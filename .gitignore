@@ -7,7 +7,9 @@
 # Generated sharing bundle.
 /quince-planning-pack.md
 # Operator-local environment layer (hosts, addresses, provisioning).
-/local/
+# No trailing slash: must also match the worktree-init SYMLINK (a trailing slash
+# matches directories only — found by qn.2b's Rule check, 2026-07-20).
+/local
 
 # --- Go (core/) ---
 /core/quince

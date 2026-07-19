@@ -146,7 +146,8 @@ Settled while building stories 1–5; a later rung changes them only via the gap
   `Detached` removing a device's **last** transport drops it from the table (identical to the
   qn.1 demo, so the UI contract is unchanged); per-transport, per-source presence means one
   source dropping never clears a transport another source holds.
-- **Reconnect backoff** = 500 ms → ×2 → 30 ms cap (`muxd/client.go`); no jitter (single
+- **Reconnect backoff** = 500 ms → ×2 → 30 s cap (`muxd/client.go`; "30 ms" here was a
+  spec typo, code says `backoffMax = 30 * time.Second` — caught in qn.2b review); no jitter (single
   long-lived socket, not a thundering herd).
 - **Reconnect reconcile** = **reset-on-(re)connect**: `muxd.Client.Run(ctx, Sink)` (Sink =
   `{Reset(); Apply(Event)}`); on each successful dial the client calls `Reset()` (registry
