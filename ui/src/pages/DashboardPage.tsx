@@ -21,7 +21,7 @@ export function DashboardPage() {
         <div className="mt-6 rounded-card border border-dashed border-line bg-card p-10 text-center">
           <div className="text-sm font-medium">No devices connected</div>
           <div className="mt-1 text-sm text-muted">
-            Plug one in to pair it, or connect it on the same network.
+            Connect a device over USB to pair it. Once paired, it shows up here while it's connected.
           </div>
         </div>
       ) : (
