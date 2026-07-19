@@ -40,7 +40,7 @@ func (p *Provider) seed() {
 		Paired:           "yes",
 		BackupEncryption: "on",
 		LastSeen:         tPhoneSeen,
-		LastBackup:       &wire.LastBackup{At: tBackupA, JobID: verZFS, Status: "succeeded"},
+		LastBackup:       &wire.LastBackup{At: tBackupA, JobID: jobID, Status: "succeeded"},
 	}
 	pad := wire.Device{
 		UDID:             udidPad,

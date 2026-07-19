@@ -39,6 +39,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/devices/{udid}", deps.handleDevice())
 	apiMux.HandleFunc("GET /api/jobs", deps.handleJobs())
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
+	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 

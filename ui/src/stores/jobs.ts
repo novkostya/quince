@@ -17,6 +17,7 @@ interface JobsState {
   logByJobId: Record<string, string[]>;
   upsert: (j: Job) => void;
   appendLog: (jobId: string, chunk: string) => void;
+  setLog: (jobId: string, lines: string[]) => void;
   replaceAll: (jobs: Job[]) => void;
 }
 
@@ -30,6 +31,13 @@ export const useJobsStore = create<JobsState>((set) => ({
       const next = [...existing, chunk];
       if (next.length > LOG_CAP) next.splice(0, next.length - LOG_CAP);
       return { logByJobId: { ...s.logByJobId, [jobId]: next } };
+    }),
+  // setLog replaces a job's log wholesale — used to recover the full-so-far tail from
+  // GET /api/jobs/{id}/log on WS reconnect (the live job.log stream is not replayable).
+  setLog: (jobId, lines) =>
+    set((s) => {
+      const capped = lines.length > LOG_CAP ? lines.slice(lines.length - LOG_CAP) : lines;
+      return { logByJobId: { ...s.logByJobId, [jobId]: capped } };
     }),
   replaceAll: (jobs) => set(() => ({ byId: Object.fromEntries(jobs.map((j) => [j.id, j])) })),
 }));

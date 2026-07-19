@@ -36,7 +36,16 @@ func (p *Provider) setJob(j wire.Job) {
 	p.bus.PublishEvent(wire.EventJobUpdated, j)
 }
 
+const demoLogCap = 500 // bound the per-job demo log buffer served by GET /api/jobs/{id}/log
+
 func (p *Provider) logJob(chunk string) {
+	p.mu.Lock()
+	buf := append(p.jobLog[jobID], chunk)
+	if len(buf) > demoLogCap {
+		buf = buf[len(buf)-demoLogCap:]
+	}
+	p.jobLog[jobID] = buf
+	p.mu.Unlock()
 	p.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: jobID, Chunk: chunk})
 }
 
@@ -87,6 +96,9 @@ func (p *Provider) jobLoop(ctx context.Context) {
 
 func (p *Provider) runOneBackup(ctx context.Context) bool {
 	start := wire.Now()
+	p.mu.Lock()
+	p.jobLog[jobID] = nil // fresh run: reset the so-far log served over REST
+	p.mu.Unlock()
 	j := wire.Job{
 		ID: jobID, UDID: udidPhone, Kind: "backup", Transport: "wifi",
 		State:     "queued",
@@ -142,6 +154,16 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 	p.setJob(j)
 	p.logJob("backup completed · structure verified")
 	p.bus.PublishEvent(wire.EventVersionCreated, newVer)
+
+	// Refresh the device's last_backup and announce it (device.updated) so the card doesn't
+	// go stale — this is what exercises the device.updated WS event end to end.
+	p.mu.Lock()
+	phone := p.devices[udidPhone]
+	phone.LastBackup = &wire.LastBackup{At: fin, JobID: jobID, Status: "succeeded"}
+	phone.LastSeen = fin
+	p.devices[udidPhone] = phone
+	p.mu.Unlock()
+	p.bus.PublishEvent(wire.EventDeviceUpdated, phone)
 	return true
 }
 

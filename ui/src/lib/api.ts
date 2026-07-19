@@ -62,8 +62,18 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   return (await resp.json()) as T;
 }
 
+// requestText fetches a text/plain body (e.g. GET /api/jobs/{id}/log). Same 401/error
+// handling as request<T>, but returns the raw text rather than parsing JSON.
+async function requestText(path: string): Promise<string> {
+  const resp = await fetch(path, { method: "GET", credentials: "same-origin" });
+  if (resp.status === 401) throw new UnauthorizedError();
+  if (!resp.ok) throw new APIError(resp.status, "error", `HTTP ${resp.status}`);
+  return resp.text();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
+  getText: (path: string) => requestText(path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),

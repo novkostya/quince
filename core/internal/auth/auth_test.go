@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,43 @@ func TestArgon2RoundTrip(t *testing.T) {
 	}
 	if ok, _ := verifyPassword("wrong", h); ok {
 		t.Fatal("verify wrong password returned true")
+	}
+}
+
+// TestVerifyPasswordRejectsEmptyKey guards against a fail-open: a corrupt/truncated hash
+// with an empty key field must never accept a password (ConstantTimeCompare([], []) == 1).
+func TestVerifyPasswordRejectsEmptyKey(t *testing.T) {
+	good, err := hashPassword("test", argonParams{memory: 8, iterations: 1, parallelism: 1, saltLen: 8, keyLen: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(good, "$") // ["","argon2id","v=19","m..,t..,p..",salt,key]
+	parts[5] = ""                     // empty key
+	bad := strings.Join(parts, "$")
+	if ok, err := verifyPassword("test", bad); ok || err == nil {
+		t.Fatalf("empty-key hash: ok=%v err=%v, want (false, error)", ok, err)
+	}
+	if ok, _ := verifyPassword("", bad); ok {
+		t.Fatal("empty password must not match an empty-key hash")
+	}
+}
+
+// TestLoginLimiterSweepsStaleBuckets proves the per-IP bucket map does not grow unbounded:
+// a bucket for an IP that went quiet is evicted once the sweep window elapses.
+func TestLoginLimiterSweepsStaleBuckets(t *testing.T) {
+	l := newLoginLimiter(3, time.Minute)
+	base := time.Now().UTC()
+	l.allow("1.1.1.1", base)
+	if len(l.buckets) != 1 {
+		t.Fatalf("bucket count = %d, want 1", len(l.buckets))
+	}
+	// A later attempt from a different IP, past the window, sweeps the stale bucket.
+	l.allow("2.2.2.2", base.Add(2*time.Minute))
+	if _, ok := l.buckets["1.1.1.1"]; ok {
+		t.Error("stale bucket for 1.1.1.1 was not swept")
+	}
+	if len(l.buckets) != 1 {
+		t.Fatalf("post-sweep bucket count = %d, want 1 (only the active IP)", len(l.buckets))
 	}
 }
 

@@ -66,6 +66,12 @@ func verifyPassword(pw, encoded string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// Guard against a corrupt/truncated hash with an empty key: keyLen 0 would make the
+	// derived key empty too, and ConstantTimeCompare([], []) == 1 would accept ANY password
+	// (fail-open). A well-formed hash always carries a 32-byte key.
+	if len(want) == 0 {
+		return false, errors.New("auth: password hash has an empty key")
+	}
 	got := argon2.IDKey([]byte(pw), salt, p.iterations, p.memory, p.parallelism, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

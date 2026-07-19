@@ -236,6 +236,53 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	}
 }
 
+// TestJobLogServesTextPlain covers GET /api/jobs/{id}/log (contracts §1): a known job's log
+// is served as text/plain; an unknown job is 404.
+func TestJobLogServesTextPlain(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(testDeps(t)))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	// Discover a real job id from the list rather than hardcoding a demo constant.
+	listResp, err := c.Get(srv.URL + "/api/jobs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Jobs []struct {
+			ID string `json:"id"`
+		} `json:"jobs"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	_ = listResp.Body.Close()
+	if len(list.Jobs) == 0 {
+		t.Fatal("demo provider returned no jobs")
+	}
+
+	resp, err := c.Get(srv.URL + "/api/jobs/" + list.Jobs[0].ID + "/log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("known job log status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("content-type = %q, want text/plain", ct)
+	}
+
+	resp2, err := c.Get(srv.URL + "/api/jobs/does-not-exist/log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown job log status = %d, want 404", resp2.StatusCode)
+	}
+}
+
 // TestReadEndpointsMatchGolden is the story-3 gate: the wire shapes must match the frozen
 // golden fixtures. Regenerate with UPDATE_GOLDEN=1 after an intentional contract change,
 // then eyeball the diff against contracts.md.

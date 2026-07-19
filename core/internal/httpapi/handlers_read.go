@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 
@@ -65,6 +66,21 @@ func (d Deps) handleJob() http.HandlerFunc {
 			return
 		}
 		writeJSON(w, d.Log, http.StatusOK, job)
+	}
+}
+
+// handleJobLog serves GET /api/jobs/{id}/log as text/plain (contracts §1: the full log
+// so far; the live tail is the WS job.log stream). 404 when the job is unknown.
+func (d Deps) handleJobLog() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log, ok := d.Jobs.JobLog(r.PathValue("id"))
+		if !ok {
+			writeError(w, d.Log, http.StatusNotFound, "not_found", "no such job")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, log)
 	}
 }
 

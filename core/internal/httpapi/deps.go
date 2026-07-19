@@ -31,10 +31,13 @@ type DeviceReader interface {
 }
 
 // JobReader serves the job REST reads. Jobs returns a page plus the next cursor ("" = last
-// page). udid "" means all devices.
+// page). udid "" means all devices. JobLog returns the full-so-far log text for a job
+// (contracts §1: GET /api/jobs/{id}/log — the live tail is the WS job.log stream); a known
+// job with no log yet returns ("", true), an unknown job ("", false).
 type JobReader interface {
 	Jobs(udid, cursor string, limit int) (jobs []wire.Job, nextCursor string)
 	Job(id string) (wire.Job, bool)
+	JobLog(id string) (log string, ok bool)
 }
 
 // VersionReader serves the version REST reads. udid "" means all devices.
@@ -50,4 +53,5 @@ func (Empty) Devices() []wire.Device                        { return []wire.Devi
 func (Empty) Device(string) (wire.Device, bool)             { return wire.Device{}, false }
 func (Empty) Jobs(string, string, int) ([]wire.Job, string) { return []wire.Job{}, "" }
 func (Empty) Job(string) (wire.Job, bool)                   { return wire.Job{}, false }
+func (Empty) JobLog(string) (string, bool)                  { return "", false }
 func (Empty) Versions(string) []wire.Version                { return []wire.Version{} }

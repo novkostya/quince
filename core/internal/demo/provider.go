@@ -8,6 +8,7 @@ package demo
 import (
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/novkostya/quince/core/internal/bus"
@@ -23,6 +24,7 @@ type Provider struct {
 	devices  map[string]wire.Device
 	order    []string // device display order
 	jobs     map[string]wire.Job
+	jobLog   map[string][]string // per-job accumulated log lines (GET /api/jobs/{id}/log)
 	versions map[string]wire.Version
 	verOrder []string // version display order (newest first)
 }
@@ -35,6 +37,7 @@ func NewProvider(b *bus.Bus, log *slog.Logger) *Provider {
 		log:      log,
 		devices:  map[string]wire.Device{},
 		jobs:     map[string]wire.Job{},
+		jobLog:   map[string][]string{},
 		versions: map[string]wire.Version{},
 	}
 	p.seed()
@@ -86,6 +89,21 @@ func (p *Provider) Job(id string) (wire.Job, bool) {
 	defer p.mu.RUnlock()
 	j, ok := p.jobs[id]
 	return j, ok
+}
+
+// JobLog returns the full-so-far log text for a job (GET /api/jobs/{id}/log). A known job
+// with no log yet returns ("", true); an unknown job returns ("", false) → 404.
+func (p *Provider) JobLog(id string) (string, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if _, ok := p.jobs[id]; !ok {
+		return "", false
+	}
+	lines := p.jobLog[id]
+	if len(lines) == 0 {
+		return "", true
+	}
+	return strings.Join(lines, "\n") + "\n", true
 }
 
 // Versions returns versions (optionally filtered by udid) in display order.

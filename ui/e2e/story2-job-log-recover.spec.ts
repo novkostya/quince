@@ -37,7 +37,8 @@ test("job card shows a tailing log; WS drop reconnects and recovers", async ({ p
   await page.evaluate(() => window.__quince?.dropWs());
   await expect(page.getByTestId("conn-badge")).toContainText(/reconnect/i, { timeout: 10_000 });
 
-  // it recovers and re-refreshes state
+  // it recovers and re-refreshes state (target the device heading specifically — the
+  // recovered log tail also contains the device name, so a bare getByText is ambiguous)
   await expect(page.getByTestId("conn-badge")).toContainText(/connected/i, { timeout: 20_000 });
-  await expect(page.getByText("family-iphone")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "family-iphone" })).toBeVisible();
 });
