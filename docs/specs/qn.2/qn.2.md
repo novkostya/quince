@@ -3,6 +3,13 @@
 **Goal.** A real iPhone/iPad appearing on USB or Wi-Fi shows up in the UI within a second
 (and vanishing removes it), driven by live muxer events — no polling, no demo fixtures.
 
+**Status (2026-07-20): CLOSED.** Code complete (stories 1–5: muxd client + registry + wiring +
+UI, `make gates`/image/e2e green — see progress decisions log `qn2-build`/`qn2-close`). **Lab
+gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) are DEFERRED** to a future hardware session:
+they need a real device AND the in-container muxer-startup gap resolved (progress dashboard open
+question 2 — nothing starts the muxer in the simple profile). Manual USB testing so far used a
+temporary usbmuxd-in-CT stopgap on the staging box (`local/environment.md`).
+
 ## Boundary
 
 In scope: `core/` only — a muxd protocol client (`internal/muxd`), a device registry that

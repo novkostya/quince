@@ -8,21 +8,21 @@ web-security baseline (CSRF, WS Origin, cookie flags, rate limit, audit), and a 
 mode that scripts fixture devices + a job exercising every WS event; the UI ships the auth
 flow, a WS bridge feeding Zustand stores, and the Dashboard / device-details / Settings
 pages bound to live demo data. A post-build review of qn.0+qn.1 (see decisions log
-`qn1-review`) landed the top minors (no blocker/major). **The frontier is now `qn.2` (muxd
-client + live device table); its spec is authored** —
-[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — **and qn.2's code is built**: the
+`qn1-review`) landed the top minors (no blocker/major). **qn.2 is BUILT + CLOSED** — the
 `internal/muxd` plist protocol client + the `internal/device` registry (merge N muxers →
 per-transport, per-source table keyed by UDID; reset-on-reconnect reconcile clears
 detached-while-away phantoms; `device.*` events), wired into non-demo `quince serve` as the
-live `DeviceReader`; full `make gates` green. **CI stories 1–5 done; lab gates 6–7
-(plug/unplug ≤1 s, netmuxd-USB audition) await the test iPhone.**
+live `DeviceReader`; full `make gates` + `make image` + `make gates-ui-e2e` green. **CI
+stories 1–5 done; lab gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) DEFERRED to a future
+hardware session** — they need a real device AND the in-container muxer-startup gap resolved
+(open question 2). **The frontier is now `qn.3` (device ops + Devices page).**
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
-| qn.2 | muxd client + live device table | **frontier** — code built (muxd + registry, stories 1–5, `make gates` green); lab gates 6–7 pending hardware |
-| qn.3 | Device ops + Devices page | outlined |
+| qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 deferred (hardware + open-q 2) |
+| qn.3 | Device ops + Devices page | **frontier** — outlined |
 | qn.4 | Backup engine, both transports + headless CLI | outlined |
 | qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
@@ -35,6 +35,30 @@ live `DeviceReader`; full `make gates` green. **CI stories 1–5 done; lab gates
 **Open questions for the Operator** (tracked here until resolved):
 1. LAN registry port + creds (address recorded in `local/environment.md`; env-only,
    never committed).
+2. **`PROPOSED (gap)` — who starts the muxer in the SIMPLE (one-container) profile?**
+   Surfaced during qn.2 staging testing (2026-07-20); **for the Architect to rule — NOT decided
+   or built here.** *Problem:* the image *ships* usbmuxd/netmuxd but nothing *starts* them
+   in-container — the entrypoint is bare `quince serve`, the muxd client only *dials* the socket,
+   and `compose.nas.yml`'s "usbmuxd inside the container" is aspirational — so `compose up` never
+   brings USB up, breaking the D12 Plex-bar promise ("compose up = the whole install"). The only
+   working topology today runs usbmuxd on the host/CT + a socket bind (`compose.lab.yml` and the
+   staging stand) — a fragile, non-shippable stopgap: usbmuxd misses hotplug in an unprivileged
+   LXC, and restarting it changes the socket inode so the container must be recreated. *Options
+   discussed:* (a) **quince supervises** the in-container muxer as a Go subprocess (own process
+   group, restart-on-crash + backoff, killed on shutdown via the signal ctx) — matches design §1
+   "one process tree under the core", enables a rescan trigger, adds no image deps; (b) a
+   Dockerfile **entrypoint script**; (c) an **s6/init** supervisor. *Proposed conclusion (this
+   session, awaiting a ruling):* option (a), gated by a new config **`devices.manage_muxer`**
+   (default `true` = simple; `false` = hardened/external muxer), plus **`POST /api/devices/rescan
+   → 202`** + a UI **"Rescan"** button that restarts usbmuxd (re-enumerating a device the
+   unprivileged LXC's missing hotplug didn't surface), reusing the existing
+   reconnect→`sink.Reset`→`device.attached` path. *Scope:* MINIMAL (usbmuxd only + rescan) vs FULL
+   (netmuxd co-supervision + restart policy + muxer health + `compose.hardened.yml`); the FULL
+   work aligns with the existing qn.6 (Plex-bar release gate) / qn.7 (netmuxd supervision + restart
+   policy) scope. *Contract note for the Architect:* `POST /api/devices/rescan` (§1) and
+   `devices.manage_muxer` (§6) are contract additions to place in `contracts.md` on ruling. A
+   fuller design capture (supervisor sketch, tests via the `os/exec` `TestHelperProcess` fake) was
+   produced this session and can be handed to the Architect.
 
 *Resolved:* **project name = quince** (Operator, 2026-07-18, after due diligence — see
 decisions log (y); repo `github.com/novkostya/quince`, images
@@ -403,3 +427,15 @@ on real traction).
   audition) remain a hardware step. `muxd.Client.Run` now takes a `Sink{Reset,Apply}`;
   rung-ruled details in `specs/qn.2/qn.2.md`. The no-flicker snapshot-debounce reconcile
   (idle-debounce + `testing/synctest`) is the documented refinement if reconnect churn bites.
+- 2026-07-20: (qn2-close) **qn.2 closed; muxer-startup gap surfaced + documented.** qn.2's
+  deliverables (muxd client + `internal/device` registry + UI; `make gates`/image/e2e green) are
+  complete; a post-build review + UI polish (empty-state copy, state-driven device card — disabled
+  `Pair`/`Back up now` reflecting muxd-minimal presence) landed alongside. Its **lab gates 6–7 are
+  deferred** to a future hardware session (they need a real device AND the muxer-startup gap
+  resolved). During staging testing an architectural gap was surfaced — **nothing starts the
+  in-container muxer, breaking D12 for USB** — and captured as **open question 2** (`PROPOSED
+  (gap)`, for the Architect; not decided/built here). A staging stand was stood up on the PVE host
+  (CT 113, `quince:staging` from the private registry, HTTPS via the CT-102 Caddy) for manual
+  testing; its USB path uses a **temporary usbmuxd-in-CT + socket-bind workaround** (hotplug needs
+  the `/root/redetect.sh` helper), rebuilt onto the house template's `/root/compose.yml` autostart
+  convention (specifics in `local/environment.md`). Frontier → **qn.3**.
