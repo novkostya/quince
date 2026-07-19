@@ -86,12 +86,16 @@ Apple mux" — possibly this very bug, unconfirmed. Consequences:
   3.24). Lesson: package-existence claims are verified against the branch's APKINDEX or
   in a clean container of that branch, never with `apk search --repository` on a
   configured host. Single-muxer netmuxd is the goal state, one config flip away.
-- qn.2's lab gate auditions netmuxd-USB on the pinned v0.4.3 **with real backup
-  traffic** (which crosses the 64 KiB message boundary immediately — the same workload
-  that failed on 2026-07-13): clean → flip the default to single-muxer and credit the
-  v0.4.3 mux fix; reproduces → file the upstream issue with the exact log line, and
-  optionally carry a patch in our pinned source build (the same pattern as the qn.7
-  libimobiledevice timeout patch).
+- The netmuxd-USB audition on the pinned v0.4.3 **with real backup traffic** (which
+  crosses the 64 KiB message boundary immediately — the same workload that failed on
+  2026-07-13) now runs in **qn.7** (originally qn.2's lab gate, re-homed via qn.2b —
+  decisions log (aw): it pairs with qn.7's netmuxd co-supervision, and `idevicepair
+  unpair` destroys the lab pairing record, so it belongs in the dedicated hardening
+  session; procedure preserved verbatim in the qn.2b spec, gate 8): clean → flip the
+  default to single-muxer and credit the v0.4.3 mux fix; reproduces → file the upstream
+  issue with the exact log line, and optionally carry a patch in our pinned source build
+  (the same pattern as the qn.7 libimobiledevice timeout patch). Until then the
+  two-daemon default stands — proven on hardware by qn.2b's supervised-usbmuxd gate.
 - qn.4/qn.5 re-prove sustained full USB backup through whichever topology is default
   before it carries real data. Note the protocol floor
 either way: initial pairing and enabling Wi-Fi sync require a USB *connection* — a

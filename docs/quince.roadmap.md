@@ -42,10 +42,11 @@ slice of all three languages; `make image` produces a runnable container.*
   backoff, killed on shutdown, **refuse-loudly if the socket is already served**;
   `POST /api/devices/rescan` (+ UI Rescan button) reusing the reset/replay reconcile
   (contracts §1/§6 already landed); hardware-free supervisor tests (`TestHelperProcess`
-  fake muxer). Then the rung **runs qn.2's deferred lab gates 6–7 as its own acceptance**.
+  fake muxer). Then the rung **runs qn.2's deferred lab gates as its own acceptance**.
   *Gate: `compose up` on the lab CT brings USB up with NO host muxer (the D12 Plex-bar
-  promise restored); plug/unplug ≤1 s in the UI; the netmuxd-USB audition verdict recorded
-  (D2 default flips to single-muxer, or the upstream issue is filed with the exact line).*
+  promise restored); plug/unplug ≤1 s in the UI — **PASSED on hardware 2026-07-20**.*
+  As-built: the netmuxd-USB audition was **re-homed to qn.7** at rung close (Operator
+  ruling, decisions log (aw) — named owner, procedure preserved in the qn.2b spec gate 8);
   FULL muxer work (netmuxd co-supervision, restart policy, muxer health in UI,
   `compose.hardened.yml`) stays in qn.6/qn.7.
 
@@ -107,7 +108,10 @@ precedent).
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
 patched-timeout libimobiledevice source build in the image (30 s → 15 min, upstream
-#1413), netmuxd supervision + restart policy, chaos suite (replay every torn-session
+#1413), netmuxd supervision + restart policy, **the netmuxd-USB audition on pinned
+v0.4.3** (re-homed here from qn.2b, decisions log (aw); procedure verbatim in the qn.2b
+spec, gate 8 — verdict flips the D2 default to single-muxer or files the upstream issue),
+chaos suite (replay every torn-session
 transcript + injected mid-file disconnects), liveness-stage thresholds tuned against the
 real lab box, honest UX copy for the slow/silent/passcode phases. *Gate: injected
 disconnects land in clean `user action required` states with committed versions
