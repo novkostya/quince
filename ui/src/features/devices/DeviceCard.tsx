@@ -4,7 +4,7 @@ import type { Device } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { modelName } from "./modelName";
+import { modelLine } from "./modelName";
 import { formatRelativeTime } from "@/lib/format";
 import { isRunning, useJobsStore } from "@/stores/jobs";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
@@ -24,13 +24,24 @@ function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
       </Badge>
     );
   }
-  return <Badge tone="neutral">Encryption unknown</Badge>;
+  return null; // "unknown" (muxd-minimal, before qn.3 lockdown) — no badge
+}
+
+// backupStatus is the one line under the transports: real history if any, else a
+// state-appropriate placeholder ("No backups yet" for a paired device, "Not set up yet" for
+// one we can't act on yet).
+function backupStatus(device: Device): string {
+  if (device.last_backup) {
+    return `Last backup ${formatRelativeTime(device.last_backup.at)} · ${device.last_backup.status}`;
+  }
+  return device.paired === "yes" ? "No backups yet" : "Not set up yet";
 }
 
 export function DeviceCard({ device }: { device: Device }) {
   const activeJob = useJobsStore((s) =>
     Object.values(s.byId).find((j) => j.udid === device.udid && isRunning(j.state)),
   );
+  const subtitle = modelLine(device.model, device.ios_version);
 
   return (
     <Card>
@@ -43,9 +54,7 @@ export function DeviceCard({ device }: { device: Device }) {
             >
               {device.name || device.udid}
             </Link>
-            <div className="truncate text-xs text-muted">
-              {modelName(device.model)} · iOS {device.ios_version}
-            </div>
+            {subtitle ? <div className="truncate text-xs text-muted">{subtitle}</div> : null}
           </div>
           <EncryptionBadge state={device.backup_encryption} />
         </div>
@@ -61,23 +70,20 @@ export function DeviceCard({ device }: { device: Device }) {
               <Wifi size={12} /> Wi-Fi
             </Badge>
           ) : null}
-          <span className="font-mono text-xs tabular-nums text-subtle">
-            seen {formatRelativeTime(device.last_seen)}
-          </span>
         </div>
 
-        <div className="mt-3 text-xs text-muted">
-          {device.last_backup
-            ? `Last backup ${formatRelativeTime(device.last_backup.at)} · ${device.last_backup.status}`
-            : "No backups yet"}
-        </div>
+        <div className="mt-3 text-xs text-muted">{backupStatus(device)}</div>
 
         <div className="mt-4">
           {activeJob ? (
             <JobProgressInline job={activeJob} />
-          ) : (
+          ) : device.paired === "yes" ? (
             <Button size="sm" disabled title="Backups arrive in a later release">
               Back up now
+            </Button>
+          ) : (
+            <Button size="sm" disabled title="Device pairing arrives in a later release">
+              Pair
             </Button>
           )}
         </div>

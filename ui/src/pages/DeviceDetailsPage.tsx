@@ -7,14 +7,13 @@ import { api } from "@/lib/api";
 import { isRunning, useJobsStore } from "@/stores/jobs";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
-import { modelName } from "@/features/devices/modelName";
+import { modelLine } from "@/features/devices/modelName";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatRelativeTime } from "@/lib/format";
 
 export function DeviceDetailsPage() {
   const { udid = "" } = useParams();
@@ -49,16 +48,19 @@ export function DeviceDetailsPage() {
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold tracking-tight">{device.name || device.udid}</h1>
-              <div className="text-sm text-muted">
-                {modelName(device.model)} · iOS {device.ios_version} · seen{" "}
-                {formatRelativeTime(device.last_seen)}
-              </div>
+              {modelLine(device.model, device.ios_version) ? (
+                <div className="text-sm text-muted">{modelLine(device.model, device.ios_version)}</div>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={device.paired === "yes" ? "ok" : "warn"}>paired: {device.paired}</Badge>
-              <Badge tone={device.backup_encryption === "on" ? "ok" : "warn"}>
-                encryption: {device.backup_encryption}
-              </Badge>
+              {device.paired !== "unknown" ? (
+                <Badge tone={device.paired === "yes" ? "ok" : "warn"}>paired: {device.paired}</Badge>
+              ) : null}
+              {device.backup_encryption !== "unknown" ? (
+                <Badge tone={device.backup_encryption === "on" ? "ok" : "warn"}>
+                  encryption: {device.backup_encryption}
+                </Badge>
+              ) : null}
             </div>
           </div>
 
@@ -70,15 +72,24 @@ export function DeviceDetailsPage() {
           ) : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button disabled title="Backups arrive in a later release">
-              Back up now
-            </Button>
-            <Button variant="outline" disabled title="Device pairing arrives in a later release">
-              Pair
-            </Button>
-            <Button variant="outline" disabled title="Encryption management arrives in a later release">
-              Manage encryption
-            </Button>
+            {device.paired === "yes" ? (
+              <>
+                <Button disabled title="Backups arrive in a later release">
+                  Back up now
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled
+                  title="Encryption management arrives in a later release"
+                >
+                  Manage encryption
+                </Button>
+              </>
+            ) : (
+              <Button disabled title="Device pairing arrives in a later release">
+                Pair
+              </Button>
+            )}
           </div>
 
           {activeJob ? (
