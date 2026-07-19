@@ -10,18 +10,18 @@ flow, a WS bridge feeding Zustand stores, and the Dashboard / device-details / S
 pages bound to live demo data. A post-build review of qn.0+qn.1 (see decisions log
 `qn1-review`) landed the top minors (no blocker/major). **The frontier is now `qn.2` (muxd
 client + live device table); its spec is authored** —
-[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — **and the first build increment landed: the
-`internal/muxd` protocol client** (usbmuxd/netmuxd plist framing, Listen handshake,
-Attached/Detached→presence events with the per-connection DeviceID map, reconnecting
-dialer; `gates-go` green). Next increment: the **device registry** (merge N muxers →
-per-transport table, reconnect-replay reconcile / phantom clearing, `device.*` bus events,
-`DeviceReader`) + `main` wiring (stories 3–4); lab gates 6–7 need the test iPhone.
+[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — **and qn.2's code is built**: the
+`internal/muxd` plist protocol client + the `internal/device` registry (merge N muxers →
+per-transport, per-source table keyed by UDID; reset-on-reconnect reconcile clears
+detached-while-away phantoms; `device.*` events), wired into non-demo `quince serve` as the
+live `DeviceReader`; full `make gates` green. **CI stories 1–5 done; lab gates 6–7
+(plug/unplug ≤1 s, netmuxd-USB audition) await the test iPhone.**
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
-| qn.2 | muxd client + live device table | **frontier** — spec + muxd protocol client landed (58a033a); registry + wiring next |
+| qn.2 | muxd client + live device table | **frontier** — code built (muxd + registry, stories 1–5, `make gates` green); lab gates 6–7 pending hardware |
 | qn.3 | Device ops + Devices page | outlined |
 | qn.4 | Backup engine, both transports + headless CLI | outlined |
 | qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
@@ -393,3 +393,13 @@ on real traction).
   buckets so the map can't grow unbounded; tests cover all three. **Deferred (logged, not
   blocking):** WS session re-validation on logout/idle-expiry, DSN-scoped SQLite pragmas, a
   `.dockerignore`, and assorted nits. Frontier unchanged: **qn.2**.
+- 2026-07-19: (qn2-build) **qn.2 code built.** The `internal/muxd` plist protocol client
+  (`howett.net/plist v1.0.1`, Listen handshake, per-connection DeviceID→UDID map, reconnecting
+  dialer) and the `internal/device` **registry** (N-muxer merge, per-transport/per-source
+  presence keyed by UDID, **reset-on-(re)connect reconcile** clearing detached-while-away
+  phantoms, `device.*` events), wired into non-demo `quince serve` as the live `DeviceReader`
+  (default topology usbmuxd-USB + netmuxd-Wi-Fi; single-muxer flip is config-only). CI stories
+  1–5 green under full `make gates`; lab gates 6–7 (plug/unplug ≤1 s + the netmuxd-USB
+  audition) remain a hardware step. `muxd.Client.Run` now takes a `Sink{Reset,Apply}`;
+  rung-ruled details in `specs/qn.2/qn.2.md`. The no-flicker snapshot-debounce reconcile
+  (idle-debounce + `testing/synctest`) is the documented refinement if reconnect churn bites.

@@ -127,18 +127,33 @@ UDID before committing or stays Operator-local. **Every bug found on the lab box
 replay fixture before it is fixed** (program hard rule) — including the audition's failure
 signature if it reproduces (synthetic UDID).
 
-## Rung-ruled decisions (qn.2 — to be settled during the build, logged here + in the dashboard)
+## Rung-ruled decisions (qn.2 — settled during the build; *rung-ruled* canon)
 
-Placeholders the implementer fills in as the build settles them (gap protocol: rung-local
-→ decide + log; anything touching a contract/storage/security/user-visible behavior →
-`PROPOSED (gap)` + Operator ruling first):
+Settled while building stories 1–5; a later rung changes them only via the gap protocol.
 
-- **plist library** — pinned at introduction time via a **live** lookup (program hard rule:
-  version pins are looked up, never remembered), preferring newest-stable with support
-  runway; the choice + version recorded here and in `go.sum`. (go-ios uses a maintained Go
-  plist lib as the reference; confirm current before pinning.)
-- **Package split** `internal/muxd` (protocol) vs `internal/device` (registry/table).
-- **ConnectionType → transport** mapping and the exact `Detached`→remove-on-last-transport
-  semantics (kept identical to the qn.1 demo so the UI contract is unchanged).
-- **Reconnect backoff** parameters (base/cap/jitter), mirroring the UI ws-client idiom.
-- **Default muxer topology** = usbmuxd (USB) + netmuxd (Wi-Fi) until story 7 flips it.
+- **plist library** = `howett.net/plist v1.0.1` (looked up live at pin time — the current
+  stable and the standard Go transcoder go-ios uses; low release cadence is expected for a
+  frozen format, same rationale as the decryption lib). In `core/go.sum`.
+- **Package split** = `internal/muxd` (wire protocol client) + `internal/device` (registry).
+- **ConnectionType → transport**: `USB`→`usb`, everything else (`Network`)→`wifi`. A
+  `Detached` removing a device's **last** transport drops it from the table (identical to the
+  qn.1 demo, so the UI contract is unchanged); per-transport, per-source presence means one
+  source dropping never clears a transport another source holds.
+- **Reconnect backoff** = 500 ms → ×2 → 30 ms cap (`muxd/client.go`); no jitter (single
+  long-lived socket, not a thundering herd).
+- **Reconnect reconcile** = **reset-on-(re)connect**: `muxd.Client.Run(ctx, Sink)` (Sink =
+  `{Reset(); Apply(Event)}`); on each successful dial the client calls `Reset()` (registry
+  drops that source's edges → `device.detached` where a transport leaves the table) then the
+  replay `Apply`s re-add what's still attached, so a device that detached while disconnected
+  is cleared (no phantom). Trade-off: a present device's transport briefly re-asserts on
+  reconnect (honest — we lost visibility). **The no-flicker variant — buffer the replay burst
+  into an atomic per-source snapshot + diff (idle-debounce in the client, tested via
+  `testing/synctest`) — is the documented refinement** if reconnect churn ever bites.
+- **Default muxer topology** = usbmuxd (USB) + netmuxd (Wi-Fi); the client loop skips empty
+  sockets, so the single-muxer flip after story 7 is config-only.
+- **Identity muxd-minimal**; qn.3 enriches via lockdown (handoff in the Design section).
+- **Tests**: stories 1/2/5 at the muxd protocol layer (`muxd_test.go`, in-memory fake muxer);
+  stories 1–4 reconcile/merge at the registry (`device/registry_test.go`, pure `Sink`
+  calls + a real bus). Story 4's REST/WS serving is covered by composition — the registry
+  publishes to the same bus `ws_test.go` fans out and satisfies the `DeviceReader`
+  `httpapi` already golden-tests — so no separate httpapi integration test was added.

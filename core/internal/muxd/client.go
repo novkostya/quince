@@ -42,6 +42,15 @@ func mapTransport(connType string) string {
 	return TransportWiFi // "Network" (netmuxd mDNS / usbmuxd) → wifi
 }
 
+// Sink receives one muxer connection's presence lifecycle. On each successful (re)connect
+// the client calls Reset() — the consumer (the device registry) drops this source's edges so
+// a device that detached while we were disconnected doesn't linger as a phantom — then
+// Apply() for every edge the muxer replays and, thereafter, each live edge.
+type Sink interface {
+	Reset()
+	Apply(ev Event)
+}
+
 // listen performs the Listen handshake on conn, then reads attach/detach messages until the
 // connection errors, resolving each to an Event. Detached carries ONLY a DeviceID (a
 // per-connection integer, reassigned across reconnects — stack D2 / qn.2 spec), so a
@@ -114,12 +123,13 @@ const (
 	backoffMax     = 30 * time.Second
 )
 
-// Run dials and Listens in a loop until ctx is cancelled, delivering every presence edge to
-// emit. Each reconnect starts a fresh listen (and thus a fresh DeviceID map). Reconciling
-// the muxer's post-reconnect replay against the prior device set — clearing devices that
-// vanished while we were disconnected — is the registry's job (next increment); Run's
-// contract there gains a resync signal.
-func (c *Client) Run(ctx context.Context, emit func(Event)) {
+// Run dials and Listens in a loop until ctx is cancelled, feeding presence edges to sink.
+// Each reconnect starts a fresh listen (fresh per-connection DeviceID map) and begins with
+// sink.Reset() BEFORE the muxer's replay, so the registry can drop this source's stale edges
+// and let the replay re-add only what's still attached — a device that vanished while we were
+// disconnected is thereby cleared, not left as a phantom (qn.2 spec). A no-flicker variant
+// (buffer the replay burst into an atomic snapshot) is a documented future refinement.
+func (c *Client) Run(ctx context.Context, sink Sink) {
 	delay := backoffInitial
 	for {
 		if ctx.Err() != nil {
@@ -135,7 +145,8 @@ func (c *Client) Run(ctx context.Context, emit func(Event)) {
 			continue
 		}
 		delay = backoffInitial // a successful connection resets the backoff
-		err = listen(ctx, conn, c.log, emit)
+		sink.Reset()           // (re)connect: drop this source's edges; the replay re-adds live ones
+		err = listen(ctx, conn, c.log, sink.Apply)
 		_ = conn.Close()
 		if ctx.Err() != nil {
 			return

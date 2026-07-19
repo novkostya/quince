@@ -25,7 +25,9 @@ import (
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
+	"github.com/novkostya/quince/core/internal/device"
 	"github.com/novkostya/quince/core/internal/httpapi"
+	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
@@ -121,7 +123,8 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var devices httpapi.DeviceReader = httpapi.Empty{}
+	// devices is assigned in both branches below; jobs/versions stay Empty until qn.4/qn.5.
+	var devices httpapi.DeviceReader
 	var jobs httpapi.JobReader = httpapi.Empty{}
 	var versions httpapi.VersionReader = httpapi.Empty{}
 	if *demoMode {
@@ -130,6 +133,25 @@ func serve(args []string) error {
 		prov.Run(ctx)
 		devices, jobs, versions = prov, prov, prov
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
+	} else {
+		// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the
+		// registry — default topology is usbmuxd for USB + netmuxd for Wi-Fi (stack D2); the
+		// single-muxer flip is config-only since the loop skips empty sockets. Jobs and
+		// versions land with their rungs (qn.4/qn.5). Muxd-unreachable is honest, not fatal:
+		// the client backs off and the device list is simply empty until a device attaches.
+		dcfg := cfgSvc.Current().Devices
+		reg := device.NewRegistry(eventBus, log)
+		for _, addr := range []string{dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr} {
+			if addr == "" {
+				continue
+			}
+			client := muxd.NewClient(addr, log)
+			sink := reg.Sink(addr)
+			go client.Run(ctx, sink)
+		}
+		devices = reg
+		log.Info("device registry watching muxers",
+			"usbmuxd", dcfg.UsbmuxdSocket, "netmuxd", dcfg.NetmuxdAddr)
 	}
 
 	srv := &http.Server{
