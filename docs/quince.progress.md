@@ -22,10 +22,7 @@ are green from a fresh tree inside `quince-dev`, the image runs (`quince version
 | qn.12 | PWA + push + schedules | outlined |
 
 **Open questions for the Operator** (tracked here until resolved):
-1. LAN registry: identified (address recorded in `local/environment.md`, gitignored) —
-   **port + creds still needed** from the Operator (env-only, never committed). `make
-   push REGISTRY=…` is implemented and untested pending them.
-2. **`usbmuxd` daemon provisioning** (`PROPOSED (gap)` in stack D2, found in qn.0): Alpine
+1. **`usbmuxd` daemon provisioning** (`PROPOSED (gap)` in stack D2, found in qn.0): Alpine
    has no `usbmuxd` daemon package, so "the container ships usbmuxd" can't be `apk`'d.
    Ruling needed before qn.2 — (A) source-build the daemon in a Dockerfile stage, or
    (B) bind-mount the host's usbmuxd socket (compose.lab.yml already shows B). qn.0 ships
@@ -225,7 +222,8 @@ on real traction).
   stub-override, vault venv built at its final path against the runtime python.
   **`.gitignore` bug caught by testing**: trailing inline comments silently disabled the
   private-file rules — rewritten with column-0 comments; UDID-bearing lab logs now
-  verified `!!` ignored. Two things still open: **open question 1** (registry creds —
-  `make push` implemented, untested) and **open question 2 / stack D2 PROPOSED** (the
-  `usbmuxd` daemon is not an Alpine package — architectural gap, ruling needed before
-  qn.2). Next frontier: **qn.1** (spec to be written).
+  verified `!!` ignored. **Registry push proven** (Operator supplied the endpoint): `make
+  push REGISTRY=<lan-registry>` pushed `quince:local` to the LAN registry (endpoint in local/environment.md) and it pulls back — closes the old open question 1;
+  endpoint recorded in `local/environment.md`. First commit landed (`699c4ef`). One gap
+  still open: **stack D2 `PROPOSED`** — the `usbmuxd` daemon is not an Alpine package,
+  ruling needed before qn.2. Next frontier: **qn.1** (spec to be written).
