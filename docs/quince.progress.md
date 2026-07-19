@@ -10,13 +10,18 @@ flow, a WS bridge feeding Zustand stores, and the Dashboard / device-details / S
 pages bound to live demo data. A post-build review of qn.0+qn.1 (see decisions log
 `qn1-review`) landed the top minors (no blocker/major). **The frontier is now `qn.2` (muxd
 client + live device table); its spec is authored** —
-[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — build not yet started.
+[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — **and the first build increment landed: the
+`internal/muxd` protocol client** (usbmuxd/netmuxd plist framing, Listen handshake,
+Attached/Detached→presence events with the per-connection DeviceID map, reconnecting
+dialer; `gates-go` green). Next increment: the **device registry** (merge N muxers →
+per-transport table, reconnect-replay reconcile / phantom clearing, `device.*` bus events,
+`DeviceReader`) + `main` wiring (stories 3–4); lab gates 6–7 need the test iPhone.
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
-| qn.2 | muxd client + live device table | **frontier** — spec authored ([qn.2.md](specs/qn.2/qn.2.md)); build not started |
+| qn.2 | muxd client + live device table | **frontier** — spec + muxd protocol client landed (58a033a); registry + wiring next |
 | qn.3 | Device ops + Devices page | outlined |
 | qn.4 | Backup engine, both transports + headless CLI | outlined |
 | qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
