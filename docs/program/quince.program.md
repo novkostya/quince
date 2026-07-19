@@ -10,7 +10,10 @@
 
 1. **Pick the frontier rung** for your track from the progress dashboard. One rung per
    session/agent. If the rung has no spec yet, the session's first deliverable is the
-   spec (from the roadmap outline), approved shape below — then build.
+   spec (from the roadmap outline), approved shape below. **Specs are reviewed before
+   any code exists**: present the spec — with its Rule check section filled in — to the
+   Operator, who routes it through the architect session; building starts only on an
+   explicit go. A spec already approved this way skips straight to build.
 2. **Build inside the boundary.** Each track owns its tree (`core/`, `vault/`, `ui/`,
    `deploy/`, `.github/`). Touching another track's tree or a contract means STOP —
    that's a contract-change rung, land it in `docs/contracts.md` first.
@@ -77,6 +80,13 @@ Rung specs add their own positive assertions on top (e.g. qn.4: "the replay of t
 - **Stories** — numbered, each independently checkable.
 - **Gates** — the exact commands/observations that prove the stories, beyond `make gates`.
 - **Fixtures** — what test data this rung adds and where it comes from.
+- **Rule check** — mandatory, written BEFORE building: every program hard rule and
+  canon boundary this rung touches *or comes near* (scope edges, contract surfaces,
+  storage invariants, secrets handling, privacy), one line each stating how the plan
+  complies. List near-misses even when compliant — a plan about to break a rule cannot
+  fill this section truthfully, which is the point: violations surface as text at spec
+  review, not as diffs under Operator supervision. (Origin: qn.2, 2026-07-20 —
+  rule-breaks in a proposed plan were caught only by Operator vigilance.)
 
 ## When the canon is silent — the gap protocol
 
