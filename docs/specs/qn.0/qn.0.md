@@ -97,7 +97,11 @@ Settled during the build; a later rung changes them only via the gap protocol.
   aren't relocatable and hardcode their interpreter, so `vault-build` is an Alpine stage
   (same base as `runtime`, identical `/usr/bin/python3`) that `uv sync`s into
   `/opt/quince/vault/.venv` — no path move, no interpreter skew in the shipped image.
-- **Alpine Apple-protocol packages** are `libimobiledevice` + `libimobiledevice-progs`
-  (the CLIs) + `libusbmuxd` (client lib). The missing `usbmuxd` *daemon* is NOT a
-  rung-local call — it's escalated as an architectural gap (stack D2 `PROPOSED`, open
-  question 2); qn.0 ships only the unambiguous pieces and builds on neither option.
+- **Alpine Apple-protocol packages** are `usbmuxd` (the daemon — USB anchor per resolved
+  D2), `netmuxd` (Wi-Fi, source-built), `libimobiledevice` + `libimobiledevice-progs`
+  (CLIs), `libusbmuxd` (client lib). The `usbmuxd` daemon is packaged in Alpine community
+  only at **3.24+** (`1.1.1_git20250201`; genuinely absent in 3.21–3.23 — the initial
+  "no package" finding was correct for the old base, not a mis-probe), so the **runtime
+  base is bumped `alpine:3.21 → 3.24`** (`ALPINE_IMAGE` in `versions.env`; toolchain
+  images stay 3.21 — they need no muxd). This resolves the former D2 gap: the image ships
+  usbmuxd + netmuxd + CLIs, verified present in the built image.

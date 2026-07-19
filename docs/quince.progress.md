@@ -22,11 +22,8 @@ are green from a fresh tree inside `quince-dev`, the image runs (`quince version
 | qn.12 | PWA + push + schedules | outlined |
 
 **Open questions for the Operator** (tracked here until resolved):
-1. **`usbmuxd` daemon provisioning** (`PROPOSED (gap)` in stack D2, found in qn.0): Alpine
-   has no `usbmuxd` daemon package, so "the container ships usbmuxd" can't be `apk`'d.
-   Ruling needed before qn.2 — (A) source-build the daemon in a Dockerfile stage, or
-   (B) bind-mount the host's usbmuxd socket (compose.lab.yml already shows B). qn.0 ships
-   only the CLIs + `libusbmuxd` client and builds on neither.
+1. LAN registry port + creds (address recorded in `local/environment.md`; env-only,
+   never committed).
 
 *Resolved:* **project name = quince** (Operator, 2026-07-18, after due diligence — see
 decisions log (y); repo `github.com/novkostya/quince`, images
@@ -207,6 +204,43 @@ on real traction).
   place; named cache volumes keep it fast; Playwright runs in its official image
   (musl question mooted); CI runs the identical containerized `make gates`.
   Contributor requirement collapses to `make` + a container runtime.
+- 2026-07-19: (ag) **the qn.0 usbmuxd `PROPOSED` gap is dissolved, not chosen between**:
+  the architect verified live that `usbmuxd` IS packaged in Alpine community on every
+  branch v3.21–v3.24 — the session's probe was faulty. Runtime ships it via `apk add`;
+  profiles unchanged (simple = in-container daemon + USB mapping, hardened = host
+  socket). Operator's netmuxd-only question ruled alongside: netmuxd alone fully serves
+  **pre-paired, Wi-Fi-sync-enabled** devices, so netmuxd-first sequencing inside
+  qn.2/qn.3 is encouraged — but initial pairing and enabling Wi-Fi sync are USB-only at
+  the protocol level, so USB stays in scope with hardware validation in the lab CT, and
+  fresh-device USB pairing must work by the qn.6 gate. Lesson added to D2: verify
+  package existence with `apk search` against the target repo, never assume.
+- 2026-07-19: (ah) **netmuxd is the single muxer for BOTH transports** (Operator-
+  identified, README-verified, superseding the two-daemon halves of (ag) and D2's
+  original wording): netmuxd v0.4+ handles USB natively via `nusb` — "no dependency on
+  a separate usbmuxd daemon"; the project outgrew its network-only name. Core's muxd
+  client targets N configured sockets with N=1 default; classic usbmuxd stays in the
+  image as a config-only fallback because netmuxd's USB path is young (v0.4.3 released
+  2026-07-14) vs usbmuxd's decades — lab gates in qn.2 (presence + fresh USB pairing)
+  and qn.4/qn.5 (sustained USB backup) decide whether the fallback is ever needed.
+  Protocol floor unchanged: fresh-device adoption requires a USB connection regardless
+  of which daemon serves it.
+- 2026-07-19: (ai) **Operator recalled hard evidence against netmuxd-USB** — an initial
+  USB backup through netmuxd died with a "packet too big"-style error at the 64 MiB
+  boundary + 1 byte (hardcoded-guard signature; unreported in netmuxd's tracker as of
+  today; observed version unknown). Ruling amended: **default USB topology = usbmuxd,
+  netmuxd serves Wi-Fi** until qn.2's netmuxd-USB audition (presence + fresh pairing +
+  a >64 MiB transfer on pinned v0.4.3) passes clean, whereupon the default flips to
+  single-muxer; a reproduction gets filed upstream with the signature, with a
+  patched-pinned-build option (the qn.7 libimobiledevice pattern). N-socket client
+  design makes the flip config-only either way.
+- 2026-07-19: (aj) **the (ai) signature corrected against the lab log** (Operator found
+  the exact line, dated 2026-07-13): it's the **64 KiB u16 boundary**, not 64 MiB —
+  `netmuxd::usb::mux … asyncReadComplete, message was too large (65536 bytes,
+  max = 65535)` — i.e. netmuxd HAD USB support during the lab and its mux read path
+  choked one byte over `0xFFFF` on real backup traffic; plausibly a one-line fix.
+  v0.4.3 shipped the NEXT DAY noting "Fixes iTunes on the Apple mux" — possibly this
+  bug, unconfirmed; the qn.2 audition (real backup traffic on pinned v0.4.3) decides.
+  Exact line quoted in stack D2; default topology ruling from (ai) unchanged.
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that

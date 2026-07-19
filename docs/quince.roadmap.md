@@ -26,9 +26,16 @@ slice of all three languages; `make image` produces a runnable container.*
   doc-comments are staged to qn.6 per D12), slog, SQLite
   (migrations), HTTP+WS with auth (first-run set-password), event bus, `--demo` mode
   serving fixture devices/jobs, embedded UI shell (sidebar + empty pages).
-- `qn.2` muxd client: Listen-mode connections (usbmuxd + netmuxd), merged device table,
-  `device.*` events; record/replay fake muxd for tests. *Gate: plug/unplug iPhone in the
-  lab LXC → attach/detach visible in UI within 1 s (manual gate) + replay tests in CI.*
+- `qn.2` muxd client: Listen-mode connection to netmuxd (single muxer, USB + Wi-Fi in
+  v0.4+ — stack D2) abstracted over N sockets (usbmuxd fallback topology = config only),
+  device table with per-transport presence, `device.*` events; record/replay fake muxd
+  for tests. *Gate: plug/unplug iPhone in the lab LXC → attach/detach visible in UI
+  within 1 s (USB via the default usbmuxd topology AND Wi-Fi via netmuxd mDNS); the
+  netmuxd-USB audition (stack D2): presence, fresh USB pairing, and real backup traffic
+  through netmuxd's USB path on v0.4.3 (messages cross the 64 KiB boundary immediately)
+  — clean → default flips to single-muxer; reproduces the lab's documented
+  `message was too large (65536 bytes, max = 65535)` failure → upstream issue filed
+  with the exact log line (patch-in-pinned-build optional); replay tests in CI.*
 
 ### M2 — Device ops (`qn.3`)
 Pair / validate / info subprocess wrappers + **backup-encryption management** (status

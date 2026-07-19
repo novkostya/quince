@@ -39,43 +39,66 @@ requirement to reuse existing open-source decryption. Rejected.
 
 ## D2. Device layer: speak the muxd protocol natively; drive Apple ops via CLI subprocesses
 
-**Decision.** The core connects directly to the `usbmuxd` unix socket and the `netmuxd`
-TCP socket (same plist-based muxer protocol) in `Listen` mode → attach/detach events push
-to the UI in real time. Pairing, device info, and backups execute the proven
-libimobiledevice CLIs (`idevicepair`, `ideviceinfo`, `idevicebackup2`) as argv
-subprocesses (never shell strings).
+**Decision.** **`netmuxd` (v0.4+) is the single muxer daemon for BOTH transports** —
+the Operator identified, and its README confirms, that netmuxd outgrew its name: it
+now talks to USB devices directly via `nusb` with *"no dependency on a separate
+usbmuxd daemon"*, alongside its original mDNS Wi-Fi discovery. The core's muxd client
+connects to its socket in `Listen` mode → attach/detach events push to the UI in real
+time, with per-transport presence read from the muxer protocol's `ConnectionType`.
+The client is written against *N* muxer sockets (config: `devices.*`), so alternate
+topologies (classic `usbmuxd` for USB alongside netmuxd, or the hardened profile's
+external socket) are configuration, not code changes. Pairing, device info, and
+backups execute the proven libimobiledevice CLIs (`idevicepair`, `ideviceinfo`,
+`idevicebackup2`) as argv subprocesses (never shell strings), pointed at the muxer via
+`USBMUXD_SOCKET_ADDRESS`.
 
 **Why.** Listen mode is what makes "iPhone appears → UI updates instantly" real — no
-polling. The protocol is small, documented, and has a reference Go implementation to crib
-from (go-ios, MIT). The CLIs are exactly what succeeded in the lab; wrapping them keeps us
-on the paved road and keeps pairing records (`/var/lib/lockdown`) compatible with the
-whole libimobiledevice toolchain. go-ios itself is automation-focused (no MobileBackup2),
-so it is a protocol reference, not a dependency.
+polling. One daemon for both transports collapses the merge complexity. The protocol is
+small, documented, and has a reference Go implementation to crib from (go-ios, MIT).
+The CLIs are exactly what succeeded in the lab; wrapping them keeps us on the paved
+road and keeps pairing records (`/var/lib/lockdown`) compatible with the whole
+libimobiledevice toolchain. go-ios itself is automation-focused (no MobileBackup2), so
+it is a protocol reference, not a dependency.
 
-**Consequence.** The container ships `usbmuxd`, `netmuxd`, and `libimobiledevice-progs`
-from qn.0; the Wi-Fi hardening rung replaces the stock libimobiledevice with a
-source-built one raising the 30 s service timeouts (`src/service.c` — upstream issue
-#1413, reproduced in the lab) **before** the first public release, since Wi-Fi is a
-primary transport (D13).
+**Honest risk + fallback (ruled 2026-07-19).** netmuxd's USB path is *young* (added in
+the v0.4 line; v0.4.3 released 2026-07-14) versus usbmuxd's decades of hardening — and
+USB is our reliability anchor. This is not hypothetical: **a backup-breaking failure in netmuxd's USB path is on
+record from the feasibility lab (2026-07-13)**, exact line preserved in the lab log:
 
-**PROPOSED (gap): how the container provides the `usbmuxd` *daemon*.** Discovered in
-qn.0: Alpine 3.21 (main+community) packages `libimobiledevice` + `libimobiledevice-progs`
-(the CLIs) and `libusbmuxd` (the client library the CLIs speak) — but there is **no
-`usbmuxd` daemon package** (netmuxd is already handled: built from source in a Dockerfile
-stage). So "the container ships usbmuxd" cannot be satisfied by `apk add`. Two ways to
-close it, to be ruled before **qn.2** (first real USB device access):
-- **(A) source-build the daemon in a Dockerfile stage**, mirroring netmuxd — the daemon
-  runs inside the container, self-contained image, matches the original intent. Cost: a
-  second from-source component and a `--privileged`/USB-device-mapped container to reach
-  the bus.
-- **(B) rely on the host's `usbmuxd`** and bind-mount its socket
-  (`/var/run/usbmuxd`) into the container (what `deploy/compose.lab.yml` already shows).
-  Simpler image; USB works wherever the host runs usbmuxd (the PVE/LXC lab case); Wi-Fi
-  via netmuxd needs no daemon either way. Cost: a host dependency, stated in deploy docs.
-qn.0 ships only what is unambiguous — the CLIs + `libusbmuxd` client — and does **not**
-pick A or B (its gate touches no daemon). Recommendation leans **(B)** for the lab/NAS
-deployments with **(A)** as an opt-in `compose` profile, but this awaits an Operator
-ruling. Until ruled, no rung builds on either.
+```
+[2026-07-13T18:30:10Z WARN  netmuxd::usb::mux] dev=0 CONTROL ERROR: asyncReadComplete,
+message was too large (65536 bytes, max = 65535)
+```
+
+— exactly one byte over a **u16** boundary in the USB mux read path: the signature of
+a `0xFFFF` length-field/buffer guard meeting a `0x10000`-byte message, plausibly a
+one-line fix. Any real backup trips it immediately (backup messages exceed 64 KiB at
+once). As of 2026-07-19 nothing matching it is in netmuxd's issue tracker. Notably,
+**v0.4.3 shipped the day after the observation** with the note "Fixes iTunes on the
+Apple mux" — possibly this very bug, unconfirmed. Consequences:
+- **Until netmuxd-USB is proven clean on real hardware, the configured default for USB
+  is the two-daemon topology**: `usbmuxd` (apk — verified in Alpine community across
+  v3.21–v3.24; the qn.0 "no package" finding was a faulty probe; lesson: verify package
+  claims with `apk search` against the target repo) serves USB, netmuxd serves Wi-Fi.
+  Single-muxer netmuxd is the goal state, one config flip away.
+- qn.2's lab gate auditions netmuxd-USB on the pinned v0.4.3 **with real backup
+  traffic** (which crosses the 64 KiB message boundary immediately — the same workload
+  that failed on 2026-07-13): clean → flip the default to single-muxer and credit the
+  v0.4.3 mux fix; reproduces → file the upstream issue with the exact log line, and
+  optionally carry a patch in our pinned source build (the same pattern as the qn.7
+  libimobiledevice timeout patch).
+- qn.4/qn.5 re-prove sustained full USB backup through whichever topology is default
+  before it carries real data. Note the protocol floor
+either way: initial pairing and enabling Wi-Fi sync require a USB *connection* — a
+fresh device can never be adopted over Wi-Fi — so USB must work by the qn.6 gate
+("fresh user pairs via UI"); netmuxd-first/Wi-Fi-first sequencing inside qn.2/qn.3 is
+encouraged (the Operator's device is pre-paired; records in the lab CT).
+
+**Consequence.** The container ships `netmuxd` (pinned, source-built) + `usbmuxd`
+(apk, fallback) + `libimobiledevice-progs` from qn.0; the Wi-Fi hardening rung replaces
+the stock libimobiledevice with a source-built one raising the 30 s service timeouts
+(`src/service.c` — upstream issue #1413, reproduced in the lab) **before** the first
+public release, since Wi-Fi is a primary transport (D13).
 
 ## D3. Backup engine: never-mutate-committed state machine around `idevicebackup2`
 

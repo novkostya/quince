@@ -8,7 +8,8 @@ ARG GO_IMAGE=golang:1.24.5-alpine3.21
 ARG NODE_IMAGE=node:22.12.0-alpine3.21
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine
 ARG RUST_IMAGE=rust:1.88-alpine3.21
-ARG ALPINE_IMAGE=alpine:3.21
+# Runtime base 3.24: the usbmuxd daemon is in Alpine community only at 3.24+ (D2).
+ARG ALPINE_IMAGE=alpine:3.24
 
 # =============================================================================
 # Toolchain stages — reused verbatim by the Makefile gate targets.
@@ -82,18 +83,19 @@ RUN uv sync --no-dev --frozen --python /usr/bin/python3
 # Runtime — Alpine + Apple protocol tooling + python venv + the daemon.
 # =============================================================================
 FROM ${ALPINE_IMAGE} AS runtime
-# Apple-protocol userland. Package names verified on Alpine 3.21 (main+community):
-#   libimobiledevice-progs = the CLIs (idevicebackup2/idevicepair/ideviceinfo) — D2
-#   libusbmuxd             = the usbmuxd *client* library the CLIs speak
-# netmuxd (from source, above) is the Wi-Fi muxer. python3 runs the vault venv.
-#
-# GAP (stack D2 says "the container ships usbmuxd"): Alpine has NO usbmuxd *daemon*
-# package (only libusbmuxd). How the USB daemon is provided — source-built in a stage
-# vs the host's usbmuxd socket bind-mounted in (as compose.lab.yml already does) — is an
-# open architectural question, ruled before qn.2 (first USB device access). qn.0 ships
-# the client libs + CLIs; its gate (version/health/selftest) needs no daemon.
+# Apple-protocol userland (stack D2). Runtime base is alpine:3.24 because the usbmuxd
+# DAEMON lands in Alpine community only at 3.24+ (1.1.1_git20250201; genuinely absent in
+# 3.21–3.23 — the qn.0 "no package" finding was correct for the old pinned base).
+#   usbmuxd                = USB muxer daemon, the reliability anchor. netmuxd's young USB
+#                            path has a recorded bug (D2), so usbmuxd is the USB default;
+#                            netmuxd serves Wi-Fi. `simple` profile runs it in-container.
+#   netmuxd (source, above)= the Wi-Fi muxer
+#   libimobiledevice-progs = the CLIs (idevicebackup2/idevicepair/ideviceinfo)
+#   libusbmuxd             = the client library the CLIs speak
+# python3 runs the vault venv.
 RUN apk add --no-cache \
       ca-certificates tzdata \
+      usbmuxd \
       libimobiledevice \
       libimobiledevice-progs \
       libusbmuxd \
