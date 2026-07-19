@@ -274,6 +274,16 @@ on real traction).
   commit messages, branch names, or fixtures; `make privacy-check` (new target) greps
   every staged diff against `local/privacy-patterns.txt` (private repo; no-ops for
   contributors/CI); leak-reaches-history = incident = rewrite + pattern added.
+- 2026-07-19: (ao) **Go rewrite of the decryption library greenlit as a parallel
+  independent project** (Operator-proposed; scope verified small+frozen — reference lib
+  last released 2024, format stable since iOS 10.2, all primitives have mature Go
+  counterparts). Own public MIT repo under the Operator's account (name via the quince
+  due-diligence method, no Apple marks); includes a test-only encrypt/builder that
+  doubles as qn.8's synthetic-fixture generator. **Subprocess boundary kept** (Operator
+  ruling): quince-vault becomes a thin Go binary on the unchanged stdio RPC; key
+  isolation preserved. qn.8's vault implementation is now conditional — Go if the
+  library passes the conformance + real-backup differential gates by rung start,
+  Python otherwise. Zero coupling: quince contracts and schedule unaffected either way.
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that

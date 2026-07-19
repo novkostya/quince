@@ -104,11 +104,16 @@ compose-up → onboarding → paired → first backup without reading anything b
 compose file's comments.*
 
 ### M6 — Vault: unlock & browse, lazy (`qn.8`)
-`quince-vault serve` (stdio RPC per contracts, reusing `iphone_backup_decrypt`) behind
-the Go `vault.Vault` interface (the swappable seam), session lifecycle (TTL, lock, scratch
-wipe), lazy Manifest reads, file browser + single-file download in UI, the golden
-conformance suite, fixture-backup generator (or documented lab-only gate if the
-generator rung proves heavy). No persistent indexing — session-scoped reads only. *Gate:
+`quince-vault serve` (stdio RPC per contracts) behind the Go `vault.Vault` interface
+(the swappable seam), session lifecycle (TTL, lock, scratch wipe), lazy Manifest reads,
+file browser + single-file download in UI, the golden conformance suite. **Vault
+implementation is conditional (stack D4 successor ruling):** the independent Go
+decryption library + thin Go RPC binary if that library is conformance-ready when this
+rung starts; else Python/`iphone_backup_decrypt` as originally specced. Either way:
+same RPC, session lifecycle, scratch jail, and conformance suite, whose goldens come
+from the Python reference regardless. Fixture-backup generator comes from the Go
+library's encrypt/builder side (or a documented lab-only gate if unavailable). No
+persistent indexing — session-scoped reads only. *Gate:
 unlock a real version, browse domains, download a file, lock; keys provably confined to
 the vault process (no password/keys in core logs, env, argv, or disk — and nothing
 persisted after lock).*
