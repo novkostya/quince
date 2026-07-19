@@ -87,8 +87,9 @@ Settled during the build; a later rung changes them only via the gap protocol.
   defaults and the gate images are one source of truth.
 - **Toolchain pins validated in `quince-dev`** (bootstrapping facts, all in `versions.env`):
   uv image tag suffix is `-alpine` (not `-alpine3.21`); Tailwind pinned **4.1.18** (the
-  first stable `4.0.0` crashes in `@tailwindcss/vite` build); Rust pinned **1.88** (netmuxd
-  `v0.4.3` needs Cargo edition 2024 ≥ 1.85); netmuxd ref bumped `v0.1.4 → v0.4.3`. Two
+  first stable `4.0.0` crashes in `@tailwindcss/vite` build); Rust needs Cargo edition 2024
+  ≥ 1.85 for netmuxd `v0.4.3`; netmuxd ref bumped `v0.1.4 → v0.4.3`. (Exact toolchain
+  versions later moved to the single 3.24 line below.) Two
   in-repo fixes: a pnpm `overrides.vite` (collapses a dual-`vite` type skew between
   `vite@6` and the copy `vitest` pulls) and an mypy override ignoring the stub-less
   `iphone_backup_decrypt` under `--strict`. Lockfiles (`go` needs none — stdlib only;
@@ -102,6 +103,14 @@ Settled during the build; a later rung changes them only via the gap protocol.
   (CLIs), `libusbmuxd` (client lib). The `usbmuxd` daemon is packaged in Alpine community
   only at **3.24+** (`1.1.1_git20250201`; genuinely absent in 3.21–3.23 — the initial
   "no package" finding was correct for the old base, not a mis-probe), so the **runtime
-  base is bumped `alpine:3.21 → 3.24`** (`ALPINE_IMAGE` in `versions.env`; toolchain
-  images stay 3.21 — they need no muxd). This resolves the former D2 gap: the image ships
-  usbmuxd + netmuxd + CLIs, verified present in the built image.
+  base is bumped `alpine:3.21 → 3.24`** (`ALPINE_IMAGE` in `versions.env`). This resolves
+  the former D2 gap: the image ships usbmuxd + netmuxd + CLIs, verified present.
+- **One Alpine line — 3.24 — across build and runtime** (Operator ruling, closing (ak)'s
+  follow-up): the toolchain images were migrated off 3.21 too, so every stage shares one
+  Alpine minor. `-alpine3.24` variants exist only on current language lines, so pins moved
+  to latest-stable (D11): **Go 1.26.5, Node 22.23.1 (still 22 LTS), Rust 1.97.1,
+  golangci-lint v2.12.2** (v2 module path + config schema; its stricter `errcheck` caught
+  two unchecked `Body.Close()` in a test). uv has no `-alpine3.24` tag, so `toolchain-uv`
+  is built `FROM alpine:3.24` with the uv binary copied from an aliased stage. Every pin
+  was looked up live at pin time (program-doc hard rule). Full `make gates` + `make image`
+  re-proven green on the unified line.
