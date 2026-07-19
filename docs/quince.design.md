@@ -288,8 +288,15 @@ non-negotiable:
   per op; everything paginates; search FTS is built in scratch on first search,
   session-scoped.
 - **Domain modules** — `overview`, `messages` (photos parked, lowest priority) — are
-  independent, versioned adapters keyed by iOS major version, each with fixtures and
-  tests, each failing soft (a broken module reports itself; others still serve). If
+  independent, versioned adapters keyed by detected schema (introspection — table and
+  column presence — never a trusted iOS version string), each with fixtures and
+  tests, each failing soft (a broken module reports itself; others still serve).
+  Record parsing inside these adapters is planned to come from the standalone
+  `ios-backup-parser` Go library (sibling repo of the decryption library; streaming
+  typed records + per-backup capability reports) once the Go vault successor (D4) has
+  landed — the adapter then reduces to glue: materialize domain files into scratch,
+  stream the library's records. Where that condition doesn't hold at qn.9/qn.10, the
+  adapter is built in-vault as originally specced (roadmap M7). If
   photos return, the mandatory first step is reusing Apple's own prebuilt thumbnails
   inside the backup (`CameraRollDomain → Media/PhotoData/Thumbnails`) — likely lazy-
   servable like any other file, with no generation step at all.

@@ -126,6 +126,17 @@ lazy session-scoped reads:
   schema, `attributedBody`, attachments join — before any API fields are designed; only
   the domain envelope is pre-frozen, contracts §1), then adapter + chats + session-
   scratch FTS5 search + virtualized thread UI.
+
+**Domain parsing is planned to come from `ios-backup-parser`** — a standalone Go
+library (separate repo, sibling of the decryption library; charter lives there) whose
+M0 schema spike *is* the research spike above, run off quince's critical path.
+Consumption is conditional, chained on the D4 successor ruling: if the Go vault landed
+at qn.8 **and** the library covers the domain when qn.9/qn.10 starts, the vault's
+adapter reduces to glue (materialize domain files → stream the library's typed records
++ capability report); otherwise the rung proceeds as specced here (in-vault adapter,
+spike in-rung). Either way the vault RPC / domain envelope stays the contract surface,
+changed only via a contract-change rung.
+
 *Gate per rung: renders the Operator's real backup correctly (spot-checked against
 iMazing) + fixture tests in CI.*
 
