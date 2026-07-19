@@ -8,7 +8,6 @@ import { modelName } from "./modelName";
 import { formatRelativeTime } from "@/lib/format";
 import { isRunning, useJobsStore } from "@/stores/jobs";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
-import { api } from "@/lib/api";
 
 function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
   if (state === "on") {
@@ -33,12 +32,6 @@ export function DeviceCard({ device }: { device: Device }) {
     Object.values(s.byId).find((j) => j.udid === device.udid && isRunning(j.state)),
   );
 
-  function startBackup() {
-    // qn.1 has no job engine (qn.4); in demo the scripted job renders regardless. The call
-    // is wired for the real engine and its errors are surfaced quietly for now.
-    void api.post("/api/jobs", { udid: device.udid, transport: "auto" }).catch(() => undefined);
-  }
-
   return (
     <Card>
       <CardContent className="p-5">
@@ -48,7 +41,7 @@ export function DeviceCard({ device }: { device: Device }) {
               to={`/devices/${device.udid}`}
               className="text-sm font-semibold tracking-tight hover:text-accent"
             >
-              {device.name}
+              {device.name || device.udid}
             </Link>
             <div className="truncate text-xs text-muted">
               {modelName(device.model)} · iOS {device.ios_version}
@@ -83,7 +76,7 @@ export function DeviceCard({ device }: { device: Device }) {
           {activeJob ? (
             <JobProgressInline job={activeJob} />
           ) : (
-            <Button size="sm" onClick={startBackup}>
+            <Button size="sm" disabled title="Backups arrive in a later release">
               Back up now
             </Button>
           )}

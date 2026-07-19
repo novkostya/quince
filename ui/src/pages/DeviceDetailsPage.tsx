@@ -48,7 +48,7 @@ export function DeviceDetailsPage() {
         <>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">{device.name}</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{device.name || device.udid}</h1>
               <div className="text-sm text-muted">
                 {modelName(device.model)} · iOS {device.ios_version} · seen{" "}
                 {formatRelativeTime(device.last_seen)}
@@ -70,11 +70,7 @@ export function DeviceDetailsPage() {
           ) : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                void api.post("/api/jobs", { udid, transport: "auto" }).catch(() => undefined)
-              }
-            >
+            <Button disabled title="Backups arrive in a later release">
               Back up now
             </Button>
             <Button variant="outline" disabled title="Device pairing arrives in a later release">
