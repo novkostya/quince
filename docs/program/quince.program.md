@@ -180,3 +180,32 @@ When rungs run in parallel (see roadmap map): each agent works its own worktree/
 names it `qn.N-short-title`, and reports gate results + dashboard diff. Integration
 happens on the sequential spine (qn.6 style rungs) by a single agent. Two agents never
 share a rung.
+
+### Landing a rung branch: rebase, then fast-forward (Operator ruling)
+
+`main`'s history is **linear**. Rung branches are session-local and unshared, so
+rebasing them is safe; merge commits are never created. The landing sequence:
+
+1. **At rung end** (gates green, report written): rebase the branch onto fresh
+   `main` in the worktree (`git rebase main`). Mid-rung rebases are allowed when the
+   rung needs something that just landed on `main`, but chasing `main` continuously
+   is not required — once, at the end, is the norm.
+2. **Conflict rules.** The progress dashboard + decisions log are append-heavy and
+   the usual collision: keep BOTH sides — `main`'s entries first (chronology), the
+   rung's after; the rung's state-line flip (`frontier` → `done`) wins. Canon docs
+   (stack/design/contracts): `main`'s version wins unless the rung's spec explicitly
+   ruled that text. A genuine doc-vs-doc contradiction discovered here is a **gap**
+   (protocol above) — never a silent resolution.
+3. **Re-prove on the rebased tip.** Re-run `make gates` (plus the rung's own
+   acceptance gates if the rebased-over changes touch its area): a textually clean
+   rebase can still be semantically broken by canon that changed underneath.
+4. **Privacy re-sweep.** Conflict resolution creates new committed content that never
+   passed the commit-time gate, so check the whole branch before integrating:
+   `git diff main...HEAD | grep '^+' | grep -inEf local/privacy-patterns.txt`
+   must come back empty (skip on boxes without the pattern file).
+5. **Integrate on the Operator's go** (same commit-when-asked etiquette):
+   `git checkout main && git merge --ff-only <branch>`. `--ff-only` is the guard —
+   if it refuses, `main` moved since the rebase: rebase again; never "fix" a refused
+   fast-forward with a merge commit.
+6. After landing, the worktree and branch may be deleted; the rung report notes the
+   landed commit range.
