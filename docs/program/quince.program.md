@@ -102,6 +102,28 @@ On hitting one:
 planning review, processed into contracts/design/roadmap the same day; decisions log
 entry (s).)
 
+## Improvement proposals — the non-blocking sibling of the gap protocol
+
+A **gap** is "canon is silent/wrong and I'm blocked." A **proposal** is "canon is fine,
+but I see something materially better." Proposals are welcome — implementers have the
+deepest contact with the code — under rules that keep the no-improvising discipline
+intact:
+
+1. **Never blocks, never built.** The rung completes on current canon regardless. No
+   implementation of the proposed idea — not even a prototype "to show you" — before an
+   Operator ruling accepts it.
+2. **Rung-end only.** Ideas noticed mid-build go on a private scratch list; at most
+   **one** proposal (your best) is filed with the rung report, as an entry in
+   [`../quince.proposals.md`](../quince.proposals.md).
+3. **Quality bar.** Proposable only if it materially improves correctness, reliability,
+   security, UX, or maintenance cost. Explicitly NOT proposals: style preferences,
+   speculative generality, "more idiomatic," and anything whose honest justification is
+   taste. Format (≤5 lines): problem → sketch → expected value → cost class (S/M/L).
+4. **Triage** (Operator, often batch-adjudicated with the architect):
+   `accepted` → becomes a story/rung; `declined` → stays in the ledger **with a
+   one-line why** (decline reasons are accumulated taste — read them before filing);
+   `parked` → revisit later. Read the ledger's declined entries before proposing.
+
 ## Hard rules
 
 - **State honesty.** The job engine and UI never claim more than is proven (a backup is

@@ -288,6 +288,15 @@ on real traction).
   isolation preserved. qn.8's vault implementation is now conditional — Go if the
   library passes the conformance + real-backup differential gates by rung start,
   Python otherwise. Zero coupling: quince contracts and schedule unaffected either way.
+- 2026-07-19: (ap) **improvement-proposal channel added** (Operator-proposed, designed
+  with the architect): a non-blocking sibling of the gap protocol — implementers may
+  file at most ONE proposal per rung, at rung end only, never pre-implemented, meeting
+  a material-value bar (correctness/reliability/security/UX/maintenance; anti-bikeshed
+  clause), into `docs/quince.proposals.md`; Operator triages accepted/declined(+why)/
+  parked, and decline reasons accumulate as readable taste. Rationale: implementers
+  have repeatedly out-seen the canon (Alpine 3.24, Tailwind pin, Makefile design) but
+  had no legitimate outlet; the cap + timing + no-prototype rules keep the
+  no-improvising discipline intact. Mirrored in ios-backup-crypt's charter.
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that
