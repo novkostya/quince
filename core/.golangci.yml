@@ -1,6 +1,9 @@
-# golangci-lint config for the quince core module. Pinned version: versions.env.
+# golangci-lint config (v2 schema). Pinned version: versions.env (GOLANGCI_LINT_VERSION).
 # Conservative, low-friction set — the daemon's value is reliability, so the vet-class
-# linters earn their keep; style noise is kept off.
+# linters earn their keep; style noise is kept off. gofmt is checked separately in the
+# gate; in v2 it's a formatter, and gosimple is folded into staticcheck.
+version: "2"
+
 run:
   timeout: 5m
 
@@ -11,10 +14,8 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - gosimple
     - misspell
     - bodyclose
-    - gofmt
 
 issues:
   max-issues-per-linter: 0

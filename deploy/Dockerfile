@@ -3,13 +3,13 @@
 # this release image compile with byte-identical toolchains. All pins come from
 # versions.env via --build-arg (defaults below mirror it). Stack canon: D2/D10/D13.
 
-# ---- pinned base images (mirror versions.env) ----
-ARG GO_IMAGE=golang:1.24.5-alpine3.21
-ARG NODE_IMAGE=node:22.12.0-alpine3.21
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine
-ARG RUST_IMAGE=rust:1.88-alpine3.21
-# Runtime base 3.24: the usbmuxd daemon is in Alpine community only at 3.24+ (D2).
+# ---- pinned base images (mirror versions.env) — ONE Alpine line (3.24) everywhere ----
+ARG GO_IMAGE=golang:1.26.5-alpine3.24
+ARG NODE_IMAGE=node:22.23.1-alpine3.24
+ARG RUST_IMAGE=rust:1.97.1-alpine3.24
 ARG ALPINE_IMAGE=alpine:3.24
+# uv publishes no -alpine3.24 tag; toolchain-uv is built FROM alpine and copies this in.
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine
 
 # =============================================================================
 # Toolchain stages — reused verbatim by the Makefile gate targets.
@@ -17,8 +17,9 @@ ARG ALPINE_IMAGE=alpine:3.24
 FROM ${GO_IMAGE} AS toolchain-go
 ARG GOLANGCI_LINT_VERSION
 RUN apk add --no-cache git make bash gcc musl-dev
-# golangci-lint built WITH this exact Go, so no analyzer/toolchain skew.
-RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v${GOLANGCI_LINT_VERSION}
+# golangci-lint built WITH this exact Go, so no analyzer/toolchain skew. v2 module path
+# carries the /v2 suffix.
+RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${GOLANGCI_LINT_VERSION}
 WORKDIR /src
 
 FROM ${NODE_IMAGE} AS toolchain-node
@@ -27,9 +28,16 @@ RUN apk add --no-cache git
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /src
 
-FROM ${UV_IMAGE} AS toolchain-uv
-RUN apk add --no-cache git make
-ENV UV_CACHE_DIR=/uv-cache
+# Alias the uv image as a stage so COPY --from can reference it (buildkit forbids
+# variable expansion directly in --from).
+FROM ${UV_IMAGE} AS uv-bin
+
+# toolchain-uv is built on the same Alpine line as everything else; uv (a static binary)
+# is copied in from astral's image, and the python that runs the vault is Alpine's own.
+FROM ${ALPINE_IMAGE} AS toolchain-uv
+RUN apk add --no-cache git make python3
+COPY --from=uv-bin /usr/local/bin/uv /usr/local/bin/uv
+ENV UV_CACHE_DIR=/uv-cache UV_PYTHON_DOWNLOADS=never
 WORKDIR /src
 
 # =============================================================================
@@ -68,13 +76,11 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -o /quince ./cmd/quince
 
 # --- vault: locked venv, built at its FINAL path against the runtime's own system
-#     python. venvs aren't relocatable and hardcode their interpreter, so we build on the
-#     same Alpine base the runtime uses (identical /usr/bin/python3) at /opt/quince/vault
-#     — no path move, no interpreter skew. uv is copied in as a static binary. ---
-FROM ${ALPINE_IMAGE} AS vault-build
-RUN apk add --no-cache python3
-COPY --from=toolchain-uv /usr/local/bin/uv /usr/local/bin/uv
-ENV UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/opt/quince/vault/.venv
+#     python. venvs aren't relocatable and hardcode their interpreter — toolchain-uv is
+#     the same Alpine (3.24) base the runtime uses (identical /usr/bin/python3), so
+#     building into /opt/quince/vault here means no path move and no interpreter skew. ---
+FROM toolchain-uv AS vault-build
+ENV UV_PROJECT_ENVIRONMENT=/opt/quince/vault/.venv
 WORKDIR /opt/quince/vault
 COPY vault/ ./
 RUN uv sync --no-dev --frozen --python /usr/bin/python3

@@ -124,6 +124,15 @@ entry (s).)
   (keybag + Manifest decrypt) narrated and < 30 s on the reference backup; first page of
   any domain after its first-use load < 300 ms; vault peak RSS < 2 GB on the reference
   backup; thumbnail workers capped.
+- **Version pins are looked up, never remembered.** LLM training data is systematically
+  stale — a model's "current version" is the current version of its training cutoff
+  (this is how `ALPINE_VERSION=3.21` got pinned while 3.21 neared EOL). When
+  introducing or bumping any pin (base images, packages, tools, actions): query the
+  live source at pin time (registry tags, releases page, the branch APKINDEX), prefer
+  the **newest stable with real support runway** (never near-EOL), and if pinning
+  anything *other* than the newest stable, the deviation gets a comment saying why
+  (e.g. "4.0.0 crashes in @tailwindcss/vite — pinned 4.1.18"). The lookup is part of
+  the rung's evidence.
 - **Docs are part of the diff.** A rung that changes behavior updates the canon it
   contradicts (stack/design/contracts) in the same change.
 

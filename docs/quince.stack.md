@@ -77,10 +77,15 @@ once). As of 2026-07-19 nothing matching it is in netmuxd's issue tracker. Notab
 **v0.4.3 shipped the day after the observation** with the note "Fixes iTunes on the
 Apple mux" — possibly this very bug, unconfirmed. Consequences:
 - **Until netmuxd-USB is proven clean on real hardware, the configured default for USB
-  is the two-daemon topology**: `usbmuxd` (apk — verified in Alpine community across
-  v3.21–v3.24; the qn.0 "no package" finding was a faulty probe; lesson: verify package
-  claims with `apk search` against the target repo) serves USB, netmuxd serves Wi-Fi.
-  Single-muxer netmuxd is the goal state, one config flip away.
+  is the two-daemon topology**: `usbmuxd` serves USB, netmuxd serves Wi-Fi. The daemon
+  is `apk add usbmuxd` on **Alpine ≥ 3.24 community ONLY** (verified per-branch against
+  the APKINDEX files, 2026-07-19: absent in 3.21–3.23) — hence the runtime base is
+  Alpine 3.24 (`versions.env`). The qn.0 "no package on 3.21" finding was CORRECT; an
+  intermediate architect claim of all-branch availability was the faulty one (apk's
+  `--repository` flag *appends* to configured repos — it answered from the host's own
+  3.24). Lesson: package-existence claims are verified against the branch's APKINDEX or
+  in a clean container of that branch, never with `apk search --repository` on a
+  configured host. Single-muxer netmuxd is the goal state, one config flip away.
 - qn.2's lab gate auditions netmuxd-USB on the pinned v0.4.3 **with real backup
   traffic** (which crosses the 64 KiB message boundary immediately — the same workload
   that failed on 2026-07-13): clean → flip the default to single-muxer and credit the

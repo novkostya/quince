@@ -241,6 +241,22 @@ on real traction).
   v0.4.3 shipped the NEXT DAY noting "Fixes iTunes on the Apple mux" — possibly this
   bug, unconfirmed; the qn.2 audition (real backup traffic on pinned v0.4.3) decides.
   Exact line quoted in stack D2; default topology ruling from (ai) unchanged.
+- 2026-07-19: (ak) **RETRACTION of the "faulty probe" accusation in (ag)/(ah)**: the
+  authoritative per-branch APKINDEX check shows `usbmuxd` in **Alpine 3.24 community
+  ONLY** (absent 3.21–3.23) — the qn.0 session's original finding was CORRECT for its
+  3.21 base; the architect's all-branches "verification" was the flawed one (apk's
+  `--repository` appends to configured repos; all four queries were answered by the dev
+  box's own 3.24 repo). The build session's `ALPINE_VERSION=3.21 → 3.24` bump is
+  ratified — additionally right because 3.21 (Nov 2024) nears EOL while 3.24 is current
+  stable and matches the dev/lab CT line. Follow-up (non-blocking): align toolchain
+  images to 3.24-based tags where published. Lesson upgraded in D2: verify package
+  claims against the branch APKINDEX or a clean container of that branch.
+- 2026-07-19: (al) **new hard rule: "version pins are looked up, never remembered"**
+  (Operator-proposed after tracing the 3.21 pin to LLM training-data staleness — a
+  model's "current" is its training cutoff's current; third staleness incident today
+  incl. two of the architect's). Every pin introduction/bump queries the live source at
+  pin time, prefers the newest stable with support runway, and comments any deviation
+  from newest with its reason. Landed in the program doc's hard rules.
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that

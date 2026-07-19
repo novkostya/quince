@@ -33,8 +33,9 @@ __pycache__/
 /vault/.ruff_cache/
 /vault/.pytest_cache/
 
-# --- Claude Code machine-local settings (shared settings.json would be tracked) ---
+# --- Claude Code machine-local settings + runtime state (shared settings.json tracked) ---
 /.claude/settings.local.json
+/.claude/scheduled_tasks.lock
 
 # --- Editor / OS noise ---
 .DS_Store
