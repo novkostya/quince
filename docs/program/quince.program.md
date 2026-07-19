@@ -35,6 +35,11 @@
   file** that exists only on the Operator's machines; read it there, never quote its
   contents into committed files. The generic contributor setup guide is
   `deploy/dev.md` (public).
+- **The Operator-local layer is itself version-controlled** — `local/` is a nested git
+  repo with a *private* remote (named only inside `local/`), invisible to this public
+  repo via `.gitignore`. Any session that edits `local/**` commits in that nested repo
+  (same commit-when-asked etiquette). Never add `local/` contents, or the directory
+  itself, to the public repo's index under any circumstances.
 - **The dev host is a container host, not a toolchain host** (Operator ruling). No
   language toolchains are ever installed on it (or anywhere): every gate target runs
   inside a pinned toolchain container (`nerdctl` or `docker`, autodetected by the
@@ -117,13 +122,24 @@ entry (s).)
   Test fixtures use the password `test`.
 - **Subprocesses**: argv arrays, own process group, supervised, killed on job end.
 - **Every bug found on the lab box becomes a replay fixture** before it's fixed (the lab
-  transcript corpus in `chatgpt-original-idea-chat.md` is the seed: extract
+  transcript corpus in `local/chatgpt-original-idea-chat.md` is the seed: extract
   `idevicebackup2` outputs into `core/internal/backup/testdata/transcripts/`).
 - **Perf budgets** (enforced by tests where cheap, by `/usr/bin/time -v` notes in the
   rung report otherwise): device list & version list API < 100 ms; session unlock
   (keybag + Manifest decrypt) narrated and < 30 s on the reference backup; first page of
   any domain after its first-use load < 300 ms; vault peak RSS < 2 GB on the reference
   backup; thumbnail workers capped.
+- **Privacy is a commit-time gate, not just a docs rule.** Public history is forever.
+  Operator-private facts — hostnames, LAN IPs, MAC addresses, network topology,
+  hardware sizing, device identifiers/UDIDs, personal names/paths, lab-log excerpts —
+  never enter committed files, **commit messages**, branch names, tags, or test
+  fixtures. Before EVERY public-repo commit, run `make privacy-check`: it greps the
+  staged diff against `local/privacy-patterns.txt` (Operator-private list; the target
+  no-ops on boxes without it, e.g. CI and contributors). Draft your commit message to
+  the same standard — describe *what* changed, never *where the Operator runs it*.
+  A hit means fix before committing; a leak that reaches history is an incident:
+  history rewrite + the pattern added to the list. This rule exists because it
+  happened once (2026-07-19, scrubbed by rewrite) — never again.
 - **Version pins are looked up, never remembered.** LLM training data is systematically
   stale — a model's "current version" is the current version of its training cutoff
   (this is how `ALPINE_VERSION=3.21` got pinned while 3.21 neared EOL). When

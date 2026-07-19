@@ -57,7 +57,7 @@ One container, multi-arch (amd64/arm64), designed to also run on modest NAS hard
 | [`docs/quince.progress.md`](docs/quince.progress.md) | Live dashboard: what is built, what is the frontier |
 | [`docs/program/quince.program.md`](docs/program/quince.program.md) | The build loop for implementing agents |
 | [`docs/specs/`](docs/specs/) | Per-rung specs |
-| `chatgpt-original-idea-chat.md` | Lab notes: the original hands-on feasibility research (Russian) |
+| `local/chatgpt-original-idea-chat.md` | Lab notes: the original hands-on feasibility research (Russian) |
 
 ## License
 

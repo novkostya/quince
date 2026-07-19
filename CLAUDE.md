@@ -34,7 +34,7 @@ on an assumption you didn't write down, and re-litigating what's already ruled.
 4. One rung per session (`docs/specs/qn.N/`). Spec first if missing. Prove with gates.
    Update the dashboard. Stop — commit/push only when the Operator asks.
 
-`chatgpt-original-idea-chat.md` is the original hands-on feasibility lab log (Russian):
+`local/chatgpt-original-idea-chat.md` is the original hands-on feasibility lab log (Russian):
 the source of real `idevicebackup2` transcripts, Wi-Fi failure modes, and ZFS facts.
 Treat it as evidence, not as decisions — decisions live in `docs/`. It is **local-only
 and gitignored** (personal data), present on the Operator's machine but absent from

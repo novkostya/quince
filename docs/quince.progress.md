@@ -34,7 +34,7 @@ on real traction).
 
 **Decisions log.**
 - 2026-07-18: full planning pass (this docs set) from the feasibility lab
-  (`../chatgpt-original-idea-chat.md`); Go core + Python vault + React/mercury-style UI;
+  (`../local/chatgpt-original-idea-chat.md`); Go core + Python vault + React/mercury-style UI;
   USB primary / Wi-Fi experimental; ZFS first-class with hardlink portable fallback.
 - 2026-07-18 (Operator review): (a) vault seam made explicitly swappable — a future
   all-Go vault is a drop-in behind `vault.Vault` + the conformance suite; (b) host
@@ -51,7 +51,7 @@ on real traction).
   Plex-grade setup (compose up → onboard in UI, everything configurable in-app) with
   OpenWrt/PVE-grade config — one tidy hand-editable `config.yml` as source of truth,
   atomic validated writes, no secrets in it, UI is an editor over the file.
-- 2026-07-18 (external crosscheck review, `../chatgpt-planning-crosscheck-feedback.md`,
+- 2026-07-18 (external crosscheck review, `../local/chatgpt-planning-crosscheck-feedback.md`,
   adjudicated with the Operator): **Operator rulings** — (g) zfs backend is
   snapshot-native (in-place `current/`, versions = quince's own snapshots, no hardlinks
   under ZFS; consistency guarantee restated per-backend: on zfs it lives in the
@@ -257,6 +257,22 @@ on real traction).
   incl. two of the architect's). Every pin introduction/bump queries the live source at
   pin time, prefers the newest stable with support runway, and comments any deviation
   from newest with its reason. Landed in the program doc's hard rules.
+- 2026-07-19: (am) **the private layer is now version-controlled** (Operator concern:
+  gitignored = untracked, unbacked-up, unsynced — quince-dev had no `local/` at all):
+  `local/` is a nested git repo pushed to a **private GitHub repo only** (Operator
+  choice over self-hosted bare / hybrid), privacy verified; the four `chatgpt-*.md`
+  lab/review logs MOVED into it (public doc references updated to `local/chatgpt-*`);
+  clone landed on quince-dev (sync gap closed) with a deploy key awaiting the
+  Operator's read-only registration; convention added to the program doc — sessions
+  editing `local/**` commit in the nested repo. Root `/chatgpt-*.md` gitignore patterns
+  retained as belt-and-braces.
+- 2026-07-19: (an) **privacy incident + new hard rule**: early qn.0 commits carried LAN
+  IPs/hostnames in docs and commit messages; the Operator had the implementer rewrite
+  history to scrub them (history verified clean post-rewrite). Cemented in the program
+  doc: privacy is a **commit-time gate** — private facts never enter committed files,
+  commit messages, branch names, or fixtures; `make privacy-check` (new target) greps
+  every staged diff against `local/privacy-patterns.txt` (private repo; no-ops for
+  contributors/CI); leak-reaches-history = incident = rewrite + pattern added.
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that

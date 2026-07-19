@@ -57,6 +57,21 @@ help: ## Show this help
 preflight:
 	@test -n "$(RUNTIME)" || { echo "ERROR: no container runtime (nerdctl/docker) found. This box must be a container host — see deploy/dev.md."; exit 1; }
 
+.PHONY: privacy-check
+privacy-check: ## Scan the staged diff for Operator-private patterns (no-op without local/privacy-patterns.txt)
+	@if [ -f local/privacy-patterns.txt ]; then \
+	  hits=$$(git diff --cached -U0 | grep -E '^\+' | grep -inEf local/privacy-patterns.txt || true); \
+	  if [ -n "$$hits" ]; then \
+	    echo "PRIVACY VIOLATION — staged diff matches local/privacy-patterns.txt:"; \
+	    echo "$$hits"; \
+	    echo "Unstage/fix before committing (program doc: privacy is a commit-time gate)."; \
+	    exit 1; \
+	  fi; \
+	  echo "privacy-check: staged diff clean"; \
+	else \
+	  echo "privacy-check: no local/privacy-patterns.txt (contributor/CI box) — skipped"; \
+	fi
+
 # ---------------------------------------------------------------------------
 # Toolchain images — built once from the Dockerfile stages, reused by gates.
 # ---------------------------------------------------------------------------

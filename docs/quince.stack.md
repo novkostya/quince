@@ -4,7 +4,7 @@
 > Implementing agents follow these as settled law; reopening one requires the Operator
 > saying so in chat, and the change lands here first.
 >
-> Grounding: the hands-on feasibility lab (`../chatgpt-original-idea-chat.md`) proved the
+> Grounding: the hands-on feasibility lab (`../local/chatgpt-original-idea-chat.md`) proved the
 > protocol path in the target environment — Alpine LXC on Proxmox, libimobiledevice 1.4.0,
 > full encrypted USB backup (143k files) + Wi-Fi incremental via netmuxd (3.6 GB, ~9 min,
 > `Backup Successful`), iMazing opens the result. Decisions below assume those facts.
