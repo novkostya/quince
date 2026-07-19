@@ -21,21 +21,23 @@ restart-w/-backoff, refuse-loudly on an already-served socket, crash-loop → `/
 degraded), `POST /api/devices/rescan → 202|409` reusing the muxd reconnect→Reset→replay
 reconcile, the `devices.manage_muxer` config key, and a UI **Rescan** control; `make gates` +
 `make image` + `make gates-ui-e2e` green, and the supervisor was smoke-tested against the
-**real** usbmuxd in the built image (`/api/health` → `muxer:{managed,state:"running"}`). Its
-**lab gates 7–8 (plug/unplug ≤ 1 s, netmuxd-USB audition) await a physical-presence session**.
-**qn.3 is the new frontier.** The qn.5-before-qn.4 order swap is also ruled in (ar).
+**real** usbmuxd in the built image (`/api/health` → `muxer:{managed,state:"running"}`). **qn.2b
+is now DONE** — **lab gate 7 (managed USB + Rescan) PASSED on real hardware** (Operator-confirmed on
+staging; it surfaced + fixed a "live `/dev/bus/usb`" deploy-config gap, (av)); gate 8 (netmuxd-USB
+audition) was **re-homed to qn.7** with a named owner (not a silent defer, (aw)). **qn.3 is the new
+frontier.** The qn.5-before-qn.4 order swap is also ruled in (ar).
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
 | qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
-| qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gates 6–7) | **BUILT (CI); lab gates 7–8 = hardware** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green (2026-07-20); supervisor smoke-tested vs the real usbmuxd in the image; lab gates 7–8 (plug/unplug ≤1 s, netmuxd-USB audition) await a physical-presence session |
+| qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **frontier** — after qn.2b; inherits "enrich muxd devices with lockdown identity" |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | outlined — **runs BEFORE qn.4** (order ruled in (ar)) |
 | qn.4 | Backup engine, both transports + headless CLI | outlined — after qn.5; closes M3 with the integrated e2e gate |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
-| qn.7 | Wi-Fi reliability hardening (before v0.1) | outlined |
+| qn.7 | Wi-Fi reliability hardening (before v0.1) + netmuxd co-supervision + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
 | qn.9–10 | Domain viewers (overview / messages) | outlined |
 | qn.11 | Photos viewer | **parked, lowest priority** (icloudpd+Immich cover photos; Apple-thumbnails spike first if revived) |
@@ -520,3 +522,14 @@ on real traction).
   in-container usbmuxd connected to the iPhone. `deploy/compose.nas.yml` corrected; captured in the
   qn.2b spec's Lab finding. The lab gate did its job: a real device found a deploy gap CI fakes
   can't. Rescan's "re-detect a missed device" value now correctly depends on a live container `/dev`.
+- 2026-07-20: (aw) **qn.2b CLOSED; netmuxd-USB audition re-homed to qn.7** (Operator ruling). Lab
+  gate 7 (managed in-container usbmuxd brings USB up via `compose up` + UI **Rescan** re-detects a
+  re-plugged device) **PASSED on hardware** (Operator-confirmed on staging, after the (av) deploy
+  fix). Lab gate 8 (the netmuxd-USB audition on v0.4.3) is **moved to qn.7** — it answers a
+  netmuxd-viability question that pairs with qn.7's netmuxd co-supervision, qn.2b's goal doesn't
+  depend on it (default topology stays usbmuxd-for-USB; the single-muxer flip is config-only either
+  way), and it's the risky one (`idevicepair unpair` destroys the pairing record). **Re-assignment
+  with a named owner, NOT a silent defer** — the audition procedure is preserved verbatim in the
+  qn.2b spec (gate 8) for the qn.7 session to inherit, and the qn.7 roadmap row now lists it, so the
+  no-orphan-gate rule qn.2b was created to enforce stays intact. qn.2b's goal (managed usbmuxd
+  supervision + rescan) is proven end-to-end (CI + hardware); the rung closes. Frontier → **qn.3**.

@@ -2,15 +2,22 @@
 
 **Goal.** In the simple one-container profile (`devices.manage_muxer: true`), `compose up`
 brings USB up with no external muxer — quince supervises the in-container usbmuxd — and a
-UI **Rescan** re-enumerates a device the unprivileged container's absent hotplug missed;
-and qn.2's deferred lab gates (plug/unplug ≤ 1 s, netmuxd-USB audition) are proven on real
-hardware. This closes the D12 "Plex-bar" USB gap that qn.2 surfaced.
+UI **Rescan** re-enumerates a device the unprivileged container's absent hotplug missed,
+proven on real hardware (plug/unplug ≤ 1 s + Rescan = lab gate 7). This closes the D12
+"Plex-bar" USB gap that qn.2 surfaced. (qn.2's other deferred gate — the netmuxd-USB audition —
+was re-homed to qn.7; see Status.)
 
-**Status: BUILT (CI stories 1–6); lab gates 7–8 are the hardware session.** `make gates` +
-`make image` + `make gates-ui-e2e` green in `quince-dev`; the supervisor was additionally
-smoke-tested against the **real** usbmuxd in the built image (see rung-ruled evidence). Cleared
-the pre-build spec-review gate (program loop step 1 + decisions log (as)) — **APPROVED by the
-architect with four amendments (folded in below)**. The amendments:
+**Status: CLOSED (2026-07-20).** CI stories 1–6 green (`make gates` + `make image` +
+`make gates-ui-e2e` in `quince-dev`; supervisor smoke-tested against the **real** usbmuxd in the
+built image). **Lab gate 7 PASSED on hardware** — the managed in-container usbmuxd brings USB up
+via `compose up` and the UI **Rescan** re-detects a re-plugged device (Operator-confirmed on
+staging; the deploy-config fix it surfaced is in the Lab finding below). **Lab gate 8
+(netmuxd-USB audition) RE-HOMED to qn.7** by Operator ruling 2026-07-20 (decisions log (aw)):
+it's a netmuxd-viability question that pairs with qn.7's netmuxd co-supervision, and qn.2b's goal
+(managed usbmuxd + rescan) doesn't depend on it — the audition procedure is preserved under gate 8
+below for the qn.7 session to inherit. Cleared the pre-build spec-review gate (program loop step 1
++ decisions log (as)) — **APPROVED by the architect with four amendments (folded in below)**. The
+amendments:
 (1) verify the usbmuxd listen-socket flag live in the image, don't assume the env var;
 (2) `deploy/` is in scope — a managed-mode compose example, else the rung's own gate is
 unrunnable; (3) gate 7's Wi-Fi leg starts netmuxd manually (netmuxd supervision is FULL /
@@ -139,11 +146,13 @@ flag takes effect at process start — see Rule check / D12). Device identity (`
 **Lab gates (manual, hardware — run on the lab CT this rung, recorded in the rung report; not
 CI). These are qn.2's deferred gates 6–7, now owned here (ruling (ar)):**
 
-7. Bring USB up **via the managed-mode compose example** (`deploy/`, amendment 2) on the lab CT —
-   `compose up`, no host muxer/socket bind — then plug/unplug the lab iPhone → device appears/
-   disappears in the UI **via the supervised in-container usbmuxd** (not qn.2's staging
-   socket-bind stopgap): **USB attach/detach within 1 s**. Also exercise **Rescan** with a device
-   plugged after startup (the missing-hotplug case) and confirm it appears.
+7. **PASSED (Operator-confirmed on staging, 2026-07-20).** Bring USB up **via the managed-mode
+   compose example** (`deploy/`, amendment 2) on the lab CT — `compose up`, no host muxer/socket
+   bind — then plug/unplug the lab iPhone → device appears/disappears in the UI **via the
+   supervised in-container usbmuxd** (not qn.2's staging socket-bind stopgap): **USB attach/detach
+   within 1 s**. Also exercise **Rescan** with a device plugged after startup (the missing-hotplug
+   case) and confirm it appears. **Surfaced the "live `/dev/bus/usb`" deploy-config gap** (Lab
+   finding below) — fixed and re-verified before this gate passed.
    **Wi-Fi leg (dependency stated — amendment 3):** netmuxd supervision is FULL scope (**qn.7**),
    so for this rung netmuxd is **started manually** alongside the managed usbmuxd; then Wi-Fi
    attach lands **within a few seconds** of the mDNS announcement (record the observed value; an
@@ -151,8 +160,13 @@ CI). These are qn.2's deferred gates 6–7, now owned here (ruling (ar)):**
    sub-check does not contradict "provable at rung close": the rung's *goal* (simple-profile USB
    up + rescan) is fully self-owned; Wi-Fi presence is a carried-over qn.2 observation, not a new
    supervised capability of this rung.
-8. **netmuxd-USB audition on pinned `v0.4.3`** (stack D2), run manually with the raw CLIs
-   pointed at netmuxd via `USBMUXD_SOCKET_ADDRESS`, with qn.2's guards intact:
+8. **RE-HOMED to qn.7 (Operator ruling 2026-07-20, decisions log (aw)).** A netmuxd-viability
+   question that pairs with qn.7's netmuxd co-supervision, not with usbmuxd supervision; qn.2b's
+   goal doesn't depend on it (default topology stays usbmuxd-for-USB; the flip is config-only
+   either way), and it's the risky one (unpair destroys the pairing record). The full procedure
+   stays here for the qn.7 session to inherit verbatim — **netmuxd-USB audition on pinned
+   `v0.4.3`** (stack D2), run manually with the raw CLIs pointed at netmuxd via
+   `USBMUXD_SOCKET_ADDRESS`, with qn.2's guards intact:
    - **Back up `/var/lib/lockdown` before `idevicepair unpair`** (fresh pairing destroys the
      treasured record); requires physical presence (Trust + passcode); old copies go stale once
      re-paired.
@@ -171,14 +185,14 @@ CI). These are qn.2's deferred gates 6–7, now owned here (ruling (ar)):**
   (story 1); UI Rescan test (story 6). The managed-mode compose example (amendment 2) is
   syntax-checked (`docker compose config` / equivalent) in the gate ladder where cheap, and
   proven live by lab gate 7.
-- Lab gates 7–8: outcome (esp. the audition verdict + any upstream issue link + the
-  supervised-USB timings) recorded in the rung report and the progress decisions log. **A rung's
-  goal is provable at rung close** (program hard rule): stories 1–6 prove the simple-profile
-  USB-up + rescan in CI; gate 7 proves supervised USB + rescan on hardware **this same session**
-  via the managed-mode compose; gate 8 runs the audition. The Wi-Fi sub-check of gate 7 uses a
-  manually-started netmuxd (its supervision is qn.7) — stated so the provability claim is honest
-  (amendment 3). No gate is deferred to a later rung (this rung exists precisely because qn.2
-  deferred them).
+- Lab gate 7 (managed USB + Rescan) recorded PASSED in the decisions log; gate 8 (audition)
+  re-homed to qn.7. **A rung's goal is provable at rung close** (program hard rule) — and it was:
+  stories 1–6 prove the simple-profile USB-up + rescan in CI; **gate 7 proved supervised USB +
+  rescan on real hardware this same session** (the rung's goal). The Wi-Fi sub-check of gate 7
+  used a manually-started netmuxd (its supervision is qn.7 — amendment 3). Gate 8 was **not the
+  goal** (a netmuxd-viability audition, config-only flip either way); it is **re-homed to qn.7 with
+  a named owner** (Operator ruling (aw)) — a re-assignment, not a silent defer, so the
+  no-orphan-gate rule qn.2b exists to enforce stays intact.
 
 ## Fixtures
 
