@@ -2,9 +2,10 @@
 
 **One-line state.** **qn.0 is BUILT — the floor stands.** `make gates` + `make image`
 are green from a fresh tree inside `quince-dev`, the image runs (`quince version`,
-`/api/health` → ok, `quince-vault selftest` exit 0, embedded UI serves), and the repo is
-`git init`'d (not yet committed — awaiting Operator). **The frontier is now `qn.1`
-(core daemon skeleton + demo mode + UI shell).** Spec: [`specs/qn.1/qn.1.md`](specs/qn.1/qn.1.md) (to be written).
+`/api/health` → ok, `quince-vault selftest` exit 0, embedded UI serves), and it is
+committed and published to the LAN registry — history scrubbed of Operator-private facts
+before any push. **The frontier is now `qn.1` (core daemon skeleton + demo mode + UI
+shell).** Spec: [`specs/qn.1/qn.1.md`](specs/qn.1/qn.1.md) (to be written).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -287,9 +288,13 @@ on real traction).
   crashes), Rust `1.88` (netmuxd needs edition 2024), pnpm `overrides.vite`, mypy
   stub-override, vault venv built at its final path against the runtime python.
   **`.gitignore` bug caught by testing**: trailing inline comments silently disabled the
-  private-file rules — rewritten with column-0 comments; UDID-bearing lab logs now
-  verified `!!` ignored. **Registry push proven** (Operator supplied the endpoint): `make
-  push REGISTRY=<lan-registry>` pushed `quince:local` to the LAN registry (endpoint in local/environment.md) and it pulls back — closes the old open question 1;
-  endpoint recorded in `local/environment.md`. First commit landed (`699c4ef`). One gap
-  still open: **stack D2 `PROPOSED`** — the `usbmuxd` daemon is not an Alpine package,
-  ruling needed before qn.2. Next frontier: **qn.1** (spec to be written).
+  private-file rules — rewritten with column-0 comments; private lab logs now verified
+  `!!` ignored. **Registry push proven**: `make push REGISTRY=<lan-registry>` pushed
+  `quince:local` to the LAN registry (endpoint in `local/environment.md`) and it pulls
+  back. Per (ak)'s follow-up the toolchain images were then migrated to a single
+  Alpine-3.24 line (Go 1.26.5 / Node 22.23.1 / Rust 1.97.1 / golangci-lint v2), re-proven
+  green; the `usbmuxd` daemon (Alpine 3.24 community) now ships in the runtime — so the
+  old D2 `PROPOSED` gap is closed, not open. Before any push, one privacy incident
+  (Operator infra in commit messages + an earlier version of this entry) was scrubbed by a
+  full `git` history rewrite — the origin of the "Privacy is a commit-time gate" hard
+  rule. Next frontier: **qn.1** (spec to be written).
