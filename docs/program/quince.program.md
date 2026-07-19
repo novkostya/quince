@@ -128,6 +128,12 @@ intact:
 
 - **State honesty.** The job engine and UI never claim more than is proven (a backup is
   `succeeded` only after verify+commit; a domain adapter that failed says so).
+- **A rung's goal is provable at rung close.** A spec whose acceptance gates depend on a
+  future rung's deliverable is mis-scoped: split, reorder, or pull the dependency in
+  until the goal sentence can be exercised end-to-end when the rung ends. Deferring a
+  gate is an explicit debt: it must name the owning rung, and the dashboard's "done"
+  states what was and wasn't proven (origin: qn.2's deferred lab gates, 2026-07-20 —
+  fixed by inserting qn.2b and swapping qn.5 before qn.4).
 - **Never mutate a committed version.** hardlink/copy: `idevicebackup2` writes only into
   `work/<job>`, `versions/<ts>` are immutable, `latest` changes only by journaled atomic
   swap. zfs: the head is a working buffer, versions are quince's own snapshots taken
@@ -180,6 +186,14 @@ When rungs run in parallel (see roadmap map): each agent works its own worktree/
 names it `qn.N-short-title`, and reports gate results + dashboard diff. Integration
 happens on the sequential spine (qn.6 style rungs) by a single agent. Two agents never
 share a rung.
+
+**Worktree init (mandatory first step).** A worktree materializes only *tracked* files,
+so the gitignored Operator-private layer is absent there. From the worktree root run
+`ln -s ../../../local local` (worktrees live at `.claude/worktrees/<name>/`; adjust the
+depth if yours sits elsewhere). The symlink occupies the gitignored `local` path, so git
+can never commit it; `make privacy-check` and every `local/environment.md` pointer then
+work unchanged. On a checkout without the private layer (contributors, CI) skip it — the
+affected targets no-op.
 
 ### Rung handoff review (the first step of every rung — Operator ruling)
 

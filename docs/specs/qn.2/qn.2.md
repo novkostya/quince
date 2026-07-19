@@ -5,10 +5,10 @@
 
 **Status (2026-07-20): CLOSED.** Code complete (stories 1–5: muxd client + registry + wiring +
 UI, `make gates`/image/e2e green — see progress decisions log `qn2-build`/`qn2-close`). **Lab
-gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) are DEFERRED** to a future hardware session:
-they need a real device AND the in-container muxer-startup gap resolved (progress dashboard open
-question 2 — nothing starts the muxer in the simple profile). Manual USB testing so far used a
-temporary usbmuxd-in-CT stopgap on the staging box (`local/environment.md`).
+gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) are OWNED BY `qn.2b`** (ruled 2026-07-20,
+decisions log (ar)): the muxer-startup gap below was resolved as a quince-supervised muxer +
+rescan, and qn.2b runs these gates as its own acceptance. Manual USB testing during this rung
+used a temporary usbmuxd-in-CT stopgap on the staging box (`local/environment.md`).
 
 ## Boundary
 
@@ -212,4 +212,7 @@ appendix exists so the design does not evaporate with the session (one-session-p
   `contracts.md` here): `POST /api/devices/rescan` (contracts §1) and `devices.manage_muxer`
   (config schema §6).
 
-**Status: awaiting Architect ruling — not decided, not built.**
+**Status: RULED 2026-07-20 (decisions log (ar)) — option (a) adopted with the
+`devices.manage_muxer` gate, refuse-loudly on an already-served socket, and the rescan
+endpoint; contracts §1/§6 + design §2 updated; built by rung `qn.2b`, which also owns this
+rung's deferred lab gates 6–7.**

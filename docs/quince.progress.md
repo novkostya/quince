@@ -13,18 +13,20 @@ pages bound to live demo data. A post-build review of qn.0+qn.1 (see decisions l
 per-transport, per-source table keyed by UDID; reset-on-reconnect reconcile clears
 detached-while-away phantoms; `device.*` events), wired into non-demo `quince serve` as the
 live `DeviceReader`; full `make gates` + `make image` + `make gates-ui-e2e` green. **CI
-stories 1–5 done; lab gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) DEFERRED to a future
-hardware session** — they need a real device AND the in-container muxer-startup gap resolved
-(open question 2). **The frontier is now `qn.3` (device ops + Devices page).**
+stories 1–5 done; lab gates 6–7 (plug/unplug ≤1 s, netmuxd-USB audition) DEFERRED** — the
+muxer-startup gap has since been RULED (decisions log (ar)): supervision + rescan + those
+lab gates all land in **`qn.2b` (muxer lifecycle + hardware proof), the new frontier**;
+`qn.3` follows it. The qn.5-before-qn.4 order swap is also ruled in (ar).
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
-| qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 deferred (hardware + open-q 2) |
-| qn.3 | Device ops + Devices page | **frontier** — outlined |
-| qn.4 | Backup engine, both transports + headless CLI | outlined |
-| qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
+| qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
+| qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gates 6–7) | **frontier** — ruled 2026-07-20 from qn.2's gap, decisions log (ar); contracts §1/§6 landed; spec to be written |
+| qn.3 | Device ops + Devices page | outlined — after qn.2b |
+| qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | outlined — **runs BEFORE qn.4** (order ruled in (ar)) |
+| qn.4 | Backup engine, both transports + headless CLI | outlined — after qn.5; closes M3 with the integrated e2e gate |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) | outlined |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
@@ -35,32 +37,12 @@ hardware session** — they need a real device AND the in-container muxer-startu
 **Open questions for the Operator** (tracked here until resolved):
 1. LAN registry port + creds (address recorded in `local/environment.md`; env-only,
    never committed).
-2. **`PROPOSED (gap)` — who starts the muxer in the SIMPLE (one-container) profile?**
-   Surfaced during qn.2 staging testing (2026-07-20); **for the Architect to rule — NOT decided
-   or built here.** *Problem:* the image *ships* usbmuxd/netmuxd but nothing *starts* them
-   in-container — the entrypoint is bare `quince serve`, the muxd client only *dials* the socket,
-   and `compose.nas.yml`'s "usbmuxd inside the container" is aspirational — so `compose up` never
-   brings USB up, breaking the D12 Plex-bar promise ("compose up = the whole install"). The only
-   working topology today runs usbmuxd on the host/CT + a socket bind (`compose.lab.yml` and the
-   staging stand) — a fragile, non-shippable stopgap: usbmuxd misses hotplug in an unprivileged
-   LXC, and restarting it changes the socket inode so the container must be recreated. *Options
-   discussed:* (a) **quince supervises** the in-container muxer as a Go subprocess (own process
-   group, restart-on-crash + backoff, killed on shutdown via the signal ctx) — matches design §1
-   "one process tree under the core", enables a rescan trigger, adds no image deps; (b) a
-   Dockerfile **entrypoint script**; (c) an **s6/init** supervisor. *Proposed conclusion (this
-   session, awaiting a ruling):* option (a), gated by a new config **`devices.manage_muxer`**
-   (default `true` = simple; `false` = hardened/external muxer), plus **`POST /api/devices/rescan
-   → 202`** + a UI **"Rescan"** button that restarts usbmuxd (re-enumerating a device the
-   unprivileged LXC's missing hotplug didn't surface), reusing the existing
-   reconnect→`sink.Reset`→`device.attached` path. *Scope:* MINIMAL (usbmuxd only + rescan) vs FULL
-   (netmuxd co-supervision + restart policy + muxer health + `compose.hardened.yml`); the FULL
-   work aligns with the existing qn.6 (Plex-bar release gate) / qn.7 (netmuxd supervision + restart
-   policy) scope. *Contract note for the Architect:* `POST /api/devices/rescan` (§1) and
-   `devices.manage_muxer` (§6) are contract additions to place in `contracts.md` on ruling. The
-   **fuller design capture** — supervisor sketch (Go subprocess under the serve ctx, own process
-   group, restart-with-backoff, killed on shutdown) and its hardware-free test approach
-   (`os/exec` `TestHelperProcess` fake) — is written up for the Architect in the qn.2 spec:
-   `docs/specs/qn.2/qn.2.md` → "Appendix — gap capture: in-container muxer supervision".
+2. ~~Who starts the muxer in the SIMPLE profile?~~ **RESOLVED 2026-07-20** — ruled
+   option (a): quince-supervised in-container muxer behind `devices.manage_muxer`
+   (refuse-loudly on an already-served socket) + `POST /api/devices/rescan`; landed as
+   rung **qn.2b** together with qn.2's deferred lab gates. Full ruling: decisions log
+   (ar); contracts §1/§6 + design §2 updated; the design capture stays in the qn.2 spec
+   appendix.
 
 *Resolved:* **project name = quince** (Operator, 2026-07-18, after due diligence — see
 decisions log (y); repo `github.com/novkostya/quince`, images
@@ -441,3 +423,29 @@ on real traction).
   testing; its USB path uses a **temporary usbmuxd-in-CT + socket-bind workaround** (hotplug needs
   the `/root/redetect.sh` helper), rebuilt onto the house template's `/root/compose.yml` autostart
   convention (specifics in `local/environment.md`). Frontier → **qn.3**.
+- 2026-07-20: (ar) **qn.2 cleanup package: muxer gap ruled, qn.2b inserted, qn.5↔qn.4
+  swapped, worktree-init fixed** (Architect adjudication + Operator rulings). (1) Open
+  question 2 RULED as option (a): quince supervises the in-container muxer — Go subprocess
+  in its own process group under the serve context, restart-on-crash with capped backoff,
+  killed on shutdown, **refuse-loudly if the socket is already served** (no silent
+  adoption) — behind `devices.manage_muxer` (true = simple profile; false =
+  hardened/external, making the staging socket-bind topology a supported mode), plus
+  `POST /api/devices/rescan → 202|409` + UI Rescan reusing the reset/replay reconcile.
+  Contracts §1/§6 and design §2 updated (the architect landed the contract-change ahead of
+  the rung, per program rule). (2) **New rung `qn.2b`** (M1, before qn.3): MINIMAL
+  supervision scope + rescan + **ownership of qn.2's deferred lab gates 6–7** (plug/unplug
+  ≤1 s + the netmuxd-USB audition) — one physical-presence session; FULL muxer work stays
+  qn.6/qn.7. Deferred-without-owner is how gates evaporate; qn.3's "fresh container via UI
+  only" gate also depends on this. (3) **New hard rule: "a rung's goal is provable at rung
+  close"** (program doc) — the Operator-requested self-containment audit of qn.3–qn.12
+  found exactly one more violation: qn.4's `succeeded` needs qn.5's `Commit()` → **order
+  swapped, qn.5 before qn.4** (qn.5 proven on fixture trees + a manually-produced
+  `idevicebackup2` tree; qn.4 closes M3 with the true e2e gate); rung numbers stay
+  (labels, not order — qn.7-before-qn.6 precedent). (4) **Worktree init**: worktrees
+  materialize only tracked files, so sessions there lacked the private `local/` layer —
+  mandatory first step now documented: `ln -s ../../../local local` (symlink sits on the
+  gitignored path, uncommittable; privacy-check + environment.md pointers work unchanged).
+  Also noted: qn.2's out-of-scope moment was handled correctly by the gap protocol (code
+  scope held; design captured as PROPOSED, not built) — the process worked. Frontier →
+  **qn.2b** (spec to be written by its session from the roadmap outline + the qn.2 spec
+  appendix).

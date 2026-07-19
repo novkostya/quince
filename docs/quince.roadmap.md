@@ -20,7 +20,7 @@ Repo scaffold (core/vault/ui/deploy/docs), Makefile gates, CI skeleton green, co
 builds and pushes to the LAN registry. *Gate: `make gates` green in CI on a hello-world
 slice of all three languages; `make image` produces a runnable container.*
 
-### M1 — Live core (`qn.1`, `qn.2`)
+### M1 — Live core (`qn.1`, `qn.2`, `qn.2b`)
 - `qn.1` core daemon skeleton: bootstrap env + the `config.yml` core (schema,
   validation, atomic canonical writes, `GET/PUT /api/config`; file-watch and generated
   doc-comments are staged to qn.6 per D12), slog, SQLite
@@ -36,6 +36,18 @@ slice of all three languages; `make image` produces a runnable container.*
   — clean → default flips to single-muxer; reproduces the lab's documented
   `message was too large (65536 bytes, max = 65535)` failure → upstream issue filed
   with the exact log line (patch-in-pinned-build optional); replay tests in CI.*
+- `qn.2b` muxer lifecycle + hardware proof (inserted 2026-07-20 from qn.2's gap capture,
+  decisions log (ar)): quince supervises the in-container usbmuxd — `devices.manage_muxer`
+  config gate, own process group under the serve context, restart-on-crash with capped
+  backoff, killed on shutdown, **refuse-loudly if the socket is already served**;
+  `POST /api/devices/rescan` (+ UI Rescan button) reusing the reset/replay reconcile
+  (contracts §1/§6 already landed); hardware-free supervisor tests (`TestHelperProcess`
+  fake muxer). Then the rung **runs qn.2's deferred lab gates 6–7 as its own acceptance**.
+  *Gate: `compose up` on the lab CT brings USB up with NO host muxer (the D12 Plex-bar
+  promise restored); plug/unplug ≤1 s in the UI; the netmuxd-USB audition verdict recorded
+  (D2 default flips to single-muxer, or the upstream issue is filed with the exact line).*
+  FULL muxer work (netmuxd co-supervision, restart policy, muxer health in UI,
+  `compose.hardened.yml`) stays in qn.6/qn.7.
 
 ### M2 — Device ops (`qn.3`)
 Pair / validate / info subprocess wrappers + **backup-encryption management** (status
@@ -47,7 +59,32 @@ this computer" flow narration). *Gate: fresh container to paired, encryption-on 
 via UI only — including setting the backup password through quince; wrappers covered
 by fake-CLI tests; no password ever appears in argv, logs, or the audit trail.*
 
-### M3 — Backup engine, both transports (`qn.4`, `qn.5`)
+### M3 — Backup engine, both transports (`qn.5` storage FIRST, then `qn.4` engine)
+
+Order ruled 2026-07-20 (decisions log (ar), the "rung closes provable" hard rule): the
+engine's `succeeded` requires `Commit()`, which is storage's — so storage lands first and
+is proven on fixture trees + manually-produced backups; the engine then closes M3 with
+the true end-to-end gate. Rung numbers are labels, not order (the qn.7-before-qn.6
+precedent).
+
+- `qn.5` storage backends per the two-layout model (stack D5): `zfs` snapshot-native
+  with per-device child datasets (Provision via constrained hook, visibility probes +
+  `rbind,rslave` mount guidance, `.zfs` browse, `latest/` mirror reflink→hardlink→copy,
+  dirty-working reporting) + `reflink` (FICLONE-based smart default —
+  Btrfs/XFS/hookless-ZFS) + `hardlink` + `copy` (journaled commit, `latest` swap), the
+  auto-selection probe (FICLONE-independence / inode tests on the real `/backups` fs),
+  one shared `clonetree` package, `quince-version.json` markers, **startup reconciliation matrix** (every commit
+  phase × crash point has a defined, tested repair), adopted-version discovery, **the
+  destructive hardlink-safety matrix** (full→incremental, big-file change, `-wal`/
+  `-shm`, deletions, renames, interrupted + next incremental, iOS upgrade, encryption
+  change; wherever hardlinks are used — the hardlink backend and the zfs mirror's
+  hardlink fallback; reflink builds exempt). *Gate (no engine needed — fixture- and
+  manual-driven, provable at rung close): the kill-at-every-stage matrix (seed / verify /
+  each commit phase) recovers to a defined state on restart, on fixture trees; a
+  manually-produced `idevicebackup2` tree commits into a version; **an rclone sync of
+  the whole tree running concurrently with a (manual) backup uploads a valid backup**
+  (the D5a contract, automated with a local target); on zfs a syncoid pass mid-write
+  replicates every committed version intact; iMazing opens the committed version.*
 - `qn.4` job state machine + `idevicebackup2` supervisor, **USB and Wi-Fi first-class
   from the start** (stack D13 — Wi-Fi is the primary use case, assisted model): stdout
   parser (fixtures = real lab transcripts incl. stalls, `-4` failures, and the
@@ -61,25 +98,11 @@ by fake-CLI tests; no password ever appears in argv, logs, or the audit trail.*
   `latest/` mirror on zfs, the resolved version dir elsewhere) — the lab-testing and
   scripting interface, and the fastest way to
   torture the engine before the UI exists (external-review point, accepted in-place
-  rather than as a CLI-first roadmap).
-- `qn.5` storage backends per the two-layout model (stack D5): `zfs` snapshot-native
-  with per-device child datasets (Provision via constrained hook, visibility probes +
-  `rbind,rslave` mount guidance, `.zfs` browse, `latest/` mirror reflink→hardlink→copy,
-  dirty-working reporting) + `reflink` (FICLONE-based smart default —
-  Btrfs/XFS/hookless-ZFS) + `hardlink` + `copy` (journaled commit, `latest` swap), the
-  auto-selection probe (FICLONE-independence / inode tests on the real `/backups` fs),
-  one shared `clonetree` package, `quince-version.json` markers, **startup reconciliation matrix** (every commit
-  phase × crash point has a defined, tested repair), adopted-version discovery, **the
-  destructive hardlink-safety matrix** (full→incremental, big-file change, `-wal`/
-  `-shm`, deletions, renames, interrupted + next incremental, iOS upgrade, encryption
-  change; wherever hardlinks are used — the hardlink backend and the zfs mirror's
-  hardlink fallback; reflink builds exempt). *Gate: encrypted backups over BOTH
-  transports on the lab box end `succeeded` with committed versions; kill-at-every-stage
-  matrix (seed / backing_up / verify / each commit phase) recovers to a defined state on
-  restart; **an rclone sync of the whole tree running concurrently with a backup
-  uploads a valid backup** (the D5a contract, automated with a local target); on zfs a
-  syncoid pass mid-backup replicates every committed version intact; iMazing opens each
-  committed version.*
+  rather than as a CLI-first roadmap). *Gate (the integrated e2e, closing M3): encrypted
+  backups over BOTH transports on the lab box, driven from the UI/CLI, end `succeeded`
+  with committed verified versions on a real backend; the engine-level kill matrix
+  (kill at seed / backing_up / verify / commit hand-off) recovers to defined states on
+  restart; iMazing opens each committed version.*
 
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
@@ -174,8 +197,8 @@ Independent tracks after M1 freezes the contracts (`contracts.md`):
 
 | Track | Owns | Rungs |
 | --- | --- | --- |
-| **core** | daemon, muxd, device ops | qn.2, qn.3 |
-| **backup** | job engine, supervisor, backends, wifi hardening | qn.4, qn.5, qn.7 |
+| **core** | daemon, muxd, device ops | qn.2, qn.2b, qn.3 |
+| **backup** | job engine, supervisor, backends, wifi hardening | qn.5, qn.4, qn.7 (in that order — (ar)) |
 | **vault** | Python: decryption, lazy domain adapters, fixtures, conformance suite | qn.8 groundwork (fixture generator, RPC harness, conformance goldens) can start right after M0 against contracts + real transcripts |
 | **ui** | React app, design system, demo polish | UI halves of qn.1/qn.3/qn.4 against `--demo` fixtures |
 | **infra** | CI, images, release, deploy docs | qn.0 hardening, qn.6 pipeline |
