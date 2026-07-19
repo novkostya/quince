@@ -533,3 +533,8 @@ on real traction).
   qn.2b spec (gate 8) for the qn.7 session to inherit, and the qn.7 roadmap row now lists it, so the
   no-orphan-gate rule qn.2b was created to enforce stays intact. qn.2b's goal (managed usbmuxd
   supervision + rescan) is proven end-to-end (CI + hardware); the rung closes. Frontier → **qn.3**.
+- 2026-07-20: (ax) **P1 accepted → qn.6** (first proposal through the channel; Operator ruling,
+  architect-recommended): the broken-container-USB onboarding/health check joins qn.6's §9
+  guided checks (ledger + roadmap M5 updated). Post-landing architect review of qn.2b: clean —
+  (aw) ratified; one docs-part-of-diff slip swept (stale audition references in stack D2 +
+  roadmap M1/M4, fixed on main).

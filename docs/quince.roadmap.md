@@ -120,7 +120,9 @@ untouched, and a manual retry from dirty `working/` completes and verifies.*
 ### M5 — v0.1 public shape (`qn.6`)
 Devices + Backup button (both transports) + live progress + history + version list, UI
 polished to the design canon; full first-run onboarding (guided checks per design §9 —
-the Plex bar); Settings as a transparent editor over `config.yml` (D12 staging
+the Plex bar; incl. accepted **P1**: detect a USB muxer that runs but can't OPEN devices
+— frozen container `/dev` or missing cgroup perms — and surface the actionable
+live-`/dev/bus/usb`-bind fix in onboarding + `/api/health`); Settings as a transparent editor over `config.yml` (D12 staging
 completes: file-watch, generated doc-comments); `compose.hardened.yml` (muxd split
 profile); release pipeline (tag → goreleaser → ghcr multi-arch → GitHub Release); deploy
 examples; license audit; README with demo screenshots. *Gate: **one week of real Wi-Fi

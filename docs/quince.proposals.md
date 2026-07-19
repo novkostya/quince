@@ -19,10 +19,13 @@ Ruling:    <filled by Operator: accepted → qn.Y / declined: <why> / parked>
 
 ---
 
-## P1 — onboarding/health check for broken container USB access   [proposed: qn.2b, 2026-07-20] [status: proposed]
+## P1 — onboarding/health check for broken container USB access   [proposed: qn.2b, 2026-07-20] [status: accepted → qn.6]
 Problem:   with `manage_muxer: true` the muxer reports `running` while unable to OPEN any device (frozen container `/dev`, missing cgroup perms) — silent until the user wonders why no device appears; exactly the qn.2b staging bug, subtle and hours to diagnose.
 Sketch:    when a USB device is present in `/sys/bus/usb` but usbmuxd logs `LIBUSB_ERROR_NO_DEVICE` / enumerates zero, surface an actionable `/api/health` + onboarding warning ("USB muxer can't open devices — compose needs a LIVE /dev/bus/usb bind + privileged/device_cgroup_rules") linking the deploy docs.
 Value:     reliability/UX — turns a silent, copy-the-wrong-`devices:`-line failure into a one-line guided fix at setup; the D12 Plex-bar promise (§9 onboarding "usbmuxd reachable" check) depends on catching exactly this.
 Cost:      M — needs usbmuxd enumeration/log parsing + a health/onboarding surface; the onboarding framework (§9) isn't built until qn.6, so it lands naturally there.
-Ruling:    <pending>
+Ruling:    accepted → qn.6 (Operator, 2026-07-20; architect-recommended). Lands as a
+           story in qn.6's §9 guided onboarding checks: deepen "usbmuxd reachable" to
+           "usbmuxd can OPEN devices", with the actionable live-/dev-bind warning in
+           both onboarding and /api/health. Roadmap M5 updated.
 
