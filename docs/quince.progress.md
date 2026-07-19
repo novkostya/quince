@@ -7,14 +7,16 @@ cookie auth with a first-run set-password flow, the event bus, the `/api/ws` soc
 web-security baseline (CSRF, WS Origin, cookie flags, rate limit, audit), and a `--demo`
 mode that scripts fixture devices + a job exercising every WS event; the UI ships the auth
 flow, a WS bridge feeding Zustand stores, and the Dashboard / device-details / Settings
-pages bound to live demo data. **The frontier is now `qn.2` (muxd client + live device
-table).** Spec: [`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) (to be written).
+pages bound to live demo data. A post-build review of qn.0+qn.1 (see decisions log
+`qn1-review`) landed the top minors (no blocker/major). **The frontier is now `qn.2` (muxd
+client + live device table); its spec is authored** —
+[`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) — build not yet started.
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
-| qn.2 | muxd client + live device table | **frontier** — outlined in roadmap, spec to be written |
+| qn.2 | muxd client + live device table | **frontier** — spec authored ([qn.2.md](specs/qn.2/qn.2.md)); build not started |
 | qn.3 | Device ops + Devices page | outlined |
 | qn.4 | Backup engine, both transports + headless CLI | outlined |
 | qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
