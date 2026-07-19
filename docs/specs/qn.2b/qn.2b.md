@@ -279,3 +279,26 @@ Every hard rule / canon boundary this rung touches *or comes near*, one complian
   key order, contracts §6); applied at process start (live re-supervision on an edit → qn.7).
 - **Rescan 202 body** = `{"status":"rescanning"}` (no `op_id` — fire-and-forget; re-enumerated
   devices arrive via `device.*` WS events, unlike pair/encryption ops).
+
+## Lab finding (2026-07-20) — the managed profile needs a LIVE `/dev/bus/usb`, not `devices:`
+
+Surfaced testing Rescan on the staging CT with a real iPhone ("Rescan didn't work"). **Not a code
+defect** — the supervisor + rescan behaved correctly (logs: `usbmuxd shutting down` → `muxsup:
+usbmuxd started` → muxd client `reconnecting` on each click). The failure was **USB access into
+the container**: a static `devices: [/dev/bus/usb:/dev/bus/usb]` (runc `--device`) **snapshots the
+device-node list at container start**, so a device plugged/re-enumerated later never appears inside
+the container — usbmuxd (restarted by Rescan) then hits `LIBUSB_ERROR_NO_DEVICE` (`/sys/bus/usb` is
+live and shows the device, but the `/dev/bus/usb/BBB/DDD` node is missing), so **restarting the
+muxer can never surface it**. In the unprivileged LXC, userns additionally strips the runc-created
+node's perms (`c---------`).
+
+**Fix (deploy-only, no code change; validated in a throwaway then deployed to staging):** bind
+`/dev/bus/usb` as a **volume** (contents stay live + real perms) and grant char-device access —
+Docker: `device_cgroup_rules: ['c 189:* rmw']`; nerdctl/podman/unprivileged-LXC (no
+`device_cgroup_rules`): `privileged: true`. With that, the container's usbmuxd connected to the
+iPhone and the muxd client held a stable Listen. `deploy/compose.nas.yml` corrected accordingly;
+staging switched to `privileged: true` + the live bind. **No replay fixture** — this is a
+container `/dev` semantics / deploy-config finding, not a reproducible code path. **Implication for
+Rescan's contract:** its "re-detect a missed device" value depends on the deployment giving the
+container a live `/dev/bus/usb`; a snapshotting `devices:` mapping silently defeats it. (The lab
+gate 7 doing its job — a real device found a real deployment gap the CI fakes could not.)

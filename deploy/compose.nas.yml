@@ -5,6 +5,16 @@
 # socket bind. `compose up`, open the UI, plug in a device. On a typical NAS the storage
 # backend auto-selects `reflink` (Btrfs/XFS) or `hardlink`/`copy` (ext4) — no zfs host hook
 # needed (D5).
+#
+# USB needs a LIVE /dev/bus/usb, NOT a static `devices:` mapping. `devices:` (runc --device)
+# snapshots the device-node list at container start, so a device plugged in — or re-enumerated —
+# LATER never appears inside the container. That defeats the whole point of **Rescan**, which
+# restarts the in-container muxer precisely to pick up such a device (an unprivileged container
+# receives no USB hotplug events, so a post-startup device is surfaced by clicking Rescan in the
+# UI). So bind /dev/bus/usb as a VOLUME (its contents stay live) and grant char-device access:
+#   - Docker: the `device_cgroup_rules` below allow major 189 (USB) — no privileged needed.
+#   - nerdctl / podman / unprivileged LXC (no device_cgroup_rules support): DROP that block and
+#     add `privileged: true` instead — that is how the container opens USB char devices there.
 
 services:
   quince:
@@ -19,13 +29,6 @@ services:
       - ./quince/data:/data
       - ./quince/cache:/cache
       - ./quince/backups:/backups # point at a real share; backend probed at runtime
-    devices:
-      # Raw USB access so the in-container usbmuxd can see the device (Wi-Fi needs no device
-      # map). Prefer a narrow device map over `privileged: true` where the platform allows it;
-      # some NAS kernels require the broad map or extra permissions.
-      - /dev/bus/usb:/dev/bus/usb
-    # Muxer: quince manages usbmuxd itself (devices.manage_muxer defaults to true — nothing to
-    # set here). NOTE: an unprivileged container often does NOT receive USB hotplug events, so a
-    # device plugged in AFTER startup may not appear on its own — click **Rescan** in the UI
-    # (Devices page) to restart the muxer and re-enumerate. To instead consume an EXTERNAL muxer
-    # (host or sidecar), bind its socket and set devices.manage_muxer: false — see compose.lab.yml.
+      - /dev/bus/usb:/dev/bus/usb  # LIVE USB bind — NOT `devices:` (that snapshots & defeats Rescan)
+    device_cgroup_rules:
+      - "c 189:* rmw" # allow opening USB char devices (major 189). nerdctl/LXC: drop this, use `privileged: true`.
