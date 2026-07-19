@@ -164,3 +164,52 @@ Settled while building stories 1–5; a later rung changes them only via the gap
   calls + a real bus). Story 4's REST/WS serving is covered by composition — the registry
   publishes to the same bus `ws_test.go` fans out and satisfies the `DeviceReader`
   `httpapi` already golden-tests — so no separate httpapi integration test was added.
+
+## Appendix — gap capture: in-container muxer supervision (for the Architect)
+
+Surfaced during qn.2 staging testing (2026-07-20) and logged as **progress dashboard open
+question 2**. This is the design work produced *while discussing the gap this session* — a
+capture for the Architect to rule from, **not a decision and not built here.** The rung's code
+scope stayed as specified above (the muxd client only *dials* an already-running muxer); this
+appendix exists so the design does not evaporate with the session (one-session-per-rung rule).
+
+- **Problem (restated).** The image *ships* usbmuxd/netmuxd but nothing *starts* them
+  in-container — the entrypoint is bare `quince serve`, the client only dials the socket, and
+  `compose.nas.yml`'s "usbmuxd inside the container" is aspirational. So `compose up` never
+  brings USB up, breaking the D12 Plex-bar promise. The only working topology today (host/CT
+  usbmuxd + a socket bind, per `compose.lab.yml` and the staging stand) is a non-shippable
+  stopgap: usbmuxd misses hotplug in an unprivileged LXC, and a usbmuxd restart changes the
+  socket inode so the container must be recreated.
+- **Proposed mechanism (option (a) of open q2).** quince supervises the in-container muxer as
+  a **Go subprocess** — `exec.CommandContext(serveCtx, …)` in its **own process group**
+  (`Setpgid`, so a shutdown signal reaps the whole tree), **restart-on-crash with capped
+  backoff** (reuse the muxd client's 500 ms → ×2 → 30 s shape), **killed on shutdown** when the
+  serve context cancels. Matches design §1 "one process tree under the core"; adds no image
+  deps (the binary already ships); enables the rescan trigger below. (Options (b) entrypoint
+  script and (c) s6/init were considered and set aside — see open q2.)
+- **Config gate — `devices.manage_muxer` (bool).** `true` = SIMPLE / one-container profile:
+  quince owns the usbmuxd lifecycle. `false` = HARDENED / external muxer (host or sidecar):
+  quince only dials, which is exactly today's `compose.lab.yml` + staging behaviour — so the
+  stopgap becomes a *supported* mode, not a hack. Minimal shape is a bool; an enum
+  (`managed | external`) is the richer form if a third mode ever appears.
+- **Rescan — `POST /api/devices/rescan → 202` + a UI "Rescan" button.** Restarts (or
+  re-enumerate-signals) the managed usbmuxd to surface a device the unprivileged LXC's missing
+  hotplug never delivered. It **reuses the existing reconnect → `sink.Reset()` →
+  `device.attached` reconciliation path** — no new device-table code, just a new trigger for
+  it. With `manage_muxer:false` quince doesn't own the muxer, so rescan is a no-op / `409`.
+- **Hardware-free tests (`os/exec` `TestHelperProcess` fake).** Re-exec the test binary as a
+  fake "usbmuxd" (the stdlib `GO_WANT_HELPER_PROCESS` pattern) so the supervisor is fully
+  CI-provable without a real muxer — same discipline as the fake muxd socket. Assert: (1)
+  starts the child under `serve`; (2) restarts with backoff after a non-zero child exit; (3)
+  stops restarting and kills the child cleanly on ctx cancel; (4) `rescan` triggers a restart +
+  re-enumerate. The fake-muxd fixtures from this rung then drive the re-enumerated stream.
+- **Scope split.** MINIMAL = usbmuxd supervision + rescan (unblocks D12 USB in the simple
+  profile). FULL = netmuxd co-supervision + restart policy + muxer health surfaced to the UI +
+  a `compose.hardened.yml`; the FULL work aligns with the existing **qn.6** (Plex-bar release
+  gate) / **qn.7** (netmuxd supervision + restart policy) scope — the Architect decides the
+  rung placement.
+- **Contract additions on ruling** (named so the Architect can place them, **not** added to
+  `contracts.md` here): `POST /api/devices/rescan` (contracts §1) and `devices.manage_muxer`
+  (config schema §6).
+
+**Status: awaiting Architect ruling — not decided, not built.**

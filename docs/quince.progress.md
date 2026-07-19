@@ -56,9 +56,11 @@ hardware session** — they need a real device AND the in-container muxer-startu
    (netmuxd co-supervision + restart policy + muxer health + `compose.hardened.yml`); the FULL
    work aligns with the existing qn.6 (Plex-bar release gate) / qn.7 (netmuxd supervision + restart
    policy) scope. *Contract note for the Architect:* `POST /api/devices/rescan` (§1) and
-   `devices.manage_muxer` (§6) are contract additions to place in `contracts.md` on ruling. A
-   fuller design capture (supervisor sketch, tests via the `os/exec` `TestHelperProcess` fake) was
-   produced this session and can be handed to the Architect.
+   `devices.manage_muxer` (§6) are contract additions to place in `contracts.md` on ruling. The
+   **fuller design capture** — supervisor sketch (Go subprocess under the serve ctx, own process
+   group, restart-with-backoff, killed on shutdown) and its hardware-free test approach
+   (`os/exec` `TestHelperProcess` fake) — is written up for the Architect in the qn.2 spec:
+   `docs/specs/qn.2/qn.2.md` → "Appendix — gap capture: in-container muxer supervision".
 
 *Resolved:* **project name = quince** (Operator, 2026-07-18, after due diligence — see
 decisions log (y); repo `github.com/novkostya/quince`, images
