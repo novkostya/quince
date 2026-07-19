@@ -18,15 +18,29 @@ import (
 	"github.com/novkostya/quince/core/internal/ws"
 )
 
-// HealthResponse is the body of GET /api/health (contracts.md — {status, version}).
+// HealthResponse is the body of GET /api/health. {status, version} since qn.1; qn.2b adds
+// muxer supervision state (design §10 — health surfaces muxer status honestly).
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status  string      `json:"status"`
+	Version string      `json:"version"`
+	Muxer   MuxerHealth `json:"muxer"`
+}
+
+// MuxerHealth is the muxer-supervision slice of /api/health (qn.2b): whether quince manages the
+// in-container muxer, its state (running | degraded | starting | stopped | unmanaged), and a
+// human detail (last exit reason / why degraded).
+type MuxerHealth struct {
+	Managed bool   `json:"managed"`
+	State   string `json:"state"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 // NewRouter assembles the full handler: security middleware wraps a root mux that mounts
 // the (separately self-guarding) WebSocket, the chained JSON API, and the UI fallback.
 func NewRouter(deps Deps) http.Handler {
+	if deps.Muxer == nil { // external/--demo default: quince owns no muxer to restart
+		deps.Muxer = UnmanagedMuxer{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -36,6 +50,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
 	apiMux.HandleFunc("GET /api/devices", deps.handleDevices())
+	apiMux.HandleFunc("POST /api/devices/rescan", deps.handleRescan())
 	apiMux.HandleFunc("GET /api/devices/{udid}", deps.handleDevice())
 	apiMux.HandleFunc("GET /api/jobs", deps.handleJobs())
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
@@ -59,7 +74,12 @@ func NewRouter(deps Deps) http.Handler {
 
 func (d Deps) handleHealth() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, d.Log, http.StatusOK, HealthResponse{Status: "ok", Version: d.Version})
+		managed, state, detail := d.Muxer.MuxerStatus()
+		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
+			Status:  "ok",
+			Version: d.Version,
+			Muxer:   MuxerHealth{Managed: managed, State: state, Detail: detail},
+		})
 	}
 }
 

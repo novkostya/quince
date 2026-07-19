@@ -46,8 +46,14 @@ type RetentionConfig struct {
 	KeepWeekly int `yaml:"keep_weekly" json:"keep_weekly"`
 }
 
-// DevicesConfig is the `devices:` section (muxer sockets, stack D2).
+// DevicesConfig is the `devices:` section (muxer supervision + sockets, stack D2). Field
+// order is the canonical YAML key order (contracts §6): manage_muxer first.
 type DevicesConfig struct {
+	// ManageMuxer true (SIMPLE profile) = quince owns the in-container usbmuxd lifecycle
+	// (supervised subprocess, restart w/ backoff; refuses loudly at startup if the socket is
+	// already served — no silent adoption). false (HARDENED/external) = quince only dials.
+	// MINIMAL (qn.2b): applied at process start; live re-supervision on an edit is qn.7.
+	ManageMuxer   bool   `yaml:"manage_muxer" json:"manage_muxer"`
 	UsbmuxdSocket string `yaml:"usbmuxd_socket" json:"usbmuxd_socket"`
 	NetmuxdAddr   string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
 }
@@ -90,6 +96,7 @@ func Default() Config {
 			},
 		},
 		Devices: DevicesConfig{
+			ManageMuxer:   true,
 			UsbmuxdSocket: "/var/run/usbmuxd",
 			NetmuxdAddr:   "127.0.0.1:27015",
 		},

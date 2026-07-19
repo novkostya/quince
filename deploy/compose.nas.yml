@@ -1,8 +1,10 @@
 # quince — generic NAS deployment (Synology / QNAP / plain Docker host).
 #
-# EXAMPLE shape; device access correctness is a qn.2 manual gate. On a typical NAS the
-# storage backend auto-selects `reflink` (Btrfs/XFS) or `hardlink`/`copy` (ext4) — no
-# zfs host hook needed (D5). usbmuxd runs INSIDE the container here (no host usbmuxd).
+# This is the SIMPLE / managed-muxer profile (qn.2b): quince supervises the usbmuxd daemon
+# INSIDE the container itself (devices.manage_muxer: true, the default) — no host usbmuxd, no
+# socket bind. `compose up`, open the UI, plug in a device. On a typical NAS the storage
+# backend auto-selects `reflink` (Btrfs/XFS) or `hardlink`/`copy` (ext4) — no zfs host hook
+# needed (D5).
 
 services:
   quince:
@@ -18,6 +20,12 @@ services:
       - ./quince/cache:/cache
       - ./quince/backups:/backups # point at a real share; backend probed at runtime
     devices:
-      - /dev/bus/usb:/dev/bus/usb # USB pairing/backup (Wi-Fi needs no device map)
-    # usbmuxd inside the container needs raw USB access; some NAS kernels require this.
-    # Prefer a narrow device map over privileged where the platform allows it.
+      # Raw USB access so the in-container usbmuxd can see the device (Wi-Fi needs no device
+      # map). Prefer a narrow device map over `privileged: true` where the platform allows it;
+      # some NAS kernels require the broad map or extra permissions.
+      - /dev/bus/usb:/dev/bus/usb
+    # Muxer: quince manages usbmuxd itself (devices.manage_muxer defaults to true — nothing to
+    # set here). NOTE: an unprivileged container often does NOT receive USB hotplug events, so a
+    # device plugged in AFTER startup may not appear on its own — click **Rescan** in the UI
+    # (Devices page) to restart the muxer and re-enumerate. To instead consume an EXTERNAL muxer
+    # (host or sidecar), bind its socket and set devices.manage_muxer: false — see compose.lab.yml.

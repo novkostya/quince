@@ -28,6 +28,7 @@ import (
 	"github.com/novkostya/quince/core/internal/device"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/muxd"
+	"github.com/novkostya/quince/core/internal/muxsup"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
@@ -124,9 +125,12 @@ func serve(args []string) error {
 	defer stop()
 
 	// devices is assigned in both branches below; jobs/versions stay Empty until qn.4/qn.5.
+	// muxer defaults to Unmanaged (external / --demo): quince owns no muxer to restart, so
+	// rescan → 409. The managed supervisor is wired in the non-demo branch when configured.
 	var devices httpapi.DeviceReader
 	var jobs httpapi.JobReader = httpapi.Empty{}
 	var versions httpapi.VersionReader = httpapi.Empty{}
+	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	if *demoMode {
 		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
 		prov := demo.NewProvider(eventBus, log)
@@ -140,6 +144,19 @@ func serve(args []string) error {
 		// versions land with their rungs (qn.4/qn.5). Muxd-unreachable is honest, not fatal:
 		// the client backs off and the device list is simply empty until a device attaches.
 		dcfg := cfgSvc.Current().Devices
+		// Managed muxer (SIMPLE profile, qn.2b): quince supervises the in-container usbmuxd —
+		// spawn under serveCtx, restart w/ backoff, refuse loudly if the socket is already
+		// served. HARDENED/external (manage_muxer: false): quince only dials, muxer stays
+		// Unmanaged (rescan → 409). The supervisor listens on dcfg.UsbmuxdSocket (its -S path),
+		// which is exactly the socket the muxd client below dials.
+		if dcfg.ManageMuxer && dcfg.UsbmuxdSocket != "" {
+			sup := muxsup.New(dcfg.UsbmuxdSocket, log)
+			go sup.Run(ctx)
+			muxer = sup
+			log.Info("supervising in-container usbmuxd", "socket", dcfg.UsbmuxdSocket)
+		} else {
+			log.Info("muxer is external (devices.manage_muxer: false or no usbmuxd_socket) — dialing only")
+		}
 		reg := device.NewRegistry(eventBus, log)
 		for _, addr := range []string{dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr} {
 			if addr == "" {
@@ -158,7 +175,7 @@ func serve(args []string) error {
 		Addr: listen,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
-			Devices: devices, Jobs: jobs, Versions: versions,
+			Devices: devices, Jobs: jobs, Versions: versions, Muxer: muxer,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

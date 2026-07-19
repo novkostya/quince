@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/novkostya/quince/core/internal/auth"
@@ -21,8 +22,30 @@ type Deps struct {
 	Devices        DeviceReader
 	Jobs           JobReader
 	Versions       VersionReader
+	Muxer          MuxerControl
 	AllowedOrigins []string
 }
+
+// MuxerControl drives POST /api/devices/rescan and reports muxer-supervision health for
+// /api/health (qn.2b). The real implementation is the muxsup.Supervisor (devices.manage_muxer:
+// true); UnmanagedMuxer stands in when the muxer is external (manage_muxer: false) or in --demo,
+// where quince owns no muxer to restart. Consumer-defined here (primitives only) so httpapi
+// imports no muxer subsystem — same pattern as DeviceReader.
+type MuxerControl interface {
+	// Rescan triggers a managed re-enumeration; accepted → 202, else 409 with reason.
+	Rescan(ctx context.Context) (accepted bool, reason string)
+	// MuxerStatus reports (managed, state, detail) for the health payload.
+	MuxerStatus() (managed bool, state, detail string)
+}
+
+// UnmanagedMuxer is the MuxerControl for external/--demo muxers: rescan is always refused (409)
+// and health reports an unmanaged muxer.
+type UnmanagedMuxer struct{}
+
+func (UnmanagedMuxer) Rescan(context.Context) (bool, string) {
+	return false, "muxer is external (devices.manage_muxer: false) — quince does not own it"
+}
+func (UnmanagedMuxer) MuxerStatus() (bool, string, string) { return false, "unmanaged", "" }
 
 // DeviceReader serves the device REST reads.
 type DeviceReader interface {

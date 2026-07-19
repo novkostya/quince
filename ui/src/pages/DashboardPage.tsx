@@ -2,6 +2,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { DeviceCard } from "@/features/devices/DeviceCard";
+import { RescanButton } from "@/features/devices/RescanButton";
 import { VersionList } from "@/features/versions/VersionList";
 
 export function DashboardPage() {
@@ -14,8 +15,15 @@ export function DashboardPage() {
 
   return (
     <section>
-      <h1 className="text-xl font-semibold tracking-tight">Devices</h1>
-      <p className="mt-1 text-sm text-muted">Your iPhones and iPads, live over USB or Wi-Fi.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Devices</h1>
+          <p className="mt-1 text-sm text-muted">
+            Your iPhones and iPads, live over USB or Wi-Fi.
+          </p>
+        </div>
+        <RescanButton />
+      </div>
 
       {order.length === 0 ? (
         <div className="mt-6 rounded-card border border-dashed border-line bg-card p-10 text-center">

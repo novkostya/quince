@@ -1,7 +1,11 @@
 # quince — lab deployment (Proxmox LXC on the same LAN as the test iPhone).
 #
-# This is an EXAMPLE shape. Correctness of USB/Wi-Fi device access is proven in qn.2
-# (manual gate), not here — qn.0 only proves the container starts and serves the UI+API.
+# This is the HARDENED / external-muxer shape: usbmuxd runs on the HOST and quince consumes its
+# socket (bound in below). Because an external process serves the socket, set
+# `devices.manage_muxer: false` in config.yml — otherwise quince refuses to start a second,
+# competing daemon (it logs loudly and reports the muxer degraded in /api/health). With
+# manage_muxer: false the UI Rescan button is a no-op (409) — quince doesn't own the host muxer.
+# For the SIMPLE in-container managed-muxer profile instead, see compose.nas.yml.
 # The backup path is bind-mounted; storage-backend probing happens at runtime (D5).
 
 services:
