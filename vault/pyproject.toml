@@ -1,0 +1,49 @@
+[project]
+name = "quince-vault"
+version = "0.0.0.dev0"
+description = "quince vault sidecar — session-scoped encrypted-backup reader (D4)."
+requires-python = ">=3.12"
+# The whole point of story 2 is proving this OSS decryption dependency installs and
+# imports on musl/alpine. pycryptodome ships musllinux wheels, so no C toolchain needed.
+dependencies = [
+    "iphone-backup-decrypt==0.9.0",
+]
+
+[project.scripts]
+quince-vault = "quince_vault.__main__:main"
+
+[dependency-groups]
+dev = [
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+    "pytest==8.3.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quince_vault"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+# The OSS decryption library ships no type stubs / py.typed marker (D4 — it's reused
+# as-is). Treat its symbols as Any rather than failing --strict on the missing stubs.
+[[tool.mypy.overrides]]
+module = ["iphone_backup_decrypt.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

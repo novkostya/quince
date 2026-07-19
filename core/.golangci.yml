@@ -1,0 +1,21 @@
+# golangci-lint config for the quince core module. Pinned version: versions.env.
+# Conservative, low-friction set — the daemon's value is reliability, so the vet-class
+# linters earn their keep; style noise is kept off.
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - misspell
+    - bodyclose
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

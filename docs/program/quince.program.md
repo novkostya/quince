@@ -1,0 +1,135 @@
+# quince — the build program
+
+> How an implementing agent (Opus) works this repo. Read order for a fresh session:
+> [`../quince.progress.md`](../quince.progress.md) →
+> [`../quince.stack.md`](../quince.stack.md) → [`../quince.design.md`](../quince.design.md) →
+> [`../contracts.md`](../contracts.md) → the rung's spec in [`../specs/`](../specs/).
+> Never start from "build the app"; always start from one rung.
+
+## The loop
+
+1. **Pick the frontier rung** for your track from the progress dashboard. One rung per
+   session/agent. If the rung has no spec yet, the session's first deliverable is the
+   spec (from the roadmap outline), approved shape below — then build.
+2. **Build inside the boundary.** Each track owns its tree (`core/`, `vault/`, `ui/`,
+   `deploy/`, `.github/`). Touching another track's tree or a contract means STOP —
+   that's a contract-change rung, land it in `docs/contracts.md` first.
+3. **Prove it.** Run the gate ladder (below) + the rung's own acceptance gates from its
+   spec. A story is proven by running it (a test, a demo-mode click-through, a lab
+   command), never by reading the code.
+4. **Update the dashboard.** Flip the rung's state in `quince.progress.md`, note gate
+   results in one line, name the next frontier. Append to the decisions log if the rung
+   settled anything new.
+5. **Stop.** Commit only when the Operator asks; never push, tag, or release without
+   being asked.
+
+## Where work runs (the dev environment — Operator ruling)
+
+- **The driving workstation is a thin client: no toolchains, no container runtime get
+  installed on it, ever.** Editing and driving from it is fine; *executing* is not. If
+  a gate seems to need a local tool, that's a signal you're in the wrong place, not a
+  reason to install anything.
+- All gates, builds, and image pushes run in a dedicated dev Linux container
+  (`quince-dev`) on the Operator's infrastructure. **Concrete hosts, addresses, sizing,
+  and the LAN registry live in `local/environment.md` — a gitignored, Operator-local
+  file** that exists only on the Operator's machines; read it there, never quote its
+  contents into committed files. The generic contributor setup guide is
+  `deploy/dev.md` (public).
+- **The dev host is a container host, not a toolchain host** (Operator ruling). No
+  language toolchains are ever installed on it (or anywhere): every gate target runs
+  inside a pinned toolchain container (`nerdctl` or `docker`, autodetected by the
+  Makefile) — the same images the multi-stage production Dockerfile builds from, so
+  dev, CI, and release compile with identical toolchains and `versions.env` pins image
+  references in exactly one place. Named cache volumes (Go build cache, pnpm store, uv
+  cache) keep containerized gates fast. Contributors need only `make` + a container
+  runtime.
+- Session modes (either is fine; the gate ladder executes ONLY in the dev container):
+  (A) Claude Code CLI inside tmux in `quince-dev`; (B) a workstation session driving
+  it over ssh (repo synced, commands via ssh / a `make remote-gates` wrapper).
+- Device tests (pairing, backups) run against the lab deployment on the same LAN as
+  the test iPhone. Remote big-iron hosts are not part of the dev loop; heavy repeatable
+  CI belongs to GitHub Actions.
+
+## Gate ladder (run from repo root; all must pass before reporting)
+
+```bash
+make gates          # the whole ladder; sub-targets:
+make gates-go       #   gofmt -l (empty) && go vet && golangci-lint run && go test -race ./...
+make gates-vault    #   ruff check && ruff format --check && mypy --strict && pytest
+make gates-ui       #   pnpm typecheck && pnpm lint && pnpm test && pnpm build
+make image          # container builds (also proves go:embed of built UI)
+```
+
+Rung specs add their own positive assertions on top (e.g. qn.4: "the replay of transcript
+`wifi-torn-session.txt` ends in `connection_lost` with the work dir discarded and
+`latest` untouched").
+
+## Spec shape (`docs/specs/qn.N/qn.N.md`)
+
+- **Goal** — one sentence, user-visible outcome.
+- **Boundary** — trees/files in scope; explicitly out-of-scope items.
+- **Design** — the minimum decisions this rung settles (link canon, don't repeat it).
+- **Stories** — numbered, each independently checkable.
+- **Gates** — the exact commands/observations that prove the stories, beyond `make gates`.
+- **Fixtures** — what test data this rung adds and where it comes from.
+
+## When the canon is silent — the gap protocol
+
+The canon is decided-so-far, not complete; missing pieces are expected, not exceptional.
+On hitting one:
+
+1. **Classify it.** *Rung-local*: an implementation detail inside your rung's boundary
+   that changes no contract surface, storage layout/lifecycle, security posture, or
+   user-visible behavior beyond your rung. *Architectural*: anything else — including
+   any contradiction between canon and observed reality.
+2. **Rung-local** → decide it yourself within canon constraints, record the decision in
+   the rung's spec, add one line to the progress decisions log (marked *rung-ruled*).
+   It is now canon; a later rung changes it only via this same protocol.
+3. **Architectural** → write the smallest complete decision text INTO the affected
+   canon doc, clearly marked `PROPOSED (gap): …`, add it to the open-questions list in
+   the progress dashboard, report it, and stop that thread (pick up another story of
+   the rung if one is independent). An Operator ruling flips `PROPOSED` to decided —
+   possibly edited. Never build on the proposal while it's pending.
+4. **Never**: silently deviate, silently "fix" a doc-vs-reality contradiction, or leave
+   a discovered gap undocumented because it was out of scope.
+
+(Worked example: the backup-encryption-management gap — spotted by the Operator during
+planning review, processed into contracts/design/roadmap the same day; decisions log
+entry (s).)
+
+## Hard rules
+
+- **State honesty.** The job engine and UI never claim more than is proven (a backup is
+  `succeeded` only after verify+commit; a domain adapter that failed says so).
+- **Never mutate a committed version.** hardlink/copy: `idevicebackup2` writes only into
+  `work/<job>`, `versions/<ts>` are immutable, `latest` changes only by journaled atomic
+  swap. zfs: the head is a working buffer, versions are quince's own snapshots taken
+  post-verify, restore/browse never reads the head. Any rung touching storage re-proves
+  its model's invariant, and startup reconciliation is part of the storage subsystem,
+  not cleanup.
+- **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off, adapter-failed,
+  cache-dropped) are surfaced in UI and logs.
+- **Config tidiness is a feature** (stack D12). Every new setting: lives in `config.yml`
+  with a generated doc-comment, has a sane default, is editable in the UI, and never
+  requires a container restart unless the spec says why. No UI-only state, no env-only
+  settings beyond the four bootstrap vars, no secrets in the file.
+- **Secrets discipline.** Backup passwords: stdin-only into vault, never argv/env/log.
+  Test fixtures use the password `test`.
+- **Subprocesses**: argv arrays, own process group, supervised, killed on job end.
+- **Every bug found on the lab box becomes a replay fixture** before it's fixed (the lab
+  transcript corpus in `chatgpt-original-idea-chat.md` is the seed: extract
+  `idevicebackup2` outputs into `core/internal/backup/testdata/transcripts/`).
+- **Perf budgets** (enforced by tests where cheap, by `/usr/bin/time -v` notes in the
+  rung report otherwise): device list & version list API < 100 ms; session unlock
+  (keybag + Manifest decrypt) narrated and < 30 s on the reference backup; first page of
+  any domain after its first-use load < 300 ms; vault peak RSS < 2 GB on the reference
+  backup; thumbnail workers capped.
+- **Docs are part of the diff.** A rung that changes behavior updates the canon it
+  contradicts (stack/design/contracts) in the same change.
+
+## Multi-agent etiquette
+
+When rungs run in parallel (see roadmap map): each agent works its own worktree/branch,
+names it `qn.N-short-title`, and reports gate results + dashboard diff. Integration
+happens on the sequential spine (qn.6 style rungs) by a single agent. Two agents never
+share a rung.

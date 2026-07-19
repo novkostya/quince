@@ -1,0 +1,70 @@
+// Package webui embeds the built React UI (ui/dist, copied here at build time) and
+// serves it with SPA-style fallback. During plain `go build`/`go test` the dist tree
+// may hold only .gitkeep; the handler degrades honestly rather than failing to compile.
+package webui
+
+import (
+	"embed"
+	"io/fs"
+	"net/http"
+	"strings"
+)
+
+// dist is populated by the build (ui/dist → core/internal/webui/dist). `all:` so that
+// the embed still compiles when only the tracked .gitkeep placeholder is present.
+//
+//go:embed all:dist
+var dist embed.FS
+
+// assets is the dist subtree rooted so paths look like "index.html", "assets/...".
+func assets() (fs.FS, error) { return fs.Sub(dist, "dist") }
+
+// Built reports whether a real UI (index.html) was embedded at build time.
+func Built() bool {
+	sub, err := assets()
+	if err != nil {
+		return false
+	}
+	_, err = fs.Stat(sub, "index.html")
+	return err == nil
+}
+
+// Handler serves the embedded UI. Unknown non-API paths fall back to index.html so the
+// SPA router can handle them. When no UI was embedded it returns a plain-text notice
+// (a build wired the placeholder only) instead of pretending to serve an app.
+func Handler() http.Handler {
+	sub, err := assets()
+	if err != nil {
+		return notBuilt()
+	}
+	if !Built() {
+		return notBuilt()
+	}
+	fileServer := http.FileServer(http.FS(sub))
+	index, _ := fs.ReadFile(sub, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := strings.TrimPrefix(r.URL.Path, "/")
+		if clean == "" {
+			serveIndex(w, index)
+			return
+		}
+		if _, statErr := fs.Stat(sub, clean); statErr == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		serveIndex(w, index)
+	})
+}
+
+func serveIndex(w http.ResponseWriter, index []byte) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(index)
+}
+
+func notBuilt() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("quince: UI not embedded in this build (placeholder only). The API is live at /api/health.\n"))
+	})
+}

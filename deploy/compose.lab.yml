@@ -1,0 +1,28 @@
+# quince — lab deployment (Proxmox LXC on the same LAN as the test iPhone).
+#
+# This is an EXAMPLE shape. Correctness of USB/Wi-Fi device access is proven in qn.2
+# (manual gate), not here — qn.0 only proves the container starts and serves the UI+API.
+# The backup path is bind-mounted; storage-backend probing happens at runtime (D5).
+
+services:
+  quince:
+    image: ghcr.io/novkostya/quince:latest
+    container_name: quince
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      QUINCE_LISTEN: ":8080"
+      # QUINCE_DATA / QUINCE_CACHE / QUINCE_BACKUPS default to /data /cache /backups.
+    volumes:
+      - ./data:/data # app DB, config.yml, pairing records (persistent)
+      - ./cache:/cache # session scratch + derived caches (disposable)
+      # Backup storage. On this host: a zfs child-dataset parent (D5). Use rbind,rslave
+      # so datasets created later appear live in the container (design §5 PVE note).
+      - /rpool/userdata/iphone-backup:/backups
+      # USB path: share the host usbmuxd socket (host runs usbmuxd; device on USB).
+      - /var/run/usbmuxd:/var/run/usbmuxd
+    devices:
+      # Raw USB bus for pairing/first backup. Narrow this to the specific bus/device in
+      # production; broad here for the lab. (qn.2 verifies device visibility.)
+      - /dev/bus/usb:/dev/bus/usb

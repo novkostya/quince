@@ -1,0 +1,23 @@
+# quince — generic NAS deployment (Synology / QNAP / plain Docker host).
+#
+# EXAMPLE shape; device access correctness is a qn.2 manual gate. On a typical NAS the
+# storage backend auto-selects `reflink` (Btrfs/XFS) or `hardlink`/`copy` (ext4) — no
+# zfs host hook needed (D5). usbmuxd runs INSIDE the container here (no host usbmuxd).
+
+services:
+  quince:
+    image: ghcr.io/novkostya/quince:latest
+    container_name: quince
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      QUINCE_LISTEN: ":8080"
+    volumes:
+      - ./quince/data:/data
+      - ./quince/cache:/cache
+      - ./quince/backups:/backups # point at a real share; backend probed at runtime
+    devices:
+      - /dev/bus/usb:/dev/bus/usb # USB pairing/backup (Wi-Fi needs no device map)
+    # usbmuxd inside the container needs raw USB access; some NAS kernels require this.
+    # Prefer a narrow device map over privileged where the platform allows it.

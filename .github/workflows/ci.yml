@@ -1,0 +1,35 @@
+name: ci
+
+# The same gate ladder as local dev — CI calls only `make` targets (no logic here), and
+# every gate runs inside the pinned toolchain containers the Makefile builds from
+# deploy/Dockerfile. Running from a fresh checkout is what independently proves the
+# fresh-clone property (qn.0 gate). Toolchain versions are pinned in versions.env.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Docker (with buildkit) is preinstalled on ubuntu-latest; the Makefile autodetects
+      # it and runs each gate in its toolchain container. No language setup needed.
+      - name: Gate ladder
+        run: make gates
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image (no push)
+        run: make image

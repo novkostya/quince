@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/* Map semantic tokens into Tailwind v4's theme so utilities like `bg-card`,
+ * `text-muted`, `border-line`, `text-accent` resolve to our variables. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--bg-card);
+  --color-elevated: var(--bg-elevated);
+  --color-line: var(--border);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --radius-card: var(--radius);
+  --font-mono: var(--mono);
+}
+
+/* Dark mode is driven by the `.dark` class on <html> (system-follow set in main.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

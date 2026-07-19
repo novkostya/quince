@@ -1,0 +1,43 @@
+# NOTE: .gitignore has no inline comments — a '#' only starts a comment at column 0.
+# Every rule below is on its own line; explanations sit above the rules they describe.
+
+# --- Operator-private / local-only material (qn.0: never enters the public repo) ---
+# Feasibility lab log + external review transcripts (UDIDs, personal data).
+/chatgpt-*.md
+# Generated sharing bundle.
+/quince-planning-pack.md
+# Operator-local environment layer (hosts, addresses, provisioning).
+/local/
+
+# --- Go (core/) ---
+/core/quince
+/core/dist/
+*.test
+*.out
+
+# --- Embedded UI build (populated at build time; only .gitkeep is tracked) ---
+/core/internal/webui/dist/*
+!/core/internal/webui/dist/.gitkeep
+
+# --- UI (ui/) ---
+/ui/node_modules/
+/ui/dist/
+/ui/.vite/
+/ui/*.tsbuildinfo
+
+# --- Vault (vault/) ---
+/vault/.venv/
+__pycache__/
+*.pyc
+/vault/.mypy_cache/
+/vault/.ruff_cache/
+/vault/.pytest_cache/
+
+# --- Claude Code machine-local settings (shared settings.json would be tracked) ---
+/.claude/settings.local.json
+
+# --- Editor / OS noise ---
+.DS_Store
+*.swp
+# macOS AppleDouble sidecars (leak into tar/zip; never want them tracked).
+._*

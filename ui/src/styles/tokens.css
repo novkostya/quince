@@ -1,0 +1,39 @@
+/* quince semantic design tokens (ui.design.md).
+ * Light + dark, one variable deep — components consume tokens only, never raw colors.
+ * The sing-box reference: light neutral bg, near-monochrome, one soft accent. */
+
+:root {
+  --bg: #f6f7f8;
+  --bg-card: #ffffff;
+  --bg-elevated: #ffffff;
+  --border: #e7e9ec;
+  --fg: #1a1d21;
+  --fg-muted: #6b7280;
+  --fg-subtle: #9aa1ab;
+  --accent: #3b6ef5;
+  --accent-fg: #ffffff;
+  --accent-soft: #eaf0fe;
+  --ok: #1f9d55;
+  --warn: #b7791f;
+  --danger: #d64545;
+
+  --sidebar-w: 15rem;
+  --radius: 0.75rem;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+}
+
+:root.dark {
+  --bg: #0b0d10;
+  --bg-card: #14171c;
+  --bg-elevated: #191d23;
+  --border: #262b33;
+  --fg: #e8eaed;
+  --fg-muted: #9aa1ab;
+  --fg-subtle: #6b7280;
+  --accent: #5b86f7;
+  --accent-fg: #0b0d10;
+  --accent-soft: #1b2436;
+  --ok: #3ecf8e;
+  --warn: #e2b04a;
+  --danger: #f16a6a;
+}
