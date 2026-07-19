@@ -296,7 +296,8 @@ on real traction).
   parked, and decline reasons accumulate as readable taste. Rationale: implementers
   have repeatedly out-seen the canon (Alpine 3.24, Tailwind pin, Makefile design) but
   had no legitimate outlet; the cap + timing + no-prototype rules keep the
-  no-improvising discipline intact. Mirrored in ios-backup-crypt's charter.
+  no-improvising discipline intact. quince-only (Operator: ios-backup-crypt is
+  near-complete — no value installing process there).
 - 2026-07-19: (ag) **qn.0 BUILT — the floor stands.** Provisioned `quince-dev`
   on the PVE host per the `local/environment.md` sequence verbatim (Alpine+nerdctl+buildkit
   template → clone → sized → `<lan-ip>`); recorded the exact `pct` commands back into that
