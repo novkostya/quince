@@ -19,7 +19,11 @@
    that's a contract-change rung, land it in `docs/contracts.md` first.
 3. **Prove it.** Run the gate ladder (below) + the rung's own acceptance gates from its
    spec. A story is proven by running it (a test, a demo-mode click-through, a lab
-   command), never by reading the code.
+   command), never by reading the code. The rung report also **declares coverage**:
+   the `go test -cover` summary (wire `-cover` into `gates-go` when first needed — one
+   line) plus an explicit **known-untested list**, one line + reason each. Declared
+   untested = accepted debt; undeclared untested behavior found by a later reviewer =
+   a finding. State honesty applies to tests too.
 4. **Update the dashboard.** Flip the rung's state in `quince.progress.md`, note gate
    results in one line, name the next frontier. Append to the decisions log if the rung
    settled anything new.
@@ -216,16 +220,25 @@ from an independent context window, and the review doubles as onboarding.
    the demo / replay the fixtures that touch the seams your rung will consume. The
    project rule applies to reviewing too: running produces findings, reading
    produces opinions.
-2. **Bounded scope.** Go deep on the surfaces your rung consumes; spot-check the
+2. **Four named dimensions** (a deliberate pass over each — not an improvised
+   reading; origin: a review found untested cases only because the Operator prompted
+   for coverage by hand, 2026-07-20):
+   (a) **seams** — the surfaces your rung consumes behave as documented, proven by
+   running them; (b) **coverage** — verify the previous rung's known-untested
+   declaration, then hunt untested error/edge branches in code you'll build on
+   (every spec story should have a test that fails if its behavior breaks);
+   (c) **state honesty** — nothing claims more than is proven (states, logs, UI);
+   (d) **contracts** — spot-check the frozen shapes the rung serves.
+3. **Bounded scope.** Go deep on the surfaces your rung consumes; spot-check the
    rest against the previous spec's stories. This is a foundation check, not a
    second gate ladder — don't spend your session re-reviewing everything.
-3. **Findings triage** (same spirit as the proposal channel):
+4. **Findings triage** (same spirit as the proposal channel):
    - canon violations, or defects that block your rung → fix NOW, as separate
      commits labeled `qn.N review fix: …`, placed before your own rung's commits
      (rung boundaries in history stay honest);
    - material but not blocking → the proposals ledger or the gap protocol;
    - taste → dropped silently.
-4. The review outcome (clean / fixes applied / escalations filed) is the opening
+5. The review outcome (clean / fixes applied / escalations filed) is the opening
    section of your rung report.
 
 ### Landing a rung branch: rebase, then fast-forward (Operator ruling)
