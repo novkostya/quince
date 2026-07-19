@@ -181,6 +181,29 @@ names it `qn.N-short-title`, and reports gate results + dashboard diff. Integrat
 happens on the sequential spine (qn.6 style rungs) by a single agent. Two agents never
 share a rung.
 
+### Rung handoff review (the first step of every rung — Operator ruling)
+
+Before building anything, the qn.N+1 session **reviews qn.N's work** (typically still
+an unlanded branch — findings are cheap to fix there). The incoming implementer is
+the project's best-positioned reviewer: it reads with "can I build on this" eyes,
+from an independent context window, and the review doubles as onboarding.
+
+1. **Run-anchored, never read-only.** `make gates` on the inherited branch; drive
+   the demo / replay the fixtures that touch the seams your rung will consume. The
+   project rule applies to reviewing too: running produces findings, reading
+   produces opinions.
+2. **Bounded scope.** Go deep on the surfaces your rung consumes; spot-check the
+   rest against the previous spec's stories. This is a foundation check, not a
+   second gate ladder — don't spend your session re-reviewing everything.
+3. **Findings triage** (same spirit as the proposal channel):
+   - canon violations, or defects that block your rung → fix NOW, as separate
+     commits labeled `qn.N review fix: …`, placed before your own rung's commits
+     (rung boundaries in history stay honest);
+   - material but not blocking → the proposals ledger or the gap protocol;
+   - taste → dropped silently.
+4. The review outcome (clean / fixes applied / escalations filed) is the opening
+   section of your rung report.
+
 ### Landing a rung branch: rebase, then fast-forward (Operator ruling)
 
 `main`'s history is **linear**. Rung branches are session-local and unshared, so
