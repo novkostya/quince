@@ -1,17 +1,20 @@
 # quince — progress dashboard
 
-**One-line state.** **qn.0 is BUILT — the floor stands.** `make gates` + `make image`
-are green from a fresh tree inside `quince-dev`, the image runs (`quince version`,
-`/api/health` → ok, `quince-vault selftest` exit 0, embedded UI serves), and it is
-committed and published to the LAN registry — history scrubbed of Operator-private facts
-before any push. **The frontier is now `qn.1` (core daemon skeleton + demo mode + UI
-shell).** Spec: [`specs/qn.1/qn.1.md`](specs/qn.1/qn.1.md) (to be written).
+**One-line state.** **qn.1 is BUILT — the app frame stands.** `make gates` (go + vault +
+ui), `make gates-ui-e2e` (Playwright stories 1–2), and `make image` are green inside
+`quince-dev`. The daemon now has typed config over `config.yml`, SQLite + migrations,
+cookie auth with a first-run set-password flow, the event bus, the `/api/ws` socket, the
+web-security baseline (CSRF, WS Origin, cookie flags, rate limit, audit), and a `--demo`
+mode that scripts fixture devices + a job exercising every WS event; the UI ships the auth
+flow, a WS bridge feeding Zustand stores, and the Dashboard / device-details / Settings
+pages bound to live demo data. **The frontier is now `qn.2` (muxd client + live device
+table).** Spec: [`specs/qn.2/qn.2.md`](specs/qn.2/qn.2.md) (to be written).
 
 | Rung | Title | State |
 | --- | --- | --- |
 | qn.0 | Floor: scaffold, gates, CI, image | **done** — gates + image green in quince-dev (2026-07-19) |
-| qn.1 | Core daemon skeleton + demo mode + UI shell | **frontier** — spec ready |
-| qn.2 | muxd client + live device table | outlined in roadmap |
+| qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
+| qn.2 | muxd client + live device table | **frontier** — outlined in roadmap, spec to be written |
 | qn.3 | Device ops + Devices page | outlined |
 | qn.4 | Backup engine, both transports + headless CLI | outlined |
 | qn.5 | Storage backends (zfs snapshot-native / hardlink / copy) + reconciliation | outlined |
@@ -309,3 +312,28 @@ on real traction).
   (Operator infra in commit messages + an earlier version of this entry) was scrubbed by a
   full `git` history rewrite — the origin of the "Privacy is a commit-time gate" hard
   rule. Next frontier: **qn.1** (spec to be written).
+- 2026-07-19: (ah-qn1) **qn.1 BUILT — the app frame stands.** Full `make gates`
+  (go + vault + ui), `make gates-ui-e2e` (Playwright stories 1–2), and `make image` green
+  in `quince-dev`. **Core** (`core/internal/{wire,config,store,auth,bus,ws,demo}` +
+  expanded `httpapi` + `id`): typed schema-v0 config with atomic canonical writes /
+  last-good-on-invalid / `quince config validate`; modernc SQLite (WAL) with embedded
+  migrations (`settings`/`sessions_auth`/`audit`); argon2id auth with first-run
+  set-password (one-shot **409** guard), session rotation, idle/absolute timeouts, per-IP
+  login rate limit, and double-submit CSRF; a race-clean event bus (drop-on-slow) + the
+  `/api/ws` handler (pre-upgrade auth + strict Origin, `hello` frame, ping keepalive); the
+  full REST read surface (devices/jobs/versions/config) golden-tested against contracts §2;
+  a security middleware chain (recover, CSP + frame denial, body limit, auth guard, CSRF
+  guard); and a `--demo` provider scripting device churn + a backup with a
+  silent-stall→recovery arc + every WS event type. **UI**: react-router auth-gated shell,
+  a WS bridge feeding Zustand stores with reconnect-backoff + GET-refresh, vendored
+  shadcn-style components on Radix, Dashboard / device-details / Settings pages on live
+  demo data, and a shared humanizer. **Operator rulings this rung** (also in the spec's
+  rung-ruled section + contracts §1): the auth endpoints (`/api/auth/status`, `/api/auth/setup`
+  with the 409 guard, double-submit CSRF) and adopting `react-router-dom`. Rung-local calls:
+  library set looked up live (yaml.v3 / modernc / coder-websocket / x/crypto / oklog-ulid;
+  zustand / TanStack Query / Radix), embedded-SQL migration runner, Secure-cookie-off in
+  demo (so http e2e/localhost login works), hardcoded admin-session timeouts (future
+  `auth:` config noted for qn.6), slog JSON/TTY, config exchanged as structured JSON,
+  golden fixtures via `make gen-golden`, and a two-container Playwright e2e target
+  (`gates-ui-e2e`, CI `e2e` job) using the official Playwright image. Not yet committed
+  (awaiting Operator). Next frontier: **qn.2**.

@@ -1,19 +1,20 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App.tsx";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "react-router-dom";
+import { queryClient } from "@/lib/queryClient";
+import { router } from "@/routes/router";
+import { initTheme } from "@/lib/theme";
 import "./index.css";
 
-// System-follow dark mode (ui.design.md principle 6). Manual override lands with the
-// Settings/theme work; qn.0 just follows the OS.
-function applyTheme(dark: boolean): void {
-  document.documentElement.classList.toggle("dark", dark);
-}
-const mql = window.matchMedia("(prefers-color-scheme: dark)");
-applyTheme(mql.matches);
-mql.addEventListener("change", (e) => applyTheme(e.matches));
+// System-follow theme at boot (ui.design.md principle 6); the Settings editor can override
+// via config.ui.theme once loaded.
+initTheme("system");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );

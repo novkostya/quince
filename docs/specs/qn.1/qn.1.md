@@ -68,3 +68,44 @@ not changed; gaps found here → contract-change note in the rung report.
 `core/internal/demo/` fixture set: 2 devices (one USB+WiFi, one WiFi-only), 1 scripted
 backup job (with a silent-stall phase and a recovery, mirroring lab reality), 3 versions
 across backends (zfs/hardlink with honest metadata, one adopted with `job_id: null`).
+
+## Rung-ruled decisions (qn.1 — canon within this rung's boundary)
+
+Settled during the build; a later rung changes them only via the gap protocol.
+
+**Operator-ruled (2026-07-19):**
+- **Auth contract additions** (contracts §1): `GET /api/auth/status → {state, csrf_token}`,
+  `POST /api/auth/setup {password}` (409 if already configured — setup succeeds exactly
+  once, never an unauthenticated reset), CSRF via a readable `quince_csrf` cookie echoed in
+  `X-CSRF-Token` (double-submit). Setup auto-logs-in.
+- **`react-router-dom` adopted** (extends stack D7, which named no router): deep-linkable
+  `/devices/:udid`, auth-gated route boundaries, sets up the parked qn.12 phone-first entry.
+
+**Library choices** (all looked up live at pin time — versions in `core/go.sum` /
+`ui/pnpm-lock.yaml`): core — `gopkg.in/yaml.v3`, `modernc.org/sqlite` (D8), `coder/websocket`,
+`golang.org/x/crypto/argon2` (PHC hand-rolled), `oklog/ulid/v2`, hand-rolled double-submit
+CSRF (no dep); UI — `zustand`, `@tanstack/react-query`, Radix primitives + `cva`/`clsx`/
+`tailwind-merge` (per D7). **Deferred:** `@tanstack/react-virtual` (no unbounded list this
+rung; the job log is a capped ring buffer).
+
+**Other rung-local calls:**
+- **Migrations** = `embed.FS` of numbered `.sql` + a ~40-line forward-only runner over a
+  `schema_migrations` table (no goose/golang-migrate dep).
+- **Secure-cookie rule** (security baseline): `Secure` unless the request is loopback-http;
+  **forced off in `--demo`** so login works over the plain-http e2e/localhost address.
+- **Admin-session timeouts hardcoded** (idle 12h, absolute 30d) — schema v0 has no key
+  (`sessions.ttl_minutes` is the vault-unlock TTL). A future `auth:` config section is noted
+  for qn.6.
+- **slog** JSON by default, text on a TTY (design §10).
+- **Config wire form**: exchanged as structured JSON — `GET` returns `{config, warnings[],
+  source}`, `PUT` takes the bare `Config` (full-document replace); the exact-YAML-with-
+  comments "current file" view is a qn.6 refinement (D12 staging).
+- **Demo** uses a fresh throwaway store per run under `QUINCE_CACHE` → starts at
+  `needs_setup` (exercises story 1); the canonical demo password is `demo`, entered at setup.
+- **Golden contract tests** live in `core/internal/httpapi/testdata/*.json`, regenerated
+  with `make gen-golden` (`UPDATE_GOLDEN=1`) and verified by eye against contracts §2.
+- **Playwright e2e** runs as two containers (app `serve --demo` + the official Playwright
+  runner) on a shared nerdctl network, the runner using an isolated node_modules volume so
+  the alpine/musl gate install is never reused under glibc — `make gates-ui-e2e`, CI job `e2e`.
+- **CSP** allows `style-src 'unsafe-inline'` (React style attributes) and `connect-src`
+  `ws:`/`wss:` for the socket; `script-src` stays `'self'`.

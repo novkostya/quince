@@ -235,8 +235,9 @@ non-negotiable:
 - **Transport**: HTTPS via user's reverse proxy or built-in self-signed fallback; Web
   Push (later) requires a real cert — documented, not solved by us.
 - **Auth**: single admin password (argon2id hash in app DB), cookie sessions
-  (`HttpOnly` + `Secure` + `SameSite=Strict`), session rotation on login, rate-limited
-  login, idle timeout. All API and WS behind it.
+  (`HttpOnly` + `Secure` + `SameSite=Strict`; `Secure` relaxed only for loopback-http and
+  `--demo`, so local/e2e over plain http still work — never in production), session
+  rotation on login, rate-limited login, idle timeout. All API and WS behind it.
 - **Web baseline**: CSRF protection on mutating endpoints; strict WS `Origin`
   validation; CSP + frame denial; reverse-proxy trust headers only from configured
   addresses; path-traversal-safe file serving (malicious filenames inside backups are

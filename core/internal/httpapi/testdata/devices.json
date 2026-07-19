@@ -1,0 +1,36 @@
+{
+  "devices": [
+    {
+      "udid": "00008140-000A1B2C3D4E001E",
+      "name": "family-iphone",
+      "model": "iPhone17,2",
+      "ios_version": "26.0.1",
+      "transports": {
+        "usb": "2026-07-18T09:15:00Z",
+        "wifi": "2026-07-18T09:10:00Z"
+      },
+      "paired": "yes",
+      "backup_encryption": "on",
+      "last_seen": "2026-07-18T09:15:00Z",
+      "last_backup": {
+        "at": "2026-07-18T02:30:11Z",
+        "job_id": "01JCZQ8XP0S8N5W2K7V4C9J2M3",
+        "status": "succeeded"
+      }
+    },
+    {
+      "udid": "00008101-0011223344550022",
+      "name": "studio-ipad",
+      "model": "iPad13,4",
+      "ios_version": "18.5",
+      "transports": {
+        "wifi": "2026-07-17T20:00:00Z"
+      },
+      "paired": "yes",
+      "backup_encryption": "off",
+      "last_seen": "2026-07-17T20:00:00Z",
+      "last_backup": null
+    }
+  ]
+}
+

@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "id": "01JCZQ8XN0R7T4M2K9V3B6H8P1",
+      "udid": "00008140-000A1B2C3D4E001E",
+      "kind": "backup",
+      "transport": "wifi",
+      "state": "backing_up",
+      "progress": {
+        "phase": "receiving",
+        "percent": 63,
+        "bytes_done": 2400000000,
+        "bytes_total": 3600000000,
+        "files_received": 149,
+        "liveness": "active"
+      },
+      "started_at": "2026-07-18T09:14:02Z",
+      "finished_at": null,
+      "error": null,
+      "retry_of": null,
+      "intent_id": "01JCZQ8XN0R7T4M2K9V3B6H8P1",
+      "attempt": 1,
+      "version_id": null
+    }
+  ],
+  "next_cursor": null
+}
+

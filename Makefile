@@ -27,6 +27,11 @@ TC_GO   := quince-toolchain-go:$(IMAGE_TAG)
 TC_NODE := quince-toolchain-node:$(IMAGE_TAG)
 TC_UV   := quince-toolchain-uv:$(IMAGE_TAG)
 
+# e2e (Playwright) plumbing: a demo app container + a runner container on a shared network.
+E2E_NET     := quince-e2e-net
+E2E_APP     := quince-e2e-app
+E2E_MODULES := quince-e2e-node-modules
+
 VERSION ?= 0.0.0-dev
 
 # Build-args threaded into every image build so the Dockerfile and the gates agree.
@@ -108,6 +113,18 @@ gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
 	    golangci-lint run; \
 	    go test -race ./...'
 
+.PHONY: fmt
+fmt: tc-go ## Go: gofmt -w (auto-format) + go mod tidy (run after editing core)
+	$(RUN) -w /src/core \
+	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
+	  -e CGO_ENABLED=1 $(TC_GO) sh -euc 'gofmt -w . && go mod tidy'
+
+.PHONY: gen-golden
+gen-golden: tc-go ## Regenerate httpapi golden fixtures (UPDATE_GOLDEN=1)
+	$(RUN) -w /src/core \
+	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
+	  -e CGO_ENABLED=1 -e UPDATE_GOLDEN=1 $(TC_GO) sh -euc 'go test ./internal/httpapi/ -run TestReadEndpointsMatchGolden'
+
 .PHONY: gates-vault
 gates-vault: tc-uv ## Vault: ruff check + ruff format --check + mypy --strict + pytest
 	$(RUN) -w /src/vault \
@@ -137,6 +154,24 @@ gates-ui: tc-node ## UI: typecheck + lint + vitest + build
 image: preflight ## Build the production container (proves go:embed of the built UI)
 	$(RUNTIME) build $(BUILD_ARGS) --target runtime -t $(IMAGE_NAME):$(IMAGE_TAG) -f deploy/Dockerfile .
 
+.PHONY: gates-ui-e2e
+gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two containers)
+	@set -e; \
+	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
+	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
+	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
+	  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	  $(IMAGE_NAME):$(IMAGE_TAG) serve --demo >/dev/null; \
+	status=0; \
+	$(RUN) --network $(E2E_NET) -w /src/ui \
+	  -v quince-pnpm-store:/pnpm-store -v $(E2E_MODULES):/src/ui/node_modules \
+	  -e BASE_URL=http://$(E2E_APP):8080 -e CI=1 -e PNPM_VERSION=$(PNPM_VERSION) \
+	  $(PLAYWRIGHT_IMAGE) sh /src/deploy/e2e-run.sh || status=$$?; \
+	$(RUNTIME) logs $(E2E_APP) > /tmp/quince-e2e-app.log 2>&1 || true; \
+	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
+	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
+	exit $$status
+
 .PHONY: push
 push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 	@test -n "$(REGISTRY)" || { echo "ERROR: set REGISTRY=host[:port]/repo (env only)"; exit 1; }
@@ -148,5 +183,5 @@ push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 # ---------------------------------------------------------------------------
 .PHONY: clean
 clean: ## Drop cache volumes and locally-built images
-	-$(RUNTIME) volume rm $(GO_BUILD_VOL) $(GO_MOD_VOL) $(PNPM_VOL) $(UV_VOL)
+	-$(RUNTIME) volume rm $(GO_BUILD_VOL) $(GO_MOD_VOL) $(PNPM_VOL) $(UV_VOL) $(E2E_MODULES)
 	-$(RUNTIME) rmi $(TC_GO) $(TC_NODE) $(TC_UV) $(IMAGE_NAME):$(IMAGE_TAG)

@@ -9,8 +9,26 @@
 
 ## 1. REST API (`/api`)
 
-Auth: `POST /api/auth/login {password}` → sets HttpOnly session cookie;
-`POST /api/auth/logout`. Everything below requires the cookie. Errors are
+Auth (endpoints ruled in qn.1, Operator 2026-07-19):
+
+```
+GET  /api/auth/status  → {state: "needs_setup" | "needs_login" | "authenticated",
+                          csrf_token}
+     // first-run detection + reload-auth check + CSRF-token delivery in one call;
+     // always reachable without a session.
+POST /api/auth/setup {password}  → 200 {state, csrf_token} + session cookie
+     // FIRST-RUN ONLY: 409 if a password already exists — setup succeeds exactly once
+     // and can never be an unauthenticated password reset. Auto-logs-in on success.
+POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session cookie
+     // 401 on bad password; 429 when the per-IP login rate limit trips.
+POST /api/auth/logout            → 204, clears the cookie.
+```
+
+Everything else requires the session cookie. State-changing requests (POST/PUT/DELETE,
+except `login`/`setup`) must echo the CSRF token in the `X-CSRF-Token` header — a
+double-submit check against the readable `quince_csrf` cookie. The session cookie is
+`HttpOnly` + `SameSite=Strict` + `Secure` (Secure relaxed only for loopback-http and
+`--demo`, so local/e2e over plain http still works — never in production). Errors are
 `{error: {code, message}}` with sensible HTTP statuses.
 
 ### Devices

@@ -1,0 +1,53 @@
+{
+  "versions": [
+    {
+      "id": "01JCZQ8XP0S8N5W2K7V4C9J2M3",
+      "udid": "00008140-000A1B2C3D4E001E",
+      "backend": "zfs",
+      "zfs_snapshot": "tank/backups/iphone-backup/00008140-000A1B2C3D4E001E@quince-01JCZQ8XN0R7T4M2K9V3B6H8P1-2026-07-18",
+      "browse_root": "/backups/00008140-000A1B2C3D4E001E/.zfs/snapshot/quince-01JCZQ8XN0R7T4M2K9V3B6H8P1/working",
+      "created_at": "2026-07-18T02:30:11Z",
+      "job_id": "01JCZQ8XN0R7T4M2K9V3B6H8P1",
+      "kind": "full",
+      "encrypted": true,
+      "is_latest": true,
+      "structure_verified_at": "2026-07-18T02:30:11Z",
+      "content_verified_at": "2026-07-18T08:00:00Z",
+      "logical_bytes": 42400000000,
+      "physical_bytes": 3400000000
+    },
+    {
+      "id": "01JCZQ8XR2T9P6X3M8W5D0K4N7",
+      "udid": "00008140-000A1B2C3D4E001E",
+      "backend": "hardlink",
+      "zfs_snapshot": null,
+      "browse_root": "/backups/00008140-000A1B2C3D4E001E/versions/2026-07-15T03-04-00Z",
+      "created_at": "2026-07-15T03:04:00Z",
+      "job_id": "01JCZ0000R7T4M2K9V3B6H8OLD",
+      "kind": "incremental",
+      "encrypted": true,
+      "is_latest": false,
+      "structure_verified_at": "2026-07-15T03:04:00Z",
+      "content_verified_at": null,
+      "logical_bytes": 41900000000,
+      "physical_bytes": 520000000
+    },
+    {
+      "id": "01JCZQ8XT4V2Q7Y4N9X6E1M5P8",
+      "udid": "00008140-000A1B2C3D4E001E",
+      "backend": "zfs",
+      "zfs_snapshot": "tank/backups/iphone-backup/00008140-000A1B2C3D4E001E@quince-adopted-2026-07-01",
+      "browse_root": "/backups/00008140-000A1B2C3D4E001E/.zfs/snapshot/quince-adopted/working",
+      "created_at": "2026-07-01T01:00:00Z",
+      "job_id": null,
+      "kind": "unknown",
+      "encrypted": true,
+      "is_latest": false,
+      "structure_verified_at": "2026-07-01T01:00:00Z",
+      "content_verified_at": null,
+      "logical_bytes": 40100000000,
+      "physical_bytes": 40100000000
+    }
+  ]
+}
+
