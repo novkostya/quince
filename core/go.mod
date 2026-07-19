@@ -7,6 +7,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/crypto v0.54.0
 	gopkg.in/yaml.v3 v3.0.1
+	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.54.0
 )
 
