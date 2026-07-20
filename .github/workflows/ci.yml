@@ -21,7 +21,7 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Docker (with buildkit) is preinstalled on ubuntu-latest; the Makefile autodetects
       # it and runs each gate in its toolchain container. No language setup needed.
       - name: Gate ladder
@@ -30,14 +30,14 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build production image (no push)
         run: make image
 
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Builds the image, boots `quince serve --demo`, and runs the Playwright stories
       # (stories 1-2) in the official Playwright container against it.
       - name: Playwright e2e (demo mode)
