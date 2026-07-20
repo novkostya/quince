@@ -360,8 +360,12 @@ muxd**/registry + qn.5 storage on a temp `/backups` — **no hardware in CI** (D
 > (A1's encrypted `Verify` on a real encrypted `Manifest.db`), **version rotation**, **interface
 > facts 1 & 5** confirmed, and the **kill-matrix `backing_up` leg** (crash → committed state intact,
 > reconciliation sweeps work + `→ connection_lost`, no phantom). The UI-driven both-transports
-> backup was re-homed to **qn.4b gate 11** (br). The **zfs legs (c/d below: `mirror` verb /
-> `bclonesaved` / iMazing / syncoid) are DEFERRED** to a later session — they need the rpool
+> backup was re-homed to **qn.4b gate 11** (br). **ARCHITECT CLARIFICATION (bv):** the engine legs
+> ran on the **`hardlink`** backend, so gate (a)'s "committed via qn.5's Commit **on the real zfs
+> backend**" is NOT yet satisfied — engine→commit-on-zfs is part of the pending **zfs half**, which
+> STAYS this rung's (Operator ruling; the session holds the topology details). The zfs half =
+> **engine→commit on the real zfs-hook backend** + `mirror` verb / `bclonesaved` / iMazing / syncoid.
+> The zfs legs are **DEFERRED** to a later session — they need the rpool
 > hook-mode topology, disproportionate vs. the incremental value (core zfs facts already proven in
 > gate-12 (bf)→(bk)); syncoid target prepped on the offsite PVE host (`local/environment.md`). Four
 > lab findings filed. **The
