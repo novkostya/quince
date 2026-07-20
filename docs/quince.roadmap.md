@@ -60,13 +60,15 @@ this computer" flow narration). *Gate: fresh container to paired, encryption-on 
 via UI only — including setting the backup password through quince; wrappers covered
 by fake-CLI tests; no password ever appears in argv, logs, or the audit trail.*
 
-### M3 — Backup engine, both transports (`qn.5` storage FIRST, then `qn.4` engine)
+### M3 — Backup engine, both transports (`qn.5` storage FIRST, then `qn.4a` engine, then `qn.4b` Wi-Fi + history)
 
 Order ruled 2026-07-20 (decisions log (ar), the "rung closes provable" hard rule): the
 engine's `succeeded` requires `Commit()`, which is storage's — so storage lands first and
-is proven on fixture trees + manually-produced backups; the engine then closes M3 with
-the true end-to-end gate. Rung numbers are labels, not order (the qn.7-before-qn.6
-precedent).
+is proven on fixture trees + manually-produced backups. The old `qn.4` was then split
+((be)): it was three heterogeneous concerns wide (engine, Wi-Fi, CLI) — `qn.4a` proves
+the transport-agnostic engine over USB with the minimal CLI as its harness, `qn.4b`
+makes Wi-Fi first-class and closes M3 with the both-transports UI-driven gate. Rung
+numbers are labels, not order (the qn.7-before-qn.6 precedent).
 
 - `qn.5` storage backends per the two-layout model (stack D5): `zfs` snapshot-native
   with per-device child datasets (Provision via constrained hook, visibility probes +
@@ -86,24 +88,35 @@ precedent).
   the whole tree running concurrently with a (manual) backup uploads a valid backup**
   (the D5a contract, automated with a local target); on zfs a syncoid pass mid-write
   replicates every committed version intact; iMazing opens the committed version.*
-- `qn.4` job state machine + `idevicebackup2` supervisor, **USB and Wi-Fi first-class
-  from the start** (stack D13 — Wi-Fi is the primary use case, assisted model): stdout
-  parser (fixtures = real lab transcripts incl. stalls, `-4` failures, and the
-  `waiting_for_passcode` phase), activity-sampler liveness with staged stall states, NO
-  auto-retry (failed → `user action required`, manual retry with `retry_of`), cancel via
-  process group, crash-safe persistence, per-UDID lock, structural verification,
-  `repair-working-copy` reserved in CLI semantics, job history API/UI (raw but live,
-  grouped by intent — contracts §2). Also ships the **headless
-  CLI** (`quince device list / backup start / versions list / versions verify /
-  versions path --latest` — the last one prints the consistent offsite-sync source: the
-  `latest/` mirror on zfs, the resolved version dir elsewhere) — the lab-testing and
-  scripting interface, and the fastest way to
-  torture the engine before the UI exists (external-review point, accepted in-place
-  rather than as a CLI-first roadmap). *Gate (the integrated e2e, closing M3): encrypted
-  backups over BOTH transports on the lab box, driven from the UI/CLI, end `succeeded`
-  with committed verified versions on a real backend; the engine-level kill matrix
-  (kill at seed / backing_up / verify / commit hand-off) recovers to defined states on
-  restart; iMazing opens each committed version.*
+- `qn.4a` **job engine + supervisor + the minimal driving CLI** (split from qn.4,
+  decisions log (be) — the old rung was three heterogeneous concerns wide): the
+  transport-AGNOSTIC core — stdout parser (fixtures = real lab transcripts incl.
+  stalls, `-4` failures, `waiting_for_passcode`, **and the Wi-Fi torn sessions**, so
+  the engine is Wi-Fi-shaped from day one in CI), activity-sampler liveness with
+  staged stall states, NO auto-retry (failed → `user action required`, manual retry
+  with `retry_of`), cancel via process group, crash-safe persistence, per-UDID lock,
+  the supervisor half of structural verification (exit code + `Backup Successful`
+  output; the tree half landed in qn.5), integration with qn.5's
+  `Seed`/`Verify`/`Commit`. Ships the minimal **headless CLI as the rung's own lab
+  harness** (`quince device list / backup start / versions list / versions path
+  --latest` — the offsite-sync source printer) — the fastest way to torture the
+  engine before the UI exists (external-review point, accepted in-place; the CLI was
+  ruled NOT a separate milestone — standalone it is thin plumbing that would rob the
+  engine rung of its driving interface). *Gate (USB): an encrypted backup on the lab
+  box, driven from the CLI, ends `succeeded` as a committed verified version on the
+  real backend; the engine-level kill matrix (kill at seed / backing_up / verify /
+  commit hand-off) recovers to defined states on restart; iMazing opens it.*
+- `qn.4b` **Wi-Fi first-class + transport policy + job history** (closes M3): real
+  Wi-Fi backups over netmuxd, `transport: auto` (prefer USB when plugged, Wi-Fi
+  otherwise), the job history API/UI (raw but live, grouped by intent — contracts
+  §2), CLI completion (`versions verify`; `quince device repair-working-copy` — the
+  surface over qn.5's backend op). **Explicitly NOT a Wi-Fi demotion** — ruling (h)
+  stands: Wi-Fi keeps first-class status with its own rung and hardware gate inside
+  M3, before qn.7 and far before v0.1; qn.4a already proves the engine against
+  Wi-Fi's failure modes in CI. *Gate (the integrated e2e, closing M3): encrypted
+  backups over BOTH transports, driven from the UI, end `succeeded` with committed
+  verified versions; a Wi-Fi mid-backup disconnect lands in an honest
+  `user action required` with committed versions untouched.*
 
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
@@ -204,7 +217,7 @@ Independent tracks after M1 freezes the contracts (`contracts.md`):
 | Track | Owns | Rungs |
 | --- | --- | --- |
 | **core** | daemon, muxd, device ops | qn.2, qn.2b, qn.3 |
-| **backup** | job engine, supervisor, backends, wifi hardening | qn.5, qn.4, qn.7 (in that order — (ar)) |
+| **backup** | job engine, supervisor, backends, wifi hardening | qn.5, qn.4a, qn.4b, qn.7 (in that order — (ar)/(be)) |
 | **vault** | Python: decryption, lazy domain adapters, fixtures, conformance suite | qn.8 groundwork (fixture generator, RPC harness, conformance goldens) can start right after M0 against contracts + real transcripts |
 | **ui** | React app, design system, demo polish | UI halves of qn.1/qn.3/qn.4 against `--demo` fixtures |
 | **infra** | CI, images, release, deploy docs | qn.0 hardening, qn.6 pipeline |

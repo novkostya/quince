@@ -31,8 +31,14 @@ never argv/env) + registry lockdown enrichment + the four frozen device-op endpo
 with the architect's three amendments + two Operator acks). **Lab gate 8 PASSED on real hardware
 (2026-07-20)** — fresh container → pair (UI) → recreate-still-paired (amendment 1) → change_password +
 disable→enable, secrets proven absent from argv/env/log; four findings caught + fixed + CI-validated
-(incl. a real enrichment auto-pair-on-locked-device bug). **qn.5 (storage) is the new frontier** (the
-qn.5-before-qn.4 order swap ruled in (ar)).
+(incl. a real enrichment auto-pair-on-locked-device bug). **qn.5 is now BUILT (CI)** — the version
+store: `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json`
+markers + startup-reconciliation matrix + adopted discovery + encryption-branched structural
+`Verify` + `RepairWorkingCopy` + retention) + `clonetree` (FICLONE/hardlink/copy) + a `versions`
+registry (the real `VersionReader`) + `DELETE /api/versions/{id}` + `version.*` events +
+reconcile-before-serve + `deploy/storage.md`; full `make gates`/image/e2e green (decisions log
+(bd)). **Lab gate 12 (real zfs + iMazing + syncoid + the destructive hardlink-safety matrix) is the
+remaining hardware step**, owned by qn.5. The qn.5-before-qn.4 order was ruled in (ar).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -41,8 +47,9 @@ qn.5-before-qn.4 order swap ruled in (ar)).
 | qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
-| qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | outlined — **runs BEFORE qn.4** (order ruled in (ar)) |
-| qn.4 | Backup engine, both transports + headless CLI | outlined — after qn.5; closes M3 with the integrated e2e gate |
+| qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **built (CI)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention) + `internal/storage/clonetree` (FICLONE/hardlink/copy) + `versions` table & registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve wiring + `deploy/storage.md`; `make gates`/image/e2e green; **lab gate 12 (real zfs + iMazing + syncoid + destructive matrix) is the remaining hardware step** (owned by this rung). **Runs BEFORE qn.4** (order ruled in (ar)) |
+| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | outlined — after qn.5; split from qn.4 ((be)); CI replays ALL transcripts incl. Wi-Fi torn sessions |
+| qn.4b | Wi-Fi first-class + transport policy + job history UI (closes M3) | outlined — after qn.4a; NOT a Wi-Fi demotion ((h) stands) |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + netmuxd co-supervision + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
@@ -67,7 +74,7 @@ License = MIT. `@mercury-fx/ui` = not consumed; mainstream vendored-component st
 instead (decisions log (u)). GitHub owner = `github.com/novkostya` (org transfer only
 on real traction).
 
-**Decisions log.**
+**Decisions log.** *(Newest entries append at the bottom.)*
 - 2026-07-18: full planning pass (this docs set) from the feasibility lab
   (`../local/chatgpt-original-idea-chat.md`); Go core + Python vault + React/mercury-style UI;
   USB primary / Wi-Fi experimental; ZFS first-class with hardlink portable fallback.
@@ -627,3 +634,48 @@ on real traction).
   sanity, with record-sampling deferred to the content level (qn.8's unlock, which now owns it
   for encrypted versions); unencrypted: the full checklist. Design §4 amended; qn.5's spec
   folds the branch + an encrypted fixture variant (amendment A1).
+- 2026-07-20: (bd) **qn.5 BUILT (CI) — the version store stands.** Cleared the pre-build
+  spec-review gate: spec + Rule check → **architect APPROVED with three amendments (A1 encrypted
+  `Verify` branch, A2 a `RepairWorkingCopy` story, A3 name `Prune`'s trigger) + five rulings**, all
+  folded in. Shipped: **`internal/storage`** — the `Backend` interface with two genuinely
+  different models (`zfs` snapshot-native via a validated exec/hook `zfsCLI`, dataset-destroy never
+  issued; `reflink`/`hardlink`/`copy` namespace-versioned), the **auto-selection probe** (FICLONE
+  independence / `link()`+inode on the real `/backups`; `copy` degraded mode surfaced), **journaled
+  commit** with on-disk `quince-version.json` markers + an explicit per-device commit journal,
+  **first-class startup reconciliation** (roll-forward matrix: kill at every phase → defined
+  repair; adopt on-disk versions with no row = `job_id` null protected; row with no artifact →
+  `missing`, never dropped; orphaned `work/` swept only after), structural **`Verify`** branching
+  on `Manifest.plist.IsEncrypted` (A1), **`RepairWorkingCopy`**, and retention **`Prune`**
+  (post-commit + explicit, no scheduler); **`internal/storage/clonetree`** (one FICLONE/hardlink/
+  copy cloner; hardlink copies `MutatesInPlace` classes); a **`versions` table + registry** in
+  `internal/store` (the real `VersionReader`); **`DELETE /api/versions/{id}` → 202|404|503** + a
+  `VersionAdmin` consumer interface + audit + `version.created`/`version.deleted` events; non-demo
+  wiring that **reconciles before serving**; a `--demo` delete path; and **`deploy/storage.md`**
+  (the constrained `quince-zfs-helper` forced-command + the anchored rclone filter block).
+  **`make gates` + `make image` + `make gates-ui-e2e` green.** `-cover` wired into `gates-go`
+  (the "when first needed" moment). **Coverage declared:** storage **78.3%**, clonetree **71.4%**,
+  store **80.1%**, httpapi **71.8%**; **known-untested** (accepted debt, all low-risk or
+  environment-gated): the reflink/FICLONE leaf (`clonetree` reflink path + the zfs reflink-mirror
+  branch) — proven for-real in lab gate 12, skipped-with-a-log in CI (tmpfs has no FICLONE); the
+  zfs reflink-from-snapshot copy-fallback branch; a few reconcile/adopt error-log branches; the
+  `zfsCLI` list/destroy not-found guards. **Build finding fixed:** `WriteMarker` now replaces
+  (remove-then-write) rather than truncates, so a hardlink-seeded `work/` can't rewrite a committed
+  version's marker. **Lab gate 12 (real zfs on the host + iMazing-opens + syncoid-mid-write + the
+  destructive hardlink-safety matrix) is the remaining physical/host step** — owned by this rung,
+  not deferred. Not yet committed (awaiting Operator). Frontier stays **qn.5** until gate 12; then
+  → **qn.4a** (engine; qn.4 split into qn.4a/qn.4b per (be)).
+- 2026-07-20: (be) **qn.4 split into qn.4a / qn.4b** (Operator-ruled after a plan-shape review:
+  the rung was three heterogeneous concerns wide — engine, Wi-Fi, CLI — unlike qn.5's
+  one-subsystem depth). **qn.4a** = the transport-AGNOSTIC job engine + supervisor + the minimal
+  headless CLI as the rung's own lab harness; CI replays ALL lab transcripts including the Wi-Fi
+  torn sessions (the engine is Wi-Fi-shaped from day one); hardware gate = an encrypted USB
+  backup driven from the CLI ending as a committed verified version + the engine kill matrix.
+  **qn.4b** = Wi-Fi first-class + `transport: auto` + the intent-grouped job history API/UI +
+  CLI completion (`versions verify`, `repair-working-copy` surface), closing M3 with the
+  both-transports UI-driven gate incl. an injected Wi-Fi mid-backup disconnect landing honestly.
+  **Explicitly NOT a Wi-Fi demotion** — ruling (h) stands: Wi-Fi keeps its own rung + hardware
+  gate inside M3, before qn.7 and far before v0.1. The CLI was ruled NOT a separate milestone:
+  standalone it is thin plumbing with no goal sentence, and splitting it would rob the engine
+  rung of its driving interface (its bulk IS the engine working). Roadmap M3 + dashboard
+  restructured; numbers stay labels (qn.2b precedent). The updated frontier chain: qn.5 gate 12
+  → qn.4a → qn.4b.
