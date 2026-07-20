@@ -36,8 +36,15 @@ double-submit check against the readable `quince_csrf` cookie. The session cooki
 ```
 GET  /api/devices                      → {devices: Device[]}
 GET  /api/devices/{udid}               → Device
-POST /api/devices/{udid}/pair          → 202 {op_id}     // surfaces "tap Trust on phone"
-POST /api/devices/{udid}/pair/validate → {paired: bool}
+POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
+     // 409: device not present on USB — pairing is USB-only at the protocol floor,
+     // surfaced actionably ("pairing needs a USB connection"). The 202 op narrates
+     // "tap Trust on the phone" / "enter the passcode on the device".
+POST /api/devices/{udid}/pair/validate → {paired: bool} | 404 | 409
+     // paired == "a pairing is CONFIRMED valid right now". A locked device cannot be
+     // confirmed (`idevicepair validate` reports "passcode set" for ANY locked device,
+     // paired or not — qn.3 hardware finding), so Device.paired shows "unknown" until
+     // an unlocked validate succeeds; the endpoint's bool is the confirmed check only.
 POST /api/devices/rescan               → 202 | 409
      // Restarts the MANAGED in-container muxer (devices.manage_muxer: true) so USB
      // devices missed by an unprivileged container's absent hotplug re-enumerate;
@@ -46,12 +53,14 @@ POST /api/devices/rescan               → 202 | 409
      // Ruled from qn.2's gap capture; landed by qn.2b.
 POST /api/devices/{udid}/encryption
      {action: "enable" | "change_password" | "disable",
-      password?, old_password?, new_password?}            → 202 {op_id}
-     // Drives `idevicebackup2 encryption`/`changepw`. Passwords travel in the TLS body
-     // and reach the subprocess via interactive pty prompt (or the documented
-     // BACKUP_PASSWORD env fallback, same-uid exposure only — qn.3 verifies which);
-     // NEVER argv (world-readable /proc), never logged, never stored. The phone will
-     // demand its own passcode confirmation — the op narrates that state to the UI.
+      password?, old_password?, new_password?}            → 202 {op_id} | 422
+     // 422: bad action or a missing required password field. Drives `idevicebackup2
+     // encryption`/`changepw`. Passwords travel in the TLS body and reach the
+     // subprocess over an interactive pty (`idevicebackup2 -i` — VERIFIED qn.3,
+     // libimobiledevice 1.4.0; the BACKUP_PASSWORD env fallback exists in the CLI but
+     // quince does not use it); NEVER argv (world-readable /proc), never logged, never
+     // stored. The phone will demand its own passcode confirmation — the op narrates
+     // that state to the UI.
      // NOTE: this is Apple's device-global backup password — the SAME password later
      // used to unlock versions in the vault. quince sets it, never keeps it.
 GET  /api/ops/{op_id}                  → Op

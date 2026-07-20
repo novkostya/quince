@@ -65,9 +65,13 @@ has no direct backup protocol and is out of scope. Nothing in the codebase may b
 iPhone-string-specific — the `model` field drives any per-device presentation.
 
 Rules: presence is muxd-event-driven, never polled. `paired` is refreshed lazily
-(`idevicepair validate`) — on attach and before any job, not on a timer. A device
-vanishing mid-job does not remove it from the table; it flips presence and lets the job
-engine decide.
+(`idevicepair validate`) — on attach and before any job, not on a timer. **A locked
+device reads as `paired: unknown`** — `validate` reports "passcode set" for ANY locked
+device, paired or not (qn.3 hardware finding), and the full lockdown identity read
+(which can pop a Trust prompt on an unpaired device — an accidental auto-pair) runs
+only after a *confirmed* validate; all other reads use the no-auto-pair simple query.
+A device vanishing mid-job does not remove it from the table; it flips presence and
+lets the job engine decide.
 
 **Backup encryption is a managed device property.** `backup_encryption` reads lockdown's
 `com.apple.mobile.backup / WillEncrypt` (refreshed with device info). Device ops expose
