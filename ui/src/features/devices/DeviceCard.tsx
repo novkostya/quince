@@ -82,8 +82,10 @@ export function DeviceCard({ device }: { device: Device }) {
               Back up now
             </Button>
           ) : (
-            <Button size="sm" disabled title="Device pairing arrives in a later release">
-              Pair
+            // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
+            // details page (qn.3); the card routes there rather than pairing in place.
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/devices/${device.udid}`}>Pair</Link>
             </Button>
           )}
         </div>

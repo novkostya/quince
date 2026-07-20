@@ -11,6 +11,17 @@ export function PairDialog({ udid, post }: { udid: string; post?: StartFn }) {
   const { op, starting, startError, start, reset, inFlight } = useDeviceOp(post);
   const done = op?.state === "succeeded";
 
+  // A completed pairing closes the dialog after a brief confirmation (the device transitions to
+  // its paired state in the page behind it).
+  React.useEffect(() => {
+    if (op?.state !== "succeeded") return;
+    const t = window.setTimeout(() => {
+      setOpen(false);
+      reset();
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [op?.state, reset]);
+
   function change(o: boolean) {
     setOpen(o);
     if (!o) reset();

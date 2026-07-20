@@ -38,20 +38,44 @@ export function EncryptionDialog({
   const { op, starting, startError, start, reset, inFlight } = useDeviceOp(post);
   const done = op?.state === "succeeded";
 
-  // Reset the chosen mode whenever the dialog opens (the device state may have changed).
+  const clearFields = React.useCallback(() => {
+    setCurrentPw("");
+    setNewPw("");
+    setConfirmPw("");
+    setFormError(null);
+  }, []);
+
+  // Pick the mode + clear prior state only on the OPEN transition — NOT on every encryption
+  // change. Otherwise a successful op flips the device's encryption, which re-derives the mode
+  // and leaves the title mismatched with the result just shown ("Enable…" over "…is off").
+  const prevOpen = React.useRef(false);
   React.useEffect(() => {
-    if (open) setMode(initialMode ?? (encryption === "off" ? "enable" : "change"));
-  }, [open, initialMode, encryption]);
+    if (open && !prevOpen.current) {
+      setMode(initialMode ?? (encryption === "off" ? "enable" : "change"));
+      reset();
+      clearFields();
+    }
+    prevOpen.current = open;
+  }, [open, initialMode, encryption, reset, clearFields]);
+
+  // A completed op closes the dialog (after a brief confirmation) rather than lingering in a
+  // recomputed state; the device card/badge reflects the new state.
+  React.useEffect(() => {
+    if (op?.state !== "succeeded") return;
+    const t = window.setTimeout(() => onOpenChange(false), 1000);
+    return () => window.clearTimeout(t);
+  }, [op?.state, onOpenChange]);
 
   function change(o: boolean) {
     onOpenChange(o);
-    if (!o) {
-      reset();
-      setCurrentPw("");
-      setNewPw("");
-      setConfirmPw("");
-      setFormError(null);
-    }
+  }
+
+  // Switching mode (incl. after a success) resets the previous op so the form returns for the
+  // new action — otherwise the switcher looks dead once an op has completed.
+  function switchMode(m: EncryptionMode) {
+    setMode(m);
+    reset();
+    clearFields();
   }
 
   function submit() {
@@ -95,14 +119,14 @@ export function EncryptionDialog({
             <Button
               size="sm"
               variant={mode === "change" ? "accent" : "outline"}
-              onClick={() => setMode("change")}
+              onClick={() => switchMode("change")}
             >
               Change password
             </Button>
             <Button
               size="sm"
               variant={mode === "disable" ? "destructive" : "outline"}
-              onClick={() => setMode("disable")}
+              onClick={() => switchMode("disable")}
             >
               Disable
             </Button>
@@ -154,6 +178,12 @@ export function EncryptionDialog({
               </p>
             ) : null}
           </div>
+        ) : null}
+
+        {!done ? (
+          <p className="mt-3 text-xs text-muted">
+            Keep the device unlocked — it will ask you to confirm this change with its passcode.
+          </p>
         ) : null}
 
         <div className="mt-4 min-h-6">
