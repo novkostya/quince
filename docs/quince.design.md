@@ -121,10 +121,20 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   AND `Backup Successful` in output AND `Status.plist` parses with
   `SnapshotState == finished` AND `Manifest.plist`/`Info.plist` parse AND `Manifest.db`
   opens read-only with the required tables AND a deterministic sample of Manifest
-  records resolves to existing blob files. *Content verification* (vault decrypts a
-  canary file) cannot run unattended — no stored password — so it happens on the user's
-  next unlock and is recorded per version as `content_verified_at`; the UI shows both
-  levels honestly.
+  records resolves to existing blob files. **The DB checks branch on encryption**
+  (architect ruling at the qn.5 spec review — the original checklist silently assumed
+  an unencrypted manifest): since iOS 10.2 an *encrypted* backup's `Manifest.db` is
+  itself encrypted, so passwordless open-and-sample is impossible there.
+  `Manifest.plist`'s `IsEncrypted` selects the variant — encrypted (the product
+  default): `Manifest.db` exists, has non-trivial size, and does **NOT** carry the
+  plaintext SQLite magic (an "encrypted" manifest that opens as plain SQLite is a
+  red flag), plus blob-shard sanity (the two-hex-char directories exist and are
+  non-empty on a full backup); the record-sample resolution moves to the content
+  level. Unencrypted: the full checklist as written. *Content verification* (vault
+  decrypts a canary file — and, for encrypted versions, performs the deferred
+  manifest-record sampling) cannot run unattended — no stored password — so it happens
+  on the user's next unlock and is recorded per version as `content_verified_at`; the
+  UI shows both levels honestly.
 - **committing**: backend `Commit()` under the journaled phase model (§5). Failure here
   = job `failed` with the working state preserved for inspection — surfaced loudly,
   never silently.
