@@ -26,7 +26,8 @@ type Provider struct {
 	jobs     map[string]wire.Job
 	jobLog   map[string][]string // per-job accumulated log lines (GET /api/jobs/{id}/log)
 	versions map[string]wire.Version
-	verOrder []string // version display order (newest first)
+	verOrder []string           // version display order (newest first)
+	ops      map[string]wire.Op // pair/encryption ops (GET /api/ops/{id}; qn.3 DeviceOps)
 }
 
 // NewProvider builds a provider seeded with deterministic fixtures. It does NOT start the
@@ -39,6 +40,7 @@ func NewProvider(b *bus.Bus, log *slog.Logger) *Provider {
 		jobs:     map[string]wire.Job{},
 		jobLog:   map[string][]string{},
 		versions: map[string]wire.Version{},
+		ops:      map[string]wire.Op{},
 	}
 	p.seed()
 	return p

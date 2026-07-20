@@ -26,6 +26,7 @@ import (
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
 	"github.com/novkostya/quince/core/internal/device"
+	"github.com/novkostya/quince/core/internal/deviceops"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/muxsup"
@@ -33,6 +34,10 @@ import (
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
 )
+
+// lockdownSystemDir is where libimobiledevice reads/writes pairing records on Linux; qn.3
+// persists its contents under $QUINCE_DATA so they survive a container recreate (amendment 1).
+const lockdownSystemDir = "/var/lib/lockdown"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -131,11 +136,12 @@ func serve(args []string) error {
 	var jobs httpapi.JobReader = httpapi.Empty{}
 	var versions httpapi.VersionReader = httpapi.Empty{}
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
+	var ops httpapi.DeviceOps // assigned in both branches below (demo → provider, else → manager)
 	if *demoMode {
 		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
 		prov := demo.NewProvider(eventBus, log)
 		prov.Run(ctx)
-		devices, jobs, versions = prov, prov, prov
+		devices, jobs, versions, ops = prov, prov, prov, prov
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
 		// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the
@@ -169,13 +175,26 @@ func serve(args []string) error {
 		devices = reg
 		log.Info("device registry watching muxers",
 			"usbmuxd", dcfg.UsbmuxdSocket, "netmuxd", dcfg.NetmuxdAddr)
+
+		// Device ops (qn.3): pair/validate/info + encryption via the libimobiledevice CLIs,
+		// pointed at the muxers by USBMUXD_SOCKET_ADDRESS. The enrichment driver overlays
+		// lockdown identity onto the registry on attach; pairing records persist under
+		// $QUINCE_DATA so they survive a container recreate (amendment 1).
+		tools := deviceops.NewTools(dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr, log)
+		lockdown := deviceops.NewLockdownStore(bootstrap.Data, lockdownSystemDir, log)
+		lockdown.Restore()
+		mgr := deviceops.NewManager(ctx, tools, reg, eventBus, st, log)
+		mgr.SetLockdown(lockdown)
+		ops = mgr
+		go deviceops.NewEnrichDriver(tools, reg, eventBus, log).Run(ctx)
+		log.Info("device ops ready (pair/encryption/enrichment)")
 	}
 
 	srv := &http.Server{
 		Addr: listen,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
-			Devices: devices, Jobs: jobs, Versions: versions, Muxer: muxer,
+			Devices: devices, Jobs: jobs, Versions: versions, Muxer: muxer, Ops: ops,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

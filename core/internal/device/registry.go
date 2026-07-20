@@ -20,14 +20,17 @@ type Registry struct {
 	// sourceID → udid → transport("usb"/"wifi") → last_seen (RFC3339 UTC)
 	sources map[string]map[string]map[string]string
 	order   []string // stable display order of udids (append on first appearance)
+	// udid → lockdown identity overlaid on the muxd-minimal shell (qn.3 enrichment).
+	identity map[string]Identity
 }
 
 // NewRegistry returns an empty registry publishing device.* events to b.
 func NewRegistry(b *bus.Bus, log *slog.Logger) *Registry {
 	return &Registry{
-		bus:     b,
-		log:     log,
-		sources: map[string]map[string]map[string]string{},
+		bus:      b,
+		log:      log,
+		sources:  map[string]map[string]map[string]string{},
+		identity: map[string]Identity{},
 	}
 }
 
@@ -185,14 +188,60 @@ func (r *Registry) mergedLocked(udid string) (wire.Device, bool) {
 	return dev, true
 }
 
-// deviceShellLocked is the muxd-minimal identity for a UDID: everything the muxer can't know
-// sits at its honest default. Paired/BackupEncryption are the literal "unknown" (NOT the ""
-// zero value, which would violate the contract enum). qn.3 enriches these via lockdown.
+// deviceShellLocked is the identity base for a UDID: the muxer-unknowable fields sit at
+// their honest default, with any lockdown Identity (qn.3) overlaid on top. Paired/
+// BackupEncryption default to the literal "unknown" (NOT the "" zero value, which would
+// violate the contract enum); an overlay leaves a field at its default when its Identity
+// value is empty ("not determined"), never guessing.
 func (r *Registry) deviceShellLocked(udid string) wire.Device {
-	return wire.Device{
+	dev := wire.Device{
 		UDID:             udid,
 		Paired:           "unknown",
 		BackupEncryption: "unknown",
+	}
+	if id, ok := r.identity[udid]; ok {
+		dev.Name = id.Name
+		dev.Model = id.Model
+		dev.IOSVersion = id.IOSVersion
+		if id.Paired != "" {
+			dev.Paired = id.Paired
+		}
+		if id.BackupEncryption != "" {
+			dev.BackupEncryption = id.BackupEncryption
+		}
+	}
+	return dev
+}
+
+// Identity is the lockdown-derived identity qn.3 overlays onto the muxd-minimal shell
+// (populated from ideviceinfo / idevicepair validate). An empty-string field means "not
+// determined" and leaves the honest default in place — the registry never guesses. All
+// fields are strings, so Identity is comparable and Enrich can cheaply detect real change.
+type Identity struct {
+	Name             string
+	Model            string
+	IOSVersion       string
+	Paired           string // yes | no | unknown ("" → leave default)
+	BackupEncryption string // on | off | unknown ("" → leave default)
+}
+
+// Enrich overlays lockdown identity onto the device keyed by udid. When the device is
+// currently present AND a field actually changed, it emits device.updated (contracts §3);
+// the overlay is retained even while the device is absent, so a later re-attach renders the
+// known identity immediately (the enrichment driver refreshes it on each attach). Follows
+// the registry's lock discipline: mutate under the lock, publish after unlock.
+func (r *Registry) Enrich(udid string, id Identity) {
+	r.mu.Lock()
+	prev, had := r.identity[udid]
+	changed := !had || prev != id
+	if changed {
+		r.identity[udid] = id
+	}
+	dev, present := r.mergedLocked(udid)
+	r.mu.Unlock()
+
+	if changed && present {
+		r.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 	}
 }
 

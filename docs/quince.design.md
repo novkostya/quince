@@ -244,8 +244,9 @@ non-negotiable:
   addresses; path-traversal-safe file serving (malicious filenames inside backups are
   expected input); response size limits + range requests for large files; rate limits on
   expensive vault operations, not just login.
-- **Audit trail**: login, unlock, file download, version delete — appended to the app
-  DB, visible in UI.
+- **Audit trail**: login, unlock, file download, version delete, **device pairing and
+  encryption changes** (qn.3 — event + UDID + outcome, never the password) — appended to
+  the app DB, visible in UI.
 - **Backup-encryption management** (§3): passwords for `encryption on`/`changepw` travel
   in TLS request bodies, reach `idevicebackup2` via pty prompt or `BACKUP_PASSWORD` env
   (same-uid exposure, short-lived process) — argv is forbidden (world-readable

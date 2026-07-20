@@ -41,6 +41,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Muxer == nil { // external/--demo default: quince owns no muxer to restart
 		deps.Muxer = UnmanagedMuxer{}
 	}
+	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
+		deps.Ops = UnavailableDeviceOps{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -52,6 +55,10 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/devices", deps.handleDevices())
 	apiMux.HandleFunc("POST /api/devices/rescan", deps.handleRescan())
 	apiMux.HandleFunc("GET /api/devices/{udid}", deps.handleDevice())
+	apiMux.HandleFunc("POST /api/devices/{udid}/pair", deps.handlePair())
+	apiMux.HandleFunc("POST /api/devices/{udid}/pair/validate", deps.handlePairValidate())
+	apiMux.HandleFunc("POST /api/devices/{udid}/encryption", deps.handleEncryption())
+	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
 	apiMux.HandleFunc("GET /api/jobs", deps.handleJobs())
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())

@@ -200,3 +200,79 @@ func TestDevicesHygiene(t *testing.T) {
 		t.Fatalf("expected usb transport + last_seen: %+v", dev)
 	}
 }
+
+func TestEnrichOverlaysIdentityAndEmitsUpdate(t *testing.T) {
+	reg, sub := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	_ = drain(sub)
+
+	reg.Enrich(udidA, Identity{
+		Name: "synthetic-iphone", Model: "iPhone17,2", IOSVersion: "26.0.1",
+		Paired: "yes", BackupEncryption: "on",
+	})
+	if got := typesOf(drain(sub)); len(got) != 1 || got[0] != wire.EventDeviceUpdated {
+		t.Fatalf("enrich events = %v (want one device.updated)", got)
+	}
+	dev, _ := reg.Device(udidA)
+	if dev.Name != "synthetic-iphone" || dev.Model != "iPhone17,2" || dev.IOSVersion != "26.0.1" ||
+		dev.Paired != "yes" || dev.BackupEncryption != "on" {
+		t.Fatalf("overlaid identity = %+v", dev)
+	}
+	// The muxer-derived fields survive the overlay.
+	if dev.Transports.USB == nil || dev.LastSeen == "" {
+		t.Fatalf("presence lost after enrich: %+v", dev)
+	}
+}
+
+func TestEnrichEmptyFieldsLeaveHonestDefault(t *testing.T) {
+	reg, sub := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	_ = drain(sub)
+
+	// Name known, but pairing/encryption not determined ("" → keep "unknown", never guess).
+	reg.Enrich(udidA, Identity{Name: "synthetic-iphone"})
+	dev, _ := reg.Device(udidA)
+	if dev.Name != "synthetic-iphone" {
+		t.Fatalf("name not overlaid: %+v", dev)
+	}
+	if dev.Paired != "unknown" || dev.BackupEncryption != "unknown" {
+		t.Fatalf("empty identity fields must leave defaults: paired %q enc %q", dev.Paired, dev.BackupEncryption)
+	}
+}
+
+func TestEnrichNoChangeSuppressesUpdate(t *testing.T) {
+	reg, sub := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	id := Identity{Name: "synthetic-iphone", Paired: "yes", BackupEncryption: "on"}
+	reg.Enrich(udidA, id)
+	_ = drain(sub)
+
+	// Re-enriching with the identical identity emits nothing (keep the WS quiet).
+	reg.Enrich(udidA, id)
+	if got := drain(sub); len(got) != 0 {
+		t.Fatalf("no-op enrich emitted %v (want none)", typesOf(got))
+	}
+}
+
+func TestEnrichAbsentDeviceRetainedNoEmit(t *testing.T) {
+	reg, sub := newTestRegistry(t)
+
+	// Enrich a UDID with no live transport: retained, but nothing to update yet.
+	reg.Enrich(udidA, Identity{Name: "synthetic-iphone", Paired: "yes"})
+	if got := drain(sub); len(got) != 0 {
+		t.Fatalf("enrich of an absent device emitted %v (want none)", typesOf(got))
+	}
+	if _, ok := reg.Device(udidA); ok {
+		t.Fatal("absent device should not appear in the table from enrich alone")
+	}
+	// A later attach carries the retained identity immediately (device.attached shell).
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	evs := drain(sub)
+	if len(evs) != 1 || evs[0].Type != wire.EventDeviceAttached {
+		t.Fatalf("attach events = %v", typesOf(evs))
+	}
+	de, ok := evs[0].Data.(wire.DeviceEvent)
+	if !ok || de.Name != "synthetic-iphone" || de.Paired != "yes" {
+		t.Fatalf("attach shell missing retained identity: %+v", evs[0].Data)
+	}
+}
