@@ -6,7 +6,10 @@ password, and sees the device's real identity (name / model / iOS / paired / enc
 — all driven by supervised libimobiledevice CLIs, with no backup password ever reaching
 argv, logs, or the audit trail.
 
-**Status: APPROVED (pre-build spec-review gate cleared) — architect go with three
+**Status: CLOSED (2026-07-20) — built, all gates green, and lab gate 8 PASSED on real
+hardware** (pair via UI → recreate-still-paired → change_password + disable→enable, secrets
+proven absent from argv/env/log; four findings caught + fixed + CI-validated — decisions log
+(ba)). Originally **APPROVED at the pre-build spec-review gate — architect go with three
 amendments + two rulings, all folded in below; Operator acks recorded.** (program loop
 step 1 + decisions log (as)). The amendments: **(1)** persist pairing records into `/data`
 (design §6's promise; qn.3 is the rung that creates them) and prove it in gate 8 by a

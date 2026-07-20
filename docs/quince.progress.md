@@ -24,13 +24,15 @@ reconcile, the `devices.manage_muxer` config key, and a UI **Rescan** control; `
 **real** usbmuxd in the built image (`/api/health` → `muxer:{managed,state:"running"}`). **qn.2b
 is now DONE** — **lab gate 7 (managed USB + Rescan) PASSED on real hardware** (Operator-confirmed on
 staging; it surfaced + fixed a "live `/dev/bus/usb`" deploy-config gap, (av)); gate 8 (netmuxd-USB
-audition) was **re-homed to qn.7** with a named owner (not a silent defer, (aw)). **qn.3 is now BUILT
-(CI)** — `internal/deviceops` (pair/validate/info wrappers + backup-encryption management over a **pty**,
+audition) was **re-homed to qn.7** with a named owner (not a silent defer, (aw)). **qn.3 is BUILT +
+CLOSED** — `internal/deviceops` (pair/validate/info wrappers + backup-encryption management over a **pty**,
 never argv/env) + registry lockdown enrichment + the four frozen device-op endpoints + the `Op` lifecycle
 + pairing-record persistence + UI pair/encryption dialogs; full `make gates`/image/e2e green (spec-approved
-with the architect's three amendments + two Operator acks, all folded in). **Its lab gate 8 (fresh
-container → paired → encryption, on real hardware) is the remaining physical-presence step.** The
-qn.5-before-qn.4 order swap is also ruled in (ar).
+with the architect's three amendments + two Operator acks). **Lab gate 8 PASSED on real hardware
+(2026-07-20)** — fresh container → pair (UI) → recreate-still-paired (amendment 1) → change_password +
+disable→enable, secrets proven absent from argv/env/log; four findings caught + fixed + CI-validated
+(incl. a real enrichment auto-pair-on-locked-device bug). **qn.5 (storage) is the new frontier** (the
+qn.5-before-qn.4 order swap ruled in (ar)).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -38,7 +40,7 @@ qn.5-before-qn.4 order swap is also ruled in (ar).
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
 | qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
-| qn.3 | Device ops + Devices page | **BUILT (CI)** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints (pair/validate/encryption/ops) + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (added e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 (fresh container → paired → encryption on real hardware) PENDING — the physical-presence session** |
+| qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | outlined — **runs BEFORE qn.4** (order ruled in (ar)) |
 | qn.4 | Backup engine, both transports + headless CLI | outlined — after qn.5; closes M3 with the integrated e2e gate |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
@@ -584,3 +586,26 @@ on real traction).
   defaults. **Lab gate 8 (fresh container → paired → encryption on real hardware) is the
   remaining physical-presence step** — owned by this rung, not deferred. Not yet committed
   (awaiting Operator).
+- 2026-07-20: (ba) **qn.3 CLOSED — lab gate 8 PASSED on real hardware.** Deployed the qn.3
+  build to the staging CT (managed usbmuxd, live `/dev/bus/usb`) and drove the gate with a real
+  iPhone: **(1) pair** via the quince UI on a fresh container → `paired: yes`, with the record
+  written to `$QUINCE_DATA/lockdown` (proves `Backup()` fired = a real pair op, not enrichment);
+  **(2) persistence** (amendment 1) → `nerdctl compose down && up` → `lockdown: restored …
+  count:2` → still `SUCCESS: Validated`, no re-Trust — **proven twice** (a second redeploy for
+  the UI fix repeated it); **(3) encryption** → `change_password` then a full `disable → enable`
+  cycle, all succeeding, ending encryption **ON** with an Operator-held password; **(4) secrets
+  (story 5) on hardware** → the capture caught `idevicebackup2 -i -u <udid> {changepw,encryption
+  off,encryption on}` — **no password in argv**, `BACKUP_PASSWORD` env count **0**, clean logs —
+  the password reached the child only over the pty. **Four findings caught by the gate, all fixed
+  + CI-validated + committed as `qn.3 lab finding:`** — the substantive one: **enrichment
+  auto-paired a locked device** (`idevicepair validate` returns "passcode is set" for ANY locked
+  device regardless of pairing — observed on a fresh host with no record — so mapping it to
+  `paired: yes` + then doing the auto-pairing full `ideviceinfo` could silently trigger Trust;
+  fixed → locked ⇒ `paired: "unknown"`, and the full/auto-pairing read runs only for a confirmed
+  `validatePaired`, everything else uses the no-auto-pair simple read); plus three UI fixes (the
+  dashboard card's stale disabled Pair now routes to the details flow; the encryption mode
+  switcher reset after a completed op; a persistent "confirm on the device with its passcode"
+  hint; mode frozen at open + dialog auto-closes on success so the title no longer mismatches the
+  result). The lab gate did its job — a real device found a real code bug the CI fakes could not.
+  The paired staging container is **kept standing** as the qn.4/qn.5 base (Operator ack).
+  Frontier → **qn.5** (storage; qn.5-before-qn.4 per (ar)).
