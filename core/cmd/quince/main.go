@@ -28,8 +28,10 @@ import (
 	"github.com/novkostya/quince/core/internal/device"
 	"github.com/novkostya/quince/core/internal/deviceops"
 	"github.com/novkostya/quince/core/internal/httpapi"
+	"github.com/novkostya/quince/core/internal/id"
 	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/muxsup"
+	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
@@ -134,7 +136,8 @@ func serve(args []string) error {
 	// rescan → 409. The managed supervisor is wired in the non-demo branch when configured.
 	var devices httpapi.DeviceReader
 	var jobs httpapi.JobReader = httpapi.Empty{}
-	var versions httpapi.VersionReader = httpapi.Empty{}
+	var versions httpapi.VersionReader // assigned in both branches (demo → provider, else → storage)
+	var versionAdmin httpapi.VersionAdmin
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	var ops httpapi.DeviceOps // assigned in both branches below (demo → provider, else → manager)
 	if *demoMode {
@@ -142,6 +145,7 @@ func serve(args []string) error {
 		prov := demo.NewProvider(eventBus, log)
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
+		versionAdmin = prov
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
 		// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the
@@ -188,13 +192,37 @@ func serve(args []string) error {
 		ops = mgr
 		go deviceops.NewEnrichDriver(tools, reg, eventBus, log).Run(ctx)
 		log.Info("device ops ready (pair/encryption/enrichment)")
+
+		// Storage subsystem (qn.5): resolve the backend from config + a probe of /backups,
+		// then run first-class startup reconciliation BEFORE serving (design §5 — the disk is
+		// the source of truth; roll-forward completes half-done commits, adopts on-disk
+		// versions, marks vanished artifacts missing). The registry is the real VersionReader.
+		scfg := cfgSvc.Current().Storage
+		stBackend, backendName, reason := storage.Select(ctx, storage.Options{
+			Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
+			ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
+			ZFSHookCmd: scfg.ZFS.HookCmd, ZFSMirror: scfg.ZFS.Mirror,
+		}, log)
+		storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
+			storage.RetentionPolicy{
+				KeepRecent: scfg.Retention.KeepRecent,
+				KeepDaily:  scfg.Retention.KeepDaily,
+				KeepWeekly: scfg.Retention.KeepWeekly,
+			}, id.New, log)
+		if err := storageMgr.Reconcile(ctx); err != nil {
+			log.Error("storage: startup reconciliation failed", "error", err)
+		}
+		versions = storageMgr
+		versionAdmin = storageMgr
+		log.Info("storage subsystem ready", "backend", backendName, "reason", reason)
 	}
 
 	srv := &http.Server{
 		Addr: listen,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
-			Devices: devices, Jobs: jobs, Versions: versions, Muxer: muxer, Ops: ops,
+			Devices: devices, Jobs: jobs, Versions: versions, VersionAdmin: versionAdmin,
+			Muxer: muxer, Ops: ops,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

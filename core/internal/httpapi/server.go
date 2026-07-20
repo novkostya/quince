@@ -44,6 +44,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
 		deps.Ops = UnavailableDeviceOps{}
 	}
+	if deps.VersionAdmin == nil { // no storage subsystem wired → refuse honestly (503)
+		deps.VersionAdmin = UnavailableVersionAdmin{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -63,6 +66,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
+	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 
 	apiHandler := chain(apiMux, bodyLimit, deps.authGuard, deps.csrfGuard)

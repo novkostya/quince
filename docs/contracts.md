@@ -110,7 +110,10 @@ per-session, always.
 
 ```
 GET    /api/versions?udid              → {versions: Version[]}
-DELETE /api/versions/{id}              → 202            // confirmed destructive action
+DELETE /api/versions/{id}              → 202 | 404 | 503   // confirmed destructive action
+     // 202: artifact (snapshot or dir) + registry row removed, audited (event, no secret),
+     // version.deleted emitted. 404: unknown id. 503: no storage subsystem wired (--demo
+     // deletes fixtures). Error codes recorded qn.5 (implemented the frozen shape).
 POST   /api/versions/{id}/unlock {password} → Session
 POST   /api/sessions/{id}/lock         → 204
 GET    /api/sessions/{id}/browse?domain&prefix&cursor   → {entries: FileEntry[], next_cursor}

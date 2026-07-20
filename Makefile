@@ -111,7 +111,7 @@ gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
 	    if [ -n "$$unformatted" ]; then echo "gofmt needs to run on:"; echo "$$unformatted"; exit 1; fi; \
 	    go vet ./...; \
 	    golangci-lint run; \
-	    go test -race ./...'
+	    go test -race -cover ./...'
 
 .PHONY: fmt
 fmt: tc-go ## Go: gofmt -w (auto-format) + go mod tidy (run after editing core)

@@ -7,6 +7,7 @@ package demo
 
 import (
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -123,6 +124,27 @@ func (p *Provider) Versions(udid string) []wire.Version {
 		}
 	}
 	return out
+}
+
+// Delete removes a fixture version (satisfies httpapi.VersionAdmin so --demo exercises the
+// destructive path). Returns 202 on success, 404 for an unknown id.
+func (p *Provider) Delete(id string) (int, error) {
+	p.mu.Lock()
+	v, ok := p.versions[id]
+	if !ok {
+		p.mu.Unlock()
+		return http.StatusNotFound, nil
+	}
+	delete(p.versions, id)
+	for i, vid := range p.verOrder {
+		if vid == id {
+			p.verOrder = append(p.verOrder[:i], p.verOrder[i+1:]...)
+			break
+		}
+	}
+	p.mu.Unlock()
+	p.bus.PublishEvent(wire.EventVersionDeleted, v)
+	return http.StatusAccepted, nil
 }
 
 func strptr(s string) *string   { return &s }

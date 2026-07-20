@@ -23,9 +23,28 @@ type Deps struct {
 	Devices        DeviceReader
 	Jobs           JobReader
 	Versions       VersionReader
+	VersionAdmin   VersionAdmin
 	Muxer          MuxerControl
 	Ops            DeviceOps
 	AllowedOrigins []string
+}
+
+// VersionAdmin performs the destructive version operations (contracts §1 DELETE
+// /api/versions/{id} → 202, a confirmed destructive action). The real implementation is
+// *storage.Manager (non-demo) or the demo provider; UnavailableVersionAdmin stands in when no
+// storage subsystem is wired. Consumer-defined here (primitives only) so httpapi imports no
+// storage subsystem — same pattern as DeviceReader/MuxerControl/DeviceOps. Returns an HTTP
+// status so the handler maps outcomes without cross-package sentinel errors (202 = accepted).
+type VersionAdmin interface {
+	Delete(id string) (status int, err error)
+}
+
+// UnavailableVersionAdmin is the VersionAdmin used when no storage subsystem is wired: delete
+// reports 503 honestly (no silent no-op).
+type UnavailableVersionAdmin struct{}
+
+func (UnavailableVersionAdmin) Delete(string) (int, error) {
+	return http.StatusServiceUnavailable, nil
 }
 
 // DeviceOps drives the pair/validate/encryption device operations and the Op lifecycle
