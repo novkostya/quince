@@ -985,9 +985,11 @@ on real traction).
   **FOUR lab findings surfaced + filed as tasks** (invisible to the CI fakes — the gate did its
   job): (i) `deviceops.willEncrypt` maps an ABSENT `WillEncrypt` key (exit-0, empty — a device that
   never set a backup password) to `"unknown"` not `"off"`, so the Manage-encryption UI asks for a
-  *current* password on an unencrypted device + the off-warning banner never shows; (ii) `quince
-  backup <udid> --transport usb` fails — Go's `flag` stops at the positional udid, so `--transport`
-  is dropped → usage error (CI calls `StartBackup()` directly, bypassing arg parsing); (iii) the
+  *current* password on an unencrypted device + the off-warning banner never shows; (ii) **[FIXED 2026-07-20]** `quince
+  backup <udid> --transport usb` failed — Go's `flag` stopped at the positional udid, so `--transport`
+  was dropped → usage error (CI called `StartBackup()` directly, bypassing arg parsing). Fixed:
+  extracted a pure `parseBackupArgs` with a multi-parse loop that honours flags before OR after the
+  positional; red→green `TestParseBackupArgs` in `cmd/quince` (coverage 8.5%→14.9%); (iii) the
   version card's `Unlock` button (`ui/src/features/versions/VersionList.tsx:31-33` — a `disabled` qn.8
   placeholder) renders on EVERY version incl. unencrypted ones, implying a password gate an
   unencrypted backup doesn't have; fix = encryption-aware on `version.encrypted` (already used for the
