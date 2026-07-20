@@ -102,6 +102,19 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 		ds, snap := splitFull(argv[len(argv)-1])
 		udid := strings.TrimPrefix(ds, f.parent+"/")
 		return "", os.RemoveAll(filepath.Join(f.backups, udid, ".zfs", "snapshot", snap))
+	case "mirror":
+		// Host-side mirror verb: rebuild latest/ from working/ + swap; verdict COPIED on tmpfs.
+		udid := strings.TrimPrefix(argv[len(argv)-1], f.parent+"/")
+		mp := filepath.Join(f.backups, udid)
+		_ = os.RemoveAll(mp + "/latest.new")
+		if err := clonetree.Clone(mp+"/latest.new", mp+"/working", clonetree.Copy); err != nil {
+			return err.Error(), err
+		}
+		_ = os.RemoveAll(mp + "/latest")
+		if err := os.Rename(mp+"/latest.new", mp+"/latest"); err != nil {
+			return err.Error(), err
+		}
+		return "COPIED", nil // tmpfs → no block sharing
 	}
 	return "", nil
 }
@@ -119,16 +132,21 @@ func splitFull(full string) (ds, snap string) {
 	return full, ""
 }
 
-// newZFSManager builds a zfs-backend Manager backed by the fakeZFS.
+// newZFSManager builds a zfs-backend Manager backed by the fakeZFS (exec mode, copy mirror).
 func newZFSManager(t *testing.T, policy RetentionPolicy) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
+	return newZFSManagerCfg(t, policy, "exec", "copy")
+}
+
+// newZFSManagerCfg builds a zfs-backend Manager with a chosen zfs mode + mirror strategy.
+func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, mirror string) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
 	t.Helper()
 	backups := t.TempDir()
 	st := openStore(t)
 	parent := "tank/backups/iphone-backup"
 	f := &fakeZFS{backups: backups, parent: parent}
-	cli := newZFSCLI(parent, "exec", "", "zfs")
+	cli := newZFSCLI(parent, mode, "hook-placeholder", "zfs")
 	cli.run = f.run
-	be := newZFSBackend(context.Background(), cli, backups, "copy", "test", testLogger())
+	be := newZFSBackend(context.Background(), cli, backups, mirror, "test", testLogger())
 	m := NewManager(be, BackendZFS, st, st, bus.New(), backups, policy, seqID(), testLogger())
 	m.now = monotonicClock()
 	return m, be, f, backups, st

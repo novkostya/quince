@@ -205,12 +205,19 @@ If a live check contradicts canon (e.g. FICLONE unavailable where design assumes
 Recorded in Rung-ruled decisions once checked against the shipped tools/libs, code built to
 match:
 
-1. **FICLONE ioctl** API surface in the pinned `golang.org/x/sys/unix` (function name +
-   signature) and whether the dev box's `/backups` (ZFS on the PVE host, block-cloning-capable
-   2.2+?) actually passes the independence probe — decides whether CI proves `reflink` for real
-   or only via a forced backend.
-2. **`.zfs/snapshot/<snap>/` layout + FICLONE-from-snapshot** on the lab host: does cloning from
-   the snapshot mount succeed, or must the job-lock-guarded clone-from-`working/` fallback fire?
+1. **FICLONE ioctl — RESOLVED (gate 12 + the five-round investigation, decisions (bf)→(bk)).**
+   `golang.org/x/sys/unix` v0.47.0 exposes `unix.IoctlFileClone(destFd, srcFd int) error`
+   (verified). Block cloning **works on the pool** — but proven ONLY at the pool level
+   (`bcloneused`/`bclonesaved` +≈file-size, ALLOC flat); dataset-level `used`/`du` bills BRT
+   clones full-size like dedup (the accounting trap that misled the first read). AND FICLONE
+   returns **`EPERM` inside the unprivileged user-namespace** (LXC + the OCI container in it),
+   measured in the exact production mount shape — so in-container reflink is unavailable in the
+   secure topology; CI (unprivileged nerdctl + tmpfs) cannot prove reflink, the host/hook path
+   proves it. This drives the mirror ladder (below).
+2. **FICLONE-from-snapshot = `EXDEV` at EVERY layer — RESOLVED (definitive, direct-tested).** A
+   snapshot is a separate superblock; cross-superblock FICLONE is refused by the kernel, no mount
+   option changes it. So **all sharing strategies clone from `working/` under the per-UDID job
+   lock, never from the `.zfs` mount** (working/ == the snapshot's content under the lock).
 3. **`zfs` command surface** (`snapshot`/`create`/`list -t snapshot`/`destroy`) exit/text
    semantics for the exec path and the fake-CLI transcripts.
 4. **rclone filter anchoring** — confirm a leading-`/` anchored `--filter "- /…/working/**"`
@@ -424,6 +431,22 @@ Every hard rule / canon boundary this rung touches *or comes near*, one complian
   sync-simulation of rclone's anchored-filter semantics (incl. the negative over-match test), with
   the real `rclone` binary run in gate 12. `storage.AnchoredFilterRules` is the single source for
   the filter block shipped in `deploy/storage.md`.
+- **Mirror ladder — folds the (bi)/(bj)/(bk) ruling (stack D5).** The zfs `latest/` mirror
+  ALWAYS clones from `working/` (never `.zfs` — EXDEV at every layer), via the risk-dominance
+  ladder: **(i) hook configured → the constrained `mirror` verb rebuilds `latest/` HOST-side**
+  (`cp -a --reflink=always` + atomic swap; touches only the derived `latest/`, never snapshots),
+  reporting a host-side SHARED/COPIED verdict; **(ii) hookless → in-container reflink from
+  `working/`**; **(iii) `EPERM`/unsupported → hardlink-under-matrix** (gate 12c); **(iv) → copy**,
+  cost surfaced. A successful reflink self-selects (a non-sharing reflink is functionally a copy);
+  the **one measurement selection edge** (measured-not-sharing → hardlink) is taken only with a
+  usable channel — in-container has none yet (statfs `f_bavail` is a documented follow-up), so an
+  in-container reflink is reported **UNVERIFIED per (bk)**, never a silent zero-space claim, and
+  the risky downgrade is not taken. Every mode + honest claim is surfaced (`MirrorReport`, logged;
+  `LastMirror()` for `/api/health`). CI proves the fallthrough (reflink-unavailable → hardlink →
+  copy) + the hook-verb argv (fake hook, verdict parsed); the reflink-shares + host-side-hook
+  paths are proven on the host/lab (gate 12). **Hardlink's tier is validated by gate 12c
+  (pending on hardware) — flagged.**
 - **Prune trigger (A3)** = post-commit + explicit call, no scheduler this rung.
-- **`deploy/storage.md`** ships the constrained `quince-zfs-helper` forced-command reference and
-  the anchored rclone filter block (both generic — no Operator infra).
+- **`deploy/storage.md`** ships the constrained `quince-zfs-helper` forced-command reference
+  (now incl. the **`mirror` verb**), and the anchored rclone filter block (both generic — no
+  Operator infra).

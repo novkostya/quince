@@ -78,18 +78,57 @@ func TestZFSDeleteDestroysSnapshot(t *testing.T) {
 	}
 }
 
+// Stack D5 ladder (i): hook configured → latest/ rebuilt HOST-side via the `mirror` verb.
+func TestZFSHookMirror(t *testing.T) {
+	m, be, f, backups, _ := newZFSManagerCfg(t, generousPolicy(), "hook", "auto")
+	commitGoodTree(t, m, testUDID)
+	if _, err := ReadMarker(zfsLatest(backups, testUDID)); err != nil {
+		t.Fatalf("latest/ not built via the hook mirror verb: %v", err)
+	}
+	if be.LastMirror().Mode != MirrorHookReflink {
+		t.Fatalf("mirror mode = %q, want %q", be.LastMirror().Mode, MirrorHookReflink)
+	}
+	// The mirror verb ran as an argv (no shell), through the hook.
+	assertCleanArgv(t, f.calls, "mirror")
+	t.Logf("hook mirror claim: %q", be.LastMirror().Claim)
+}
+
+// Stack D5 ladder (ii)-(iv): hookless → in-container reflink → hardlink-under-matrix → copy,
+// self-selecting. On the CI filesystem reflink is unavailable, so it falls through and reports
+// an honest non-zero-space claim (never a silent zero-space assertion).
+func TestZFSMirrorInContainerLadder(t *testing.T) {
+	m, be, _, backups, _ := newZFSManagerCfg(t, generousPolicy(), "exec", "auto")
+	commitGoodTree(t, m, testUDID)
+	if _, err := ReadMarker(zfsLatest(backups, testUDID)); err != nil {
+		t.Fatalf("latest/ not built: %v", err)
+	}
+	r := be.LastMirror()
+	switch r.Mode {
+	case MirrorReflink, MirrorHardlink, MirrorCopy:
+		t.Logf("in-container ladder selected mode=%q claim=%q", r.Mode, r.Claim)
+	default:
+		t.Fatalf("unexpected in-container mirror mode %q", r.Mode)
+	}
+	if r.Claim == "" {
+		t.Fatal("mirror claim must be surfaced, never empty")
+	}
+}
+
 // assertCleanArgv finds a call for op and checks it is an argv array with no shell metacharacters
 // (secrets/subprocess hygiene: commands are never shell strings — design §6).
 func assertCleanArgv(t *testing.T, calls [][]string, op string) {
 	t.Helper()
 	for _, c := range calls {
-		if len(c) >= 2 && c[1] == op {
-			if c[0] != "zfs" {
-				t.Fatalf("argv[0] = %q, want zfs", c[0])
+		// The op is at index 1 in exec mode (["zfs", op, …]); in hook mode the hook argv
+		// precedes it. Find the op anywhere and assert every element is metacharacter-free
+		// (the real hygiene invariant: argv arrays, never shell strings — design §6).
+		for _, a := range c {
+			if a != op {
+				continue
 			}
-			for _, a := range c {
-				if strings.ContainsAny(a, " \t;|&$`\n") {
-					t.Fatalf("argv element %q contains a shell metacharacter", a)
+			for _, e := range c {
+				if strings.ContainsAny(e, " \t;|&$`\n") {
+					t.Fatalf("argv element %q contains a shell metacharacter", e)
 				}
 			}
 			return

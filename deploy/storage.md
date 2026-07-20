@@ -46,7 +46,8 @@ client — the client cannot escape it):
 ```sh
 #!/bin/sh
 # Constrained ZFS helper for quince. Allows ONLY:
-#   snapshot|destroy|list on @quince-* snapshots under $PARENT, and create of children of $PARENT.
+#   snapshot|destroy|list on @quince-* snapshots under $PARENT, create of children of $PARENT,
+#   and `mirror` (rebuild the DERIVED latest/ host-side — never a snapshot).
 # Dataset destroy is intentionally NOT reachable.
 set -eu
 PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
@@ -57,10 +58,35 @@ case "$op" in
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
   destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
+  mirror)   # rebuild latest/ from working/ HOST-side (where FICLONE works even when the
+            # container's unprivileged userns forbids it — gate-12 finding). Touches ONLY the
+            # derived latest/ (rebuildable), NEVER a snapshot: bounded blast radius. Reports
+            # SHARED/COPIED so quince can make an honest space claim (stack D5 (bi)/(bk)).
+            case "$target" in "$PARENT"/*)
+              mp=$(zfs get -H -o value mountpoint "$target") || exit 1
+              [ -d "$mp/working" ] || { echo "no working/" >&2; exit 1; }
+              rm -rf "$mp/latest.new"
+              a0=$(zfs get -Hp -o value available "$target")
+              cp -a --reflink=always "$mp/working" "$mp/latest.new"   # reflink under the job lock
+              zpool sync "${PARENT%%/*}" 2>/dev/null || sync          # settle txg accounting
+              a1=$(zfs get -Hp -o value available "$target")
+              rm -rf "$mp/latest.old"; [ -d "$mp/latest" ] && mv "$mp/latest" "$mp/latest.old"
+              mv "$mp/latest.new" "$mp/latest"; rm -rf "$mp/latest.old"   # atomic swap
+              sz=$(du -sb "$mp/latest" | cut -f1); drop=$((a0 - a1))
+              [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED   # pool-level sharing verdict
+              exit 0 ;; esac ;;
 esac
 echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
 exit 1
 ```
+
+The `mirror` verb is the stack D5 ladder's tier (i): with a hook configured, quince delegates the
+`latest/` rebuild to the host, where block cloning is not blocked by the unprivileged
+user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb touches only the
+derived, rebuildable `latest/` — never a snapshot — so even a buggy verb cannot damage a canonical
+version. It emits `SHARED`/`COPIED` so quince reports an honest space claim rather than assuming
+zero-space. Hookless deployments fall through the in-container ladder (reflink → hardlink-under-
+matrix → copy), reporting sharing UNVERIFIED where no measurement channel is available.
 
 Then `storage.zfs.hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes zfsuser@zfshost"` (the helper
 runs regardless of the command text; quince appends the operation + target as argv).

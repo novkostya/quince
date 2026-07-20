@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
@@ -26,6 +27,23 @@ type zfsBackend struct {
 	mirrorCfg  string // auto | reflink | hardlink | copy
 	appVersion string
 	log        *slog.Logger
+
+	mu         sync.Mutex
+	lastMirror MirrorReport // surfaced mirror mode + honest space claim (stack D5 (bj)/(bk))
+}
+
+func (b *zfsBackend) setMirror(r MirrorReport) {
+	b.mu.Lock()
+	b.lastMirror = r
+	b.mu.Unlock()
+	b.log.Info("zfs latest/ mirror built", "mode", r.Mode, "claim", r.Claim)
+}
+
+// LastMirror returns the most recent mirror report (for /api/health surfacing).
+func (b *zfsBackend) LastMirror() MirrorReport {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastMirror
 }
 
 func newZFSBackend(baseCtx context.Context, cli *zfsCLI, backups, mirrorCfg, appVersion string, log *slog.Logger) *zfsBackend {
@@ -145,31 +163,42 @@ func (b *zfsBackend) finishCommit(j *Journal) error {
 	return removeJournal(dev)
 }
 
-// rebuildLatest materializes latest/ from the snapshot's .zfs working path (immutable source)
-// via the resolved mirror strategy, then atomically swaps it in.
-func (b *zfsBackend) rebuildLatest(udid, snap string) error {
-	src := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", snap, "working")
-	if _, err := os.Stat(src); err != nil {
-		return fmt.Errorf("storage: snapshot working path %s not present: %w", src, err)
+// rebuildLatest materializes latest/ from the just-committed version and atomically swaps it in,
+// via the stack D5 mirror ladder ((bi)/(bj)/(bk)). It ALWAYS clones from working/ — NEVER the
+// .zfs snapshot mount: reflink-from-snapshot is EXDEV at every layer (cross-superblock, kernel
+// behavior), and working/ holds the snapshot's exact content under the per-UDID job lock. The
+// chosen mode + honest space claim are recorded (surfaced in logs + /api/health).
+func (b *zfsBackend) rebuildLatest(udid, _ string) error {
+	working := zfsWorking(b.backups, udid)
+	if isEmptyDir(working) {
+		return fmt.Errorf("storage: working/ empty at mirror build for %s", udid)
 	}
 	latest := zfsLatest(b.backups, udid)
+
+	// (i) hook configured → the constrained `mirror` verb rebuilds latest/ HOST-side, where
+	// FICLONE works even when the container's unprivileged userns forbids it (gate-12 finding
+	// (bi)). It reflinks from working/ under the job lock + atomic-swaps, touching ONLY the
+	// derived latest/ (never snapshots) — a bounded blast radius since latest/ is rebuildable.
+	if b.cli.mode == "hook" {
+		ctx, cancel := b.opCtx()
+		defer cancel()
+		shared, err := b.cli.Mirror(ctx, udid)
+		if err != nil {
+			return err
+		}
+		b.setMirror(MirrorReport{Mode: MirrorHookReflink, Claim: hookClaim(shared)})
+		return nil
+	}
+
+	// (ii)-(iv) in-container / delegated-exec path: build into staging, then atomic-swap.
 	staging := latest + ".new"
 	old := latest + ".old"
 	if err := os.RemoveAll(staging); err != nil {
 		return err
 	}
-	strategy := b.resolveMirror(deviceDir(b.backups, udid))
-	if err := clonetree.Clone(staging, src, strategy); err != nil {
-		// reflink can refuse clones from a snapshot mount — fall back once to copy, surfaced.
-		if strategy == clonetree.Reflink && errors.Is(err, clonetree.ErrReflinkUnsupported) {
-			b.log.Warn("storage: reflink-from-snapshot refused — falling back to copy for latest/ mirror", "udid", udid)
-			_ = os.RemoveAll(staging)
-			if err := clonetree.Clone(staging, src, clonetree.Copy); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+	report, err := b.buildMirrorInContainer(staging, working)
+	if err != nil {
+		return err
 	}
 	// Atomic swap: latest → latest.old, latest.new → latest, rm latest.old.
 	_ = os.RemoveAll(old)
@@ -183,22 +212,57 @@ func (b *zfsBackend) rebuildLatest(udid, snap string) error {
 	if err := os.Rename(staging, latest); err != nil {
 		return err
 	}
+	b.setMirror(report)
 	return os.RemoveAll(old)
 }
 
-func (b *zfsBackend) resolveMirror(deviceDir string) clonetree.Strategy {
+// buildMirrorInContainer runs the reflink → hardlink-under-matrix → copy ladder from working/
+// (stack D5 (bk)), self-selecting by risk dominance. reflink is attempted first (a non-sharing
+// reflink is functionally a copy — same correctness/cost); EPERM/unsupported (the unprivileged-
+// userns case, gate-12 finding (bi)) falls through to hardlink, then copy. There is no usable
+// in-container measurement channel yet (the hook path measures host-side; the syscall statfs
+// channel is a documented follow-up), so a successful reflink is reported UNVERIFIED per (bk) —
+// never a silent zero-space claim — and the risky measured-not-sharing→hardlink downgrade is
+// NOT taken absent a channel (reflink wins on the risk asymmetry). Every degraded mode is
+// surfaced (log + report). Note: the hardlink tier's safety is validated by gate 12c (the
+// destructive matrix; owned by this rung, pending on hardware).
+func (b *zfsBackend) buildMirrorInContainer(staging, working string) (MirrorReport, error) {
 	switch b.mirrorCfg {
-	case "reflink":
-		return clonetree.Reflink
 	case "hardlink":
-		return clonetree.Hardlink
+		return MirrorReport{MirrorHardlink, "hardlink (explicit) — matrix-gated (gate 12c)"},
+			clonetree.Clone(staging, working, clonetree.Hardlink)
 	case "copy":
-		return clonetree.Copy
-	default: // auto: prefer reflink, else copy (hardlink from a read-only snapshot is rarely apt)
-		if clonetree.ReflinkProbe(deviceDir) {
-			return clonetree.Reflink
-		}
-		return clonetree.Copy
+		return MirrorReport{MirrorCopy, "copy (explicit) — full-backup-size write per commit"},
+			clonetree.Clone(staging, working, clonetree.Copy)
+	}
+	// auto / reflink: reflink from working/.
+	err := clonetree.Clone(staging, working, clonetree.Reflink)
+	if err == nil {
+		return MirrorReport{MirrorReflink, claimFor(sharingUnknown)}, nil
+	}
+	if !errors.Is(err, clonetree.ErrReflinkUnsupported) {
+		return MirrorReport{}, err
+	}
+	_ = os.RemoveAll(staging)
+	b.log.Warn("storage: in-container reflink unavailable (EPERM/unsupported — unprivileged userns) → hardlink-under-matrix")
+	if err := clonetree.Clone(staging, working, clonetree.Hardlink); err == nil {
+		return MirrorReport{MirrorHardlink, "hardlink-under-matrix (reflink unavailable) — gated on gate 12c"}, nil
+	}
+	_ = os.RemoveAll(staging)
+	b.log.Warn("storage: hardlink unavailable → full copy of latest/ (full-backup-size write per commit; surfaced degraded mode)")
+	return MirrorReport{MirrorCopy, "copy (reflink+hardlink unavailable) — full-backup-size write per commit"},
+		clonetree.Clone(staging, working, clonetree.Copy)
+}
+
+// hookClaim renders the honest space claim for a host-side hook mirror given its measured verdict.
+func hookClaim(shared sharingResult) string {
+	switch shared {
+	case sharingYes:
+		return "zero-space verified (host-side reflink via hook; pool-level sharing confirmed)"
+	case sharingNo:
+		return "host-side reflink did not share — full-backup-size write per commit (surfaced)"
+	default:
+		return "host-side reflink via hook; sharing unverified — budget full-copy space cost"
 	}
 }
 

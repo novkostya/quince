@@ -121,6 +121,32 @@ func (c *zfsCLI) DestroySnapshot(ctx context.Context, udid, snap string) error {
 	return nil
 }
 
+// Mirror runs the constrained host-side `mirror` verb (HOOK mode only; stack D5 ladder (i),
+// (bi)): the helper rebuilds latest/ from working/ via `cp -a --reflink=always` under the job
+// lock + atomic swap — touching ONLY the derived latest/, never snapshots (bounded blast radius)
+// — where FICLONE works even though the container's unprivileged userns forbids it. The helper
+// reports whether the clone actually shared blocks (host-side, a reliable pool-level channel:
+// `zfs list -o avail` or `zpool get bclone*` delta), printed as SHARED / COPIED; quince maps
+// that to the honest space claim.
+func (c *zfsCLI) Mirror(ctx context.Context, udid string) (sharingResult, error) {
+	ds := c.dataset(udid)
+	if !datasetPattern.MatchString(ds) {
+		return sharingUnknown, fmt.Errorf("storage: invalid dataset name %q", ds)
+	}
+	out, err := c.run(ctx, c.argv("mirror", ds))
+	if err != nil {
+		return sharingUnknown, fmt.Errorf("zfs mirror %s: %w: %s", ds, err, strings.TrimSpace(out))
+	}
+	switch {
+	case strings.Contains(out, "SHARED"):
+		return sharingYes, nil
+	case strings.Contains(out, "COPIED"):
+		return sharingNo, nil
+	default:
+		return sharingUnknown, nil // helper gave no verdict → honest UNVERIFIED
+	}
+}
+
 // snapNameFor builds quince's snapshot short name: quince-<versionID>-<YYYY-MM-DD>.
 func snapNameFor(versionID string, created time.Time) string {
 	return "quince-" + versionID + "-" + created.UTC().Format(snapDateLayout)
