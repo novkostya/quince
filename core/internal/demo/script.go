@@ -70,7 +70,7 @@ func (p *Provider) deviceChurn(ctx context.Context) {
 			p.mu.Lock()
 			pad := p.devices[udidPad]
 			delete(p.devices, udidPad)
-			p.order = []string{udidPhone}
+			p.order = removeUDID(p.order, udidPad) // drop ONLY the pad — keep phone + on-demand devices
 			p.mu.Unlock()
 			p.bus.PublishEvent(wire.EventDeviceDetached, wire.DeviceEvent{Device: pad, Transport: "wifi"})
 		} else {
@@ -82,12 +82,27 @@ func (p *Provider) deviceChurn(ctx context.Context) {
 				BackupEncryption: "off", LastSeen: now,
 			}
 			p.devices[udidPad] = pad
-			p.order = []string{udidPhone, udidPad}
+			p.order = append(removeUDID(p.order, udidPad), udidPad) // re-add pad without dropping the others
 			p.mu.Unlock()
 			p.bus.PublishEvent(wire.EventDeviceAttached, wire.DeviceEvent{Device: pad, Transport: "wifi"})
 		}
 		present = !present
 	}
+}
+
+// removeUDID returns order without udid, preserving every other entry. deviceChurn uses it so
+// toggling the pad's Wi-Fi presence never drops the Run()-seeded on-demand devices (spare-iphone,
+// new-iphone) — the qn.4b e2e (story 4) depends on their persistence past the first churn tick.
+// Before this, churn hardcoded p.order to phone(+pad) and wiped the on-demand devices after 20 s,
+// so story 4 only passed if it happened to run inside that window (flaked red on slower CI runners).
+func removeUDID(order []string, udid string) []string {
+	out := make([]string, 0, len(order))
+	for _, u := range order {
+		if u != udid {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // jobLoop re-drives the scripted backup forever with a pause between runs.
