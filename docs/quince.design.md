@@ -155,7 +155,12 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   **escape hatch** is `quince device repair-working-copy <udid>` (zfs: rebuild
   `working/` from the last good snapshot; reserved semantically now, implemented in
   qn.5, never automatic in v0.1). Never two concurrent jobs per UDID. Transport policy
-  `auto` prefers USB when plugged, Wi-Fi otherwise.
+  `auto` prefers USB when plugged, Wi-Fi otherwise — and resolves against **current
+  presence only**: a device on neither transport is **refused actionably** (no job
+  minted; the UI disables "Back up now" with the reason), because a guessed transport
+  would persist a dishonest `Job.transport` (the contract stores only concrete
+  `usb`/`wifi`). Explicit `usb`/`wifi` keeps the start-then-connect
+  `waiting_for_device` flow. (Ruled at the qn.4b spec review, decisions log (bp).)
 
 There is no post-backup indexing state: backup content is only ever read lazily inside
 an unlocked viewer session (§7), so success is defined purely by verify + commit.
