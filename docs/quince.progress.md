@@ -49,7 +49,20 @@ disk-low, startup job reconciliation), the `jobs` store + command surface (`POST
 `job.*`), and the `quince backup` CLI; `make gates`/image/e2e green, CI stories 1–14 (incl.
 wifi-torn→`connection_lost`, verify-gate→`failed`, single-flight→409). **Lab gate 15 (real
 encrypted USB backup e2e + kill-matrix + the re-homed gate-12 legs) is the remaining hardware step,
-owned by qn.4a** ((bp)). Frontier stays **qn.4a** until gate 15; then → **qn.4b** (closes M3).
+owned by qn.4a** ((bp)). **qn.4b is now BUILT (CI-proven)** — transport **`auto` resolution**
+(`StartBackup` resolves against current presence — prefer USB when plugged, else Wi-Fi — stores the
+CONCRETE transport on the `Job`, never `"auto"`; a device on neither transport → actionable **422**,
+no job minted, design §4/(bp)), the **`quince versions verify`** + **`device repair-working-copy`**
+CLI escape hatches (thin `buildStorage` + `storage.VerifyVersion`/`VerifyLatest`, browseRoot-resolved,
+no new backend surface), the **live demo `JobControl`** (scripts on-demand jobs + a seeded failed job
+for the retry affordance; single-flight shared with the ambient loop — reversing qn.4a's 503), and
+the **UI** (live "Back up now" w/ transport override, one-tap **Retry** on failed intent groups,
+**Cancel** on the running job — details page + dashboard card); `make gates`/image/e2e green, e2e
+**story 4** (Back up now → cancel → retry) + the qn.4a Wi-Fi-success coverage finding retired (a
+`wifi-incremental-success` story). **Lab gate 11 (both-transports UI-driven backup + honest Wi-Fi
+disconnect) + gate 12c (destructive hardlink-safety matrix) — the consolidated hardware day with
+qn.4a's gate 15 — remain the hardware step**, owned by qn.4b. Frontier is **qn.4b** until the
+hardware day; **M3 closes then.**
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -60,7 +73,7 @@ owned by qn.4a** ((bp)). Frontier stays **qn.4a** until gate 15; then → **qn.4
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
 | qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built (CI-proven); lab gate 15 (hardware) pending** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Lab gate 15 (real encrypted USB backup e2e + kill-matrix + the re-homed gate-12 legs: host `mirror` verb, iMazing, syncoid) owned by this rung** — the hardware session; interface facts 1 (symlinked target) + 5 (no-secret-for-backup) verify-live there. Not committed (awaiting Operator) |
-| qn.4b | Wi-Fi first-class + transport policy + job history UI (closes M3) | outlined — after qn.4a; NOT a Wi-Fi demotion ((h) stands) |
+| qn.4b | Wi-Fi first-class + transport policy + job-history UI (closes M3) | **built (CI-proven); lab gate 11/12c (hardware) pending** — transport **`auto` resolution** (prefer-USB-when-plugged, absent→**422** no job, concrete transport stored) + httpapi passes `auto` through; **`quince versions verify <id>\|--udid`** + **`device repair-working-copy <udid>`** CLI escape hatches (`storage.VerifyVersion`/`VerifyLatest`, browseRoot-resolved, no new backend surface); **live demo `JobControl`** (on-demand scripted jobs + seeded failed job for retry; single-flight; reverses qn.4a's 503); **UI** live Back up now (auto + transport override) / one-tap Retry on failed intent groups / Cancel on running job (details page + dashboard card). `make gates`/image/e2e green (e2e **story 4**: Back up now → cancel → retry). Retired the qn.4a Wi-Fi-success coverage finding (`wifi-incremental-success` story). Coverage backup **83.4%** / demo **55.3%** (was 0) / storage **78.2%** / httpapi 72.2% / cmd/quince 8.5% (CLI wiring hw-exercised). NOT a Wi-Fi demotion ((h) stands). **Lab gate 11 (both-transports UI-driven + honest Wi-Fi disconnect) + 12c (destructive hardlink matrix) = the consolidated hardware day with qn.4a gate 15** |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + netmuxd co-supervision + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
@@ -893,3 +906,44 @@ on real traction).
   **auto-open the pair dialog** on arrival — keeps qn.3's "narrated flow lives on details"
   decision, just makes the click deliver on its label. Same pattern applies to any future
   card action that lives as a dialog on details. Small; no contract change.
+- 2026-07-20: (br) **qn.4b BUILT (CI) — Wi-Fi first-class + transport policy + job-history UI; M3's
+  CI half closed.** Cleared the pre-build spec-review gate ((bp)): spec + Rule check → architect
+  APPROVED, with the flagged `auto`-when-absent edge **ratified as canon** (refuse actionably, design
+  §4). **Handoff review of qn.4a: CLEAN** (no blocker/major; `make gates` green on the inherited tip,
+  the consumed seams re-run verbose; one minor coverage finding — the shipped-unexercised
+  `wifi-incremental-success`/`encryption-changed` transcripts — **retired** here by a Wi-Fi-success
+  story). Shipped: **transport `auto` resolution** in `backup.Engine` (`resolveTransport` — prefer
+  USB when present else Wi-Fi, store the CONCRETE `usb`/`wifi` on the `Job` never `"auto"`, absent →
+  actionable **422** with no job minted; explicit `usb`/`wifi` keep the start-then-connect wait) +
+  httpapi passes `auto` through; the **`quince versions verify <id>|--udid`** + **`quince device
+  repair-working-copy <udid>`** CLI escape hatches (design §4; CLI-only, no REST/contract) on a
+  factored-out **`buildStorage`** (storage-only, no muxer/registry/engine goroutines) + a thin
+  same-track **`storage.Manager.VerifyVersion`/`VerifyLatest`** (resolves the tree via the existing
+  `browseRoot` — works for latest/archived/zfs-snapshot, **no new backend method**); the **live demo
+  `JobControl`** (`StartBackup`/`CancelJob` scripting on-demand jobs through the real state names, a
+  Run()-seeded stable spare device + a seeded failed job so the retry affordance is exercisable,
+  per-UDID single-flight shared with the ambient loop) — **reversing qn.4a's demo-503** (its own
+  named condition — an e2e that posts jobs — is now met); and the **UI** (live "Back up now" with a
+  transport override when on both, one-tap **Retry** on failed intent groups carrying `retry_of`,
+  **Cancel** on the running job; details page + dashboard card; assisted narration, honest disabled
+  states, no fabricated progress). **Folded the (bq) DeviceCard bug fix** (Operator-found, assigned
+  to this rung): the dashboard card's **Pair** now deep-links a pair *intent* (react-router state)
+  that **auto-opens the pairing dialog** on the details page — the click delivers on its label, and
+  qn.3's narrated-flow-on-details decision stands (no contract change; a Run()-seeded unpaired demo
+  device + an e2e assertion prove card Pair → dialog visible). **`make gates` + `make image` +
+  `make gates-ui-e2e` green**; new
+  e2e **story 4** (Back up now → live cancel → retry a failed backup, all against `--demo`). CI Go
+  stories: `auto`→concrete + both→USB, `auto`-absent→422-no-job, Wi-Fi success replay (retires the
+  finding), retry-chain, cancel, demo single-flight/cancel/retry, `versions verify` good/torn/unknown.
+  **Coverage:** backup **83.4%**, demo **55.3%** (was 0), storage **78.2%**, httpapi 72.2%,
+  cmd/quince 8.5%; **known-untested** (accepted debt): the `cmd/quince` CLI command wiring
+  (`versions`/`device` verbs + `buildStorage` — the storage/engine logic they call is tested; the
+  verbs are hardware/integration-exercised), the demo `waitStep` shutdown-`stop` branch, and the
+  storage reflink leaf (unchanged from qn.5). Contracts §1's `auto` note updated to "implemented"
+  (docs-part-of-the-diff). **NOT proven on hardware — the consolidated hardware day (architect note,
+  (bp)):** qn.4a gate 15 (CLI USB + kill-matrix + mirror/iMazing/syncoid) → **qn.4b gate 11**
+  (UI-driven backup over **both** transports + an injected Wi-Fi mid-backup disconnect landing
+  `connection_lost`) + **gate 12c** (the destructive hardlink-safety matrix), one Operator session;
+  the Wi-Fi legs need netmuxd *running* (started for the session — the binary ships since qn.0;
+  co-supervision stays qn.7). Frontier stays **qn.4b** until the hardware day; **M3 closes then.**
+  **Landed on `main` (CI half)** per the qn.4a relaxed-order precedent; the lab gate 11/12c findings land later as labeled commits.

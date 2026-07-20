@@ -73,12 +73,15 @@ GET  /api/ops/{op_id}                  → Op
 
 ```
 POST /api/jobs {udid, transport: "usb"|"wifi"|"auto", retry_of?}   → 202 Job
-     // Error codes (implemented qn.4a): 409 a backup is already running for this UDID
-     // (never two concurrent jobs per device); 422 bad/omitted transport OR transport:"auto"
-     // (automatic selection is resolved in qn.4b — until then choose usb|wifi); 404 unknown
-     // device; 503 no backup engine wired (e.g. --demo, whose scripted jobs populate the read
-     // surface but expose no start/cancel). retry_of (optional) sets the assisted-model retry
-     // chain: the new job inherits intent_id from the chain root and increments attempt.
+     // Error codes: 409 a backup is already running for this UDID (never two concurrent jobs
+     // per device); 422 bad/omitted transport, OR transport:"auto" when the device is present
+     // on NEITHER transport (qn.4b, design §4/(bp): auto resolves against current presence —
+     // prefer USB when plugged, else Wi-Fi — and refuses actionably when absent, since a guessed
+     // transport would persist a dishonest Job.transport; the Job stores the resolved concrete
+     // usb|wifi, never "auto"); 404 unknown device; 503 no backup engine wired (e.g. --demo before
+     // qn.4b; from qn.4b --demo scripts on-demand jobs and the command surface is live). retry_of
+     // (optional) sets the assisted-model retry chain: the new job inherits intent_id from the
+     // chain root and increments attempt.
 GET  /api/jobs?cursor&limit&udid                        → {jobs: Job[], next_cursor}
      // cursor pagination newest-first; the cursor is the last job id of the prior page.
 GET  /api/jobs/{id}                                     → Job
