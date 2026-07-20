@@ -42,7 +42,14 @@ proved block cloning works at the POOL level but EPERMs in the unprivileged user
 ladder clones from `working/` (never `.zfs`) via a host-side hook `mirror` verb / in-container
 reflink / hardlink / copy. **Lab gate 12's remaining hardware legs (host-side mirror verb,
 iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm) — named owner, not a silent
-defer). Frontier → **qn.4a** (backup engine; closes M3 with qn.4b).
+defer). **qn.4a is now BUILT (CI-proven)** — the `internal/backup` job engine drives `idevicebackup2`
+through the state machine into qn.5 storage (per-UDID single-flight, streaming supervisor with the
+`<target>/<UDID>` symlink adapter, transcript-grounded parser, activity-sampler liveness + A3
+disk-low, startup job reconciliation), the `jobs` store + command surface (`POST /api/jobs`, cancel,
+`job.*`), and the `quince backup` CLI; `make gates`/image/e2e green, CI stories 1–14 (incl.
+wifi-torn→`connection_lost`, verify-gate→`failed`, single-flight→409). **Lab gate 15 (real
+encrypted USB backup e2e + kill-matrix + the re-homed gate-12 legs) is the remaining hardware step,
+owned by qn.4a** ((bp)). Frontier stays **qn.4a** until gate 15; then → **qn.4b** (closes M3).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -52,7 +59,7 @@ defer). Frontier → **qn.4a** (backup engine; closes M3 with qn.4b).
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
-| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | outlined — after qn.5; split from qn.4 ((be)); CI replays ALL transcripts incl. Wi-Fi torn sessions |
+| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built (CI-proven); lab gate 15 (hardware) pending** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Lab gate 15 (real encrypted USB backup e2e + kill-matrix + the re-homed gate-12 legs: host `mirror` verb, iMazing, syncoid) owned by this rung** — the hardware session; interface facts 1 (symlinked target) + 5 (no-secret-for-backup) verify-live there. Not committed (awaiting Operator) |
 | qn.4b | Wi-Fi first-class + transport policy + job history UI (closes M3) | outlined — after qn.4a; NOT a Wi-Fi demotion ((h) stands) |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + netmuxd co-supervision + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined |
@@ -829,3 +836,35 @@ on real traction).
   stand; no incident. Standing lesson kept: the gate cannot see pre-existing lines — a
   whole-tree `privacy-scan-all` target remains available as a future hardening if a genuinely
   sensitive pattern is ever added. Bare hostnames/IPs/MACs remain firmly private.
+- 2026-07-20: (bp) **qn.4a BUILT (CI) — the backup engine drives idevicebackup2 end-to-end.**
+  Cleared the pre-build spec-review gate: spec + Rule check → **architect APPROVED with three
+  amendments (1 startup job-row reconciliation story + explicit two-reconciler order; 2 the
+  `waiting_for_device` bound named `const`; 3 the sampler free-space / `disk_low` leg — the
+  implementer's "A3", ACCEPTED) + two ratifications (the double-`Verify` stands; `transport:auto`
+  stays deferred to qn.4b) + one correction (no rung numbers in the `auto` 422 API string)**, all
+  folded in. Shipped: **`internal/backup`** — the `Job` state machine (per-UDID single-flight),
+  the `idevicebackup2` streaming supervisor (argv/`setpgid`/group-kill), a transcript-grounded
+  tolerant parser, the activity-sampler liveness (staged, passcode-paused, startup-grace, + A3
+  free-space `disk_low` warning surfaced via `job.log`/`slog`, never a silent kill), preflight
+  (presence + pairing + encryption policy + disk headroom + Seed), the Seed→`Verify`→`CommitJob`/
+  `Discard` handoff, and **startup job-row reconciliation** (crash-orphans → `connection_lost`, a
+  rolled-forward commit → `succeeded`, run AFTER storage reconciliation); a **`jobs` table +
+  registry** in `internal/store` (real `JobReader`, cursor pagination); the **job command surface**
+  (`POST /api/jobs` 202/409/422/404/503, `POST …/cancel`, `JobControl` consumer interface, `job.*`
+  events) + contracts §1 error codes recorded; the **`quince backup` CLI** (`DriveToCompletion`)
+  via a shared `cmd/quince` `buildLiveStack` (serve + CLI); and the **six lab transcripts** +
+  meta + a fake-`idevicebackup2` replayer. `make gates`/image/e2e green. **Two RULINGS that drove
+  the build (both rung-local, in the qn.4a spec):** (1) *the Wi-Fi torn session is a STALL, not an
+  error line* — the lab's `Heartbeat(SleepyTime)` freezes output; the sampler's tree-activity
+  timeout produces `connection_lost` (the discriminator vs a survivable silence is tree churn, not
+  output); (2) *`idevicebackup2 backup <target>` writes into `<target>/<UDID>/`* while qn.5 expects
+  the tree at the work dir — bridged by an engine-side **symlink adapter** (`<UDID>` → work dir),
+  no qn.5 change, no tree copy, no committed-state mutation (verify-live on lab gate 15).
+  **Coverage:** backup **83.2%**, store 80.8%, httpapi 72.2%, cmd/quince 11.0% (the CLI wiring is
+  hardware-exercised); known-untested = the real-`idevicebackup2` argv/symlink-follow + `statfsFree`
+  leaf (fake-covered in CI) + `buildLiveStack`/`backupCmd`. **Handoff review of qn.5: clean** (one
+  minor — `CommitJob`'s verify-fail branch, now covered by story 6). **Lab gate 15 (real encrypted
+  USB backup + kill-matrix + the re-homed gate-12 legs) owned by this rung** — the hardware
+  session; NOT proven yet. **Landed on `main` (CI half); gate-15 findings land later as labeled
+  commits** (Operator relaxed the usual land-after-hardware order for this rung). Frontier stays
+  **qn.4a** until lab gate 15, then → **qn.4b**.
