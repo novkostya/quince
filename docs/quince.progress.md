@@ -988,8 +988,12 @@ on real traction).
   *current* password on an unencrypted device + the off-warning banner never shows; (ii) `quince
   backup <udid> --transport usb` fails — Go's `flag` stops at the positional udid, so `--transport`
   is dropped → usage error (CI calls `StartBackup()` directly, bypassing arg parsing); (iii) the
-  version card's `Unlock` button shows on unencrypted versions (should be encryption-aware — qn.8
-  placeholder); (iv) the device card lingers on "Backing up 100%" through verify+commit and doesn't
+  version card's `Unlock` button (`ui/src/features/versions/VersionList.tsx:31-33` — a `disabled` qn.8
+  placeholder) renders on EVERY version incl. unencrypted ones, implying a password gate an
+  unencrypted backup doesn't have; fix = encryption-aware on `version.encrypted` (already used for the
+  `unencrypted` badge, contracts §2 / `ui/src/lib/types.ts`): encrypted → `Unlock` (password → browse),
+  unencrypted → `Browse` (direct read, no password), per design §7 (unlock is encrypted-only) — inert
+  today so UI-polish / qn.8-area, not a functional defect; (iv) the device card lingers on "Backing up 100%" through verify+commit and doesn't
   reflect `device.last_backup` (check the engine sets it on success). (iii)/(iv) may be subsumed by
   qn.4b's landed job-history/backup UI (br) — dedup at fix time. **(v) CONFIRMED + root-caused
   (2026-07-20 zfs session):** `device.last_backup` is populated **only in the `demo` provider**
