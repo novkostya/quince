@@ -33,7 +33,35 @@ becomes another one:
 
 ## Format
 
-Plain text, exactly as the tool emitted it (byte-for-byte after scrubbing), one run per
-file. A companion `*.meta.json` (added in qn.4) records expected terminal state, timing
-hints for the replayer, and the scrub map. No such files exist yet — this rung (qn.0)
-only lays down this task description.
+Plain text, one run per file: the `idevicebackup2` stdout lines the tool emits (progress
+bars, `Full backup mode.`, `Backup Successful.`, the passcode prompt, …). A companion
+`*.meta.json` records the expected terminal state and the replayer's timing hints.
+
+**Landed in qn.4a.** The six fixtures below exist now. **Honesty note (D9):** the lab's
+live runs were *fragmentary* — repeated Wi-Fi tears (`Heartbeat(SleepyTime)`) meant no
+single clean full-success run was captured end-to-end. So each `.txt` is a canonical
+reconstruction built **only from real output lines observed in the lab log**
+(`local/chatgpt-original-idea-chat.md`), not one verbatim capture. Grounding the *parser*
+in the real line vocabulary is the point. **No scrubbing of PII was needed inside the
+transcripts** because `idevicebackup2`'s stdout carries no UDID, device name, or path —
+those appeared only in shell prompts and `netmuxd` logs, which are not part of these
+captures. Tests supply a synthetic UDID out of band.
+
+### `*.meta.json` schema (consumed by the fake replayer in `backup_test` helpers)
+
+| field | meaning |
+| --- | --- |
+| `transport` | `usb` \| `wifi` — which muxer the run used |
+| `terminal_state` | expected `Job.state` at the end (`succeeded` / `connection_lost` / …) |
+| `exit_code` | process exit code; `-1` = the engine kills it (torn/hang) — it never exits itself |
+| `encrypted`, `kind` | what the written tree's `Manifest.plist`/`Status.plist` should say |
+| `tree` | `complete` (valid MobileBackup2 tree → passes `storage.Verify`) \| `torn` \| `none` |
+| `line_delay_ms` | base delay between emitted lines |
+| `stall_after_line` | 1-based line index after which to inject a silence (0 = none) |
+| `stall_ms`, `stall_churns_tree` | the silence length, and whether the tree keeps changing during it (the `silent-stall` vs `wifi-torn-session` discriminator) |
+| `hang_after_last` | after the last line, block until killed (the torn-transport freeze) |
+| `note` | provenance + what the fixture exercises |
+
+The six: `full-usb-success`, `wifi-incremental-success`, `waiting-for-passcode`,
+`wifi-torn-session`, `silent-stall`, `encryption-changed`. Every new bug found on the lab
+box later becomes another fixture here **before** it is fixed (hard rule).

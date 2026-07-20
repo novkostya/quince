@@ -18,7 +18,7 @@ func openTemp(t *testing.T) *Store {
 
 func TestMigrateCreatesTablesAndIsIdempotent(t *testing.T) {
 	st := openTemp(t)
-	for _, table := range []string{"settings", "sessions_auth", "audit", "versions", "schema_migrations"} {
+	for _, table := range []string{"settings", "sessions_auth", "audit", "versions", "jobs", "schema_migrations"} {
 		var name string
 		err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
 		if err != nil {
@@ -33,8 +33,8 @@ func TestMigrateCreatesTablesAndIsIdempotent(t *testing.T) {
 	if err := st.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 2 {
-		t.Fatalf("schema_migrations rows = %d, want 2", applied)
+	if applied != 3 {
+		t.Fatalf("schema_migrations rows = %d, want 3", applied)
 	}
 }
 

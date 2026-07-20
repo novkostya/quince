@@ -175,6 +175,30 @@ func (m *Manager) Prune(udid string) error {
 // RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).
 func (m *Manager) RepairWorkingCopy(udid string) error { return m.backend.RepairWorkingCopy(udid) }
 
+// VerifyTree is the passwordless structural-verification tree half exposed to the backup engine
+// (qn.4a): it runs Verify and returns primitives, so the backup package imports no storage types.
+// The engine calls this for the `verifying` state; CommitJob re-runs it (cheap, quiescent tree).
+func (m *Manager) VerifyTree(treeDir string) (ok bool, detail, kind string, encrypted bool) {
+	r := Verify(treeDir)
+	return r.OK, r.Detail, r.Kind, r.Encrypted
+}
+
+// VersionForJob reports the version id a job committed, if any — used by qn.4a's startup job-row
+// reconciliation to distinguish a commit that rolled forward (→ succeeded) from a true orphan
+// (→ connection_lost). Reads the registry (indexed by udid), never the fs.
+func (m *Manager) VersionForJob(udid, jobID string) (string, bool) {
+	rows, err := m.reg.ListVersions(udid)
+	if err != nil {
+		return "", false
+	}
+	for _, r := range rows {
+		if r.JobID != nil && *r.JobID == jobID {
+			return r.ID, true
+		}
+	}
+	return "", false
+}
+
 // --- mapping helpers ---
 
 func (m *Manager) toWire(r store.VersionRow) wire.Version {

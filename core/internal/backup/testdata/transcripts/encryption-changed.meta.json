@@ -1,0 +1,15 @@
+{
+  "name": "encryption-changed",
+  "transport": "usb",
+  "terminal_state": "succeeded",
+  "exit_code": 0,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "complete",
+  "line_delay_ms": 1,
+  "stall_after_line": 0,
+  "stall_ms": 0,
+  "stall_churns_tree": false,
+  "hang_after_last": false,
+  "note": "The first backup right after a backup-password enable/change: the device forces a full backup ('Enforcing full backup from device.') even when an incremental was requested, and the resulting version is kind=full. Real lab behavior after 'Backup encryption has been enabled successfully.'"
+}

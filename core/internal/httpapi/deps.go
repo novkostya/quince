@@ -22,11 +22,37 @@ type Deps struct {
 	Bus            *bus.Bus
 	Devices        DeviceReader
 	Jobs           JobReader
+	JobControl     JobControl
 	Versions       VersionReader
 	VersionAdmin   VersionAdmin
 	Muxer          MuxerControl
 	Ops            DeviceOps
 	AllowedOrigins []string
+}
+
+// JobControl drives POST /api/jobs and POST /api/jobs/{id}/cancel (contracts §1). The real
+// implementation is *backup.Engine (non-demo); UnavailableJobControl stands in for --demo and
+// when no engine is wired. Consumer-defined here (primitives + wire.Job) so httpapi imports no
+// backup subsystem — same pattern as DeviceOps/VersionAdmin. Returns an HTTP status + reason so
+// the handler maps outcomes without cross-package sentinel errors (202 = accepted; 409 already
+// running; 422 bad/auto transport; 404 unknown device or job).
+type JobControl interface {
+	StartBackup(udid, transport, retryOf string) (job wire.Job, status int, reason string)
+	CancelJob(id string) (job wire.Job, status int, reason string)
+}
+
+// UnavailableJobControl is the JobControl used when no backup engine is wired (--demo, which loops
+// scripted jobs for the read surface, or a misconfigured deploy): the command surface reports 503
+// honestly (no silent no-op), never fabricating a job.
+type UnavailableJobControl struct{}
+
+func (UnavailableJobControl) StartBackup(string, string, string) (wire.Job, int, string) {
+	return wire.Job{}, http.StatusServiceUnavailable,
+		"the backup engine is unavailable (running --demo, or no device backend is configured)"
+}
+
+func (UnavailableJobControl) CancelJob(string) (wire.Job, int, string) {
+	return wire.Job{}, http.StatusServiceUnavailable, "the backup engine is unavailable"
 }
 
 // VersionAdmin performs the destructive version operations (contracts §1 DELETE

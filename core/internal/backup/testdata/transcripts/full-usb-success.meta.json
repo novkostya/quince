@@ -1,0 +1,15 @@
+{
+  "name": "full-usb-success",
+  "transport": "usb",
+  "terminal_state": "succeeded",
+  "exit_code": 0,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "complete",
+  "line_delay_ms": 1,
+  "stall_after_line": 0,
+  "stall_ms": 0,
+  "stall_churns_tree": false,
+  "hang_after_last": false,
+  "note": "Happy path: a clean full encrypted backup over USB. Assembled from the real idevicebackup2 output vocabulary captured in the lab (progress bars, 'Enforcing full backup from device.', 'Full backup mode.', 'Backup Successful.'); the lab's live Wi-Fi runs were fragmentary (repeated tears), so this is the canonical full-success reconstruction, not one verbatim capture. idevicebackup2 stdout carries no UDID/device-name/path, so nothing PII was present to scrub."
+}

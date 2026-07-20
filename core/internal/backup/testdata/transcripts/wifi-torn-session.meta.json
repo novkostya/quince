@@ -1,0 +1,15 @@
+{
+  "name": "wifi-torn-session",
+  "transport": "wifi",
+  "terminal_state": "connection_lost",
+  "exit_code": -1,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "torn",
+  "line_delay_ms": 1,
+  "stall_after_line": 0,
+  "stall_ms": 0,
+  "stall_churns_tree": false,
+  "hang_after_last": true,
+  "note": "The real Wi-Fi failure mode from the lab: a Heartbeat(SleepyTime) drop freezes the transfer at '2% (23.2 MB/938.6 MB)' — idevicebackup2 prints NO error, it hangs on the dead transport with zero further output and zero tree churn. The engine's activity-sampler liveness timeout catches the frozen tree and kills the process group → connection_lost. exit_code -1 = killed by the engine (never exits on its own within the test)."
+}

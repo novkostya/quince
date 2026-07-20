@@ -1,0 +1,9 @@
+Backup will be encrypted.
+Enforcing full backup from device.
+Full backup mode.
+[==================================================] 100% (61.2 MB/61.2 MB)
+[=======                                           ]  14% Finished
+Receiving files
+[==================================================] 100% (72.3 MB/72.3 MB)
+[==================================================] 100% Finished
+Backup Successful.

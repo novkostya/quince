@@ -1,0 +1,15 @@
+{
+  "name": "waiting-for-passcode",
+  "transport": "usb",
+  "terminal_state": "succeeded",
+  "exit_code": 0,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "complete",
+  "line_delay_ms": 1,
+  "stall_after_line": 4,
+  "stall_ms": 300,
+  "stall_churns_tree": false,
+  "hang_after_last": false,
+  "note": "Line 4 is the real assisted-model prompt '*** Waiting for passcode to be entered on the device ***' (D13). The stall after it models the user taking time to enter the passcode on the phone; the engine must PAUSE the liveness clock in the waiting_for_passcode phase, so this silence — with no tree churn — must NOT trip the stall timeout. Then progress resumes to success."
+}

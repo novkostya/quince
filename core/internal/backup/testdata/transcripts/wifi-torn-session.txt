@@ -1,0 +1,7 @@
+Backup will be encrypted.
+Enforcing full backup from device.
+Full backup mode.
+[==================================================] 100% (56.6 MB/56.6 MB)
+[====================                              ]  38% Finished
+Receiving files
+[==                                                ]   2% (23.2 MB/938.6 MB)

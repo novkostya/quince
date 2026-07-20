@@ -47,6 +47,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.VersionAdmin == nil { // no storage subsystem wired → refuse honestly (503)
 		deps.VersionAdmin = UnavailableVersionAdmin{}
 	}
+	if deps.JobControl == nil { // no backup engine wired (--demo) → command surface 503
+		deps.JobControl = UnavailableJobControl{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -62,8 +65,10 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair/validate", deps.handlePairValidate())
 	apiMux.HandleFunc("POST /api/devices/{udid}/encryption", deps.handleEncryption())
 	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
+	apiMux.HandleFunc("POST /api/jobs", deps.handleJobCreate())
 	apiMux.HandleFunc("GET /api/jobs", deps.handleJobs())
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
+	apiMux.HandleFunc("POST /api/jobs/{id}/cancel", deps.handleJobCancel())
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())

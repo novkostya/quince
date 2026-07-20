@@ -1,8 +1,9 @@
 // Command quince is the core daemon. Subcommands:
 //
-//	quince serve [--demo] [--listen :8080]   # serve the UI + API (contracts.md)
-//	quince config validate [path]            # validate config.yml; nonzero exit on error
-//	quince version                           # print the build version
+//	quince serve [--demo] [--listen :8080]        # serve the UI + API (contracts.md)
+//	quince backup <udid> [--transport usb|wifi]   # drive one backup to completion (qn.4a lab CLI)
+//	quince config validate [path]                 # validate config.yml; nonzero exit on error
+//	quince version                                # print the build version
 //
 // Bootstrap config is env-only (contracts.md §6: QUINCE_DATA/CACHE/BACKUPS/LISTEN);
 // everything else lives in /data/config.yml, read at startup.
@@ -25,13 +26,7 @@ import (
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
-	"github.com/novkostya/quince/core/internal/device"
-	"github.com/novkostya/quince/core/internal/deviceops"
 	"github.com/novkostya/quince/core/internal/httpapi"
-	"github.com/novkostya/quince/core/internal/id"
-	"github.com/novkostya/quince/core/internal/muxd"
-	"github.com/novkostya/quince/core/internal/muxsup"
-	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
@@ -56,6 +51,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "serve":
 		return serve(args[1:])
+	case "backup":
+		return backupCmd(args[1:])
 	case "config":
 		return configCmd(args[1:])
 	case "version":
@@ -72,9 +69,10 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "quince %s\n\nUsage:\n"+
-		"  quince serve [--demo] [--listen :8080]   serve the UI + API\n"+
-		"  quince config validate [path]            validate config.yml\n"+
-		"  quince version                           print version\n", version.String())
+		"  quince serve [--demo] [--listen :8080]        serve the UI + API\n"+
+		"  quince backup <udid> [--transport usb|wifi]   drive one backup to completion\n"+
+		"  quince config validate [path]                 validate config.yml\n"+
+		"  quince version                                print version\n", version.String())
 }
 
 func serve(args []string) error {
@@ -135,7 +133,8 @@ func serve(args []string) error {
 	// muxer defaults to Unmanaged (external / --demo): quince owns no muxer to restart, so
 	// rescan → 409. The managed supervisor is wired in the non-demo branch when configured.
 	var devices httpapi.DeviceReader
-	var jobs httpapi.JobReader = httpapi.Empty{}
+	var jobs httpapi.JobReader         // assigned in both branches (demo → provider, else → engine)
+	var jobControl httpapi.JobControl  // nil in demo → router serves 503 on the command surface
 	var versions httpapi.VersionReader // assigned in both branches (demo → provider, else → storage)
 	var versionAdmin httpapi.VersionAdmin
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
@@ -146,83 +145,24 @@ func serve(args []string) error {
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
 		versionAdmin = prov
+		// jobControl stays nil: --demo loops scripted jobs for the read surface, but has no real
+		// engine to start/cancel, so the command surface refuses honestly (503).
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
-		// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the
-		// registry — default topology is usbmuxd for USB + netmuxd for Wi-Fi (stack D2); the
-		// single-muxer flip is config-only since the loop skips empty sockets. Jobs and
-		// versions land with their rungs (qn.4/qn.5). Muxd-unreachable is honest, not fatal:
-		// the client backs off and the device list is simply empty until a device attaches.
-		dcfg := cfgSvc.Current().Devices
-		// Managed muxer (SIMPLE profile, qn.2b): quince supervises the in-container usbmuxd —
-		// spawn under serveCtx, restart w/ backoff, refuse loudly if the socket is already
-		// served. HARDENED/external (manage_muxer: false): quince only dials, muxer stays
-		// Unmanaged (rescan → 409). The supervisor listens on dcfg.UsbmuxdSocket (its -S path),
-		// which is exactly the socket the muxd client below dials.
-		if dcfg.ManageMuxer && dcfg.UsbmuxdSocket != "" {
-			sup := muxsup.New(dcfg.UsbmuxdSocket, log)
-			go sup.Run(ctx)
-			muxer = sup
-			log.Info("supervising in-container usbmuxd", "socket", dcfg.UsbmuxdSocket)
-		} else {
-			log.Info("muxer is external (devices.manage_muxer: false or no usbmuxd_socket) — dialing only")
-		}
-		reg := device.NewRegistry(eventBus, log)
-		for _, addr := range []string{dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr} {
-			if addr == "" {
-				continue
-			}
-			client := muxd.NewClient(addr, log)
-			sink := reg.Sink(addr)
-			go client.Run(ctx, sink)
-		}
-		devices = reg
-		log.Info("device registry watching muxers",
-			"usbmuxd", dcfg.UsbmuxdSocket, "netmuxd", dcfg.NetmuxdAddr)
-
-		// Device ops (qn.3): pair/validate/info + encryption via the libimobiledevice CLIs,
-		// pointed at the muxers by USBMUXD_SOCKET_ADDRESS. The enrichment driver overlays
-		// lockdown identity onto the registry on attach; pairing records persist under
-		// $QUINCE_DATA so they survive a container recreate (amendment 1).
-		tools := deviceops.NewTools(dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr, log)
-		lockdown := deviceops.NewLockdownStore(bootstrap.Data, lockdownSystemDir, log)
-		lockdown.Restore()
-		mgr := deviceops.NewManager(ctx, tools, reg, eventBus, st, log)
-		mgr.SetLockdown(lockdown)
-		ops = mgr
-		go deviceops.NewEnrichDriver(tools, reg, eventBus, log).Run(ctx)
-		log.Info("device ops ready (pair/encryption/enrichment)")
-
-		// Storage subsystem (qn.5): resolve the backend from config + a probe of /backups,
-		// then run first-class startup reconciliation BEFORE serving (design §5 — the disk is
-		// the source of truth; roll-forward completes half-done commits, adopts on-disk
-		// versions, marks vanished artifacts missing). The registry is the real VersionReader.
-		scfg := cfgSvc.Current().Storage
-		stBackend, backendName, reason := storage.Select(ctx, storage.Options{
-			Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
-			ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-			ZFSHookCmd: scfg.ZFS.HookCmd, ZFSMirror: scfg.ZFS.Mirror,
-		}, log)
-		storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
-			storage.RetentionPolicy{
-				KeepRecent: scfg.Retention.KeepRecent,
-				KeepDaily:  scfg.Retention.KeepDaily,
-				KeepWeekly: scfg.Retention.KeepWeekly,
-			}, id.New, log)
-		if err := storageMgr.Reconcile(ctx); err != nil {
-			log.Error("storage: startup reconciliation failed", "error", err)
-		}
-		versions = storageMgr
-		versionAdmin = storageMgr
-		log.Info("storage subsystem ready", "backend", backendName, "reason", reason)
+		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5
+		// storage + qn.4a backup engine), with startup reconciliation run in-order BEFORE serving
+		// (storage → job rows). Shared verbatim with the `backup` CLI.
+		ls := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
+		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
 	}
 
 	srv := &http.Server{
 		Addr: listen,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
-			Devices: devices, Jobs: jobs, Versions: versions, VersionAdmin: versionAdmin,
-			Muxer: muxer, Ops: ops,
+			Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
+			VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

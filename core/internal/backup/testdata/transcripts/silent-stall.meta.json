@@ -1,0 +1,15 @@
+{
+  "name": "silent-stall",
+  "transport": "wifi",
+  "terminal_state": "succeeded",
+  "exit_code": 0,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "complete",
+  "line_delay_ms": 1,
+  "stall_after_line": 6,
+  "stall_ms": 400,
+  "stall_churns_tree": true,
+  "hang_after_last": false,
+  "note": "The discriminator against wifi-torn-session: same frozen-output pattern (a multi-minute silence while the device prepares), BUT the tree keeps churning (the lab saw du fluctuating during exactly this pause). Because the sampler judges liveness by TREE activity, not output silence, this must NOT be killed — it stages to silent_but_connected and survives, then resumes and completes. Proves the app-level clock can't undercut normal long silences."
+}

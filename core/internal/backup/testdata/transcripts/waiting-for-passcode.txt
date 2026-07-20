@@ -1,0 +1,10 @@
+Backup will be encrypted.
+Enforcing full backup from device.
+Full backup mode.
+*** Waiting for passcode to be entered on the device ***
+[==================================================] 100% (61.2 MB/61.2 MB)
+[========                                          ]  15% Finished
+Receiving files
+[==================================================] 100% (56.0 MB/56.0 MB)
+[==================================================] 100% Finished
+Backup Successful.
