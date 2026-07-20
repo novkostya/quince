@@ -26,8 +26,10 @@ The chosen backend and *why* are logged at startup and shown in onboarding (qn.6
 - `storage.zfs.mode: hook` — quince runs `storage.zfs.hook_cmd` (an argv, never a shell string),
   typically an SSH forced-command to a constrained helper on the ZFS host. This keeps the
   HTTP-facing container free of ZFS privileges (the hardened posture). The transport binary the
-  `hook_cmd` names (usually `ssh`) must exist **where quince runs** — the container image needs an
-  ssh client (e.g. `openssh-client`); the stock image ships without one.
+  `hook_cmd` names (usually `ssh`) must exist **where quince runs**: the runtime image ships
+  `openssh-client` for exactly this (qn.4a gate-15 finding #2) — without it every hook call dies
+  with `exec: "ssh": executable file not found` and no backup can seed. An `exec`-mode hook that
+  shells out to some other transport must ensure that binary is present too.
 
 ### The constrained `quince-zfs-helper` (forced-command reference)
 

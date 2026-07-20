@@ -98,6 +98,11 @@ FROM ${ALPINE_IMAGE} AS runtime
 #   netmuxd (source, above)= the Wi-Fi muxer
 #   libimobiledevice-progs = the CLIs (idevicebackup2/idevicepair/ideviceinfo)
 #   libusbmuxd             = the client library the CLIs speak
+#   openssh-client         = transport for the zfs `hook` mode — quince runs the constrained
+#                            quince-zfs-helper on the ZFS host over ssh (deploy/storage.md).
+#                            Required whenever storage.zfs.mode: hook; harmless otherwise.
+#                            (qn.4a gate-15 finding #2: hook mode was proven on a hand-`apk
+#                            add`ed container; codified here so it survives a compose recreate.)
 # python3 runs the vault venv.
 RUN apk add --no-cache \
       ca-certificates tzdata \
@@ -105,6 +110,7 @@ RUN apk add --no-cache \
       libimobiledevice \
       libimobiledevice-progs \
       libusbmuxd \
+      openssh-client \
       python3
 
 COPY --from=vault-build /opt/quince/vault /opt/quince/vault
