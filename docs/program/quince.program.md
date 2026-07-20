@@ -36,6 +36,12 @@
   installed on it, ever.** Editing and driving from it is fine; *executing* is not. If
   a gate seems to need a local tool, that's a signal you're in the wrong place, not a
   reason to install anything.
+- **One project, one dev host** (ruled 2026-07-20). Sibling projects (the standalone
+  libraries) never share a dev container with quince or with each other — cross-project
+  cache, container-namespace, and memory contention on a shared box was tried once and
+  became a mess that forced an emergency second box mid-rung. Each project gets its own
+  dev container under the same pure-container-host rules; the concrete registry lives in
+  `local/environment.md`. A dev box idle between milestones is stopped, not deleted.
 - All gates, builds, and image pushes run in a dedicated dev Linux container
   (`quince-dev`) on the Operator's infrastructure. **Concrete hosts, addresses, sizing,
   and the LAN registry live in `local/environment.md` — a gitignored, Operator-local
