@@ -19,11 +19,32 @@ func TestValidateUnpaired(t *testing.T) {
 	}
 }
 
-func TestValidateLockedCountsAsPaired(t *testing.T) {
-	// A passcode-locked device whose pairing record exists is paired (no unpair needed).
+func TestValidateLockedNotConfirmed(t *testing.T) {
+	// "passcode is set" is returned for any locked device regardless of pairing, so it is NOT a
+	// confirmation — Validate reports false honestly (lab finding 2026-07-20).
 	paired, err := fakeTools("DEVICEOPS_FAKE=locked").Validate(context.Background(), fakeUDID, TransportUSB)
-	if err != nil || !paired {
-		t.Fatalf("validate locked = %v, err %v (want true, nil)", paired, err)
+	if err != nil || paired {
+		t.Fatalf("validate locked = %v, err %v (want false, nil)", paired, err)
+	}
+}
+
+func TestInfoLockedUsesSimpleReadNoAutoPair(t *testing.T) {
+	// A locked device: paired is unknown, encryption undetermined, and the read is the simple
+	// (-s) one — NEVER the auto-pairing full read (guards against enrichment surfacing an
+	// unexpected Trust prompt; lab finding 2026-07-20). The fake omits DeviceName for -s, so an
+	// empty name here proves the simple path was taken.
+	id, err := fakeTools("DEVICEOPS_FAKE=locked").Info(context.Background(), fakeUDID, TransportUSB)
+	if err != nil {
+		t.Fatalf("Info err = %v", err)
+	}
+	if id.Paired != "unknown" {
+		t.Fatalf("paired = %q (want unknown for a locked device)", id.Paired)
+	}
+	if id.BackupEncryption != "" {
+		t.Fatalf("encryption must stay undetermined while locked, got %q", id.BackupEncryption)
+	}
+	if id.Name != "" {
+		t.Fatalf("locked device must use the simple read (no DeviceName), got %q", id.Name)
 	}
 }
 

@@ -37,11 +37,14 @@ const (
 
 func pairedString(vr validateResult) string {
 	switch vr {
-	case validatePaired, validateLocked:
+	case validatePaired:
 		return "yes"
 	case validateNotPaired:
 		return "no"
 	default:
+		// validateLocked: the "passcode is set" response is returned for any LOCKED device
+		// regardless of whether a pairing record exists (lab-confirmed 2026-07-20 — it appeared
+		// on a fresh host with no record), so pairing is genuinely undeterminable while locked.
 		return "unknown"
 	}
 }
@@ -67,15 +70,16 @@ func (t *Tools) validate(ctx context.Context, udid, transport string) (validateR
 	}
 }
 
-// Validate reports whether the device is paired with this host (contracts §1 POST
-// .../pair/validate → {paired}). A passcode-locked device whose pairing record exists counts
-// as paired (no unpair needed); "not paired" is the only false.
+// Validate reports whether the device is CONFIRMED paired with this host (contracts §1 POST
+// .../pair/validate → {paired}). A locked device ("passcode is set") is not a confirmation —
+// that response is returned regardless of pairing state — so it reports false, honestly (the
+// caller can unlock and retry).
 func (t *Tools) Validate(ctx context.Context, udid, transport string) (bool, error) {
 	vr, err := t.validate(ctx, udid, transport)
 	if err != nil {
 		return false, err
 	}
-	return vr == validatePaired || vr == validateLocked, nil
+	return vr == validatePaired, nil
 }
 
 // --- ideviceinfo ---
@@ -125,17 +129,21 @@ func (t *Tools) willEncrypt(ctx context.Context, udid, transport string) string 
 	}
 }
 
-// Info builds the lockdown identity overlay for a device (enrichment). It never triggers a
-// pairing: the full read + WillEncrypt run only when validate already reports a pairing
-// record; an unpaired device gets the public fields via a simple connection. Undetermined
-// fields stay "" / "unknown" — never guessed (state honesty).
+// Info builds the lockdown identity overlay for a device (enrichment). It NEVER triggers a
+// pairing: the full read + WillEncrypt run only for a CONFIRMED validatePaired (an established
+// trust session, so no handshake). Any other state — not paired, or locked ("passcode is
+// set", which is NOT a confirmation, lab finding 2026-07-20) — uses the simple read (-s), which
+// cannot auto-pair, so a background enrichment can never surface an unexpected Trust prompt.
+// Undetermined fields stay "" / "unknown" — never guessed (state honesty). Name/encryption
+// fill in on the next enrichment once the device is unlocked + paired (e.g. reEnrich after the
+// explicit pair op).
 func (t *Tools) Info(ctx context.Context, udid, transport string) (device.Identity, error) {
 	if !validUDID(udid) {
 		return device.Identity{}, ErrBadUDID
 	}
 	vr, _ := t.validate(ctx, udid, transport)
 	id := device.Identity{Paired: pairedString(vr)}
-	if vr == validatePaired || vr == validateLocked {
+	if vr == validatePaired {
 		id.Name, id.Model, id.IOSVersion = t.info(ctx, udid, transport, false)
 		id.BackupEncryption = t.willEncrypt(ctx, udid, transport)
 	} else {
