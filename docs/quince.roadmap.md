@@ -110,7 +110,11 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   the qn.5 spec's gate-12 section). *Gate (USB): an encrypted backup on the lab
   box, driven from the CLI, ends `succeeded` as a committed verified version on the
   real backend; the engine-level kill matrix (kill at seed / backing_up / verify /
-  commit hand-off) recovers to defined states on restart; iMazing opens it.*
+  commit hand-off) recovers to defined states on restart; iMazing opens it.
+  Inherited from qn.5's gate 12 ((bn)) — measurements taken during this same gate's
+  backup, no extra session: the host-side `mirror` verb proves live on the real
+  rpool (`bclonesaved` observed moving on the commit), and a syncoid pass
+  mid-backup replicates every committed version intact.*
 - `qn.4b` **Wi-Fi first-class + transport policy + job history** (closes M3): real
   Wi-Fi backups over netmuxd, `transport: auto` (prefer USB when plugged, Wi-Fi
   otherwise), the job history API/UI (raw but live, grouped by intent — contracts
@@ -121,7 +125,12 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   Wi-Fi's failure modes in CI. *Gate (the integrated e2e, closing M3): encrypted
   backups over BOTH transports, driven from the UI, end `succeeded` with committed
   verified versions; a Wi-Fi mid-backup disconnect lands in an honest
-  `user action required` with committed versions untouched.*
+  `user action required` with committed versions untouched. Plus the 12c destructive
+  hardlink-safety matrix inherited from qn.5 ((bn)) — its transitions
+  (full→incremental, interrupted+next-incremental, encryption change; iOS-upgrade
+  opportunistic) are natural products of this rung's repeated real backups; the
+  hardlink mirror/backend tier stays disabled-to-copy (surfaced) until the matrix
+  passes.*
 
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
