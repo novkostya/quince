@@ -7,16 +7,17 @@ import "net/http"
 // reason; the handler maps 202 to the Job body and anything else to the {error:{code,message}}
 // envelope. Reads (GET) are handled in handlers_read.go.
 
-// jobCreateRequest is the POST /api/jobs body (contracts §1). transport auto is deferred to qn.4b
-// (the engine returns 422); retry_of is optional (the assisted-model retry chain).
+// jobCreateRequest is the POST /api/jobs body (contracts §1). transport "auto" is resolved by the
+// engine against current presence (qn.4b, design §4); retry_of is optional (the assisted-model
+// retry chain).
 type jobCreateRequest struct {
 	UDID      string `json:"udid"`
-	Transport string `json:"transport"` // usb | wifi (auto → 422 until qn.4b)
+	Transport string `json:"transport"` // usb | wifi | auto (engine resolves auto → concrete)
 	RetryOf   string `json:"retry_of"`
 }
 
-// handleJobCreate serves POST /api/jobs → 202 Job; 409 already-running, 422 bad/auto transport,
-// 404 unknown device, 503 no engine.
+// handleJobCreate serves POST /api/jobs → 202 Job; 409 already-running, 422 bad transport or
+// auto-when-absent, 404 unknown device, 503 no engine.
 func (d Deps) handleJobCreate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req jobCreateRequest

@@ -5,11 +5,18 @@ import { useDeviceOp, type StartFn } from "./useDeviceOp";
 import { OpNarration } from "./OpNarration";
 
 // PairDialog drives POST /api/devices/{udid}/pair and narrates the assisted flow (tap Trust +
-// passcode) from the op.updated stream. `post` is injectable for tests.
-export function PairDialog({ udid, post }: { udid: string; post?: StartFn }) {
+// passcode) from the op.updated stream. `post` is injectable for tests. `autoOpen` opens the dialog
+// on arrival — the dashboard card's Pair deep-links a pair intent so the click lands IN the dialog
+// (qn.4b fix for (bq); qn.3's decision that the narrated flow lives on details stands).
+export function PairDialog({ udid, post, autoOpen }: { udid: string; post?: StartFn; autoOpen?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const { op, starting, startError, start, reset, inFlight } = useDeviceOp(post);
   const done = op?.state === "succeeded";
+
+  // A pair intent carried in from the dashboard card auto-opens the dialog on arrival.
+  React.useEffect(() => {
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
 
   // A completed pairing closes the dialog after a brief confirmation (the device transitions to
   // its paired state in the page behind it).

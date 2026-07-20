@@ -121,18 +121,18 @@ func New(o Options) *Engine {
 // --- httpapi.JobControl ---
 
 // StartBackup creates and launches a backup job (contracts §1 POST /api/jobs). Returns the Job +
-// an HTTP status: 202 accepted, 409 already-running, 422 bad/auto transport, 404 unknown device or
-// retry_of, 500 store error.
+// an HTTP status: 202 accepted, 409 already-running, 422 bad transport OR auto-when-absent, 404
+// unknown device or retry_of, 500 store error. transport "auto" resolves against current presence
+// (design §4, decisions (bp)): prefer USB when present, else Wi-Fi; a device on NEITHER transport is
+// refused actionably. The Job stores the resolved CONCRETE transport (never "auto") — a guess would
+// persist a dishonest Job.transport (state honesty).
 func (e *Engine) StartBackup(udid, transport, retryOf string) (wire.Job, int, string) {
-	if transport == TransportAuto {
-		return wire.Job{}, http.StatusUnprocessableEntity,
-			"automatic transport selection is not available yet — choose usb or wifi"
-	}
-	if transport != TransportUSB && transport != TransportWiFi {
-		return wire.Job{}, http.StatusUnprocessableEntity, "transport must be usb or wifi"
-	}
 	if !validUDID(udid) {
 		return wire.Job{}, http.StatusNotFound, "unknown device"
+	}
+	transport, status, reason := e.resolveTransport(udid, transport)
+	if status != 0 {
+		return wire.Job{}, status, reason
 	}
 
 	e.mu.Lock()
@@ -644,6 +644,32 @@ func (e *Engine) killReasonOf(lj *liveJob) string {
 	lj.mu.Lock()
 	defer lj.mu.Unlock()
 	return lj.killReason
+}
+
+// resolveTransport turns the requested transport into a concrete usb|wifi, or an HTTP error to
+// return from StartBackup. Explicit usb|wifi passes through unchanged (keeping the start-then-connect
+// waiting_for_device flow — presence is NOT required at Start). "auto" (design §4, decisions (bp))
+// resolves against CURRENT presence — prefer USB when present, else Wi-Fi — and refuses a device on
+// neither transport with an actionable 422 (no job minted): a guessed transport would persist a
+// dishonest Job.transport. status == 0 means success (the resolved transport is returned).
+func (e *Engine) resolveTransport(udid, requested string) (transport string, status int, reason string) {
+	switch requested {
+	case TransportUSB, TransportWiFi:
+		return requested, 0, ""
+	case TransportAuto:
+		dev, ok := e.devices.Device(udid)
+		switch {
+		case ok && presentOn(dev, TransportUSB):
+			return TransportUSB, 0, ""
+		case ok && presentOn(dev, TransportWiFi):
+			return TransportWiFi, 0, ""
+		default:
+			return "", http.StatusUnprocessableEntity,
+				"device is not currently connected — connect it over USB or Wi-Fi, or choose a transport"
+		}
+	default:
+		return "", http.StatusUnprocessableEntity, "transport must be usb, wifi, or auto"
+	}
 }
 
 func presentOn(dev wire.Device, transport string) bool {

@@ -75,24 +75,9 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	log.Info("device ops ready (pair/encryption/enrichment)")
 
 	// Storage subsystem (qn.5): resolve the backend + reconcile before anything serves.
-	scfg := cfgSvc.Current().Storage
-	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
-		Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
-		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSMirror: scfg.ZFS.Mirror,
-	}, log)
-	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
-		storage.RetentionPolicy{
-			KeepRecent: scfg.Retention.KeepRecent,
-			KeepDaily:  scfg.Retention.KeepDaily,
-			KeepWeekly: scfg.Retention.KeepWeekly,
-		}, id.New, log)
-	if err := storageMgr.Reconcile(ctx); err != nil {
-		log.Error("storage: startup reconciliation failed", "error", err)
-	}
+	storageMgr := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log)
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
-	log.Info("storage subsystem ready", "backend", backendName, "reason", reason)
 
 	// Backup engine (qn.4a): drives idevicebackup2 through the state machine into storage. Its
 	// job-row reconciliation runs AFTER storage's (order matters — amendment 1).
@@ -114,4 +99,30 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.engine = eng
 	log.Info("backup engine ready")
 	return ls
+}
+
+// buildStorage resolves the qn.5 backend and returns a reconciled *storage.Manager. It is the
+// storage half of buildLiveStack, factored out so the read-only admin CLIs (`versions verify`,
+// `device repair-working-copy`) can operate on a truthful, reconciled registry WITHOUT starting the
+// muxer supervisor / device registry / enrichment goroutines the full stack spins up. Reconcile runs
+// before returning (same as serve) so adopted/missing versions are reflected.
+func buildStorage(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *config.Service,
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger) *storage.Manager {
+	scfg := cfgSvc.Current().Storage
+	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
+		Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
+		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
+		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSMirror: scfg.ZFS.Mirror,
+	}, log)
+	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
+		storage.RetentionPolicy{
+			KeepRecent: scfg.Retention.KeepRecent,
+			KeepDaily:  scfg.Retention.KeepDaily,
+			KeepWeekly: scfg.Retention.KeepWeekly,
+		}, id.New, log)
+	if err := storageMgr.Reconcile(ctx); err != nil {
+		log.Error("storage: startup reconciliation failed", "error", err)
+	}
+	log.Info("storage subsystem ready", "backend", backendName, "reason", reason)
+	return storageMgr
 }

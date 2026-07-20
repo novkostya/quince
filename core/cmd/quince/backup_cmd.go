@@ -15,17 +15,18 @@ import (
 	"github.com/novkostya/quince/core/internal/store"
 )
 
-// backupCmd is the minimal headless CLI — qn.4a's own lab harness. It builds the live stack and
-// drives ONE backup for <udid> to completion, streaming state to stdout; exit 0 on succeeded, else
-// nonzero. transport auto is resolved in qn.4b, so this CLI accepts usb|wifi (the engine 422s auto).
+// backupCmd is the minimal headless CLI (the lab harness). It builds the live stack and drives ONE
+// backup for <udid> to completion, streaming state to stdout; exit 0 on succeeded, else nonzero.
+// --transport defaults to auto (the engine resolves it against current presence — design §4/(bp));
+// usb|wifi are explicit.
 func backupCmd(args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
-	transport := fs.String("transport", backup.TransportUSB, "usb | wifi")
+	transport := fs.String("transport", backup.TransportAuto, "usb | wifi | auto")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: quince backup <udid> [--transport usb|wifi]")
+		return errors.New("usage: quince backup <udid> [--transport usb|wifi|auto]")
 	}
 	udid := fs.Arg(0)
 

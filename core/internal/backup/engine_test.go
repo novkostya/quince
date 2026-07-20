@@ -628,13 +628,14 @@ func TestStoryCLIFailingBackupExitsNonzero(t *testing.T) {
 	}
 }
 
-// StartBackup input guards: auto → 422; unknown transport → 422.
+// StartBackup input guards: an unknown or empty transport → 422 (no job minted). transport-auto
+// RESOLUTION is covered by engine_transport_test.go (TestAutoResolves* / TestAutoWhenAbsent*).
 func TestStartBackupTransportGuards(t *testing.T) {
 	h := newHarness(t, fakeParams{}, TransportUSB)
-	if _, s, _ := h.eng.StartBackup(testUDID, TransportAuto, ""); s != 422 {
-		t.Fatalf("auto transport = %d, want 422", s)
-	}
 	if _, s, _ := h.eng.StartBackup(testUDID, "carrier-pigeon", ""); s != 422 {
 		t.Fatalf("bad transport = %d, want 422", s)
+	}
+	if _, s, _ := h.eng.StartBackup(testUDID, "", ""); s != 422 {
+		t.Fatalf("empty transport = %d, want 422", s)
 	}
 }

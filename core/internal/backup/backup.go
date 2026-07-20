@@ -15,7 +15,8 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
-// Transports (contracts §2). auto is resolved in qn.4b — qn.4a accepts usb|wifi only.
+// Transports (contracts §2). "auto" is a request-only value resolved by the engine against current
+// presence (design §4, decisions (bp)); a Job only ever stores the concrete usb|wifi.
 const (
 	TransportUSB  = "usb"
 	TransportWiFi = "wifi"

@@ -71,12 +71,18 @@ func TestJobCreateRetryOfPassed(t *testing.T) {
 	}
 }
 
-func TestJobCreateAutoTransport422(t *testing.T) {
+// transport "auto" reaches the engine (which resolves it); when the engine refuses — e.g.
+// auto-when-absent (design §4/(bp)) — the 422 maps to the error envelope. The handler is
+// transport-agnostic: it passes "auto" through and maps whatever status comes back.
+func TestJobCreateAutoResolvedByEngine(t *testing.T) {
 	stub := &stubJobControl{startStatus: http.StatusUnprocessableEntity,
-		startReason: "automatic transport selection is not available yet — choose usb or wifi"}
+		startReason: "device is not currently connected — connect it over USB or Wi-Fi, or choose a transport"}
 	srv, c := jobsServer(t, stub)
 	resp := postCSRF(t, c, srv, "/api/jobs", `{"udid":"DEV-1","transport":"auto"}`)
 	defer func() { _ = resp.Body.Close() }()
+	if stub.recTransport != "auto" {
+		t.Fatalf("handler passed transport=%q, want auto reaching the engine", stub.recTransport)
+	}
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}

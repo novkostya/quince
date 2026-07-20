@@ -1,9 +1,11 @@
 // Command quince is the core daemon. Subcommands:
 //
-//	quince serve [--demo] [--listen :8080]        # serve the UI + API (contracts.md)
-//	quince backup <udid> [--transport usb|wifi]   # drive one backup to completion (qn.4a lab CLI)
-//	quince config validate [path]                 # validate config.yml; nonzero exit on error
-//	quince version                                # print the build version
+//	quince serve [--demo] [--listen :8080]             # serve the UI + API (contracts.md)
+//	quince backup <udid> [--transport usb|wifi|auto]   # drive one backup to completion (lab CLI)
+//	quince versions verify <id> | --udid <udid>        # re-run structural verification (qn.4b)
+//	quince device repair-working-copy <udid>           # rebuild working/ from last good (qn.4b)
+//	quince config validate [path]                      # validate config.yml; nonzero exit on error
+//	quince version                                     # print the build version
 //
 // Bootstrap config is env-only (contracts.md §6: QUINCE_DATA/CACHE/BACKUPS/LISTEN);
 // everything else lives in /data/config.yml, read at startup.
@@ -53,6 +55,10 @@ func run(args []string) error {
 		return serve(args[1:])
 	case "backup":
 		return backupCmd(args[1:])
+	case "versions":
+		return versionsCmd(args[1:])
+	case "device":
+		return deviceCmd(args[1:])
 	case "config":
 		return configCmd(args[1:])
 	case "version":
@@ -69,10 +75,12 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "quince %s\n\nUsage:\n"+
-		"  quince serve [--demo] [--listen :8080]        serve the UI + API\n"+
-		"  quince backup <udid> [--transport usb|wifi]   drive one backup to completion\n"+
-		"  quince config validate [path]                 validate config.yml\n"+
-		"  quince version                                print version\n", version.String())
+		"  quince serve [--demo] [--listen :8080]             serve the UI + API\n"+
+		"  quince backup <udid> [--transport usb|wifi|auto]   drive one backup to completion\n"+
+		"  quince versions verify <id> | --udid <udid>        re-run structural verification\n"+
+		"  quince device repair-working-copy <udid>           rebuild working/ from last good\n"+
+		"  quince config validate [path]                      validate config.yml\n"+
+		"  quince version                                     print version\n", version.String())
 }
 
 func serve(args []string) error {
@@ -145,8 +153,7 @@ func serve(args []string) error {
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
 		versionAdmin = prov
-		// jobControl stays nil: --demo loops scripted jobs for the read surface, but has no real
-		// engine to start/cancel, so the command surface refuses honestly (503).
+		jobControl = prov // qn.4b: the demo command surface is live (scripts on-demand jobs, no hardware)
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
 		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5

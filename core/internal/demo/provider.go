@@ -6,6 +6,7 @@
 package demo
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -17,15 +18,17 @@ import (
 )
 
 // Provider holds the mutable demo world. It implements httpapi's DeviceReader/JobReader/
-// VersionReader interfaces structurally.
+// JobControl/VersionReader interfaces structurally.
 type Provider struct {
 	mu       sync.RWMutex
 	bus      *bus.Bus
 	log      *slog.Logger
+	baseCtx  context.Context // set by Run; scripted jobs stop when it is cancelled
 	devices  map[string]wire.Device
 	order    []string // device display order
 	jobs     map[string]wire.Job
 	jobLog   map[string][]string // per-job accumulated log lines (GET /api/jobs/{id}/log)
+	running  map[string]*demoRun // in-flight scripted jobs by UDID (single-flight, qn.4b)
 	versions map[string]wire.Version
 	verOrder []string           // version display order (newest first)
 	ops      map[string]wire.Op // pair/encryption ops (GET /api/ops/{id}; qn.3 DeviceOps)
@@ -40,6 +43,7 @@ func NewProvider(b *bus.Bus, log *slog.Logger) *Provider {
 		devices:  map[string]wire.Device{},
 		jobs:     map[string]wire.Job{},
 		jobLog:   map[string][]string{},
+		running:  map[string]*demoRun{},
 		versions: map[string]wire.Version{},
 		ops:      map[string]wire.Op{},
 	}

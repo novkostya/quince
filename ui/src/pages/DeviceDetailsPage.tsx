@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { ArrowLeft } from "lucide-react";
@@ -14,6 +14,8 @@ import { EncryptionDialog, type EncryptionMode } from "@/features/devices/Encryp
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
+import { BackupControls } from "@/features/jobs/BackupControls";
+import { useBackup } from "@/features/jobs/useBackup";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +44,11 @@ export function DeviceDetailsPage() {
     useShallow((s) => s.order.map((id) => s.byId[id]).filter((v) => v.udid === udid)),
   );
   const activeJob = jobs.find((j) => isRunning(j.state));
+  const backup = useBackup(udid);
+  // A pair intent deep-linked from the dashboard card (router state) auto-opens the pair dialog on
+  // arrival — qn.4b fix for (bq), keeping qn.3's narrated-flow-on-details decision.
+  const location = useLocation();
+  const pairIntent = Boolean((location.state as { pair?: boolean } | null)?.pair);
 
   return (
     <section>
@@ -88,18 +95,23 @@ export function DeviceDetailsPage() {
             </div>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-start gap-3">
             {device.paired === "yes" ? (
               <>
-                <Button disabled title="Backups arrive in a later release">
-                  Back up now
-                </Button>
+                <BackupControls
+                  device={device}
+                  activeJob={activeJob}
+                  start={backup.start}
+                  cancel={backup.cancel}
+                  busy={backup.busy}
+                  error={backup.error}
+                />
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
                 </Button>
               </>
             ) : (
-              <PairDialog udid={device.udid} />
+              <PairDialog udid={device.udid} autoOpen={pairIntent} />
             )}
           </div>
 
@@ -121,7 +133,7 @@ export function DeviceDetailsPage() {
           <div className="mt-8">
             <h2 className="text-sm font-semibold text-muted">Backup history</h2>
             <div className="mt-3">
-              <JobHistory jobs={jobs} />
+              <JobHistory jobs={jobs} onRetry={(latest) => void backup.start("auto", latest.id)} />
             </div>
           </div>
 

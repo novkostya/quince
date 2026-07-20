@@ -183,6 +183,56 @@ func (m *Manager) VerifyTree(treeDir string) (ok bool, detail, kind string, encr
 	return r.OK, r.Detail, r.Kind, r.Encrypted
 }
 
+// VerifyReport is the outcome of an on-demand `versions verify` (the qn.4b CLI escape hatch): the
+// STRUCTURAL, passwordless verification of a committed version's tree. Content verification (the
+// vault canary + encrypted-manifest record sampling) is qn.8's and is NOT run here — state honesty:
+// this reports the structural level only.
+type VerifyReport struct {
+	VersionID string
+	UDID      string
+	OK        bool
+	Detail    string
+	Kind      string
+	Encrypted bool
+	TreePath  string
+}
+
+// VerifyVersion re-runs the passwordless structural Verify on a committed version's tree
+// (CLI `quince versions verify <id>`). ok=false when the version is unknown. It resolves the tree
+// via browseRoot — the same path contracts §2 exposes as Version.browse_root — so it works for the
+// latest, archived namespace versions, and zfs snapshots alike, with NO new backend surface. A
+// version marked missing on disk reports OK:false honestly rather than opening a phantom path.
+func (m *Manager) VerifyVersion(id string) (VerifyReport, bool) {
+	row, ok, err := m.reg.GetVersion(id)
+	if err != nil || !ok {
+		return VerifyReport{}, false
+	}
+	rep := VerifyReport{VersionID: id, UDID: row.UDID}
+	if row.Missing {
+		rep.Detail = "version artifact is missing on disk"
+		return rep, true
+	}
+	tree := browseRoot(m.backups, row.UDID, row.Backend, row.ZFSSnapshot, row.IsLatest, row.CreatedAt)
+	r := Verify(tree)
+	rep.OK, rep.Detail, rep.Kind, rep.Encrypted, rep.TreePath = r.OK, r.Detail, r.Kind, r.Encrypted, tree
+	return rep, true
+}
+
+// VerifyLatest verifies a device's current latest version (CLI `versions verify --udid <udid>`).
+// ok=false when the device has no committed version. Reuses VerifyVersion for the resolution.
+func (m *Manager) VerifyLatest(udid string) (VerifyReport, bool) {
+	rows, err := m.reg.ListVersions(udid)
+	if err != nil {
+		return VerifyReport{}, false
+	}
+	for _, r := range rows {
+		if r.IsLatest {
+			return m.VerifyVersion(r.ID)
+		}
+	}
+	return VerifyReport{}, false
+}
+
 // VersionForJob reports the version id a job committed, if any — used by qn.4a's startup job-row
 // reconciliation to distinguish a commit that rolled forward (→ succeeded) from a true orphan
 // (→ connection_lost). Reads the registry (indexed by udid), never the fs.

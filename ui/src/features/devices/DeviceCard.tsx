@@ -8,6 +8,7 @@ import { modelLine } from "./modelName";
 import { formatRelativeTime } from "@/lib/format";
 import { isRunning, useJobsStore } from "@/stores/jobs";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
+import { useBackup } from "@/features/jobs/useBackup";
 
 function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
   if (state === "on") {
@@ -41,6 +42,8 @@ export function DeviceCard({ device }: { device: Device }) {
   const activeJob = useJobsStore((s) =>
     Object.values(s.byId).find((j) => j.udid === device.udid && isRunning(j.state)),
   );
+  const { start, busy, error } = useBackup(device.udid);
+  const present = Boolean(device.transports.usb || device.transports.wifi);
   const subtitle = modelLine(device.model, device.ios_version);
 
   return (
@@ -78,14 +81,30 @@ export function DeviceCard({ device }: { device: Device }) {
           {activeJob ? (
             <JobProgressInline job={activeJob} />
           ) : device.paired === "yes" ? (
-            <Button size="sm" disabled title="Backups arrive in a later release">
-              Back up now
-            </Button>
+            <div className="flex flex-col gap-1">
+              <Button
+                size="sm"
+                onClick={() => void start("auto")}
+                disabled={!present || busy}
+                title={present ? undefined : "Connect the device to back it up"}
+                data-testid="card-backup-now"
+              >
+                {busy ? "Starting…" : "Back up now"}
+              </Button>
+              {error ? (
+                <span className="text-xs text-danger" role="alert">
+                  {error}
+                </span>
+              ) : null}
+            </div>
           ) : (
             // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
-            // details page (qn.3); the card routes there rather than pairing in place.
+            // details page (qn.3); the card routes there carrying a pair INTENT (router state) so the
+            // details page auto-opens the dialog — the click delivers on its label (qn.4b fix, (bq)).
             <Button asChild size="sm" variant="outline">
-              <Link to={`/devices/${device.udid}`}>Pair</Link>
+              <Link to={`/devices/${device.udid}`} state={{ pair: true }}>
+                Pair
+              </Link>
             </Button>
           )}
         </div>

@@ -10,9 +10,15 @@ import (
 
 // Run starts the live timeline: device churn, a looping scripted backup (with a
 // silent-stall → recovery arc mirroring lab reality), and periodic op / session /
-// version events — so every WS event type fires end to end. It returns immediately;
-// goroutines exit when ctx is cancelled.
+// version events — so every WS event type fires end to end. It also seeds the on-demand
+// backup target (qn.4b: a stable device the UI e2e drives "Back up now" against, plus a
+// failed job so the retry affordance is exercisable). It returns immediately; goroutines
+// exit when ctx is cancelled.
 func (p *Provider) Run(ctx context.Context) {
+	p.mu.Lock()
+	p.baseCtx = ctx
+	p.mu.Unlock()
+	p.seedOnDemandDevice()
 	go p.deviceChurn(ctx)
 	go p.jobLoop(ctx)
 	go p.miscEvents(ctx)
@@ -38,15 +44,17 @@ func (p *Provider) setJob(j wire.Job) {
 
 const demoLogCap = 500 // bound the per-job demo log buffer served by GET /api/jobs/{id}/log
 
-func (p *Provider) logJob(chunk string) {
+func (p *Provider) logJob(chunk string) { p.logJobFor(jobID, chunk) }
+
+func (p *Provider) logJobFor(jid, chunk string) {
 	p.mu.Lock()
-	buf := append(p.jobLog[jobID], chunk)
+	buf := append(p.jobLog[jid], chunk)
 	if len(buf) > demoLogCap {
 		buf = buf[len(buf)-demoLogCap:]
 	}
-	p.jobLog[jobID] = buf
+	p.jobLog[jid] = buf
 	p.mu.Unlock()
-	p.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: jobID, Chunk: chunk})
+	p.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: jid, Chunk: chunk})
 }
 
 // deviceChurn toggles the iPad's Wi-Fi presence so the dashboard shows a device appearing
@@ -95,6 +103,14 @@ func (p *Provider) jobLoop(ctx context.Context) {
 }
 
 func (p *Provider) runOneBackup(ctx context.Context) bool {
+	// Hold the single-flight slot for the phone so an on-demand "Back up now" for it (and the
+	// engine invariant) stays honest; skip a cycle if something else already owns the phone.
+	run, free := p.startRun(udidPhone, jobID)
+	if !free {
+		return sleep(ctx, 3*time.Second)
+	}
+	defer p.endRun(udidPhone)
+
 	start := wire.Now()
 	p.mu.Lock()
 	p.jobLog[jobID] = nil // fresh run: reset the so-far log served over REST
@@ -139,13 +155,17 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 		if s.log != "" {
 			p.logJob(s.log)
 		}
-		if !sleep(ctx, s.wait) {
+		switch p.waitStep(run, s.wait) {
+		case "cancel":
+			p.finishCancelled(&j) // e.g. the fixed phone job was cancelled via the API
+			return true           // the loop re-runs after its pause
+		case "stop":
 			return false
 		}
 	}
 
 	// Success: create a fresh version, link it to the job, finish.
-	newVer := p.commitDemoVersion()
+	newVer := p.commitDemoVersionFor(udidPhone, jobID)
 	fin := wire.Now()
 	j.State = "succeeded"
 	j.Progress.Phase = "done"
@@ -157,26 +177,20 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 
 	// Refresh the device's last_backup and announce it (device.updated) so the card doesn't
 	// go stale — this is what exercises the device.updated WS event end to end.
-	p.mu.Lock()
-	phone := p.devices[udidPhone]
-	phone.LastBackup = &wire.LastBackup{At: fin, JobID: jobID, Status: "succeeded"}
-	phone.LastSeen = fin
-	p.devices[udidPhone] = phone
-	p.mu.Unlock()
-	p.bus.PublishEvent(wire.EventDeviceUpdated, phone)
+	p.refreshLastBackup(udidPhone, jobID, fin, "succeeded")
 	return true
 }
 
-// commitDemoVersion prepends a new fixture version, trimming to a reasonable count.
-func (p *Provider) commitDemoVersion() wire.Version {
+// commitDemoVersionFor prepends a new fixture version for a device, trimming to a reasonable count.
+func (p *Provider) commitDemoVersionFor(udid, jid string) wire.Version {
 	now := wire.Now()
 	vid := id.New()
 	v := wire.Version{
-		ID: vid, UDID: udidPhone, Backend: "zfs",
-		ZFSSnapshot:         strptr("tank/backups/iphone-backup/" + udidPhone + "@quince-" + vid),
-		BrowseRoot:          "/backups/" + udidPhone + "/.zfs/snapshot/quince-" + vid + "/working",
+		ID: vid, UDID: udid, Backend: "zfs",
+		ZFSSnapshot:         strptr("tank/backups/iphone-backup/" + udid + "@quince-" + vid),
+		BrowseRoot:          "/backups/" + udid + "/.zfs/snapshot/quince-" + vid + "/working",
 		CreatedAt:           now,
-		JobID:               strptr(jobID),
+		JobID:               strptr(jid),
 		Kind:                "incremental",
 		Encrypted:           true,
 		IsLatest:            true,
@@ -185,9 +199,9 @@ func (p *Provider) commitDemoVersion() wire.Version {
 		PhysicalBytes:       260_000_000,
 	}
 	p.mu.Lock()
-	// demote the previous latest
+	// demote the previous latest for this device
 	for id2, prev := range p.versions {
-		if prev.UDID == udidPhone && prev.IsLatest {
+		if prev.UDID == udid && prev.IsLatest {
 			prev.IsLatest = false
 			p.versions[id2] = prev
 		}
@@ -201,6 +215,22 @@ func (p *Provider) commitDemoVersion() wire.Version {
 	}
 	p.mu.Unlock()
 	return v
+}
+
+// refreshLastBackup updates a device's last_backup summary and announces device.updated so the
+// dashboard card never goes stale after a scripted job finishes.
+func (p *Provider) refreshLastBackup(udid, jid, at, status string) {
+	p.mu.Lock()
+	dev, ok := p.devices[udid]
+	if !ok {
+		p.mu.Unlock()
+		return
+	}
+	dev.LastBackup = &wire.LastBackup{At: at, JobID: jid, Status: status}
+	dev.LastSeen = at
+	p.devices[udid] = dev
+	p.mu.Unlock()
+	p.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 }
 
 // miscEvents exercises the remaining WS event types: op.updated (pair narration),

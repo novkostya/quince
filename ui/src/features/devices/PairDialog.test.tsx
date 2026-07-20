@@ -49,4 +49,17 @@ describe("PairDialog", () => {
     fireEvent.click(await screen.findByRole("button", { name: /start pairing/i }));
     await screen.findByText(/needs a usb connection/i);
   });
+
+  // (bq) fix: a pair intent deep-linked from the dashboard card auto-opens the dialog on arrival,
+  // so the click lands IN the dialog rather than just navigating (qn.3's narrated-flow-on-details
+  // decision stands — this only changes where the click delivers).
+  it("auto-opens when arriving with a pair intent", () => {
+    render(<PairDialog udid="DEV-1" autoOpen />);
+    expect(screen.getByText(/pair this device/i)).toBeTruthy();
+  });
+
+  it("stays closed without a pair intent (the trigger button is shown, not the dialog)", () => {
+    render(<PairDialog udid="DEV-1" />);
+    expect(screen.queryByText(/pair this device/i)).toBeNull();
+  });
 });
