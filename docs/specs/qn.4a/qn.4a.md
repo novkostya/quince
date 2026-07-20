@@ -17,9 +17,12 @@ de-processed (no rung numbers in a user-facing string, log may cite the rung); a
 ratifications recorded — the double-`Verify` stands as written, and `transport: auto` stays
 deferred to qn.4b.
 
-**BUILT (CI-proven) — lab gate 15 (hardware) pending.** `make gates` + `make image` +
-`make gates-ui-e2e` green in `quince-dev`; CI stories 1–14 pass. See the **Rung report** and
-**Rung-ruled decisions** at the end. Not yet committed (awaiting the Operator).
+**BUILT (CI-proven) + lab gate 15 PASSED on hardware — engine legs (bs) + zfs half (bw).** `make
+gates` + `make image` + `make gates-ui-e2e` green in `quince-dev`; CI stories 1–14 pass. Gate 15:
+the CLI-USB engine legs passed on the hardlink backend (bs), and the zfs half — engine→commit on the
+real zfs-hook backend, host `mirror` verb + `bclonesaved` live, syncoid mid-write — passed on the
+real rpool (bw); only **iMazing-opens** (Operator GUI) is unverified. See the **Rung report** and
+**Rung-ruled decisions** at the end. Landed on `main`.
 
 This rung closes M3's engine half. It is the FIRST rung that runs a real backup end-to-end, so it
 is where qn.5's storage `Seed`/`Verify`/`Commit`/`Discard` seam meets real traffic (the reason

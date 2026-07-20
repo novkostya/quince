@@ -25,7 +25,9 @@ The chosen backend and *why* are logged at startup and shown in onboarding (qn.6
   delegation (`zfs allow`) or run privileged. Simplest where the daemon can reach `zfs`.
 - `storage.zfs.mode: hook` — quince runs `storage.zfs.hook_cmd` (an argv, never a shell string),
   typically an SSH forced-command to a constrained helper on the ZFS host. This keeps the
-  HTTP-facing container free of ZFS privileges (the hardened posture).
+  HTTP-facing container free of ZFS privileges (the hardened posture). The transport binary the
+  `hook_cmd` names (usually `ssh`) must exist **where quince runs** — the container image needs an
+  ssh client (e.g. `openssh-client`); the stock image ships without one.
 
 ### The constrained `quince-zfs-helper` (forced-command reference)
 
@@ -51,10 +53,20 @@ client — the client cannot escape it):
 # Dataset destroy is intentionally NOT reachable.
 set -eu
 PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
+CTUID=0   # container's mapped root uid: 0 for privileged/native; the userns base (e.g. 100000)
+          # when quince runs in an UNPRIVILEGED LXC — else the create chown below is a no-op fix.
 set -- $SSH_ORIGINAL_COMMAND
-op="${1:-}"; target="${2:-}"
+op="${1:-}"
+# The dataset/snapshot is the LAST arg, not $2: quince sends flags BEFORE it — `create -p <ds>`,
+# `list -t snapshot -H -o name -r <ds>` — so $2 is a flag and $2-based matching REFUSES those verbs.
+target=""; for a in "$@"; do target="$a"; done
 case "$op" in
-  create)   case "$target" in "$PARENT"/*) exec zfs create -p "$target" ;; esac ;;
+  create)   case "$target" in "$PARENT"/*)
+              zfs create -p "$target" || exit 1
+              # host root owns the new dataset; when quince runs in an unprivileged-userns container
+              # its mapped root can't write the root-owned mountpoint — chown so working/ is writable.
+              chown "$CTUID:$CTUID" "$(zfs get -H -o value mountpoint "$target")"
+              exit 0 ;; esac ;;
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
   destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
@@ -92,8 +104,12 @@ Then `storage.zfs.hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes zfsuser@zfsh
 runs regardless of the command text; quince appends the operation + target as argv).
 
 Child-dataset visibility: a dataset created after the container starts appears as an empty stub
-inside a plain bind mount. Use an `rbind,rslave` mount so new children propagate live (design §5);
-quince probes visibility and prints `pct set -mpN` fallback instructions when propagation is absent.
+inside a plain bind mount. The host `zfs create` must propagate through **both** hops — into the
+LXC (`lxc.mount.entry: /pool-mount mnt/x none rbind,rslave,create=dir 0 0`, which becomes
+slave+shared when the host mount is `shared`) **and** onto the OCI bind (`propagation: rslave` /
+`-v src:dst:rslave`) — so the new child mounts live at `/backups/<udid>` in the container
+(design §5). quince probes visibility and prints `pct set -mpN` fallback instructions when
+propagation is absent.
 
 ## Offsite sync (D5a) — the anchored filter block
 

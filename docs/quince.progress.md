@@ -72,7 +72,7 @@ hardware day; **M3 closes then.**
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
-| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built + landed (CI); gate-15 ENGINE legs hardware-proven; zfs legs PENDING (qn.4a-owned, (bv))** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Gate 15 split (clarified (bv)):** the ENGINE legs PASSED on real hardware (iPad, hardlink `/backups`) — CLI-USB backup both encryption variants (A1 encrypted `Verify` on real data), version rotation, interface facts 1+5, kill-matrix `backing_up`. The **zfs half remains and stays qn.4a's** (the session holds the topology details): **engine→commit on the real zfs-hook backend** (the piece the plan left implicit — proven only on hardlink so far), the host **`mirror` verb** + **`bclonesaved`** live, **iMazing** opens a zfs-committed version, **syncoid** mid-write — all gated on the rpool hook-mode setup. Runs when the Operator stands up that topology (likely alongside qn.4b's gate 11/12c). **CI half landed on main.** |
+| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built + landed (CI); gate 15 hardware-proven — ENGINE legs (bs) + zfs half (bw); only iMazing-opens (Operator GUI) left** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Gate 15 split (clarified (bv)):** the ENGINE legs PASSED on real hardware (iPad, hardlink `/backups`) — CLI-USB backup both encryption variants (A1 encrypted `Verify` on real data), version rotation, interface facts 1+5, kill-matrix `backing_up`. The **zfs half is PROVEN ((bw))**: **engine→commit on the real zfs-hook backend** (encrypted, verified, version snapshot cut), host **`mirror` verb** + **`bclonesaved`** moving live (+~3 GB), **syncoid** mid-write (both `@quince-*` restore points + dirty `working/` replicated offsite) — the constrained forced-command hook key + `rbind,rslave` host→LXC→container propagation stood up on the real rpool; three deploy-doc hook bugs found+fixed (`$2`→last-arg, image-ssh-client, create-chown). Only **iMazing-opens** (Operator GUI) is unverified. **Landed on main.** |
 | qn.4b | Wi-Fi first-class + transport policy + job-history UI (closes M3) | **built (CI-proven); lab gate 11/12c (hardware) pending** — transport **`auto` resolution** (prefer-USB-when-plugged, absent→**422** no job, concrete transport stored) + httpapi passes `auto` through; **`quince versions verify <id>\|--udid`** + **`device repair-working-copy <udid>`** CLI escape hatches (`storage.VerifyVersion`/`VerifyLatest`, browseRoot-resolved, no new backend surface); **live demo `JobControl`** (on-demand scripted jobs + seeded failed job for retry; single-flight; reverses qn.4a's 503); **UI** live Back up now (auto + transport override) / one-tap Retry on failed intent groups / Cancel on running job (details page + dashboard card). `make gates`/image/e2e green (e2e **story 4**: Back up now → cancel → retry). Retired the qn.4a Wi-Fi-success coverage finding (`wifi-incremental-success` story). Coverage backup **83.4%** / demo **55.3%** (was 0) / storage **78.2%** / httpapi 72.2% / cmd/quince 8.5% (CLI wiring hw-exercised). NOT a Wi-Fi demotion ((h) stands). **Lab gate 11 (both-transports UI-driven + honest Wi-Fi disconnect) + 12c (destructive hardlink matrix) = the consolidated hardware day with qn.4a gate 15** |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + netmuxd co-supervision + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined |
@@ -991,7 +991,25 @@ on real traction).
   version card's `Unlock` button shows on unencrypted versions (should be encryption-aware — qn.8
   placeholder); (iv) the device card lingers on "Backing up 100%" through verify+commit and doesn't
   reflect `device.last_backup` (check the engine sets it on success). (iii)/(iv) may be subsumed by
-  qn.4b's landed job-history/backup UI (br) — dedup at fix time. **Observations (not bugs):** both
+  qn.4b's landed job-history/backup UI (br) — dedup at fix time. **(v) CONFIRMED + root-caused
+  (2026-07-20 zfs session):** `device.last_backup` is populated **only in the `demo` provider**
+  (`internal/demo/{script,jobcontrol,fixtures}.go` `refreshLastBackup`) — the REAL path (engine
+  `Commit` success + `wire.Device` serialization from the live registry/store) never writes it, so a
+  paired device with committed versions shows **"No backups yet"** on the card while the version list
+  right below shows them (Operator screenshot: 5 versions — 3 `zfs incremental · structure verified`,
+  2 `hardlink` — under a "No backups yet" card). This proves (iv)'s hypothesis; fix = the engine sets
+  `device.last_backup {at,job,status}` on commit success (or the device DTO derives it from the latest
+  committed version) — dedup with qn.4b's backup UI (br). **(vi) GitHub Actions CI RED on `main` —
+  root-caused + fixed (2026-07-20).** Only the `e2e` job failed (`gates`+`image` green), on bu+bv+a
+  re-run: the two qn.4b **story4** Playwright tests time out waiting for the demo devices
+  `spare-iphone` + `new-iphone` to appear. Root cause: `demo.deviceChurn` reset `p.order` to a
+  hardcoded `[phone]`/`[phone,pad]` every 20 s, wiping the on-demand devices `seedOnDemandDevice`
+  had appended at `Run()` — so story4 passed only if it ran inside the first 20 s (green at bq on a
+  fast runner; reliably red once the runner scheduled story4 later). NOT a code regression (main
+  unchanged since bq) — a latent demo bug CI timing finally exposed. **Fix:** churn toggles only the
+  pad in `p.order` (new `removeUDID` helper), preserving phone + on-demand devices; stories 1–3 only
+  assert phone/pad so they're unaffected. Verified by reading (no local Go toolchain) — CI confirms on
+  the next push. **Observations (not bugs):** both
   runs came out `kind:incremental` — `idevicebackup2` did device-relative differentials, and the
   encryption change did NOT force a full backup on this iPad (unlike the lab-log iPhone) → a real
   product question (should the engine pass `--full` on the first backup / after an encryption
@@ -1025,3 +1043,32 @@ on real traction).
   runs when the Operator stands up the rpool hook topology (likely with qn.4b's gate 11/12c —
   one hook-topology setup serves both). Also fixed en route: the qn.4a dashboard row was stale
   ("Not committed") — reconciled to reflect the landed CI half + the hardware-proven engine legs.
+- 2026-07-20: (bw) **qn.4a zfs half PROVEN on real hardware — the engine drives a committed,
+  verified version on the real zfs-hook backend, end-to-end.** Stood up the deferred (bv) topology on
+  the lab rpool: a throwaway parent dataset, a constrained `quince-zfs-helper` forced-command SSH key
+  (create/snapshot/destroy/list/mirror; dataset-destroy + parent-escape both refused, verified), the
+  per-device child dataset `rbind,rslave`-propagated host→LXC→container (a host-side `zfs create`
+  appears live at `/backups/<udid>`), `storage.backend: zfs, mode: hook`. **The zfs legs (gate
+  15(a)+(d), (bv) enumeration):** (a) **engine→commit on zfs** — `quince backup` drove
+  `queued→…→succeeded` on the zfs backend; an ENCRYPTED backup (on-device keybag; Manifest carries
+  `ManifestKey`+`BackupKeyBag`), the `verifying` state ran A1's Verify on the committed tree,
+  `committing` cut the version snapshot `<ds>@quince-<versionID>` (~3.1 GB refer), `latest/`
+  reflink-mirrored. (d) **host `mirror` verb + `bclonesaved` live** — the verb ran on the real rpool
+  (`mode: hook-reflink`, "zero-space verified"); pool `bclonesaved` moved **+~3 GB** (measured `zpool
+  get bclonesaved`, the pool-level way — [[zfs-reflink-clone-facts]], never dataset `used`). (d)
+  **syncoid mid-write** — while a second backup was actively writing `working/`, a syncoid pass
+  replicated the child dataset to the offsite PVE host: both committed `@quince-*` restore points
+  intact (refer matched, working+latest trees present) + a sync-snap captured the dirty in-flight
+  `working/`. Offsite replication is safe during an active backup. (d) **iMazing-opens** stays an
+  Operator-GUI leg — flagged, not agent-verifiable. **Deploy-doc bugs (surface only once hook mode is
+  actually stood up — nobody had; all fixed in `deploy/storage.md`):** (1) the reference helper read
+  `target="$2"`, but quince sends the dataset LAST (`create -p <ds>`, `list … -r <ds>`) → it REFUSED
+  create+list; now last-arg. (2) the stock image ships no ssh client that `hook_cmd` needs; documented.
+  (3) a host-created dataset is root-owned → the unprivileged-userns container can't write `working/`;
+  the `create` verb now chowns to the container's mapped uid. Documented the two-hop (LXC + OCI)
+  `rbind,rslave` propagation too. **willEncrypt finding strengthened (backlog (bs)-(i)):** `unknown`
+  also arises from a COLD-lockdown enrichment race, not only an absent key → preflight hard-fails
+  `encryption_required` with no retry even on a device that WILL encrypt; the storage legs set
+  `require_encryption: false` (device still encrypts) to test storage, not re-litigate pairing.
+  **qn.4a zfs half CLOSED — only iMazing-opens (Operator GUI) remains.** M3's engine goal is now
+  hardware-proven on BOTH backends: hardlink engine legs (bs), zfs half (bw).
