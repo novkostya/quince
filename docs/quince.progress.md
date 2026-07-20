@@ -849,7 +849,12 @@ on real traction).
   stand; no incident. Standing lesson kept: the gate cannot see pre-existing lines — a
   whole-tree `privacy-scan-all` target remains available as a future hardening if a genuinely
   sensitive pattern is ever added. Bare hostnames/IPs/MACs remain firmly private.
-- 2026-07-20: (bp) **qn.4a BUILT (CI) — the backup engine drives idevicebackup2 end-to-end.**
+- 2026-07-20: (bt) **qn.4a BUILT (CI) — the backup engine drives idevicebackup2 end-to-end.**
+  *(Letter fix 2026-07-20: this entry was originally mislabeled (bp), colliding with the qn.4b
+  spec-approval entry below. Every `(bp)` cross-reference in canon + code means that auto-absent
+  ruling, so THIS build record was renumbered — to (bt), since (bs) was legitimately taken by the
+  gate-15 hardware entry that landed meanwhile — rather than churn 20 references. Out of strict
+  alpha order by design; a terminal build record.)*
   Cleared the pre-build spec-review gate: spec + Rule check → **architect APPROVED with three
   amendments (1 startup job-row reconciliation story + explicit two-reconciler order; 2 the
   `waiting_for_device` bound named `const`; 3 the sampler free-space / `disk_low` leg — the
