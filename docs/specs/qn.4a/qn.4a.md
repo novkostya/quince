@@ -354,6 +354,19 @@ muxd**/registry + qn.5 storage on a temp `/backups` — **no hardware in CI** (D
     silent kill on either path; the frozen `Job`/`JobProgress` wire shape is unchanged.
 
 **Lab gate (manual, hardware — USB; the rung's headline proof + the re-homed gate-12 legs (bm)/(bn)).**
+
+> **STATUS (2026-07-20, decisions (bs)):** the **engine legs PASSED on real hardware** (an iPad15,7,
+> iOS 26.5 — not the iPhone below): CLI-USB backup, both **unencrypted and encrypted** variants
+> (A1's encrypted `Verify` on a real encrypted `Manifest.db`), **version rotation**, **interface
+> facts 1 & 5** confirmed, and the **kill-matrix `backing_up` leg** (crash → committed state intact,
+> reconciliation sweeps work + `→ connection_lost`, no phantom). The UI-driven both-transports
+> backup was re-homed to **qn.4b gate 11** (br). The **zfs legs (c/d below: `mirror` verb /
+> `bclonesaved` / iMazing / syncoid) are DEFERRED** to a later session — they need the rpool
+> hook-mode topology, disproportionate vs. the incremental value (core zfs facts already proven in
+> gate-12 (bf)→(bk)); syncoid target prepped on the offsite PVE host (`local/environment.md`). Four
+> lab findings filed. **The
+> M3 engine half is hardware-proven.**
+
 On the qn.3-kept **paired staging container** + the PVE host's real **rpool** (zfs hook mode) + a
 real iPhone:
 
