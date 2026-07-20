@@ -31,14 +31,18 @@ never argv/env) + registry lockdown enrichment + the four frozen device-op endpo
 with the architect's three amendments + two Operator acks). **Lab gate 8 PASSED on real hardware
 (2026-07-20)** — fresh container → pair (UI) → recreate-still-paired (amendment 1) → change_password +
 disable→enable, secrets proven absent from argv/env/log; four findings caught + fixed + CI-validated
-(incl. a real enrichment auto-pair-on-locked-device bug). **qn.5 is now BUILT (CI)** — the version
-store: `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json`
-markers + startup-reconciliation matrix + adopted discovery + encryption-branched structural
-`Verify` + `RepairWorkingCopy` + retention) + `clonetree` (FICLONE/hardlink/copy) + a `versions`
-registry (the real `VersionReader`) + `DELETE /api/versions/{id}` + `version.*` events +
-reconcile-before-serve + `deploy/storage.md`; full `make gates`/image/e2e green (decisions log
-(bd)). **Lab gate 12 (real zfs + iMazing + syncoid + the destructive hardlink-safety matrix) is the
-remaining hardware step**, owned by qn.5. The qn.5-before-qn.4 order was ruled in (ar).
+(incl. a real enrichment auto-pair-on-locked-device bug). **qn.5 is DONE (CI-proven; landed
+`285c40b`..`3ce5bb1`)** — the version store: `internal/storage` (4 backends + auto-probe +
+journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted
+discovery + encryption-branched structural `Verify` + `RepairWorkingCopy` + retention + the
+(bi)/(bk) **mirror ladder**) + `clonetree` + a `versions` registry (the real `VersionReader`) +
+`DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`;
+full `make gates`/image/e2e green ((bd), (bl)). A five-round mirror investigation ((bf)→(bk))
+proved block cloning works at the POOL level but EPERMs in the unprivileged userns — the mirror
+ladder clones from `working/` (never `.zfs`) via a host-side hook `mirror` verb / in-container
+reflink / hardlink / copy. **Lab gate 12's remaining hardware legs (host-side mirror verb,
+iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm) — named owner, not a silent
+defer). Frontier → **qn.4a** (backup engine; closes M3 with qn.4b).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -47,7 +51,7 @@ remaining hardware step**, owned by qn.5. The qn.5-before-qn.4 order was ruled i
 | qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
-| qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **built (CI)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention) + `internal/storage/clonetree` (FICLONE/hardlink/copy) + `versions` table & registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve wiring + `deploy/storage.md`; `make gates`/image/e2e green; **lab gate 12 (real zfs + iMazing + syncoid + destructive matrix) is the remaining hardware step** (owned by this rung). **Runs BEFORE qn.4** (order ruled in (ar)) |
+| qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
 | qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | outlined — after qn.5; split from qn.4 ((be)); CI replays ALL transcripts incl. Wi-Fi torn sessions |
 | qn.4b | Wi-Fi first-class + transport policy + job history UI (closes M3) | outlined — after qn.4a; NOT a Wi-Fi demotion ((h) stands) |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
@@ -789,3 +793,19 @@ on real traction).
   12). **Still uncommitted pending the Operator's ask** (the two CI-half commits stand). Remaining
   gate-12 legs (Operator-driven): the host-side `mirror` verb on the real rpool, iMazing-opens,
   syncoid mid-write, and the 12c destructive matrix (which validates the hardlink tier).
+- 2026-07-20: (bm) **qn.5 CLOSED (CI-proven); lab gate 12's remaining hardware legs RE-HOMED to
+  qn.4a** (Operator ruling — session cut off after the five-round mirror investigation). Landed on
+  `main` in four commits: `285c40b` (storage backends + reconciliation) + `9a4511b` (docs (bd)/(be))
+  + `7e34034` (mirror ladder + lab harness) + `3ce5bb1` (docs (bf)→(bl)). **Proven at close:** the
+  whole storage subsystem in CI (11 stories + the reconciliation kill-matrix + the D5a anchored-
+  filter contract; `make gates`/image/e2e green; coverage storage 78.7% / clonetree 71.4% / store
+  80.1% / httpapi 71.8%), plus the real-zfs commit + encrypted `Verify` + the reflink/EPERM/EXDEV
+  facts exercised on hardware during the gate-12 investigation ((bf)→(bk)). **NOT proven on
+  hardware (re-homed, NOT silently dropped — the qn.2b→qn.7 no-orphan-gate precedent):** the
+  host-side `mirror` verb on the real rpool, iMazing-opens, syncoid mid-write, and the 12c
+  destructive hardlink-safety matrix. **Owner = qn.4a**, whose first real-backup hardware session
+  runs qn.5's storage `Commit` on real traffic (the natural home); the legs are preserved verbatim
+  in the qn.5 spec's gate-12 section. Interim note: the `hardlink` mirror/backend tier is
+  matrix-unproven until 12c runs (the Operator's rpool uses the reflink hook path, so it isn't hit
+  there); the pushed staging image is pre-mirror-ladder and needs a re-push before the qn.4a
+  hardware session. Frontier → **qn.4a**.

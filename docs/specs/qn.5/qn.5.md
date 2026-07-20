@@ -8,12 +8,21 @@ listed/deletable via the API, and a crash at any commit phase reconciles to a de
 on restart — **all provable on fixture trees + a manually-produced backup, with no backup
 engine** (the "provable at rung close" rule; qn.4 supplies the engine after this).
 
-**Status: BUILT (CI) — awaiting lab gate 12** (decisions log (bd)). Cleared the pre-build
-spec-review gate — **architect go with three amendments + five rulings, all folded in below**
-(program loop step 1 + decisions log (as)). `make gates` + `make image` + `make gates-ui-e2e`
-green; the 11 CI stories pass; **lab gate 12 (real zfs + iMazing + syncoid + the destructive
-hardlink-safety matrix) is the remaining hardware step, owned by this rung.** Not yet committed
-(awaiting the Operator's ask). The as-built details are in **Rung-ruled decisions** below.
+**Status: CLOSED (CI-proven) — lab gate 12 RE-HOMED to qn.4a** (decisions log (bd), (bl), (bm)).
+Cleared the pre-build spec-review gate (architect go, three amendments + five rulings, all
+folded in). `make gates` + `make image` + `make gates-ui-e2e` green; the 11 CI stories pass; the
+mirror-ladder ruling ((bi)/(bk)) is folded in ((bl)). Landed on `main` in four commits
+(`285c40b`..`3ce5bb1`). **What is proven: the whole storage subsystem in CI** — the four
+backends, auto-probe, journaled commit + `quince-version.json` markers, the startup-reconciliation
+kill-matrix, adopted-version discovery, encryption-branched structural `Verify`, retention,
+`RepairWorkingCopy`, the versions registry + `DELETE`, and the D5a anchored-filter contract; plus
+the real-zfs commit + encrypted `Verify` were exercised on hardware during the gate-12
+investigation (decisions (bf)→(bk)). **What is NOT yet proven on hardware, re-homed to qn.4a
+(post-qn.4, a NAMED owner — not a silent defer, per the qn.2b→qn.7 precedent):** the host-side
+`mirror` verb on the real rpool, iMazing-opens of a committed version, syncoid mid-write, and the
+12c destructive hardlink-safety matrix. qn.4a is the first rung that runs real backups end-to-end
+on a real backend, so it exercises qn.5's storage `Commit` on real traffic — the natural home for
+these legs. The as-built details are in **Rung-ruled decisions** below.
 
 - **Ruling 1 (CI-vs-lab split, confirmed).** fake-`zfs` in CI + real on the host is the line —
   do **not** attempt a file-backed pool (an unprivileged Alpine LXC running nested OCI can't
@@ -282,7 +291,11 @@ Each independently checkable. CI stories use fixture trees + a fake `zfs` CLI (t
     reseeds `work/` from `latest/`. A repair with no last-good version fails honestly (nothing
     to rebuild from), never silently leaving a half-state.
 
-**Lab gate (manual, hardware/host — OWNED and RUN this rung; recorded in the rung report):**
+**Lab gate (manual, hardware/host — RE-HOMED to qn.4a, decisions (bm); legs preserved verbatim
+below for that session to inherit — a named owner, not a silent defer):** the gate-12
+investigation (decisions (bf)→(bk)) already proved the real-zfs commit + encrypted `Verify` +
+the reflink/EPERM/EXDEV facts on hardware; the remaining legs (host-side `mirror` verb, iMazing,
+syncoid, the 12c destructive matrix) attach to qn.4a's first real-backup hardware session.
 
 12. **Real zfs on the lab host + iMazing + syncoid + the destructive matrix.** On the lab
     deployment (the qn.3-kept paired staging container + the PVE host's real rpool, hook mode):

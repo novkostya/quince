@@ -102,7 +102,12 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   --latest` — the offsite-sync source printer) — the fastest way to torture the
   engine before the UI exists (external-review point, accepted in-place; the CLI was
   ruled NOT a separate milestone — standalone it is thin plumbing that would rob the
-  engine rung of its driving interface). *Gate (USB): an encrypted backup on the lab
+  engine rung of its driving interface). **Inherits qn.5's re-homed gate-12 hardware
+  legs** (decisions (bm)): its first real-backup hardware session runs qn.5's storage
+  `Commit` on real traffic, so the host-side `mirror` verb on the real rpool, iMazing-
+  opens, syncoid mid-write, and the **12c destructive hardlink-safety matrix** (which
+  validates the hardlink mirror/backend tier) attach here (legs preserved verbatim in
+  the qn.5 spec's gate-12 section). *Gate (USB): an encrypted backup on the lab
   box, driven from the CLI, ends `succeeded` as a committed verified version on the
   real backend; the engine-level kill matrix (kill at seed / backing_up / verify /
   commit hand-off) recovers to defined states on restart; iMazing opens it.*
