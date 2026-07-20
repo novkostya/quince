@@ -24,8 +24,13 @@ reconcile, the `devices.manage_muxer` config key, and a UI **Rescan** control; `
 **real** usbmuxd in the built image (`/api/health` → `muxer:{managed,state:"running"}`). **qn.2b
 is now DONE** — **lab gate 7 (managed USB + Rescan) PASSED on real hardware** (Operator-confirmed on
 staging; it surfaced + fixed a "live `/dev/bus/usb`" deploy-config gap, (av)); gate 8 (netmuxd-USB
-audition) was **re-homed to qn.7** with a named owner (not a silent defer, (aw)). **qn.3 is the new
-frontier.** The qn.5-before-qn.4 order swap is also ruled in (ar).
+audition) was **re-homed to qn.7** with a named owner (not a silent defer, (aw)). **qn.3 is now BUILT
+(CI)** — `internal/deviceops` (pair/validate/info wrappers + backup-encryption management over a **pty**,
+never argv/env) + registry lockdown enrichment + the four frozen device-op endpoints + the `Op` lifecycle
++ pairing-record persistence + UI pair/encryption dialogs; full `make gates`/image/e2e green (spec-approved
+with the architect's three amendments + two Operator acks, all folded in). **Its lab gate 8 (fresh
+container → paired → encryption, on real hardware) is the remaining physical-presence step.** The
+qn.5-before-qn.4 order swap is also ruled in (ar).
 
 | Rung | Title | State |
 | --- | --- | --- |
@@ -33,7 +38,7 @@ frontier.** The qn.5-before-qn.4 order swap is also ruled in (ar).
 | qn.1 | Core daemon skeleton + demo mode + UI shell | **done** — full gates + e2e + image green in quince-dev (2026-07-19) |
 | qn.2 | muxd client + live device table | **done** — muxd client + registry + UI; `make gates`/image/e2e green (2026-07-20); lab gates 6–7 → owned by qn.2b |
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
-| qn.3 | Device ops + Devices page | **frontier** — after qn.2b; inherits "enrich muxd devices with lockdown identity" |
+| qn.3 | Device ops + Devices page | **BUILT (CI)** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints (pair/validate/encryption/ops) + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (added e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 (fresh container → paired → encryption on real hardware) PENDING — the physical-presence session** |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | outlined — **runs BEFORE qn.4** (order ruled in (ar)) |
 | qn.4 | Backup engine, both transports + headless CLI | outlined — after qn.5; closes M3 with the integrated e2e gate |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
@@ -547,3 +552,35 @@ on real traction).
   study-data bind re-pointed from quince-dev to the parser's own (to-be-provisioned) box, and
   the sibling repos' `privacy-check` pattern lookup extended (`../quince-local/…`) so the
   commit gate stays armed on boxes that have no quince checkout next door.
+- 2026-07-20: (az) **qn.3 BUILT (CI) — device ops + Devices page.** Cleared the pre-build
+  spec-review gate: spec + Rule check → **architect APPROVED with three amendments + two
+  rulings**, all folded in (Operator acks: hardware encryption coverage = `change_password` +
+  a disable→enable cycle; keep the freshly-paired container standing). **Interface facts verified
+  live** in the built image (libimobiledevice 1.4.0) — the STOP-gap cleared: `idevicebackup2`
+  supports interactive `-i` (pty getpass) **and** `BACKUP_PASSWORD`/`_NEW` env; per the spec's
+  pty-preference qn.3 uses the **pty** (password never in argv/env/log); `idevicepair pair` is
+  **error-and-retry** (not blocking) so `waiting_for_user` is a poll-until-`SUCCESS` loop;
+  `USBMUXD_SOCKET_ADDRESS` = `UNIX:<path>`/`host:port`; `ideviceinfo -x` keys + `-q
+  com.apple.mobile.backup -k WillEncrypt`. Shipped: **`internal/deviceops`** (argv wrappers with
+  the muxsup subprocess hygiene + a `GO_WANT_HELPER_PROCESS` fake-CLI harness; the pty-driven
+  encryption path via `creack/pty v1.1.24`); **`device.Enrich`** (lockdown identity overlaid on
+  the muxd-minimal shell, `device.updated` on change) + a bus-driven **enrichment driver**
+  (attach → `ideviceinfo`/`idevicepair validate`, per-UDID debounced, off the request path);
+  the **four frozen endpoints** (`POST …/pair` 202|404|409, `…/pair/validate`, `…/encryption`
+  202|422, `GET /api/ops/{id}`) behind a consumer-defined `DeviceOps` interface; the **`Op`
+  lifecycle** manager (running→waiting_for_user→succeeded|failed, `op.updated`); **audit** rows
+  for pair/encryption (no secret; design §6 list updated — amendment 3); **pairing-record
+  persistence** (whole-dir copy of `/var/lib/lockdown` ↔ `$QUINCE_DATA/lockdown`, amendment 1 —
+  survives a container recreate); non-demo wiring + a demo `DeviceOps` scripting the op flow;
+  and **UI** pair + encryption dialogs (assisted narration, unencrypted-banner CTA, USB-only 409
+  explained, passwords never in URL/log). **`make gates` + `make image` + `make gates-ui-e2e`
+  green** (added e2e **story 3**: encryption op narrates the assisted flow to success). **Story 5
+  headline gate proven** — a test asserts the password is in no argv/env/log/audit and only
+  reaches the child over the pty. **Coverage declared:** deviceops **80.2%**, device **97.6%**,
+  httpapi **71.8%**; **known-untested** (accepted debt, all low-risk error/edge or trivial
+  helpers): the enrichment-driver subscription-overflow `refreshAll` recovery, the ctx-cancel
+  process-group SIGKILL branch, the ops-map `pruneLocked` eviction (needs 200+ ops), the
+  lockdown mkdir-error warn branches, and the trivial `SetLockdown`/`encStartMsg`/`encDoneMsg`
+  defaults. **Lab gate 8 (fresh container → paired → encryption on real hardware) is the
+  remaining physical-presence step** — owned by this rung, not deferred. Not yet committed
+  (awaiting Operator).
