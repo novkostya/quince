@@ -188,13 +188,52 @@ differently (Operator ruling: no hardlink games under ZFS):
      correctly, `current`/`latest` does not.)
    - `latest/` — a consistent mirror of the last *verified* backup, rebuilt at commit
      and swapped atomically. **The snapshot is the canonical version; `latest/` is its
-     materialized view**: it is built from the just-created snapshot's `.zfs` path (an
-     immutable source even during a long clone/copy fallback), via reflink clone where
-     available (OpenZFS block cloning — near-instant, zero extra space, fully
-     independent files; probed, incl. FICLONE-from-snapshot-mount, with a
-     job-lock-guarded clone-from-`working/` fallback if the snapshot mount refuses
-     clones; further fallbacks hardlink under the safety matrix, else copy). This
-     exists for file-level offsite sync (D5a).
+     materialized view**: built from the just-created snapshot's `.zfs` path (an
+     immutable source even during a long clone/copy fallback), by the first mirror
+     strategy that actually works — reflink → hardlink (safety-matrix-gated) → copy.
+     **RESOLVED 2026-07-20 after a three-round investigation (decisions log
+     (bf)→(bg)→(bh)→(bi)) — the zfs mirror uses a strategy ladder, because three
+     distinct facts were established:** (1) *the pool clones fine* (host-side:
+     `bclonesaved` +≈file-size, ALLOC flat); (2) *dataset-level accounting lies* —
+     ZFS bills BRT clones like dedup (full size per reference in `used`/`du`), so
+     sharing is verified ONLY at pool level (`zpool get bcloneused,bclonesaved`, or
+     the `avail` delta reachable via the hook's `list` verb); (3) *the unprivileged
+     user-namespace blocks FICLONE outright (`EPERM`)* — measured in the exact
+     production shape (rpool child rbind'd into an unprivileged CT, and the OCI
+     container inside it), so in-container reflink is unavailable in the
+     recommended secure topology. **The mirror ladder (ruled (bi)):**
+     (i) hook configured → a new constrained **`mirror` verb** runs the rebuild
+     host-side, where FICLONE works (`cp -a --reflink=always` from `working/` under
+     the job lock into a temp dir + atomic swap; constrained to children of the
+     configured parent; touches only the DERIVED `latest/` — never snapshots — so
+     even a buggy verb cannot damage canonical versions); (ii) no hook →
+     in-container reflink attempt (covers privileged/bare-metal topologies; fails
+     fast with `EPERM` in unprivileged ones, self-selecting down the ladder);
+     (iii) hardlink-under-safety-matrix (gate 12c); (iv) copy — always correct,
+     cost SURFACED (backend-selection string, commit log, health;
+     ~full-backup-size write amplification per commit stated plainly), never
+     silent. EXDEV-from-snapshot holds at every layer (kernel: separate
+     superblock), so ALL sharing strategies clone from `working/` under the job
+     lock, never from the `.zfs` mount. **Probe semantics (refined 2026-07-20, (bj), corrected (bk) — both
+     Operator-challenged): the sharing measurement governs REPORTING plus exactly
+     ONE selection edge.** Reflink outranks hardlink *when both share* because
+     clones are independent while hardlinks alias (in-place mutation of `working/`
+     would silently corrupt a hardlinked `latest/` — the matrix-gated risk), so
+     the ladder orders by RISK dominance, not space. The one edge: a
+     **measured-not-sharing** reflink falls through to hardlink-under-matrix
+     (downgrade-for-space is allowed; upgrading into aliasing risk blindly is
+     not). Absent any measurement channel, reflink wins on the risk asymmetry —
+     its worst case is copy COST (reported "unverified"), hardlink's worst case
+     is silent `latest/` corruption. The measurement otherwise decides what
+     quince honestly *claims* ("zero-space verified" / "sharing unverifiable in
+     this topology — budget full-copy cost" / "copy"). Measurement channels, best available: hook `list` avail-delta →
+     delegated `zfs list -o avail` (exec mode) → syscall-only `statfs(2)`
+     `f_bavail` delta around an incompressible test clone (works in any container;
+     sync-and-settle for txg accounting lag) → none usable ⇒ report UNVERIFIED,
+     never claim zero-space. This mirror exists for file-level offsite sync (D5a)
+     — which is unchanged: pointing rclone at `.zfs` paths instead was considered
+     and rejected (with `snapdir=hidden` rclone never sees them; with
+     `snapdir=visible` it would walk EVERY snapshot at full size).
    A version IS a `zfs snapshot <parent>/<udid>@quince-<job>-<ts>`, taken **only after
    structural verification passes**, browsed read-only via that dataset's
    `.zfs/snapshot/`. Seed and Discard are no-ops; retention = destroying our own

@@ -679,3 +679,113 @@ on real traction).
   rung of its driving interface (its bulk IS the engine working). Roadmap M3 + dashboard
   restructured; numbers stay labels (qn.2b precedent). The updated frontier chain: qn.5 gate 12
   → qn.4a → qn.4b.
+- 2026-07-20: (bf) **gate-12 gap RULED: the zfs mirror probes for MEASURED sharing, not FICLONE
+  success.** The gate's Operator-run core PASSED on real ZFS 2.4.3 (throwaway child dataset;
+  create → snapshot → mirror → registry → `RepairWorkingCopy`, twice; **A1's encrypted `Verify`
+  proven on the real ~34G encrypted tree** — committed without opening `Manifest.db`, exactly
+  the CI-blind bug the amendment predicted) and surfaced two definitive findings: (1)
+  reflink-from-snapshot = `EXDEV` (interface fact 2 answered; the designed clone-from-`working/`
+  fallback stands); (2) **FICLONE succeeds WITHOUT sharing blocks on the real pool**
+  (`block_cloning` active, `zfs_bclone_enabled=1`; verified three independent ways) — the
+  "zero extra space" reflink premise is false there. Ruling: option (c) sharpened — the mirror
+  strategy chain stays reflink → hardlink → copy, but the probe measures real physical-usage
+  sharing; ineffective reflink is demoted, the hardlink strategy is the space candidate GATED
+  on the 12c destructive matrix, and copy is the always-correct floor with its cost SURFACED
+  (no silent fallback). Option (b) — offsite sync from `.zfs` paths — REJECTED: `snapdir=hidden`
+  hides them from rclone, `snapdir=visible` uploads every snapshot at full size; D5a stands.
+  Option (d) — root cause — demoted to a non-blocking side quest; first check: `zfs get
+  encryption` on the pool datasets (BRT + native encryption has documented no-share
+  restrictions — this may be known behavior, not a 2.4.x bug), then an upstream issue if it
+  reproduces on an unencrypted dataset. Stack D5 amended.
+- 2026-07-20: (bg) **the (bf) no-share verdict is PROVISIONAL — Operator challenged it, and
+  there is a specific accounting trap that could fully explain the evidence.** ZFS charges
+  BRT-cloned blocks like dedup: full size per reference at dataset level (`zfs list used`,
+  `du`); the savings are visible ONLY at pool level (`zpool get
+  bcloneused,bclonesaved,bcloneratio` / pool ALLOC delta). All three gate-12 measurements are
+  consistent with WORKING clones misread through dataset accounting. Discriminator protocol
+  (host-side, zero container layers, ~10 min): on the PVE host — `zfs create` a throwaway,
+  `dd` a test file, `zpool sync`, note `bclonesaved` + pool ALLOC, GNU `cp --reflink=always`,
+  `zpool sync`, re-read both. `bclonesaved` grows ~file-size → cloning WORKS, reflink
+  reinstated, (bf)'s demotion reverses (the probe still moves to pool-level measurement —
+  that part of the ruling stands regardless). Flat → the no-share finding is real; then `zfs
+  get encryption` (BRT × native-encryption restriction) before any upstream filing. Also
+  eliminate stack layers while at it: the original harness ran through container/bind paths —
+  the re-measure runs on the host with GNU cp; note `zfs_bclone_wait_dirty=0` makes clones of
+  UNSYNCED data fail (a Go fallback chain could silently copy) — hence the `zpool sync`
+  before cloning. The EXDEV-from-snapshot finding is unaffected (cross-superblock FICLONE is
+  kernel behavior no mount option changes; the clone-from-`working/` fallback stands). Remaining gate-12 legs: iMazing-opens
+  (Operator GUI), syncoid mid-write (needs a replication target), the 12c matrix — with the
+  iOS-upgrade leg marked OPPORTUNISTIC (runs at the next real update; a named trigger, not a
+  blocker), the rest forceable now.
+- 2026-07-20: (bh) **(bg)'s discriminator RUN by the Operator on the host — CLONING WORKS;
+  reflink REINSTATED.** `bcloneused` 388M→788M (+400M = the test file), `bclonesaved`
+  695M→1.07G, pool ALLOC flat at 391G; the baseline itself proves prior clones were already
+  sharing on this pool. (bf)'s demotion reverses per (bg)'s pre-registered branch: the zfs
+  `latest/` mirror keeps reflink (near-instant, zero extra pool space; the ~34G-per-commit
+  copy price evaporates). What stands from (bf): the EXDEV-from-snapshot finding + the
+  clone-from-`working/` fallback (the operative path), and the probe measuring REAL sharing
+  at the POOL level — rung-local pick for qn.5: the `avail`-delta method needs only the
+  hook's existing `list` verb, or extend the helper with read-only `zpool get bclone*`.
+  Dataset-level `used` is documented as the trap (BRT bills like dedup). Option (d) side
+  quest CLOSED: root cause = accounting semantics, nothing is broken, no upstream issue.
+  Chain of custody worth recording: the gap protocol caught canon-vs-reality, and Operator
+  skepticism then caught evidence-vs-instrumentation — without (bg), a dataset-`used` probe
+  would have silently demoted a working reflink on every pool, forever.
+- 2026-07-20: (bi) **the Operator's layer ladder caught the THIRD layer: unprivileged userns
+  blocks FICLONE (`EPERM`) — mirror strategy RULED as a ladder with a host-side hook verb.**
+  The qn.5 session's mandated re-verification (OCI → LXC → host, exact production mount shape)
+  established: host shares fully (+4.3G bcloneused/saved, ALLOC flat); unprivileged LXC and
+  the OCI container inside it get `EPERM` — so in-container reflink is unavailable in the
+  recommended secure topology, and the session's original practical outcome (mirror costs a
+  copy) was RIGHT for the wrong reason, twice removed. Its confirmations were exemplary:
+  recomputed dataset-`used` predictions match all three original readings (the accounting trap
+  fully explains finding #2), EXDEV-from-snapshot reproduces at every layer. RULING (option 1
+  + option 2 as fallback; 3 rejected on security posture — privileged topologies simply fall
+  out of the ladder naturally; 4 stays rejected per (bf)): the mirror ladder = (i) hook
+  present → new constrained **`mirror` verb** rebuilds `latest/` HOST-side where FICLONE
+  works (`cp -a --reflink=always` from `working/` under the job lock + atomic swap; children
+  of the parent only; touches only the derived `latest/`, never snapshots — bounded blast
+  radius since `latest/` is rebuildable); (ii) hookless → in-container reflink attempt with
+  the pool-level probe; (iii) hardlink-under-matrix; (iv) copy, surfaced. Stack D5 amended;
+  deploy/storage.md + the helper reference gain the verb (qn.5 folds); interface facts 1–2
+  close with the full three-layer evidence. Investigation arc complete: canon-vs-reality →
+  evidence-vs-instrumentation → layer-privilege; each round caught by a different mechanism
+  (gap protocol / Operator skepticism / the Operator's layer ladder).
+- 2026-07-20: (bj) **probe semantics refined (fourth Operator challenge: "how can a
+  hookless container run a pool-level probe?"): the sharing measurement governs REPORTING,
+  never selection.** A non-sharing FICLONE is functionally a copy (same correctness, same
+  cost), so FICLONE-works suffices to select reflink — the EPERM case self-selects down the
+  ladder; the measurement only decides the honest claim (zero-space verified / unverifiable
+  in this topology / copy cost). Measurement channels, best-available: hook `list`
+  avail-delta → delegated `zfs list -o avail` (exec mode) → syscall-only `statfs(2)`
+  `f_bavail` delta around an incompressible test clone (no zfs binary needed; sync-and-settle
+  for txg accounting lag) → none ⇒ report UNVERIFIED, never claim zero-space. Stack D5
+  amended. This closes the reflink investigation: selection is now trivially safe, and
+  honesty degrades gracefully with the deployment's observability.
+- 2026-07-20: (bk) **(bj) corrected on the fifth Operator challenge ("hardlink seems
+  better"): the measurement DOES inform selection — in exactly one direction.** (bj)'s
+  "never worse than the fallback" compared only against copy and forgot hardlink sits above
+  it. Corrected rule: the ladder orders by RISK dominance (reflink clones are independent;
+  hardlinks alias — in-place mutation of `working/` would silently corrupt a hardlinked
+  `latest/`, which is why hardlink is matrix-gated and why reflink outranks it wherever both
+  share); the one selection edge is **measured-not-sharing reflink → fall through to
+  hardlink-under-matrix** (downgrade-for-space allowed; blind upgrade into aliasing risk
+  never). Channel-less deployments still prefer reflink on the risk asymmetry: worst case =
+  copy COST reported "unverified" vs hardlink's worst case = silent latest/ corruption.
+  Stack D5 amended. Investigation tally: five Operator challenges, five outcome changes.
+- 2026-07-20: (bl) **qn.5 folds the mirror-ladder ruling into code + docs.** Implemented the
+  stack D5 (bi)/(bj)/(bk) ladder in `internal/storage`: the zfs `latest/` mirror now ALWAYS
+  clones from `working/` (never `.zfs` — EXDEV every layer), via **(i) hook `mirror` verb
+  (host-side reflink + atomic swap, touches only the derived `latest/`, reports SHARED/COPIED)
+  → (ii) in-container reflink → (iii) hardlink-under-matrix → (iv) copy**, self-selecting by
+  risk dominance; an in-container reflink reports **UNVERIFIED** (no channel yet — statfs
+  `f_bavail` is a documented follow-up) and never takes the risky measured-not-sharing→hardlink
+  downgrade absent a channel; every mode + honest claim is surfaced (`MirrorReport` / logs /
+  `LastMirror()` for health). `deploy/storage.md` + the `quince-zfs-helper` reference gain the
+  `mirror` verb. Interface facts 1–2 closed with the three-layer evidence (block cloning works
+  at the POOL level but EPERMs in the unprivileged userns; FICLONE-from-snapshot is EXDEV).
+  `make gates-go` green (0 lint, race-clean; storage 78.7%); CI proves the fallthrough + the
+  hook-verb argv (fake hook), the reflink-shares + host-side-hook paths prove on the lab (gate
+  12). **Still uncommitted pending the Operator's ask** (the two CI-half commits stand). Remaining
+  gate-12 legs (Operator-driven): the host-side `mirror` verb on the real rpool, iMazing-opens,
+  syncoid mid-write, and the 12c destructive matrix (which validates the hardlink tier).
