@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
@@ -8,6 +9,8 @@ import { isRunning, useJobsStore } from "@/stores/jobs";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { modelLine } from "@/features/devices/modelName";
+import { PairDialog } from "@/features/devices/PairDialog";
+import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
@@ -17,7 +20,14 @@ import { Badge } from "@/components/ui/badge";
 
 export function DeviceDetailsPage() {
   const { udid = "" } = useParams();
+  const [encOpen, setEncOpen] = useState(false);
+  const [encMode, setEncMode] = useState<EncryptionMode | undefined>(undefined);
   const fromStore = useDevicesStore((s) => s.byUdid[udid]);
+
+  function openEncryption(mode?: EncryptionMode) {
+    setEncMode(mode);
+    setEncOpen(true);
+  }
 
   // On a cold deep-link the store may be empty; fall back to a direct fetch.
   const q = useQuery({
@@ -65,9 +75,16 @@ export function DeviceDetailsPage() {
           </div>
 
           {device.backup_encryption === "off" ? (
-            <div className="mt-4 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn">
-              This device's backups are <strong>not encrypted</strong> — Health, Keychain, and
-              saved passwords are omitted. Enabling encryption arrives with device management.
+            <div className="mt-4 flex flex-col gap-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                This device's backups are <strong>not encrypted</strong> — Health, Keychain, and
+                saved passwords are omitted.
+              </span>
+              {device.paired === "yes" ? (
+                <Button size="sm" onClick={() => openEncryption("enable")}>
+                  Enable encryption
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -77,20 +94,22 @@ export function DeviceDetailsPage() {
                 <Button disabled title="Backups arrive in a later release">
                   Back up now
                 </Button>
-                <Button
-                  variant="outline"
-                  disabled
-                  title="Encryption management arrives in a later release"
-                >
+                <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
                 </Button>
               </>
             ) : (
-              <Button disabled title="Device pairing arrives in a later release">
-                Pair
-              </Button>
+              <PairDialog udid={device.udid} />
             )}
           </div>
+
+          <EncryptionDialog
+            udid={device.udid}
+            encryption={device.backup_encryption}
+            open={encOpen}
+            onOpenChange={setEncOpen}
+            initialMode={encMode}
+          />
 
           {activeJob ? (
             <div className="mt-6 flex flex-col gap-3">

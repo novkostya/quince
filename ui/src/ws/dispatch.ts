@@ -1,8 +1,9 @@
-import type { Device, Job, Version, WSEnvelope } from "@/lib/types";
+import type { Device, Job, Op, Version, WSEnvelope } from "@/lib/types";
 import type { DeviceEvent, HelloEvent, JobLogEvent, SessionLockedEvent } from "./types";
 import { useConnectionStore } from "@/stores/connection";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore } from "@/stores/jobs";
+import { useOpsStore } from "@/stores/ops";
 import { useSessionStore } from "@/stores/session";
 import { useVersionsStore } from "@/stores/versions";
 
@@ -42,7 +43,7 @@ export function dispatch(env: WSEnvelope): void {
       break;
     }
     case "op.updated":
-      // pair/encryption narration lands in qn.2/qn.3; no store consumer yet.
+      useOpsStore.getState().upsert(env.data as Op);
       break;
     default:
       break;
