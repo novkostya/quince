@@ -1,15 +1,17 @@
 # quince — progress dashboard
 
-**One-line state.** ⚑ **FRONTIER = `qn.4c` — the DAILY-DRIVER target ((by)); its CI half is BUILT,
-only the hardware day remains.** The Operator's bar before a planned **code freeze + process
-revamp**: a full backup cycle over BOTH transports, live progress without a page refresh, major
-bugs fixed. **netmuxd co-supervision + findings (i)/(iv)/(v) are landed and CI-proven** (full
-ladder + image + e2e green; the built image runs BOTH supervised muxers, respawns a `kill -9`ed
-netmuxd, and keeps usbmuxd's socket intact — the spike's takeover hazard verified absent). What is
-left is **one hardware day: the inherited gate 11** (both transports UI-driven, Wi-Fi on supervised
-netmuxd surviving a container restart, honest disconnect, real last-backup line, iMazing glance),
-which also settles the **(ca) mDNS-across-the-bridge** question. **Gate 12c and all of qn.6–qn.12
-stay deferred past the freeze.** History below.
+**One-line state.** ⚑ **`qn.4c` is BUILT + HARDWARE-PROVEN — the DAILY-DRIVER bar is MET ((cd)/(ce)).**
+Both transports drive real encrypted backups from the browser on **supervised** muxers: a 33.3 GB
+first-ever full backup and a cabled incremental both committed, verified and snapshotted; live
+updates arrive with no page refresh; devices show their real last backup; iMazing opens a committed
+`latest/` tree (which also retires qn.4a gate 15's last leg). The hardware day found — and fixed
+in-session — a **gate-blocking** bug in landed qn.4a code: the backup target stub lived on the cache
+filesystem, so `idevicebackup2` reported the wrong free space and the DEVICE refused any backup
+larger than it ((cd)). **Two legs are not clean:** a Wi-Fi drop lands safely but is labelled
+`failed` instead of `connection_lost` (interface fact 2 is incomplete — a drop has two shapes), and
+(f)'s unencrypted half is **declared unrunnable** on this hardware with a stated reason. Seven
+findings are filed with diagnoses, none blocking. **Remaining before the code freeze: nothing
+session-buildable** — the open items are post-freeze work. History below.
 
 **qn.1 is BUILT — the app frame stands.** `make gates` (go + vault +
 ui), `make gates-ui-e2e` (Playwright stories 1–2), and `make image` are green inside
@@ -83,9 +85,9 @@ hardware day; **M3 closes then.**
 | qn.2b | Muxer lifecycle + hardware proof (supervision, rescan, lab gate 7) | **done** — `internal/muxsup` supervisor + `POST /api/devices/rescan` + `devices.manage_muxer` + `/api/health` muxer + UI Rescan; `make gates`/image/e2e green + real-usbmuxd smoke test (2026-07-20); **lab gate 7 (managed USB + Rescan) PASSED on hardware**; gate 8 (netmuxd-USB audition) re-homed to qn.7 (aw) |
 | qn.3 | Device ops + Devices page | **done** — `internal/deviceops` (pair/validate/`ideviceinfo` + encryption via **pty**, never argv/env) + registry `Enrich` + enrichment driver + 4 frozen endpoints + `Op` lifecycle + audit + **pairing-record persistence** (amendment 1) + UI pair/encryption dialogs; `make gates`/image/e2e green (e2e story 3); coverage deviceops 80.2%, device 97.6%, httpapi 71.8%. **Lab gate 8 PASSED on hardware (2026-07-20)** — fresh container → **pair** (via UI, record persisted) → **recreate → still paired** (amendment 1 proven twice) → **change_password + disable→enable** cycle, all succeeding; **secrets proven** (`idevicebackup2 -i … {changepw,encryption off,encryption on}` — no password in argv, `BACKUP_PASSWORD` env count 0, clean logs). **4 findings fixed + CI-validated** (enrichment auto-pair on locked device; 3 UI) |
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
-| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built + landed (CI); gate 15 hardware-proven — ENGINE legs (bs) + zfs half (bw); only iMazing-opens (Operator GUI) left** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Gate 15 split (clarified (bv)):** the ENGINE legs PASSED on real hardware (iPad, hardlink `/backups`) — CLI-USB backup both encryption variants (A1 encrypted `Verify` on real data), version rotation, interface facts 1+5, kill-matrix `backing_up`. The **zfs half is PROVEN ((bw))**: **engine→commit on the real zfs-hook backend** (encrypted, verified, version snapshot cut), host **`mirror` verb** + **`bclonesaved`** moving live (+~3 GB), **syncoid** mid-write (both `@quince-*` restore points + dirty `working/` replicated offsite) — the constrained forced-command hook key + `rbind,rslave` host→LXC→container propagation stood up on the real rpool; three deploy-doc hook bugs found+fixed (`$2`→last-arg, image-ssh-client, create-chown). Only **iMazing-opens** (Operator GUI) is unverified. **Landed on main.** |
+| qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built + landed (CI); gate 15 **FULLY hardware-proven** — ENGINE legs (bs) + zfs half (bw) + **iMazing-opens PASSED (cf)**** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Gate 15 split (clarified (bv)):** the ENGINE legs PASSED on real hardware (iPad, hardlink `/backups`) — CLI-USB backup both encryption variants (A1 encrypted `Verify` on real data), version rotation, interface facts 1+5, kill-matrix `backing_up`. The **zfs half is PROVEN ((bw))**: **engine→commit on the real zfs-hook backend** (encrypted, verified, version snapshot cut), host **`mirror` verb** + **`bclonesaved`** moving live (+~3 GB), **syncoid** mid-write (both `@quince-*` restore points + dirty `working/` replicated offsite) — the constrained forced-command hook key + `rbind,rslave` host→LXC→container propagation stood up on the real rpool; three deploy-doc hook bugs found+fixed (`$2`→last-arg, image-ssh-client, create-chown). Only **iMazing-opens** (Operator GUI) is unverified. **Landed on main.** |
 | qn.4b | Wi-Fi first-class + transport policy + job-history UI (closes M3) | **built (CI-proven); lab gate 11/12c (hardware) pending** — transport **`auto` resolution** (prefer-USB-when-plugged, absent→**422** no job, concrete transport stored) + httpapi passes `auto` through; **`quince versions verify <id>\|--udid`** + **`device repair-working-copy <udid>`** CLI escape hatches (`storage.VerifyVersion`/`VerifyLatest`, browseRoot-resolved, no new backend surface); **live demo `JobControl`** (on-demand scripted jobs + seeded failed job for retry; single-flight; reverses qn.4a's 503); **UI** live Back up now (auto + transport override) / one-tap Retry on failed intent groups / Cancel on running job (details page + dashboard card). `make gates`/image/e2e green (e2e **story 4**: Back up now → cancel → retry). Retired the qn.4a Wi-Fi-success coverage finding (`wifi-incremental-success` story). Coverage backup **83.4%** / demo **55.3%** (was 0) / storage **78.2%** / httpapi 72.2% / cmd/quince 8.5% (CLI wiring hw-exercised). NOT a Wi-Fi demotion ((h) stands). **Lab gate 11 (both-transports UI-driven + honest Wi-Fi disconnect) + 12c (destructive hardlink matrix) = the consolidated hardware day with qn.4a gate 15**. **CLOSED (CI) 2026-07-20 ((by)):** its CI half is landed and complete; **gate 11 is RE-HOMED to `qn.4c`** (named owner — its Wi-Fi leg should run on SUPERVISED netmuxd, the shape actually deployed, not a hand-started one), **gate 12c is DEFERRED past the code freeze** (the destructive hardlink matrix gates a backend the Operator doesn't run — zfs deployment; the hardlink tier stays disabled-to-copy, surfaced), and findings (i)/(iv)/(v) **move to qn.4c**. No session work remains here. |
-| qn.4c | **netmuxd supervision + usability fixes (the DAILY-DRIVER target)** | **BUILT (CI-proven); lab gate 11 (hardware) pending** — `internal/muxsup` generalized to a daemon **`Spec`** (name/role/argv/probe-network/address) + **`Group`** (two daemons, one rescan) + the `plannedMuxers` resolution table; **netmuxd supervised** as `--host/--port --socket-path <private> --disable-usb` (every flag verified live; the private socket path is a SAFETY flag — netmuxd deletes and rebinds whatever socket it names, and its default is usbmuxd's: a silent USB blackout, reproduced then designed out, (bz)); `/api/health` **clean break** to `muxers:[{name,role,managed,state,detail,rescan}]`; rescan stays **USB-only**. Findings fixed: **(i)-A** `willEncrypt` exit-0-empty → `off` (`unknown` now means a real read failure), **(i)-B** preflight **re-reads encryption live** before refusing (cold-lockdown hard-fail gone; still-unknown refuses with the honest reason), **(v)** `last_backup` derived from the newest committed **version** (survives restarts, covers adopted, null `job_id`) + `AnnounceBackup` on commit success, **(iv)** verified **subsumed by running** (a new `DeviceCard` test proves the card already narrates verifying/committing). `make gates`/image/**e2e 6/6** green; **image smoke: both muxers `running`, `kill -9`d netmuxd respawned, usbmuxd socket intact**. Coverage muxsup **86.9%** / device 97.8% / backup 83.8% / cmd/quince 20.9%. Deploy: the **Wi-Fi mDNS constraint** is now first-class in `compose.nas.yml` (host-networking answer + honest security tradeoff + macvlan alternative), and P1b records the Wi-Fi twin of P1 ((ca)). **Lab gate 11 = the remaining hardware day.** History: inserted 2026-07-20 ((by)) to reach the Operator's "personally usable" bar before a planned code freeze. Scope: generalize the hardware-proven `internal/muxsup` to **co-supervise netmuxd** (config-gated, TCP probe vs its unix-socket one, restart-with-backoff, health surfaced — without it nothing starts netmuxd on `compose up`, so Wi-Fi dies silently after any restart: the qn.2b-for-usbmuxd reason, pulled forward from qn.7) + fix qn.4a findings **(i)** `willEncrypt`→`unknown` mis-map + the cold-lockdown race that hard-fails a legitimate encrypted backup at preflight, **(v)** the engine never writing `device.last_backup` (→ "No backups yet" on a device with real versions), **(iv)** the card lingering at "Backing up 100%" (likely subsumed by (v)). **Inherits qn.4b gate 11** — both transports UI-driven, live progress observed on a real backup, Wi-Fi over SUPERVISED netmuxd surviving a container restart, + the iMazing glance. Gate 12c stays deferred past the freeze. |
+| qn.4c | **netmuxd supervision + usability fixes (the DAILY-DRIVER target)** | **DONE — CI-proven + LAB GATE 11 run on hardware ((ce)): 6/8 legs passed, (d) landed safely but mislabelled, (f)'s unencrypted half declared unrunnable with a reason.** Hardware: 33.3 GB full + cabled incremental committed over supervised netmuxd/usbmuxd, `auto`→USB proven, secrets clean on both transports, iMazing opened the committed `latest/` (retires qn.4a gate 15's last leg), cancel clean, verify+commit of 33 GB in 36 s, `bclonesaved` 46.5→80.1 GiB. A **gate-blocking** bug in landed qn.4a code was found AND fixed in-session ((cd)): the target stub on the cache filesystem made the device refuse any backup bigger than it. Seven findings filed. — `internal/muxsup` generalized to a daemon **`Spec`** (name/role/argv/probe-network/address) + **`Group`** (two daemons, one rescan) + the `plannedMuxers` resolution table; **netmuxd supervised** as `--host/--port --socket-path <private> --disable-usb` (every flag verified live; the private socket path is a SAFETY flag — netmuxd deletes and rebinds whatever socket it names, and its default is usbmuxd's: a silent USB blackout, reproduced then designed out, (bz)); `/api/health` **clean break** to `muxers:[{name,role,managed,state,detail,rescan}]`; rescan stays **USB-only**. Findings fixed: **(i)-A** `willEncrypt` exit-0-empty → `off` (`unknown` now means a real read failure), **(i)-B** preflight **re-reads encryption live** before refusing (cold-lockdown hard-fail gone; still-unknown refuses with the honest reason), **(v)** `last_backup` derived from the newest committed **version** (survives restarts, covers adopted, null `job_id`) + `AnnounceBackup` on commit success, **(iv)** verified **subsumed by running** (a new `DeviceCard` test proves the card already narrates verifying/committing). `make gates`/image/**e2e 6/6** green; **image smoke: both muxers `running`, `kill -9`d netmuxd respawned, usbmuxd socket intact**. Coverage muxsup **86.9%** / device 97.8% / backup 83.8% / cmd/quince 20.9%. Deploy: the **Wi-Fi mDNS constraint** is now first-class in `compose.nas.yml` (host-networking answer + honest security tradeoff + macvlan alternative), and P1b records the Wi-Fi twin of P1 ((ca)). **Lab gate 11 = the remaining hardware day.** History: inserted 2026-07-20 ((by)) to reach the Operator's "personally usable" bar before a planned code freeze. Scope: generalize the hardware-proven `internal/muxsup` to **co-supervise netmuxd** (config-gated, TCP probe vs its unix-socket one, restart-with-backoff, health surfaced — without it nothing starts netmuxd on `compose up`, so Wi-Fi dies silently after any restart: the qn.2b-for-usbmuxd reason, pulled forward from qn.7) + fix qn.4a findings **(i)** `willEncrypt`→`unknown` mis-map + the cold-lockdown race that hard-fails a legitimate encrypted backup at preflight, **(v)** the engine never writing `device.last_backup` (→ "No backups yet" on a device with real versions), **(iv)** the card lingering at "Backing up 100%" (likely subsumed by (v)). **Inherits qn.4b gate 11** — both transports UI-driven, live progress observed on a real backup, Wi-Fi over SUPERVISED netmuxd surviving a container restart, + the iMazing glance. Gate 12c stays deferred past the freeze. |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined — **netmuxd co-supervision MOVED to qn.4c** ((by)); qn.7 keeps the patched-timeout libimobiledevice build, restart-policy tuning, the chaos suite, liveness thresholds, and the audition. Deferred past the code freeze |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
@@ -1246,3 +1248,102 @@ on real traction).
   established pattern). The session's handling was exemplary — it surfaced the race by making a
   test flaky under load, then made the test *wait the window out with a comment naming the cause*
   rather than hiding it.
+- 2026-07-21: (cd) **qn.4c GATE-11 LAB FINDING — the backup target stub must live on the storage
+  filesystem; fixed as a lab-finding commit.** The first real full backup (iPhone, ~40 GB, USB via
+  USB-over-IP) failed three times in ~30–60 s with zero bytes and `idevicebackup2 failed: exit
+  status 151`, phase `waiting_for_passcode`, despite the passcode being entered every time — while
+  the iPad's Wi-Fi incremental had just succeeded, so it read as "USB is broken". **Root cause,
+  proven both directions on the device within minutes:** mobilebackup2 asks the HOST for its free
+  space, and `idevicebackup2` answers with a `statfs` of **the target directory it was handed** —
+  it does NOT follow the `<UDID>` symlink into the work dir. quince passed
+  `$QUINCE_CACHE/backup-targets/<jobID>` (a 26 GB filesystem on staging), so the phone was told
+  26 GB, needed ~40 GB, and refused with `ErrorCode 105: Insufficient free disk space
+  (MBErrorDomain/105)` → **exit 151**. A raw run with the target on the storage filesystem (546 GB)
+  went straight into `Receiving files`. The iPad passed only because an incremental's delta fits in
+  26 GB. **Gate-blocking, in landed qn.4a code:** any device whose backup exceeds the cache
+  filesystem could never be backed up — every real iPhone. **Fix:** the stub is derived from the
+  work dir (`<dir of workDir>/.quince-targets/<jobID>`), quince-writable on every backend and
+  always on the storage filesystem; `ToolConfig.TargetRoot` REMOVED (a knob whose wrong value
+  silently breaks large backups should not exist). Note the engine's old `<backups>/…` default would
+  ALSO have failed under the zfs hook profile — the parent dataset root is root-owned, only
+  per-device children are chowned. **Second fix, same finding:** a failed job now reports the tool's
+  own last error line (`backup failed: Insufficient free disk space…`) instead of the exit status —
+  the bare code made three identical failures indistinguishable, and 151==105 is documented
+  nowhere upstream. **Fixtures first (hard rule):** `disk-full-105.{txt,meta.json}` (scrubbed real
+  capture) + `TestPrepareTargetLivesBesideTheWorkDir` + `TestFailedBackupReportsTheDeviceReason`.
+  **Process note:** the Operator predicted this failure mode from the `/cache` path before the run
+  ("I'm afraid there might be a faulty free-space probe inside ibackup2 because /cache is on
+  rootfs") — the diagnosis was then run-anchored, not argued: a raw `idevicebackup2` into a
+  throwaway scratch dir on each filesystem, which is the qn.2b raw-run guard doing its job.
+  **Session backlog (filed, not blocking):** crash-orphaned stub dirs unswept by reconciliation;
+  the passcode narration unreachable in practice (the phase is learned in the same breath as the
+  failure); two `latest` badges until reload (client-side staleness, server verified correct).
+- 2026-07-22: (ce) **qn.4c LAB GATE 11 — the DAILY-DRIVER bar is met on real hardware; 6 of 8 legs
+  passed, 1 mislabelled, 1 declared unrunnable.** One Operator hardware day on the staging CT
+  (managed profile, zfs hook backend, real iPhone 16 Pro + iPad). **PASSED:** **(b) Wi-Fi from the
+  browser on SUPERVISED netmuxd** — `compose up` alone brought both muxers up; a pre-flight proved
+  the only netmuxd on the box was the container's supervised child with the ruled argv (a
+  hand-started leftover was found squatting on 27015 and retired first — refuse-loudly would
+  otherwise have made the gate prove nothing, exactly the (by) concern). An encrypted incremental
+  committed, then a device's **first-ever full backup — 33.3 GB — committed over the same path** at
+  a measured **16–24 MiB/s**; Wi-Fi beat the Operator's USB path, which was VirtualHere USB-over-IP
+  across the same Wi-Fi. **(a) USB from the browser** — a cabled incremental committed, with
+  `transport: auto` **resolving to USB because the cable was plugged** (qn.4b policy, first hardware
+  proof), no `-n`, the supervised usbmuxd socket, and the lab-finding target fix live in argv.
+  **(c) survives a restart** (the redeploy: both daemons back unaided, device back on `wifi`,
+  backup immediately after). **(e) real last-backup line** on a device with pre-existing versions.
+  **(g) secrets** — `BACKUP_PASSWORD` count 0 and no password in argv, captured live on BOTH
+  transports. **(h) iMazing-opens** — the committed `latest/` tree (the reflink mirror) shared over
+  SMB opened natively in iMazing: device info, `Current Backup Encrypted: Yes`, and decrypted photo
+  enumeration. **That also retires the last unverified leg of qn.4a's gate 15 ((bw)).** **CANCEL**
+  passed too: `cancelled`, child reaped, stub cleaned, honest discard note naming the fallback
+  version, no phantom, slot released. **Storage held throughout:** verify+commit of 33 GB took
+  **36 s** (A1 is structural, the commit is a snapshot + block clone — neither scales with the
+  tree); `bclonesaved` **46.5 → 80.1 GiB** across two consecutive commits, i.e. `latest/` genuinely
+  reflinked, never copied; version rotation exact (one `is_latest` per device, always).
+  **NOT TICKED — (d) mid-backup Wi-Fi disconnect: landed SAFELY but MISLABELLED.** Everything
+  protective held (work discarded, `latest/` untouched, no phantom), but the job ended
+  `failed`/`backup_failed` rather than `connection_lost`/`device_disconnected`, because taking the
+  device off the LAN produced an immediate receive error (`Could not receive from mobilebackup2
+  (-256)`, terminal in 2.5 min, `liveness: active` throughout) instead of a stall — the sampler
+  never participated. **Interface fact 2 is INCOMPLETE, not wrong:** a Wi-Fi loss has two shapes
+  (the lab's frozen `Heartbeat(SleepyTime)` stall, which quince handles correctly, and this clean
+  error exit, which it mislabels). Filed with a fixture-first fix direction. **DECLARED UNRUNNABLE
+  — (f)'s unencrypted half:** finding (i)-A needs a device that has NEVER had a backup password (no
+  `WillEncrypt` key at all); both lab devices have had one, so disabling encryption yields a
+  *present* `false` — the branch that already worked — while changing the Operator's real device
+  state and producing a permanently-incomplete version. Declared CI-covered only (story 7 +
+  `enc_never_set`), accepted debt with a stated reason; a factory-fresh device belongs to qn.6's
+  onboarding gate anyway. **Live progress: PARTIAL** — the WS path updates card and details with no
+  reload (confirmed repeatedly), but the percentage moves in jumps and the byte pair beside it is
+  wrong, so the leg is recorded honestly rather than ticked clean. **SEVEN findings filed, all
+  diagnosed, none blocking:** the gate-blocking target-filesystem bug (fixed in-session, (cd)); a
+  Wi-Fi drop mislabelled `failed`; the dashboard card staying silent when the newest attempt failed
+  (the most daily-driver-relevant UI gap — `last_backup` semantics are right, the card needs a
+  companion affordance); 12 KB progress blobs that mangle the log pane AND make the parser read the
+  oldest frame (measured: UI showed `1.6 KB / 2.9 GB` while the tool was at `2.5 GB/2.7 GB` of a
+  different file); current-file bytes presented as overall; every version reading `incremental`
+  because the device writes `IsFullBackup: false` even for a first 33 GB backup; two `latest` badges
+  until reload (client-side staleness, server verified correct); crash-orphaned target stubs unswept.
+  **Operational note for the deployment:** the host's `zfs-auto-snap` is snapshotting quince's
+  datasets (mid-backup snapshots pinned 15.7 → 67.6 GB), which contradicts stack decision (b)
+  ("quince relies only on snapshots it creates") and sits outside quince's retention model — the
+  Operator will exclude the parent dataset. **M3's daily-driver goal is met:** both transports
+  UI-driven, live updates without a refresh, real last-backup lines, and the major bugs fixed.
+- 2026-07-22: (cf) **iMazing-opens PASSED — qn.4a's gate 15 is now FULLY hardware-proven.** The
+  Operator opened a quince-committed backup in iMazing (Windows) and it parsed **completely**, not
+  merely "opened": device info (`Current Backup Encrypted: Yes`, iPadOS 26.5.2, 2.93 GB, snapshot
+  count 1) read from the `…\latest` mirror, the **19-app inventory** enumerated, and the **full
+  23-domain File System tree** browsable (`CameraRollDomain`, `HomeDomain`, `KeychainDomain`,
+  `MediaDomain`, …). The reference tool declaring a quince **encrypted** commit wholly intelligible
+  is the strongest external validation the storage + engine path can get — it exercises qn.5's
+  `latest/` mirror, the journaled commit, and A1's encrypted structure end-to-end from outside our
+  own code. **qn.4a is now complete on every leg** (engine (bs) + zfs (bw) + iMazing (cf)).
+  **Parity observation from the same screenshots (Operator):** iMazing also surfaces *Apps*, *File
+  System*, *Profiles* and *Voice Memos*. Triaged — nothing is missing from the **product**: the
+  **app list** is already planned in **qn.9**'s overview ("device summary, app list, sizes"), and
+  **File System** browsing is **qn.8**'s vault (unlock → browse → download). *Profiles* (MDM/config
+  profiles) is niche for a personal backup browser — not planned, no demand. **Voice Memos**,
+  however, is a genuine gap in the *parser's* domain parity review (user-created audio + a
+  recordings DB — unlike voicemail the Operator certainly has data, and unlike whatsapp it is not
+  app-encrypted); recorded in the ios-backup-parser backlog without reopening its settled scope.
