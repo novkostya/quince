@@ -113,6 +113,12 @@ func (t *Tools) info(ctx context.Context, udid, transport string, simple bool) (
 
 // willEncrypt reads lockdown com.apple.mobile.backup/WillEncrypt → the backup_encryption
 // state (design §3). Requires a trusted session, so it is queried only for paired devices.
+//
+// An ABSENT key — exit 0 with empty output — means "off", not "unknown" (qn.4a lab finding (i)-A,
+// fixed in qn.4c): a device that has never had a backup password simply has no WillEncrypt key,
+// and reporting `unknown` there made the UI hide the not-encrypted warning and ask for a *current*
+// password the device does not have. `unknown` stays reserved for a genuine failure to read (a
+// cold or locked lockdown, an unparseable value) — the case where quince really does not know.
 func (t *Tools) willEncrypt(ctx context.Context, udid, transport string) string {
 	args := append(networkArgs(transport), "-u", udid, "-q", "com.apple.mobile.backup", "-k", "WillEncrypt")
 	out, _, err := t.run(ctx, t.Ideviceinfo, transport, args...)
@@ -122,7 +128,7 @@ func (t *Tools) willEncrypt(ctx context.Context, udid, transport string) string 
 	switch strings.TrimSpace(out) {
 	case "true":
 		return "on"
-	case "false":
+	case "false", "":
 		return "off"
 	default:
 		return "unknown"

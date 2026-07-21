@@ -18,21 +18,30 @@ import (
 	"github.com/novkostya/quince/core/internal/ws"
 )
 
-// HealthResponse is the body of GET /api/health. {status, version} since qn.1; qn.2b adds
-// muxer supervision state (design §10 — health surfaces muxer status honestly).
+// HealthResponse is the body of GET /api/health. {status, version} since qn.1; qn.2b added muxer
+// supervision state (design §10 — health surfaces muxer status honestly), which qn.4c turned into
+// a per-daemon ARRAY: quince may supervise usbmuxd (USB) and netmuxd (Wi-Fi) at once, and a single
+// aggregate object could not say which one was degraded. The singular `muxer` key is GONE (clean
+// break ruled (bz)) — two overlapping representations rot, /api/health is not a frozen contract,
+// and quince is its only consumer.
 type HealthResponse struct {
-	Status  string      `json:"status"`
-	Version string      `json:"version"`
-	Muxer   MuxerHealth `json:"muxer"`
+	Status  string        `json:"status"`
+	Version string        `json:"version"`
+	Muxers  []MuxerHealth `json:"muxers"` // never null → JSON []
 }
 
-// MuxerHealth is the muxer-supervision slice of /api/health (qn.2b): whether quince manages the
-// in-container muxer, its state (running | degraded | starting | stopped | unmanaged), and a
-// human detail (last exit reason / why degraded).
+// MuxerHealth is one muxer daemon's slice of /api/health: which daemon, the transport it serves,
+// whether quince manages it, its state (running | degraded | starting | stopped | external), a
+// human detail (last exit reason / why degraded / why external), and whether
+// POST /api/devices/rescan applies to it (USB only — restarting netmuxd would tear a live Wi-Fi
+// backup).
 type MuxerHealth struct {
+	Name    string `json:"name"`
+	Role    string `json:"role"` // usb | wifi
 	Managed bool   `json:"managed"`
 	State   string `json:"state"`
 	Detail  string `json:"detail,omitempty"`
+	Rescan  bool   `json:"rescan"`
 }
 
 // NewRouter assembles the full handler: security middleware wraps a root mux that mounts
@@ -90,11 +99,14 @@ func NewRouter(deps Deps) http.Handler {
 
 func (d Deps) handleHealth() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		managed, state, detail := d.Muxer.MuxerStatus()
+		muxers := d.Muxer.MuxersHealth()
+		if muxers == nil {
+			muxers = []MuxerHealth{}
+		}
 		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
 			Status:  "ok",
 			Version: d.Version,
-			Muxer:   MuxerHealth{Managed: managed, State: state, Detail: detail},
+			Muxers:  muxers,
 		})
 	}
 }

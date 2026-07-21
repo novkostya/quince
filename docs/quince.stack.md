@@ -103,6 +103,30 @@ fresh device can never be adopted over Wi-Fi — so USB must work by the qn.6 ga
 ("fresh user pairs via UI"); netmuxd-first/Wi-Fi-first sequencing inside qn.2/qn.3 is
 encouraged (the Operator's device is pre-paired; records in the lab CT).
 
+**Verified netmuxd invocation (qn.4c, run against the shipped pinned v0.4.3 — not remembered).**
+quince supervises netmuxd as
+`netmuxd --host <h> --port <p> --socket-path <private> --disable-usb`:
+
+- `--host/--port` from `devices.netmuxd_addr`, making the configured address authoritative (the
+  same discipline as usbmuxd's `-S`).
+- **`--socket-path` is a safety flag, not a preference.** netmuxd deletes and rebinds whatever
+  unix socket that names, and its default is `/var/run/usbmuxd`. Reproduced in the built image:
+  with usbmuxd running and serving, starting netmuxd on the default path logged `Deleting old
+  Unix socket` and took it over — usbmuxd stayed alive with its socket inode gone, i.e. a
+  **silent USB blackout**. quince gives netmuxd a private path and refuses to supervise it at all
+  if that path would equal `devices.usbmuxd_socket`. (The feasibility lab hit the same class of
+  accident by running `netmuxd --version`, which is not a flag, so it started normally.)
+- `--disable-unix` was the alternative way to avoid the collision and was **rejected**: it puts
+  netmuxd in "host mode", where it depends on another unix-mode daemon being alive — coupling
+  Wi-Fi health to USB health, backwards for two transports that should fail independently.
+- `--disable-usb` keeps this decision's two-daemon split real: without it both daemons claim the
+  same USB device. It is the single flag the single-muxer flip removes after qn.7's audition.
+- No `--plist-storage`: netmuxd reads `/var/lib/lockdown/<UDID>.plist`, the same pairing records
+  quince already persists and restores (qn.3 amendment 1). `RUST_LOG=info` is injected when
+  unset, since netmuxd is silent below `error`.
+- **Wi-Fi discovery is mDNS-only**, so a supervised netmuxd is necessary but not sufficient: the
+  container must be able to receive multicast from the LAN (`deploy/compose.nas.yml`).
+
 **Consequence.** The container ships `netmuxd` (pinned, source-built) + `usbmuxd`
 (apk, fallback) + `libimobiledevice-progs` from qn.0; the Wi-Fi hardening rung replaces
 the stock libimobiledevice with a source-built one raising the 30 s service timeouts

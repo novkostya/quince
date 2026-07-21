@@ -1,10 +1,26 @@
 # quince — generic NAS deployment (Synology / QNAP / plain Docker host).
 #
-# This is the SIMPLE / managed-muxer profile (qn.2b): quince supervises the usbmuxd daemon
-# INSIDE the container itself (devices.manage_muxer: true, the default) — no host usbmuxd, no
-# socket bind. `compose up`, open the UI, plug in a device. On a typical NAS the storage
-# backend auto-selects `reflink` (Btrfs/XFS) or `hardlink`/`copy` (ext4) — no zfs host hook
-# needed (D5).
+# This is the SIMPLE / managed-muxer profile (qn.2b + qn.4c): quince supervises BOTH muxer
+# daemons INSIDE the container itself (devices.manage_muxer: true, the default) — usbmuxd for
+# USB, netmuxd for Wi-Fi. No host muxer, no socket bind. `compose up`, open the UI, plug in a
+# device. On a typical NAS the storage backend auto-selects `reflink` (Btrfs/XFS) or
+# `hardlink`/`copy` (ext4) — no zfs host hook needed (D5).
+#
+# ── Wi-Fi needs the container on the LAN (a first-class deployment constraint) ─────────────
+# netmuxd finds Wi-Fi devices ONLY by mDNS (`_apple-mobdev2._tcp.local`). Multicast does not
+# cross a bridged container network, so with the default `ports:` mapping below netmuxd runs
+# happily and discovers NOTHING — quince will show the muxer as `running` because it IS, while
+# Wi-Fi stays empty forever. If Wi-Fi backup matters to you (it is quince's primary use case),
+# run the container ON the host network:
+#
+#   network_mode: host        # and DELETE the `ports:` block — QUINCE_LISTEN binds host :8080
+#
+# Honest tradeoff: host networking shares the host's network namespace with the container, so
+# the container can reach (and bind) anything the host can — strictly weaker isolation than the
+# bridged default, and at odds with the hardened-profile story. The alternative that keeps
+# isolation is a **macvlan** network, which gives the container its own LAN presence (and its
+# own IP) without host-namespace access; it is more setup and not available on every host.
+# USB-only deployments can ignore all of this and stay bridged.
 #
 # USB needs a LIVE /dev/bus/usb, NOT a static `devices:` mapping. `devices:` (runc --device)
 # snapshots the device-node list at container start, so a device plugged in — or re-enumerated —
@@ -21,7 +37,7 @@ services:
     image: ghcr.io/novkostya/quince:latest
     container_name: quince
     restart: unless-stopped
-    ports:
+    ports: # DELETE this block when you switch to `network_mode: host` for Wi-Fi (see the header)
       - "8080:8080"
     environment:
       QUINCE_LISTEN: ":8080"

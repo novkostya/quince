@@ -105,6 +105,20 @@ func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job 
 	return wire.Job{}
 }
 
+// startWhenReleased starts a retry, tolerating the brief single-flight window between a job's
+// terminal row and the release of its per-UDID slot (see the note at its call site).
+func startWhenReleased(t *testing.T, e *Engine, transport, retryOf string) (wire.Job, int, string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		job, status, reason := e.StartBackup(testUDID, transport, retryOf)
+		if status != 409 || time.Now().After(deadline) {
+			return job, status, reason
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func waitState(t *testing.T, e *Engine, id, state string, d time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(d)
@@ -435,6 +449,129 @@ func TestStoryPreflightEncryptionRequired(t *testing.T) {
 	}
 }
 
+// fakeAnnouncer is the DeviceAnnouncer seam: it records which devices were re-published.
+type fakeAnnouncer struct {
+	mu    sync.Mutex
+	udids []string
+}
+
+func (f *fakeAnnouncer) AnnounceBackup(udid string) {
+	f.mu.Lock()
+	f.udids = append(f.udids, udid)
+	f.mu.Unlock()
+}
+
+func (f *fakeAnnouncer) seen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.udids...)
+}
+
+// qn.4c story 9 / findings (iv)+(v): a successful commit re-publishes the device, so the card
+// lands on its real "Last backup …" line without a page refresh. Announcing is deliberately tied
+// to COMMIT SUCCESS — the moment the device's committed-version history actually changed.
+func TestSucceededCommitAnnouncesTheDevice(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	ann := &fakeAnnouncer{}
+	h := newHarness(t, m.params(t), m.Transport, func(o *Options, _ *fakeDevices) { o.Announcer = ann })
+
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 20*time.Second)
+	if final.State != StateSucceeded {
+		t.Fatalf("state=%s error=%v; want succeeded", final.State, final.Error)
+	}
+	if got := ann.seen(); len(got) != 1 || got[0] != testUDID {
+		t.Fatalf("announced %v; want exactly one announce for %s", got, testUDID)
+	}
+}
+
+// The mirror image: a job that fails announces nothing — there is no new committed version, so
+// the device's last_backup is unchanged and a device.updated would be noise (state honesty).
+func TestFailedJobAnnouncesNothing(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	ann := &fakeAnnouncer{}
+	h := newHarness(t, m.params(t), m.Transport, func(o *Options, d *fakeDevices) {
+		o.Announcer = ann
+		d.set(testUDID, m.Transport, "off") // preflight refuses (require_encryption)
+	})
+
+	job := h.start(t, m.Transport, "")
+	if final := waitTerminal(t, h.eng, job.ID, 5*time.Second); final.State != StateFailed {
+		t.Fatalf("state=%s; want failed", final.State)
+	}
+	if got := ann.seen(); len(got) != 0 {
+		t.Fatalf("announced %v after a failed job; want nothing", got)
+	}
+}
+
+// fakeProber is the EncryptionProber seam: it answers with a fixed live reading and counts calls.
+type fakeProber struct {
+	state string
+	ok    bool
+	calls int
+}
+
+func (f *fakeProber) RefreshEncryption(context.Context, string, string) (string, bool) {
+	f.calls++
+	return f.state, f.ok
+}
+
+// qn.4c story 8 / finding (i)-B: a device whose CACHED encryption state is `unknown` (enrichment
+// ran while lockdown was cold) used to be hard-refused at preflight even though it does encrypt.
+// Preflight now re-reads live and proceeds on the fresh "on".
+func TestPreflightReprobesUnknownEncryption(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	prober := &fakeProber{state: "on", ok: true}
+	h := newHarness(t, m.params(t), m.Transport, func(o *Options, d *fakeDevices) {
+		d.set(testUDID, m.Transport, "unknown") // the cold-lockdown reading
+		o.Prober = prober
+	})
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 20*time.Second)
+	if final.State != StateSucceeded {
+		t.Fatalf("state=%s error=%v; want succeeded — a live re-read said the device encrypts", final.State, final.Error)
+	}
+	if prober.calls != 1 {
+		t.Fatalf("prober called %d times; want exactly 1 (one probe per preflight)", prober.calls)
+	}
+}
+
+// The other half of (i)-B: when the live re-read says the device really has encryption OFF, the
+// refusal stands — and its message is the actionable one, not the "couldn't confirm" one.
+func TestPreflightRefusesWhenLiveReadSaysOff(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), m.Transport, func(o *Options, d *fakeDevices) {
+		d.set(testUDID, m.Transport, "unknown")
+		o.Prober = &fakeProber{state: "off", ok: true}
+	})
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 5*time.Second)
+	if final.State != StateFailed || final.Error == nil || final.Error.Code != ErrEncryptionRequired {
+		t.Fatalf("state=%s error=%v, want failed/%s", final.State, final.Error, ErrEncryptionRequired)
+	}
+	if !strings.Contains(final.Error.Message, "turned off") {
+		t.Fatalf("message = %q; want the actionable enable-encryption wording", final.Error.Message)
+	}
+}
+
+// And when even the live read cannot tell (locked device, probe failed), the job still refuses —
+// but says the TRUE reason instead of implying the user disabled encryption (state honesty).
+func TestPreflightRefusesHonestlyWhenEncryptionUnconfirmable(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), m.Transport, func(o *Options, d *fakeDevices) {
+		d.set(testUDID, m.Transport, "unknown")
+		o.Prober = &fakeProber{ok: false} // the probe itself failed
+	})
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 5*time.Second)
+	if final.State != StateFailed || final.Error == nil || final.Error.Code != ErrEncryptionRequired {
+		t.Fatalf("state=%s error=%v, want failed/%s", final.State, final.Error, ErrEncryptionRequired)
+	}
+	if !strings.Contains(final.Error.Message, "could not be confirmed") {
+		t.Fatalf("message = %q; want it to say the state could not be confirmed", final.Error.Message)
+	}
+}
+
 // Story 9c: policy relaxed + unencrypted device → proceeds; the committed version is badged
 // encrypted:false (no silent downgrade).
 func TestStoryPreflightEncryptionRelaxed(t *testing.T) {
@@ -500,7 +637,13 @@ func TestStoryRetryChainFields(t *testing.T) {
 	if f1.IntentID != j1.ID || f1.Attempt != 1 || f1.RetryOf != nil {
 		t.Fatalf("first job: intent=%s attempt=%d retry_of=%v", f1.IntentID, f1.Attempt, f1.RetryOf)
 	}
-	j2, s2, reason := h.eng.StartBackup(testUDID, m.Transport, j1.ID)
+	// A job's ROW goes terminal before its work is discarded and the per-UDID single-flight slot
+	// is released (release is deferred past discard — correct: a new job must not race the old
+	// one's work dir). So an instant retry can legitimately see 409 for a moment; wait it out
+	// rather than asserting on teardown timing. NOTE (qn.4c, filed): the 409 message a user would
+	// see in that window says "a backup is already running for this device", which reads as wrong
+	// right after the UI announced a failure — worth a friendlier reason for the one-tap Retry.
+	j2, s2, reason := startWhenReleased(t, h.eng, m.Transport, j1.ID)
 	if s2 != 202 {
 		t.Fatalf("retry start = %d (%s)", s2, reason)
 	}

@@ -56,6 +56,29 @@ func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bu
 // BackendName reports the resolved backend (for /api/health + onboarding).
 func (m *Manager) BackendName() string { return m.backendName }
 
+// LastBackup summarizes a device's most recent SUCCESSFUL backup for Device.last_backup
+// (contracts §2, ratified (bz); qn.4a finding (v)). Versions — not job rows — are the source of
+// truth for "has this device been backed up": a version exists ONLY after verify + commit, it
+// outlives the process that made it, and it covers ADOPTED versions (a dataset replicated or
+// restored to a fresh host, or quince reinstalled over existing backups), which have no job at
+// all — hence a nil JobID rather than a fabricated one. Versions the registry knows are MISSING
+// on disk are skipped: claiming a backup whose artifact is gone would be exactly the overclaim
+// this project forbids. ok=false → the device honestly has no backups ("No backups yet").
+func (m *Manager) LastBackup(udid string) (wire.LastBackup, bool) {
+	rows, err := m.reg.ListVersions(udid) // newest first
+	if err != nil {
+		m.log.Error("storage: last-backup lookup failed", "udid", udid, "error", err)
+		return wire.LastBackup{}, false
+	}
+	for _, r := range rows {
+		if r.Missing {
+			continue
+		}
+		return wire.LastBackup{At: fmtRFC(r.CreatedAt), JobID: r.JobID, Status: "succeeded"}, true
+	}
+	return wire.LastBackup{}, false
+}
+
 // Versions implements httpapi.VersionReader (contracts §1 GET /api/versions). Reads the
 // registry (indexed, no fs walk on the hot path — perf budget) and maps to the wire shape.
 func (m *Manager) Versions(udid string) []wire.Version {

@@ -29,3 +29,10 @@ Ruling:    accepted → qn.6 (Operator, 2026-07-20; architect-recommended). Land
            "usbmuxd can OPEN devices", with the actionable live-/dev-bind warning in
            both onboarding and /api/health. Roadmap M5 updated.
 
+
+## P1b — the Wi-Fi twin of P1: netmuxd runs but sees nothing   [proposed: qn.4c, 2026-07-21] [status: recorded beside P1 → qn.6]
+Problem:   netmuxd discovers Wi-Fi devices ONLY by mDNS, which does not cross a bridged container network — so a supervised netmuxd reports `running` (it is) while enumerating **zero devices forever**, and Wi-Fi (the primary use case) looks broken with nothing anywhere saying why. Same silent shape as P1, other transport.
+Sketch:    when a managed netmuxd has been up past a grace period with zero Wi-Fi devices ever seen — or no mDNS responses at all — surface an actionable `/api/health` + onboarding warning ("Wi-Fi muxer sees no devices — the container needs LAN multicast: `network_mode: host` or macvlan") linking `deploy/compose.nas.yml`.
+Value:     reliability/UX — the deployment constraint is real and invisible; without this the user's only symptom is an empty device list, and the fix is one compose line they have no way to guess.
+Cost:      M — needs a "has this muxer ever produced a device" signal + the same health/onboarding surface P1 builds; near-zero marginal cost if built WITH P1.
+Ruling:    recorded beside P1 by the architect ((ca), 2026-07-21) — lands with P1 in qn.6 rather than as a separate rung. qn.4c supervises netmuxd and reports its state honestly; it does not diagnose the transport (out of scope, and gate 11(b) settles whether the deployed shape needs host networking at all).

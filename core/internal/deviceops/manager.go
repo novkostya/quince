@@ -280,6 +280,29 @@ func (m *Manager) runEncryption(opID, udid, transport, action, password, oldPass
 
 // reEnrich refreshes a device's identity after a successful op (paired / encryption flip),
 // bounded by enrichWait, off the request path.
+// RefreshEncryption re-reads a device's backup-encryption state from lockdown RIGHT NOW and
+// overlays the whole fresh identity onto the registry (so the UI's badge self-corrects too).
+// It is the backup engine's preflight prober: the registry's cached value can read `unknown`
+// merely because enrichment ran while lockdown was still cold, which used to hard-fail a
+// legitimately-encrypted device's backup ((bw), qn.4a finding (i)-B).
+//
+// It reuses Info, so it inherits qn.3's hardware-learned safety: a device that is not CONFIRMED
+// paired gets the simple (-s) read, which cannot auto-pair — a preflight probe can never surface
+// an unexpected Trust prompt. ok=false means the read failed; the caller must not infer a state
+// from that (state honesty).
+func (m *Manager) RefreshEncryption(ctx context.Context, udid, transport string) (string, bool) {
+	id, err := m.tools.Info(ctx, udid, transport)
+	if err != nil {
+		m.log.Warn("deviceops: live encryption probe failed", "udid", udid, "error", err)
+		return "", false
+	}
+	m.devs.Enrich(udid, id)
+	if id.BackupEncryption == "" {
+		return "unknown", true
+	}
+	return id.BackupEncryption, true
+}
+
 func (m *Manager) reEnrich(udid, transport string) {
 	ctx, cancel := context.WithTimeout(m.baseCtx, m.enrichWait)
 	defer cancel()

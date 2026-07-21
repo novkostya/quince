@@ -241,7 +241,7 @@ func (p *Provider) refreshLastBackup(udid, jid, at, status string) {
 		p.mu.Unlock()
 		return
 	}
-	dev.LastBackup = &wire.LastBackup{At: at, JobID: jid, Status: status}
+	dev.LastBackup = &wire.LastBackup{At: at, JobID: &jid, Status: status}
 	dev.LastSeen = at
 	p.devices[udid] = dev
 	p.mu.Unlock()

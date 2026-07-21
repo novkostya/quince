@@ -101,3 +101,46 @@ func TestInfoEncryptionOff(t *testing.T) {
 		t.Fatalf("encryption = %q (want off)", id.BackupEncryption)
 	}
 }
+
+// TestInfoEncryptionNeverSet is qn.4a lab finding (i)-A (qn.4c story 7): a device that has never
+// had a backup password has NO WillEncrypt key, so `ideviceinfo -k WillEncrypt` exits 0 printing
+// nothing. That is the device saying "off" — reporting "unknown" made the UI hide the
+// not-encrypted warning and ask for a current password that does not exist.
+func TestInfoEncryptionNeverSet(t *testing.T) {
+	id, err := fakeTools("DEVICEOPS_FAKE=enc_never_set").Info(context.Background(), fakeUDID, TransportUSB)
+	if err != nil {
+		t.Fatalf("Info err = %v", err)
+	}
+	if id.BackupEncryption != "off" {
+		t.Fatalf("encryption = %q (want off — an absent WillEncrypt key means the device will not encrypt)", id.BackupEncryption)
+	}
+}
+
+// TestInfoEncryptionUnknownOnReadFailure keeps the other half honest: a lockdown read that FAILS
+// is still "unknown" — quince never downgrades "I could not ask" into a claim about the device.
+func TestInfoEncryptionUnknownOnReadFailure(t *testing.T) {
+	id, err := fakeTools("DEVICEOPS_FAKE=enc_read_failed").Info(context.Background(), fakeUDID, TransportUSB)
+	if err != nil {
+		t.Fatalf("Info err = %v", err)
+	}
+	if id.BackupEncryption != "unknown" {
+		t.Fatalf("encryption = %q (want unknown — the read failed, so quince does not know)", id.BackupEncryption)
+	}
+}
+
+// TestRefreshEncryption (qn.4c story 8, the prober seam): a live re-read returns the fresh state
+// AND lands it in the registry, so the UI's encryption badge self-corrects at the same time.
+func TestRefreshEncryption(t *testing.T) {
+	devs := newFakeDevices()
+	devs.add(usbDevice(fakeUDID))
+	m := newTestManager(t, devs, "DEVICEOPS_FAKE=enc_off")
+
+	got, ok := m.RefreshEncryption(context.Background(), fakeUDID, TransportUSB)
+	if !ok || got != "off" {
+		t.Fatalf("RefreshEncryption = (%q, %v); want (off, true)", got, ok)
+	}
+	id, had := devs.lastEnrich(fakeUDID)
+	if !had || id.BackupEncryption != "off" {
+		t.Fatalf("registry was not refreshed by the probe: %+v (had=%v)", id, had)
+	}
+}

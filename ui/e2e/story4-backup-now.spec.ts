@@ -55,3 +55,32 @@ test("dashboard card Pair auto-opens the pairing dialog on the details page", as
   await expect(page).toHaveURL(/\/devices\//);
   await expect(page.getByText(/pair this device/i)).toBeVisible({ timeout: 10_000 });
 });
+
+// qn.4c story 10 (findings (iv)+(v)): a backup started from the DASHBOARD CARD runs to success and
+// the card lands on its real last-backup line — live, with no page reload. The defect this covers:
+// the card sat at "Backing up 100%" through verify+commit and then said "No backups yet" even
+// though the backup had committed a version. Kept separate from the cancel/retry story above,
+// which deliberately never lets a job finish.
+test("a card-started backup ends on the real last-backup line without a reload", async ({ page }) => {
+  await authenticate(page);
+
+  // Scope to the spare device's card body — the innermost element holding both its name and its
+  // backup control. (No assertion on the STARTING text: the demo server is shared across the
+  // tests in this file, and the retry above may already have given this device a backup. What
+  // this story proves is the transition out of progress and onto a real last-backup line.)
+  const card = page
+    .locator("div")
+    .filter({ has: page.getByTestId("card-backup-now") })
+    .filter({ hasText: "spare-iphone" })
+    .last();
+
+  await card.getByTestId("card-backup-now").click();
+  await expect(card.getByTestId("card-backup-now")).toBeHidden({ timeout: 10_000 });
+
+  // The scripted job walks queued → … → verifying → committing → succeeded (~6s). No reload
+  // anywhere in this test: everything below arrives over the WebSocket.
+  await expect(card.getByTestId("card-backup-now")).toBeVisible({ timeout: 30_000 });
+  await expect(card.getByText(/last backup/i)).toBeVisible();
+  await expect(card.getByText(/no backups yet/i)).toHaveCount(0);
+  await expect(card.getByText("Backing up")).toHaveCount(0);
+});

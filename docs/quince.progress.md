@@ -1,11 +1,15 @@
 # quince — progress dashboard
 
-**One-line state.** ⚑ **FRONTIER = `qn.4c` — the DAILY-DRIVER target ((by)).** The Operator's
-bar before a planned **code freeze + process revamp**: a full backup cycle over BOTH transports,
-live progress without a page refresh, major bugs fixed. That is **one session (qn.4c: netmuxd
-co-supervision + qn.4a findings (i)/(iv)/(v)) + one hardware day (the inherited qn.4b gate 11)**.
-qn.4a and qn.4b are done/closed on CI, with qn.4a's engine goal hardware-proven on BOTH backends;
-**gate 12c and all of qn.6–qn.12 are deferred past the freeze.** History below.
+**One-line state.** ⚑ **FRONTIER = `qn.4c` — the DAILY-DRIVER target ((by)); its CI half is BUILT,
+only the hardware day remains.** The Operator's bar before a planned **code freeze + process
+revamp**: a full backup cycle over BOTH transports, live progress without a page refresh, major
+bugs fixed. **netmuxd co-supervision + findings (i)/(iv)/(v) are landed and CI-proven** (full
+ladder + image + e2e green; the built image runs BOTH supervised muxers, respawns a `kill -9`ed
+netmuxd, and keeps usbmuxd's socket intact — the spike's takeover hazard verified absent). What is
+left is **one hardware day: the inherited gate 11** (both transports UI-driven, Wi-Fi on supervised
+netmuxd surviving a container restart, honest disconnect, real last-backup line, iMazing glance),
+which also settles the **(ca) mDNS-across-the-bridge** question. **Gate 12c and all of qn.6–qn.12
+stay deferred past the freeze.** History below.
 
 **qn.1 is BUILT — the app frame stands.** `make gates` (go + vault +
 ui), `make gates-ui-e2e` (Playwright stories 1–2), and `make image` are green inside
@@ -81,7 +85,7 @@ hardware day; **M3 closes then.**
 | qn.5 | Storage backends (zfs snapshot-native / reflink / hardlink / copy) + reconciliation | **done (CI-proven; landed `285c40b`..`3ce5bb1`)** — `internal/storage` (4 backends + auto-probe + journaled commit + `quince-version.json` markers + startup-reconciliation kill-matrix + adopted-version discovery + structural `Verify` (encryption-branched, A1) + `RepairWorkingCopy` + retention + the (bi)/(bk) **mirror ladder**: clone-from-`working/`, hook `mirror` verb → in-container reflink → hardlink-under-matrix → copy, surfaced/UNVERIFIED reporting) + `clonetree` (FICLONE/hardlink/copy) + `versions` registry + `DELETE /api/versions/{id}` + `version.*` events + reconcile-before-serve + `deploy/storage.md`; `make gates`/image/e2e green. **Proven in CI** (11 stories + reconciliation matrix + D5a anchored-filter contract) + **real-zfs commit/Verify on hardware** during the gate-12 investigation ((bf)→(bk)). **Lab gate 12's remaining hardware legs (host-side `mirror` verb, iMazing, syncoid, 12c destructive matrix) RE-HOMED to qn.4a** ((bm); named owner, legs preserved in the qn.5 spec). Ran BEFORE qn.4 (order ruled (ar)) |
 | qn.4a | Backup engine + supervisor + minimal CLI (USB gate) | **built + landed (CI); gate 15 hardware-proven — ENGINE legs (bs) + zfs half (bw); only iMazing-opens (Operator GUI) left** — `internal/backup` (state-machine engine + per-UDID single-flight + `idevicebackup2` streaming supervisor w/ the `<target>/<UDID>` **symlink adapter** + transcript-grounded parser + activity-sampler liveness w/ **A3** free-space watch + preflight + Seed→Verify→Commit/Discard + **startup job-row reconciliation**) + a `jobs` table/registry (real `JobReader`) + the job command surface (`POST /api/jobs` 202/409/422, `POST …/cancel`, `job.*` events) + the `quince backup` CLI (shared `buildLiveStack`); 6 lab transcripts extracted+scrubbed. `make gates`/image/e2e green; CI stories 1–14 incl. **wifi-torn→`connection_lost`** (a stall, not an error — sampler catches it), **verify-gate→`failed`**, **single-flight→409**, **startup-reconcile→`connection_lost`/rolled-forward-`succeeded`**. Coverage backup **83.2%** / store 80.8% / httpapi 72.2%. **Gate 15 split (clarified (bv)):** the ENGINE legs PASSED on real hardware (iPad, hardlink `/backups`) — CLI-USB backup both encryption variants (A1 encrypted `Verify` on real data), version rotation, interface facts 1+5, kill-matrix `backing_up`. The **zfs half is PROVEN ((bw))**: **engine→commit on the real zfs-hook backend** (encrypted, verified, version snapshot cut), host **`mirror` verb** + **`bclonesaved`** moving live (+~3 GB), **syncoid** mid-write (both `@quince-*` restore points + dirty `working/` replicated offsite) — the constrained forced-command hook key + `rbind,rslave` host→LXC→container propagation stood up on the real rpool; three deploy-doc hook bugs found+fixed (`$2`→last-arg, image-ssh-client, create-chown). Only **iMazing-opens** (Operator GUI) is unverified. **Landed on main.** |
 | qn.4b | Wi-Fi first-class + transport policy + job-history UI (closes M3) | **built (CI-proven); lab gate 11/12c (hardware) pending** — transport **`auto` resolution** (prefer-USB-when-plugged, absent→**422** no job, concrete transport stored) + httpapi passes `auto` through; **`quince versions verify <id>\|--udid`** + **`device repair-working-copy <udid>`** CLI escape hatches (`storage.VerifyVersion`/`VerifyLatest`, browseRoot-resolved, no new backend surface); **live demo `JobControl`** (on-demand scripted jobs + seeded failed job for retry; single-flight; reverses qn.4a's 503); **UI** live Back up now (auto + transport override) / one-tap Retry on failed intent groups / Cancel on running job (details page + dashboard card). `make gates`/image/e2e green (e2e **story 4**: Back up now → cancel → retry). Retired the qn.4a Wi-Fi-success coverage finding (`wifi-incremental-success` story). Coverage backup **83.4%** / demo **55.3%** (was 0) / storage **78.2%** / httpapi 72.2% / cmd/quince 8.5% (CLI wiring hw-exercised). NOT a Wi-Fi demotion ((h) stands). **Lab gate 11 (both-transports UI-driven + honest Wi-Fi disconnect) + 12c (destructive hardlink matrix) = the consolidated hardware day with qn.4a gate 15**. **CLOSED (CI) 2026-07-20 ((by)):** its CI half is landed and complete; **gate 11 is RE-HOMED to `qn.4c`** (named owner — its Wi-Fi leg should run on SUPERVISED netmuxd, the shape actually deployed, not a hand-started one), **gate 12c is DEFERRED past the code freeze** (the destructive hardlink matrix gates a backend the Operator doesn't run — zfs deployment; the hardlink tier stays disabled-to-copy, surfaced), and findings (i)/(iv)/(v) **move to qn.4c**. No session work remains here. |
-| qn.4c | **netmuxd supervision + usability fixes (the DAILY-DRIVER target)** | **frontier** — inserted 2026-07-20 ((by)) to reach the Operator's "personally usable" bar before a planned code freeze. Scope: generalize the hardware-proven `internal/muxsup` to **co-supervise netmuxd** (config-gated, TCP probe vs its unix-socket one, restart-with-backoff, health surfaced — without it nothing starts netmuxd on `compose up`, so Wi-Fi dies silently after any restart: the qn.2b-for-usbmuxd reason, pulled forward from qn.7) + fix qn.4a findings **(i)** `willEncrypt`→`unknown` mis-map + the cold-lockdown race that hard-fails a legitimate encrypted backup at preflight, **(v)** the engine never writing `device.last_backup` (→ "No backups yet" on a device with real versions), **(iv)** the card lingering at "Backing up 100%" (likely subsumed by (v)). **Inherits qn.4b gate 11** — both transports UI-driven, live progress observed on a real backup, Wi-Fi over SUPERVISED netmuxd surviving a container restart, + the iMazing glance. Gate 12c stays deferred past the freeze. |
+| qn.4c | **netmuxd supervision + usability fixes (the DAILY-DRIVER target)** | **BUILT (CI-proven); lab gate 11 (hardware) pending** — `internal/muxsup` generalized to a daemon **`Spec`** (name/role/argv/probe-network/address) + **`Group`** (two daemons, one rescan) + the `plannedMuxers` resolution table; **netmuxd supervised** as `--host/--port --socket-path <private> --disable-usb` (every flag verified live; the private socket path is a SAFETY flag — netmuxd deletes and rebinds whatever socket it names, and its default is usbmuxd's: a silent USB blackout, reproduced then designed out, (bz)); `/api/health` **clean break** to `muxers:[{name,role,managed,state,detail,rescan}]`; rescan stays **USB-only**. Findings fixed: **(i)-A** `willEncrypt` exit-0-empty → `off` (`unknown` now means a real read failure), **(i)-B** preflight **re-reads encryption live** before refusing (cold-lockdown hard-fail gone; still-unknown refuses with the honest reason), **(v)** `last_backup` derived from the newest committed **version** (survives restarts, covers adopted, null `job_id`) + `AnnounceBackup` on commit success, **(iv)** verified **subsumed by running** (a new `DeviceCard` test proves the card already narrates verifying/committing). `make gates`/image/**e2e 6/6** green; **image smoke: both muxers `running`, `kill -9`d netmuxd respawned, usbmuxd socket intact**. Coverage muxsup **86.9%** / device 97.8% / backup 83.8% / cmd/quince 20.9%. Deploy: the **Wi-Fi mDNS constraint** is now first-class in `compose.nas.yml` (host-networking answer + honest security tradeoff + macvlan alternative), and P1b records the Wi-Fi twin of P1 ((ca)). **Lab gate 11 = the remaining hardware day.** History: inserted 2026-07-20 ((by)) to reach the Operator's "personally usable" bar before a planned code freeze. Scope: generalize the hardware-proven `internal/muxsup` to **co-supervise netmuxd** (config-gated, TCP probe vs its unix-socket one, restart-with-backoff, health surfaced — without it nothing starts netmuxd on `compose up`, so Wi-Fi dies silently after any restart: the qn.2b-for-usbmuxd reason, pulled forward from qn.7) + fix qn.4a findings **(i)** `willEncrypt`→`unknown` mis-map + the cold-lockdown race that hard-fails a legitimate encrypted backup at preflight, **(v)** the engine never writing `device.last_backup` (→ "No backups yet" on a device with real versions), **(iv)** the card lingering at "Backing up 100%" (likely subsumed by (v)). **Inherits qn.4b gate 11** — both transports UI-driven, live progress observed on a real backup, Wi-Fi over SUPERVISED netmuxd surviving a container restart, + the iMazing glance. Gate 12c stays deferred past the freeze. |
 | qn.6 | v0.1 release shape (after qn.7) | outlined |
 | qn.7 | Wi-Fi reliability hardening (before v0.1) + **the netmuxd-USB audition (re-homed from qn.2b, (aw))** | outlined — **netmuxd co-supervision MOVED to qn.4c** ((by)); qn.7 keeps the patched-timeout libimobiledevice build, restart-policy tuning, the chaos suite, liveness thresholds, and the audition. Deferred past the code freeze |
 | qn.8 | Vault: unlock, lazy browse, conformance suite | outlined |
@@ -98,6 +102,11 @@ hardware day; **M3 closes then.**
    rung **qn.2b** together with qn.2's deferred lab gates. Full ruling: decisions log
    (ar); contracts §1/§6 + design §2 updated; the design capture stays in the qn.2 spec
    appendix.
+3. ~~`Device.last_backup.job_id` → nullable?~~ **RESOLVED 2026-07-21 ((bz))** — approved and
+   landed in contracts §2 ahead of the rung (the qn.2b precedent): `last_backup` derives from
+   the newest **committed version** (survives restarts, covers adopted versions, which have no
+   job → `null`), and means the last **successful** backup; a failed last attempt lives in the
+   intent-grouped job history. Built by **qn.4c** (finding (v)).
 
 *Resolved:* **project name = quince** (Operator, 2026-07-18, after due diligence — see
 decisions log (y); repo `github.com/novkostya/quince`, images
@@ -1168,3 +1177,50 @@ on real traction).
   reaches it sees zero devices forever, which is **exactly the shape of accepted proposal P1**
   (a muxer that runs but cannot open devices → actionable onboarding/health warning). The Wi-Fi
   twin should land with P1 in qn.6, or at minimum be recorded beside it.
+- 2026-07-21: (cb) **qn.4c BUILT (CI) — netmuxd is co-supervised, and the three "it looks broken"
+  defects are gone.** The rung's CI half is complete; only the inherited hardware day (gate 11)
+  remains. **Supervision:** `internal/muxsup` now describes any muxer daemon as a `Spec`
+  (name/role/argv/probe-network/address/rescan-applies) and a `Group` runs the two-daemon topology;
+  `cmd/quince`'s pure `plannedMuxers` resolves `devices.manage_muxer` + the two addresses into
+  supervise/dial/refuse decisions (table-tested). The qn.2b guarantees — own process group,
+  restart-with-capped-backoff, crash-loop → degraded, refuse-loudly on an already-served address,
+  killed on shutdown — are now **parameterized over a unix-socket AND a TCP daemon**, so netmuxd
+  inherits proof rather than just code. **The argv is load-bearing** ((bz)): `--host/--port` from
+  `devices.netmuxd_addr`, a **private `--socket-path`** (netmuxd deletes and rebinds whatever socket
+  it names — with the default that is the live usbmuxd's, i.e. a silent USB blackout), and
+  `--disable-usb` (D2's USB anchor until qn.7's audition); a derived path colliding with
+  `devices.usbmuxd_socket` makes quince **refuse to supervise netmuxd** loudly while still dialing
+  it. **Health took the clean break**: `muxers:[{name,role,managed,state,detail,rescan}]` replaces
+  the singular `muxer`; rescan stays **USB-only** (restarting netmuxd would tear a live Wi-Fi
+  backup). **Findings:** (i)-A `willEncrypt` maps exit-0-with-empty-output to **`off`** (an absent
+  key IS the device saying it will not encrypt; `unknown` now means a genuine read failure);
+  (i)-B **preflight re-reads the encryption state live** (`deviceops.RefreshEncryption`, reusing
+  qn.3's non-auto-pairing `Info`) whenever the cached value is not `on` — the cold-lockdown
+  hard-fail is gone, a fresh `off` still refuses actionably, and a still-`unknown` refuses with the
+  TRUE reason instead of implying the user disabled encryption (proceeding-on-unknown was
+  considered and rejected: discovering it after writing GBs is worse); (v) **`last_backup` derives
+  from the newest non-missing committed version** through an injected source read at merge time
+  (no cache to go stale — right after a restart, right for adopted versions, right after a delete),
+  plus `AnnounceBackup` on commit success for the live card update; (iv) **verified subsumed by
+  running, not assumed** (the architect's build flag) — a new `DeviceCard` test drives
+  backing_up(100%) → verifying → committing and shows the card already narrates each, so the only
+  missing piece was the last-backup line. **Gates:** `make gates` + `make image` +
+  `make gates-ui-e2e` green in quince-dev (e2e 6/6, incl. a new story: a dashboard-card backup runs
+  to success and the card lands on its real last-backup line **with no reload**). **Image smoke
+  test (the CI-side proof of the rung's promise):** `quince serve` in the image built this rung
+  reports both daemons `running` with the exact ruled argv, **both sockets coexisting**, TCP 27015
+  listening; a `kill -9` of the netmuxd child was **respawned by the supervisor** while usbmuxd
+  kept its original pid and a live socket (`idevice_id -l` exit 0). Coverage: muxsup **86.9%**,
+  device 97.8%, backup 83.8%, cmd/quince 20.9% (was 14.9), httpapi 72.0%, deviceops 80.3%.
+  **Deploy ((ca) discharged in advance of the gate):** the Wi-Fi/mDNS requirement is a first-class
+  header section in `compose.nas.yml` (host-networking answer, its honest isolation tradeoff, and
+  macvlan as the isolation-preserving alternative); `compose.lab.yml` documents the host-run netmuxd
+  equivalent incl. the `--socket-path` warning; **P1b** records the Wi-Fi twin of P1 in the
+  proposals ledger for qn.6. **One pre-existing finding filed (out of scope, has a home):** a job's
+  row goes terminal before its work is discarded and the single-flight slot released, so an instant
+  Retry can hit a 409 that says "a backup is already running" — correct refusal, misleading words;
+  the smallest fix is a distinct reason string. **Remaining: lab gate 11 (a)–(h), one Operator
+  hardware day** — both transports UI-driven with live progress, Wi-Fi on SUPERVISED netmuxd
+  surviving a container restart, honest mid-backup disconnect, the real last-backup line on a
+  device with pre-existing versions, encryption honesty, secrets absence, iMazing-opens. It also
+  settles whether the deployed bridged shape sees Wi-Fi devices at all, or needs host networking.

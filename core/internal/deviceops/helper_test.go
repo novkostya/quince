@@ -127,9 +127,18 @@ func fakePair(scenario string) {
 }
 
 func fakeWillEncrypt(scenario string) {
-	if scenario == "enc_off" {
+	switch scenario {
+	case "enc_off":
 		fmt.Println("false")
-	} else {
+	case "enc_never_set":
+		// The qn.4a lab finding (i)-A, reproduced: on a device that has NEVER had a backup
+		// password, the WillEncrypt key is ABSENT and `ideviceinfo -q … -k WillEncrypt` exits 0
+		// printing nothing. That is the device saying "I will not encrypt", not "I don't know".
+		os.Exit(0)
+	case "enc_read_failed":
+		fmt.Fprintln(os.Stderr, "ERROR: Could not connect to lockdownd")
+		os.Exit(1)
+	default:
 		fmt.Println("true")
 	}
 	os.Exit(0)

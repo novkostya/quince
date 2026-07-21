@@ -36,6 +36,8 @@ type Options struct {
 	Storage   Storage
 	VersionQ  StorageForJob
 	Devices   Devices
+	Prober    EncryptionProber // optional: live encryption re-read at preflight (finding (i)-B)
+	Announcer DeviceAnnouncer  // optional: republish the device after a commit (finding (v))
 	Bus       *bus.Bus
 	Log       *slog.Logger
 	Config    Config
@@ -65,6 +67,8 @@ type Engine struct {
 	storage   Storage
 	versionQ  StorageForJob
 	devices   Devices
+	prober    EncryptionProber
+	announcer DeviceAnnouncer
 	bus       *bus.Bus
 	log       *slog.Logger
 	cfg       Config
@@ -110,7 +114,8 @@ func New(o Options) *Engine {
 	}
 	return &Engine{
 		baseCtx: o.BaseCtx, st: o.Store, storage: o.Storage, versionQ: o.VersionQ,
-		devices: o.Devices, bus: o.Bus, log: o.Log, cfg: o.Config, backups: o.Backups,
+		devices: o.Devices, prober: o.Prober, announcer: o.Announcer,
+		bus: o.Bus, log: o.Log, cfg: o.Config, backups: o.Backups,
 		newID: o.NewID, now: o.Now, freeSpace: o.FreeSpace,
 		tool: &tool{bin: o.Tool.Bin, argPrefix: o.Tool.ArgPrefix, env: o.Tool.Env,
 			usbmuxd: o.Tool.UsbmuxdSocket, netmuxd: o.Tool.NetmuxdAddr, targetRoot: targetRoot},
@@ -297,7 +302,7 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 	}
 
 	e.transition(lj, func(r *store.JobRow) { r.State = StatePreflight; r.Phase = StatePreflight })
-	workDir, code, reason := e.preflight(lj)
+	workDir, code, reason := e.preflight(ctx, lj)
 	if code != "" {
 		e.terminate(lj, StateFailed, code, reason)
 		return // preflight refuses BEFORE Seed → nothing to discard
@@ -345,7 +350,7 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 
 // preflight checks presence, pairing, the encryption policy, and disk headroom (all BEFORE Seed,
 // so a refusal leaves nothing to discard), then Seeds and returns the work dir. code=="" on success.
-func (e *Engine) preflight(lj *liveJob) (workDir, code, reason string) {
+func (e *Engine) preflight(ctx context.Context, lj *liveJob) (workDir, code, reason string) {
 	udid, transport := lj.row.UDID, lj.row.Transport
 	dev, ok := e.devices.Device(udid)
 	if !ok || !presentOn(dev, transport) {
@@ -354,10 +359,10 @@ func (e *Engine) preflight(lj *liveJob) (workDir, code, reason string) {
 	if dev.Paired == "no" {
 		return "", ErrNotPaired, "device is not paired — pair it first"
 	}
-	if e.cfg.RequireEncryption && dev.BackupEncryption != "on" {
-		return "", ErrEncryptionRequired,
-			"backup encryption is required but the device reports it " + dev.BackupEncryption +
-				" — enable encryption first"
+	if e.cfg.RequireEncryption {
+		if code, reason := e.checkEncryption(ctx, udid, transport, dev.BackupEncryption); code != "" {
+			return "", code, reason
+		}
 	}
 	if e.freeSpace != nil && e.backups != "" {
 		if free, err := e.freeSpace(e.backups); err == nil && free < e.cfg.DiskLowFreeBytes {
@@ -370,6 +375,41 @@ func (e *Engine) preflight(lj *liveJob) (workDir, code, reason string) {
 		return "", ErrBackupFailed, "seed work area: " + err.Error()
 	}
 	return wd, "", ""
+}
+
+// checkEncryption enforces backup.require_encryption WITHOUT trusting a stale reading. The
+// registry's value can be `unknown` merely because enrichment ran while lockdown was cold, which
+// used to hard-fail a device that does encrypt, with no retry ((bw), finding (i)-B). So anything
+// other than a cached "on" is re-read live (one probe, ~a second) and the decision is made on the
+// fresh value:
+//
+//	on      → proceed;
+//	off     → refuse, actionable ("enable encryption first");
+//	unknown → refuse, but say the true reason (we could not ask the device) instead of implying
+//	          the user turned encryption off.
+//
+// Proceeding on `unknown` is deliberately NOT an option: require_encryption means "do not take an
+// unencrypted backup", and discovering that after writing gigabytes — then discarding them —
+// is worse than an actionable refusal (state honesty over optimism).
+func (e *Engine) checkEncryption(ctx context.Context, udid, transport, cached string) (code, reason string) {
+	state := cached
+	if state != "on" && e.prober != nil {
+		if fresh, ok := e.prober.RefreshEncryption(ctx, udid, transport); ok {
+			e.log.Info("backup: re-read encryption state at preflight", "udid", udid, "cached", cached, "fresh", fresh)
+			state = fresh
+		}
+	}
+	switch state {
+	case "on":
+		return "", ""
+	case "off":
+		return ErrEncryptionRequired,
+			"backup encryption is required but this device has it turned off — enable encryption first"
+	default:
+		return ErrEncryptionRequired,
+			"backup encryption is required but this device's encryption state could not be confirmed " +
+				"(the device may be locked) — unlock it and try again"
+	}
 }
 
 func (e *Engine) awaitDevice(ctx context.Context, lj *liveJob) bool {
@@ -619,6 +659,13 @@ func (e *Engine) succeed(lj *liveJob, versionID string) {
 		r.FinishedAt, r.VersionID = &fin, &versionID
 	})
 	e.log.Info("backup: job succeeded", "job", lj.row.ID, "udid", lj.row.UDID, "version", versionID)
+	// The device's last_backup now reads differently (it derives from committed versions), so ask
+	// the registry to re-publish it: the dashboard card lands on "Last backup … · succeeded"
+	// without a page refresh (qn.4a findings (iv)+(v)). Nil-safe: without an announcer the card
+	// catches up on the next fetch.
+	if e.announcer != nil {
+		e.announcer.AnnounceBackup(lj.row.UDID)
+	}
 }
 
 func (e *Engine) discard(lj *liveJob) {

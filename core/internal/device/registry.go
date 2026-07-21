@@ -22,6 +22,9 @@ type Registry struct {
 	order   []string // stable display order of udids (append on first appearance)
 	// udid → lockdown identity overlaid on the muxd-minimal shell (qn.3 enrichment).
 	identity map[string]Identity
+	// lastBackup resolves Device.last_backup from the version registry (qn.4c finding (v)).
+	// Nil until wired (e.g. --demo, tests): the field then stays null, never a guess.
+	lastBackup func(udid string) (wire.LastBackup, bool)
 }
 
 // NewRegistry returns an empty registry publishing device.* events to b.
@@ -31,6 +34,33 @@ func NewRegistry(b *bus.Bus, log *slog.Logger) *Registry {
 		log:      log,
 		sources:  map[string]map[string]map[string]string{},
 		identity: map[string]Identity{},
+	}
+}
+
+// SetLastBackupSource wires where Device.last_backup comes from — the version registry
+// (storage.Manager.LastBackup). It is READ on every merge rather than cached, so the field is
+// automatically right after a restart, after an adopted version is discovered, and after a
+// version is deleted; there is no second copy to go stale. Call once, before serving.
+// Tradeoff, declared: the lookup runs while the registry lock is held, so a device read costs one
+// indexed SQLite query per device (tens of microseconds against a 100 ms budget). Caching would
+// buy nothing but a way to be wrong.
+func (r *Registry) SetLastBackupSource(fn func(udid string) (wire.LastBackup, bool)) {
+	r.mu.Lock()
+	r.lastBackup = fn
+	r.mu.Unlock()
+}
+
+// AnnounceBackup re-publishes a device because its backup history just changed (the engine calls
+// it after a successful commit). The value itself comes from the source above; this only makes
+// the change LIVE — the dashboard card updates without a page refresh (qn.4a findings (iv)+(v)).
+// A device that is not currently present emits nothing: there is no device on screen to update,
+// and the next read is honest anyway.
+func (r *Registry) AnnounceBackup(udid string) {
+	r.mu.RLock()
+	dev, present := r.mergedLocked(udid)
+	r.mu.RUnlock()
+	if present {
+		r.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 	}
 }
 
@@ -208,6 +238,11 @@ func (r *Registry) deviceShellLocked(udid string) wire.Device {
 		}
 		if id.BackupEncryption != "" {
 			dev.BackupEncryption = id.BackupEncryption
+		}
+	}
+	if r.lastBackup != nil {
+		if lb, ok := r.lastBackup(udid); ok {
+			dev.LastBackup = &lb
 		}
 	}
 	return dev

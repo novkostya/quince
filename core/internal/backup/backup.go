@@ -9,6 +9,7 @@
 package backup
 
 import (
+	"context"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/store"
@@ -119,6 +120,24 @@ type Storage interface {
 // it via the frozen wire.Device it already serves — no device-package import edge).
 type Devices interface {
 	Device(udid string) (wire.Device, bool)
+}
+
+// EncryptionProber re-reads a device's backup-encryption state live at preflight
+// (*deviceops.Manager satisfies it). OPTIONAL: with no prober wired (e.g. --demo) preflight
+// decides on the registry's cached value alone. It exists because that cached value can read
+// `unknown` merely because enrichment ran while lockdown was cold, which hard-failed a
+// legitimately-encrypted device's backup with no retry (qn.4a finding (i)-B, (bw)).
+// ok=false means the probe itself failed — never a state to infer from.
+type EncryptionProber interface {
+	RefreshEncryption(ctx context.Context, udid, transport string) (state string, ok bool)
+}
+
+// DeviceAnnouncer asks the device registry to re-publish a device (device.updated) because
+// something outside the registry changed what it reports — today: a successful commit changing
+// last_backup (*device.Registry satisfies it). OPTIONAL, nil-safe: without it the card catches
+// up on the next fetch instead of live (qn.4a finding (v)).
+type DeviceAnnouncer interface {
+	AnnounceBackup(udid string)
 }
 
 // jobToWire maps a stored row to the frozen Job shape (contracts §2).

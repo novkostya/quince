@@ -38,7 +38,7 @@ and the only network listener.
 | Component | Responsibility |
 | --- | --- |
 | `muxd client` | Maintains Listen connections to N configured muxer sockets — default: ONE, netmuxd v0.4+ serving both USB and Wi-Fi (stack D2); classic usbmuxd is a config-only fallback topology. Merges sources into one device table keyed by UDID with per-transport presence (`ConnectionType`); reconnects with backoff; emits `device.*` events. |
-| `muxer supervisor` | With `devices.manage_muxer: true` (simple profile): owns the in-container usbmuxd lifecycle — Go subprocess in its own process group under the serve context, restart-on-crash with capped backoff, killed on shutdown; **refuses loudly at startup if something already serves the socket** (no silent adoption). Powers `POST /api/devices/rescan` (restart → re-enumerate → the muxd client's reset/replay reconcile). `false` = hardened profile: external muxer sockets only, rescan → 409. Ruled 2026-07-20 from qn.2's gap capture. MINIMAL scope built in qn.2b — supervision + rescan + basic muxer state (`managed`/`running`/`degraded`, incl. crash-loop, with the last exit reason) in `GET /api/health`; netmuxd co-supervision + a live UI muxer-health panel are qn.7. |
+| `muxer supervisor` | With `devices.manage_muxer: true` (simple profile): owns the lifecycle of **every configured muxer daemon** — usbmuxd for USB *and* netmuxd for Wi-Fi (qn.4c) — each a Go subprocess in its own process group under the serve context, restart-on-crash with capped backoff, killed on shutdown; each **refuses loudly at startup if something already serves its address** (no silent adoption; unix-socket probe for usbmuxd, TCP probe for netmuxd). Powers `POST /api/devices/rescan` (restart → re-enumerate → the muxd client's reset/replay reconcile) — **USB only**: Wi-Fi has no hotplug gap and a netmuxd restart would tear a live Wi-Fi backup. `false` = hardened profile: external muxers dialed only, reported `external` in health, rescan → 409. Ruled 2026-07-20 from qn.2's gap capture (qn.2b: usbmuxd), extended by ruling (by)/(bz) (qn.4c: netmuxd, pulled forward from qn.7 because nothing else starts it — Wi-Fi was silently dead after every restart). Per-daemon state lands in `GET /api/health` (§10); a live UI muxer-health panel + restart-policy config remain qn.7. **The netmuxd argv is load-bearing** (verified live, stack D2): a private `--socket-path` — with the default it DELETES and rebinds usbmuxd's socket — plus `--disable-usb`. |
 | `device ops` | Pair / validate / info via argv subprocess wrappers; caches `ideviceinfo` snapshots; never interpolates UDIDs into shell. |
 | `job engine` | One goroutine per job driving the state machine (§4); global per-UDID mutex; persists every transition to SQLite *before* emitting the event (crash-safe: on startup, orphaned `backing_up` jobs become `connection_lost` and their work dirs are discarded). |
 | `backup supervisor` | Spawns `idevicebackup2` in its own process group; parses stdout incrementally (tolerant line parser — unknown lines are logged, never fatal); tracks progress and liveness via the activity sampler (§4). |
@@ -55,8 +55,16 @@ A device is identified by UDID and may be present on multiple transports at once
 ```
 Device { udid, name, model, ios_version, transports: {usb: seen_at, wifi: seen_at},
          paired: yes|no|unknown, backup_encryption: on|off|unknown,
-         last_seen, last_backup: {at, job_id, status} }
+         last_seen, last_backup: {at, job_id|null, status} }
 ```
+
+**`last_backup` is derived, never stored on the device** (qn.4c, ratified (bz)): it is the
+newest committed **version** for that UDID — versions are the source of truth for "has this
+device been backed up", so the field is right after a restart and covers **adopted** versions
+(a replicated/restored dataset), which have no job at all → `job_id: null`. It therefore means
+the last **successful** backup; a failed last attempt lives in the intent-grouped job history.
+The engine re-publishes the device (`device.updated`) after a successful commit so the card
+updates without a page refresh.
 
 Device scope: anything speaking the standard pairing + MobileBackup2 stack — iPhone and
 iPad are first-class (identical protocol; the lab proved iPhone, iPad needs no extra
@@ -379,3 +387,22 @@ picked and why; usbmuxd reachable; optional Wi-Fi toggle) — every choice writt
 Structured logs (slog, JSON in container), per-job log files under `/data/logs/<job>` and
 streamed over WS live; `/api/health` includes muxd connectivity, backend probe result,
 disk headroom; Prometheus `/metrics` is a cheap later rung, not v1.
+
+**`/api/health` muxer shape** (design-level, deliberately NOT frozen in contracts until the
+qn.7 UI panel consumes it). One entry per configured muxer daemon — quince may supervise two:
+
+```jsonc
+{"status": "ok", "version": "…",
+ "muxers": [
+   {"name": "usbmuxd", "role": "usb",  "managed": true, "state": "running", "rescan": true},
+   {"name": "netmuxd", "role": "wifi", "managed": true, "state": "degraded",
+    "detail": "netmuxd keeps exiting: exit status 1", "rescan": false}
+ ]}
+```
+
+`state` ∈ `starting | running | degraded | stopped | external`; `detail` carries the last exit
+reason / why degraded / why external; `rescan` says whether `POST /api/devices/rescan` restarts
+that daemon (USB only). An external muxer (`manage_muxer: false`) appears with `managed: false`
+rather than being omitted — an absent entry would read as "no muxer". `--demo` reports `[]`.
+qn.2b's singular `muxer` object is **gone** (qn.4c clean break, ruled (bz)): with two daemons a
+single aggregate could not say which one was degraded, and two overlapping representations rot.

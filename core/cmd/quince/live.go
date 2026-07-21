@@ -13,7 +13,6 @@ import (
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/id"
 	"github.com/novkostya/quince/core/internal/muxd"
-	"github.com/novkostya/quince/core/internal/muxsup"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
@@ -41,15 +40,11 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
-	// Managed muxer (SIMPLE profile, qn.2b) or external (HARDENED / manage_muxer: false).
-	if dcfg.ManageMuxer && dcfg.UsbmuxdSocket != "" {
-		sup := muxsup.New(dcfg.UsbmuxdSocket, log)
-		go sup.Run(ctx)
-		ls.muxer = sup
-		log.Info("supervising in-container usbmuxd", "socket", dcfg.UsbmuxdSocket)
-	} else {
-		log.Info("muxer is external (devices.manage_muxer: false or no usbmuxd_socket) — dialing only")
-	}
+	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
+	// external (HARDENED / manage_muxer: false — dialed only, still reported in /api/health).
+	group := buildMuxerGroup(dcfg, log)
+	go group.Run(ctx)
+	ls.muxer = muxerHealth{group}
 
 	// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the registry.
 	reg := device.NewRegistry(eventBus, log)
@@ -79,12 +74,19 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
 
+	// Device.last_backup derives from the committed versions (qn.4c finding (v)): the version
+	// registry is the source of truth for "has this device been backed up", so a device shows its
+	// real last backup immediately after a restart — including versions adopted from a restored
+	// dataset, which no job row would ever explain.
+	reg.SetLastBackupSource(storageMgr.LastBackup)
+
 	// Backup engine (qn.4a): drives idevicebackup2 through the state machine into storage. Its
 	// job-row reconciliation runs AFTER storage's (order matters — amendment 1).
 	ecfg := backup.DefaultConfig()
 	ecfg.RequireEncryption = cfgSvc.Current().Backup.RequireEncryption
 	eng := backup.New(backup.Options{
 		BaseCtx: ctx, Store: st, Storage: storageMgr, VersionQ: storageMgr, Devices: reg,
+		Prober: opsMgr, Announcer: reg,
 		Bus: eventBus, Log: log, Config: ecfg, Backups: bootstrap.Backups, NewID: id.New,
 		Tool: backup.ToolConfig{
 			Bin: "idevicebackup2", UsbmuxdSocket: dcfg.UsbmuxdSocket, NetmuxdAddr: dcfg.NetmuxdAddr,

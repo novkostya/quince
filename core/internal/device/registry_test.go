@@ -276,3 +276,82 @@ func TestEnrichAbsentDeviceRetainedNoEmit(t *testing.T) {
 		t.Fatalf("attach shell missing retained identity: %+v", evs[0].Data)
 	}
 }
+
+// --- qn.4c finding (v): Device.last_backup is real ---------------------------------------------
+
+// TestLastBackupComesFromTheVersionSource: with a source wired, a present device carries the
+// last backup the version registry knows about — the defect this fixes was a device with real
+// committed versions rendering "No backups yet".
+func TestLastBackupComesFromTheVersionSource(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	jobID := "JOB-1"
+	r.SetLastBackupSource(func(udid string) (wire.LastBackup, bool) {
+		if udid != udidA {
+			return wire.LastBackup{}, false
+		}
+		return wire.LastBackup{At: "2026-07-21T10:00:00Z", JobID: &jobID, Status: "succeeded"}, true
+	})
+	r.apply(srcUSB, attach(udidA, muxd.TransportUSB))
+	r.apply(srcUSB, attach(udidB, muxd.TransportUSB))
+
+	devA, _ := r.Device(udidA)
+	if devA.LastBackup == nil || devA.LastBackup.At != "2026-07-21T10:00:00Z" || *devA.LastBackup.JobID != jobID {
+		t.Fatalf("device A last_backup = %+v; want the source's value", devA.LastBackup)
+	}
+	devB, _ := r.Device(udidB)
+	if devB.LastBackup != nil {
+		t.Fatalf("device B last_backup = %+v; want null — it has no versions", devB.LastBackup)
+	}
+}
+
+// TestLastBackupFromAdoptedVersionHasNoJob: an adopted version (restored/replicated dataset) has
+// no job row, so job_id is null — never a fabricated id (contracts §2, ratified (bz)).
+func TestLastBackupFromAdoptedVersionHasNoJob(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.SetLastBackupSource(func(string) (wire.LastBackup, bool) {
+		return wire.LastBackup{At: "2026-07-01T00:00:00Z", Status: "succeeded"}, true
+	})
+	r.apply(srcUSB, attach(udidA, muxd.TransportUSB))
+
+	dev, _ := r.Device(udidA)
+	if dev.LastBackup == nil || dev.LastBackup.JobID != nil {
+		t.Fatalf("adopted last_backup = %+v; want a value with a null job_id", dev.LastBackup)
+	}
+}
+
+// TestLastBackupNilSourceStaysNull: without a source (e.g. --demo, or before wiring) the field is
+// null rather than a guess.
+func TestLastBackupNilSourceStaysNull(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.apply(srcUSB, attach(udidA, muxd.TransportUSB))
+	if dev, _ := r.Device(udidA); dev.LastBackup != nil {
+		t.Fatalf("last_backup = %+v; want null with no source wired", dev.LastBackup)
+	}
+}
+
+// TestAnnounceBackupPublishesDeviceUpdated is the live half of the fix: after a commit the engine
+// announces, the card re-renders from the WS event, and no page refresh is needed. An absent
+// device announces nothing (there is nothing on screen to update).
+func TestAnnounceBackupPublishesDeviceUpdated(t *testing.T) {
+	r, sub := newTestRegistry(t)
+	r.SetLastBackupSource(func(string) (wire.LastBackup, bool) {
+		return wire.LastBackup{At: "2026-07-21T10:00:00Z", Status: "succeeded"}, true
+	})
+	r.apply(srcUSB, attach(udidA, muxd.TransportUSB))
+	drain(sub) // discard the attach event
+
+	r.AnnounceBackup(udidA)
+	evs := drain(sub)
+	if len(evs) != 1 || evs[0].Type != wire.EventDeviceUpdated {
+		t.Fatalf("events = %+v; want exactly one device.updated", evs)
+	}
+	dev, ok := evs[0].Data.(wire.Device)
+	if !ok || dev.LastBackup == nil {
+		t.Fatalf("device.updated payload = %+v; want a device carrying last_backup", evs[0].Data)
+	}
+
+	r.AnnounceBackup(udidB) // never attached
+	if evs := drain(sub); len(evs) != 0 {
+		t.Fatalf("announcing an absent device emitted %+v; want nothing", evs)
+	}
+}

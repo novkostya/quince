@@ -102,25 +102,27 @@ func (UnavailableDeviceOps) Encryption(context.Context, string, string, string, 
 func (UnavailableDeviceOps) Op(string) (wire.Op, bool) { return wire.Op{}, false }
 
 // MuxerControl drives POST /api/devices/rescan and reports muxer-supervision health for
-// /api/health (qn.2b). The real implementation is the muxsup.Supervisor (devices.manage_muxer:
-// true); UnmanagedMuxer stands in when the muxer is external (manage_muxer: false) or in --demo,
-// where quince owns no muxer to restart. Consumer-defined here (primitives only) so httpapi
-// imports no muxer subsystem — same pattern as DeviceReader.
+// /api/health (qn.2b; qn.4c made it plural — quince may supervise usbmuxd AND netmuxd). The real
+// implementation is the muxsup.Group (devices.manage_muxer: true); UnmanagedMuxer stands in for
+// --demo, where quince owns no muxer at all. Consumer-defined here so httpapi imports no muxer
+// subsystem — same pattern as DeviceReader.
 type MuxerControl interface {
-	// Rescan triggers a managed re-enumeration; accepted → 202, else 409 with reason.
+	// Rescan restarts the managed USB muxer (netmuxd is never restarted — it would tear a live
+	// Wi-Fi backup, (bz)); accepted → 202, else 409 with reason.
 	Rescan(ctx context.Context) (accepted bool, reason string)
-	// MuxerStatus reports (managed, state, detail) for the health payload.
-	MuxerStatus() (managed bool, state, detail string)
+	// MuxersHealth reports one entry per configured muxer daemon for the health payload.
+	MuxersHealth() []MuxerHealth
 }
 
-// UnmanagedMuxer is the MuxerControl for external/--demo muxers: rescan is always refused (409)
-// and health reports an unmanaged muxer.
+// UnmanagedMuxer is the MuxerControl for --demo, where there are no muxers at all: rescan is
+// always refused (409) and health honestly reports an empty list. (An external-but-dialed muxer
+// is NOT this case — it appears in the list with managed:false; see muxsup.Group.)
 type UnmanagedMuxer struct{}
 
 func (UnmanagedMuxer) Rescan(context.Context) (bool, string) {
-	return false, "muxer is external (devices.manage_muxer: false) — quince does not own it"
+	return false, "no muxer is managed by quince (devices.manage_muxer: false, or --demo)"
 }
-func (UnmanagedMuxer) MuxerStatus() (bool, string, string) { return false, "unmanaged", "" }
+func (UnmanagedMuxer) MuxersHealth() []MuxerHealth { return []MuxerHealth{} }
 
 // DeviceReader serves the device REST reads.
 type DeviceReader interface {

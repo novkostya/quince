@@ -34,11 +34,16 @@ type Transports struct {
 	WiFi *string `json:"wifi,omitempty"`
 }
 
-// LastBackup summarizes a device's most recent backup for the dashboard card.
+// LastBackup summarizes a device's most recent SUCCESSFUL backup for the dashboard card
+// (contracts §2, ratified (bz)). It is derived from the newest committed VERSION, not from job
+// history — versions are the source of truth for "has this device been backed up", so the field
+// survives restarts and covers ADOPTED versions (a restored/replicated dataset). Those have no
+// job at all, hence JobID is nullable; fabricating one would be a state-honesty violation.
+// A failed last *attempt* lives in the intent-grouped job history, never here.
 type LastBackup struct {
-	At     string `json:"at"`
-	JobID  string `json:"job_id"`
-	Status string `json:"status"`
+	At     string  `json:"at"`
+	JobID  *string `json:"job_id"` // nil = adopted version (no job record) → JSON null
+	Status string  `json:"status"`
 }
 
 // Job is one backup attempt driven by the state machine (contracts §2, design §4).

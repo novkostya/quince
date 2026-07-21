@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -65,6 +66,75 @@ func TestHealthReturnsOKAndVersion(t *testing.T) {
 	}
 	if got.Status != "ok" || got.Version != "test-1.2.3" {
 		t.Fatalf("body = %+v", got)
+	}
+}
+
+// twoMuxers reports the shipped SIMPLE-profile topology: a managed usbmuxd (rescan applies) and a
+// managed netmuxd (it never does — restarting it would tear a live Wi-Fi backup).
+type twoMuxers struct{}
+
+func (twoMuxers) Rescan(context.Context) (bool, string) { return true, "" }
+func (twoMuxers) MuxersHealth() []MuxerHealth {
+	return []MuxerHealth{
+		{Name: "usbmuxd", Role: "usb", Managed: true, State: "running", Rescan: true},
+		{Name: "netmuxd", Role: "wifi", Managed: true, State: "degraded", Detail: "keeps exiting", Rescan: false},
+	}
+}
+
+// TestHealthReportsEveryMuxer (qn.4c story 5): /api/health carries one entry PER DAEMON, so a
+// degraded netmuxd is visible next to a healthy usbmuxd — and the qn.2b singular `muxer` key is
+// gone (clean break ruled (bz)-3: two overlapping representations rot).
+func TestHealthReportsEveryMuxer(t *testing.T) {
+	deps := testDeps(t)
+	deps.Muxer = twoMuxers{}
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/health")
+	if err != nil {
+		t.Fatalf("GET /api/health: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if strings.Contains(string(body), `"muxer"`) {
+		t.Fatalf("health still carries the singular muxer key: %s", body)
+	}
+
+	var got HealthResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Muxers) != 2 {
+		t.Fatalf("muxers = %+v; want 2 entries", got.Muxers)
+	}
+	if got.Muxers[0].Name != "usbmuxd" || !got.Muxers[0].Rescan {
+		t.Errorf("usb entry = %+v; want usbmuxd with rescan", got.Muxers[0])
+	}
+	if got.Muxers[1].Name != "netmuxd" || got.Muxers[1].State != "degraded" || got.Muxers[1].Rescan {
+		t.Errorf("wifi entry = %+v; want a degraded netmuxd that rescan does not touch", got.Muxers[1])
+	}
+}
+
+// TestHealthWithNoMuxersIsAnEmptyList: --demo owns no muxer; the key is still present as [] so a
+// client never has to distinguish "absent" from "none".
+func TestHealthWithNoMuxersIsAnEmptyList(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(testDeps(t))) // Muxer nil → UnmanagedMuxer
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/health")
+	if err != nil {
+		t.Fatalf("GET /api/health: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), `"muxers":[]`) {
+		t.Fatalf("want an empty muxers array, got: %s", body)
 	}
 }
 

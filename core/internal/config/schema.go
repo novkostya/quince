@@ -49,13 +49,23 @@ type RetentionConfig struct {
 // DevicesConfig is the `devices:` section (muxer supervision + sockets, stack D2). Field
 // order is the canonical YAML key order (contracts §6): manage_muxer first.
 type DevicesConfig struct {
-	// ManageMuxer true (SIMPLE profile) = quince owns the in-container usbmuxd lifecycle
-	// (supervised subprocess, restart w/ backoff; refuses loudly at startup if the socket is
-	// already served — no silent adoption). false (HARDENED/external) = quince only dials.
-	// MINIMAL (qn.2b): applied at process start; live re-supervision on an edit is qn.7.
-	ManageMuxer   bool   `yaml:"manage_muxer" json:"manage_muxer"`
+	// ManageMuxer true (SIMPLE profile) = quince owns the lifecycle of EVERY muxer daemon it is
+	// configured to reach (qn.4c): usbmuxd when UsbmuxdSocket is set, netmuxd when NetmuxdAddr is
+	// set — each a supervised subprocess, restart w/ backoff; each refuses loudly at startup if
+	// its address is already served (no silent adoption). false (HARDENED/external) = quince only
+	// dials both, and reports them as `external` in /api/health. ONE flag governs both daemons on
+	// purpose (D12 config tidiness): the mixed topology still degrades honestly through
+	// refuse-loudly. Applied at process start; live re-supervision on an edit is qn.7.
+	ManageMuxer bool `yaml:"manage_muxer" json:"manage_muxer"`
+	// UsbmuxdSocket is where the USB muxer listens — authoritative: a managed usbmuxd is started
+	// with `-S <this>`, and POST /api/devices/rescan restarts THIS daemon (USB hotplug is what
+	// rescan exists for).
 	UsbmuxdSocket string `yaml:"usbmuxd_socket" json:"usbmuxd_socket"`
-	NetmuxdAddr   string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
+	// NetmuxdAddr is the Wi-Fi muxer's host:port — authoritative: a managed netmuxd is started
+	// with `--host/--port` from it (plus a private --socket-path, since netmuxd would otherwise
+	// delete and rebind the usbmuxd socket, and --disable-usb, since usbmuxd is the USB anchor
+	// until qn.7's audition). Empty = no Wi-Fi muxer at all.
+	NetmuxdAddr string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
 }
 
 // SessionsConfig is the `sessions:` section (vault-unlock TTL — NOT the admin cookie TTL,

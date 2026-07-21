@@ -8,7 +8,7 @@ export interface Transports {
 
 export interface LastBackup {
   at: string;
-  job_id: string;
+  job_id: string | null; // null = derived from an adopted version (no job record) — contracts §2
   status: string;
 }
 

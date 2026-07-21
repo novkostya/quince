@@ -16,7 +16,9 @@ type stubMuxer struct {
 }
 
 func (s stubMuxer) Rescan(context.Context) (bool, string) { return s.accepted, s.reason }
-func (stubMuxer) MuxerStatus() (bool, string, string)     { return true, "running", "" }
+func (stubMuxer) MuxersHealth() []MuxerHealth {
+	return []MuxerHealth{{Name: "usbmuxd", Role: "usb", Managed: true, State: "running", Rescan: true}}
+}
 
 // TestRescanManagedReturns202: with a managed muxer, POST /api/devices/rescan is accepted (202).
 func TestRescanManagedReturns202(t *testing.T) {

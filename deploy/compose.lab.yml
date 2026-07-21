@@ -5,6 +5,14 @@
 # `devices.manage_muxer: false` in config.yml — otherwise quince refuses to start a second,
 # competing daemon (it logs loudly and reports the muxer degraded in /api/health). With
 # manage_muxer: false the UI Rescan button is a no-op (409) — quince doesn't own the host muxer.
+#
+# manage_muxer: false applies to BOTH daemons (qn.4c): netmuxd is then expected to run on the
+# host too (quince only dials devices.netmuxd_addr, and reports it as `external` in
+# /api/health). A host-run netmuxd sidesteps the container-mDNS constraint described in
+# compose.nas.yml — it is already on the LAN. Point devices.netmuxd_addr at it, and remember
+# netmuxd must not be started with the DEFAULT --socket-path: it deletes and rebinds whatever
+# socket that names, which on this host is the live usbmuxd's (verified, qn.4c). Give it
+# `--socket-path /var/run/netmuxd --disable-usb`, the same argv quince uses when it supervises.
 # For the SIMPLE in-container managed-muxer profile instead, see compose.nas.yml.
 # The backup path is bind-mounted; storage-backend probing happens at runtime (D5).
 
