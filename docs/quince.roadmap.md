@@ -132,10 +132,44 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   hardlink mirror/backend tier stays disabled-to-copy (surfaced) until the matrix
   passes.*
 
+### ⚑ Daily-driver target — the Operator's "personally usable" milestone (ruled 2026-07-20, (by))
+
+Before a planned **code freeze + process revamp**, the bar is a quince the Operator
+actually *uses*: **a full backup cycle over BOTH transports, live progress without a page
+refresh, and the major bugs fixed.** That is exactly two things:
+
+- **`qn.4c`** — netmuxd **co-supervision** (pulled forward from qn.7) + the qn.4a
+  usability findings (i)/(iv)/(v). Without supervision nothing starts netmuxd on
+  `compose up`, so Wi-Fi is silently dead after every restart — the same reason qn.2b
+  exists for usbmuxd. Reuses the hardware-proven `internal/muxsup` (generalize its
+  hardcoded `usbmuxd -f -S <socket>` + unix-socket probe to also drive netmuxd over TCP).
+- **one hardware day** — the **inherited qn.4b gate 11** (both transports, UI-driven,
+  live progress watched on a real backup) + netmuxd surviving a container restart + the
+  iMazing glance. Gate 11's Wi-Fi leg runs on the **supervised** netmuxd — the shape
+  actually deployed, not a hand-started one.
+
+**Explicitly deferred past the freeze:** **gate 12c** (the destructive hardlink matrix —
+the Operator's deployment is zfs; the hardlink tier stays disabled-to-copy, surfaced),
+the rest of qn.7's Wi-Fi hardening, and everything from qn.6 on. **Reaching this target
+is the freeze point.**
+
+- `qn.4c` **netmuxd supervision + usability fixes** (inserted 2026-07-20, (by)): generalize
+  `internal/muxsup` to co-supervise netmuxd (config-gated like `devices.manage_muxer`,
+  TCP probe, restart-with-backoff, health surfaced) + fix the qn.4a findings: **(i)**
+  `willEncrypt`→`unknown` mis-map on unencrypted devices AND the cold-lockdown enrichment
+  race that hard-fails a legitimate encrypted backup at preflight; **(v)** the engine never
+  writes `device.last_backup` on commit (only demo does) → "No backups yet" on a device
+  with real versions; **(iv)** the card lingering at "Backing up 100%" through verify+commit
+  (likely subsumed by (v)). *Gate: the inherited qn.4b gate 11 — encrypted backups over
+  BOTH transports driven from the UI end `succeeded` with live progress observed and no
+  page refresh; Wi-Fi runs over SUPERVISED netmuxd which survives a container restart; a
+  device with committed versions shows its real last backup.*
+
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
 patched-timeout libimobiledevice source build in the image (30 s → 15 min, upstream
-#1413), netmuxd supervision + restart policy, **the netmuxd-USB audition on pinned
+#1413), ~~netmuxd supervision~~ (**moved to qn.4c**, (by)) + restart-policy tuning,
+**the netmuxd-USB audition on pinned
 v0.4.3** (re-homed here from qn.2b, decisions log (aw); procedure verbatim in the qn.2b
 spec, gate 8 — verdict flips the D2 default to single-muxer or files the upstream issue),
 chaos suite (replay every torn-session
