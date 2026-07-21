@@ -157,7 +157,16 @@ Device: {
   "paired": "yes" | "no" | "unknown",
   "backup_encryption": "on" | "off" | "unknown",   // lockdown com.apple.mobile.backup/WillEncrypt
   "last_seen": "...",
-  "last_backup": {"at": "...", "job_id": "...", "status": "succeeded"} | null
+  "last_backup": {"at": "...", "job_id": "..." | null, "status": "succeeded"} | null
+     // job_id NULLABLE — ratified at the qn.4c spec review ((bz)). last_backup is derived
+     // from the newest COMMITTED VERSION, not from job history: versions are the source of
+     // truth for "has this device been backed up", so the field survives restarts AND covers
+     // ADOPTED versions (a restored/replicated dataset, or quince reinstalled over existing
+     // backups) — which have no job at all, hence null. A non-null job_id links to the run
+     // that produced it. Semantics follow: this is the last SUCCESSFUL backup (a committed
+     // version implies success); a failed last *attempt* lives in the intent-grouped job
+     // history, never here. Fabricating a job id for an adopted version would be exactly the
+     // state-honesty violation this project forbids.
 }
 
 Job: {
