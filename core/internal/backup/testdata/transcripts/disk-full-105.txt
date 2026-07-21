@@ -1,0 +1,11 @@
+Backup directory is "/cache/backup-targets/JOB0"
+Started "com.apple.mobilebackup2" service on port 50956.
+Negotiated Protocol Version 2.1
+Starting backup...
+Backup will be encrypted.
+Requesting backup from device...
+Full backup mode.
+*** Waiting for passcode to be entered on the device ***
+ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)
+Received 0 files from device.
+Backup Failed (Error Code 105).

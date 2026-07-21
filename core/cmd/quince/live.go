@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
 
 	"github.com/novkostya/quince/core/internal/backup"
 	"github.com/novkostya/quince/core/internal/bus"
@@ -90,7 +89,6 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 		Bus: eventBus, Log: log, Config: ecfg, Backups: bootstrap.Backups, NewID: id.New,
 		Tool: backup.ToolConfig{
 			Bin: "idevicebackup2", UsbmuxdSocket: dcfg.UsbmuxdSocket, NetmuxdAddr: dcfg.NetmuxdAddr,
-			TargetRoot: filepath.Join(bootstrap.Cache, "backup-targets"),
 		},
 	})
 	if err := eng.Reconcile(); err != nil {

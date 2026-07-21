@@ -537,3 +537,134 @@ shape discovers Wi-Fi devices at all, or whether the documented `network_mode: h
 is needed. `deploy/compose.nas.yml` ships that constraint as a first-class header section with the
 honest security tradeoff; `compose.lab.yml` documents the host-run netmuxd equivalent (including
 the `--socket-path` warning). **M3's daily-driver bar closes when gate 11 passes.**
+
+## Lab finding (2026-07-21, gate 11) — the target stub must live on the storage filesystem
+
+**Symptom.** The first real full backup (iPhone, ~40 GB, USB) failed three times in a row within
+30–60 s, zero bytes, `failed` with `idevicebackup2 failed: exit status 151`, phase
+`waiting_for_passcode` — even though the Operator entered the passcode every time. The iPad's Wi-Fi
+**incremental** had just succeeded on the same deployment, so it read as "USB is broken".
+
+**Root cause (proven both directions, on the device, minutes apart).** mobilebackup2 asks the HOST
+how much free space it has; `idevicebackup2` answers with a `statfs` of **the target directory it
+was handed**, and does **not** follow the `<UDID>` symlink into the storage work dir. quince passed
+`$QUINCE_CACHE/backup-targets/<jobID>` — on the staging box a 26 GB filesystem — so the phone was
+told 26 GB, needed ~40 GB, and refused:
+
+```
+*** Waiting for passcode to be entered on the device ***
+ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)
+Backup Failed (Error Code 105).      →  exit 151
+```
+
+A raw run with the target on the **storage** filesystem (546 GB), same device, same minute, sailed
+past the check into `Receiving files`. The iPad only passed because an incremental's delta fits in
+26 GB. Exit **151 == MBErrorDomain 105** — which no upstream doc states, hence the opaque message.
+
+**Severity: gate-blocking, in landed qn.4a code.** Any device whose backup exceeds the cache
+filesystem's free space can never be backed up — i.e. every real iPhone. Fixed here as a
+**lab-finding commit** (the precedent the Operator set for the 409 race), fixture first per the
+hard rule.
+
+**Fix.** The stub is derived from the work dir: `<dir of workDir>/.quince-targets/<jobID>/<UDID> →
+workDir`. That is quince-writable on every backend (the *parent* dataset root is root-owned under
+the zfs hook profile — which is why the engine's old `<backups>/.quince-backup-targets` default
+would also have failed) and always on the storage filesystem. `ToolConfig.TargetRoot` is removed:
+a knob whose wrong setting silently breaks large backups should not exist. On zfs the stub sits
+inside the snapshotted dataset harmlessly — per-job cleanup runs when the child exits, before the
+commit snapshot is cut.
+
+**Second fix, same finding.** A failed job now reports the tool's **own last error line** instead
+of the exit status: `backup failed: Insufficient free disk space on drive to back up
+(MBErrorDomain/105)`. The parser captures `ErrorCode N: …` / `ERROR: …`; the bare exit code is what
+made three identical failures indistinguishable. (This retires the "opaque terminal message" item
+from the session backlog.)
+
+**Fixtures (written before the fix).** `testdata/transcripts/disk-full-105.{txt,meta.json}` — the
+scrubbed real capture — plus `TestPrepareTargetLivesBesideTheWorkDir` (asserts the stub is under
+the device's storage area and is still the `<UDID>`-symlink shape) and
+`TestFailedBackupReportsTheDeviceReason` (replays the transcript, asserts the device's words reach
+the job error and the exit status does not).
+
+**Still open from the same session (backlog, not blocking):** crash-orphaned stub dirs are not
+swept by reconciliation; the passcode narration is unreachable in practice (quince learns the
+phase in the same breath as the failure); two `latest` badges until reload (client-side staleness,
+server verified correct).
+
+## Gate 11 — running results (Operator hardware day, 2026-07-21/22)
+
+Recorded as each leg lands. Legs are ticked only on what was actually observed.
+
+- **(b) Wi-Fi from the browser, on SUPERVISED netmuxd — PASSED.** `compose up` alone brought both
+  muxers up (`/api/health` → both `managed:true,state:"running"`); the pre-flight confirmed the only
+  netmuxd on the box was the container's supervised child carrying the ruled argv, so this proves
+  the shape actually deployed. An encrypted **incremental** committed a structure-verified version.
+  A device's **first-ever full backup — 33.3 GB — then COMMITTED over the same path**, at a measured
+  **16–24 MiB/s** (pool-side sampling; the rate rises as the device moves from many small files to
+  large media). Wi-Fi turned out FASTER than the Operator's USB path — that path was VirtualHere
+  USB-over-IP across the same Wi-Fi, so it paid encapsulation overhead netmuxd does not.
+  **The commit tail is fast:** `receiving 100%` at 22:14:52 → `committing` 22:15:04 → `succeeded`
+  22:15:28 — **36 s to verify and commit 33 GB**, because A1's encrypted verification is structural
+  (Manifest shape + sampled shards, never opening the DB) and the commit is a snapshot plus a
+  block-clone mirror, neither of which scales with the tree. Evidence on the pool: version row
+  `is_latest=1, encrypted=1, structure_verified ✓, 33.34 GB logical`; snapshot
+  `@quince-<versionID>-2026-07-21` at `refer 33.8G`; `bclonesaved` **46.5 GiB** — the `latest/`
+  mirror is genuinely reflinked, not copied. This is the largest tree the engine has ever driven.
+- **(c) Survives a restart — PASSED (as a side effect of the redeploy).** `compose pull && down &&
+  up -d` for the lab-finding image: both daemons came back supervised with no manual step, the
+  device reappeared on `wifi` unaided, and a backup ran immediately after.
+- **(e) Real last-backup line on a device with pre-existing versions — PASSED.** The iPad card read
+  "Last backup yesterday · succeeded" straight after deploy, before any new backup — finding (v) on
+  real committed versions, including ones this deployment did not create.
+- **(g) Secrets on hardware — PASSED.** Captured live during the Wi-Fi backup: child argv
+  `idevicebackup2 -n -u <UDID> backup <target>`, `BACKUP_PASSWORD` env count **0**, env limited to
+  the bootstrap vars + `USBMUXD_SOCKET_ADDRESS`. Re-affirms qn.4a fact 5 on the network path.
+- **(h) iMazing-opens — PASSED.** This also retires the last unverified leg of qn.4a's gate 15
+  ((bw)). The per-device dataset was shared over SMB and the committed **`latest/` tree** — i.e. the
+  reflink-built mirror, not the working copy — opened directly in iMazing on Windows: device info,
+  OS/model, `Current Backup Encrypted: Yes`, snapshot count and size, plus decrypted enumeration of
+  the photo library. A commercial third-party tool reading our committed tree natively is the
+  strongest available evidence that a quince version is a genuine iOS backup rather than a
+  directory that satisfies only our own verifier — and it proves the mirror ladder's whole-tree
+  promise (the thing offsite rclone sync depends on).
+- **Live progress with no page refresh — PARTIALLY OBSERVED.** The live job log streams correctly
+  and the card/details panes update from the WS with no reload. The *percentage* moves in jumps
+  because it is driven only by sparse "NN% Finished" lines, and the byte pair beside it is the
+  CURRENT FILE (stale, at that — see the log-blob finding). Filed as backlog, not ticked as clean.
+- **(a) USB from the browser — PASSED.** A cabled **incremental** committed
+  (`22:20:13 → 22:27:54`). Four things proven in one argv:
+  `idevicebackup2 -u <UDID> backup /backups/<UDID>/.quince-targets/<jobID>` with
+  `USBMUXD_SOCKET_ADDRESS=UNIX:/var/run/usbmuxd` and **no `-n`** — i.e. `transport: auto`
+  **resolved to USB because the cable was plugged** (qn.4b's policy, first time on hardware), the
+  real USB code path, the supervised usbmuxd's socket, and the lab-finding target fix in the
+  shipped shape. Version rotation correct (new version `is_latest=1`, previous demoted to 0,
+  exactly one latest per device), snapshot cut, and `bclonesaved` **46.5 → 80.1 GiB** — the second
+  consecutive commit whose `latest/` mirror was reflinked rather than copied.
+- **CANCEL (not a numbered leg, but the assisted model's other half) — PASSED.** Cancelling a
+  running Wi-Fi backup landed `cancelled`/`cancelled`, the child was reaped, the stub cleaned, work
+  discarded with an honest note naming the fallback (`working copy dirty, last good version =
+  22:15:00Z`), **no phantom version**, both muxers still running, and the single-flight slot was
+  free again (a new job started 1m44s later). The 409-window race the architect ruled to qn.7 did
+  not bite: on zfs `Discard` leaves the dirty working copy in place, so the window is near-nil.
+- **(d) Mid-backup Wi-Fi disconnect — LANDED SAFELY, MISLABELLED (finding).** The iPad was taken
+  off the LAN mid-transfer. Everything protective held: work discarded, `latest/` untouched, still
+  exactly 6 versions with one `is_latest`, no phantom. But the job landed
+  **`failed`/`backup_failed`**, not the `connection_lost`/`device_disconnected` this leg specifies,
+  because the drop produced an immediate receive error rather than a stall:
+  `backup failed: Could not receive from mobilebackup2 (-256)`, `liveness: active` throughout,
+  terminal in ~2.5 min — the 15-minute sampler never participated. **Interface fact 2 is
+  INCOMPLETE, not wrong:** a Wi-Fi loss has two shapes — the lab's frozen transfer
+  (`Heartbeat(SleepyTime)`, caught by the sampler, correctly `connection_lost`) and this clean
+  receive error. quince handles the first and mislabels the second. Filed with a fixture-first fix
+  direction; the leg is NOT ticked. *(Silver lining: that message is tonight's parser fix working
+  in the wild — with the old code it would have read "exit status N" and been unclassifiable.)*
+- **(f) Encryption honesty — HALF, and the other half is DECLARED UNRUNNABLE on this hardware.**
+  `encryption: on` reads correctly and preflight no longer hard-fails a cold-lockdown device.
+  The (i)-A path — a device that has **never had a backup password**, so lockdown has no
+  `WillEncrypt` key and `ideviceinfo` exits 0 printing nothing — cannot be reproduced here: both
+  lab devices have had backup passwords, so disabling encryption yields `WillEncrypt: false`, a
+  **present** key, which is the branch that already worked before the fix. Running it would change
+  the Operator's real device state and produce a permanently-incomplete unencrypted version while
+  testing nothing. **Declared as CI-covered only** (story 7 + the `enc_never_set` fixture);
+  accepted debt with a stated reason, per the program's declared-untested rule. It needs a
+  factory-fresh device, which is a qn.6 onboarding-gate concern anyway ("fresh user pairs via UI").

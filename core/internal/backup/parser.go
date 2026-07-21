@@ -14,6 +14,7 @@ type parsed struct {
 	phaseReceiving  bool     // "Receiving files" / "Sending files"
 	waitingPasscode bool     // "*** Waiting for passcode ... ***"
 	success         bool     // "Backup Successful."
+	failReason      string   // the tool's OWN words for a failure (see reErrorCode)
 	overallPercent  *float64 // from "NN% Finished" (the only trustworthy OVERALL percent)
 	bytesDone       int64    // best-effort current-transfer bytes from "(X/Y)"
 	bytesTotal      int64
@@ -26,6 +27,11 @@ var (
 	reFinished = regexp.MustCompile(`(\d+)%\s+Finished`)
 	// "[..]  2% (23.2 MB/938.6 MB)" — a size pair; best-effort current-transfer bytes.
 	reBytes = regexp.MustCompile(`\(([\d.]+)\s*([KMGT]?B)/([\d.]+)\s*([KMGT]?B)\)`)
+	// "ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)" —
+	// the DEVICE's own explanation of a refusal. Captured verbatim so a failed job can say what
+	// went wrong instead of "exit status 151" (qn.4c lab finding: 151 == MBErrorDomain 105, and
+	// the bare exit code told the Operator nothing). Also matches a plain "ERROR: <text>" line.
+	reErrorCode = regexp.MustCompile(`^(?:ErrorCode \d+: |ERROR: )(.+)$`)
 )
 
 // parseLine classifies one line of idevicebackup2 output.
@@ -50,6 +56,9 @@ func parseLine(line string) parsed {
 		p.bytesDone = parseSize(m[1], m[2])
 		p.bytesTotal = parseSize(m[3], m[4])
 		p.hasBytes = true
+	}
+	if m := reErrorCode.FindStringSubmatch(l); m != nil {
+		p.failReason = strings.TrimSpace(m[1])
 	}
 	return p
 }

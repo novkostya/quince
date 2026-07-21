@@ -527,7 +527,16 @@ Every hard rule / canon boundary this rung touches *or comes near*, one complian
   straight into the work dir — no tree copy, no committed-state mutation, no qn.5 change. Rung-local
   (engine-side, no contract/layout change). The symlink-follow behavior is exercised end-to-end by
   the fake in CI; the real `idevicebackup2`'s acceptance of the symlinked target is a **lab-gate-15
-  verify-live** item.
+  verify-live** item — **CONFIRMED on hardware** (2.8 GB landed through it, (bs)).
+  **AMENDED by qn.4c's gate-11 lab finding (2026-07-21):** the scratch dir must live on the **same
+  filesystem as the work dir**, not under `$QUINCE_CACHE`. mobilebackup2 asks the host for its free
+  space and `idevicebackup2` answers with a `statfs` of **the target directory it was handed** — it
+  does NOT follow the `<UDID>` symlink. With the stub on a small cache filesystem, the DEVICE
+  refuses the backup (`ErrorCode 105: Insufficient free disk space`, exit 151, zero bytes), so no
+  device whose backup exceeds the cache filesystem could ever be backed up. The stub is now derived
+  as `<dir of workDir>/.quince-targets/<jobID>` — quince-writable on every backend and always on the
+  storage filesystem — and `ToolConfig.TargetRoot` is gone. Proven both ways on real hardware:
+  refused at 26 GB, transferring at 546 GB.
 - **Interface fact 2 — a Wi-Fi torn session is a STALL, not an error line (RESOLVED from the lab
   transcripts).** The lab's Wi-Fi drop (`Heartbeat(SleepyTime)`) **freezes** `idevicebackup2`'s
   output with no error — the process hangs on the dead transport. So `connection_lost` is produced

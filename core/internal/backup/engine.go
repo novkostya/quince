@@ -48,15 +48,17 @@ type Options struct {
 	FreeSpace func(string) (uint64, error) // nil → statfsFree
 }
 
-// ToolConfig configures the idevicebackup2 supervisor. In production only Bin/sockets/TargetRoot
-// are set; ArgPrefix + Env are the test-only fake-CLI harness (Bin = the test binary).
+// ToolConfig configures the idevicebackup2 supervisor. In production only Bin + the muxer
+// addresses are set; ArgPrefix + Env are the test-only fake-CLI harness (Bin = the test binary).
+// There is deliberately NO target-root knob: the per-job symlink stub is derived from the storage
+// work dir, because a stub on a different filesystem makes idevicebackup2 report the wrong free
+// space and the device refuses the backup (qn.4c lab finding — see prepareTarget).
 type ToolConfig struct {
 	Bin           string   // "" → "idevicebackup2"
 	ArgPrefix     []string // test-only leading args (-test.run=… "--")
 	Env           []string // test-only extra child env (the fake harness knobs)
 	UsbmuxdSocket string
 	NetmuxdAddr   string
-	TargetRoot    string // "" → <Backups>/.quince-backup-targets
 }
 
 // Engine runs backups. One goroutine per job; a global per-UDID single-flight (never two jobs for
@@ -108,17 +110,13 @@ func New(o Options) *Engine {
 	if o.Tool.Bin == "" {
 		o.Tool.Bin = "idevicebackup2"
 	}
-	targetRoot := o.Tool.TargetRoot
-	if targetRoot == "" {
-		targetRoot = o.Backups + "/.quince-backup-targets"
-	}
 	return &Engine{
 		baseCtx: o.BaseCtx, st: o.Store, storage: o.Storage, versionQ: o.VersionQ,
 		devices: o.Devices, prober: o.Prober, announcer: o.Announcer,
 		bus: o.Bus, log: o.Log, cfg: o.Config, backups: o.Backups,
 		newID: o.NewID, now: o.Now, freeSpace: o.FreeSpace,
 		tool: &tool{bin: o.Tool.Bin, argPrefix: o.Tool.ArgPrefix, env: o.Tool.Env,
-			usbmuxd: o.Tool.UsbmuxdSocket, netmuxd: o.Tool.NetmuxdAddr, targetRoot: targetRoot},
+			usbmuxd: o.Tool.UsbmuxdSocket, netmuxd: o.Tool.NetmuxdAddr},
 		running: map[string]*liveJob{}, logs: newLogStore(),
 	}
 }
@@ -322,7 +320,7 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 		e.terminate(lj, StateConnectionLost, ErrInterrupted, "interrupted by shutdown")
 		e.discard(lj)
 	case outcomeProcErr:
-		e.terminate(lj, StateFailed, ErrBackupFailed, "idevicebackup2 failed: "+res.detail)
+		e.terminate(lj, StateFailed, ErrBackupFailed, "backup failed: "+res.detail)
 		e.discard(lj)
 	case outcomeProcOK:
 		if !res.backupSuccessful {
@@ -457,6 +455,7 @@ type superviseState struct {
 	paused      bool
 	outputSince bool
 	success     bool
+	failReason  string // the tool's own last error line, for an honest failure message
 }
 
 func (e *Engine) supervise(parent context.Context, lj *liveJob, workDir string) superviseResult {
@@ -543,7 +542,7 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, workDir string) 
 	reason := lj.killReason
 	lj.mu.Unlock()
 	ss.mu.Lock()
-	success := ss.success
+	success, failReason := ss.success, ss.failReason
 	ss.mu.Unlock()
 
 	switch {
@@ -554,7 +553,14 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, workDir string) 
 	case parent.Err() != nil:
 		return superviseResult{kind: outcomeShutdown, backupSuccessful: success}
 	case waitErr != nil:
-		return superviseResult{kind: outcomeProcErr, detail: waitErr.Error(), backupSuccessful: success}
+		// Prefer the tool's OWN last error line over the exit status: a user can act on
+		// "Insufficient free disk space on drive to back up", never on "exit status 151"
+		// (qn.4c lab finding — the Operator got the latter three times in a row).
+		detail := waitErr.Error()
+		if failReason != "" {
+			detail = failReason
+		}
+		return superviseResult{kind: outcomeProcErr, detail: detail, backupSuccessful: success}
 	default:
 		return superviseResult{kind: outcomeProcOK, backupSuccessful: success}
 	}
@@ -575,6 +581,9 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 	}
 	if p.phaseReceiving {
 		ss.paused = false
+	}
+	if p.failReason != "" {
+		ss.failReason = p.failReason // keep the LAST one: it is the proximate cause
 	}
 	ss.mu.Unlock()
 

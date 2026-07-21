@@ -73,8 +73,7 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 		Log: log, Config: testCfg(), Backups: backups, NewID: id.New,
 		Now:       func() time.Time { return time.Now().UTC() },
 		FreeSpace: func(string) (uint64, error) { return 100 << 30, nil },
-		Tool: ToolConfig{Bin: os.Args[0], ArgPrefix: fakeArgPrefix(), Env: fakeToolEnv(p),
-			TargetRoot: filepath.Join(dir, "targets")},
+		Tool:      ToolConfig{Bin: os.Args[0], ArgPrefix: fakeArgPrefix(), Env: fakeToolEnv(p)},
 	}
 	for _, m := range mods {
 		m(&o, dev)
@@ -780,5 +779,75 @@ func TestStartBackupTransportGuards(t *testing.T) {
 	}
 	if _, s, _ := h.eng.StartBackup(testUDID, "", ""); s != 422 {
 		t.Fatalf("empty transport = %d, want 422", s)
+	}
+}
+
+// --- qn.4c lab finding (gate 11): the target stub must live on the STORAGE filesystem -----------
+
+// TestPrepareTargetLivesBesideTheWorkDir is the regression guard for the bug that blocked the
+// first real full backup. mobilebackup2 asks the host how much free space it has, and
+// idevicebackup2 answers with a statfs of the target directory it was handed — it does NOT follow
+// the <UDID> symlink. So a stub on a small scratch filesystem makes the DEVICE refuse the backup
+// ("ErrorCode 105: Insufficient free disk space", exit 151, zero bytes). Proven on hardware: the
+// same device refused with the stub on a 26 GB cache filesystem and started transferring with it
+// on the 546 GB storage filesystem. The stub therefore must be derived from the work dir.
+func TestPrepareTargetLivesBesideTheWorkDir(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "backups", "SYNTHETIC-UDID-AAAA-0001", "working")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := &tool{bin: "unused"}
+
+	target, cleanup, err := tl.prepareTarget("JOB0", "SYNTHETIC-UDID-AAAA-0001", workDir)
+	if err != nil {
+		t.Fatalf("prepareTarget: %v", err)
+	}
+	defer cleanup()
+
+	// The stub must sit under the work dir's own parent — the same filesystem the tree lands on.
+	deviceArea := filepath.Dir(workDir)
+	if !strings.HasPrefix(target, deviceArea+string(filepath.Separator)) {
+		t.Fatalf("target %q is not under the device's storage area %q — a statfs of it would report\n"+
+			"the wrong filesystem's free space and the device would refuse the backup", target, deviceArea)
+	}
+
+	// And it must still be the <UDID>-symlink shape idevicebackup2 requires (interface fact 1).
+	link, err := os.Readlink(filepath.Join(target, "SYNTHETIC-UDID-AAAA-0001"))
+	if err != nil {
+		t.Fatalf("stub is not a symlink named after the UDID: %v", err)
+	}
+	if link != workDir {
+		t.Fatalf("symlink → %q, want the work dir %q", link, workDir)
+	}
+
+	cleanup()
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatal("cleanup left the stub behind (it would be captured by the commit snapshot)")
+	}
+}
+
+// TestFailedBackupReportsTheDeviceReason replays the lab transcript of that refusal and asserts
+// the job carries the device's OWN words. Before this, a user saw "exit status 151" — true,
+// useless, and (as the Operator found) indistinguishable from any other failure.
+func TestFailedBackupReportsTheDeviceReason(t *testing.T) {
+	m := loadMeta(t, "disk-full-105")
+	h := newHarness(t, m.params(t), m.Transport)
+
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 10*time.Second)
+	if final.State != StateFailed || final.Error == nil {
+		t.Fatalf("state=%s error=%v; want failed with an error", final.State, final.Error)
+	}
+	if final.Error.Code != ErrBackupFailed {
+		t.Fatalf("code = %q, want %q", final.Error.Code, ErrBackupFailed)
+	}
+	if !strings.Contains(final.Error.Message, "Insufficient free disk space") {
+		t.Fatalf("message = %q; want the device's own reason, not an exit code", final.Error.Message)
+	}
+	if strings.Contains(final.Error.Message, "exit status") {
+		t.Fatalf("message = %q; the bare exit status is what made this failure unreadable", final.Error.Message)
+	}
+	if len(h.mgr.Versions(testUDID)) != 0 {
+		t.Fatal("a refused backup must leave no version")
 	}
 }

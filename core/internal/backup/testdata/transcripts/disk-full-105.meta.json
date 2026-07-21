@@ -1,0 +1,15 @@
+{
+  "name": "disk-full-105",
+  "transport": "usb",
+  "terminal_state": "failed",
+  "exit_code": 151,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "none",
+  "line_delay_ms": 1,
+  "stall_after_line": 0,
+  "stall_ms": 0,
+  "stall_churns_tree": false,
+  "hang_after_last": false,
+  "note": "LAB CAPTURE 2026-07-21 (qn.4c gate 11, real iPhone, ~40 GB full backup). The device REFUSES the backup for lack of host disk space: mobilebackup2 asks the host how much room it has, idevicebackup2 answers with a statfs of the target directory it was handed — WITHOUT following the <UDID> symlink into the storage work dir — so quince's cache-resident target stub reported the cache filesystem's 26 GB instead of the storage filesystem's 546 GB. Note the ordering: the passcode prompt comes FIRST, the space refusal immediately after, which is why the job died in the waiting_for_passcode phase with an opaque 'exit status 151' (151 == MBErrorDomain 105). Fixed in qn.4c by placing the target stub beside the work dir; this transcript is the regression guard for the failure being reported in the device's own words rather than as an exit code."
+}
