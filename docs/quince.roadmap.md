@@ -132,6 +132,56 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   hardlink mirror/backend tier stays disabled-to-copy (surfaced) until the matrix
   passes.*
 
+### ⚑ `qn.5b` — atomic `latest` + the `working/` lifecycle redesign (inserted 2026-07-22, (cg))
+
+**Storage correctness against a stated requirement, not polish** — and the reason it runs
+**before the B2 cron is trusted**. The Operator's three constraints are: a `zfs snapshot` at
+*any* instant captures a solid `latest/`; the directory `idevicebackup2` writes into is
+excluded from rclone; and changes to `latest/` are **atomic**. Constraint 3 is violated today
+(stack D5 `PROPOSED (gap)`): both swap paths do `mv latest → latest.old; mv latest.new →
+latest`, so `latest/` briefly **does not exist** — an rclone sync crossing it deletes the
+remote copy.
+
+- **Atomic `latest`.** Replace both two-rename swaps with **exchange-rename**
+  (`renameat2(RENAME_EXCHANGE)`), which never leaves the name unoccupied. **Verify
+  `RENAME_EXCHANGE` on ZFS live first** (interface fact — a VFS flag the filesystem must
+  implement); the symlink workaround stays forbidden (D5a). Privilege split: the hook keeps
+  the FICLONE reflink into `latest.new`; **quince does the exchange in-container** (rename
+  needs no privilege).
+- **Per-job `working/` (Operator-proposed, architect-agreed).** Stop keeping `working/`
+  permanently. Seed it as a **reflink clone of `latest/` at job start** (near-free, proven at
+  gate 11: `bclonesaved` +33.6 GiB) — MobileBackup2 increments from a clone exactly as it does
+  from a persistent dir; the old "Seed is a no-op" elegance predates knowing cloning was cheap.
+  Between backups the dataset then holds **only `latest/`**, so every snapshot contains exactly
+  one complete backup *structurally*, and the rclone exclusion covers a directory that usually
+  doesn't exist. **Preserve resume: on FAILURE keep the dirty `working/`** so a retry resumes
+  into it (a 33 GB Wi-Fi backup dying at 90% must not restart); on success it *becomes*
+  `latest/`.
+- **Reorder commit:** verify → atomic exchange → **then** snapshot, so the snapshot holds
+  `latest/` = the version and `browse_root` points at the real latest backup rather than a
+  directory named `working`.
+- **Drop the symlink dance.** The `<target>/<UDID>` stub exists only because
+  `idevicebackup2` insists on writing to `<target>/<UDID>/` — and it caused the gate-blocking
+  free-space bug (28b97de) by putting the stub on the wrong filesystem. Choose the staging path
+  so the tool's own convention lands where we want, then exchange that directory into `latest/`.
+  No symlink, and the bug class is structurally impossible.
+- **Post-failure UX (Operator-raised; the shape is the implementer's call, reviewed at the
+  contract proposal).** With a dirty `working/` kept, the honest actions are **Retry** (resume
+  into it) and **Reset** (discard it; the next backup re-clones from `latest/`, losing only the
+  partial). A third, **Retry clean**, is Reset + Backup-now and may just confuse — **the
+  implementer decides 2 vs 3 and lands it as a contract proposal for review.** Note `Reset` is
+  already the landed `RepairWorkingCopy` backend op (qn.5), exposed CLI-only by qn.4b — a UI
+  surface means a REST addition, hence the contract review.
+- **Model unification.** The namespace backends already seed-from-`latest` and rotate; with
+  this, zfs does the same, differing only in that a version is a snapshot rather than a
+  directory. D5's "two version models" collapses toward one.
+
+*Gate: `RENAME_EXCHANGE` verified on the real pool; a snapshot taken at **any** point of a
+running backup contains a complete `latest/` and never a partial one; a continuous `rclone
+sync` loop running across many commits never deletes or tears the remote copy; a failed backup
+leaves a resumable `working/` and a retry completes without re-transferring; between backups
+the dataset holds only `latest/`.*
+
 ### ⚑ Daily-driver target — the Operator's "personally usable" milestone (ruled 2026-07-20, (by))
 
 Before a planned **code freeze + process revamp**, the bar is a quince the Operator

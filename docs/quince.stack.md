@@ -333,11 +333,31 @@ mounted filesystems and uploads whatever is there. The rule:
   history stays local, remote history comes from B2 bucket versioning or
   `--backup-dir`. The operator's flow is literally
   `zfs snapshot -r … && rclone sync /rpool/userdata b2:…` — the snapshot for local
-  restore points, `latest/` guaranteeing the upload is never torn. The only nonatomic
-  instant is the `latest` swap itself (two renames; an exchange-rename where the
-  kernel/ZFS supports it): a walk crossing it could briefly mix two *individually
-  valid* versions — self-healed by the next run, revertible remotely via B2 versioning,
-  and documented. Push-style alternative: the post-commit hook (parked) runs rclone
+  restore points, `latest/` guaranteeing the upload is never torn.
+
+  > **`PROPOSED (gap)` — the `latest` swap is NOT atomic, and this passage understated
+  > it (Operator-found 2026-07-22; scoped to `qn.5b`).** This text called the swap "the
+  > only nonatomic instant… could briefly mix two *individually valid* versions." That
+  > is **too mild**. Both implementations do `mv latest → latest.old; mv latest.new →
+  > latest` — the in-container Go path (`storage/zfs.go`) and the host-side hook's
+  > `mirror` verb (`deploy/storage.md`) — each commented "atomic swap," neither atomic.
+  > Between the two renames **`latest/` does not exist at all**. The real failure modes
+  > are therefore: (1) `rclone sync` crossing the window sees `latest/` missing and
+  > **DELETES the remote copy at B2** (sync mirrors deletions — not a "mix," a wipe
+  > followed by a full re-upload); (2) a `zfs snapshot` landing there captures a version
+  > with **no `latest/`**. B2 versioning makes it recoverable, not harmless. The window
+  > is two renames wide, but the Operator's requirement is explicitly "safe at ANY
+  > instant," and a cron running for months will eventually land in it. The fix this
+  > passage already gestures at — **exchange-rename** (`renameat2(RENAME_EXCHANGE)`,
+  > which never leaves the name unoccupied) — was never implemented. Note the privilege
+  > split favours us: only FICLONE needs the host, so the hook keeps doing the reflink
+  > into `latest.new` while **quince does the exchange in-container** (rename needs no
+  > privilege). `RENAME_EXCHANGE` support on ZFS is an **interface fact to verify live**,
+  > not assume; the symlink workaround stays forbidden (D5a: `latest/` is a real
+  > directory). Full scope + the `working/`-lifecycle redesign it belongs with: qn.5b,
+  > decisions log (cg).
+
+  Push-style alternative: the post-commit hook (parked) runs rclone
   right after each verified commit.
 - `reflink`/`hardlink`/`copy`: `latest/` is a real immutable-between-commits directory —
   same include rule, same anchored filter block (minus `working/`).
