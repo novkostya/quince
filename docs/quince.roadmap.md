@@ -191,10 +191,19 @@ backup there, (3) `zfs send workdir@ready | zfs receive -F …/latest` to publis
 - **Step 3 is fatal — it makes the very problem qn.5b fixes far worse.** A plain send/receive
   is a **full copy** (33 GB rewritten, no block sharing — discarding the reflink win), and
   incrementality would demand fragile send-lineage bookkeeping between two datasets forever.
-  Worse, during a `receive -F` the destination is rolled back and applied progressively, and is
-  typically unmounted for the operation — so the **microsecond** window where `latest/` is
-  missing becomes a **minutes-long** one. An rclone cron wouldn't "eventually" lose that race;
-  it would reliably hit it.
+  **Precisely what `receive -F` does** (corrected 2026-07-22 — an earlier draft here said
+  "applied progressively," which is wrong and would leave an implementer with a bad model):
+  it **rolls the destination back** to the most recent common snapshot, then streams into a
+  hidden `%recv` temporary, and the new state appears **atomically at the end**. So nothing is
+  ever half-written — and **a ZFS snapshot is never corrupt**; it is atomic and internally
+  consistent by construction. The failure is different and still disqualifying: (a) for the
+  duration, `latest` holds an **older** backup (the rollback target), and (b) rollback/receive
+  into a *mounted* dataset requires an **unmount/remount**, which leaves the mountpoint
+  **present and EMPTY** — the worst shape for `rclone sync`, which reads it as "source has no
+  files" and **deletes the remote copy**. Exposure becomes **minutes** (a 33 GB receive) rather
+  than microseconds. *(The exact mount behaviour of `recv -F` into a mounted dataset is
+  reasoned, not measured — verifiable in minutes if this is ever revisited; it is not blocking,
+  since the copy cost alone disqualifies the approach.)*
 - **The principle (why no dataset-level operation can work here):** the requirement is that a
   *filesystem path stays continuously valid for a walker*. Every dataset-level operation —
   send, receive, rename, promote — involves a **mount transition**, so none can satisfy it.
@@ -204,11 +213,16 @@ backup there, (3) `zfs send workdir@ready | zfs receive -F …/latest` to publis
   remote PVE host, proven at gate 11). It moves datasets *between pools*; it cannot swap a
   locally-visible directory without taking that directory offline. Right tool, wrong job.
 
-*Gate: `RENAME_EXCHANGE` verified on the real pool; a snapshot taken at **any** point of a
-running backup contains a complete `latest/` and never a partial one; a continuous `rclone
-sync` loop running across many commits never deletes or tears the remote copy; a failed backup
-leaves a resumable `working/` and a retry completes without re-transferring; between backups
-the dataset holds only `latest/`.*
+*Gate — note the requirement bundles **two observers that fail independently**, so they are
+asserted separately (Operator-sharpened 2026-07-22): **(1) the snapshot observer** — a `zfs
+snapshot` taken at **any** point of a running backup and of a commit contains a **complete
+`latest/`** (today it can contain **none at all**: a snapshot landing in the two-rename window
+is perfectly consistent and perfectly useless as a restore point); **(2) the filesystem-walk
+observer** — a continuous `rclone sync` loop running across many commits **never deletes and
+never tears** the remote copy (today the same window shows a missing `latest/` and sync mirrors
+the deletion). Plus: `RENAME_EXCHANGE` verified on the real pool before any code; a failed
+backup leaves a resumable `working/` and a retry completes without re-transferring; between
+backups the dataset holds only `latest/`.*
 
 ### ⚑ Daily-driver target — the Operator's "personally usable" milestone (ruled 2026-07-20, (by))
 
