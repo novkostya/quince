@@ -176,6 +176,34 @@ remote copy.
   this, zfs does the same, differing only in that a version is a snapshot rather than a
   directory. D5's "two version models" collapses toward one.
 
+**Alternative considered and REJECTED — the all-ZFS-primitives design** (proposed 2026-07-22;
+recorded because it is a reasonable idea an implementer may independently have, and the
+reasoning generalizes): *(1) `zfs clone` the working area into its own dataset, (2) run the
+backup there, (3) `zfs send workdir@ready | zfs receive -F …/latest` to publish it.*
+
+- **Step 1 is genuinely clever** and deserves credit: a clone is instant, zero-space,
+  ZFS-native, and would sidestep the whole FICLONE-`EPERM`-in-unprivileged-userns saga, since
+  cloning is a `zfs` command through the hook rather than a filesystem syscall. It still loses:
+  we already have a cheap seed (host-side reflink, *measured* at gate 11); making `working` a
+  **dataset** instead of a **directory** is exactly what forces step 3's problem; and a clone
+  **pins its origin snapshot** (undestroyable until the clone is gone or promoted), entangling
+  retention with the backup lifecycle for no gain.
+- **Step 3 is fatal — it makes the very problem qn.5b fixes far worse.** A plain send/receive
+  is a **full copy** (33 GB rewritten, no block sharing — discarding the reflink win), and
+  incrementality would demand fragile send-lineage bookkeeping between two datasets forever.
+  Worse, during a `receive -F` the destination is rolled back and applied progressively, and is
+  typically unmounted for the operation — so the **microsecond** window where `latest/` is
+  missing becomes a **minutes-long** one. An rclone cron wouldn't "eventually" lose that race;
+  it would reliably hit it.
+- **The principle (why no dataset-level operation can work here):** the requirement is that a
+  *filesystem path stays continuously valid for a walker*. Every dataset-level operation —
+  send, receive, rename, promote — involves a **mount transition**, so none can satisfy it.
+  Directory-level `renameat2(RENAME_EXCHANGE)` keeps the mount stable and flips the entry in one
+  syscall with no observable gap. Right tool for the actual constraint.
+- **Where send/receive IS right: replication.** It is already the offsite path (`syncoid` to the
+  remote PVE host, proven at gate 11). It moves datasets *between pools*; it cannot swap a
+  locally-visible directory without taking that directory offline. Right tool, wrong job.
+
 *Gate: `RENAME_EXCHANGE` verified on the real pool; a snapshot taken at **any** point of a
 running backup contains a complete `latest/` and never a partial one; a continuous `rclone
 sync` loop running across many commits never deletes or tears the remote copy; a failed backup

@@ -1381,3 +1381,18 @@ on real traction).
   exchange in-container. Commit reorders to verify → exchange → snapshot, making the version
   `latest/` and `browse_root` point at the real latest backup. Bonus: D5's **two version models
   collapse toward one** (namespace backends already seed-from-latest and rotate).
+  **Alternative considered + REJECTED (same day, recorded in the qn.5b roadmap entry so the
+  implementer doesn't re-explore it):** an all-ZFS-primitives design — `zfs clone` the working
+  area into its own dataset, back it up there, then `zfs send workdir@ready | zfs receive -F
+  …/latest`. The clone half is genuinely clever (instant, zero-space, and it would sidestep the
+  FICLONE-`EPERM` problem entirely, being a `zfs` command rather than a syscall) but loses on
+  three counts: the seed is already cheap and measured, a clone **pins its origin snapshot**
+  (retention entanglement), and making `working` a *dataset* is exactly what forces the fatal
+  half. The `send | receive -F` publish step is a **full 33 GB copy** (no block sharing) and,
+  because the destination is rolled back and applied progressively (typically unmounted for the
+  operation), it turns a **microsecond** missing-`latest/` window into a **minutes-long** one —
+  strictly worse than the bug being fixed. **Generalizable principle recorded:** the requirement
+  is that a *filesystem path stay continuously valid for a walker*, and every dataset-level
+  operation (send/receive/rename/promote) involves a **mount transition**, so none can satisfy
+  it — only a directory-level atomic exchange can. send/receive remains exactly right for what
+  it already does here: **replication** (syncoid offsite, proven at gate 11).
