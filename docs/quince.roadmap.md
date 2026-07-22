@@ -148,6 +148,24 @@ remote copy.
   implement); the symlink workaround stays forbidden (D5a). Privilege split: the hook keeps
   the FICLONE reflink into `latest.new`; **quince does the exchange in-container** (rename
   needs no privilege).
+  - **UNVERIFIED LEAD (2026-07-22, from an LLM — treat as a hypothesis, not a fact; the
+    "interface facts are looked up live, never remembered" rule applies doubly here):** modern
+    OpenZFS is *reported* to support `RENAME_EXCHANGE` including ZIL replay records, and Debian
+    13 / PVE 9 ships a one-liner CLI for it — `apt install util-linux-extra` then
+    `exch <dir-a> <dir-b>`. Two models were asked and **disagreed** (one pessimistic, one
+    optimistic), which is precisely why this is a test and not an argument. **First task of the
+    rung:** run `exch` on two non-empty dirs in the real pool and settle it. If unsupported,
+    the fallback ladder is: atomic **symlink swap** (fixes both observers; requires reopening
+    D5a's no-symlink rule + a mandatory documented `rclone --copy-links`, Operator sign-off),
+    with **rclone-from-an-explicit-snapshot-path** as defense-in-depth worth adopting either way.
+  - **⚠ Load-bearing constraint reported with the lead — it kills one design option.** The
+    exchange requires both paths to be **ordinary directories on the SAME mounted filesystem**;
+    two child datasets in one pool are still different filesystems and fail with `EXDEV`. So the
+    idea of making `latest/` its **own child dataset** (floated to keep snapshots clean) is
+    **incompatible with the atomic exchange** — `latest` and its staging sibling must be plain
+    directories inside one dataset. The per-job `working/` design below already satisfies the
+    clean-snapshot goal without needing a separate dataset, so nothing is lost — but verify this
+    constraint alongside the flag itself.
 - **Per-job `working/` (Operator-proposed, architect-agreed).** Stop keeping `working/`
   permanently. Seed it as a **reflink clone of `latest/` at job start** (near-free, proven at
   gate 11: `bclonesaved` +33.6 GiB) — MobileBackup2 increments from a clone exactly as it does
