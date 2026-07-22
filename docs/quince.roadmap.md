@@ -242,6 +242,65 @@ the deletion). Plus: `RENAME_EXCHANGE` verified on the real pool before any code
 backup leaves a resumable `working/` and a retry completes without re-transferring; between
 backups the dataset holds only `latest/`.*
 
+### ⚑ `qn.6a` — soak-ready UI (a slice of qn.6 pulled forward; inserted 2026-07-22, (ch))
+
+**Purpose: make quince good enough that the Operator actually *uses* it daily, so it soaks
+under real usage on staging *while the process revamp runs*.** The revamp is process work — the
+codebase is idle during it — so a usable app converts that idle stretch into soak time, and soak
+time cannot be compressed or backfilled. **Mobile is the precondition**, not polish: if you must
+be at a desktop, the daily use (and therefore the soak) never happens.
+
+**Sequence: `qn.5b` → `qn.6a` → freeze + revamp (app soaking).** 5b runs first deliberately —
+it changes the `working/` lifecycle and the failure/Retry semantics, i.e. exactly the behaviour
+the soak observes. Soaking on a model about to change would waste the findings.
+
+- **Mobile-first responsive pass** over the **existing** device-centric IA — explicitly a
+  *responsive + touch-target* pass, **not an IA redesign**. The dashboard-cards → device-details
+  structure is already mobile-amenable; the desktop-shaped pieces (job log pane, version lists,
+  the pair/encryption dialogs, the backup-history table) are the real work. That distinction is
+  the difference between a rung and a project — hold it.
+- **Offline devices are listed.** Today the device table is live muxd presence only, and a device
+  with no transports is *removed* — so a backup tool forgets your device exists the moment you
+  unplug it. Minimal shape: union the live table with the distinct UDIDs already in the versions
+  registry, and **persist the identity already fetched at enrichment** (name/model) so offline
+  rows aren't bare UDIDs — a column or small table, not a new subsystem. **Offline card
+  behaviour (Operator-specified):** keep the same card shape and a **disabled "Back up now"** so
+  layout stays aligned with online cards — but disabled **with a reason** on hover/tap, never a
+  dead button (the established qn.4b pattern, and the (bq) lesson). Show last-seen and version
+  count; versions stay browsable.
+- **Device labels in the backup list** — the list currently doesn't say which device a backup
+  belongs to. Small, real.
+- **The log-blob `SplitFunc` fix** (gate-11 finding, optional if it grows): one fix reportedly
+  clears the mangled log pane, the stale byte counter, **and** the log bloat. It is directly on
+  the soak path — live progress is what you stare at from a phone — so it earns its place if it
+  stays small.
+
+**Explicitly NOT in scope:** storage setup in onboarding (the auto-probe already chooses; what's
+missing is *explaining* the choice, which is qn.6's onboarding-checks work beside P1/P1b — don't
+build a config UI for something that should be automatic); the **Synology/alpha-tester
+prerequisites** (a platform feasibility spike on DSM, and gate **12c**, which un-defers the
+moment a non-zfs tester appears — see the note below); anything in qn.6's release half.
+
+**Forward note — "Wake up" (Operator idea, post-`qn.12` spike, NOT this rung).** An offline
+device may simply be *asleep on the same LAN*. Once qn.12 ships Web Push, a **"Wake up"** action
+could send a push to the device's PWA to rouse it so its mDNS announcement resumes and netmuxd
+rediscovers it. Fits the assisted model exactly (quince cannot back up unattended, but it may
+*nudge*), and needs no new infrastructure beyond a push kind. Genuinely uncertain and therefore
+a **spike**: it is unproven that waking the screen restores Wi-Fi-sync visibility, and it can
+only ever work when the device is on the same network — so the UI must stay honest ("wake
+attempt sent; if it's on your network it should appear shortly"), never claiming success.
+
+*Gate: the Operator drives a complete backup **from the iPhone browser** — start, watch live
+progress, cancel, retry — without pinch-zooming or meeting an unusable control; a powered-off
+device appears in the list with last-seen, version count, and a disabled-with-reason "Back up
+now"; the backup list names its device. Then the soak begins: quince in real daily use on
+staging for the duration of the freeze/revamp.*
+
+**Process note:** this is the **last rung under the current process**. Its implementer should
+record process friction as it goes (decisions-log letter collisions, doc drift, gate-ownership
+seams, spec overhead) and hand that to the revamp as **evidence** — otherwise the process gets
+redesigned from memory.
+
 ### ⚑ Daily-driver target — the Operator's "personally usable" milestone (ruled 2026-07-20, (by))
 
 Before a planned **code freeze + process revamp**, the bar is a quince the Operator
