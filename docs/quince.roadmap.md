@@ -343,7 +343,23 @@ v0.4.3** (re-homed here from qn.2b, decisions log (aw); procedure verbatim in th
 spec, gate 8 — verdict flips the D2 default to single-muxer or files the upstream issue),
 chaos suite (replay every torn-session
 transcript + injected mid-file disconnects), liveness-stage thresholds tuned against the
-real lab box, honest UX copy for the slow/silent/passcode phases. *Gate: injected
+real lab box, honest UX copy for the slow/silent/passcode phases.
+
+**Spike (feasibility-first, (cn)): enable/disable Wi-Fi discoverability ("Wi-Fi sync") from
+inside quince.** Today a fresh device's Wi-Fi sync must be ticked in **Finder/iTunes** ("Show
+this device when on Wi-Fi") — so the D12 "everything in quince" onboarding promise is **broken
+for the PRIMARY transport** (a user can pair over USB in quince but then needs a Mac to actually
+turn Wi-Fi backups on). **Likely mechanism, to VERIFY not assume** (interface-facts-looked-up
+rule): a lockdown `SetValue` on the `com.apple.mobile.wireless_lockdown` domain
+(`EnableWifiConnections`-ish key) — libimobiledevice's `lockdownd_set_value` supports it, and it
+is a **USB-trusted** operation, which fits perfectly: pairing is USB-only anyway (stack D2), so
+the natural moment is *during the qn.3 USB pair* (plug → Trust → quince pairs **and** flips
+Wi-Fi sync on → unplug → Wi-Fi works, no Finder detour). Read-back gives a `wifi_sync:
+on|off|unknown` device property to display + toggle beside pairing/encryption. **Spike answers:**
+the exact domain/key; whether SetValue is accepted and takes effect (reboot/respring needed?);
+USB-required confirmed; whether the device must be unlocked / a Trust re-confirm fires. Home is
+either here (Wi-Fi) or a small device-ops addition folded into qn.6 onboarding; if infeasible,
+onboarding must document the Finder step honestly. *Gate: injected
 disconnects land in clean `user action required` states with committed versions
 untouched, and a manual retry from dirty `working/` completes and verifies.*
 
