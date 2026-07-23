@@ -178,6 +178,15 @@ remote copy.
 - **Reorder commit:** verify → atomic exchange → **then** snapshot, so the snapshot holds
   `latest/` = the version and `browse_root` points at the real latest backup rather than a
   directory named `working`.
+- **Rename the snapshot format `quince-<ULID>-<date>` → `quince-<date>-<ULID>`** (Operator, readability
+  — the opaque ULID-first name reads badly in `zfs list`). LOW-RISK, verified: the name's identity is
+  carried by the `quince-version.json` **marker**, not by parsing the name (`zfscli.go` only
+  prefix-matches `quince-*` for the hook glob and uses the whole name opaquely as a `.zfs/snapshot/
+  <name>/` path element), so this is a one-line change to `snapNameFor` (`zfscli.go:152`) + its
+  comments + the contracts §2 example + tests. The `quince-` prefix is preserved so the constrained
+  hook glob (`@quince-*`) is unaffected, and old-format snapshots still adopt (marker-driven, prefix
+  still matches) — no migration needed. Rides qn.5b because this rung already reworks the snapshot
+  path (`browse_root` moves `…/working` → `…/latest`).
 - **Drop the symlink dance.** The `<target>/<UDID>` stub exists only because
   `idevicebackup2` insists on writing to `<target>/<UDID>/` — and it caused the gate-blocking
   free-space bug (28b97de) by putting the stub on the wrong filesystem. Choose the staging path
