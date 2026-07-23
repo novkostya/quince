@@ -427,6 +427,65 @@ over `quince versions path --latest`); more domains (WhatsApp, contacts, call hi
 contacts/calls are easy wins, may pull forward); Prometheus metrics; Docker Hub mirror;
 multi-device polish; public demo instance.
 
+## ⚑ Post-freeze EPIC — Storage as a first-class entity (multi-storage) — captured 2026-07-22, (cl)
+
+**Not a rung — an epic (several rungs), deliberately post-freeze, recorded so the direction lives
+in the docs, not only the Operator's head.** The Operator's core insight is *correct and it names a
+real modeling error*: **a storage backend (`zfs`/`reflink`/`hardlink`/`copy`) is a property of a
+STORAGE, not of a backup.** Today quince has exactly one `/backups`, one backend auto-probed
+globally, and `Version.backend` (contracts §2) recorded per-version — that last field is the
+*symptom*: a version's backend is really its storage's backend. The v1 single-storage model was a
+reasonable simplification; it is "kind of wrong" as the long-term shape. This is how mature tools
+(Immich external libraries, Plex) model it.
+
+**The target model (Operator, architect-endorsed):**
+- **Storage is a first-class entity** — created (first one during onboarding, Plex-style), shown on
+  the dashboard with stats (backup count, space used / free), managed in the UI.
+- **One immutable backend per storage**, selected + probed **at creation**. Backend never changes
+  in place; a future **migration** = *create a new storage from an existing one*.
+- **A device backs up to multiple storages** (the 3-2-1 rule a backup tool should embody: local
+  fast + offsite/removable).
+- **Incremental is scoped to (device, storage)** — a delta can only be taken against the previous
+  backup *on that storage*. So the `latest/`/`working/` lifecycle (which qn.5b reworks) becomes
+  per-(device, storage), and **the first backup to any NEW storage is always a full transfer** even
+  for a long-backed-up device (surface this honestly). "full vs incremental" is thus explicitly
+  per-storage.
+- **A storage can be OFFLINE** (removable HDD plugged occasionally; a network share that's down) —
+  shown, not errored; it must not block backups to *other* storages.
+
+**Architect challenges + refinements (the Operator asked to be challenged):**
+1. **Storage identity must be written INTO the storage** — a `quince-storage.json` (UUID + backend +
+   created-at) at its root, the analog of `quince-version.json`. A removable HDD's *path* changes on
+   replug; only an embedded UUID lets quince know "this is the same storage" and sanity-check it.
+2. **Reframe the "pre-backup probe"** the Operator was unsure about: backend is *selected* at
+   creation (immutable), but **reachability + still-the-expected-backend is checked before each
+   backup** — that check *is* the offline-detection and the "did this dataset get remounted as
+   something else" guard. Selection at creation; health-check before use. Both, not either.
+3. **Offsite/B2 is a REPLICATION of a storage, not a storage** (my lean, flagged as a real open
+   question). The D5a rclone→B2 model syncs a storage's `latest/` offsite; B2 isn't a place quince
+   *commits versions to*, it's a mirror. Folding B2 into the storage abstraction vs keeping
+   replication separate is a genuine design fork to settle when this is scoped.
+4. **Split the iMazing case into TWO features** the Operator conflated: **(a) external read-only
+   storage** — mount a foreign backup (iMazing/iTunes/`ios-backup-crypt` output) `:ro` and
+   browse/restore *in place*, no copy (Immich's "external library"); **(b) import/migration** — copy
+   a foreign backup INTO a new quince-managed storage. (a) is lighter and lands the "connect iMazing
+   over the network `:ro`" use case cleanly — and it's a natural fit for the **sibling libraries**
+   (`ios-backup-crypt` + `ios-backup-parser` read *any* standard backup, not only quince-committed
+   ones), so external-readonly storages are feasible precisely because those libraries exist.
+5. **Offline-storage policy: don't queue unattended backups** (queuing fights the assisted model,
+   D13). A backup targets a storage (or a set, skipping offline ones with a clear report); an
+   offline target is an honest "can't right now," not a background retry.
+6. **Consider a storage `mode`** (`managed` | `external-readonly`) rather than treating every foreign
+   source as a migration — external-readonly is a first-class *mode*, not a one-time import.
+
+**Interaction with near-term work:** qn.5b's atomic-`latest` + per-job-`working/` mechanics are the
+SAME within a storage's device-tree whether there is one storage or many — only the path prefix
+changes (`/backups/<udid>/…` → `<storage>/<udid>/…`). **So qn.5b is safe to build now**, provided it
+does not hard-bake single-storage assumptions that are costly to unwind (paths should be
+storage-scopeable; `Device.last_backup` derivation should tolerate becoming per-storage later).
+Scope this epic into rungs *after* the freeze, under the revamped process — it is exactly the kind of
+large, contract-touching, multi-surface work the revamp should make smoother.
+
 ## Parallelization map (multi-agent)
 
 Independent tracks after M1 freezes the contracts (`contracts.md`):
