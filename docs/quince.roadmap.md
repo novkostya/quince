@@ -419,6 +419,24 @@ mid-backup disconnect produces an `action_required` push and a one-tap retry wor
 committed version is ever perturbed; reminders never spam (cooldown honored).*
 
 ### Later / parked
+
+**Scoped per-device view + QR/link device enrollment (captured 2026-07-22, (cm) — Later, not soon).**
+A single-**device** view of quince reachable via an admin-issued **scoped token** (permissions:
+view / backup / restore-later), so the *device owner* — not the admin — can trigger their own
+backups and browse their own data without whole-app admin access. Onboarding is seamless: the admin's
+device-detail page has an action that produces a **link + QR code**; opened on another device it
+auto-authorizes *that* device to the scoped view. Why it matters (more than convenience): **it is the
+delegated-access dimension the phone-first assisted model (qn.12) implicitly assumes away** — qn.12
+treats admin = phone owner, but in a household they differ, and the scoped device view is exactly the
+per-owner phone surface. Natural home: **after / with qn.12**. Prior art: Plex home users, Jellyfin,
+streaming-device "claim/pair" flows. *Architect notes banked so a naive later build doesn't get the
+security wrong:* **(1)** the link/QR must carry a **one-time, short-TTL enrollment secret that mints a
+device-bound scoped session on first use — NOT a bearer token in the URL** (a URL is leaked by
+history, screenshots, chat forwards); **(2) restore is a dangerous scope** (it can overwrite a
+device) — likely admin-only or re-auth-gated even here; **(3)** this is a real **auth subsystem**
+(capability tokens, per-device sessions, an enrollment flow, a revocation UI, audit coverage of
+scoped actions), so it **reopens the qn.1 security baseline** (design §6) — not a small feature.
+
 Photos viewer (qn.11 — see M7 note: Apple-prebuilt-thumbnails spike first); restore &
 Finder-compatible export; **offsite-sync ergonomics** (post-commit hook firing with the
 committed version's path — lets rclone→B2 run push-style after every good backup; maybe
