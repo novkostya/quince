@@ -1434,3 +1434,22 @@ on real traction).
   success claim. **qn.6a is the LAST rung under the current process:** its implementer records
   process friction as it goes (letter collisions, doc drift, gate-ownership seams, spec overhead)
   and hands it to the revamp as evidence, so the process isn't redesigned from memory.
+- 2026-07-22: (ci) **gate-11 findings — DURABLE disposition + rung distribution (bookkeeping).**
+  The seven gate-11 findings were narrated in (ce) and filed as UI task chips, but **task chips do
+  not survive an app restart** — so this entry is their durable home, each with a named owner, so
+  none is orphaned (the no-orphan-finding discipline). The Operator's qn.5b/qn.6a insertion already
+  absorbed several; this records the full map and flags the two that need an architect/Operator
+  ruling rather than deciding them here.
+  | # | Finding | Owner | Why |
+  |---|---|---|---|
+  | 1 | target stub on the cache filesystem → device refuses large backups | **FIXED** `28b97de` ((cd)) | gate-blocking; fixed in-session, fixture-first |
+  | 2 | 409 "already running" on instant Retry (terminal-before-slot-release) | **qn.7** ((cc)) | state-honesty, narrow window; pull-forward trigger if it bites |
+  | 3 | 12 KB progress-bar blobs mangle the log pane AND make the parser read the *oldest* frame (stale bytes) | **qn.6a** ((ch) row) | one `SplitFunc` clears pane + stale byte counter + log bloat; on the soak path |
+  | 4 | crash-orphaned `/cache` target stubs unswept by reconciliation | **SUBSUMED by qn.5b** ((cg)) | qn.5b drops the `<target>/<UDID>` symlink dance entirely → the stub class ceases to exist; nothing to sweep. **Chip dismissed as superseded.** |
+  | 5 | "Backup directory is /cache/…" job-log line reads as alarming | **SUBSUMED by qn.5b** ((cg)), residual clarity nit → **qn.6a** log work | no more `/cache` target: the path the tool reports becomes the real staging dir. Only the wording nit (if any) remains, and folds into qn.6a's log pass |
+  | 6 | dashboard card stays silent when the newest attempt FAILED (shows only last *success*) | **qn.6a** *(PROPOSED — confirm)* | `last_backup` semantics are correct ((bz)); the card needs a "needs attention + Retry" companion line. Most daily-driver-relevant UI gap — a soak tester who can't see failures defeats the soak, so it fits qn.6a's soak-usability charter |
+  | 7 | two "latest" badges until reload (client keeps the demoted version's flag) | **qn.6a** *(PROPOSED — timing)* | cheap client-side fix (mirror the server's single-latest invariant in the versions store). **But qn.5b reorders commit + reshapes the `version.*`/`latest` surface** — confirm whether the fix rides qn.5b (where that surface changes) or qn.6a (pure UI) |
+  | 8 | a Wi-Fi drop mid-transfer lands `failed`, not `connection_lost` (interface fact 2 incomplete — a drop has TWO shapes: stall vs clean receive-error exit) | **qn.7** *(PROPOSED)* | it IS a Wi-Fi transport-loss classification + interface-fact-2 correction, squarely qn.7's chaos-suite/liveness domain; the parser now captures the tool's reason, so the classification hook already exists. Fixture-first (`wifi-dropoff-receive-error`) beside the existing stall fixture |
+  | 9 | every version reads `incremental` — device writes `IsFullBackup:false` even for a first 33 GB backup | **NEEDS A RULING** (ties to open product question (bs)) | two halves: (a) derive `kind` honestly (`BackupState=="new"` / no prior version → `full`) — a small storage/`verify.go` fix; (b) whether to pass `idevicebackup2 --full` on a first backup / after an encryption change — a **product decision** ((bs)). (a) makes qn.5's full-only shard check actually run. Architect to assign a rung; not decided here |
+  | 10 | progress percent freezes then jumps (driven only by sparse "NN% Finished") + current-file bytes shown as the *backup* total | **SPLIT: qn.6a** (byte labelling, rides #3's `SplitFunc`) **+ qn.7** (percent/liveness shaping) *(PROPOSED)* | the honest-byte relabel is soak-path UI; smoother percent-from-cumulative-bytes + the liveness note firing during active large-file receives is progress/liveness *shaping* = qn.7 |
+  Net: **#1 fixed, #2/#8 → qn.7, #3/#5/#6/#7 → qn.6a, #4 obsolete (qn.5b), #9 unassigned pending a ruling, #10 split.** The four PROPOSED rows and #9 want an architect glance; the rest are settled. P1/P1b (the muxer-runs-but-blind onboarding/health warnings) remain qn.6 in the proposals ledger — distinct from these, not re-homed.
