@@ -36,7 +36,11 @@ type ZFSConfig struct {
 	ParentDataset string `yaml:"parent_dataset" json:"parent_dataset"`
 	Mode          string `yaml:"mode" json:"mode"` // exec | hook
 	HookCmd       string `yaml:"hook_cmd" json:"hook_cmd"`
-	Mirror        string `yaml:"mirror" json:"mirror"` // auto | reflink | hardlink | copy
+	// Seed is the in-container strategy for cloning latest/ → working/<udid> at job start (qn.5b;
+	// renamed from `mirror` when the reflink moved from commit-time to seed-time). auto | reflink |
+	// copy — the hardlink tier is never used for the seed (amendment A: it would alias the
+	// committed latest/). In hook mode the host-side `seed` verb does the reflink and this is moot.
+	Seed string `yaml:"seed" json:"seed"`
 }
 
 // RetentionConfig is `storage.retention:`.
@@ -96,8 +100,8 @@ func Default() Config {
 		Storage: StorageConfig{
 			Backend: "auto",
 			ZFS: ZFSConfig{
-				Mode:   "exec",
-				Mirror: "auto",
+				Mode: "exec",
+				Seed: "auto",
 			},
 			Retention: RetentionConfig{
 				KeepRecent: 10,

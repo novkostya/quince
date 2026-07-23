@@ -49,9 +49,11 @@ func newNSManager(t *testing.T, strategy clonetree.Strategy, policy RetentionPol
 	return m, be, backups, st
 }
 
-// fakeZFS simulates the host ZFS: snapshot = copy working/ → .zfs/snapshot/<snap>/working/,
-// list = enumerate .zfs/snapshot/*, destroy = rm the snapshot dir, create = no-op. It records
-// every argv so tests can assert exact commands (argv arrays, no shell) and inject failures.
+// fakeZFS simulates the host ZFS (qn.5b model): snapshot = copy latest/ → .zfs/snapshot/<snap>/
+// latest/ (the exchange already moved the verified tree into latest/ before the snapshot),
+// list = enumerate .zfs/snapshot/*, destroy = rm the snapshot dir, create = no-op, seed = clone
+// latest/ → working/<udid> host-side (the hook `seed` verb). It records every argv so tests can
+// assert exact commands (argv arrays, no shell) and inject failures.
 type fakeZFS struct {
 	backups string
 	parent  string
@@ -74,8 +76,8 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 	case "snapshot":
 		ds, snap := splitFull(argv[len(argv)-1])
 		udid := strings.TrimPrefix(ds, f.parent+"/")
-		src := filepath.Join(f.backups, udid, "working")
-		dst := filepath.Join(f.backups, udid, ".zfs", "snapshot", snap, "working")
+		src := filepath.Join(f.backups, udid, "latest")
+		dst := filepath.Join(f.backups, udid, ".zfs", "snapshot", snap, "latest")
 		if _, err := os.Stat(dst); err == nil {
 			return "already exists", errFake // idempotency path exercised by callers
 		}
@@ -102,16 +104,16 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 		ds, snap := splitFull(argv[len(argv)-1])
 		udid := strings.TrimPrefix(ds, f.parent+"/")
 		return "", os.RemoveAll(filepath.Join(f.backups, udid, ".zfs", "snapshot", snap))
-	case "mirror":
-		// Host-side mirror verb: rebuild latest/ from working/ + swap; verdict COPIED on tmpfs.
+	case "seed":
+		// Host-side seed verb (qn.5b): clone latest/ → working/<udid>; verdict COPIED on tmpfs.
 		udid := strings.TrimPrefix(argv[len(argv)-1], f.parent+"/")
 		mp := filepath.Join(f.backups, udid)
-		_ = os.RemoveAll(mp + "/latest.new")
-		if err := clonetree.Clone(mp+"/latest.new", mp+"/working", clonetree.Copy); err != nil {
+		tree := filepath.Join(mp, "working", udid)
+		_ = os.RemoveAll(tree)
+		if err := os.MkdirAll(filepath.Join(mp, "working"), 0o755); err != nil {
 			return err.Error(), err
 		}
-		_ = os.RemoveAll(mp + "/latest")
-		if err := os.Rename(mp+"/latest.new", mp+"/latest"); err != nil {
+		if err := clonetree.Clone(tree, filepath.Join(mp, "latest"), clonetree.Copy); err != nil {
 			return err.Error(), err
 		}
 		return "COPIED", nil // tmpfs → no block sharing
@@ -132,13 +134,13 @@ func splitFull(full string) (ds, snap string) {
 	return full, ""
 }
 
-// newZFSManager builds a zfs-backend Manager backed by the fakeZFS (exec mode, copy mirror).
+// newZFSManager builds a zfs-backend Manager backed by the fakeZFS (exec mode, copy seed).
 func newZFSManager(t *testing.T, policy RetentionPolicy) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
 	return newZFSManagerCfg(t, policy, "exec", "copy")
 }
 
-// newZFSManagerCfg builds a zfs-backend Manager with a chosen zfs mode + mirror strategy.
-func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, mirror string) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
+// newZFSManagerCfg builds a zfs-backend Manager with a chosen zfs mode + in-container seed strategy.
+func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, seed string) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
 	t.Helper()
 	backups := t.TempDir()
 	st := openStore(t)
@@ -146,20 +148,27 @@ func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, mirror string)
 	f := &fakeZFS{backups: backups, parent: parent}
 	cli := newZFSCLI(parent, mode, "hook-placeholder", "zfs")
 	cli.run = f.run
-	be := newZFSBackend(context.Background(), cli, backups, mirror, "test", testLogger())
+	be := newZFSBackend(context.Background(), cli, backups, seed, "test", testLogger())
 	m := NewManager(be, BackendZFS, st, st, bus.New(), backups, policy, seqID(), testLogger())
 	m.now = monotonicClock()
 	return m, be, f, backups, st
 }
 
-// writeInto commits a fresh good encrypted-full tree for udid through Seed→write→CommitJob.
-func commitGoodTree(t *testing.T, m *Manager, udid string) {
+// seedTree seeds a job and returns the working TREE (working/<udid>) the fake tool writes into
+// (idevicebackup2 writes to <target>/<UDID>/; Seed returns the target parent, qn.5b).
+func seedTree(t *testing.T, m *Manager, udid, job string) string {
 	t.Helper()
-	work, err := m.Seed(udid, "job-"+udid)
+	target, err := m.Seed(udid, job)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	goodEncryptedFull(t, work)
+	return filepath.Join(target, udid)
+}
+
+// commitGoodTree commits a fresh good encrypted-full tree for udid through Seed→write→CommitJob.
+func commitGoodTree(t *testing.T, m *Manager, udid string) {
+	t.Helper()
+	goodEncryptedFull(t, seedTree(t, m, udid, "job-"+udid))
 	if _, err := m.CommitJob(udid, "job-"+udid); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

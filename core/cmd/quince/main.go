@@ -3,7 +3,7 @@
 //	quince serve [--demo] [--listen :8080]             # serve the UI + API (contracts.md)
 //	quince backup <udid> [--transport usb|wifi|auto]   # drive one backup to completion (lab CLI)
 //	quince versions verify <id> | --udid <udid>        # re-run structural verification (qn.4b)
-//	quince device repair-working-copy <udid>           # rebuild working/ from last good (qn.4b)
+//	quince device reset-working <udid>                 # discard the dirty working/ (qn.5b Reset)
 //	quince config validate [path]                      # validate config.yml; nonzero exit on error
 //	quince version                                     # print the build version
 //
@@ -78,7 +78,7 @@ func usage() {
 		"  quince serve [--demo] [--listen :8080]             serve the UI + API\n"+
 		"  quince backup <udid> [--transport usb|wifi|auto]   drive one backup to completion\n"+
 		"  quince versions verify <id> | --udid <udid>        re-run structural verification\n"+
-		"  quince device repair-working-copy <udid>           rebuild working/ from last good\n"+
+		"  quince device reset-working <udid>                 discard the dirty working/\n"+
 		"  quince config validate [path]                      validate config.yml\n"+
 		"  quince version                                     print version\n", version.String())
 }
@@ -146,7 +146,8 @@ func serve(args []string) error {
 	var versions httpapi.VersionReader // assigned in both branches (demo → provider, else → storage)
 	var versionAdmin httpapi.VersionAdmin
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
-	var ops httpapi.DeviceOps // assigned in both branches below (demo → provider, else → manager)
+	var ops httpapi.DeviceOps             // assigned in both branches below (demo → provider, else → manager)
+	var workingReset httpapi.WorkingReset // nil in demo → router serves 503 on the reset surface
 	if *demoMode {
 		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
 		prov := demo.NewProvider(eventBus, log)
@@ -162,6 +163,9 @@ func serve(args []string) error {
 		ls := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
 		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
+		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
+			workingReset = ls.engine
+		}
 	}
 
 	srv := &http.Server{
@@ -169,7 +173,7 @@ func serve(args []string) error {
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
 			Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
-			VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops,
+			VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

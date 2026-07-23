@@ -66,6 +66,15 @@ POST /api/devices/{udid}/encryption
      // that state to the UI.
      // NOTE: this is Apple's device-global backup password — the SAME password later
      // used to unlock versions in the vault. quince sets it, never keeps it.
+POST /api/devices/{udid}/reset-working → 202 {note} | 404 | 409 | 503
+     // qn.5b Reset (accepted contract proposal, decisions (co)): DISCARD the device's dirty
+     // working/ so the next backup starts clean from latest/ — losing only the partial, NEVER a
+     // committed version. Idempotent (a device with no working/ is already clean → 202). 409 while
+     // a backup is running for the device (single-flight; cancel it first); 404 unknown device;
+     // 503 no backup engine wired (--demo). The backend op is RepairWorkingCopy (CLI:
+     // `quince device reset-working <udid>`). The honest COMPANION of a kept-dirty working/: on
+     // failure the partial is kept so a retry RESUMES (no re-transfer); Reset is the explicit
+     // discard. Audited (reset event, no secret); touches no version.* / latest surface.
 GET  /api/ops/{op_id}                  → Op
      // pair/encryption return 202 {op_id}; the op's narration (e.g. "tap Trust on the
      // phone", "enter the passcode on the device") streams via `op.updated` WS events,
@@ -202,18 +211,29 @@ Version: {
   "id": "...", "udid": "...", "backend": "zfs" | "reflink" | "hardlink" | "copy",
   // zfs: a version IS a snapshot; browse_root goes through .zfs (read-only by nature).
   // namespace backends (reflink/hardlink/copy): a version is an immutable dir.
-  "zfs_snapshot": "rpool/.../<udid>@quince-01J...-2026-07-18" | null,   // zfs backend only
-  "browse_root": "/backups/<udid>/.zfs/snapshot/quince-01J.../working"  // zfs (per-device dataset)
+  "zfs_snapshot": "rpool/.../<udid>@quince-2026-07-18T02-30-01J..." | null,   // zfs backend only
+  // qn.5b: snapshot name is quince-<YYYY-MM-DDTHH-MM>-<ULID> (date-first for readable `zfs list`
+  // ordering; the ULID == version id is the collision-free tail, decisions (co)).
+  "browse_root": "/backups/<udid>/.zfs/snapshot/quince-2026-07-18T02-30-01J.../latest"  // zfs
               |  "/backups/<udid>/latest"                                // namespace backends, newest
               |  "/backups/<udid>/versions/2026-07-18T02-30-11Z",        // namespace, rotated-out
-  // browse_root is computed per request on namespace backends: a version moves from
-  // latest/ to versions/<ts>/ when the next commit rotates it.
+  // qn.5b: on zfs, browse_root goes through .zfs/snapshot/<snap>/LATEST (was /working) — the
+  // commit atomically exchanges the verified tree into latest/ before snapshotting, so the
+  // snapshot IS latest/ = the version. browse_root is computed per request on namespace backends:
+  // a version moves from latest/ to versions/<ts>/ when the next commit rotates it.
   "created_at": "...", "job_id": "..." | null,
   // job_id null = adopted: a quince-format version found on disk/in snapshots without
   // a DB record (e.g. dataset replicated/restored to a fresh host; reconciliation
   // re-registers from quince-version.json). Adopted, listed, protected from retention
   // until the user says otherwise.
   "kind": "full" | "incremental" | "unknown",
+  // qn.5b (finding #9(a), decisions (cj)/(ck)): kind is derived AUTHORITATIVELY from whether the
+  // per-job working/ was seeded from an existing latest/ (incremental) or started empty (a first/
+  // full backup) — NOT from Status.plist.IsFullBackup, which the lab proved lies (a first 33 GB
+  // backup writes IsFullBackup:false). Every quince version is a COMPLETE, independently-restorable
+  // backup regardless of kind; kind stays internal (it gates the encrypted verify's blob-shard
+  // check — asserted only on a genuine full) and is dropped from the version CARD in the UI (qn.6a),
+  // because "incremental" imports a false fragile-chain mental model.
   "encrypted": true,        // unencrypted versions are permanently badged incomplete
   "is_latest": true,
   "structure_verified_at": "..." | null,   // set at commit (structural verification)
@@ -336,9 +356,13 @@ storage:
     parent_dataset: ""      # e.g. rpool/userdata/iphone-backup; one child dataset per device
     mode: exec              # exec (delegated) | hook
     hook_cmd: ""            # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
-                            # (forced-command: snapshot/destroy/list @quince-*, create children;
-                            #  dataset destroy deliberately impossible via the key)
-    mirror: auto            # latest/ build strategy: auto (reflink → hardlink → copy) | reflink | hardlink | copy
+                            # (forced-command: snapshot/destroy/list @quince-*, create children,
+                            #  seed working/<udid> from latest/; dataset destroy impossible via the key)
+    seed: auto              # qn.5b: in-container strategy to clone latest/ → working/<udid> at job
+                            #   start (renamed from `mirror` when the reflink moved commit→seed).
+                            #   auto (reflink → copy) | reflink | copy — hardlink is NEVER used for
+                            #   the seed (it would alias the committed latest/; gate 12c). In hook
+                            #   mode the host-side `seed` verb does the reflink and this is moot.
   retention:
     keep_recent: 10
     keep_daily: 30

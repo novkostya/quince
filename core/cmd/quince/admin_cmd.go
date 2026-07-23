@@ -84,20 +84,22 @@ func versionsCmd(args []string) error {
 	})
 }
 
-// deviceCmd implements `quince device repair-working-copy <udid>` — the design §4 escape hatch that
-// rebuilds a device's mutable working area from its last-good version (zfs: from the last snapshot;
-// namespace: reseed work/ from latest/). Honest failure when there is no last-good version to
-// rebuild from; never automatic in v0.1.
+// deviceCmd implements the qn.5b Reset escape hatch — `quince device reset-working <udid>` (or its
+// back-compat alias `repair-working-copy`): DISCARD a device's dirty working/ so the next backup
+// starts clean from latest/, losing only the partial and never a committed version. (Under the
+// qn.5b per-job model the working copy is seeded from latest/ at job start, so the old "rebuild
+// working from the last snapshot" is no longer needed — discarding it is the honest action.) Never
+// automatic in v0.1; the UI surface is POST /api/devices/{udid}/reset-working.
 func deviceCmd(args []string) error {
-	if len(args) != 2 || args[0] != "repair-working-copy" {
-		return errors.New("usage: quince device repair-working-copy <udid>")
+	if len(args) != 2 || (args[0] != "reset-working" && args[0] != "repair-working-copy") {
+		return errors.New("usage: quince device reset-working <udid>")
 	}
 	udid := args[1]
 	return withStorage(func(mgr *storage.Manager) error {
 		if err := mgr.RepairWorkingCopy(udid); err != nil {
-			return fmt.Errorf("repair working copy for %s: %w", udid, err)
+			return fmt.Errorf("reset working copy for %s: %w", udid, err)
 		}
-		fmt.Printf("working copy for device %s rebuilt from the last good version\n", udid)
+		fmt.Printf("working copy for device %s discarded — the next backup starts clean from the last version\n", udid)
 		return nil
 	})
 }

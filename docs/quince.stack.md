@@ -205,14 +205,26 @@ differently (Operator ruling: no hardlink games under ZFS):
    streams must be independent — versioning device A must never snapshot device B — and
    the per-device snapshot list is the version list). Layout inside each child dataset
    `<parent>/<udid>`:
-   - `working/` — the in-place MobileBackup2 working copy (Apple-designed, most-tested
-     write path, zero cleverness); honestly dirty mid-job; **never** a sync source.
-     (Named `working/`, not `current/`, by Operator ruling: the name must scream
-     "possibly dirty" to someone with zero context — `working`/`latest` reads
-     correctly, `current`/`latest` does not.)
-   - `latest/` — a consistent mirror of the last *verified* backup, rebuilt at commit
-     and swapped atomically. **The snapshot is the canonical version; `latest/` is its
-     materialized view**: built from the just-created snapshot's `.zfs` path (an
+   > **qn.5b SUPERSEDES the commit-time-mirror model below (built 2026-07-24, decisions
+   > (cg)/(co)).** `latest/` is no longer a mirror *rebuilt from the snapshot at commit*;
+   > it **IS the backup**. A **per-job `working/<udid>`** is seeded from `latest/` at job
+   > start, verified, then **atomically exchanged** into `latest/` (`renameat2(RENAME_
+   > EXCHANGE)`, in-container, no privilege), and the snapshot captures `latest/` = the
+   > version (`browse_root` → `…/latest`). Between backups the dataset holds **only
+   > `latest/`**. The reflink MOVED from commit (rebuild) to job-start (seed): the hook's
+   > `mirror` verb became a **`seed` verb**, and the in-container ladder is **reflink →
+   > copy — never hardlink** for the seed (it would alias the committed `latest/`, gate
+   > 12c). The reflink measurement facts below (pool clones fine / dataset accounting lies
+   > / userns blocks FICLONE) still hold — they now govern the *seed*, not a mirror. The
+   > detail below is retained as the reflink saga's record; the live model is the qn.5b spec.
+   - `working/` — the MobileBackup2 working copy for a job, seeded from `latest/` at job
+     start (Apple-designed, most-tested write path); honestly dirty mid-job; **never** a
+     sync source; kept dirty on FAILURE so a retry resumes, removed on success (exchanged
+     into `latest/`). (Named `working/`, not `current/`, by Operator ruling: the name must
+     scream "possibly dirty" — `working`/`latest` reads correctly, `current`/`latest` does not.)
+   - `latest/` — historically (pre-qn.5b) a consistent mirror of the last *verified* backup,
+     rebuilt at commit and swapped atomically. **The snapshot is the canonical version; `latest/`
+     is its materialized view**: built from the just-created snapshot's `.zfs` path (an
      immutable source even during a long clone/copy fallback), by the first mirror
      strategy that actually works — reflink → hardlink (safety-matrix-gated) → copy.
      **RESOLVED 2026-07-20 after a three-round investigation (decisions log
@@ -258,10 +270,11 @@ differently (Operator ruling: no hardlink games under ZFS):
      — which is unchanged: pointing rclone at `.zfs` paths instead was considered
      and rejected (with `snapdir=hidden` rclone never sees them; with
      `snapdir=visible` it would walk EVERY snapshot at full size).
-   A version IS a `zfs snapshot <parent>/<udid>@quince-<job>-<ts>`, taken **only after
-   structural verification passes**, browsed read-only via that dataset's
-   `.zfs/snapshot/`. Seed and Discard are no-ops; retention = destroying our own
-   snapshots. **Only quince-created snapshots count** — host auto-snapshot tooling is
+   A version IS a `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>`, taken **only after
+   structural verification passes** AND the verified tree is exchanged into `latest/` (qn.5b: the
+   snapshot captures `latest/` = the version), browsed read-only via `.zfs/snapshot/<snap>/latest`.
+   Seed clones `latest/` → `working/<udid>`; Discard keeps the dirty `working/` for a retry;
+   retention = destroying our own snapshots. **Only quince-created snapshots count** — host auto-snapshot tooling is
    never relied on, created, or classified. Host-side ops go through delegated exec or a
    constrained hook (forced-command SSH key allowing only: `snapshot`/`destroy`/`list`
    scoped to `@quince-*` snapshots, plus `create` of child datasets under the one
@@ -335,27 +348,22 @@ mounted filesystems and uploads whatever is there. The rule:
   `zfs snapshot -r … && rclone sync /rpool/userdata b2:…` — the snapshot for local
   restore points, `latest/` guaranteeing the upload is never torn.
 
-  > **`PROPOSED (gap)` — the `latest` swap is NOT atomic, and this passage understated
-  > it (Operator-found 2026-07-22; scoped to `qn.5b`).** This text called the swap "the
-  > only nonatomic instant… could briefly mix two *individually valid* versions." That
-  > is **too mild**. Both implementations do `mv latest → latest.old; mv latest.new →
-  > latest` — the in-container Go path (`storage/zfs.go`) and the host-side hook's
-  > `mirror` verb (`deploy/storage.md`) — each commented "atomic swap," neither atomic.
-  > Between the two renames **`latest/` does not exist at all**. The real failure modes
-  > are therefore: (1) `rclone sync` crossing the window sees `latest/` missing and
-  > **DELETES the remote copy at B2** (sync mirrors deletions — not a "mix," a wipe
-  > followed by a full re-upload); (2) a `zfs snapshot` landing there captures a version
-  > with **no `latest/`**. B2 versioning makes it recoverable, not harmless. The window
-  > is two renames wide, but the Operator's requirement is explicitly "safe at ANY
-  > instant," and a cron running for months will eventually land in it. The fix this
-  > passage already gestures at — **exchange-rename** (`renameat2(RENAME_EXCHANGE)`,
-  > which never leaves the name unoccupied) — was never implemented. Note the privilege
-  > split favours us: only FICLONE needs the host, so the hook keeps doing the reflink
-  > into `latest.new` while **quince does the exchange in-container** (rename needs no
-  > privilege). `RENAME_EXCHANGE` support on ZFS is an **interface fact to verify live**,
-  > not assume; the symlink workaround stays forbidden (D5a: `latest/` is a real
-  > directory). Full scope + the `working/`-lifecycle redesign it belongs with: qn.5b,
-  > decisions log (cg).
+  > **RESOLVED by qn.5b (built 2026-07-24; the gap was Operator-found 2026-07-22).** The
+  > swap is now **atomic**: `latest/` changes only by a single `renameat2(RENAME_EXCHANGE)`
+  > (verified on the real ZFS pool, decisions (co)), so it is never unoccupied and a walk
+  > or `zfs snapshot` crossing a commit always sees a complete `latest/` — the remote copy
+  > can no longer be deleted, the snapshot can no longer capture a missing `latest/`. The
+  > old two-rename swap (`mv latest → latest.old; mv latest.new → latest`) is gone from
+  > BOTH paths — the in-container Go path (`storage/zfs.go`) and the host hook. Along with
+  > it: the backup is written into a **per-job `working/<udid>`** seeded from `latest/` at
+  > job start (host-side reflink via the hook's new `seed` verb, or the in-container
+  > reflink→copy ladder — **never hardlink**, gate 12c), verified, then EXCHANGED into
+  > `latest/`; the snapshot captures `latest/` = the version (`browse_root` → `…/latest`),
+  > and between backups the dataset holds **only `latest/`**. The privilege split held:
+  > FICLONE (the seed) is host-side, the exchange is quince's in-container `renameat2` (no
+  > privilege). `kind` (full/incremental) is now derived from the seed decision, not
+  > `IsFullBackup`. D5's two version models collapse toward one. Full scope: qn.5b spec +
+  > decisions log (cg)/(co).
 
   Push-style alternative: the post-commit hook (parked) runs rclone
   right after each verified commit.
@@ -367,11 +375,14 @@ mounted filesystems and uploads whatever is there. The rule:
 
 Restore/browse never read `working/`. A torn `working/` normally needs no repair — the
 lab showed MobileBackup2 continues from torn state, and every result re-passes full
-structural verification — with `quince device repair-working-copy <udid>` (rebuild
-`working/` from the last good snapshot) as the explicit escape hatch if dirty-state
-incrementals repeatedly fail; the UI reports "working copy dirty, last good version =
-<ts>" meanwhile. The `quince versions path --latest <udid>` CLI prints the mirror path
-(or a specific version's path) for scripts that want a single-device source.
+structural verification — and qn.5b makes this first-class: on FAILURE the dirty
+`working/<udid>` is **KEPT** so a retry RESUMES into it (no re-transfer). The explicit
+escape hatch is **Reset** — `quince device reset-working <udid>` / `POST /api/devices/
+{udid}/reset-working` (the landed `RepairWorkingCopy` op, now a **discard**: drop the
+dirty `working/` so the next backup re-seeds clean from `latest/`, losing only the
+partial, never a version). The UI reports "working copy kept dirty for retry; last good
+version = <ts>" meanwhile. The `quince versions path --latest <udid>` CLI prints the
+`latest/` path (or a specific version's path) for scripts that want a single-device source.
 
 **Why.** The Operator's ruling makes the zfs backend *simpler and more robust* than the
 previous hardlink+snapshot hybrid: the write path is exactly what Apple ships, versioning

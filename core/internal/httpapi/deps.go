@@ -27,7 +27,29 @@ type Deps struct {
 	VersionAdmin   VersionAdmin
 	Muxer          MuxerControl
 	Ops            DeviceOps
+	WorkingReset   WorkingReset
 	AllowedOrigins []string
+}
+
+// WorkingReset drives POST /api/devices/{udid}/reset-working (qn.5b, contracts §1): discard a
+// device's dirty working/ so the next backup starts clean from latest/. The real implementation is
+// *backup.Engine (it holds the per-UDID single-flight, so it can refuse 409 while a backup runs);
+// UnavailableWorkingReset stands in for --demo / when no engine is wired. Consumer-defined here
+// (primitives only) so httpapi imports no backup subsystem — same pattern as JobControl. Returns an
+// HTTP status + reason so the handler maps outcomes without cross-package sentinel errors (202 =
+// reset done / already clean; 409 a backup is running; 404 unknown device). Never touches a
+// committed version.
+type WorkingReset interface {
+	ResetWorking(udid string) (status int, reason string)
+}
+
+// UnavailableWorkingReset is the WorkingReset used when no backup engine is wired (--demo, or a
+// misconfigured deploy): reset reports 503 honestly (no silent no-op).
+type UnavailableWorkingReset struct{}
+
+func (UnavailableWorkingReset) ResetWorking(string) (int, string) {
+	return http.StatusServiceUnavailable,
+		"the backup engine is unavailable (running --demo, or no device backend is configured)"
 }
 
 // JobControl drives POST /api/jobs and POST /api/jobs/{id}/cancel (contracts §1). The real

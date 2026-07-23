@@ -14,7 +14,7 @@ import (
 var datasetPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:/-]{0,255}$`)
 
 // snapShortPattern guards the snapshot short name (@<this>). quince only ever makes
-// quince-<ulid>-<date> names, but adopted/foreign scans see arbitrary ones — validate anyway.
+// quince-<date>-<ulid> names (qn.5b), but adopted/foreign scans see arbitrary ones — validate anyway.
 var snapShortPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$`)
 
 // zfsCLI runs host ZFS operations. mode "exec" runs `zfs …` directly (delegated privileges);
@@ -121,21 +121,21 @@ func (c *zfsCLI) DestroySnapshot(ctx context.Context, udid, snap string) error {
 	return nil
 }
 
-// Mirror runs the constrained host-side `mirror` verb (HOOK mode only; stack D5 ladder (i),
-// (bi)): the helper rebuilds latest/ from working/ via `cp -a --reflink=always` under the job
-// lock + atomic swap — touching ONLY the derived latest/, never snapshots (bounded blast radius)
-// — where FICLONE works even though the container's unprivileged userns forbids it. The helper
-// reports whether the clone actually shared blocks (host-side, a reliable pool-level channel:
-// `zfs list -o avail` or `zpool get bclone*` delta), printed as SHARED / COPIED; quince maps
-// that to the honest space claim.
-func (c *zfsCLI) Mirror(ctx context.Context, udid string) (sharingResult, error) {
+// Seed runs the constrained host-side `seed` verb (HOOK mode only; qn.5b, replacing the old
+// `mirror` verb): the helper clones latest/ → working/<udid> via `cp -a --reflink=always` under the
+// job lock and chowns it to the container uid, where FICLONE works even though the container's
+// unprivileged userns forbids it (gate-12 (bi)). It touches ONLY the mutable working area, never a
+// snapshot or the committed latest/ (bounded blast radius). The helper reports whether the clone
+// actually shared blocks (host-side, a reliable pool-level channel: `zfs list -o avail` or
+// `zpool get bclone*` delta), printed as SHARED / COPIED; quince maps that to the honest claim.
+func (c *zfsCLI) Seed(ctx context.Context, udid string) (sharingResult, error) {
 	ds := c.dataset(udid)
 	if !datasetPattern.MatchString(ds) {
 		return sharingUnknown, fmt.Errorf("storage: invalid dataset name %q", ds)
 	}
-	out, err := c.run(ctx, c.argv("mirror", ds))
+	out, err := c.run(ctx, c.argv("seed", ds))
 	if err != nil {
-		return sharingUnknown, fmt.Errorf("zfs mirror %s: %w: %s", ds, err, strings.TrimSpace(out))
+		return sharingUnknown, fmt.Errorf("zfs seed %s: %w: %s", ds, err, strings.TrimSpace(out))
 	}
 	switch {
 	case strings.Contains(out, "SHARED"):
@@ -147,7 +147,11 @@ func (c *zfsCLI) Mirror(ctx context.Context, udid string) (sharingResult, error)
 	}
 }
 
-// snapNameFor builds quince's snapshot short name: quince-<versionID>-<YYYY-MM-DD>.
+// snapNameFor builds quince's snapshot short name: quince-<YYYY-MM-DDTHH-MM>-<versionID> (qn.5b
+// amendment B, decisions (co)). Date-first for readable `zfs list` ordering; the ULID (==
+// versionID) kept as the collision-free tail — two same-minute commits get distinct names, and the
+// name maps back to the version/marker/logs. The `quince-` prefix is preserved so the constrained
+// hook glob `@quince-*` and ListSnapshots' HasPrefix are unaffected.
 func snapNameFor(versionID string, created time.Time) string {
-	return "quince-" + versionID + "-" + created.UTC().Format(snapDateLayout)
+	return "quince-" + created.UTC().Format(snapDateLayout) + "-" + versionID
 }

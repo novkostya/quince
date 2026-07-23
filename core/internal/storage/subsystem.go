@@ -94,7 +94,10 @@ func (m *Manager) Versions(udid string) []wire.Version {
 	return out
 }
 
-// Seed provisions the device area (idempotent) and returns the writer's work dir (design §5).
+// Seed provisions the device area (idempotent) and returns the idevicebackup2 TARGET — the
+// per-device working/ parent, seeded so the tool's own <target>/<UDID> convention lands the tree in
+// working/<udid> with no symlink (qn.5b). A dirty working/ is resumed; else it is seeded from
+// latest/ via the backend's safe strategy.
 func (m *Manager) Seed(udid, jobID string) (string, error) {
 	if err := m.backend.Provision(udid); err != nil {
 		return "", err
@@ -102,13 +105,32 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 	return m.backend.WorkDir(udid, jobID)
 }
 
+// seedKind returns the AUTHORITATIVE full|incremental kind for the in-flight job from the work
+// sentinel (whether working/ was seeded from an existing latest/ — finding #9(a), (cj)/(ck)); if
+// the sentinel is missing it infers from whether the device already has a committed version, never
+// from Status.plist.IsFullBackup (which the lab proved lies).
+func (m *Manager) seedKind(udid string) string {
+	if w, ok, err := readWorkState(m.backups, udid); err == nil && ok {
+		return w.kindOf()
+	}
+	if rows, err := m.reg.ListVersions(udid); err == nil {
+		for _, r := range rows {
+			if !r.Missing {
+				return "incremental"
+			}
+		}
+	}
+	return "full"
+}
+
 // CommitJob verifies the job's tree then commits it into an immutable version, rows it into the
 // registry (registry_committed phase), publishes version.created, and runs a post-commit Prune
-// (A3). The caller has already written the tree into the Seed work dir. A verification failure
-// returns an error WITHOUT committing (state honesty — a version exists only after verify+commit).
+// (A3). The caller has already written the tree into the Seed target (working/<udid>). A
+// verification failure returns an error WITHOUT committing (state honesty — a version exists only
+// after verify+commit).
 func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
 	tree := m.backend.TreePath(udid, jobID)
-	vr := Verify(tree)
+	vr := Verify(tree, m.seedKind(udid))
 	if !vr.OK {
 		return wire.Version{}, fmt.Errorf("storage: structural verification failed: %s", vr.Detail)
 	}
@@ -198,11 +220,14 @@ func (m *Manager) Prune(udid string) error {
 // RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).
 func (m *Manager) RepairWorkingCopy(udid string) error { return m.backend.RepairWorkingCopy(udid) }
 
-// VerifyTree is the passwordless structural-verification tree half exposed to the backup engine
-// (qn.4a): it runs Verify and returns primitives, so the backup package imports no storage types.
-// The engine calls this for the `verifying` state; CommitJob re-runs it (cheap, quiescent tree).
-func (m *Manager) VerifyTree(treeDir string) (ok bool, detail, kind string, encrypted bool) {
-	r := Verify(treeDir)
+// VerifyWork is the passwordless structural-verification exposed to the backup engine (qn.4a/qn.5b):
+// it resolves the job's working tree (working/<udid>) internally and returns primitives, so the
+// backup package imports no storage types. The kind is the AUTHORITATIVE seed-derived value
+// (finding #9(a)). The engine calls this for the `verifying` state; CommitJob re-runs it (cheap,
+// quiescent tree).
+func (m *Manager) VerifyWork(udid, jobID string) (ok bool, detail, kind string, encrypted bool) {
+	tree := m.backend.TreePath(udid, jobID)
+	r := Verify(tree, m.seedKind(udid))
 	return r.OK, r.Detail, r.Kind, r.Encrypted
 }
 
@@ -236,7 +261,7 @@ func (m *Manager) VerifyVersion(id string) (VerifyReport, bool) {
 		return rep, true
 	}
 	tree := browseRoot(m.backups, row.UDID, row.Backend, row.ZFSSnapshot, row.IsLatest, row.CreatedAt)
-	r := Verify(tree)
+	r := Verify(tree, row.Kind)
 	rep.OK, rep.Detail, rep.Kind, rep.Encrypted, rep.TreePath = r.OK, r.Detail, r.Kind, r.Encrypted, tree
 	return rep, true
 }

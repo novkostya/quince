@@ -8,8 +8,9 @@ import (
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
 )
 
-// Story 3: namespace commit runs the journaled rotation (latest is newest, previous rotated to
-// versions/<ts>/, work/ gone), across the three strategies.
+// Story 4: namespace commit runs the atomic exchange + archive (latest is newest via a single
+// RENAME_EXCHANGE — never an unoccupied instant — previous rotated to versions/<ts>/, working/
+// gone), across the safe strategies.
 
 func TestNamespaceCommitRotation(t *testing.T) {
 	strategies := []clonetree.Strategy{clonetree.Copy, clonetree.Hardlink}
@@ -21,22 +22,14 @@ func TestNamespaceCommitRotation(t *testing.T) {
 			m, _, backups, st := newNSManager(t, strategy, generousPolicy())
 
 			// First commit → becomes latest.
-			w1, err := m.Seed(testUDID, "job1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			goodEncryptedFull(t, w1)
+			goodEncryptedFull(t, seedTree(t, m, testUDID, "job1"))
 			v1, err := m.CommitJob(testUDID, "job1")
 			if err != nil {
 				t.Fatalf("commit 1: %v", err)
 			}
 
 			// Second commit → v1 rotates to versions/<ts>/, v2 becomes latest.
-			w2, err := m.Seed(testUDID, "job2")
-			if err != nil {
-				t.Fatal(err)
-			}
-			goodEncryptedFull(t, w2)
+			goodEncryptedFull(t, seedTree(t, m, testUDID, "job2"))
 			v2, err := m.CommitJob(testUDID, "job2")
 			if err != nil {
 				t.Fatalf("commit 2: %v", err)
@@ -54,7 +47,7 @@ func TestNamespaceCommitRotation(t *testing.T) {
 			}
 
 			// latest/ holds v2's marker.
-			lm, err := ReadMarker(nsLatest(backups, testUDID))
+			lm, err := ReadMarker(latestDir(backups, testUDID))
 			if err != nil || lm.VersionID != v2.ID {
 				t.Fatalf("latest marker = %q err=%v, want %s", lm.VersionID, err, v2.ID)
 			}
@@ -67,53 +60,55 @@ func TestNamespaceCommitRotation(t *testing.T) {
 			if vm.VersionID != v1.ID {
 				t.Fatalf("rotated version = %s, want v1 %s", vm.VersionID, v1.ID)
 			}
-			// work/ is empty (both jobs promoted/consumed).
-			if !isEmptyDir(filepath.Join(deviceDir(backups, testUDID), "work")) {
-				t.Fatal("work/ not empty after commits")
+			// working/ is gone after a successful commit (between backups only latest/ + versions/).
+			if _, err := os.Stat(workingParent(backups, testUDID)); !os.IsNotExist(err) {
+				t.Fatal("working/ should be gone after commit")
 			}
 			// browse_root: latest points at latest/, the rotated one at versions/<ts>.
 			wire := m.Versions(testUDID)
-			if wire[0].BrowseRoot != nsLatest(backups, testUDID) {
+			if wire[0].BrowseRoot != latestDir(backups, testUDID) {
 				t.Fatalf("latest browse_root = %q", wire[0].BrowseRoot)
 			}
-			if wire[1].BrowseRoot == nsLatest(backups, testUDID) {
+			if wire[1].BrowseRoot == latestDir(backups, testUDID) {
 				t.Fatalf("rotated browse_root should be versions/<ts>, got %q", wire[1].BrowseRoot)
 			}
 		})
 	}
 }
 
-// Story 3 (discard): a failed job's work is removed; committed state untouched.
-func TestNamespaceDiscard(t *testing.T) {
+// Story 6 (discard keeps the dirty working): a failed job's working/ is KEPT (unified with zfs, so
+// a retry resumes); committed state untouched.
+func TestNamespaceDiscardKeepsWorking(t *testing.T) {
 	m, _, backups, _ := newNSManager(t, clonetree.Copy, generousPolicy())
 	commitGoodTree(t, m, testUDID)
-	w, _ := m.Seed(testUDID, "jobX")
-	goodEncryptedFull(t, w)
+	tree := seedTree(t, m, testUDID, "jobX")
+	goodEncryptedFull(t, tree)
 	if _, err := m.Discard(testUDID, "jobX"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(nsWork(backups, testUDID, "jobX")); !os.IsNotExist(err) {
-		t.Fatal("work/jobX should be gone after discard")
+	if isEmptyDir(workingTree(backups, testUDID)) {
+		t.Fatal("working/<udid> should be KEPT dirty after discard (resume), not deleted")
 	}
 	if !hasVersion(m, testUDID) {
 		t.Fatal("committed version should survive a discard")
 	}
 }
 
-// Story 11: RepairWorkingCopy reseeds work/ from latest/; fails honestly with no last-good.
-func TestNamespaceRepairWorkingCopy(t *testing.T) {
+// Story 6 (Reset discards): RepairWorkingCopy discards the dirty working so the next backup
+// re-seeds; the committed version is untouched.
+func TestNamespaceResetWorking(t *testing.T) {
 	m, _, backups, _ := newNSManager(t, clonetree.Copy, generousPolicy())
-	// No latest yet → repair fails honestly.
-	if err := m.RepairWorkingCopy(testUDID); err == nil {
-		t.Fatal("repair with no last-good version should fail")
-	}
 	commitGoodTree(t, m, testUDID)
+	// Leave a dirty working from a partial attempt.
+	goodEncryptedFull(t, seedTree(t, m, testUDID, "jobX"))
 	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("repair: %v", err)
+		t.Fatalf("reset: %v", err)
 	}
-	reseed := filepath.Join(deviceDir(backups, testUDID), "work", "current")
-	if _, err := os.Stat(filepath.Join(reseed, "Status.plist")); err != nil {
-		t.Fatalf("reseeded work/current missing latest content: %v", err)
+	if _, err := os.Stat(workingParent(backups, testUDID)); !os.IsNotExist(err) {
+		t.Fatal("working/ should be gone after Reset")
+	}
+	if !hasVersion(m, testUDID) {
+		t.Fatal("committed version should survive a Reset")
 	}
 }
 

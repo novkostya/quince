@@ -59,6 +59,43 @@ func postCSRF(t *testing.T, c *http.Client, srv *httptest.Server, path, body str
 	return resp
 }
 
+// stubReset is a WorkingReset whose outcome the test fixes.
+type stubReset struct {
+	status int
+	reason string
+}
+
+func (s stubReset) ResetWorking(string) (int, string) { return s.status, s.reason }
+
+// TestResetWorkingHandler covers POST /api/devices/{udid}/reset-working (qn.5b): the handler maps
+// the control's status, and a nil control (no engine wired) defaults to 503 via the router guard.
+func TestResetWorkingHandler(t *testing.T) {
+	cases := []struct {
+		name    string
+		control WorkingReset // nil → exercise the router's UnavailableWorkingReset default
+		want    int
+	}{
+		{"accepted", stubReset{status: http.StatusAccepted, reason: "reset"}, http.StatusAccepted},
+		{"running", stubReset{status: http.StatusConflict, reason: "a backup is running"}, http.StatusConflict},
+		{"unknown", stubReset{status: http.StatusNotFound, reason: "unknown device"}, http.StatusNotFound},
+		{"no engine (nil → 503)", nil, http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testDeps(t)
+			deps.WorkingReset = tc.control
+			srv := httptest.NewServer(NewRouter(deps))
+			t.Cleanup(srv.Close)
+			c := authedClient(t, srv)
+			resp := postCSRF(t, c, srv, "/api/devices/DEV-1/reset-working", "")
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("reset-working status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
 func TestPairAccepted(t *testing.T) {
 	srv, c := opsServer(t, &stubOps{pairOpID: "01OP", pairStatus: http.StatusAccepted})
 	resp := postCSRF(t, c, srv, "/api/devices/DEV-1/pair", "")

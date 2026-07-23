@@ -18,36 +18,41 @@ var created2 = time.Date(2026, 7, 18, 3, 0, 0, 0, time.UTC)
 // `phase` (as a crash would), with the journal written. v1 must already be the committed latest.
 func stageNSCommit(t *testing.T, m *Manager, backups, udid, jobID, vid string, phase CommitPhase) {
 	t.Helper()
-	work := nsWork(backups, udid, jobID)
-	goodEncryptedFull(t, work)
-	mustMarker(t, work, vid, jobID, udid, m.backendName)
+	tree := workingTree(backups, udid)
+	goodEncryptedFull(t, tree)
+	mustMarker(t, tree, vid, jobID, udid, m.backendName)
 	dev := deviceDir(backups, udid)
-	latest := nsLatest(backups, udid)
+	latest := latestDir(backups, udid)
+	// Capture prevTS from the current latest (v1) BEFORE any exchange.
+	prevTS := ""
+	if pm, err := ReadMarker(latest); err == nil {
+		pt, _ := parseRFC(pm.CreatedAt)
+		prevTS = tsDir(pt)
+	}
 	j := Journal{
 		VersionID: vid, UDID: udid, Backend: m.backendName, JobID: jobID, Phase: PhasePrepared,
 		CreatedAt: fmtRFC(created2), Kind: "full", Encrypted: true, StructureVerifiedAt: fmtRFC(created2),
-		JobDir: work,
+		JobDir: tree, PrevTS: prevTS,
 	}
-	if phase == PhasePreviousArchived || phase == PhaseLatestPromoted {
-		prevTS := ""
-		if pm, err := ReadMarker(latest); err == nil {
-			pt, _ := parseRFC(pm.CreatedAt)
-			prevTS = tsDir(pt)
+	if phase == PhaseExchanged || phase == PhaseArchived {
+		if err := os.MkdirAll(latest, 0o755); err != nil {
+			t.Fatal(err)
 		}
-		if !isEmptyDir(latest) && prevTS != "" {
+		if err := exchange(tree, latest); err != nil { // atomic swap: latest ⇄ working/<udid>
+			t.Fatal(err)
+		}
+		j.Phase = PhaseExchanged
+	}
+	if phase == PhaseArchived {
+		// working/<udid> now holds the displaced v1 content → archive it, then remove working/.
+		if !isEmptyDir(tree) && prevTS != "" {
 			_ = os.MkdirAll(nsVersions(backups, udid), 0o755)
-			if err := os.Rename(latest, nsVersionDir(backups, udid, mustParseTSOrNow(prevTS))); err != nil {
+			if err := os.Rename(tree, nsVersionDir(backups, udid, mustParseTSOrNow(prevTS))); err != nil {
 				t.Fatal(err)
 			}
 		}
-		j.PrevTS = prevTS
-		j.Phase = PhasePreviousArchived
-	}
-	if phase == PhaseLatestPromoted {
-		if err := os.Rename(work, latest); err != nil {
-			t.Fatal(err)
-		}
-		j.Phase = PhaseLatestPromoted
+		_ = os.RemoveAll(workingParent(backups, udid))
+		j.Phase = PhaseArchived
 	}
 	if err := writeJournal(dev, j); err != nil {
 		t.Fatal(err)
@@ -56,7 +61,7 @@ func stageNSCommit(t *testing.T, m *Manager, backups, udid, jobID, vid string, p
 
 // Story 5: kill-at-every-namespace-phase → reconciliation rolls forward to a defined state.
 func TestReconcileNamespaceKillMatrix(t *testing.T) {
-	phases := []CommitPhase{PhasePrepared, PhasePreviousArchived, PhaseLatestPromoted}
+	phases := []CommitPhase{PhasePrepared, PhaseExchanged, PhaseArchived}
 	for _, phase := range phases {
 		t.Run(string(phase), func(t *testing.T) {
 			m, _, backups, st := newNSManager(t, clonetree.Copy, generousPolicy())
@@ -74,7 +79,7 @@ func TestReconcileNamespaceKillMatrix(t *testing.T) {
 			if rows[0].ID != "v2crash" || !rows[0].IsLatest {
 				t.Fatalf("phase %s: newest should be v2crash+latest, got %s latest=%v", phase, rows[0].ID, rows[0].IsLatest)
 			}
-			lm, err := ReadMarker(nsLatest(backups, testUDID))
+			lm, err := ReadMarker(latestDir(backups, testUDID))
 			if err != nil || lm.VersionID != "v2crash" {
 				t.Fatalf("phase %s: latest marker = %q err=%v", phase, lm.VersionID, err)
 			}
@@ -89,7 +94,7 @@ func TestReconcileNamespaceKillMatrix(t *testing.T) {
 func TestReconcileNamespaceLostRegistryWrite(t *testing.T) {
 	m, _, backups, st := newNSManager(t, clonetree.Copy, generousPolicy())
 	commitGoodTree(t, m, testUDID)
-	stageNSCommit(t, m, backups, testUDID, "job2", "v2lost", PhaseLatestPromoted)
+	stageNSCommit(t, m, backups, testUDID, "job2", "v2lost", PhaseArchived)
 	// Simulate the fs-consistent-but-registry-lost case: clear the journal.
 	if err := removeJournal(deviceDir(backups, testUDID)); err != nil {
 		t.Fatal(err)
@@ -158,36 +163,41 @@ func TestReconcileSkipsCorruptMarker(t *testing.T) {
 // --- zfs kill matrix (fake-zfs) ---
 
 func TestReconcileZFSKillMatrix(t *testing.T) {
-	phases := []CommitPhase{PhasePrepared, PhaseSnapshotCreated, PhaseLatestRebuilt}
+	phases := []CommitPhase{PhasePrepared, PhaseExchanged, PhaseSnapshotCreated}
 	for _, phase := range phases {
 		t.Run(string(phase), func(t *testing.T) {
 			m, be, f, backups, st := newZFSManager(t, generousPolicy())
 			if err := be.Provision(testUDID); err != nil {
 				t.Fatal(err)
 			}
-			working := zfsWorking(backups, testUDID)
-			goodEncryptedFull(t, working)
-			mustMarker(t, working, "zv-crash", "job1", testUDID, BackendZFS)
+			tree := workingTree(backups, testUDID)
+			goodEncryptedFull(t, tree)
+			mustMarker(t, tree, "zv-crash", "job1", testUDID, BackendZFS)
 
 			snap := snapNameFor("zv-crash", created2)
 			full := be.cli.dataset(testUDID) + "@" + snap
 			dev := deviceDir(backups, testUDID)
+			latest := latestDir(backups, testUDID)
 			j := Journal{
 				VersionID: "zv-crash", UDID: testUDID, Backend: BackendZFS, JobID: "job1",
 				Phase: PhasePrepared, CreatedAt: fmtRFC(created2), Kind: "full", Encrypted: true,
-				StructureVerifiedAt: fmtRFC(created2), ZFSSnapshot: full,
+				StructureVerifiedAt: fmtRFC(created2), ZFSSnapshot: full, JobDir: tree,
 			}
-			if phase == PhaseSnapshotCreated || phase == PhaseLatestRebuilt {
+			if phase == PhaseExchanged || phase == PhaseSnapshotCreated {
+				if err := os.MkdirAll(latest, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := exchange(tree, latest); err != nil { // atomic swap: latest ⇄ working/<udid>
+					t.Fatal(err)
+				}
+				j.Phase = PhaseExchanged
+			}
+			if phase == PhaseSnapshotCreated {
+				_ = os.RemoveAll(workingParent(backups, testUDID))
 				if _, err := f.run(context.Background(), []string{"zfs", "snapshot", full}); err != nil {
 					t.Fatal(err)
 				}
 				j.Phase = PhaseSnapshotCreated
-			}
-			if phase == PhaseLatestRebuilt {
-				if err := be.rebuildLatest(testUDID, snap); err != nil {
-					t.Fatal(err)
-				}
-				j.Phase = PhaseLatestRebuilt
 			}
 			if err := writeJournal(dev, j); err != nil {
 				t.Fatal(err)

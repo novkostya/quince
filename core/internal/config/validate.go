@@ -21,8 +21,8 @@ func Validate(c Config) []wire.ConfigError {
 	if !oneOf(c.Storage.ZFS.Mode, "exec", "hook") {
 		add("storage.zfs.mode", enumMsg(c.Storage.ZFS.Mode, "exec", "hook"))
 	}
-	if !oneOf(c.Storage.ZFS.Mirror, "auto", "reflink", "hardlink", "copy") {
-		add("storage.zfs.mirror", enumMsg(c.Storage.ZFS.Mirror, "auto", "reflink", "hardlink", "copy"))
+	if !oneOf(c.Storage.ZFS.Seed, "auto", "reflink", "copy") {
+		add("storage.zfs.seed", enumMsg(c.Storage.ZFS.Seed, "auto", "reflink", "copy"))
 	}
 	if c.Storage.Retention.KeepRecent < 0 {
 		add("storage.retention.keep_recent", "must be >= 0")

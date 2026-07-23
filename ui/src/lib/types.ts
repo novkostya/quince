@@ -121,7 +121,7 @@ export interface Config {
   backup: { transport: string; require_encryption: boolean };
   storage: {
     backend: string;
-    zfs: { parent_dataset: string; mode: string; hook_cmd: string; mirror: string };
+    zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
     retention: { keep_recent: number; keep_daily: number; keep_weekly: number };
   };
   devices: { usbmuxd_socket: string; netmuxd_addr: string };

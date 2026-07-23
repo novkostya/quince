@@ -132,7 +132,15 @@ numbers are labels, not order (the qn.7-before-qn.6 precedent).
   hardlink mirror/backend tier stays disabled-to-copy (surfaced) until the matrix
   passes.*
 
-### ⚑ `qn.5b` — atomic `latest` + the `working/` lifecycle redesign (inserted 2026-07-22, (cg))
+### `qn.5b` — atomic `latest` + the `working/` lifecycle redesign (inserted 2026-07-22, (cg); **BUILT (CI) 2026-07-24, (cp)**)
+
+> **BUILT (CI-proven).** Atomic `latest` via in-container `renameat2(RENAME_EXCHANGE)`; per-job
+> `working/<udid>` seeded from `latest/` (safe strategy — hardlink→copy), kept-dirty-on-failure for
+> resume; commit reordered verify→exchange→snapshot; symlink dance dropped (free-space bug 28b97de
+> structurally impossible); snapshot `quince-<YYYY-MM-DDTHH-MM>-<ULID>`; honest seed-derived `kind`;
+> Reset REST+CLI. `make gates`/image green. Spec approved-with-amendments ((co)); build in (cp).
+> **Remaining: the real-rpool lab legs** (G-snapshot / G-rclone / G-exchange-live + syncoid) on an
+> Operator hardware day. Original scope below.
 
 **Storage correctness against a stated requirement, not polish** — and the reason it runs
 **before the B2 cron is trusted**. The Operator's three constraints are: a `zfs snapshot` at

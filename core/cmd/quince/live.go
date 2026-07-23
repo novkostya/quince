@@ -112,7 +112,7 @@ func buildStorage(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *confi
 	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
 		Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
 		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSMirror: scfg.ZFS.Mirror,
+		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
 	}, log)
 	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
 		storage.RetentionPolicy{

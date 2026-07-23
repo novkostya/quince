@@ -13,41 +13,44 @@ import (
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
 )
 
-// zfsOpTimeout bounds a single host ZFS operation (snapshot/create/list/destroy).
+// zfsOpTimeout bounds a single host ZFS operation (snapshot/create/list/destroy/seed).
 const zfsOpTimeout = 60 * time.Second
 
-// zfsBackend implements the snapshot-native version model (design §5, stack D5): the writer
-// mutates working/ in place, a version IS a @quince-* snapshot taken post-verify, and latest/
-// is a materialized mirror rebuilt from the new snapshot's .zfs path and atomically swapped —
-// the sync-facing consistent view (D5a). Seed/Discard are no-ops on the working copy.
+// zfsBackend implements the snapshot-native version model (design §5, stack D5; reworked in
+// qn.5b). The writer fills a per-job working/<udid> seeded from latest/ at job start; commit
+// verifies it, ATOMICALLY EXCHANGES it into latest/ (renameat2(RENAME_EXCHANGE) — no window), then
+// takes the @quince-* snapshot, so the snapshot IS latest/ = the version and browse_root points at
+// it. Between backups the dataset holds only latest/. There is no commit-time latest/ mirror any
+// more; the reflink moved to seed time (host-side via the hook `seed` verb in the unprivileged
+// profile, or the in-container reflink→copy ladder otherwise).
 type zfsBackend struct {
 	baseCtx    context.Context
 	cli        *zfsCLI
 	backups    string
-	mirrorCfg  string // auto | reflink | hardlink | copy
+	seedCfg    string // auto | reflink | copy (in-container seed strategy; hardlink is never used — amendment A)
 	appVersion string
 	log        *slog.Logger
 
-	mu         sync.Mutex
-	lastMirror MirrorReport // surfaced mirror mode + honest space claim (stack D5 (bj)/(bk))
+	mu       sync.Mutex
+	lastSeed SeedReport // surfaced seed mode + honest space claim (stack D5 (bj)/(bk))
 }
 
-func (b *zfsBackend) setMirror(r MirrorReport) {
+func (b *zfsBackend) setSeed(r SeedReport) {
 	b.mu.Lock()
-	b.lastMirror = r
+	b.lastSeed = r
 	b.mu.Unlock()
-	b.log.Info("zfs latest/ mirror built", "mode", r.Mode, "claim", r.Claim)
+	b.log.Info("zfs working/ seeded from latest", "mode", r.Mode, "claim", r.Claim)
 }
 
-// LastMirror returns the most recent mirror report (for /api/health surfacing).
-func (b *zfsBackend) LastMirror() MirrorReport {
+// LastSeed returns the most recent seed report (for /api/health surfacing).
+func (b *zfsBackend) LastSeed() SeedReport {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.lastMirror
+	return b.lastSeed
 }
 
-func newZFSBackend(baseCtx context.Context, cli *zfsCLI, backups, mirrorCfg, appVersion string, log *slog.Logger) *zfsBackend {
-	return &zfsBackend{baseCtx: baseCtx, cli: cli, backups: backups, mirrorCfg: mirrorCfg,
+func newZFSBackend(baseCtx context.Context, cli *zfsCLI, backups, seedCfg, appVersion string, log *slog.Logger) *zfsBackend {
+	return &zfsBackend{baseCtx: baseCtx, cli: cli, backups: backups, seedCfg: seedCfg,
 		appVersion: appVersion, log: log}
 }
 
@@ -78,36 +81,102 @@ func (b *zfsBackend) Provision(udid string) error {
 			"(recommended: an rbind,rslave lxc.mount.entry; else `pct set -mpN` + restart)",
 			"udid", udid, "path", dev, "error", err)
 	}
-	for _, d := range []string{zfsWorking(b.backups, udid), zfsLatest(b.backups, udid)} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return err
-		}
-	}
-	return nil
+	// Only latest/ is permanent (between backups the dataset holds only latest/); working/ is
+	// created per job by WorkDir.
+	return os.MkdirAll(latestDir(b.backups, udid), 0o755)
 }
 
-// WorkDir returns working/ — zfs seeds by nature (the previous state is already in place), so
-// this is design §5's no-op Seed.
+// WorkDir returns the idevicebackup2 TARGET (workingParent) after seeding working/<udid> from
+// latest/ (design §5 Seed, qn.5b). A non-empty working/<udid> is RESUMED as-is (a prior failed
+// attempt); otherwise it is seeded — host-side via the hook `seed` verb where in-container FICLONE
+// is blocked, else the in-container reflink→copy ladder — or created empty on a first backup. The
+// seed decision (seeded-from-latest ⇒ incremental) is recorded in the work sentinel.
 func (b *zfsBackend) WorkDir(udid, _ string) (string, error) {
 	if !validUDID(udid) {
 		return "", fmt.Errorf("storage: invalid udid %q", udid)
 	}
-	working := zfsWorking(b.backups, udid)
-	if err := os.MkdirAll(working, 0o755); err != nil {
+	parent := workingParent(b.backups, udid)
+	tree := workingTree(b.backups, udid)
+	if !isEmptyDir(tree) {
+		b.log.Info("storage: resuming dirty working (zfs)", "udid", udid)
+		return parent, nil // already seeded; kind recovered from the sentinel at commit
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return "", err
 	}
-	return working, nil
+	latest := latestDir(b.backups, udid)
+	seeded := false
+	if !isEmptyDir(latest) {
+		if err := b.seedWorking(udid, tree, latest); err != nil {
+			return "", err
+		}
+		seeded = true
+	} else if err := os.MkdirAll(tree, 0o755); err != nil {
+		return "", err
+	}
+	if err := writeWorkState(b.backups, udid, workState{SeededFromLatest: seeded}); err != nil {
+		return "", err
+	}
+	return parent, nil
 }
 
-func (b *zfsBackend) TreePath(udid, _ string) string { return zfsWorking(b.backups, udid) }
+// seedWorking clones latest/ → working/<udid>. Hook mode delegates to the host-side `seed` verb
+// (where FICLONE works despite the unprivileged userns, gate-12 (bi)); otherwise the in-container
+// reflink→copy ladder runs (never hardlink — amendment A). The chosen mode + honest space claim
+// are surfaced.
+func (b *zfsBackend) seedWorking(udid, tree, latest string) error {
+	if b.cli.mode == "hook" {
+		ctx, cancel := b.opCtx()
+		defer cancel()
+		shared, err := b.cli.Seed(ctx, udid)
+		if err != nil {
+			return fmt.Errorf("storage: hook seed working from latest: %w", err)
+		}
+		b.setSeed(SeedReport{Mode: SeedHookReflink, Claim: hookClaim(shared)})
+		return nil
+	}
+	report, err := b.seedInContainer(tree, latest)
+	if err != nil {
+		return fmt.Errorf("storage: seed working from latest: %w", err)
+	}
+	b.setSeed(report)
+	return nil
+}
+
+// seedInContainer runs the reflink → copy ladder from latest/ (qn.5b amendment A: the hardlink
+// tier is disabled-to-copy for the seed until gate 12c). reflink is attempted first; EPERM/
+// unsupported (the unprivileged-userns case, gate-12 (bi)) falls through to a full copy, surfaced.
+// There is no usable in-container sharing-measurement channel yet, so a successful reflink is
+// reported UNVERIFIED ((bk)) — never a silent zero-space claim.
+func (b *zfsBackend) seedInContainer(tree, latest string) (SeedReport, error) {
+	if b.seedCfg == "copy" {
+		return SeedReport{SeedCopy, "copy (explicit) — full-backup-size seed"},
+			clonetree.Clone(tree, latest, clonetree.Copy)
+	}
+	// auto / reflink: reflink from latest/.
+	err := clonetree.Clone(tree, latest, clonetree.Reflink)
+	if err == nil {
+		return SeedReport{SeedReflink, claimFor(sharingUnknown)}, nil
+	}
+	if !errors.Is(err, clonetree.ErrReflinkUnsupported) {
+		return SeedReport{}, err
+	}
+	_ = os.RemoveAll(tree)
+	b.log.Warn("storage: in-container reflink unavailable (EPERM/unsupported — unprivileged userns) → full copy seed (surfaced degraded mode)")
+	return SeedReport{SeedCopy, "copy (reflink unavailable) — full-backup-size seed"},
+		clonetree.Clone(tree, latest, clonetree.Copy)
+}
+
+func (b *zfsBackend) TreePath(udid, _ string) string { return workingTree(b.backups, udid) }
 
 func (b *zfsBackend) Commit(req CommitReq) (Committed, error) {
-	working := zfsWorking(b.backups, req.UDID)
-	if isEmptyDir(working) {
-		return Committed{}, fmt.Errorf("storage: working/ is empty — nothing to commit")
+	tree := workingTree(b.backups, req.UDID)
+	if isEmptyDir(tree) {
+		return Committed{}, fmt.Errorf("storage: working tree is empty — nothing to commit")
 	}
-	// Marker is written into working/ BEFORE the snapshot so the immutable version carries it.
-	if err := WriteMarker(working, Marker{
+	// Marker is written into working/<udid> BEFORE the exchange so it rides into latest/ and the
+	// immutable snapshot carries it.
+	if err := WriteMarker(tree, Marker{
 		VersionID: req.VersionID, JobID: req.JobID, UDID: req.UDID, Backend: BackendZFS,
 		CreatedAt: fmtRFC(req.CreatedAt), Kind: req.Verify.Kind, Encrypted: req.Verify.Encrypted,
 		StructureVerifiedAt: fmtRFC(req.CreatedAt), AppVersion: b.appVersion,
@@ -120,7 +189,8 @@ func (b *zfsBackend) Commit(req CommitReq) (Committed, error) {
 		VersionID: req.VersionID, UDID: req.UDID, Backend: BackendZFS, JobID: req.JobID,
 		Phase: PhasePrepared, CreatedAt: fmtRFC(req.CreatedAt), Kind: req.Verify.Kind,
 		Encrypted: req.Verify.Encrypted, StructureVerifiedAt: fmtRFC(req.CreatedAt),
-		LogicalBytes: req.Verify.LogicalBytes, ZFSSnapshot: b.cli.dataset(req.UDID) + "@" + snap,
+		LogicalBytes: req.Verify.LogicalBytes, JobDir: tree,
+		ZFSSnapshot: b.cli.dataset(req.UDID) + "@" + snap,
 	}
 	if err := writeJournal(dev, j); err != nil {
 		return Committed{}, err
@@ -131,13 +201,36 @@ func (b *zfsBackend) Commit(req CommitReq) (Committed, error) {
 	return b.committedFromSnapshot(req.UDID, snap)
 }
 
-// finishCommit runs snapshot → latest-rebuild from the journal's phase, idempotently, clearing
-// the journal at the end (shared by Commit and ResumeCommit — roll-forward).
+// finishCommit runs exchange → snapshot from the journal's phase, idempotently (roll-forward,
+// shared by Commit and ResumeCommit). The exchange is NOT idempotent (re-running it reverses the
+// swap), so it is guarded by the version-id marker on latest/: a resume that finds latest/ already
+// carrying this version's id skips straight to the snapshot.
 func (b *zfsBackend) finishCommit(j *Journal) error {
 	dev := deviceDir(b.backups, j.UDID)
 	snap := snapName(j.ZFSSnapshot)
+	latest := latestDir(b.backups, j.UDID)
+	tree := j.JobDir
 
 	if j.Phase == PhasePrepared {
+		if !latestHasVersion(latest, j.VersionID) {
+			if err := os.MkdirAll(latest, 0o755); err != nil { // exchange needs both dirs to exist
+				return err
+			}
+			if err := exchange(tree, latest); err != nil {
+				return fmt.Errorf("storage: exchange working into latest: %w", err)
+			}
+		}
+		j.Phase = PhaseExchanged
+		if err := writeJournal(dev, *j); err != nil {
+			return err
+		}
+	}
+
+	if j.Phase == PhaseExchanged {
+		// working/ now holds the OLD latest content (already in the previous snapshot) — drop it
+		// so the dataset (and this snapshot) hold only latest/.
+		_ = os.RemoveAll(workingParent(b.backups, j.UDID))
+		removeWorkState(b.backups, j.UDID)
 		ctx, cancel := b.opCtx()
 		err := b.cli.Snapshot(ctx, j.UDID, snap)
 		cancel()
@@ -150,124 +243,11 @@ func (b *zfsBackend) finishCommit(j *Journal) error {
 		}
 	}
 
-	if j.Phase == PhaseSnapshotCreated {
-		if err := b.rebuildLatest(j.UDID, snap); err != nil {
-			return err
-		}
-		j.Phase = PhaseLatestRebuilt
-		if err := writeJournal(dev, *j); err != nil {
-			return err
-		}
-	}
-
 	return removeJournal(dev)
 }
 
-// rebuildLatest materializes latest/ from the just-committed version and atomically swaps it in,
-// via the stack D5 mirror ladder ((bi)/(bj)/(bk)). It ALWAYS clones from working/ — NEVER the
-// .zfs snapshot mount: reflink-from-snapshot is EXDEV at every layer (cross-superblock, kernel
-// behavior), and working/ holds the snapshot's exact content under the per-UDID job lock. The
-// chosen mode + honest space claim are recorded (surfaced in logs + /api/health).
-func (b *zfsBackend) rebuildLatest(udid, _ string) error {
-	working := zfsWorking(b.backups, udid)
-	if isEmptyDir(working) {
-		return fmt.Errorf("storage: working/ empty at mirror build for %s", udid)
-	}
-	latest := zfsLatest(b.backups, udid)
-
-	// (i) hook configured → the constrained `mirror` verb rebuilds latest/ HOST-side, where
-	// FICLONE works even when the container's unprivileged userns forbids it (gate-12 finding
-	// (bi)). It reflinks from working/ under the job lock + atomic-swaps, touching ONLY the
-	// derived latest/ (never snapshots) — a bounded blast radius since latest/ is rebuildable.
-	if b.cli.mode == "hook" {
-		ctx, cancel := b.opCtx()
-		defer cancel()
-		shared, err := b.cli.Mirror(ctx, udid)
-		if err != nil {
-			return err
-		}
-		b.setMirror(MirrorReport{Mode: MirrorHookReflink, Claim: hookClaim(shared)})
-		return nil
-	}
-
-	// (ii)-(iv) in-container / delegated-exec path: build into staging, then atomic-swap.
-	staging := latest + ".new"
-	old := latest + ".old"
-	if err := os.RemoveAll(staging); err != nil {
-		return err
-	}
-	report, err := b.buildMirrorInContainer(staging, working)
-	if err != nil {
-		return err
-	}
-	// Atomic swap: latest → latest.old, latest.new → latest, rm latest.old.
-	_ = os.RemoveAll(old)
-	if !isEmptyDir(latest) {
-		if err := os.Rename(latest, old); err != nil {
-			return err
-		}
-	} else {
-		_ = os.RemoveAll(latest)
-	}
-	if err := os.Rename(staging, latest); err != nil {
-		return err
-	}
-	b.setMirror(report)
-	return os.RemoveAll(old)
-}
-
-// buildMirrorInContainer runs the reflink → hardlink-under-matrix → copy ladder from working/
-// (stack D5 (bk)), self-selecting by risk dominance. reflink is attempted first (a non-sharing
-// reflink is functionally a copy — same correctness/cost); EPERM/unsupported (the unprivileged-
-// userns case, gate-12 finding (bi)) falls through to hardlink, then copy. There is no usable
-// in-container measurement channel yet (the hook path measures host-side; the syscall statfs
-// channel is a documented follow-up), so a successful reflink is reported UNVERIFIED per (bk) —
-// never a silent zero-space claim — and the risky measured-not-sharing→hardlink downgrade is
-// NOT taken absent a channel (reflink wins on the risk asymmetry). Every degraded mode is
-// surfaced (log + report). Note: the hardlink tier's safety is validated by gate 12c (the
-// destructive matrix; owned by this rung, pending on hardware).
-func (b *zfsBackend) buildMirrorInContainer(staging, working string) (MirrorReport, error) {
-	switch b.mirrorCfg {
-	case "hardlink":
-		return MirrorReport{MirrorHardlink, "hardlink (explicit) — matrix-gated (gate 12c)"},
-			clonetree.Clone(staging, working, clonetree.Hardlink)
-	case "copy":
-		return MirrorReport{MirrorCopy, "copy (explicit) — full-backup-size write per commit"},
-			clonetree.Clone(staging, working, clonetree.Copy)
-	}
-	// auto / reflink: reflink from working/.
-	err := clonetree.Clone(staging, working, clonetree.Reflink)
-	if err == nil {
-		return MirrorReport{MirrorReflink, claimFor(sharingUnknown)}, nil
-	}
-	if !errors.Is(err, clonetree.ErrReflinkUnsupported) {
-		return MirrorReport{}, err
-	}
-	_ = os.RemoveAll(staging)
-	b.log.Warn("storage: in-container reflink unavailable (EPERM/unsupported — unprivileged userns) → hardlink-under-matrix")
-	if err := clonetree.Clone(staging, working, clonetree.Hardlink); err == nil {
-		return MirrorReport{MirrorHardlink, "hardlink-under-matrix (reflink unavailable) — gated on gate 12c"}, nil
-	}
-	_ = os.RemoveAll(staging)
-	b.log.Warn("storage: hardlink unavailable → full copy of latest/ (full-backup-size write per commit; surfaced degraded mode)")
-	return MirrorReport{MirrorCopy, "copy (reflink+hardlink unavailable) — full-backup-size write per commit"},
-		clonetree.Clone(staging, working, clonetree.Copy)
-}
-
-// hookClaim renders the honest space claim for a host-side hook mirror given its measured verdict.
-func hookClaim(shared sharingResult) string {
-	switch shared {
-	case sharingYes:
-		return "zero-space verified (host-side reflink via hook; pool-level sharing confirmed)"
-	case sharingNo:
-		return "host-side reflink did not share — full-backup-size write per commit (surfaced)"
-	default:
-		return "host-side reflink via hook; sharing unverified — budget full-copy space cost"
-	}
-}
-
 func (b *zfsBackend) ResumeCommit(j Journal) (Committed, bool, error) {
-	if j.Phase == PhaseLatestRebuilt {
+	if j.Phase == PhaseSnapshotCreated {
 		_ = removeJournal(deviceDir(b.backups, j.UDID))
 		c, err := b.committedFromSnapshot(j.UDID, snapName(j.ZFSSnapshot))
 		return c, true, err
@@ -279,8 +259,8 @@ func (b *zfsBackend) ResumeCommit(j Journal) (Committed, bool, error) {
 	return c, true, err
 }
 
-// Discard leaves working/ dirty (design §5: no unwind; repair-working-copy is the escape hatch)
-// and reports the last good version for the UI/log.
+// Discard keeps working/ dirty (design §5 / qn.5b: no unwind — a retry resumes into it; Reset is
+// the explicit discard) and reports the last good version for the UI/log.
 func (b *zfsBackend) Discard(udid, _ string) (string, error) {
 	last := "none"
 	if arts, err := b.Scan(udid); err == nil {
@@ -290,7 +270,7 @@ func (b *zfsBackend) Discard(udid, _ string) (string, error) {
 			}
 		}
 	}
-	return fmt.Sprintf("working copy dirty, last good version = %s", last), nil
+	return fmt.Sprintf("working copy kept dirty for retry; last good version = %s", last), nil
 }
 
 func (b *zfsBackend) DeleteArtifact(a Artifact) error {
@@ -302,29 +282,15 @@ func (b *zfsBackend) DeleteArtifact(a Artifact) error {
 	return b.cli.DestroySnapshot(ctx, a.UDID, snapName(*a.ZFSSnapshot))
 }
 
+// RepairWorkingCopy is the qn.5b Reset op: DISCARD the dirty working area so the next backup
+// re-seeds cleanly from latest/ (the previous "rebuild working from the last snapshot" is
+// superfluous now — seeding does that at job start). Losing only the partial, never a version.
 func (b *zfsBackend) RepairWorkingCopy(udid string) error {
-	arts, err := b.Scan(udid)
-	if err != nil {
+	if err := os.RemoveAll(workingParent(b.backups, udid)); err != nil {
 		return err
 	}
-	var last *Artifact
-	for i := range arts {
-		if arts[i].IsLatest {
-			last = &arts[i]
-		}
-	}
-	if last == nil || last.ZFSSnapshot == nil {
-		return fmt.Errorf("storage: no last-good snapshot to rebuild the working copy from")
-	}
-	src := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", snapName(*last.ZFSSnapshot), "working")
-	working := zfsWorking(b.backups, udid)
-	if err := os.RemoveAll(working); err != nil {
-		return err
-	}
-	if err := clonetree.Clone(working, src, clonetree.Copy); err != nil {
-		return fmt.Errorf("storage: rebuild working from snapshot: %w", err)
-	}
-	b.log.Info("storage: rebuilt working copy from last snapshot", "udid", udid, "snapshot", *last.ZFSSnapshot)
+	removeWorkState(b.backups, udid)
+	b.log.Info("storage: reset — discarded dirty working copy (zfs)", "udid", udid)
 	return nil
 }
 
@@ -338,19 +304,23 @@ func (b *zfsBackend) Scan(udid string) ([]Artifact, error) {
 	var out []Artifact
 	var newest string
 	for _, s := range snaps {
-		working := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", s, "working")
-		m, err := ReadMarker(working)
+		// qn.5b: the version content lives at latest/ inside the snapshot. Pre-qn.5b snapshots
+		// held it at working/ and are treated as disposable lab data (decisions (co), decision 4):
+		// ReadMarker(.../latest) simply fails to find a marker for them and they are skipped
+		// gracefully — never adopted at a stale path, never a crash.
+		snapLatest := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", s, "latest")
+		m, err := ReadMarker(snapLatest)
 		if errors.Is(err, ErrMarkerCorrupt) {
 			b.log.Warn("storage: snapshot marker failed its checksum — not adopting", "udid", udid, "snapshot", s)
 			continue
 		}
 		if err != nil {
-			continue // a foreign or marker-less snapshot is not a quince version we adopt
+			continue // a foreign, marker-less, or pre-qn.5b snapshot is not a version we adopt here
 		}
 		full := b.cli.dataset(udid) + "@" + s
 		snapCopy := full
 		out = append(out, Artifact{UDID: udid, Backend: BackendZFS, ZFSSnapshot: &snapCopy,
-			Marker: m, PhysicalBytes: dirSize(working)})
+			Marker: m, PhysicalBytes: dirSize(snapLatest)})
 		if m.CreatedAt > newest {
 			newest = m.CreatedAt
 		}
@@ -365,17 +335,25 @@ func (b *zfsBackend) Scan(udid string) ([]Artifact, error) {
 
 func (b *zfsBackend) PendingJournals() ([]Journal, error) { return scanJournals(b.backups) }
 
-// SweepWork is a no-op on zfs: working/ is the live in-place copy, never orphaned job dirs.
+// SweepWork is a no-op on zfs: a dirty working/ is first-class resumable state (a retry resumes
+// into it), not an orphan — Reset is the only discard (qn.5b).
 func (b *zfsBackend) SweepWork(string) error { return nil }
 
 func (b *zfsBackend) committedFromSnapshot(udid, snap string) (Committed, error) {
-	working := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", snap, "working")
-	m, err := ReadMarker(working)
+	snapLatest := filepath.Join(deviceDir(b.backups, udid), ".zfs", "snapshot", snap, "latest")
+	m, err := ReadMarker(snapLatest)
 	if err != nil {
 		return Committed{}, fmt.Errorf("storage: read snapshot marker after commit: %w", err)
 	}
-	c := committedFromMarker(m, dirSize(working))
+	c := committedFromMarker(m, dirSize(snapLatest))
 	full := b.cli.dataset(udid) + "@" + snap
 	c.ZFSSnapshot = &full
 	return c, nil
+}
+
+// latestHasVersion reports whether latest/ already carries the given version's marker — the
+// idempotency guard for the non-idempotent exchange (a re-run must not swap twice).
+func latestHasVersion(latest, versionID string) bool {
+	m, err := ReadMarker(latest)
+	return err == nil && m.VersionID == versionID
 }

@@ -9,8 +9,10 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
 `storage.backend: auto` (the default) resolves at startup:
 
 - **zfs** — chosen when `storage.zfs.parent_dataset` (or a `hook_cmd`) is set, or `backend: zfs`
-  is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots,
-  `latest/` is a materialized mirror rebuilt from the snapshot's `.zfs` path.
+  is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots.
+  qn.5b: `latest/` IS the backup — a per-job `working/<udid>` (seeded from `latest/` at job start)
+  is verified then atomically exchanged into `latest/`, and the snapshot captures `latest/` = the
+  version. Between backups the dataset holds only `latest/`.
 - **reflink** — the smart default where `/backups` supports FICLONE (Btrfs/Synology, XFS,
   hookless OpenZFS 2.2+). CoW clones, fully independent files, no host coupling.
 - **hardlink** — for filesystems with neither reflink nor snapshots (ext4 NAS).
@@ -51,8 +53,12 @@ client — the client cannot escape it):
 #!/bin/sh
 # Constrained ZFS helper for quince. Allows ONLY:
 #   snapshot|destroy|list on @quince-* snapshots under $PARENT, create of children of $PARENT,
-#   and `mirror` (rebuild the DERIVED latest/ host-side — never a snapshot).
+#   and `seed` (clone latest/ → working/<udid> host-side — the mutable work area, never a snapshot).
 # Dataset destroy is intentionally NOT reachable.
+# qn.5b MIGRATION: the old `mirror` verb (rebuild latest/ from working/) is REPLACED by `seed`
+#   (clone latest/ → working/<udid>) — the reflink moved from commit-time to job-start. The atomic
+#   latest/ swap is now an in-container renameat2(RENAME_EXCHANGE) done by quince (no privilege).
+#   Operators upgrading MUST replace the mirror) case below with the seed) case.
 set -eu
 PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
 CTUID=0   # container's mapped root uid: 0 for privileged/native; the userns base (e.g. 100000)
@@ -72,35 +78,40 @@ case "$op" in
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
   destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-  mirror)   # rebuild latest/ from working/ HOST-side (where FICLONE works even when the
-            # container's unprivileged userns forbids it — gate-12 finding). Touches ONLY the
-            # derived latest/ (rebuildable), NEVER a snapshot: bounded blast radius. Reports
-            # SHARED/COPIED so quince can make an honest space claim (stack D5 (bi)/(bk)).
+  seed)     # qn.5b: clone latest/ → working/<udid> HOST-side (where FICLONE works even when the
+            # container's unprivileged userns forbids it — gate-12 finding), then chown it so the
+            # in-container idevicebackup2 can WRITE it and quince can EXCHANGE it. Touches ONLY the
+            # mutable working area, NEVER a snapshot or the committed latest/: bounded blast radius.
+            # Reports SHARED/COPIED so quince makes an honest space claim (stack D5 (bi)/(bk)).
             case "$target" in "$PARENT"/*)
               mp=$(zfs get -H -o value mountpoint "$target") || exit 1
-              [ -d "$mp/working" ] || { echo "no working/" >&2; exit 1; }
-              rm -rf "$mp/latest.new"
+              [ -d "$mp/latest" ] || { echo "no latest/ to seed from" >&2; exit 1; }
+              udid=${target##*/}
+              rm -rf "$mp/working/$udid"; mkdir -p "$mp/working"
               a0=$(zfs get -Hp -o value available "$target")
-              cp -a --reflink=always "$mp/working" "$mp/latest.new"   # reflink under the job lock
-              zpool sync "${PARENT%%/*}" 2>/dev/null || sync          # settle txg accounting
+              cp -a --reflink=always "$mp/latest" "$mp/working/$udid"   # reflink seed under the job lock
+              zpool sync "${PARENT%%/*}" 2>/dev/null || sync            # settle txg accounting
               a1=$(zfs get -Hp -o value available "$target")
-              rm -rf "$mp/latest.old"; [ -d "$mp/latest" ] && mv "$mp/latest" "$mp/latest.old"
-              mv "$mp/latest.new" "$mp/latest"; rm -rf "$mp/latest.old"   # atomic swap
-              sz=$(du -sb "$mp/latest" | cut -f1); drop=$((a0 - a1))
-              [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED   # pool-level sharing verdict
+              chown -R "$CTUID:$CTUID" "$mp/working"                    # container must write + exchange it
+              sz=$(du -sb "$mp/working/$udid" | cut -f1); drop=$((a0 - a1))
+              [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED # pool-level sharing verdict
               exit 0 ;; esac ;;
 esac
 echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
 exit 1
 ```
 
-The `mirror` verb is the stack D5 ladder's tier (i): with a hook configured, quince delegates the
-`latest/` rebuild to the host, where block cloning is not blocked by the unprivileged
-user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb touches only the
-derived, rebuildable `latest/` — never a snapshot — so even a buggy verb cannot damage a canonical
-version. It emits `SHARED`/`COPIED` so quince reports an honest space claim rather than assuming
-zero-space. Hookless deployments fall through the in-container ladder (reflink → hardlink-under-
-matrix → copy), reporting sharing UNVERIFIED where no measurement channel is available.
+The `seed` verb (qn.5b, replacing `mirror`): with a hook configured, quince delegates the job-start
+clone of `latest/` → `working/<udid>` to the host, where block cloning is not blocked by the
+unprivileged user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb
+touches only the mutable, rebuildable `working/` area — never a snapshot, never the committed
+`latest/` — so even a buggy verb cannot damage a canonical version. It emits `SHARED`/`COPIED` so
+quince reports an honest space claim rather than assuming zero-space. **The atomic `latest/` swap
+itself is NOT in the hook** — at commit quince does an in-container `renameat2(RENAME_EXCHANGE)`
+(working/<udid> ⇄ latest/, no privilege, no window) and then the hook `snapshot`. Hookless
+deployments fall through the in-container seed ladder (reflink → copy; **never hardlink** — a
+hardlink seed would alias the committed `latest/`, gate 12c), reporting sharing UNVERIFIED where no
+measurement channel is available.
 
 Then `storage.zfs.hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes zfsuser@zfshost"` (the helper
 runs regardless of the command text; quince appends the operation + target as argv).
@@ -122,9 +133,11 @@ and local-only areas are excluded by **anchored** filter rules. Ship this block 
 
 ```
 --filter "- /iphone-backup/*/working/**"
---filter "- /iphone-backup/*/work/**"
 --filter "- /iphone-backup/*/versions/**"
 ```
+
+(qn.5b dropped the old per-job `work/<job>/` dir — the mutable in-progress tree is now
+`working/<udid>/`, still covered by the anchored `working/**` rule.)
 
 ⚠ **The leading `/` (anchor) is load-bearing.** An unanchored `--exclude "**/working/**"` would
 also drop any directory named `working` *inside* backup content under `latest/`, silently
@@ -141,6 +154,9 @@ zfs snapshot -r pool/path/to/iphone-backup@offsite-$(date +%s)   # local restore
 rclone sync /pool/path b2:bucket/quince <the three --filter lines above>
 ```
 
-The only non-atomic instant is the `latest/` swap itself (two renames); a walk crossing it can
-briefly mix two *individually valid* versions — self-healed by the next run, revertible remotely
-via bucket versioning.
+**There is no non-atomic instant (qn.5b).** `latest/` changes only by a single
+`renameat2(RENAME_EXCHANGE)` — it is never unoccupied, so a walk (or a `zfs snapshot`) crossing a
+commit always sees a complete `latest/`, never a missing one. This replaced the old two-rename swap,
+whose window an `rclone sync` could cross and mirror as a **deletion** of the remote copy (the
+stack-D5 `PROPOSED (gap)`, decisions (cg)). Between backups the dataset holds only `latest/`
+(the per-job `working/` exists only during/after a backup, and is rclone-excluded).

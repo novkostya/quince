@@ -18,7 +18,7 @@ type Options struct {
 	ZFSParent  string // storage.zfs.parent_dataset
 	ZFSMode    string // exec | hook
 	ZFSHookCmd string
-	ZFSMirror  string // auto | reflink | hardlink | copy
+	ZFSSeed    string // auto | reflink | copy (in-container seed strategy; hardlink never used — amendment A)
 }
 
 // Select resolves the effective backend (stack D5 auto-selection): explicit zfs intent
@@ -36,7 +36,7 @@ func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, s
 			reason = "storage.backend: zfs"
 		}
 		log.Info("storage backend selected", "backend", BackendZFS, "reason", reason, "mode", opts.ZFSMode)
-		return newZFSBackend(baseCtx, cli, opts.Backups, orAuto(opts.ZFSMirror), opts.AppVersion, log), BackendZFS, reason
+		return newZFSBackend(baseCtx, cli, opts.Backups, orAuto(opts.ZFSSeed), opts.AppVersion, log), BackendZFS, reason
 	}
 
 	switch opts.Backend {
@@ -102,6 +102,20 @@ func strategyFor(name string) clonetree.Strategy {
 	default:
 		return clonetree.Copy
 	}
+}
+
+// seedStrategy returns the strategy SAFE for seeding working/<udid> from latest/ (qn.5b
+// amendment A, decisions (co)). Reflink (independent CoW) and copy are safe; a HARDLINK seed
+// would alias working/<udid> to the committed latest/, so an in-place idevicebackup2 write to any
+// file class not yet on clonetree.MutatesInPlace would corrupt the committed version through the
+// alias — the very completeness the deferred gate 12c proves. Until then the hardlink tier stays
+// disabled-to-copy for the seed too, so it downgrades to copy (a surfaced degraded mode; the
+// caller logs it). reflink/copy pass through unchanged.
+func seedStrategy(s clonetree.Strategy) clonetree.Strategy {
+	if s == clonetree.Hardlink {
+		return clonetree.Copy
+	}
+	return s
 }
 
 func orAuto(s string) string {

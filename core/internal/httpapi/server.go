@@ -59,6 +59,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.JobControl == nil { // no backup engine wired (--demo) → command surface 503
 		deps.JobControl = UnavailableJobControl{}
 	}
+	if deps.WorkingReset == nil { // no backup engine wired → reset surface 503
+		deps.WorkingReset = UnavailableWorkingReset{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -73,6 +76,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair", deps.handlePair())
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair/validate", deps.handlePairValidate())
 	apiMux.HandleFunc("POST /api/devices/{udid}/encryption", deps.handleEncryption())
+	apiMux.HandleFunc("POST /api/devices/{udid}/reset-working", deps.handleResetWorking())
 	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
 	apiMux.HandleFunc("POST /api/jobs", deps.handleJobCreate())
 	apiMux.HandleFunc("GET /api/jobs", deps.handleJobs())

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// Story 4: zfs commit creates a @quince-* snapshot, rebuilds latest/ from .zfs, and rows the
-// version; commands are argv arrays (no shell).
+// Story 3: zfs commit exchanges the verified working tree into latest/ (atomic) then takes a
+// @quince-* snapshot capturing latest/ = the version; commands are argv arrays (no shell).
 func TestZFSCommit(t *testing.T) {
 	m, _, f, backups, _ := newZFSManager(t, generousPolicy())
 	commitGoodTree(t, m, testUDID)
@@ -21,44 +21,54 @@ func TestZFSCommit(t *testing.T) {
 	if v.Backend != BackendZFS || v.ZFSSnapshot == nil || !strings.Contains(*v.ZFSSnapshot, "@quince-") {
 		t.Fatalf("bad zfs version: backend=%s snap=%v", v.Backend, v.ZFSSnapshot)
 	}
-	if !strings.Contains(v.BrowseRoot, filepath.Join(".zfs", "snapshot")) {
-		t.Fatalf("zfs browse_root should go through .zfs: %q", v.BrowseRoot)
+	// browse_root goes through .zfs and points at latest/ (was working/ pre-qn.5b).
+	if !strings.Contains(v.BrowseRoot, filepath.Join(".zfs", "snapshot")) || !strings.HasSuffix(v.BrowseRoot, "latest") {
+		t.Fatalf("zfs browse_root should be .zfs/snapshot/<snap>/latest: %q", v.BrowseRoot)
 	}
 	snap := snapName(*v.ZFSSnapshot)
-	if _, err := os.Stat(filepath.Join(backups, testUDID, ".zfs", "snapshot", snap, "working")); err != nil {
-		t.Fatalf("snapshot working path missing: %v", err)
+	if _, err := os.Stat(filepath.Join(backups, testUDID, ".zfs", "snapshot", snap, "latest")); err != nil {
+		t.Fatalf("snapshot latest/ path missing: %v", err)
 	}
-	lm, err := ReadMarker(zfsLatest(backups, testUDID))
+	// The live latest/ holds the version (the exchange moved the tree in) and working/ is gone.
+	lm, err := ReadMarker(latestDir(backups, testUDID))
 	if err != nil || lm.VersionID != v.ID {
-		t.Fatalf("latest/ not rebuilt from snapshot: marker=%q err=%v", lm.VersionID, err)
+		t.Fatalf("latest/ marker = %q err=%v, want %s", lm.VersionID, err, v.ID)
+	}
+	if _, err := os.Stat(workingParent(backups, testUDID)); !os.IsNotExist(err) {
+		t.Fatal("working/ should be gone after a successful zfs commit")
 	}
 	assertCleanArgv(t, f.calls, "snapshot")
 }
 
-func TestZFSDiscardReportsDirty(t *testing.T) {
-	m, _, _, _, _ := newZFSManager(t, generousPolicy())
+func TestZFSDiscardKeepsWorking(t *testing.T) {
+	m, _, _, backups, _ := newZFSManager(t, generousPolicy())
 	commitGoodTree(t, m, testUDID)
-	note, err := m.Discard(testUDID, "job-"+testUDID)
+	goodEncryptedFull(t, seedTree(t, m, testUDID, "jobX")) // a partial attempt
+	note, err := m.Discard(testUDID, "jobX")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(note, "working copy dirty, last good") {
-		t.Fatalf("discard note = %q, want a dirty-working report", note)
+	if !strings.Contains(note, "kept dirty for retry") {
+		t.Fatalf("discard note = %q, want a kept-dirty report", note)
+	}
+	if isEmptyDir(workingTree(backups, testUDID)) {
+		t.Fatal("working/<udid> should be KEPT dirty after discard (resume)")
 	}
 }
 
-func TestZFSRepairWorkingCopy(t *testing.T) {
+// Reset discards the dirty working so the next backup re-seeds from latest/.
+func TestZFSResetWorking(t *testing.T) {
 	m, _, _, backups, _ := newZFSManager(t, generousPolicy())
 	commitGoodTree(t, m, testUDID)
-	working := zfsWorking(backups, testUDID)
-	if err := os.RemoveAll(working); err != nil { // simulate a corrupt/lost working copy
-		t.Fatal(err)
-	}
+	goodEncryptedFull(t, seedTree(t, m, testUDID, "jobX"))
 	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("repair: %v", err)
+		t.Fatalf("reset: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(working, "Status.plist")); err != nil {
-		t.Fatalf("working not rebuilt from snapshot: %v", err)
+	if _, err := os.Stat(workingParent(backups, testUDID)); !os.IsNotExist(err) {
+		t.Fatal("working/ should be gone after Reset")
+	}
+	if !hasVersion(m, testUDID) {
+		t.Fatal("committed version must survive a Reset")
 	}
 }
 
@@ -78,39 +88,47 @@ func TestZFSDeleteDestroysSnapshot(t *testing.T) {
 	}
 }
 
-// Stack D5 ladder (i): hook configured → latest/ rebuilt HOST-side via the `mirror` verb.
-func TestZFSHookMirror(t *testing.T) {
-	m, be, f, backups, _ := newZFSManagerCfg(t, generousPolicy(), "hook", "auto")
-	commitGoodTree(t, m, testUDID)
-	if _, err := ReadMarker(zfsLatest(backups, testUDID)); err != nil {
-		t.Fatalf("latest/ not built via the hook mirror verb: %v", err)
+// qn.5b ladder: hook configured → working/<udid> seeded HOST-side via the `seed` verb at job start.
+func TestZFSHookSeed(t *testing.T) {
+	m, be, f, _, _ := newZFSManagerCfg(t, generousPolicy(), "hook", "auto")
+	commitGoodTree(t, m, testUDID) // v1 → latest/
+	// A second job triggers the seed of working/<udid> from latest/ (via the hook `seed` verb).
+	target, err := m.Seed(testUDID, "job2")
+	if err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	if be.LastMirror().Mode != MirrorHookReflink {
-		t.Fatalf("mirror mode = %q, want %q", be.LastMirror().Mode, MirrorHookReflink)
+	if _, err := os.Stat(filepath.Join(target, testUDID, "Status.plist")); err != nil {
+		t.Fatalf("working/<udid> not seeded via the hook seed verb: %v", err)
 	}
-	// The mirror verb ran as an argv (no shell), through the hook.
-	assertCleanArgv(t, f.calls, "mirror")
-	t.Logf("hook mirror claim: %q", be.LastMirror().Claim)
+	if be.LastSeed().Mode != SeedHookReflink {
+		t.Fatalf("seed mode = %q, want %q", be.LastSeed().Mode, SeedHookReflink)
+	}
+	assertCleanArgv(t, f.calls, "seed") // the seed verb ran as an argv (no shell), through the hook
+	t.Logf("hook seed claim: %q", be.LastSeed().Claim)
 }
 
-// Stack D5 ladder (ii)-(iv): hookless → in-container reflink → hardlink-under-matrix → copy,
-// self-selecting. On the CI filesystem reflink is unavailable, so it falls through and reports
-// an honest non-zero-space claim (never a silent zero-space assertion).
-func TestZFSMirrorInContainerLadder(t *testing.T) {
-	m, be, _, backups, _ := newZFSManagerCfg(t, generousPolicy(), "exec", "auto")
+// qn.5b ladder: hookless → in-container reflink → copy, self-selecting (NEVER hardlink for the
+// seed, amendment A). On the CI filesystem reflink is unavailable, so it falls through to copy and
+// reports an honest claim (never a silent zero-space assertion).
+func TestZFSSeedInContainerLadder(t *testing.T) {
+	m, be, _, _, _ := newZFSManagerCfg(t, generousPolicy(), "exec", "auto")
 	commitGoodTree(t, m, testUDID)
-	if _, err := ReadMarker(zfsLatest(backups, testUDID)); err != nil {
-		t.Fatalf("latest/ not built: %v", err)
+	target, err := m.Seed(testUDID, "job2")
+	if err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	r := be.LastMirror()
+	if _, err := os.Stat(filepath.Join(target, testUDID, "Status.plist")); err != nil {
+		t.Fatalf("working/<udid> not seeded: %v", err)
+	}
+	r := be.LastSeed()
 	switch r.Mode {
-	case MirrorReflink, MirrorHardlink, MirrorCopy:
-		t.Logf("in-container ladder selected mode=%q claim=%q", r.Mode, r.Claim)
+	case SeedReflink, SeedCopy:
+		t.Logf("in-container seed selected mode=%q claim=%q", r.Mode, r.Claim)
 	default:
-		t.Fatalf("unexpected in-container mirror mode %q", r.Mode)
+		t.Fatalf("unexpected in-container seed mode %q (hardlink must never be used for the seed)", r.Mode)
 	}
 	if r.Claim == "" {
-		t.Fatal("mirror claim must be surfaced, never empty")
+		t.Fatal("seed claim must be surfaced, never empty")
 	}
 }
 

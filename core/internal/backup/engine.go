@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
@@ -22,11 +23,14 @@ var udidPattern = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 
 func validUDID(u string) bool { return udidPattern.MatchString(u) }
 
-// StorageForJob is the extra query the engine needs beyond the Storage seam for reconciliation:
-// did a commit for this job roll forward (a version now carries its job_id)? Kept separate so the
-// primary Storage interface stays about the running flow. *storage.Manager satisfies both.
+// StorageForJob is the extra storage surface the engine needs beyond the running-flow Storage seam:
+// did a commit for this job roll forward (a version now carries its job_id)? — used by
+// reconciliation; and RepairWorkingCopy — the Reset action (discard the dirty working/). Kept
+// separate so the primary Storage interface stays about the running flow. *storage.Manager
+// satisfies both.
 type StorageForJob interface {
 	VersionForJob(udid, jobID string) (versionID string, ok bool)
+	RepairWorkingCopy(udid string) error
 }
 
 // Options wires the engine.
@@ -50,9 +54,9 @@ type Options struct {
 
 // ToolConfig configures the idevicebackup2 supervisor. In production only Bin + the muxer
 // addresses are set; ArgPrefix + Env are the test-only fake-CLI harness (Bin = the test binary).
-// There is deliberately NO target-root knob: the per-job symlink stub is derived from the storage
-// work dir, because a stub on a different filesystem makes idevicebackup2 report the wrong free
-// space and the device refuses the backup (qn.4c lab finding — see prepareTarget).
+// There is deliberately NO target-root knob: the target IS the storage backend's working/ parent
+// (Seed's return), always on the storage filesystem, so idevicebackup2's free-space statfs is
+// truthful by construction (qn.5b dropped the old symlink stub; qn.4c lab finding, bug 28b97de).
 type ToolConfig struct {
 	Bin           string   // "" → "idevicebackup2"
 	ArgPrefix     []string // test-only leading args (-test.run=… "--")
@@ -205,6 +209,35 @@ func (e *Engine) CancelJob(id string) (wire.Job, int, string) {
 	return jobToWire(row), http.StatusAccepted, ""
 }
 
+// ResetWorking discards a device's dirty working/ so the next backup starts clean from latest/ (the
+// qn.5b Reset action, contracts §1 POST /api/devices/{udid}/reset-working). It refuses 409 while a
+// backup is running for the device — resetting mid-backup would yank the tree from under
+// idevicebackup2 — and 404s an unknown device. Idempotent: a device with no working/ is already
+// clean (→ 202). It NEVER touches a committed version (Reset only discards the mutable working/).
+func (e *Engine) ResetWorking(udid string) (int, string) {
+	if !validUDID(udid) {
+		return http.StatusNotFound, "unknown device"
+	}
+	if _, ok := e.devices.Device(udid); !ok {
+		return http.StatusNotFound, "unknown device"
+	}
+	e.mu.Lock()
+	_, busy := e.running[udid]
+	e.mu.Unlock()
+	if busy {
+		return http.StatusConflict, "a backup is running for this device — cancel it before resetting"
+	}
+	if e.versionQ == nil {
+		return http.StatusServiceUnavailable, "the storage subsystem is unavailable"
+	}
+	if err := e.versionQ.RepairWorkingCopy(udid); err != nil {
+		e.log.Error("backup: reset working failed", "udid", udid, "error", err)
+		return http.StatusInternalServerError, "reset failed: " + err.Error()
+	}
+	e.log.Info("backup: reset — discarded dirty working copy", "udid", udid)
+	return http.StatusAccepted, "working copy reset — the next backup starts clean from the last version"
+}
+
 // --- httpapi.JobReader ---
 
 func (e *Engine) Jobs(udid, cursor string, limit int) ([]wire.Job, string) {
@@ -329,7 +362,7 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 			return
 		}
 		e.transition(lj, func(r *store.JobRow) { r.State = StateVerifying; r.Phase = StateVerifying })
-		ok, detail, _, _ := e.storage.VerifyTree(workDir)
+		ok, detail, _, _ := e.storage.VerifyWork(udid, lj.row.ID)
 		if !ok {
 			e.terminate(lj, StateFailed, ErrVerifyFailed, "structural verification failed: "+detail)
 			e.discard(lj)
@@ -458,13 +491,13 @@ type superviseState struct {
 	failReason  string // the tool's own last error line, for an honest failure message
 }
 
-func (e *Engine) supervise(parent context.Context, lj *liveJob, workDir string) superviseResult {
+func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) superviseResult {
 	udid := lj.row.UDID
-	target, cleanup, err := e.tool.prepareTarget(lj.row.ID, udid, workDir)
-	if err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: "prepare target: " + err.Error()}
-	}
-	defer cleanup()
+	// qn.5b: target IS the working/ parent handed to idevicebackup2 (Seed's return); the tool
+	// writes the tree into <target>/<UDID> by its own convention, so no symlink stub is needed and
+	// the free-space statfs is truthful (target is on the storage filesystem by construction). The
+	// sampler watches the actual tree (where Manifest.db churns), not the parent.
+	tree := filepath.Join(target, udid)
 
 	runCtx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -496,7 +529,7 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, workDir string) 
 	go scan(stdout)
 	go scan(stderr)
 
-	smp := newSampler(e.cfg, workDir, e.freeSpace, e.now())
+	smp := newSampler(e.cfg, tree, e.freeSpace, e.now())
 	ticker := time.NewTicker(e.cfg.SampleInterval)
 	defer ticker.Stop()
 	sampleDone := make(chan struct{})

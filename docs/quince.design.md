@@ -160,9 +160,11 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   manual incremental — the lab showed MobileBackup2 continues from torn state — but
   that's a policy, not a guarantee: every result still passes full structural
   verification, and if incrementals from a dirty working copy repeatedly fail, the
-  **escape hatch** is `quince device repair-working-copy <udid>` (zfs: rebuild
-  `working/` from the last good snapshot; reserved semantically now, implemented in
-  qn.5, never automatic in v0.1). Never two concurrent jobs per UDID. Transport policy
+  **escape hatch** is **Reset** — `quince device reset-working <udid>` / `POST /api/devices/{udid}/
+  reset-working` (qn.5b: discard the dirty `working/` so the next backup re-seeds clean from
+  `latest/`, losing only the partial; the landed `RepairWorkingCopy` op, never automatic in v0.1).
+  On FAILURE the dirty `working/` is otherwise KEPT so a one-tap retry RESUMES into it (no
+  re-transfer). Never two concurrent jobs per UDID. Transport policy
   `auto` prefers USB when plugged, Wi-Fi otherwise — and resolves against **current
   presence only**: a device on neither transport is **refused actionably** (no job
   minted; the UI disables "Back up now" with the reason), because a guessed transport
@@ -179,47 +181,55 @@ Two layouts, per stack D5 (Operator rulings: ZFS versions natively via per-devic
 datasets; the live namespace always presents a consistent last-verified backup for
 whole-tree offsite sync — D5a):
 
+**qn.5b unified the two lifecycles onto one** (decisions (cg)/(co)): every backend now writes into a
+per-job `working/<udid>` seeded from `latest/`, verifies it, and **atomically exchanges** it into
+`latest/`. The models differ only in what a *version* is (a snapshot vs a directory).
+
 ```
-zfs backend (one child dataset per device)   reflink / hardlink / copy backends (plain dirs)
-<parent>/<udid>  mounted at /backups/<udid>  /backups/<udid>/latest/
-├── working/ ← idevicebackup2 mutates        ← REAL DIR: newest verified backup;
-│             in place; dirty mid-job;          offsite-sync source
-│             excluded from offsite sync     /backups/<udid>/versions/<ts>/
-└── latest/   ← REAL DIR: materialized view    ← prior versions (rotated out of latest
-              of the newest snapshot, built      by rename at commit); local-only
-              from its .zfs path at commit;  /backups/<udid>/work/<job-id>/
-              THE offsite-sync source          ← the only place idevicebackup2 writes
-versions = zfs snapshots @quince-<job>-<ts>     (seeded from latest: reflink | hardlink
-(post-verify only), browsed via .zfs/snapshot/    | copy)
+all backends — /backups/<udid>/ (zfs: a child dataset mounted here; namespace: plain dirs)
+├── latest/            ← REAL DIR: the newest verified backup = the version content; the SOLE
+│                        offsite-sync source; permanent between backups. Changed ONLY by a single
+│                        renameat2(RENAME_EXCHANGE) at commit — never unoccupied.
+├── working/<udid>/    ← the ONLY place idevicebackup2 writes (target = working/, its own
+│                        <target>/<UDID> convention → no symlink). Per-job: seeded from latest/ at
+│                        job start (safe strategy), dirty mid-job, KEPT on FAILURE (a retry
+│                        resumes — no re-transfer), removed on success. Excluded from offsite sync.
+└── versions/<ts>/     ← prior versions — NAMESPACE ONLY (rotated out of latest/ at commit);
+                         local-only. zfs has NO versions/ dir: prior versions are
+                         @quince-<YYYY-MM-DDTHH-MM>-<ULID> snapshots (post-verify), browsed via
+                         .zfs/snapshot/<snap>/latest/. So on zfs, between backups the dataset holds
+                         ONLY latest/ (every snapshot = exactly one complete backup, structurally).
 ```
 
 `latest/` is a real directory on every backend, never a symlink — one uniform offsite
-contract (stack D5a): include `latest/`, exclude `working/`, `work/`, and `versions/` — via ANCHORED
+contract (stack D5a): include `latest/`, exclude `working/` and `versions/` — via ANCHORED
 filter rules only (unanchored name matches would silently drop same-named dirs inside
 backup content; exact block in stack D5a).
 
 Interface (all operations idempotent, all logged with their real commands):
 
 ```
-Provision(udid) → device store   // zfs: create child dataset via hook + visibility probe
-Seed(job)    → workdir     // namespace: populate work from latest; zfs: no-op
-Commit(job)  → VersionRef  // journaled promotion (below)
-Discard(job)               // namespace: rm work; zfs: no-op (dirty working/ stays a
-                           // candidate; repair-working-copy is the escape hatch)
+Provision(udid) → device store   // zfs: create child dataset via hook + visibility probe; else mkdir latest/
+Seed(udid,job)  → target   // return the idevicebackup2 target (working/ parent); seed working/<udid>
+                           // from latest/ (safe strategy: hardlink→copy), or RESUME a dirty one
+Commit(udid,job) → VersionRef  // verify working/<udid> → atomic exchange into latest/ → snapshot/archive
+Discard(udid,job)          // KEEP the dirty working/ so a retry resumes (all backends; Reset discards)
+RepairWorkingCopy(udid)    // Reset: discard the dirty working/ (the next backup re-seeds from latest/)
 List() / Delete(ref) / Prune(policy) / Verify(ref)
 ```
 
 | Backend | Version = | Commit | Notes |
 | --- | --- | --- | --- |
-| `zfs` | `zfs snapshot <parent>/<udid>@quince-<job>-<ts>` | snapshot via hook/exec + rebuild `latest/` from the new snapshot's `.zfs` path (immutable source; reflink→hardlink→copy, probed) + atomic swap | hook = forced-command SSH key: `snapshot`/`destroy`/`list` on `@quince-*` + `create` of children under the configured parent; **dataset destroy never in the key** (quince prints the host command); `.zfs` visibility + new-child-dataset propagation probed — recommended PVE mount is `lxc.mount.entry … rbind,rslave` (live propagation, no restart), else printed `pct set -mpN` instructions; nested-OCI bind uses `propagation: rslave`; single-dataset fallback mode documented |
-| `reflink` | `latest/` (newest) + `versions/<ts>/` dirs | journaled rotation: `latest/`→`versions/<prev>`, `work/`→`latest/` | smart default where FICLONE probe passes (Btrfs/XFS/bcachefs, ZFS 2.2+ without a hook); clones are independent files — **no hardlink-safety matrix needed**; cloning in-process via FICLONE ioctl (no `cp --reflink` dependency) |
-| `hardlink` | `latest/` (newest) + `versions/<ts>/` dirs | same journaled rotation | for no-reflink filesystems (ext4); gated by the destructive hardlink-safety matrix (stack D5); in-place-mutating file classes copied, not linked |
-| `copy` | `latest/` (newest) + `versions/<ts>/` dirs | same journaled rotation | full-copy seed; transient 2× space; retention defaults to latest-only |
+| `zfs` | `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>` | verify → **exchange** working/<udid> ⇄ latest/ (in-container `renameat2`, no privilege, no window) → rm working/ → `snapshot` via hook/exec. Seed is host-side reflink via the hook `seed` verb, or in-container reflink→copy | hook = forced-command SSH key: `snapshot`/`destroy`/`list` on `@quince-*` + `create` of children + `seed` (clone latest/→working/<udid>); **dataset destroy never in the key** (quince prints the host command); `.zfs` visibility + new-child-dataset propagation probed — recommended PVE mount is `lxc.mount.entry … rbind,rslave` (live propagation, no restart), else printed `pct set -mpN` instructions; nested-OCI bind uses `propagation: rslave`; single-dataset fallback mode documented |
+| `reflink` | `latest/` (newest) + `versions/<ts>/` dirs | verify → **exchange** working/<udid> ⇄ latest/ → archive the displaced content to `versions/<prev>` | smart default where FICLONE probe passes (Btrfs/XFS/bcachefs, ZFS 2.2+ without a hook); clones are independent files — **no hardlink-safety matrix needed**; cloning in-process via FICLONE ioctl (no `cp --reflink` dependency) |
+| `hardlink` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | for no-reflink filesystems (ext4); the **seed is disabled-to-copy** until the destructive hardlink-safety matrix passes (gate 12c) — a hardlink seed would alias the committed `latest/`; in-place-mutating file classes copied, not linked |
+| `copy` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | full-copy seed; transient 2× space; retention defaults to latest-only |
 
 Auto-selection: explicit zfs config → `zfs`; else probe `/backups` at runtime:
 FICLONE-independence test → `reflink`, `link()`+inode test → `hardlink`, else `copy`
-(stack D5). One shared `clonetree` package implements all three clone strategies for
-seeding, version promotion, and the zfs `latest/` mirror.
+(stack D5). One shared `clonetree` package implements the three clone strategies; qn.5b uses it for
+the **seed** (clone `latest/` → `working/<udid>` at job start, hardlink downgraded to copy — gate
+12c), and the atomic `latest/` swap is a plain `renameat2(RENAME_EXCHANGE)`, not a clone.
 
 **Commit is journaled, and startup reconciliation is a first-class subsystem** (adopted
 from external review). Commit phases persist to the job journal AND to on-disk markers —
@@ -227,17 +237,18 @@ each committed version carries `quince-version.json` (version id, job id, create
 structural-verify result, app version), written before promotion:
 
 ```
-prepared → previous_archived → latest_promoted → registry_committed   (reflink/hardlink/copy:
-                                                  latest/ → versions/<prev>, work → latest/)
-prepared → snapshot_created → latest_rebuilt → registry_committed     (zfs: latest/ built
-                                                  from the new snapshot's .zfs path)
+qn.5b — the atomic exchange is the shared pivot (marker-guarded, since re-running it reverses it):
+prepared → exchanged → archived → registry_committed          (namespace: working/<udid> ⇄ latest/,
+                                                                then displaced content → versions/<prev>)
+prepared → exchanged → snapshot_created → registry_committed  (zfs: working/<udid> ⇄ latest/,
+                                                                rm working/, then snapshot latest/)
 ```
 
 **Roll-forward principle (external-review point, accepted): once structural
 verification has passed and the immutable artifact exists (the zfs snapshot, or the
 promoted version dir), that backup is never discarded by recovery.** Reconciliation
-always completes the remaining phases — rebuild `latest/`, finish the rotation, write
-the registry row — rather than unwinding them; the only exception is an artifact whose
+always completes the remaining phases — finish the exchange (marker-guarded), archive/snapshot,
+write the registry row — rather than unwinding them; the only exception is an artifact whose
 `quince-version.json` marker is missing or fails its hash check. A commit failure must
 never destroy a successfully transferred multi-hour Wi-Fi backup.
 

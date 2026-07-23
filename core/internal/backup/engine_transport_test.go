@@ -59,8 +59,11 @@ func TestAutoResolvesToWifiAndWifiSucceeds(t *testing.T) {
 		t.Fatal("a Wi-Fi success committed no version")
 	}
 	vs := h.mgr.Versions(testUDID)
-	if len(vs) != 1 || vs[0].Kind != "incremental" || !vs[0].Encrypted {
-		t.Fatalf("want 1 encrypted incremental version, got %+v", vs)
+	// qn.5b / finding #9(a): kind is AUTHORITATIVE from the seed decision, not the transcript's
+	// IsFullBackup. This is a FIRST backup (no prior latest/ to seed from) → honestly "full", even
+	// though the transcript is an "incremental" TRANSFER — every quince version is complete.
+	if len(vs) != 1 || vs[0].Kind != "full" || !vs[0].Encrypted {
+		t.Fatalf("want 1 encrypted full version (first backup, seed-derived kind), got %+v", vs)
 	}
 }
 

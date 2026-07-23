@@ -156,7 +156,7 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 		{"backing_up", "receiving", 71, 260, "active", "receiving resumed… 260", 1500 * time.Millisecond},
 		{"backing_up", "receiving", 92, 330, "active", "receiving files… 330", 1500 * time.Millisecond},
 		{"verifying", "verifying", 100, 355, "active", "verifying: Backup Successful · Manifest.db ok · blobs resolve", 2000 * time.Millisecond},
-		{"committing", "committing", 100, 355, "active", "committing: snapshot @quince-… · latest/ rebuilt", 2000 * time.Millisecond},
+		{"committing", "committing", 100, 355, "active", "committing: exchange working→latest · snapshot @quince-…", 2000 * time.Millisecond},
 	}
 
 	for _, s := range steps {
@@ -202,8 +202,8 @@ func (p *Provider) commitDemoVersionFor(udid, jid string) wire.Version {
 	vid := id.New()
 	v := wire.Version{
 		ID: vid, UDID: udid, Backend: "zfs",
-		ZFSSnapshot:         strptr("tank/backups/iphone-backup/" + udid + "@quince-" + vid),
-		BrowseRoot:          "/backups/" + udid + "/.zfs/snapshot/quince-" + vid + "/working",
+		ZFSSnapshot:         strptr("tank/backups/iphone-backup/" + udid + "@quince-2026-07-18T02-30-" + vid),
+		BrowseRoot:          "/backups/" + udid + "/.zfs/snapshot/quince-2026-07-18T02-30-" + vid + "/latest",
 		CreatedAt:           now,
 		JobID:               strptr(jid),
 		Kind:                "incremental",

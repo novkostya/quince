@@ -286,7 +286,7 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	c := authedClient(t, srv)
 
 	body := `{"backup":{"transport":"usb","require_encryption":true},` +
-		`"storage":{"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","mirror":"auto"},` +
+		`"storage":{"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
 		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +

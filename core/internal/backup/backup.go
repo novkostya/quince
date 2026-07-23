@@ -104,15 +104,18 @@ type JobStore interface {
 
 // Storage is the qn.5 seam the engine drives (*storage.Manager satisfies it via thin methods).
 // The engine imports no storage internals — CommitJob already returns the frozen wire.Version,
-// and VerifyTree returns primitives, so there is no import edge into the storage package.
+// and VerifyWork returns primitives, so there is no import edge into the storage package.
 type Storage interface {
-	// Seed provisions the device area and returns the writer's work dir (== the tree path).
-	Seed(udid, jobID string) (workDir string, err error)
-	// VerifyTree is the passwordless structural verification (storage.Verify) — the tree half.
-	VerifyTree(treeDir string) (ok bool, detail, kind string, encrypted bool)
+	// Seed provisions the device area and returns the idevicebackup2 TARGET — the working/ parent,
+	// seeded so the tool's own <target>/<UDID> convention lands the tree in working/<udid> with no
+	// symlink (qn.5b). A dirty working/ is resumed; else it is seeded from latest/.
+	Seed(udid, jobID string) (target string, err error)
+	// VerifyWork is the passwordless structural verification of the job's working tree
+	// (working/<udid>); the kind is the authoritative seed-derived value (qn.5b, finding #9(a)).
+	VerifyWork(udid, jobID string) (ok bool, detail, kind string, encrypted bool)
 	// CommitJob verifies + commits the job's tree into an immutable version (returns it).
 	CommitJob(udid, jobID string) (wire.Version, error)
-	// Discard drops a failed job's work (returns a human note, e.g. dirty-working on zfs).
+	// Discard keeps a failed job's dirty working/ so a retry resumes (returns a human note; qn.5b).
 	Discard(udid, jobID string) (note string, err error)
 }
 

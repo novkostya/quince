@@ -16,15 +16,14 @@
 //	  -e QUINCE_LAB_UDID=<udid> \
 //	  -e QUINCE_LAB_ZFS_PARENT=<pool/parent> \
 //	  -e QUINCE_LAB_ZFS_MODE=hook -e QUINCE_LAB_ZFS_HOOK="ssh -i /data/keys/zfs -o BatchMode=yes <user>@<host>" \
-//	  -e QUINCE_LAB_ZFS_MIRROR=auto \
+//	  -e QUINCE_LAB_ZFS_SEED=auto \
 //	  quince-toolchain-go:local go test -tags lab ./internal/storage/ -run TestLabGate12 -v
 //
-// The harness commits the working/ tree, asserts the snapshot + encrypted-Verify + reflink-from-
-// snapshot latest/ mirror + marker, exercises RepairWorkingCopy, and prints the paths for the
-// manual legs (iMazing opens browse_root; syncoid replicates the dataset; the D5a rclone filter
-// block is printed for the offsite leg). The destructive hardlink-safety matrix (gate 12c) is a
-// documented per-leg procedure in the spec — it needs the hardlink mirror/backend and a fresh
-// idevicebackup2 run per scenario, so it is driven by hand, not by this harness.
+// The harness commits the working/<udid> tree via the qn.5b atomic exchange, asserts the snapshot +
+// encrypted-Verify + that latest/ holds the committed version + marker, exercises Reset, and prints
+// the paths + the qn.5b observer procedures for the manual legs (the G-snapshot / G-rclone /
+// G-exchange-live legs run DURING a real backup; iMazing opens browse_root; syncoid replicates the
+// dataset). The destructive hardlink-safety matrix (gate 12c) is deferred past the freeze.
 package storage
 
 import (
@@ -38,7 +37,7 @@ import (
 	"github.com/novkostya/quince/core/internal/store"
 )
 
-// TestLabReflinkProbe runs ONLY quince's clonetree reflink (buildMirror's operative op) between
+// TestLabReflinkProbe runs ONLY quince's clonetree reflink (the seed clone's operative op) between
 // two env-given paths — for the confirmation-ladder: run it INSIDE an OCI container with an
 // rpool-backed path bound, and measure pool-level bcloneused/ALLOC from the host to prove the
 // OCI + bind chain preserves block sharing. QUINCE_LAB_RF_SNAP (optional) checks EXDEV-from-
@@ -80,7 +79,7 @@ func TestLabGate12(t *testing.T) {
 	backend, name, reason := Select(context.Background(), Options{
 		Backend: BackendZFS, Backups: backups, AppVersion: "lab",
 		ZFSParent: parent, ZFSMode: mode, ZFSHookCmd: os.Getenv("QUINCE_LAB_ZFS_HOOK"),
-		ZFSMirror: os.Getenv("QUINCE_LAB_ZFS_MIRROR"),
+		ZFSSeed: os.Getenv("QUINCE_LAB_ZFS_SEED"),
 	}, log)
 	if name != BackendZFS {
 		t.Fatalf("expected zfs backend, got %q (%s)", name, reason)
@@ -101,20 +100,20 @@ func TestLabGate12(t *testing.T) {
 	if _, err := m.Seed(udid, "labgate"); err != nil {
 		t.Fatalf("provision/seed: %v", err)
 	}
-	working := zfsWorking(backups, udid)
+	working := workingTree(backups, udid)
 	if tree := os.Getenv("QUINCE_LAB_TREE"); tree != "" && isEmptyDir(working) {
 		if err := clonetree.Clone(working, tree, clonetree.Reflink); err != nil {
 			t.Logf("reflink seed failed (%v) — falling back to copy", err)
 			if err := clonetree.Clone(working, tree, clonetree.Copy); err != nil {
 				t.Fatalf("seed working from %s: %v", tree, err)
 			}
-			t.Logf("seeded working/ from %s via COPY", tree)
+			t.Logf("seeded working/<udid> from %s via COPY", tree)
 		} else {
-			t.Logf("seeded working/ from %s via REFLINK", tree)
+			t.Logf("seeded working/<udid> from %s via REFLINK", tree)
 		}
 	}
 	if isEmptyDir(working) {
-		t.Fatalf("working/ is empty — set QUINCE_LAB_TREE or produce a backup into %s first", working)
+		t.Fatalf("working/<udid> is empty — set QUINCE_LAB_TREE or produce a backup into %s first", working)
 	}
 	v, err := m.CommitJob(udid, "labgate")
 	if err != nil {
@@ -132,28 +131,38 @@ func TestLabGate12(t *testing.T) {
 	t.Logf("committed version %s snapshot=%s kind=%s encrypted=%v", v.ID, *v.ZFSSnapshot, v.Kind, v.Encrypted)
 	t.Logf("browse_root (point iMazing here): %s", v.BrowseRoot)
 
-	// latest/ must be rebuilt from the snapshot and carry the version's marker.
-	lm, err := ReadMarker(zfsLatest(backups, udid))
+	// latest/ IS the committed version (the exchange moved the verified tree in) + carries the marker.
+	lm, err := ReadMarker(latestDir(backups, udid))
 	if err != nil || lm.VersionID != v.ID {
-		t.Fatalf("latest/ mirror not rebuilt from snapshot: marker=%q err=%v", lm.VersionID, err)
+		t.Fatalf("latest/ does not hold the committed version: marker=%q err=%v", lm.VersionID, err)
 	}
-	t.Logf("latest/ mirror rebuilt OK at %s", zfsLatest(backups, udid))
+	t.Logf("latest/ holds the committed version at %s", latestDir(backups, udid))
 
-	// (a') RepairWorkingCopy rebuilds working/ from the last snapshot.
+	// (a') Reset discards any dirty working; idempotent (no-op when already clean). The next backup
+	// re-seeds from latest/.
 	if err := m.RepairWorkingCopy(udid); err != nil {
-		t.Fatalf("repair-working-copy: %v", err)
+		t.Fatalf("reset-working: %v", err)
 	}
-	t.Log("repair-working-copy rebuilt working/ from the last snapshot")
+	t.Log("reset-working (discard dirty working) OK")
 
 	// (b/c) Manual legs — print what the operator drives by hand.
+	// qn.5b gate — the two observers, run DURING a real backup (idevicebackup2 into working/<udid>):
+	t.Logf("MANUAL (qn.5b G-snapshot): while a backup runs AND at the commit instant, loop "+
+		"`zfs snapshot %s/%s@probe-$(date +%%s%%N)`; EVERY probe snapshot must contain a COMPLETE "+
+		"latest/ (never none) — the two-rename swap failed exactly here.", parent, udid)
+	t.Logf("MANUAL (qn.5b G-rclone): run a continuous `rclone sync` of the parent (filter below) " +
+		"across many commits; the remote latest/ is NEVER deleted and NEVER torn (diff vs a known-good latest/).")
+	t.Logf("MANUAL (qn.5b G-exchange-live): before trusting the in-container exchange, run `exch` " +
+		"(util-linux-extra) on two non-empty dirs INSIDE the deployed container on this dataset — settle it in the layer it runs in.")
 	t.Logf("MANUAL (b) syncoid: replicate %s/%s mid-write; every @quince-* + latest/ must arrive intact", parent, udid)
 	t.Logf("MANUAL offsite (D5a): rclone sync the parent with the anchored filter:")
 	for _, r := range AnchoredFilterRules(lastPathSegment(parent)) {
 		t.Logf("    --filter %q", r)
 	}
-	t.Log("MANUAL (c) destructive hardlink-safety matrix: force the hardlink mirror/backend and run " +
-		"full->incremental, big-file, -wal/-shm, delete, rename, interrupted+next, iOS upgrade, " +
-		"encryption change; assert the prior version's blobs keep byte+metadata identity (spec gate 12c).")
+	t.Log("MANUAL (c) destructive hardlink-safety matrix (gate 12c, deferred past the freeze): force " +
+		"the hardlink backend and run full->incremental, big-file, -wal/-shm, delete, rename, " +
+		"interrupted+next, iOS upgrade, encryption change; assert the prior version's blobs keep " +
+		"byte+metadata identity. Until it passes, hardlink stays disabled-to-copy — INCLUDING the seed.")
 }
 
 func lastPathSegment(p string) string {

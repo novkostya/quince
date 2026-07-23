@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -679,7 +680,8 @@ func TestStoryStartupReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeTree(wd, fakeParams{Tree: "complete", Encrypted: true, Kind: "full"})
+	// Seed returns the idevicebackup2 TARGET (working/ parent); the tree lands at <target>/<udid>.
+	writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"})
 	if _, err := h.mgr.CommitJob(testUDID, "BBBB"); err != nil {
 		t.Fatalf("seed the rolled-forward version: %v", err)
 	}
@@ -782,47 +784,71 @@ func TestStartBackupTransportGuards(t *testing.T) {
 	}
 }
 
-// --- qn.4c lab finding (gate 11): the target stub must live on the STORAGE filesystem -----------
+// TestResetWorking covers the qn.5b Reset action on the engine (contracts §1 reset-working):
+// 404 unknown device, 202 discards a dirty working/, 409 while a backup is running.
+func TestResetWorking(t *testing.T) {
+	t.Run("unknown device 404", func(t *testing.T) {
+		h := newHarness(t, fakeParams{}, TransportUSB)
+		if s, _ := h.eng.ResetWorking("SYNTHETIC-UDID-UNKNOWN-0009"); s != http.StatusNotFound {
+			t.Fatalf("reset unknown device = %d, want 404", s)
+		}
+	})
+	t.Run("dirty working 202 discards", func(t *testing.T) {
+		h := newHarness(t, fakeParams{}, TransportUSB)
+		wd, err := h.mgr.Seed(testUDID, "jobX")
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"})
+		if s, _ := h.eng.ResetWorking(testUDID); s != http.StatusAccepted {
+			t.Fatalf("reset dirty working = %d, want 202", s)
+		}
+		if _, err := os.Stat(wd); !os.IsNotExist(err) {
+			t.Fatal("working/ should be discarded after reset")
+		}
+	})
+	t.Run("backup running 409", func(t *testing.T) {
+		m := loadMeta(t, "silent-stall") // stays in backing_up long enough to observe
+		h := newHarness(t, m.params(t), m.Transport)
+		j := h.start(t, m.Transport, "")
+		waitState(t, h.eng, j.ID, StateBackingUp, 2*time.Second)
+		if s, _ := h.eng.ResetWorking(testUDID); s != http.StatusConflict {
+			t.Fatalf("reset while a backup runs = %d, want 409", s)
+		}
+		h.eng.CancelJob(j.ID)
+		waitTerminal(t, h.eng, j.ID, 3*time.Second)
+	})
+}
 
-// TestPrepareTargetLivesBesideTheWorkDir is the regression guard for the bug that blocked the
-// first real full backup. mobilebackup2 asks the host how much free space it has, and
-// idevicebackup2 answers with a statfs of the target directory it was handed — it does NOT follow
-// the <UDID> symlink. So a stub on a small scratch filesystem makes the DEVICE refuse the backup
-// ("ErrorCode 105: Insufficient free disk space", exit 151, zero bytes). Proven on hardware: the
-// same device refused with the stub on a 26 GB cache filesystem and started transferring with it
-// on the 546 GB storage filesystem. The stub therefore must be derived from the work dir.
-func TestPrepareTargetLivesBesideTheWorkDir(t *testing.T) {
-	workDir := filepath.Join(t.TempDir(), "backups", "SYNTHETIC-UDID-AAAA-0001", "working")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+// --- qn.5b: the free-space bug (28b97de) is structurally impossible (no symlink stub) ------------
+
+// TestBackupTargetIsOnStorageFilesystem is the qn.5b structural replacement for the deleted
+// symlink-stub regression guard. mobilebackup2 asks the host how much free space it has, and
+// idevicebackup2 answers with a statfs of the target directory it was handed. qn.5b points the tool
+// STRAIGHT at the storage backend's working/ parent (Seed's return) — always on the storage
+// filesystem by construction, with NO symlink stub — so the statfs is truthful and the device can
+// never be told the wrong filesystem's free space (the 28b97de failure). The tree lands at
+// <target>/<udid> by idevicebackup2's own convention.
+func TestBackupTargetIsOnStorageFilesystem(t *testing.T) {
+	udid := "SYNTHETIC-UDID-AAAA-0001"
+	// Seed returns exactly this shape: <backups>/<udid>/working.
+	target := filepath.Join(t.TempDir(), "backups", udid, "working")
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tl := &tool{bin: "unused"}
+	tl := &tool{bin: "idevicebackup2"}
 
-	target, cleanup, err := tl.prepareTarget("JOB0", "SYNTHETIC-UDID-AAAA-0001", workDir)
-	if err != nil {
-		t.Fatalf("prepareTarget: %v", err)
-	}
-	defer cleanup()
-
-	// The stub must sit under the work dir's own parent — the same filesystem the tree lands on.
-	deviceArea := filepath.Dir(workDir)
-	if !strings.HasPrefix(target, deviceArea+string(filepath.Separator)) {
-		t.Fatalf("target %q is not under the device's storage area %q — a statfs of it would report\n"+
-			"the wrong filesystem's free space and the device would refuse the backup", target, deviceArea)
+	// The tool is pointed straight at the target — no stub, no symlink derivation.
+	cmd := tl.command(context.Background(), TransportUSB, udid, target)
+	if got := cmd.Args[len(cmd.Args)-1]; got != target {
+		t.Fatalf("idevicebackup2 target = %q, want the storage working/ parent %q (no stub)", got, target)
 	}
 
-	// And it must still be the <UDID>-symlink shape idevicebackup2 requires (interface fact 1).
-	link, err := os.Readlink(filepath.Join(target, "SYNTHETIC-UDID-AAAA-0001"))
-	if err != nil {
-		t.Fatalf("stub is not a symlink named after the UDID: %v", err)
-	}
-	if link != workDir {
-		t.Fatalf("symlink → %q, want the work dir %q", link, workDir)
-	}
-
-	cleanup()
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatal("cleanup left the stub behind (it would be captured by the commit snapshot)")
+	// The tree lands at <target>/<udid>, under the device's storage area → the statfs is truthful.
+	tree := filepath.Join(target, udid)
+	deviceArea := filepath.Dir(target)
+	if !strings.HasPrefix(tree, deviceArea+string(filepath.Separator)) {
+		t.Fatalf("tree %q is not under the device's storage area %q — its statfs would report the wrong fs", tree, deviceArea)
 	}
 }
 

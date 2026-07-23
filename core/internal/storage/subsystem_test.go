@@ -15,8 +15,7 @@ import (
 func TestManagerVersionsAndDelete(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, generousPolicy())
 	commitGoodTree(t, m, testUDID)
-	w, _ := m.Seed(testUDID, "job2")
-	goodEncryptedFull(t, w)
+	goodEncryptedFull(t, seedTree(t, m, testUDID, "job2"))
 	if _, err := m.CommitJob(testUDID, "job2"); err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +74,7 @@ func TestManagerPostCommitPrune(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{KeepRecent: 2})
 	for i := 1; i <= 4; i++ {
 		job := "job" + string(rune('0'+i))
-		w, err := m.Seed(testUDID, job)
-		if err != nil {
-			t.Fatal(err)
-		}
-		goodEncryptedFull(t, w)
+		goodEncryptedFull(t, seedTree(t, m, testUDID, job))
 		if _, err := m.CommitJob(testUDID, job); err != nil {
 			t.Fatalf("commit %d: %v", i, err)
 		}

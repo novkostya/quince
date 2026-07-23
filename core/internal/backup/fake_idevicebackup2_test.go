@@ -17,8 +17,9 @@ import (
 
 // The fake idevicebackup2: a re-exec of the test binary (the qn.2b/qn.3 GO_WANT_HELPER_PROCESS
 // discipline) that replays one committed transcript on stdout with its timing, writes the matching
-// MobileBackup2 tree into <target>/<UDID>/ (which the engine's symlink adapter points at the qn.5
-// work dir, so storage.Verify runs against real structure), and exits with the transcript's code —
+// MobileBackup2 tree into <target>/<UDID>/ (which, qn.5b, IS the storage backend's working/<udid>
+// because the engine hands idevicebackup2 the working/ parent directly — no symlink adapter — so
+// storage.Verify runs against real structure), and exits with the transcript's code —
 // or hangs (frozen transport) until the engine's liveness timeout kills it. All params travel in
 // argv (no env), so parallel tests stay isolated.
 
@@ -76,7 +77,7 @@ func helperArgsAfter(sep string) []string {
 }
 
 func runFake(p fakeParams, udid, target string) int {
-	treeDir := filepath.Join(target, udid) // symlink → the qn.5 work dir
+	treeDir := filepath.Join(target, udid) // qn.5b: == the storage working/<udid> tree (no symlink)
 	_ = os.MkdirAll(treeDir, 0o755)
 
 	lines := readLinesOrEmpty(p.TranscriptPath)

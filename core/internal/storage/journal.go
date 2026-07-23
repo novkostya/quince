@@ -17,13 +17,16 @@ const journalName = ".quince-commit.json"
 type CommitPhase string
 
 const (
-	// namespace (reflink/hardlink/copy): prepared → previous_archived → latest_promoted.
-	PhasePrepared         CommitPhase = "prepared"          // marker written into work/<job>
-	PhasePreviousArchived CommitPhase = "previous_archived" // latest/ → versions/<prev-ts>/
-	PhaseLatestPromoted   CommitPhase = "latest_promoted"   // work/<job>/ → latest/
-	// zfs: prepared → snapshot_created → latest_rebuilt.
-	PhaseSnapshotCreated CommitPhase = "snapshot_created" // @quince-<id>-<ts> exists
-	PhaseLatestRebuilt   CommitPhase = "latest_rebuilt"   // latest/ rebuilt from .zfs + swapped
+	// qn.5b: both models share the atomic exchange as their pivot. The tree is written to
+	// working/<udid>, its marker written in, then it is EXCHANGED into latest/ in one syscall
+	// (marker-guarded for idempotency — a re-run that sees latest/ already carrying this version's
+	// id does not re-exchange). What differs is only the finish:
+	//   namespace: prepared → exchanged → archived        (old working content → versions/<prev-ts>/)
+	//   zfs:       prepared → exchanged → snapshot_created (dataset snapshot captures latest/)
+	PhasePrepared        CommitPhase = "prepared"         // marker written into working/<udid>
+	PhaseExchanged       CommitPhase = "exchanged"        // working/<udid> ⇄ latest/ done (atomic)
+	PhaseArchived        CommitPhase = "archived"         // namespace: prev latest → versions/<prev-ts>/
+	PhaseSnapshotCreated CommitPhase = "snapshot_created" // zfs: @quince-<date>-<id> exists
 )
 
 // Journal is the on-disk commit progress record for one device. Reconciliation reads it to

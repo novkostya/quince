@@ -22,6 +22,21 @@ func (d Deps) handlePair() http.HandlerFunc {
 	}
 }
 
+// handleResetWorking serves POST /api/devices/{udid}/reset-working → 202 (qn.5b Reset, contracts
+// §1): discard the device's dirty working/ so the next backup starts clean from latest/. 409 while
+// a backup is running for the device, 404 unknown device, 503 no engine wired. Never touches a
+// committed version.
+func (d Deps) handleResetWorking() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status, reason := d.WorkingReset.ResetWorking(r.PathValue("udid"))
+		if status != http.StatusAccepted {
+			writeError(w, d.Log, status, statusCode(status), reason)
+			return
+		}
+		writeJSON(w, d.Log, http.StatusAccepted, map[string]string{"note": reason})
+	}
+}
+
 // handlePairValidate serves POST /api/devices/{udid}/pair/validate → {paired: bool}.
 func (d Deps) handlePairValidate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

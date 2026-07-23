@@ -46,8 +46,8 @@ func syncSim(t *testing.T, dst, src string, rules []string) {
 
 // buildTransferTree lays out a whole-storage transfer root with quince's subtree: a valid
 // latest/ (including a content dir literally named "working" to catch over-match), a rotated
-// versions/<ts>/, a work/<job>/, and a device-level working/ (the zfs case). subdir/udid names
-// echo the offsite layout.
+// versions/<ts>/, and a per-job working/<udid>/ (the mutable in-progress tree). subdir/udid names
+// echo the offsite layout (qn.5b: the old work/<job>/ is gone).
 func buildTransferTree(t *testing.T, root, subdir, udid string) {
 	t.Helper()
 	dev := filepath.Join(root, subdir, udid)
@@ -55,13 +55,12 @@ func buildTransferTree(t *testing.T, root, subdir, udid string) {
 	// A content directory named "working" INSIDE latest/ — the anchored filter must NOT drop it.
 	writeFile(t, filepath.Join(dev, "latest", "SubApp", "working", "data.bin"), []byte("real backup content"))
 	// Things the offsite copy must exclude:
-	writeFile(t, filepath.Join(dev, "working", "dirty.tmp"), []byte("mid-backup"))
-	writeFile(t, filepath.Join(dev, "work", "job1", "partial.tmp"), []byte("in flight"))
+	writeFile(t, filepath.Join(dev, "working", udid, "dirty.tmp"), []byte("mid-backup"))
 	writeFile(t, filepath.Join(dev, "versions", "2026-07-01T00-00-00Z", "Status.plist"), []byte("old"))
 }
 
 // Story 10: the anchored filter uploads a complete latest/ (incl. nested working/), excludes
-// working//work//versions/, and a concurrent backup churning work/ cannot perturb the upload.
+// working//versions/, and a concurrent backup churning working/ cannot perturb the upload.
 func TestOffsiteAnchoredFilterContract(t *testing.T) {
 	root := t.TempDir()
 	subdir, udid := "iphone-backup", testUDID
@@ -80,7 +79,7 @@ func TestOffsiteAnchoredFilterContract(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				_ = os.WriteFile(filepath.Join(root, subdir, udid, "work", "job1", "churn"),
+				_ = os.WriteFile(filepath.Join(root, subdir, udid, "working", udid, "churn"),
 					[]byte(time.Now().String()), 0o644)
 			}
 		}
@@ -91,15 +90,15 @@ func TestOffsiteAnchoredFilterContract(t *testing.T) {
 
 	dev := filepath.Join(dst, subdir, udid)
 	// latest/ is present and structurally valid (a complete verified backup).
-	if r := Verify(filepath.Join(dev, "latest")); !r.OK {
+	if r := Verify(filepath.Join(dev, "latest"), "full"); !r.OK {
 		t.Fatalf("synced latest/ should verify: %s", r.Detail)
 	}
 	// The nested content dir named "working" survives (NOT over-excluded).
 	if !fileExists(filepath.Join(dev, "latest", "SubApp", "working", "data.bin")) {
 		t.Fatal("anchored filter wrongly dropped a content dir named working inside latest/")
 	}
-	// working//work//versions/ are excluded.
-	for _, gone := range []string{"working", "work", "versions"} {
+	// working//versions/ are excluded.
+	for _, gone := range []string{"working", "versions"} {
 		if fileExists(filepath.Join(dev, gone)) {
 			t.Fatalf("offsite copy must not contain %s/", gone)
 		}

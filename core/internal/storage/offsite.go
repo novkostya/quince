@@ -9,10 +9,13 @@ import "strings"
 // same-named directory inside backup content under latest/, silently corrupting the offsite
 // copy (the D5a hazard). The deploy docs ship this block verbatim; PathExcluded proves its
 // semantics in CI, and lab gate 12 runs it through the real rclone.
+//
+// qn.5b: the per-job staging is now working/<udid> (the old per-job work/<job> is gone), so only
+// working/ (the mutable in-progress tree) and versions/ (local-only namespace history) are excluded
+// — latest/ is the sole synced payload, and the atomic exchange means a walk never sees it missing.
 func AnchoredFilterRules(subdir string) []string {
 	return []string{
 		"- /" + subdir + "/*/working/**",
-		"- /" + subdir + "/*/work/**",
 		"- /" + subdir + "/*/versions/**",
 	}
 }

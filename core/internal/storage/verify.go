@@ -25,13 +25,20 @@ const minManifestSize = 64
 // Manifest.plist.IsEncrypted (A1 / decisions (bc)): encrypted backups (the product default)
 // encrypt Manifest.db itself since iOS 10.2, so passwordless open-and-sample is impossible —
 // per-record blob resolution is deferred to the content level (qn.8 unlock).
-func Verify(treeDir string) VerifyResult {
+//
+// kind is the AUTHORITATIVE full|incremental|unknown value the caller supplies (qn.5b, finding
+// #9(a)): for a live backup it is derived from whether working/ was seeded from an existing
+// latest/ (the seed sentinel), NOT from Status.plist.IsFullBackup — which the lab proved lies (a
+// first 33 GB backup writes IsFullBackup:false). Verify uses kind only to gate the encrypted
+// blob-shard check (asserted on a genuine full backup, where an absent shard is definitely a bug;
+// skipped on an incremental, where few/no new blobs is legitimate). An honest "full" here is what
+// makes that check actually run on a first backup.
+func Verify(treeDir, kind string) VerifyResult {
 	fail := func(detail string) VerifyResult { return VerifyResult{OK: false, Detail: detail} }
 
 	// Status.plist parses with SnapshotState == "finished".
 	var status struct {
 		SnapshotState string `plist:"SnapshotState"`
-		IsFullBackup  bool   `plist:"IsFullBackup"`
 	}
 	if err := readPlist(filepath.Join(treeDir, "Status.plist"), &status); err != nil {
 		return fail("Status.plist does not parse: " + err.Error())
@@ -52,15 +59,6 @@ func Verify(treeDir string) VerifyResult {
 	}
 	if err := readPlist(filepath.Join(treeDir, "Manifest.plist"), &manifest); err != nil {
 		return fail("Manifest.plist does not parse: " + err.Error())
-	}
-
-	kind := "unknown"
-	if status.SnapshotState == "finished" {
-		if status.IsFullBackup {
-			kind = "full"
-		} else {
-			kind = "incremental"
-		}
 	}
 
 	res := VerifyResult{Encrypted: manifest.IsEncrypted, Kind: kind, LogicalBytes: dirSize(treeDir)}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -19,22 +18,6 @@ type tool struct {
 	netmuxd   string   // devices.netmuxd_addr
 }
 
-// targetStubDir is where a job's symlink stub lives: beside the storage work dir, so a statfs of
-// the stub reports the STORAGE filesystem's free space (see prepareTarget). Hidden + per-job.
-const targetStubDir = ".quince-targets"
-
-// targetRootFor derives the stub root from the work dir the storage backend handed us:
-//
-//	zfs:        /backups/<udid>/working        → /backups/<udid>/.quince-targets
-//	namespace:  /backups/<udid>/work/<jobid>   → /backups/<udid>/work/.quince-targets
-//
-// Both are quince-writable and on the storage filesystem. On zfs the stub sits inside the
-// snapshotted dataset, which is harmless: the per-job cleanup runs when the child exits, before
-// the version snapshot is cut at commit (a crash-orphaned stub is swept by reconciliation).
-func targetRootFor(workDir string) string {
-	return filepath.Join(filepath.Dir(workDir), targetStubDir)
-}
-
 // socketAddr is the USBMUXD_SOCKET_ADDRESS for a transport (VERIFIED qn.3): UNIX:<path> for the
 // usbmuxd unix socket, host:port for netmuxd.
 func socketAddr(transport, usbmuxd, netmuxd string) string {
@@ -47,35 +30,14 @@ func socketAddr(transport, usbmuxd, netmuxd string) string {
 	return usbmuxd
 }
 
-// prepareTarget builds the idevicebackup2 target: a scratch dir whose <udid> entry is a SYMLINK to
-// the storage work dir. idevicebackup2 backup <target> writes the tree into <target>/<UDID>/ (a
-// libimobiledevice convention — INTERFACE FACT, confirmed live), so the symlink makes it write
-// straight into qn.5's work dir with no tree copy and no committed-state mutation. Cleaned per job.
-//
-// The stub dir MUST live on the same filesystem as the work dir (lab finding, qn.4c gate 11).
-// mobilebackup2 asks the host how much free space it has, and idevicebackup2 answers with a statfs
-// of the target directory it was handed — it does NOT follow the <UDID> symlink. With the stub on
-// a small scratch filesystem (quince used $QUINCE_CACHE), the phone is told that filesystem's free
-// space and REFUSES the backup: `ErrorCode 105: Insufficient free disk space` → exit 151, zero
-// bytes, no actionable message. Proven on real hardware: the same device refused with the stub on a
-// 26 GB cache filesystem and began transferring with it on the 546 GB storage filesystem.
-// Placing the stub beside the work dir makes the answer truthful on every backend, and needs no
-// extra writable location — the device's own storage area is already quince-writable (the parent
-// dataset root is NOT, under the zfs hook profile, which is why a naive <backups>/… root fails).
-func (t *tool) prepareTarget(jobID, udid, workDir string) (target string, cleanup func(), err error) {
-	target = filepath.Join(targetRootFor(workDir), jobID)
-	if err := os.RemoveAll(target); err != nil {
-		return "", nil, err
-	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return "", nil, err
-	}
-	if err := os.Symlink(workDir, filepath.Join(target, udid)); err != nil {
-		_ = os.RemoveAll(target)
-		return "", nil, err
-	}
-	return target, func() { _ = os.RemoveAll(target) }, nil
-}
+// The idevicebackup2 TARGET is the storage backend's working/ parent (Seed's return). The tool
+// writes the tree into <target>/<UDID>/ by its own libimobiledevice convention (INTERFACE FACT,
+// confirmed live), so quince points it straight there — NO symlink stub (qn.5b dropped the old
+// <target>/<UDID> symlink dance). This also fixes the free-space bug class (28b97de) structurally:
+// idevicebackup2 answers mobilebackup2's free-space query with a statfs of the target directory it
+// was handed, and that target is now always on the STORAGE filesystem by construction (it is the
+// device's own working/ parent), never a scratch/cache fs — so the phone is told the truth and no
+// longer refuses a large backup with `ErrorCode 105: Insufficient free disk space`.
 
 // command builds the supervised idevicebackup2 process. argv (INTERFACE FACT — the exact flags are
 // verified live in the built image): `idevicebackup2 [-n] -u <udid> backup <target>` — -n selects
