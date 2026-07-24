@@ -34,7 +34,11 @@ export function PasswordForm({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg p-6 text-fg">
+    // min-h-dvh (not 100vh) so it matches the visible area on a phone — no stray scroll. On a phone
+    // the form sits toward the top so the keyboard / Face ID sheet has room below it (dead-centering
+    // looks unbalanced once the sheet slides up); on desktop it centers. Safe-area padding keeps it
+    // clear of the status bar / side notch (qn.6a soak fixes).
+    <div className="flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6">
       <form onSubmit={submit} className="w-full max-w-sm rounded-card border border-line bg-card p-6">
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-base font-semibold">{title}</h1>

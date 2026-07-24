@@ -19,7 +19,11 @@ export function AppLayout() {
   //    made sticky, so there is no forced-height seam and the always-bounce feel is preserved.
   // min-w-0 lets wide children (logs, tables) scroll inside themselves, not the page.
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-bg text-fg pt-[env(safe-area-inset-top)] sm:h-auto sm:min-h-screen sm:flex-row sm:overflow-visible sm:pt-0">
+    // Safe-area insets apply at EVERY breakpoint (env() is 0 on real desktops): a LANDSCAPE phone is
+    // ≥ sm, so it uses the row layout yet still has a side notch / home indicator — zeroing the insets
+    // on sm would put content under the notch (qn.6a soak fix). Top+sides on the shell; the bottom is
+    // on <main> and the sidebar.
+    <div className="flex h-full flex-col overflow-hidden bg-bg pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-fg sm:h-auto sm:min-h-screen sm:flex-row sm:overflow-visible">
       <Sidebar />
       <main className="min-w-0 flex-1 overflow-y-auto overscroll-y-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:overflow-visible sm:p-8">
         <Outlet />
