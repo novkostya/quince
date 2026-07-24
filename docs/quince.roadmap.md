@@ -291,12 +291,15 @@ the soak observes. Soaking on a model about to change would waste the findings.
   clears the mangled log pane, the stale byte counter, **and** the log bloat. It is directly on
   the soak path — live progress is what you stare at from a phone — so it earns its place if it
   stays small.
-- **Candidates from the qn.5b hardware session (architect to confirm homing):** **(cr)** missing/dead
-  versions must stop rendering as normal backups — surface `missing` on the wire + render dead (no
-  size, no `Unlock`, offer removal); same family as finding #6 (a soak that shows phantom backups is
-  worthless). **(cu) option (1)** — a visible **"preparing / seeding" phase** for the preflight→passcode
-  gap qn.5b lengthened (the seed now runs before the passcode prompt): show "Preparing — cloning from
-  your last backup…" instead of dead air. Both are soak-path UX and cheap.
+- **From the qn.5b hardware session (homing CONFIRMED, contract shapes ruled — (cv)):** **(cr)(a)**
+  missing/dead versions must stop rendering as normal backups — add **`missing: bool` to
+  `wire.Version`** (contracts §2, ruled) and render such versions **explicitly dead, not omitted**
+  (no size claim, no `Unlock`/browse affordance, an "artifact gone — remove?" action wired to the
+  existing `DELETE /api/versions/{id}`). Omission would silently shrink history — during a soak
+  that masks exactly the drift the soak exists to surface; same family as finding #6. **(cu)
+  option (1)** — add a **`seeding` job phase** between `preflight` and `backing_up` (contracts
+  phase-enum addition, ruled) so the UI narrates "Preparing — cloning from your last backup…"
+  instead of dead air during the O(files) seed. Both are soak-path UX and cheap.
 
 **Explicitly NOT in scope:** storage setup in onboarding (the auto-probe already chooses; what's
 missing is *explaining* the choice, which is qn.6's onboarding-checks work beside P1/P1b — don't
@@ -544,6 +547,14 @@ reasonable simplification; it is "kind of wrong" as the long-term shape. This is
    offline target is an honest "can't right now," not a background retry.
 6. **Consider a storage `mode`** (`managed` | `external-readonly`) rather than treating every foreign
    source as a migration — external-readonly is a first-class *mode*, not a one-time import.
+7. **Continuous reconciliation is BLOCKED on this epic's offline distinction ((cr)(b), ruled (cv)).**
+   Today disk↔index reconciliation runs at startup only, so an artifact vanishing under a live
+   daemon goes unnoticed until restart (proven on hardware: snapshots destroyed under a running
+   quince). The fix everyone reaches for — a periodic sweep or revalidate-on-read — **must not be
+   built before "storage unreachable" and "artifact gone" are distinguishable states**: a sweep that
+   cannot tell them apart would mark every version on an unplugged removable HDD `missing`, which is
+   exactly wrong. Sequencing: this epic lands the storage-health model first; the background sweep
+   is a rung *inside* it, not a near-term patch.
 
 **Interaction with near-term work:** qn.5b's atomic-`latest` + per-job-`working/` mechanics are the
 SAME within a storage's device-tree whether there is one storage or many — only the path prefix
