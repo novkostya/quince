@@ -360,10 +360,52 @@ is the freeze point.**
   page refresh; Wi-Fi runs over SUPERVISED netmuxd which survives a container restart; a
   device with committed versions shows its real last backup.*
 
+### ⚑ `qn.6b` — transport patience (inserted 2026-07-24, (de); **the LAST pre-freeze insert**)
+
+Pre-freeze because the soak's premise requires it: a Wi-Fi backup that hangs is what makes the
+Operator quietly stop tapping "Back up now" — and then the soak is dead and the freeze plan with
+it. Split OUT of `qn.7` (which keeps its name and stays post-freeze). Scope, deliberately small:
+
+- **The patched libimobiledevice build in the image** — receive timeout 30 s → 15 min (upstream
+  #1413), the fix for the failure class (ct) root-caused on real hardware (genuine Wi-Fi loss +
+  link drops; netmuxd exonerated). Shape: **NOT a hosted fork** — a patch file in-tree, applied to
+  the pinned upstream tag during the image build (visible, reviewable, no second repo to maintain;
+  pins stay in `versions.env`).
+- **The gate patch (candidate C, (cz)) on the SAME fork** — a `--gate <path>` pause at
+  idevicebackup2's one free point (post-`Backup`-request/passcode-fired, pre-message-loop): quince
+  launches immediately, seeds in parallel, touches the gate file when done. **This SETTLES the
+  (cx)/(cz) evidence gate:** the Operator now has the `seeding` narration and still finds the raw
+  wait "really annoying" — the raw latency, not its visibility, is the complaint, which is exactly
+  what the gate demanded. Spike-first per (cz): gate placement vs the pre-request `Info.plist`
+  write; device tolerance of ~20 s host silence ((ct)'s multi-minute pauses say yes — verify).
+  **Fallback if the spike fails: candidate B** (pre-seed-after-commit, config-gated, `SHARED`-only)
+  so the rung cannot stall on it.
+- **Liveness thresholds retuned to the 15-minute reality — these CANNOT ship separately.** With
+  the tool legitimately silent for up to 15 min on a dead link, unretuned thresholds trade "fails
+  too fast" for "looks hung forever" — the Operator's exact complaint, worse. The thresholds must
+  hold both (ct) sides at once: no panic on legitimate `app_limited` pauses, AND an honest,
+  eventual, narrated classification of a genuinely dead link.
+- **The 6a-soak hang is the acceptance case.** The Operator captures it BEFORE it is redeployed
+  away: the job row (did it reach `connection_lost`, or sit in `backing_up` forever?), the job
+  log, and the wait duration. Whether the sampler fired decides "qn.6b tunes thresholds" vs
+  "qn.6b fixes a liveness bug".
+
+**Explicitly NOT here (stays `qn.7`):** chaos suite, netmuxd-USB audition, restart-policy tuning,
+#2 409-race, full #8 classification taxonomy, #9b, #10-percent, UX copy polish.
+
+**The last-insert rule ((de)):** a pre-freeze insert is justified only by a defect that STOPS
+DAILY USE. This is the fourth insert ((by) qn.4c, (cg) qn.5b, (ch) qn.6a, (de) qn.6b) and the
+final one — nothing else on the books meets the bar.
+
+CI-provable: the patch applies + builds in the pinned pipeline, gate-flag behavior, threshold
+logic. Lab-owed: 15-min patience across a real Wi-Fi drop, the gate patch against a real device,
+and the hang case re-run.
+
 ### M4 — Wi-Fi reliability hardening (`qn.7`)
 The flakiness-absorption rung, BEFORE the public release because Wi-Fi is primary:
-patched-timeout libimobiledevice source build in the image (30 s → 15 min, upstream
-#1413), ~~netmuxd supervision~~ (**moved to qn.4c**, (by)) + restart-policy tuning,
+~~patched-timeout libimobiledevice source build in the image (30 s → 15 min, upstream
+#1413)~~ (**moved to qn.6b with the initial liveness retune**, (de) — qn.7 keeps the
+chaos-suite-driven FINE tuning), ~~netmuxd supervision~~ (**moved to qn.4c**, (by)) + restart-policy tuning,
 **the netmuxd-USB audition on pinned
 v0.4.3** (re-homed here from qn.2b, decisions log (aw); procedure verbatim in the qn.2b
 spec, gate 8 — verdict flips the D2 default to single-muxer or files the upstream issue),
@@ -472,11 +514,12 @@ committed version is ever perturbed; reminders never spam (cooldown honored).*
 
 ### Later / parked
 
-**Eliminating the seed latency (the (cu) raw-latency half — parked, EVIDENCE-GATED on the soak,
-(cx)/(cz)).** qn.6a's `seeding` phase fixes the *visible* dead air; this parks the candidate
-mechanisms for removing the latency itself, so nothing is re-derived from scratch later. **Do not
-build any of these until the soak shows the raw wait — not its visibility — is the complaint.** If
-it is, the live fork is **B (pre-seed) vs C (gate patch)**; A is dominated, kept as history.
+**Eliminating the seed latency (the (cu) raw-latency half — GATE MET, SETTLED → candidate C,
+building in `qn.6b` ((de)); (cx)/(cz) kept below as the decision record).** The evidence the gate
+demanded arrived on day one of the soak: the Operator has the `seeding` narration and still finds
+the raw wait "really annoying" — the latency itself, not its visibility, is the complaint. Ruled
+(de): **candidate C (the gate patch), riding the same libimobiledevice fork qn.6b builds for the
+timeout patch; candidate B is the in-rung fallback if C's spike fails.** History below.
 - **Source-verified facts (idevicebackup2 master, 2026-07-24 — re-verify against the vendored build
   before building):** before sending the `Backup` request it only stat/reads `Info.plist` and
   rewrites it **remove-then-create** (unlink+create — hardlink-alias-safe); it does NOT read
