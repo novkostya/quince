@@ -27,7 +27,9 @@
 html,
 body,
 #root {
-  height: 100%;
+  height: 100%; /* fallback for browsers without dvh */
+  height: 100dvh; /* track the mobile browser toolbar so the app shell is exactly the visible area
+                     and <main> is the ONLY scroll region — no nested/document scroll (qn.6a) */
 }
 
 body {

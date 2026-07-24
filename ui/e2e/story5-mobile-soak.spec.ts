@@ -28,6 +28,14 @@ test("the dashboard fits a phone and lists an offline device with a disabled, ex
   );
   expect(overflow).toBeLessThanOrEqual(1);
 
+  // The DOCUMENT itself must not scroll vertically — the scroll region is <main>, not the page, so
+  // the top nav bar never scrolls away and there's no nested scroll. (Headless can't emulate the iOS
+  // toolbar that actually triggered the bug, but this holds the shell-owns-its-scroll invariant.)
+  const docVScroll = await page.evaluate(
+    () => document.documentElement.scrollHeight - document.documentElement.clientHeight,
+  );
+  expect(docVScroll).toBeLessThanOrEqual(1);
+
   // The offline demo device (attic-ipad: no transport, but it has backups).
   const offline = page.getByTestId("device-card").filter({ hasText: "attic-ipad" });
   await expect(offline.getByText("Offline")).toBeVisible();
