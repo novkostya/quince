@@ -123,7 +123,9 @@ describe("DeviceCard", () => {
     renderCard(device({ last_backup: { at: "2026-07-20T00:00:00Z", job_id: "J1", status: "succeeded" } }));
     expect(screen.getByText(/needs attention/i)).toBeTruthy();
     expect(screen.getByTestId("card-retry")).toBeTruthy();
-    // last_backup (last SUCCESS) is still shown — the failure line is a companion, not a mutation.
+    // Retry is the SINGLE primary action — it REPLACES "Back up now", not sits beside it (soak fix).
+    expect(screen.queryByTestId("card-backup-now")).toBeNull();
+    // last_backup (last SUCCESS) is still shown — the failure line is context, not a mutation.
     expect(screen.getByText(/last backup/i)).toBeTruthy();
   });
 

@@ -35,12 +35,15 @@ const DIVISIONS: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
   { amount: Number.POSITIVE_INFINITY, unit: "year" },
 ];
 
-// formatRelativeTime turns an RFC3339 timestamp into "2 hours ago". Returns "—" for empty.
+// formatRelativeTime turns an RFC3339 timestamp into "2 hours ago". Sub-minute ages collapse to
+// "just now" — exact seconds are noise and would churn a live label every tick (qn.6a). Returns "—"
+// for empty. Pair with <RelativeTime> (useNow) so the label advances live; the exact time is on hover.
 export function formatRelativeTime(iso: string, now: number = Date.now()): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
   let duration = (then - now) / 1000; // seconds, negative = past
+  if (Math.abs(duration) < 60) return "just now";
   for (const division of DIVISIONS) {
     if (Math.abs(duration) < division.amount) {
       return rtf.format(Math.round(duration), division.unit);

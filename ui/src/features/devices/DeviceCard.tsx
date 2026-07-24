@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { modelLine } from "./modelName";
-import { formatRelativeTime } from "@/lib/format";
+import { RelativeTime } from "@/components/RelativeTime";
 import { isRunning, useJobsStore } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
@@ -29,14 +29,17 @@ function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
   return null; // "unknown" (muxd-minimal, before qn.3 lockdown) — no badge
 }
 
-// backupStatus is the one line under the transports: real history if any, else a
-// state-appropriate placeholder ("No backups yet" for a paired device, "Not set up yet" for
-// one we can't act on yet).
-function backupStatus(device: Device): string {
+// BackupStatus is the one line under the transports: real history if any (with a live, hover-exact
+// timestamp), else a state-appropriate placeholder.
+function BackupStatus({ device }: { device: Device }) {
   if (device.last_backup) {
-    return `Last backup ${formatRelativeTime(device.last_backup.at)} · ${device.last_backup.status}`;
+    return (
+      <>
+        Last backup <RelativeTime iso={device.last_backup.at} /> · {device.last_backup.status}
+      </>
+    );
   }
-  return device.paired === "yes" ? "No backups yet" : "Not set up yet";
+  return <>{device.paired === "yes" ? "No backups yet" : "Not set up yet"}</>;
 }
 
 // isFailed marks a terminal attempt the user should act on (assisted model — a failed newest attempt
@@ -102,31 +105,23 @@ export function DeviceCard({ device }: { device: Device }) {
           ) : null}
         </div>
 
-        <div className="mt-3 text-xs text-muted">{backupStatus(device)}</div>
+        <div className="mt-3 text-xs text-muted">
+          <BackupStatus device={device} />
+        </div>
         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-subtle">
           <span>
             {versionCount} {versionCount === 1 ? "backup" : "backups"}
           </span>
           {!present && device.last_seen ? (
-            <span>last seen {formatRelativeTime(device.last_seen)}</span>
+            <span>
+              last seen <RelativeTime iso={device.last_seen} />
+            </span>
           ) : null}
         </div>
 
-        {attention ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-accent-soft p-2.5">
-            <span className="text-xs text-danger">Last attempt needs attention</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void start("auto", attention.id)}
-              disabled={busy}
-              data-testid="card-retry"
-            >
-              Retry
-            </Button>
-          </div>
-        ) : null}
-
+        {/* Exactly ONE primary action per card (qn.6a soak fix — a "needs attention" line PLUS a
+            separate "Back up now" was two buttons doing the same thing). When the newest attempt
+            failed, Retry IS that action and replaces Back up now, with the failure as context. */}
         <div className="mt-4">
           {activeJob ? (
             <JobProgressInline job={activeJob} />
@@ -145,7 +140,33 @@ export function DeviceCard({ device }: { device: Device }) {
               </Button>
               <span className="text-xs text-muted">Connect it over USB or Wi-Fi to back it up.</span>
             </div>
-          ) : device.paired === "yes" ? (
+          ) : device.paired !== "yes" ? (
+            // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
+            // details page (qn.3); the card routes there carrying a pair INTENT (router state) so the
+            // details page auto-opens the dialog — the click delivers on its label (qn.4b fix, (bq)).
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/devices/${device.udid}`} state={{ pair: true }}>
+                Pair
+              </Link>
+            </Button>
+          ) : attention ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs text-danger">Last attempt needs attention</span>
+              <Button
+                size="sm"
+                onClick={() => void start("auto", attention.id)}
+                disabled={busy}
+                data-testid="card-retry"
+              >
+                {busy ? "Starting…" : "Retry backup"}
+              </Button>
+              {error ? (
+                <span className="text-xs text-danger" role="alert">
+                  {error}
+                </span>
+              ) : null}
+            </div>
+          ) : (
             <div className="flex flex-col gap-1">
               <Button
                 size="sm"
@@ -161,15 +182,6 @@ export function DeviceCard({ device }: { device: Device }) {
                 </span>
               ) : null}
             </div>
-          ) : (
-            // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
-            // details page (qn.3); the card routes there carrying a pair INTENT (router state) so the
-            // details page auto-opens the dialog — the click delivers on its label (qn.4b fix, (bq)).
-            <Button asChild size="sm" variant="outline">
-              <Link to={`/devices/${device.udid}`} state={{ pair: true }}>
-                Pair
-              </Link>
-            </Button>
           )}
         </div>
       </CardContent>

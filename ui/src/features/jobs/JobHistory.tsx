@@ -1,7 +1,7 @@
 import type { Job } from "@/lib/types";
 import { groupByIntent } from "./groupByIntent";
 import { humanJobState } from "./state";
-import { formatRelativeTime } from "@/lib/format";
+import { RelativeTime } from "@/components/RelativeTime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -34,9 +34,7 @@ export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: 
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-medium">{g.summary}</div>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-subtle">
-                {formatRelativeTime(g.latest.started_at)}
-              </span>
+              <RelativeTime iso={g.latest.started_at} className="font-mono text-xs text-subtle" />
               {i === 0 && onRetry && needsAttention(g.latest) ? (
                 <Button size="sm" variant="outline" onClick={() => onRetry(g.latest)} data-testid="retry-backup">
                   Retry

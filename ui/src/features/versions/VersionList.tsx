@@ -3,7 +3,8 @@ import type { Version } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { formatBytes, formatRelativeTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { RelativeTime } from "@/components/RelativeTime";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 
@@ -62,7 +63,7 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
       <div className="flex items-center justify-between gap-3 rounded-card border border-dashed border-line bg-card p-4 opacity-80">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-muted">{formatRelativeTime(version.created_at)}</span>
+            <RelativeTime iso={version.created_at} className="text-sm font-medium text-muted" />
             {showDevice ? <DeviceLabel udid={version.udid} /> : null}
             <Badge tone="danger">missing</Badge>
           </div>
@@ -77,7 +78,7 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
     <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-card p-4">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">{formatRelativeTime(version.created_at)}</span>
+          <RelativeTime iso={version.created_at} className="text-sm font-medium" />
           {showDevice ? <DeviceLabel udid={version.udid} /> : null}
           {version.is_latest ? <Badge tone="accent">latest</Badge> : null}
           {version.job_id === null ? <Badge tone="neutral">adopted</Badge> : null}

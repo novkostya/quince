@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatDuration, formatPercent, formatSpeed } from "./format";
+import { formatBytes, formatDuration, formatPercent, formatRelativeTime, formatSpeed } from "./format";
 
 describe("formatBytes", () => {
   it("scales SI decimal with spaced units", () => {
@@ -35,5 +35,22 @@ describe("formatDuration", () => {
     expect(formatDuration(65)).toBe("1m 5s");
     expect(formatDuration(3700)).toBe("1h 1m");
     expect(formatDuration(-1)).toBe("—");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = new Date("2026-07-20T12:00:00Z").getTime();
+  it("collapses sub-minute ages to 'just now' (no noisy seconds)", () => {
+    expect(formatRelativeTime("2026-07-20T12:00:00Z", now)).toBe("just now");
+    expect(formatRelativeTime("2026-07-20T11:59:30Z", now)).toBe("just now"); // 30s
+  });
+  it("shows minutes / hours / days", () => {
+    expect(formatRelativeTime("2026-07-20T11:58:00Z", now)).toBe("2 minutes ago");
+    expect(formatRelativeTime("2026-07-20T10:00:00Z", now)).toBe("2 hours ago");
+    expect(formatRelativeTime("2026-07-18T12:00:00Z", now)).toBe("2 days ago");
+  });
+  it("guards empty / invalid", () => {
+    expect(formatRelativeTime("", now)).toBe("—");
+    expect(formatRelativeTime("not-a-date", now)).toBe("—");
   });
 });
