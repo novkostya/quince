@@ -472,6 +472,40 @@ committed version is ever perturbed; reminders never spam (cooldown honored).*
 
 ### Later / parked
 
+**Eliminating the seed latency (the (cu) raw-latency half — parked, EVIDENCE-GATED on the soak,
+(cx)).** qn.6a's `seeding` phase fixes the *visible* dead air; this parks the two candidate
+mechanisms for removing the latency itself, so neither is re-derived from scratch later. **Do not
+build either until the soak shows the raw wait — not its visibility — is the complaint.**
+- **Source-verified facts (idevicebackup2 master, 2026-07-24 — re-verify against the vendored build
+  before building):** before sending the `Backup` request it only stat/reads `Info.plist` and
+  rewrites it **remove-then-create** (unlink+create — hardlink-alias-safe); it does NOT read
+  `Status.plist`/`Manifest.db` pre-request (the device asks for those later via `DownloadFiles`);
+  the iOS 16.1+ passcode wait fires right after the request, BEFORE the message loop; it holds **no
+  long-lived fds** into the target across the loop (per-message `fopen`). Net: the passcode prompt
+  needs only a target directory with an `Info.plist` — not the manifests, not the shards.
+- **Candidate A — Operator's stand-in + `exch` scheme ((cu) option 2 made concrete, no custom
+  tooling):** give idevicebackup2 a minimal **stand-in** target immediately (COPIES of the four
+  control files — `Info.plist`, `Status.plist`, `Manifest.plist`, `Manifest.db` (~1–2 s) — and **no
+  shard aliases at all**, so corruption of `latest/` is structurally impossible; readonly is the
+  wrong tool — it breaks the legitimate Info.plist rewrite); seed the real `working/` in parallel;
+  `RENAME_EXCHANGE` the seeded tree in when ready; re-copy the fresh `Info.plist` from the stand-in
+  post-swap. **The hazard is the LOST RACE, not early-rw:** the swap must land strictly before the
+  first WRITE-class device message (`UploadFiles`/`MoveItems`/`RemoveItems`) — a tiny incremental on
+  a big device (seconds of transfer vs a ~23 s seed) makes losing plausible, and a post-write swap
+  discards device-uploaded data into the doomed stand-in → a version missing blobs (Finding B's
+  failure mode by another road). A safe build needs a deterministic gate (the supervisor's
+  transcript-phase observation — laggy), clean fail-to-retry on a lost race, and Finding-B-guard
+  coverage of the new crash shapes. **A dedicated rung with a spike leg, if ever.**
+- **Candidate B — pre-seed after commit ((cu) option 3): the architect's lean.** Rebuild `working/`
+  right after each commit so "Back up now" finds it ready → same ideal UX (prompt in ~1 s), **zero
+  concurrency**. The staleness objection is empty — `latest/` never changes between commits, so a
+  post-commit seed is byte-identical to a job-start seed. Real costs, exactly two: it re-breaks
+  "between backups the dataset holds only `latest/`" (bought for cleanliness, not correctness;
+  snapshots carry a reflink-shared `working/`, ~zero space, rclone already excludes `work/**`), and
+  a copy-fallback seed would pay real disk — so **config-gated + only where the seed reports
+  `SHARED`**. Risk-per-UX, B dominates A; A wins only if the clean-snapshot invariant is ruled
+  non-negotiable.
+
 **Scoped per-device view + QR/link device enrollment (captured 2026-07-22, (cm) — Later, not soon).**
 A single-**device** view of quince reachable via an admin-issued **scoped token** (permissions:
 view / backup / restore-later), so the *device owner* — not the admin — can trigger their own
