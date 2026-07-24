@@ -6,9 +6,16 @@ package webui
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"strings"
 )
+
+func init() {
+	// .webmanifest isn't in Go's default MIME table; register it so the PWA manifest is served as
+	// application/manifest+json rather than content-sniffed to text/plain (qn.6a icons).
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // dist is populated by the build (ui/dist → core/internal/webui/dist). `all:` so that
 // the embed still compiles when only the tracked .gitkeep placeholder is present.
