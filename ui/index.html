@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0d10" />
+    <!-- Home-screen / standalone behaviour (qn.6a soak). Without these iOS runs an added-to-home-screen
+         site in a quirky web-clip mode with an off geometry (the content-offset bug); declaring
+         standalone makes the viewport predictable, and the shell pads by env(safe-area-inset-*) so the
+         nav clears the status bar and content clears the home indicator. Full PWA (manifest, icons,
+         push) is qn.12. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="quince" />
     <title>quince</title>
   </head>
   <body>

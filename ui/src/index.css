@@ -32,6 +32,14 @@ body,
                      and <main> is the ONLY scroll region — no nested/document scroll (qn.6a) */
 }
 
+html,
+body {
+  /* Kill the iOS document rubber-band: the page itself never scrolls (the scroll region is <main>),
+     so an overscroll at the top/bottom shouldn't bounce the whole document or chain the gesture to
+     an outer scroller (qn.6a soak fix). <main> carries overscroll-y-contain for the same reason. */
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);

@@ -1,6 +1,8 @@
 import type { WSEnvelope } from "@/lib/types";
 import { refreshAll } from "@/lib/refresh";
 import { useConnectionStore } from "@/stores/connection";
+import { queryClient } from "@/lib/queryClient";
+import { authStatusKey } from "@/lib/auth";
 import { dispatch } from "./dispatch";
 
 const BASE_DELAY = 500;
@@ -63,10 +65,65 @@ function scheduleReconnect(): void {
   reconnectTimer = setTimeout(open, delay);
 }
 
+function socketOpen(): boolean {
+  return socket !== null && socket.readyState === WebSocket.OPEN;
+}
+
+// resumeReconnect force-reconnects immediately when the app comes back to the foreground or the
+// network returns. iOS suspends a backgrounded PWA and tears down its socket WITHOUT always firing
+// onclose, leaving a dead-but-non-null socket that open() would skip (`if (socket) return`) — so the
+// UI sits on "reconnecting…" until the PWA is restarted. Here we drop any stale socket, reset the
+// backoff (a resumed timer could be up to 30 s out), and reconnect now. We also revalidate auth: a
+// long suspension can idle-expire the session, and re-checking /api/auth/status lets the route guard
+// send an expired user to login instead of spinning forever (qn.6a soak fix).
+function resumeReconnect(): void {
+  if (stopped || socketOpen()) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  attempt = 0;
+  if (socket) {
+    socket.onclose = null;
+    socket.onerror = null;
+    socket.onmessage = null;
+    try {
+      socket.close();
+    } catch {
+      /* already dead */
+    }
+    socket = null;
+  }
+  void queryClient.invalidateQueries({ queryKey: authStatusKey });
+  useConnectionStore.getState().setStatus("connecting");
+  open();
+}
+
+function onVisible(): void {
+  if (typeof document !== "undefined" && document.visibilityState === "visible") resumeReconnect();
+}
+
+function addResumeListeners(): void {
+  if (typeof window === "undefined") return;
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("online", resumeReconnect);
+  window.addEventListener("pageshow", onVisible);
+  window.addEventListener("focus", onVisible);
+}
+
+function removeResumeListeners(): void {
+  if (typeof window === "undefined") return;
+  document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("online", resumeReconnect);
+  window.removeEventListener("pageshow", onVisible);
+  window.removeEventListener("focus", onVisible);
+}
+
 // connect opens the socket (called from the authed shell only).
 export function connect(): void {
   stopped = false;
   attempt = 0;
+  addResumeListeners();
   useConnectionStore.getState().setStatus("connecting");
   open();
 }
@@ -74,6 +131,7 @@ export function connect(): void {
 // close tears the socket down and stops reconnecting (called on logout / shell unmount).
 export function close(): void {
   stopped = true;
+  removeResumeListeners();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;

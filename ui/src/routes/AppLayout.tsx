@@ -16,9 +16,9 @@ export function AppLayout() {
   // region is <main> — the nav bar stays put and the page never nests a second scroll (qn.6a mobile
   // fix). min-w-0 lets wide children (logs, tables) scroll inside themselves, not the page.
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-bg text-fg sm:flex-row">
+    <div className="flex h-full flex-col overflow-hidden bg-bg text-fg pt-[env(safe-area-inset-top)] sm:flex-row sm:pt-0">
       <Sidebar />
-      <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
+      <main className="min-w-0 flex-1 overflow-y-auto overscroll-y-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-8">
         <Outlet />
       </main>
     </div>
