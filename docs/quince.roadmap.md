@@ -432,6 +432,21 @@ finding for the liveness-threshold tuning:** iOS Wi-Fi backups have long *legiti
 idle pauses (the phone doing its own snapshot/file-prep) — quince must NOT treat a multi-minute idle
 window as a stall/deadlock; a real 34 GB backup completed after exactly such a pause.
 
+**Hardware evidence banked 2026-07-25 ((dm)) — the qn.6b lab session sharpened qn.7's scope to
+AUTO-RESUME.** Real Wi-Fi backups over the qn.6b patched image showed the patched timeout rides out
+`app_limited` and multi-minute *device-side* pauses (extended survival 48 s → 31 min on a marginal
+link, and quince held `active` through a device delta-recompute with no false kill) but CANNOT cure a
+`-4` from a genuine connection drop — root-caused live to **band roaming** (the phone at the 2.4/5 GHz
+range boundary flapping bands, each flap resetting the mux TLS session). **The protocol floor (canon):**
+a dropped mobilebackup2 session is unrescuable in-flight at ANY layer (TLS state bound to the dead
+connection; no session reattach) — recovery is ALWAYS a fresh backup request that resumes the on-disk
+snapshot (kept-dirty-working, no re-transfer) + an iOS per-backup passcode. So qn.7's real Wi-Fi
+resilience is **auto-retry-on-reconnect + resume** (proven manually: fail → resume → 61 % → resume →
+complete) plus **`-4`→`connection_lost` reclassification** (a drop must not read as a hard `failed`).
+Open question that decides seamless-vs-one-tap: does a retry inside iOS's recent-unlock window skip the
+passcode prompt? Phone-sleep (`SleepyTime`) is a secondary drop factor; a netmuxd-DEBUG+pcap of
+roam-vs-signal-vs-sleep is the definitive chaos-suite input (offered in the (dm) session, not taken).
+
 **Spike (feasibility-first, (cn)): enable/disable Wi-Fi discoverability ("Wi-Fi sync") from
 inside quince.** Today a fresh device's Wi-Fi sync must be ticked in **Finder/iTunes** ("Show
 this device when on Wi-Fi") — so the D12 "everything in quince" onboarding promise is **broken
