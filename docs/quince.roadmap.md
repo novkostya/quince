@@ -291,6 +291,12 @@ the soak observes. Soaking on a model about to change would waste the findings.
   clears the mangled log pane, the stale byte counter, **and** the log bloat. It is directly on
   the soak path — live progress is what you stare at from a phone — so it earns its place if it
   stays small.
+- **Candidates from the qn.5b hardware session (architect to confirm homing):** **(cr)** missing/dead
+  versions must stop rendering as normal backups — surface `missing` on the wire + render dead (no
+  size, no `Unlock`, offer removal); same family as finding #6 (a soak that shows phantom backups is
+  worthless). **(cu) option (1)** — a visible **"preparing / seeding" phase** for the preflight→passcode
+  gap qn.5b lengthened (the seed now runs before the passcode prompt): show "Preparing — cloning from
+  your last backup…" instead of dead air. Both are soak-path UX and cheap.
 
 **Explicitly NOT in scope:** storage setup in onboarding (the auto-probe already chooses; what's
 missing is *explaining* the choice, which is qn.6's onboarding-checks work beside P1/P1b — don't
@@ -361,6 +367,16 @@ spec, gate 8 — verdict flips the D2 default to single-muxer or files the upstr
 chaos suite (replay every torn-session
 transcript + injected mid-file disconnects), liveness-stage thresholds tuned against the
 real lab box, honest UX copy for the slow/silent/passcode phases.
+
+**Hardware evidence banked 2026-07-24 ((ct)):** the qn.5b hardware session reproduced real Wi-Fi
+failures on the iPhone (`Could not receive from mobilebackup2 (-4/-256)` / netmuxd
+`Heartbeat(Timeout)`), root-caused via pcap/`ss`/netmuxd-DEBUG to genuine Wi-Fi packet loss + link
+drops (netmuxd exonerated; not a message-size bug) — exactly what the patched timeout absorbs. **Two
+real-world captures are preserved as chaos-suite fixtures** (a genuine Wi-Fi failure + a
+success-with-pause) — **local-only on the lab host, LAN IPs, must never enter git.** **New, load-bearing
+finding for the liveness-threshold tuning:** iOS Wi-Fi backups have long *legitimate* `app_limited`
+idle pauses (the phone doing its own snapshot/file-prep) — quince must NOT treat a multi-minute idle
+window as a stall/deadlock; a real 34 GB backup completed after exactly such a pause.
 
 **Spike (feasibility-first, (cn)): enable/disable Wi-Fi discoverability ("Wi-Fi sync") from
 inside quince.** Today a fresh device's Wi-Fi sync must be ticked in **Finder/iTunes** ("Show
