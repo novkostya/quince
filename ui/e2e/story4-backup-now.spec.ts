@@ -19,29 +19,49 @@ async function authenticate(page: Page): Promise<void> {
 // WS loop with no hardware — a backup starts and shows a live cancel + log, cancels honestly, and a
 // failed backup shows a one-tap Retry that starts a fresh attempt (stack D13). The on-demand demo
 // device (stable, encryption on) is the target; its seeded failed backup exercises retry.
-test("back up now starts a job, cancels honestly, and retries a failed backup", async ({ page }) => {
+test("back up now starts a job, cancels honestly, and retries a failed backup", async ({ page }, testInfo) => {
   await authenticate(page);
 
   await page.getByRole("link", { name: "spare-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
-  // The seeded failed backup is the LATEST intent, so it shows the one-tap Retry (Retry lives only on
-  // the latest intent — qn.6a). Retry starts a fresh attempt; cancel it back to a clean state.
-  await expect(page.getByTestId("retry-backup")).toBeVisible();
-  await page.getByTestId("retry-backup").click();
-  await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("cancel-backup").click();
-  await expect(page.getByText(/backup cancelled/i)).toBeVisible({ timeout: 10_000 });
+  // JobHistory renders one summary per intent group; a cancelled intent's summary is exactly "Backup
+  // cancelled" (capital B — this exact match deliberately excludes the lowercase job-log line "backup
+  // cancelled", which lives only in the transient log pane). This test cancels TWO jobs (the retried
+  // seed intent + the backup-now intent), so by the end two groups legitimately read this. Assert on
+  // the COUNT (delta), never bare visibility: (a) tolerant of >1 cancelled group, so it never trips
+  // strict mode; (b) immune to the newest-first ordering tie when both cancelled jobs share a
+  // whole-second `started_at` (wire.Now() is RFC3339, second precision). — flake fix, CI 30108238903.
+  const cancelledGroups = page.getByText("Backup cancelled", { exact: true });
+
+  // The retry leg needs the demo's one-shot seeded failed backup to be spare-iphone's LATEST intent
+  // (Retry renders only on the latest intent — qn.6a). The e2e demo server is SHARED and never
+  // re-seeds per test, so a Playwright RETRY of this test re-runs against state the failed primary
+  // attempt already advanced past: the seed is no longer the latest intent and Retry is gone. Run the
+  // retry leg only on the primary attempt (retry === 0 — always a fresh container, seed pristine); a
+  // Playwright retry still fully exercises the backup-now/cancel leg below. — idempotence fix.
+  if (testInfo.retry === 0) {
+    // The seeded failed backup is the LATEST intent, so it shows the one-tap Retry. Retry starts a
+    // fresh attempt; cancel it back to a clean state (one cancelled group appears — the seed intent).
+    await expect(page.getByTestId("retry-backup")).toBeVisible();
+    const before = await cancelledGroups.count();
+    await page.getByTestId("retry-backup").click();
+    await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("cancel-backup").click();
+    await expect(cancelledGroups).toHaveCount(before + 1, { timeout: 10_000 });
+  }
 
   // Back up now → a job starts (the cancel control + live log exist only for a running job).
   await expect(page.getByTestId("backup-now")).toBeVisible({ timeout: 10_000 });
+  const beforeBackupNow = await cancelledGroups.count();
   await page.getByTestId("backup-now").click();
   await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("job-log")).toBeVisible({ timeout: 10_000 });
 
-  // Cancel → the job ends cancelled (state honesty) and the Back up now control returns.
+  // Cancel → the job ends cancelled (state honesty) and the Back up now control returns. Exactly one
+  // more cancelled group appears — assert the delta, not bare visibility (see the note above).
   await page.getByTestId("cancel-backup").click();
-  await expect(page.getByText(/backup cancelled/i)).toBeVisible({ timeout: 10_000 });
+  await expect(cancelledGroups).toHaveCount(beforeBackupNow + 1, { timeout: 10_000 });
   await expect(page.getByTestId("backup-now")).toBeVisible({ timeout: 10_000 });
 });
 
