@@ -25,10 +25,16 @@ test("back up now starts a job, cancels honestly, and retries a failed backup", 
   await page.getByRole("link", { name: "spare-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
-  // The seeded failed backup shows the assisted retry affordance.
+  // The seeded failed backup is the LATEST intent, so it shows the one-tap Retry (Retry lives only on
+  // the latest intent — qn.6a). Retry starts a fresh attempt; cancel it back to a clean state.
   await expect(page.getByTestId("retry-backup")).toBeVisible();
+  await page.getByTestId("retry-backup").click();
+  await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("cancel-backup").click();
+  await expect(page.getByText(/backup cancelled/i)).toBeVisible({ timeout: 10_000 });
 
   // Back up now → a job starts (the cancel control + live log exist only for a running job).
+  await expect(page.getByTestId("backup-now")).toBeVisible({ timeout: 10_000 });
   await page.getByTestId("backup-now").click();
   await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("job-log")).toBeVisible({ timeout: 10_000 });
@@ -37,10 +43,6 @@ test("back up now starts a job, cancels honestly, and retries a failed backup", 
   await page.getByTestId("cancel-backup").click();
   await expect(page.getByText(/backup cancelled/i)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("backup-now")).toBeVisible({ timeout: 10_000 });
-
-  // Retry the failed backup → a new attempt starts.
-  await page.getByTestId("retry-backup").click();
-  await expect(page.getByTestId("cancel-backup")).toBeVisible({ timeout: 10_000 });
 });
 
 // (bq) fix: the dashboard card's Pair deep-links a pair INTENT (router state) that auto-opens the

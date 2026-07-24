@@ -23,17 +23,26 @@ function job(overrides: Partial<Job>): Job {
 }
 
 describe("JobHistory", () => {
-  it("offers Retry only on a group whose latest attempt failed", () => {
+  it("offers Retry ONLY on the latest intent when it needs attention — not older failed intents", () => {
     const onRetry = vi.fn();
-    const failed = job({ id: "F1", state: "connection_lost", intent_id: "F1" });
-    const succeeded = job({ id: "S1", state: "succeeded", intent_id: "S1" });
-    render(<JobHistory jobs={[failed, succeeded]} onRetry={onRetry} />);
+    // Newest intent failed; an OLDER intent also failed. Only the newest gets a Retry.
+    const latestFailed = job({ id: "F2", state: "failed", intent_id: "F2", started_at: "2026-07-20T10:00:00Z" });
+    const olderFailed = job({ id: "F1", state: "connection_lost", intent_id: "F1", started_at: "2026-07-19T10:00:00Z" });
+    render(<JobHistory jobs={[olderFailed, latestFailed]} onRetry={onRetry} />);
 
     const retries = screen.getAllByTestId("retry-backup");
-    expect(retries).toHaveLength(1); // only the failed group
+    expect(retries).toHaveLength(1); // only the latest intent, not the older failed one
 
     fireEvent.click(retries[0]);
-    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "F1" }));
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "F2" }));
+  });
+
+  it("shows no Retry when the latest intent succeeded, even if an older intent failed", () => {
+    const onRetry = vi.fn();
+    const latestOk = job({ id: "S1", state: "succeeded", intent_id: "S1", started_at: "2026-07-20T10:00:00Z" });
+    const olderFailed = job({ id: "F1", state: "failed", intent_id: "F1", started_at: "2026-07-19T10:00:00Z" });
+    render(<JobHistory jobs={[olderFailed, latestOk]} onRetry={onRetry} />);
+    expect(screen.queryByTestId("retry-backup")).toBeNull();
   });
 
   it("renders no Retry when onRetry is not provided", () => {

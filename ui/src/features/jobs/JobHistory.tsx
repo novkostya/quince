@@ -17,9 +17,11 @@ function needsAttention(latest: Job): boolean {
   return latest.state === "failed" || latest.state === "connection_lost";
 }
 
-// JobHistory groups a device's backups by intent (contracts §2 UI contract). onRetry, when given,
-// renders a one-tap Retry on a group whose latest attempt failed — the new attempt inherits the
-// intent and folds into this same group.
+// JobHistory groups a device's backups by intent (contracts §2 UI contract; groups are newest-first).
+// onRetry, when given, renders a one-tap Retry — but ONLY on the LATEST intent when its latest attempt
+// failed. Retrying an OLD failed intent is just "back up now" with extra confusion, and it would match
+// the device card, which surfaces needs-attention for the newest attempt only (finding #6). Older
+// failures stay in the history as record, without a Retry.
 export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: Job) => void }) {
   const groups = groupByIntent(jobs);
   if (groups.length === 0) {
@@ -27,7 +29,7 @@ export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: 
   }
   return (
     <div className="flex flex-col gap-2">
-      {groups.map((g) => (
+      {groups.map((g, i) => (
         <div key={g.intentId} className="rounded-card border border-line bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-medium">{g.summary}</div>
@@ -35,7 +37,7 @@ export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: 
               <span className="font-mono text-xs text-subtle">
                 {formatRelativeTime(g.latest.started_at)}
               </span>
-              {onRetry && needsAttention(g.latest) ? (
+              {i === 0 && onRetry && needsAttention(g.latest) ? (
                 <Button size="sm" variant="outline" onClick={() => onRetry(g.latest)} data-testid="retry-backup">
                   Retry
                 </Button>
