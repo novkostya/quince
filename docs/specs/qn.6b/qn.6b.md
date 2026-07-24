@@ -209,7 +209,7 @@ pure silence.** Only a `-4 SSL_ERROR` (peer reset / SSL fault) is fatal. Consequ
 `01KY95VPJ8WW9ESN3EFMRGMRFZ`, iPhone (34 GB) over Wi-Fi, resumed a dirty `working/` (no re-seed),
 transferred at ~1500 pkts/s, then **died at ~44 s** with
 `backup_failed | backup failed: Could not receive from mobilebackup2 (-4)`. The pcap root-caused it
-(architect, ratified (ct)): **intermittent Wi-Fi link drops** — a ~4 s dead patch recovered, a ~10 s
+(the qn.5b hardware implementer's wire dive, ratified (cv) — attribution corrected per (dh)): **intermittent Wi-Fi link drops** — a ~4 s dead patch recovered, a ~10 s
 one did not; the container retransmitted the same segment with 2 s→4 s exponential backoff into
 silence, then idevicebackup2 gave up. 39 phone-side retransmits, **0 non-RST zero-window** (netmuxd
 exonerated), variable failure offset (not a message-size bug). The earlier run died via netmuxd
