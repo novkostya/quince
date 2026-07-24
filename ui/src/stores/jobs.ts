@@ -7,6 +7,7 @@ const RUNNING: ReadonlySet<Job["state"]> = new Set([
   "queued",
   "waiting_for_device",
   "preflight",
+  "seeding",
   "backing_up",
   "verifying",
   "committing",

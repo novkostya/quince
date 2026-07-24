@@ -10,11 +10,11 @@ test("set password, land in the shell, devices appear, reload keeps session", as
   await page.getByRole("button", { name: /set password/i }).click();
 
   await expect(page).toHaveURL(/\/devices/);
-  await expect(page.getByText("family-iphone")).toBeVisible();
+  await expect(page.getByRole("link", { name: "family-iphone" })).toBeVisible();
   // the Wi-Fi iPad churns in on the demo's ~20s presence timer
-  await expect(page.getByText("studio-ipad")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "studio-ipad" })).toBeVisible({ timeout: 30_000 });
 
   await page.reload();
   await expect(page).toHaveURL(/\/devices/);
-  await expect(page.getByText("family-iphone")).toBeVisible();
+  await expect(page.getByRole("link", { name: "family-iphone" })).toBeVisible();
 });

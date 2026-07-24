@@ -22,19 +22,71 @@ type Registry struct {
 	order   []string // stable display order of udids (append on first appearance)
 	// udid → lockdown identity overlaid on the muxd-minimal shell (qn.3 enrichment).
 	identity map[string]Identity
+	// udid → newest presence timestamp we recorded (RFC3339 UTC), persisted so an OFFLINE device
+	// still shows a real "last seen" (qn.6a). Live devices derive last_seen from their edges instead.
+	offlineSeen map[string]string
 	// lastBackup resolves Device.last_backup from the version registry (qn.4c finding (v)).
 	// Nil until wired (e.g. --demo, tests): the field then stays null, never a guess.
 	lastBackup func(udid string) (wire.LastBackup, bool)
+	// knownUDIDs lists the UDIDs that have committed versions — the OFFLINE-device set unioned with
+	// live presence so a powered-off device that has backups is still listed (qn.6a). Nil until wired.
+	knownUDIDs func() []string
+	// persistIdentity writes a device's identity + last_seen so an offline row survives a restart
+	// with its name (qn.6a). Nil until wired (tests/--demo keep identity in-memory only).
+	persistIdentity func(udid string, id Identity, lastSeen string)
+}
+
+// PersistedIdentity is one stored identity row loaded at startup (qn.6a). The device package stays
+// free of the store's schema — live.go maps store.DeviceIdentityRow ↔ this.
+type PersistedIdentity struct {
+	UDID     string
+	Identity Identity
+	LastSeen string
 }
 
 // NewRegistry returns an empty registry publishing device.* events to b.
 func NewRegistry(b *bus.Bus, log *slog.Logger) *Registry {
 	return &Registry{
-		bus:      b,
-		log:      log,
-		sources:  map[string]map[string]map[string]string{},
-		identity: map[string]Identity{},
+		bus:         b,
+		log:         log,
+		sources:     map[string]map[string]map[string]string{},
+		identity:    map[string]Identity{},
+		offlineSeen: map[string]string{},
 	}
+}
+
+// SetKnownUDIDs wires the offline-device set — the UDIDs with committed versions (qn.6a). Devices()
+// unions these with live presence so a powered-off device that has backups is still listed. Read on
+// every device read (like SetLastBackupSource), so it is automatically correct after a commit/delete.
+// Call once, before serving.
+func (r *Registry) SetKnownUDIDs(fn func() []string) {
+	r.mu.Lock()
+	r.knownUDIDs = fn
+	r.mu.Unlock()
+}
+
+// SetPersist wires where an enriched identity is persisted so an offline row survives a restart with
+// its name (qn.6a). Call once, before serving.
+func (r *Registry) SetPersist(fn func(udid string, id Identity, lastSeen string)) {
+	r.mu.Lock()
+	r.persistIdentity = fn
+	r.mu.Unlock()
+}
+
+// LoadPersisted seeds the registry's identity + last-seen maps from storage at startup, so an offline
+// device renders its known name and a real "last seen" immediately, before any muxer reconnects.
+func (r *Registry) LoadPersisted(rows []PersistedIdentity) {
+	r.mu.Lock()
+	for _, row := range rows {
+		if row.UDID == "" {
+			continue
+		}
+		r.identity[row.UDID] = row.Identity
+		if row.LastSeen != "" {
+			r.offlineSeen[row.UDID] = row.LastSeen
+		}
+	}
+	r.mu.Unlock()
 }
 
 // SetLastBackupSource wires where Device.last_backup comes from — the version registry
@@ -66,24 +118,73 @@ func (r *Registry) AnnounceBackup(udid string) {
 
 // --- httpapi.DeviceReader ---
 
-// Devices returns the merged devices in display order (never nil → JSON []).
+// Devices returns the merged devices in display order, then the OFFLINE devices — UDIDs that have
+// committed versions but no live transport (qn.6a) — so a powered-off device that has backups is
+// still listed instead of being forgotten the moment it is unplugged. Live devices come first (in
+// their attach order); offline devices follow in newest-backup-first order (the knownUDIDs source
+// orders them). Never nil → JSON [].
 func (r *Registry) Devices() []wire.Device {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	live := make(map[string]bool, len(r.order))
 	out := make([]wire.Device, 0, len(r.order))
 	for _, udid := range r.order {
 		if dev, ok := r.mergedLocked(udid); ok {
 			out = append(out, dev)
+			live[udid] = true
 		}
+	}
+	for _, udid := range r.offlineUDIDsLocked() {
+		if live[udid] {
+			continue // already listed with a live transport
+		}
+		out = append(out, r.offlineShellLocked(udid))
 	}
 	return out
 }
 
-// Device returns one merged device by UDID.
+// Device returns one device by UDID: the live merged view when present, else an OFFLINE shell for a
+// UDID that has committed versions (qn.6a), so a deep-link to a powered-off device's details page
+// works. ok=false only when quince has neither presence nor backups for the UDID.
 func (r *Registry) Device(udid string) (wire.Device, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.mergedLocked(udid)
+	if dev, ok := r.mergedLocked(udid); ok {
+		return dev, true
+	}
+	if r.hasVersionsLocked(udid) {
+		return r.offlineShellLocked(udid), true
+	}
+	return wire.Device{}, false
+}
+
+// offlineUDIDsLocked is the offline-device set: the UDIDs with committed versions (knownUDIDs), in
+// that source's order. Empty when the source is unwired (tests/--demo) — then Devices() is live-only,
+// exactly as before qn.6a.
+func (r *Registry) offlineUDIDsLocked() []string {
+	if r.knownUDIDs == nil {
+		return nil
+	}
+	return r.knownUDIDs()
+}
+
+// hasVersionsLocked reports whether the UDID has any committed version (offline-device membership).
+func (r *Registry) hasVersionsLocked(udid string) bool {
+	for _, u := range r.offlineUDIDsLocked() {
+		if u == udid {
+			return true
+		}
+	}
+	return false
+}
+
+// offlineShellLocked builds the card for a device with no live transport: its persisted identity and
+// last_backup, no transports (so "Back up now" renders disabled-with-reason), and the persisted
+// last_seen so the card is honest about when the device was last around.
+func (r *Registry) offlineShellLocked(udid string) wire.Device {
+	dev := r.deviceShellLocked(udid) // identity + last_backup overlaid; no transports
+	dev.LastSeen = r.offlineSeen[udid]
+	return dev
 }
 
 // --- muxd.Sink factory ---
@@ -123,24 +224,31 @@ func (r *Registry) apply(source string, ev muxd.Event) {
 	}
 	after := r.transportPresentLocked(ev.UDID, ev.Transport)
 
-	var emit *emission
+	var emits []emission
 	switch {
 	case ev.Kind == muxd.Attached && !before && after:
 		r.ensureOrderLocked(ev.UDID)
 		dev, _ := r.mergedLocked(ev.UDID)
-		emit = &emission{wire.EventDeviceAttached, wire.DeviceEvent{Device: dev, Transport: ev.Transport}}
+		emits = append(emits, emission{wire.EventDeviceAttached, wire.DeviceEvent{Device: dev, Transport: ev.Transport}})
 	case ev.Kind == muxd.Detached && before && !after:
 		dev, ok := r.mergedLocked(ev.UDID)
-		if !ok { // last transport gone → device leaves the table
-			dev = r.deviceShellLocked(ev.UDID)
+		if !ok { // last transport gone → device leaves the LIVE table
 			r.dropFromOrderLocked(ev.UDID)
+			r.offlineSeen[ev.UDID] = wire.Now() // it was here until just now — last seen = now
+			dev = r.deviceShellLocked(ev.UDID)
 		}
-		emit = &emission{wire.EventDeviceDetached, wire.DeviceEvent{Device: dev, Transport: ev.Transport}}
+		emits = append(emits, emission{wire.EventDeviceDetached, wire.DeviceEvent{Device: dev, Transport: ev.Transport}})
+		// If the fully-detached device has backups, keep it on screen as an OFFLINE card instead of
+		// vanishing (qn.6a): the detached event removes the live row, this re-adds the offline shell,
+		// so unplugging your phone mid-session turns its card offline without a page refresh.
+		if !ok && r.hasVersionsLocked(ev.UDID) {
+			emits = append(emits, emission{wire.EventDeviceUpdated, r.offlineShellLocked(ev.UDID)})
+		}
 	}
 	r.mu.Unlock()
 
-	if emit != nil {
-		r.bus.PublishEvent(emit.typ, emit.data)
+	for _, e := range emits {
+		r.bus.PublishEvent(e.typ, e.data)
 	}
 }
 
@@ -273,8 +381,22 @@ func (r *Registry) Enrich(udid string, id Identity) {
 		r.identity[udid] = id
 	}
 	dev, present := r.mergedLocked(udid)
+	// When the device is present, advance its persisted last_seen to the newest edge so an offline
+	// row (rendered later, after it detaches) is honest about when it was last around (qn.6a).
+	lastSeen := r.offlineSeen[udid]
+	if present && dev.LastSeen != "" {
+		lastSeen = dev.LastSeen
+		r.offlineSeen[udid] = lastSeen
+	}
+	persist := r.persistIdentity
 	r.mu.Unlock()
 
+	// Persist the identity + last_seen so an offline device survives a restart with its name (qn.6a).
+	// Persist whenever something changed OR the device is present (to bump last_seen); the DB write
+	// runs outside the lock.
+	if persist != nil && (changed || present) {
+		persist(udid, id, lastSeen)
+	}
 	if changed && present {
 		r.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 	}

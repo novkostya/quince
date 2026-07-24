@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/backup"
 	"github.com/novkostya/quince/core/internal/bus"
@@ -78,6 +79,35 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// real last backup immediately after a restart — including versions adopted from a restored
 	// dataset, which no job row would ever explain.
 	reg.SetLastBackupSource(storageMgr.LastBackup)
+
+	// Offline devices (qn.6a): a powered-off device that has backups stays listed. The registry
+	// unions live presence with the UDIDs that have committed versions, and persists the identity
+	// fetched at enrichment so an offline row shows a name + last-seen after a restart.
+	reg.SetKnownUDIDs(storageMgr.KnownUDIDs)
+	reg.SetPersist(func(udid string, idn device.Identity, lastSeen string) {
+		if err := st.UpsertDeviceIdentity(store.DeviceIdentityRow{
+			UDID: udid, Name: idn.Name, Model: idn.Model, IOSVersion: idn.IOSVersion,
+			Paired: idn.Paired, BackupEncryption: idn.BackupEncryption,
+			LastSeen: lastSeen, UpdatedAt: time.Now().UTC(),
+		}); err != nil {
+			log.Warn("device identity persist failed", "udid", udid, "error", err)
+		}
+	})
+	if rows, err := st.ListDeviceIdentities(); err != nil {
+		log.Warn("device identity load failed", "error", err)
+	} else {
+		persisted := make([]device.PersistedIdentity, 0, len(rows))
+		for _, row := range rows {
+			persisted = append(persisted, device.PersistedIdentity{
+				UDID: row.UDID, LastSeen: row.LastSeen,
+				Identity: device.Identity{
+					Name: row.Name, Model: row.Model, IOSVersion: row.IOSVersion,
+					Paired: row.Paired, BackupEncryption: row.BackupEncryption,
+				},
+			})
+		}
+		reg.LoadPersisted(persisted)
+	}
 
 	// Backup engine (qn.4a): drives idevicebackup2 through the state machine into storage. Its
 	// job-row reconciliation runs AFTER storage's (order matters — amendment 1).

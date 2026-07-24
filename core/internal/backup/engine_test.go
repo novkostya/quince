@@ -260,6 +260,24 @@ func (ec *eventCollector) logContains(s string) bool {
 
 // ============================ Stories ============================
 
+// qn.6a ((cu)/(cv)): the backup passes through the `seeding` phase — quince cloning latest/ → working/
+// before idevicebackup2 starts — between preflight and backing_up, so the UI narrates the clone wait
+// instead of dead air before the on-device passcode prompt.
+func TestSeedingPhaseEmitted(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), m.Transport)
+	ec, stop := collect(t, h.bus)
+	defer stop()
+	job := h.start(t, m.Transport, "")
+	final := waitTerminal(t, h.eng, job.ID, 5*time.Second)
+	if final.State != StateSucceeded {
+		t.Fatalf("state=%s error=%v", final.State, final.Error)
+	}
+	if !ec.sawPhase(PhaseSeeding) {
+		t.Fatal("no job.updated carried the seeding phase (between preflight and backing_up)")
+	}
+}
+
 // Story 2: a clean full encrypted USB backup drives the state machine to a committed, verified
 // version in qn.5 storage.
 func TestStoryFullUSBSuccess(t *testing.T) {

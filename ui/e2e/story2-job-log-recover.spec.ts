@@ -26,7 +26,7 @@ async function authenticate(page: Page): Promise<void> {
 test("job card shows a tailing log; WS drop reconnects and recovers", async ({ page }) => {
   await authenticate(page);
 
-  await page.getByText("family-iphone").click();
+  await page.getByRole("link", { name: "family-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
   // the scripted backup produces a live log pane (waits across the loop's pause)

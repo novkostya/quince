@@ -28,6 +28,7 @@ export type JobState =
   | "queued"
   | "waiting_for_device"
   | "preflight"
+  | "seeding" // qn.6a: cloning latest/ → working/ before the tool starts (contracts §2)
   | "backing_up"
   | "verifying"
   | "committing"
@@ -85,6 +86,10 @@ export interface Version {
   content_verified_at: string | null;
   logical_bytes: number;
   physical_bytes: number;
+  // missing = the artifact is GONE (reconciliation couldn't find it); the row survives so history
+  // isn't silently shrunk. Rendered explicitly dead — no size, no Unlock, an "artifact gone — remove?"
+  // action on DELETE (qn.6a (cr)). Older servers omit the key → undefined is treated as false.
+  missing?: boolean;
 }
 
 export interface Op {

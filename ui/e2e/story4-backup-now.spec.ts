@@ -22,7 +22,7 @@ async function authenticate(page: Page): Promise<void> {
 test("back up now starts a job, cancels honestly, and retries a failed backup", async ({ page }) => {
   await authenticate(page);
 
-  await page.getByText("spare-iphone").click();
+  await page.getByRole("link", { name: "spare-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
   // The seeded failed backup shows the assisted retry affordance.
@@ -68,11 +68,7 @@ test("a card-started backup ends on the real last-backup line without a reload",
   // backup control. (No assertion on the STARTING text: the demo server is shared across the
   // tests in this file, and the retry above may already have given this device a backup. What
   // this story proves is the transition out of progress and onto a real last-backup line.)
-  const card = page
-    .locator("div")
-    .filter({ has: page.getByTestId("card-backup-now") })
-    .filter({ hasText: "spare-iphone" })
-    .last();
+  const card = page.getByTestId("device-card").filter({ hasText: "spare-iphone" });
 
   await card.getByTestId("card-backup-now").click();
   await expect(card.getByTestId("card-backup-now")).toBeHidden({ timeout: 10_000 });

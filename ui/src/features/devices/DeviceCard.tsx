@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
-import { ShieldAlert, ShieldCheck, Usb, Wifi } from "lucide-react";
-import type { Device } from "@/lib/types";
+import { ShieldAlert, ShieldCheck, Usb, Wifi, WifiOff } from "lucide-react";
+import type { Device, Job } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { modelLine } from "./modelName";
 import { formatRelativeTime } from "@/lib/format";
 import { isRunning, useJobsStore } from "@/stores/jobs";
+import { useVersionsStore } from "@/stores/versions";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
 import { useBackup } from "@/features/jobs/useBackup";
 
@@ -38,17 +39,38 @@ function backupStatus(device: Device): string {
   return device.paired === "yes" ? "No backups yet" : "Not set up yet";
 }
 
+// isFailed marks a terminal attempt the user should act on (assisted model — a failed newest attempt
+// must be visible or the soak is worthless, gate-11 finding #6, (cj)).
+function isFailed(state: Job["state"]): boolean {
+  return state === "failed" || state === "connection_lost";
+}
+
 export function DeviceCard({ device }: { device: Device }) {
-  const activeJob = useJobsStore((s) =>
-    Object.values(s.byId).find((j) => j.udid === device.udid && isRunning(j.state)),
+  const jobsForDevice = (s: { byId: Record<string, Job> }) =>
+    Object.values(s.byId).filter((j) => j.udid === device.udid);
+  const activeJob = useJobsStore((s) => jobsForDevice(s).find((j) => isRunning(j.state)));
+  // The newest attempt for the device (by start time) — its failure drives the "needs attention" line.
+  const newestJob = useJobsStore((s) =>
+    jobsForDevice(s).reduce<Job | undefined>(
+      (newest, j) => (!newest || j.started_at > newest.started_at ? j : newest),
+      undefined,
+    ),
   );
+  // Non-missing versions this device actually holds (the card's "N backups" count, qn.6a).
+  const versionCount = useVersionsStore(
+    (s) => s.order.filter((id) => s.byId[id]?.udid === device.udid && !s.byId[id]?.missing).length,
+  );
+
   const { start, busy, error } = useBackup(device.udid);
   const present = Boolean(device.transports.usb || device.transports.wifi);
   const subtitle = modelLine(device.model, device.ios_version);
+  // Surface a failed newest attempt only when nothing is currently running (a running job already
+  // narrates itself) and last_backup (last SUCCESS) doesn't cover it.
+  const attention = !activeJob && newestJob && isFailed(newestJob.state) ? newestJob : undefined;
 
   return (
-    <Card>
-      <CardContent className="p-5">
+    <Card data-testid="device-card">
+      <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link
@@ -73,20 +95,62 @@ export function DeviceCard({ device }: { device: Device }) {
               <Wifi size={12} /> Wi-Fi
             </Badge>
           ) : null}
+          {!present ? (
+            <Badge tone="neutral">
+              <WifiOff size={12} /> Offline
+            </Badge>
+          ) : null}
         </div>
 
         <div className="mt-3 text-xs text-muted">{backupStatus(device)}</div>
+        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-subtle">
+          <span>
+            {versionCount} {versionCount === 1 ? "backup" : "backups"}
+          </span>
+          {!present && device.last_seen ? (
+            <span>last seen {formatRelativeTime(device.last_seen)}</span>
+          ) : null}
+        </div>
+
+        {attention ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-accent-soft p-2.5">
+            <span className="text-xs text-danger">Last attempt needs attention</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void start("auto", attention.id)}
+              disabled={busy}
+              data-testid="card-retry"
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
 
         <div className="mt-4">
           {activeJob ? (
             <JobProgressInline job={activeJob} />
+          ) : !present ? (
+            // Offline: a disabled "Back up now" WITH a reason (never a dead button), same shape as an
+            // online card so the layout stays aligned (Operator ruling, (ch)/(bq)). The reason is
+            // shown inline too — a hover title alone is invisible on a phone.
+            <div className="flex flex-col gap-1">
+              <Button
+                size="sm"
+                disabled
+                title="Connect the device to back it up"
+                data-testid="card-backup-now"
+              >
+                Back up now
+              </Button>
+              <span className="text-xs text-muted">Connect it over USB or Wi-Fi to back it up.</span>
+            </div>
           ) : device.paired === "yes" ? (
             <div className="flex flex-col gap-1">
               <Button
                 size="sm"
                 onClick={() => void start("auto")}
-                disabled={!present || busy}
-                title={present ? undefined : "Connect the device to back it up"}
+                disabled={busy}
                 data-testid="card-backup-now"
               >
                 {busy ? "Starting…" : "Back up now"}

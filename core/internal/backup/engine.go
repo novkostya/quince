@@ -333,10 +333,21 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 	}
 
 	e.transition(lj, func(r *store.JobRow) { r.State = StatePreflight; r.Phase = StatePreflight })
-	workDir, code, reason := e.preflight(ctx, lj)
-	if code != "" {
+	if code, reason := e.preflight(ctx, lj); code != "" {
 		e.terminate(lj, StateFailed, code, reason)
 		return // preflight refuses BEFORE Seed → nothing to discard
+	}
+
+	// seeding: clone latest/ → working/<udid> (O(files); ~23 s on a 34 GB device, near-instant on a
+	// resume). Its own state so the UI narrates "Preparing — cloning from your last backup…" instead
+	// of dead air before the on-device passcode prompt fires (qn.6a (cu)/(cv)).
+	e.transition(lj, func(r *store.JobRow) { r.State = StateSeeding; r.Phase = PhaseSeeding; r.Liveness = LivenessActive })
+	workDir, err := e.storage.Seed(udid, lj.row.ID)
+	if err != nil {
+		// A seed failure has committed nothing; any partial working/ is discarded-and-re-seeded on
+		// the next attempt by the qn.5b Finding B sentinel guard, so there is nothing to discard here.
+		e.terminate(lj, StateFailed, ErrBackupFailed, "seed work area: "+err.Error())
+		return
 	}
 
 	e.transition(lj, func(r *store.JobRow) { r.State = StateBackingUp; r.Phase = PhaseStarting; r.Liveness = LivenessActive })
@@ -379,33 +390,30 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 	}
 }
 
-// preflight checks presence, pairing, the encryption policy, and disk headroom (all BEFORE Seed,
-// so a refusal leaves nothing to discard), then Seeds and returns the work dir. code=="" on success.
-func (e *Engine) preflight(ctx context.Context, lj *liveJob) (workDir, code, reason string) {
+// preflight checks presence, pairing, the encryption policy, and disk headroom — all BEFORE the
+// seeding step, so a refusal leaves nothing to discard. code=="" on success; the Seed itself runs
+// in the separate `seeding` state (qn.6a) so the clone latency is narrated, not dead air.
+func (e *Engine) preflight(ctx context.Context, lj *liveJob) (code, reason string) {
 	udid, transport := lj.row.UDID, lj.row.Transport
 	dev, ok := e.devices.Device(udid)
 	if !ok || !presentOn(dev, transport) {
-		return "", ErrDeviceNotVisible, "device is not present on " + transport
+		return ErrDeviceNotVisible, "device is not present on " + transport
 	}
 	if dev.Paired == "no" {
-		return "", ErrNotPaired, "device is not paired — pair it first"
+		return ErrNotPaired, "device is not paired — pair it first"
 	}
 	if e.cfg.RequireEncryption {
 		if code, reason := e.checkEncryption(ctx, udid, transport, dev.BackupEncryption); code != "" {
-			return "", code, reason
+			return code, reason
 		}
 	}
 	if e.freeSpace != nil && e.backups != "" {
 		if free, err := e.freeSpace(e.backups); err == nil && free < e.cfg.DiskLowFreeBytes {
-			return "", ErrDiskLow, fmt.Sprintf(
+			return ErrDiskLow, fmt.Sprintf(
 				"target filesystem is low on space (%d MiB free) — free space before backing up", free>>20)
 		}
 	}
-	wd, err := e.storage.Seed(udid, lj.row.ID)
-	if err != nil {
-		return "", ErrBackupFailed, "seed work area: " + err.Error()
-	}
-	return wd, "", ""
+	return "", ""
 }
 
 // checkEncryption enforces backup.require_encryption WITHOUT trusting a stale reading. The
@@ -521,6 +529,7 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 		defer readers.Done()
 		sc := bufio.NewScanner(rc)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		sc.Split(scanFrames) // split on \r too, so progress redraws are per-frame tokens (qn.6a #3)
 		for sc.Scan() {
 			e.handleLine(lj, ss, sc.Text())
 		}
@@ -600,9 +609,19 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 }
 
 func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
-	e.logs.append(lj.row.ID, line+"\n")
-	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: line + "\n"})
 	p := parseLine(line)
+
+	// A pure progress redraw ("[..] 38% Finished", "[..] 2% (23/938 MB)") updates the bar but is NOT
+	// logged: at frame rate it floods the pane and the ring buffer (gate-11 finding #3, (cj)). The
+	// progress fields still update below, and job.updated carries them (throttled). Everything with
+	// real narration — phase headers ("Receiving files"), the passcode wait, the tool's error line,
+	// "Backup Successful" — is logged verbatim.
+	redraw := (p.overallPercent != nil || p.hasBytes) &&
+		!p.waitingPasscode && !p.phaseReceiving && !p.success && p.failReason == ""
+	if !redraw {
+		e.logs.append(lj.row.ID, line+"\n")
+		e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: line + "\n"})
+	}
 
 	ss.mu.Lock()
 	ss.outputSince = true

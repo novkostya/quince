@@ -24,6 +24,10 @@ const udidSpare = "00008130-0022446688AA0044"
 // the pairing dialog on the details page (qn.4b fix for (bq)).
 const udidUnpaired = "00008120-0011002200330044"
 
+// udidOffline is a powered-off device that HAS backups but no live transport (qn.6a): it proves the
+// offline card (disabled "Back up now" with a reason, last-seen, version count) and a DEAD version.
+const udidOffline = "00008110-0099887766554433"
+
 // demoRun holds an in-flight scripted job so it can be cancelled and hold the single-flight slot.
 type demoRun struct {
 	jobID  string
@@ -128,6 +132,7 @@ func (p *Provider) scriptBackup(run *demoRun, job wire.Job) {
 	}{
 		{"queued", "queued", 0, 0, "active", "queued backup for " + job.UDID + " (" + job.Transport + ")", 900 * time.Millisecond},
 		{"preflight", "preflight", 0, 0, "active", "preflight: validate ok · encryption on · disk ok", 900 * time.Millisecond},
+		{"seeding", "seeding", 0, 0, "active", "preparing: cloning from your last backup…", 1200 * time.Millisecond},
 		{"backing_up", "receiving", 28, 55, "active", "receiving files… 55", 900 * time.Millisecond},
 		{"backing_up", "receiving", 66, 170, "active", "receiving files… 170", 900 * time.Millisecond},
 		{"backing_up", "receiving", 94, 240, "active", "receiving files… 240", 900 * time.Millisecond},
@@ -139,8 +144,13 @@ func (p *Provider) scriptBackup(run *demoRun, job wire.Job) {
 	for _, s := range steps {
 		job.State = s.state
 		job.Progress.Phase = s.phase
-		job.Progress.Percent = f64ptr(s.pct)
-		job.Progress.BytesDone = int64(float64(job.Progress.BytesTotal) * s.pct / 100)
+		if s.state == "seeding" {
+			job.Progress.Percent = nil // indeterminate clone (O(files)) — not "0%"
+			job.Progress.BytesDone = 0
+		} else {
+			job.Progress.Percent = f64ptr(s.pct)
+			job.Progress.BytesDone = int64(float64(job.Progress.BytesTotal) * s.pct / 100)
+		}
 		job.Progress.FilesReceived = s.files
 		job.Progress.Liveness = s.liveness
 		p.setJob(job)
@@ -245,11 +255,43 @@ func (p *Provider) seedOnDemandDevice() {
 		BackupEncryption: "unknown",
 		LastSeen:         now,
 	}
+	// An OFFLINE device: no transports, but it has backups (a live one + a DEAD one) and a last-seen
+	// in the past — proves the qn.6a offline card + the "artifact gone — remove?" dead-version row.
+	offline := wire.Device{
+		UDID: udidOffline, Name: "attic-ipad", Model: "iPad13,4", IOSVersion: "18.5",
+		Transports:       wire.Transports{}, // powered off — no transport
+		Paired:           "yes",
+		BackupEncryption: "on",
+		LastSeen:         "2026-07-18T09:15:00Z",
+		LastBackup:       &wire.LastBackup{At: "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Status: "succeeded"},
+	}
+	liveVerID, deadVerID := id.New(), id.New()
+	liveVer := wire.Version{
+		ID: liveVerID, UDID: udidOffline, Backend: "zfs",
+		ZFSSnapshot: strptr("tank/backups/iphone-backup/" + udidOffline + "@quince-2026-07-18T09-15-" + liveVerID),
+		BrowseRoot:  "/backups/" + udidOffline + "/.zfs/snapshot/quince-2026-07-18T09-15-" + liveVerID + "/latest",
+		CreatedAt:   "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Kind: "incremental",
+		Encrypted: true, IsLatest: true, StructureVerifiedAt: strptr("2026-07-18T09:15:00Z"),
+		LogicalBytes: 12_400_000_000, PhysicalBytes: 90_000_000,
+	}
+	// A DEAD version: its artifact is gone (reconciliation marked it missing). Rendered explicitly
+	// dead — no size, no Unlock, a Remove action (qn.6a (cr)).
+	deadVer := wire.Version{
+		ID: deadVerID, UDID: udidOffline, Backend: "zfs",
+		CreatedAt: "2026-07-10T09:15:00Z", JobID: strptr(id.New()), Kind: "full",
+		Encrypted: true, IsLatest: false, Missing: true,
+		LogicalBytes: 11_800_000_000, PhysicalBytes: 11_800_000_000,
+	}
+
 	p.mu.Lock()
 	p.devices[udidSpare] = dev
 	p.devices[udidUnpaired] = unpaired
-	p.order = append(p.order, udidSpare, udidUnpaired)
+	p.devices[udidOffline] = offline
+	p.order = append(p.order, udidSpare, udidUnpaired, udidOffline)
 	p.jobs[failedID] = failed
+	p.versions[liveVerID] = liveVer
+	p.versions[deadVerID] = deadVer
+	p.verOrder = append(p.verOrder, liveVerID, deadVerID)
 	p.mu.Unlock()
 	p.bus.PublishEvent(wire.EventDeviceAttached, wire.DeviceEvent{Device: dev, Transport: "usb"})
 	p.bus.PublishEvent(wire.EventDeviceAttached, wire.DeviceEvent{Device: unpaired, Transport: "usb"})

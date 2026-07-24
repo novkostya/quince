@@ -1,10 +1,44 @@
 package backup
 
 import (
+	"bytes"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// scanFrames is the bufio.SplitFunc the supervisor scans idevicebackup2 output with. It splits like
+// bufio.ScanLines but ALSO treats a bare carriage return as a line terminator, because the tool
+// redraws its progress bar in place with '\r' and NO newline ("[..] 2% (23.2 MB/938.6 MB)\r[..] 4%
+// …"). Under ScanLines those redraws accumulate into one multi-kilobyte "line" until a newline (or
+// the 1 MB buffer cap) finally arrives — which mangles the log pane AND makes the byte regex match
+// the OLDEST frame in the blob, so the byte counter reads stale (gate-11 finding #3, (cj)). Splitting
+// on '\r' yields one token per frame: the parser sees the LATEST bytes, the pane stays clean, and the
+// pure-progress frames are dropped from the log (handleLine), killing the bloat. '\r\n' is one break.
+func scanFrames(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	i := bytes.IndexAny(data, "\r\n")
+	if i < 0 {
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil // no terminator yet — ask for more
+	}
+	if data[i] == '\r' {
+		// A trailing '\r' with more possibly coming could be the '\r' of a '\r\n' split across reads;
+		// wait for the next byte so the '\n' is folded into this same break, not emitted as an empty line.
+		if i == len(data)-1 && !atEOF {
+			return 0, nil, nil
+		}
+		if i+1 < len(data) && data[i+1] == '\n' {
+			return i + 2, data[:i], nil // fold \r\n
+		}
+		return i + 1, data[:i], nil
+	}
+	return i + 1, data[:i], nil // '\n'
+}
 
 // The parser is transcript-grounded, not guessed: its recognizers come from the real
 // idevicebackup2 output captured in the lab (core/internal/backup/testdata/transcripts). A line

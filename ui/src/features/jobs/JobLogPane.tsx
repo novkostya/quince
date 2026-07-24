@@ -21,7 +21,9 @@ export function JobLogPane({ jobId }: { jobId: string }) {
       className="max-h-56 overflow-auto rounded-card border border-line bg-bg p-3 font-mono text-xs text-muted"
     >
       {lines.map((line, i) => (
-        <div key={i} className="whitespace-pre-wrap">
+        // break-words so a long path/token wraps instead of forcing the page to scroll sideways on a
+        // phone (qn.6a mobile pass).
+        <div key={i} className="whitespace-pre-wrap break-words">
           {line}
         </div>
       ))}

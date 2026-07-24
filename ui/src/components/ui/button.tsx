@@ -13,10 +13,12 @@ export const buttonVariants = cva(
         ghost: "text-muted hover:bg-elevated hover:text-fg",
         destructive: "bg-danger text-white hover:opacity-90",
       },
+      // Taller on phones for a comfortable touch target, current density on desktop (qn.6a mobile
+      // pass): base = mobile, sm: = desktop.
       size: {
-        sm: "h-8 px-3",
-        md: "h-9 px-4",
-        icon: "h-9 w-9",
+        sm: "h-9 px-3 sm:h-8",
+        md: "h-10 px-4 sm:h-9",
+        icon: "h-10 w-10 sm:h-9 sm:w-9",
       },
     },
     defaultVariants: { variant: "accent", size: "md" },

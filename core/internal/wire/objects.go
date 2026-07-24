@@ -65,12 +65,15 @@ type Job struct {
 
 // JobProgress is the throttled progress + liveness snapshot for a running job.
 type JobProgress struct {
-	Phase         string   `json:"phase"`   // incl. "waiting_for_passcode"
-	Percent       *float64 `json:"percent"` // null when indeterminate
-	BytesDone     int64    `json:"bytes_done"`
-	BytesTotal    int64    `json:"bytes_total"`
-	FilesReceived int64    `json:"files_received"`
-	Liveness      string   `json:"liveness"` // active | silent_but_connected | suspected_stall
+	Phase   string   `json:"phase"`   // incl. "seeding", "waiting_for_passcode"
+	Percent *float64 `json:"percent"` // null when indeterminate; the trustworthy OVERALL signal
+	// BytesDone/BytesTotal are the CURRENT-TRANSFER bytes from idevicebackup2's "(X/Y)" — the current
+	// file, NOT the whole backup (the tool gives no reliable upfront backup-byte total). The UI labels
+	// them as the current file and leads with Percent + FilesReceived (qn.6a #10-byte, (cj)). Best-effort.
+	BytesDone     int64  `json:"bytes_done"`
+	BytesTotal    int64  `json:"bytes_total"`
+	FilesReceived int64  `json:"files_received"`
+	Liveness      string `json:"liveness"` // active | silent_but_connected | suspected_stall
 }
 
 // JobError is the {code, message} shape reused by Job.error and Op.error.
@@ -95,6 +98,11 @@ type Version struct {
 	ContentVerifiedAt   *string `json:"content_verified_at"`   // set on a later unlock
 	LogicalBytes        int64   `json:"logical_bytes"`
 	PhysicalBytes       int64   `json:"physical_bytes"`
+	// Missing = the registry row survives but its on-disk artifact is GONE (reconciliation could not
+	// find the snapshot/dir; roll-forward keeps the row, never drops it — contracts §2, qn.6a
+	// (cr)(a)/(cv)). The UI renders such a version explicitly dead (no size claim, no Unlock, an
+	// "artifact gone — remove?" action on DELETE), never omitting it.
+	Missing bool `json:"missing"`
 }
 
 // Op is a pair/encryption operation whose narration streams over op.updated (contracts §2).

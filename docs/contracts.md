@@ -184,8 +184,13 @@ Device: {
 Job: {
   "id": "01J...", "udid": "...", "kind": "backup",
   "transport": "usb" | "wifi",
-  "state": "queued" | "waiting_for_device" | "preflight" | "backing_up" | "verifying"
+  "state": "queued" | "waiting_for_device" | "preflight" | "seeding" | "backing_up" | "verifying"
          | "committing" | "succeeded" | "failed" | "cancelled" | "connection_lost",
+  // qn.6a (cu opt 1 / cv): `seeding` is emitted between `preflight` and `backing_up` while storage
+  // Seed reflink/hardlink-clones latest/ → working/<udid> (O(files); ~23 s on a 34 GB iPhone,
+  // near-instant on a resume). The UI narrates "Preparing — cloning from your last backup…" instead
+  // of dead air before the on-device passcode prompt. progress.phase mirrors it; it is a running
+  // (non-terminal) state.
   "progress": {"phase": "receiving",                          // incl. "waiting_for_passcode"
                "percent": 63.0,                               // percent nullable
                "bytes_done": 2400000000, "bytes_total": 3600000000,
@@ -238,7 +243,15 @@ Version: {
   "is_latest": true,
   "structure_verified_at": "..." | null,   // set at commit (structural verification)
   "content_verified_at": "..." | null,     // set by verify_canary on a later unlock
-  "logical_bytes": 42400000000, "physical_bytes": 3400000000   // best-effort
+  "logical_bytes": 42400000000, "physical_bytes": 3400000000,  // best-effort
+  "missing": false
+  // qn.6a (cr(a) / cv): true = the registry row survives but its on-disk artifact is GONE
+  // (reconciliation could not find the snapshot/dir — roll-forward keeps the row, never drops it).
+  // store.VersionRow.Missing already exists and is honoured by LastBackup / recomputeLatest /
+  // Delete / VerifyVersion; qn.6a crosses it to the wire so the UI renders such a version explicitly
+  // DEAD — no size claim, no Unlock, an "artifact gone — remove?" action on DELETE /api/versions/{id}
+  // — instead of asserting a backup that does not exist. The row is NEVER omitted: omission would
+  // silently shrink history, masking exactly the drift a soak exists to surface.
 }
 
 Op: { "id": "...", "udid": "...", "kind": "pair" | "encryption",

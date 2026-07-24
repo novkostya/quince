@@ -80,6 +80,28 @@ func (s *Store) ListVersions(udid string) ([]VersionRow, error) {
 	return out, rows.Err()
 }
 
+// UDIDsWithVersions returns the distinct UDIDs that have at least one version row (missing or not),
+// newest-activity first. It is the offline-device set (qn.6a): a device is remembered because it has
+// backups, even when no muxer currently sees it. Missing rows are included — a device whose artifacts
+// all vanished still has a history the user should see, rendered dead.
+func (s *Store) UDIDsWithVersions() ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT udid FROM versions GROUP BY udid ORDER BY MAX(created_at) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 // GetVersion returns one version by id; ok=false when absent.
 func (s *Store) GetVersion(id string) (VersionRow, bool, error) {
 	row := s.db.QueryRow(`SELECT id, udid, backend, zfs_snapshot, created_at, job_id, kind,

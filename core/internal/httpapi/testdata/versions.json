@@ -14,7 +14,8 @@
       "structure_verified_at": "2026-07-18T02:30:11Z",
       "content_verified_at": "2026-07-18T08:00:00Z",
       "logical_bytes": 42400000000,
-      "physical_bytes": 3400000000
+      "physical_bytes": 3400000000,
+      "missing": false
     },
     {
       "id": "01JCZQ8XR2T9P6X3M8W5D0K4N7",
@@ -30,7 +31,8 @@
       "structure_verified_at": "2026-07-15T03:04:00Z",
       "content_verified_at": null,
       "logical_bytes": 41900000000,
-      "physical_bytes": 520000000
+      "physical_bytes": 520000000,
+      "missing": false
     },
     {
       "id": "01JCZQ8XT4V2Q7Y4N9X6E1M5P8",
@@ -46,7 +48,8 @@
       "structure_verified_at": "2026-07-01T01:00:00Z",
       "content_verified_at": null,
       "logical_bytes": 40100000000,
-      "physical_bytes": 40100000000
+      "physical_bytes": 40100000000,
+      "missing": false
     }
   ]
 }

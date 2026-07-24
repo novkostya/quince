@@ -149,6 +149,7 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 		{"queued", "queued", 0, 0, "active", "queued backup for family-iphone (wifi)", 1500 * time.Millisecond},
 		{"waiting_for_device", "waiting_for_device", 0, 0, "active", "waiting for device on wifi…", 1500 * time.Millisecond},
 		{"preflight", "preflight", 0, 0, "active", "preflight: validate ok · encryption on · 18.2 GB free", 1500 * time.Millisecond},
+		{"seeding", "seeding", 0, 0, "active", "preparing: cloning from your last backup…", 2000 * time.Millisecond},
 		{"backing_up", "receiving", 12, 40, "active", "receiving files… 40", 1500 * time.Millisecond},
 		{"backing_up", "receiving", 34, 120, "active", "receiving files… 120", 1500 * time.Millisecond},
 		{"backing_up", "receiving", 52, 190, "silent_but_connected", "device is preparing… this can take several minutes", 2500 * time.Millisecond},
@@ -162,8 +163,13 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 	for _, s := range steps {
 		j.State = s.state
 		j.Progress.Phase = s.phase
-		j.Progress.Percent = f64ptr(s.pct)
-		j.Progress.BytesDone = int64(float64(j.Progress.BytesTotal) * s.pct / 100)
+		if s.state == "seeding" {
+			j.Progress.Percent = nil // the clone is O(files) with no progress signal — indeterminate, not "0%"
+			j.Progress.BytesDone = 0
+		} else {
+			j.Progress.Percent = f64ptr(s.pct)
+			j.Progress.BytesDone = int64(float64(j.Progress.BytesTotal) * s.pct / 100)
+		}
 		j.Progress.FilesReceived = s.files
 		j.Progress.Liveness = s.liveness
 		p.setJob(j)
@@ -223,10 +229,18 @@ func (p *Provider) commitDemoVersionFor(udid, jid string) wire.Version {
 	}
 	p.versions[vid] = v
 	p.verOrder = append([]string{vid}, p.verOrder...)
-	if len(p.verOrder) > 8 { // trim oldest to bound growth
-		drop := p.verOrder[len(p.verOrder)-1]
-		p.verOrder = p.verOrder[:len(p.verOrder)-1]
-		delete(p.versions, drop)
+	if len(p.verOrder) > 10 { // trim to bound growth: drop the oldest NON-offline version
+		for i := len(p.verOrder) - 1; i >= 0; i-- {
+			// Keep the offline device's seeded versions (the live + DEAD fixture the qn.6a e2e needs);
+			// otherwise the ambient loop would eventually trim them away as the oldest.
+			if p.versions[p.verOrder[i]].UDID == udidOffline {
+				continue
+			}
+			drop := p.verOrder[i]
+			p.verOrder = append(p.verOrder[:i], p.verOrder[i+1:]...)
+			delete(p.versions, drop)
+			break
+		}
 	}
 	p.mu.Unlock()
 	return v

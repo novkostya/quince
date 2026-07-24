@@ -4,6 +4,7 @@ const STATE_LABELS: Record<Job["state"], string> = {
   queued: "Queued",
   waiting_for_device: "Waiting for device",
   preflight: "Preflight",
+  seeding: "Preparing",
   backing_up: "Backing up",
   verifying: "Verifying",
   committing: "Committing",
@@ -20,6 +21,11 @@ export function humanJobState(s: Job["state"]): string {
 // livenessNote returns honest narration for the slow/silent/passcode phases (ui.design.md
 // principle 2 — the lab proved Apple's protocol goes silent for minutes; never fake motion).
 export function livenessNote(job: Job): string | null {
+  if (job.state === "seeding") {
+    // The clone runs BEFORE idevicebackup2 starts, so the on-device passcode prompt can't appear yet
+    // — narrate the wait instead of dead air (qn.6a (cu)/(cv)).
+    return "cloning from your last backup…";
+  }
   if (job.progress.phase === "waiting_for_passcode") {
     return "enter the passcode on the device to continue";
   }

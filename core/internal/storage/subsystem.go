@@ -19,6 +19,7 @@ type Registry interface {
 	GetVersion(id string) (store.VersionRow, bool, error)
 	DeleteVersion(id string) error
 	MarkVersionMissing(id string, missing bool) error
+	UDIDsWithVersions() ([]string, error)
 }
 
 // Auditor records the version-delete audit rows (*store.Store satisfies it). Detail never
@@ -55,6 +56,18 @@ func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bu
 
 // BackendName reports the resolved backend (for /api/health + onboarding).
 func (m *Manager) BackendName() string { return m.backendName }
+
+// KnownUDIDs returns the distinct UDIDs that have any committed version — the offline-device set the
+// device registry unions with live presence so a powered-off device that has backups is still listed
+// (qn.6a). Errors degrade to empty (a failed lookup must not blank the live device table).
+func (m *Manager) KnownUDIDs() []string {
+	udids, err := m.reg.UDIDsWithVersions()
+	if err != nil {
+		m.log.Error("storage: known-udids lookup failed", "error", err)
+		return nil
+	}
+	return udids
+}
 
 // LastBackup summarizes a device's most recent SUCCESSFUL backup for Device.last_backup
 // (contracts §2, ratified (bz); qn.4a finding (v)). Versions — not job rows — are the source of
@@ -305,6 +318,7 @@ func (m *Manager) toWire(r store.VersionRow) wire.Version {
 		BrowseRoot: browseRoot(m.backups, r.UDID, r.Backend, r.ZFSSnapshot, r.IsLatest, r.CreatedAt),
 		CreatedAt:  fmtRFC(r.CreatedAt), JobID: r.JobID, Kind: r.Kind, Encrypted: r.Encrypted,
 		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes, PhysicalBytes: r.PhysicalBytes,
+		Missing: r.Missing, // crossed to the wire so the UI renders a gone artifact dead (qn.6a (cr))
 	}
 	if r.StructureVerifiedAt != nil {
 		s := fmtRFC(*r.StructureVerifiedAt)

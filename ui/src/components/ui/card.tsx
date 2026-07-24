@@ -1,8 +1,20 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("rounded-card border border-line bg-card", className)}>{children}</div>;
+export function Card({
+  className,
+  children,
+  "data-testid": testId,
+}: {
+  className?: string;
+  children: ReactNode;
+  "data-testid"?: string;
+}) {
+  return (
+    <div className={cn("rounded-card border border-line bg-card", className)} data-testid={testId}>
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({ className, children }: { className?: string; children: ReactNode }) {

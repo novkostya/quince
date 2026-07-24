@@ -1,6 +1,6 @@
 // Package backup is quince's transport-agnostic backup engine (stack D3/D13, design §4). It
 // drives idevicebackup2 as a supervised streaming subprocess through the frozen job state
-// machine — queued → waiting_for_device → preflight → backing_up → verifying → committing →
+// machine — queued → waiting_for_device → preflight → seeding → backing_up → verifying → committing →
 // succeeded, with failed/cancelled/connection_lost terminals — and hands the produced tree to
 // qn.5 storage (Seed → Verify → Commit, or Discard on failure). The invariant above all: the
 // writer only ever touches the storage work area; a version exists only after verify + commit
@@ -29,6 +29,7 @@ const (
 	StateQueued           = "queued"
 	StateWaitingForDevice = "waiting_for_device"
 	StatePreflight        = "preflight"
+	StateSeeding          = "seeding" // cloning latest/ → working/<udid> before the tool starts (qn.6a)
 	StateBackingUp        = "backing_up"
 	StateVerifying        = "verifying"
 	StateCommitting       = "committing"
@@ -47,6 +48,7 @@ const (
 
 // Progress phases.
 const (
+	PhaseSeeding            = "seeding" // mirrors StateSeeding into progress.phase (qn.6a)
 	PhaseStarting           = "starting"
 	PhaseReceiving          = "receiving"
 	PhaseWaitingForPasscode = "waiting_for_passcode"

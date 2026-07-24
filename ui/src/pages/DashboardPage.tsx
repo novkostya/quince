@@ -45,7 +45,8 @@ export function DashboardPage() {
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-muted">Recent backups</h2>
           <div className="mt-3">
-            <VersionList versions={recent} />
+            {/* showDevice: this list mixes devices, so each row names its device (qn.6a #3). */}
+            <VersionList versions={recent} showDevice />
           </div>
         </div>
       ) : null}

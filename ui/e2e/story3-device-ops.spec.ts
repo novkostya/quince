@@ -22,7 +22,7 @@ test("encryption op narrates the assisted flow to success", async ({ page }) => 
   await authenticate(page);
 
   // The demo phone is paired with encryption on → "Manage encryption" opens in change mode.
-  await page.getByText("family-iphone").click();
+  await page.getByRole("link", { name: "family-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
   await page.getByRole("button", { name: /manage encryption/i }).click();
