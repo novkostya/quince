@@ -28,16 +28,35 @@ html,
 body,
 #root {
   height: 100%; /* fallback for browsers without dvh */
-  height: 100dvh; /* track the mobile browser toolbar so the app shell is exactly the visible area
-                     and <main> is the ONLY scroll region — no nested/document scroll (qn.6a) */
+  height: 100dvh; /* PHONE: a definite viewport height so the fixed shell (h-full) can make <main>
+                     the only scroll region, tracking the mobile toolbar — no nested/document scroll. */
+}
+
+@media (min-width: 640px) {
+  html,
+  body,
+  #root {
+    /* DESKTOP: natural height so the document itself scrolls (native macOS bounce), at least a
+       viewport tall. The sidebar is sticky; there is no forced-height seam. */
+    height: auto;
+    min-height: 100dvh;
+  }
 }
 
 html,
 body {
-  /* Kill the iOS document rubber-band: the page itself never scrolls (the scroll region is <main>),
-     so an overscroll at the top/bottom shouldn't bounce the whole document or chain the gesture to
-     an outer scroller (qn.6a soak fix). <main> carries overscroll-y-contain for the same reason. */
+  /* PHONE: kill the iOS document rubber-band — the page itself never scrolls (the region is <main>),
+     so an overscroll shouldn't bounce the document or chain to an outer scroller (qn.6a soak fix).
+     <main> carries overscroll-y-contain for the same reason. */
   overscroll-behavior: none;
+}
+
+@media (min-width: 640px) {
+  html,
+  body {
+    /* DESKTOP: the document is the scroller, so keep the native macOS elastic (always-)bounce. */
+    overscroll-behavior: auto;
+  }
 }
 
 body {

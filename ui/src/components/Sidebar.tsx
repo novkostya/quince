@@ -14,7 +14,7 @@ export function Sidebar() {
   const version = useConnectionStore((s) => s.serverVersion);
   return (
     <aside
-      className="flex shrink-0 flex-row items-center gap-1 border-b border-line bg-card px-3 py-2 sm:w-[var(--sidebar-w)] sm:flex-col sm:items-stretch sm:gap-0 sm:border-b-0 sm:border-r sm:px-0 sm:py-0"
+      className="flex shrink-0 flex-row items-center gap-1 border-b border-line bg-card px-3 py-2 sm:sticky sm:top-0 sm:h-screen sm:w-[var(--sidebar-w)] sm:flex-col sm:items-stretch sm:gap-0 sm:self-start sm:border-b-0 sm:border-r sm:px-0 sm:py-0"
       aria-label="Primary"
     >
       <div className="px-1 sm:px-5 sm:pb-5 sm:pt-6">
