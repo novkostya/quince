@@ -13,8 +13,20 @@ import (
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
 )
 
-// zfsOpTimeout bounds a single host ZFS operation (snapshot/create/list/destroy/seed).
+// zfsOpTimeout bounds a single host ZFS METADATA operation (snapshot/create/list/destroy). These
+// are effectively O(1) — a snapshot is a metadata write, not a data walk — so a tight bound is right.
 const zfsOpTimeout = 60 * time.Second
+
+// zfsSeedTimeout bounds the SEED clone, which is a different animal and must not inherit the
+// metadata bound above. Seeding reflink-clones an ENTIRE backup tree: its cost scales with the FILE
+// COUNT and the blocks cloned, never with a constant. Reflink makes it space-free, not time-free —
+// every file still costs open+create+FICLONE+metadata. Measured on real hardware (hardware finding
+// (cs)): a 133k-file / 34 GB device took ~17.5 s to clone warm, ~32 s for the whole verb, and past
+// 60 s cold or with a previous working/ to remove — so the 60 s metadata timeout SIGKILLed a real
+// iPhone seed mid-clone and made the device un-backup-able. This bound is deliberately generous: it
+// is only a backstop against a hung hook transport, because the JOB's own context already cancels
+// the seed on shutdown/cancel, and the liveness sampler owns stall detection.
+const zfsSeedTimeout = 30 * time.Minute
 
 // zfsBackend implements the snapshot-native version model (design §5, stack D5; reworked in
 // qn.5b). The writer fills a per-job working/<udid> seeded from latest/ at job start; commit
@@ -57,11 +69,20 @@ func newZFSBackend(baseCtx context.Context, cli *zfsCLI, backups, seedCfg, appVe
 func (b *zfsBackend) Name() string { return BackendZFS }
 
 func (b *zfsBackend) opCtx() (context.Context, context.CancelFunc) {
+	return b.ctxWithin(zfsOpTimeout)
+}
+
+// seedCtx bounds the seed clone with zfsSeedTimeout, NOT the metadata bound (see the constants).
+func (b *zfsBackend) seedCtx() (context.Context, context.CancelFunc) {
+	return b.ctxWithin(zfsSeedTimeout)
+}
+
+func (b *zfsBackend) ctxWithin(d time.Duration) (context.Context, context.CancelFunc) {
 	base := b.baseCtx
 	if base == nil {
 		base = context.Background()
 	}
-	return context.WithTimeout(base, zfsOpTimeout)
+	return context.WithTimeout(base, d)
 }
 
 func (b *zfsBackend) Provision(udid string) error {
@@ -126,7 +147,7 @@ func (b *zfsBackend) WorkDir(udid, _ string) (string, error) {
 // are surfaced.
 func (b *zfsBackend) seedWorking(udid, tree, latest string) error {
 	if b.cli.mode == "hook" {
-		ctx, cancel := b.opCtx()
+		ctx, cancel := b.seedCtx() // O(files+blocks), NOT a metadata op — see zfsSeedTimeout
 		defer cancel()
 		shared, err := b.cli.Seed(ctx, udid)
 		if err != nil {

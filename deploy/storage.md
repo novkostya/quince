@@ -88,11 +88,15 @@ case "$op" in
               [ -d "$mp/latest" ] || { echo "no latest/ to seed from" >&2; exit 1; }
               udid=${target##*/}
               rm -rf "$mp/working/$udid"; mkdir -p "$mp/working"
+              # Chown the PARENT only: mkdir makes it root-owned, but `cp -a` below PRESERVES
+              # latest/'s ownership (already the container uid), so a recursive chown is redundant —
+              # and it is NOT free: it re-walks every file (measured 4.7 s on a 133k-file tree, and
+              # it grows with file count). Hardware finding (cs).
+              chown "$CTUID:$CTUID" "$mp/working"
               a0=$(zfs get -Hp -o value available "$target")
               cp -a --reflink=always "$mp/latest" "$mp/working/$udid"   # reflink seed under the job lock
               zpool sync "${PARENT%%/*}" 2>/dev/null || sync            # settle txg accounting
               a1=$(zfs get -Hp -o value available "$target")
-              chown -R "$CTUID:$CTUID" "$mp/working"                    # container must write + exchange it
               sz=$(du -sb "$mp/working/$udid" | cut -f1); drop=$((a0 - a1))
               [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED # pool-level sharing verdict
               exit 0 ;; esac ;;
@@ -106,7 +110,13 @@ clone of `latest/` → `working/<udid>` to the host, where block cloning is not 
 unprivileged user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb
 touches only the mutable, rebuildable `working/` area — never a snapshot, never the committed
 `latest/` — so even a buggy verb cannot damage a canonical version. It emits `SHARED`/`COPIED` so
-quince reports an honest space claim rather than assuming zero-space. **The atomic `latest/` swap
+quince reports an honest space claim rather than assuming zero-space. **Sizing (hardware-measured,
+(cs)):** the seed is **O(file count + blocks cloned)**, never O(1) — reflink makes it *space*-free,
+not *time*-free, because every file still costs `open`+`create`+`FICLONE`+metadata. A 133k-file /
+34 GB device clones in ~17.5 s warm (~7.6k files/s) and takes longer cold or when a previous
+`working/` must be removed first. quince therefore bounds the seed with its own generous
+`zfsSeedTimeout`, **not** the 60 s metadata-op timeout — reusing that one SIGKILLed a real 34 GB
+seed mid-clone. Budget minutes for large devices. **The atomic `latest/` swap
 itself is NOT in the hook** — at commit quince does an in-container `renameat2(RENAME_EXCHANGE)`
 (working/<udid> ⇄ latest/, no privilege, no window) and then the hook `snapshot`. Hookless
 deployments fall through the in-container seed ladder (reflink → copy; **never hardlink** — a

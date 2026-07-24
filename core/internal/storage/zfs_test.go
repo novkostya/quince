@@ -1,10 +1,12 @@
 package storage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Story 3: zfs commit exchanges the verified working tree into latest/ (atomic) then takes a
@@ -105,6 +107,40 @@ func TestZFSHookSeed(t *testing.T) {
 	}
 	assertCleanArgv(t, f.calls, "seed") // the seed verb ran as an argv (no shell), through the hook
 	t.Logf("hook seed claim: %q", be.LastSeed().Claim)
+}
+
+// TestSeedUsesItsOwnGenerousTimeout is the regression guard for the hardware finding (cs): the seed
+// reflink-clones an ENTIRE backup tree (measured ~17.5 s for 133k files / 34 GB warm, past 60 s
+// cold), so it must NOT inherit the 60 s METADATA timeout — doing so SIGKILLed a real 34 GB iPhone
+// seed mid-clone and made the device un-backup-able. Asserts the deadline the seed call actually
+// runs under, by inspecting the context the hook verb receives.
+func TestSeedUsesItsOwnGenerousTimeout(t *testing.T) {
+	m, be, _, _, _ := newZFSManagerCfg(t, generousPolicy(), "hook", "auto")
+	commitGoodTree(t, m, testUDID) // v1 → latest/, so the next Seed actually clones
+
+	var seedDeadline time.Duration
+	prev := be.cli.run
+	be.cli.run = func(ctx context.Context, argv []string) (string, error) {
+		for _, a := range argv {
+			if a == "seed" {
+				if dl, ok := ctx.Deadline(); ok {
+					seedDeadline = time.Until(dl)
+				}
+			}
+		}
+		return prev(ctx, argv)
+	}
+
+	if _, err := m.Seed(testUDID, "job2"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if seedDeadline == 0 {
+		t.Fatal("the seed verb never ran (no deadline captured)")
+	}
+	if seedDeadline <= zfsOpTimeout {
+		t.Fatalf("seed ran under a %v deadline (<= the %v metadata timeout) — a large tree would be "+
+			"SIGKILLed mid-clone, exactly the hardware failure this guards", seedDeadline, zfsOpTimeout)
+	}
 }
 
 // qn.5b ladder: hookless → in-container reflink → copy, self-selecting (NEVER hardlink for the
