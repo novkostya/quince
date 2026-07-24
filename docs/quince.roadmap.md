@@ -677,6 +677,33 @@ reasonable simplification; it is "kind of wrong" as the long-term shape. This is
    cannot tell them apart would mark every version on an unplugged removable HDD `missing`, which is
    exactly wrong. Sequencing: this epic lands the storage-health model first; the background sweep
    is a rung *inside* it, not a near-term patch.
+8. **Candidate storage MODE for this epic ((do), Operator-proposed 2026-07-24): `zfs-native` —
+   backup-in-place + snapshot-only versioning.** The tool backs up straight into the live dataset
+   tree; commit = verify → `zfs snapshot`; versions ARE snapshots; the newest committed snapshot is
+   the read surface (browse + offsite). What it fixes in one stroke: **no seed → no seed latency**
+   (the qn.6b gate becomes unnecessary on this mode); **mutate-in-place preserves block births → 
+   syncoid sends are delta-sized** (the (dl) replica cost solved at the root); **honest snapshot
+   accounting** (the (dl) mirage impossible); **no partial-seed class** (Finding B moot); CoW
+   snapshots provide version isolation for free (a torn live tree is just the resumable dirty
+   state; every committed version is immutable). Offsite stays possible file-level: rclone FROM the
+   newest snapshot path — an immutable source cannot be torn by construction (`quince versions path
+   --latest` already exists as the resolution plumbing, host-side where `.zfs` works). **Its
+   costs, named:** (a) it re-splits the lifecycle qn.5b unified — the portable `working/`⇄`latest/`
+   + exchange model remains the floor for every non-snapshotting backend (and the qn.6b gate
+   remains THEIR seed-latency answer), so this is a second lifecycle beside the first, not a
+   replacement; (b) `.zfs/snapshot` paths become load-bearing for browse — unprivileged-container
+   snapshot-automount access is a KNOWN minefield in the nested topology (probe first); (c) it is
+   an epic-scale redesign, gated on soak evidence, never a pre-freeze pivot ((dn): the current
+   model is hardware-proven and nothing here meets the insert bar). A **btrfs-native twin** is the
+   natural DSM/Synology sibling if a snapshot-capable non-zfs tester appears. **Related recorded
+   alternative (rejected harder): snapshot-as-latest via mount flips / clone-promote** — mounting
+   the newest snapshot as the stable read surface, or `working` = `zfs clone` + commit = snapshot +
+   `promote`. ZFS-native and send-friendly in the abstract, but it moves PER-BACKUP operations to
+   the dataset/mount layer: privileged hook choreography through host→LXC→OCI propagation for
+   every backup (the rbind/rslave war was fought to mount each device dataset ONCE), EXDEV blocks
+   reflink-seeding from snapshot mounts (gate-12 measured), and mount transitions reopen exactly
+   the walkability gap (cg) rejected. Attractive only on a privileged single-namespace deployment
+   — which this project deliberately is not.
 
 **Interaction with near-term work:** qn.5b's atomic-`latest` + per-job-`working/` mechanics are the
 SAME within a storage's device-tree whether there is one storage or many — only the path prefix

@@ -257,7 +257,20 @@ differently (Operator ruling: no hardlink games under ZFS):
      REAL: `zfs send` does not preserve block cloning** — a syncoid/replication
      target rematerializes every `@quince-*` snapshot at full billed size, so
      snapshot RETENTION is a real capacity knob on any replica (not on the origin
-     pool), and pruning old generations is the lever; (3) *the unprivileged
+     pool), and pruning old generations is the lever. **A genuine `cp` on seed
+     would NOT help the replica ((do)):** send size is driven by block BIRTHS,
+     not physical sharing — both reflink and real copy mint an entirely newborn
+     tree each generation, so incremental sends are ~full-size either way;
+     dropping reflink would only make the ORIGIN pay full price too (reflink is
+     pure origin-side win, send-neutral). Replica-side levers, in order:
+     retention/selective replication; `dedup=on` on the RECEIVING dataset only
+     (fast-dedup — recv rematerializes, the DDT collapses it back to ~deltas,
+     cost quarantined to the replica); or a content-addressed offsite channel
+     (restic/borg) instead of send. The D5a PRIMARY channel (rclone of `latest/`,
+     file-level, mtime-preserved by `cp -a`) is delta-efficient and unaffected.
+     The mutate-in-place lifecycle that WOULD make sends delta-sized is banked as
+     the epic-(cl) `zfs-native` mode candidate — a post-freeze redesign, not a
+     tweak; (3) *the unprivileged
      user-namespace blocks FICLONE outright (`EPERM`)* — measured in the exact
      production shape (rpool child rbind'd into an unprivileged CT, and the OCI
      container inside it), so in-container reflink is unavailable in the
