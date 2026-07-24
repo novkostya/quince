@@ -34,12 +34,18 @@ func Built() bool {
 // (a build wired the placeholder only) instead of pretending to serve an app.
 func Handler() http.Handler {
 	sub, err := assets()
-	if err != nil {
+	if err != nil || !Built() {
 		return notBuilt()
 	}
-	if !Built() {
-		return notBuilt()
-	}
+	return handlerFor(sub)
+}
+
+// handlerFor is the testable core (Handler wires in the real embed.FS). Its cache policy is the
+// standard SPA one, and it is load-bearing for the soak: index.html references content-HASHED
+// assets, so index.html must NEVER be cached without revalidation (a stale one keeps pointing at old
+// asset hashes → a deploy is invisible until the user clears their cache), while the hashed assets
+// under assets/ are immutable and cached hard. Everything else revalidates.
+func handlerFor(sub fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(sub))
 	index, _ := fs.ReadFile(sub, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +55,11 @@ func Handler() http.Handler {
 			return
 		}
 		if _, statErr := fs.Stat(sub, clean); statErr == nil {
+			if strings.HasPrefix(clean, "assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "no-cache") // favicon/manifest/etc. change on deploy
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -57,6 +68,9 @@ func Handler() http.Handler {
 }
 
 func serveIndex(w http.ResponseWriter, index []byte) {
+	// no-cache = the browser may store it but MUST revalidate before use, so a redeploy is picked up
+	// on the next load instead of hiding behind a stale entry point (qn.6a soak fix).
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(index)
 }
