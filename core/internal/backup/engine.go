@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -338,11 +340,13 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 		return // preflight refuses BEFORE Seed → nothing to discard
 	}
 
-	// seeding: clone latest/ → working/<udid> (O(files); ~23 s on a 34 GB device, near-instant on a
-	// resume). Its own state so the UI narrates "Preparing — cloning from your last backup…" instead
-	// of dead air before the on-device passcode prompt fires (qn.6a (cu)/(cv)).
+	// seeding: prepare the work area. A COLD seed clones latest/ → working/<udid> (O(files); ~23 s
+	// on a 34 GB device); qn.6b overlaps that clone with the tool startup via candidate C's --gate so
+	// the on-device passcode prompt appears in ~1–2 s instead of after the seed (qn.6a (cu)/(cz)). A
+	// resume or first-backup has nothing to clone (seedPending=false) → start the tool straight away.
+	// The `seeding` state still narrates "Preparing — cloning from your last backup…" during the clone.
 	e.transition(lj, func(r *store.JobRow) { r.State = StateSeeding; r.Phase = PhaseSeeding; r.Liveness = LivenessActive })
-	workDir, err := e.storage.Seed(udid, lj.row.ID)
+	target, seedPending, err := e.storage.PrepareWork(udid, lj.row.ID)
 	if err != nil {
 		// A seed failure has committed nothing; any partial working/ is discarded-and-re-seeded on
 		// the next attempt by the qn.5b Finding B sentinel guard, so there is nothing to discard here.
@@ -350,9 +354,18 @@ func (e *Engine) run(ctx context.Context, lj *liveJob) {
 		return
 	}
 
-	e.transition(lj, func(r *store.JobRow) { r.State = StateBackingUp; r.Phase = PhaseStarting; r.Liveness = LivenessActive })
-	res := e.supervise(ctx, lj, workDir)
+	var res superviseResult
+	if seedPending {
+		res = e.superviseGatedSeed(ctx, lj, target)
+	} else {
+		e.transition(lj, func(r *store.JobRow) { r.State = StateBackingUp; r.Phase = PhaseStarting; r.Liveness = LivenessActive })
+		res = e.supervise(ctx, lj, target)
+	}
 	switch res.kind {
+	case outcomeSeedErr:
+		// The gated clone failed after the tool launched. Same terminal shape as the pre-launch seed
+		// error above; the Finding B sentinel guard owns any partial working/, so no discard.
+		e.terminate(lj, StateFailed, ErrBackupFailed, "seed work area: "+res.detail)
 	case outcomeCancel:
 		e.terminate(lj, StateCancelled, ErrCancelled, "cancelled")
 		e.discard(lj)
@@ -483,6 +496,7 @@ const (
 	outcomeTimeout
 	outcomeCancel
 	outcomeShutdown
+	outcomeSeedErr // qn.6b: the gated clone (SeedWork) failed after the tool launched
 )
 
 type superviseResult struct {
@@ -499,32 +513,52 @@ type superviseState struct {
 	failReason  string // the tool's own last error line, for an honest failure message
 }
 
-func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) superviseResult {
+// gated-seed rendezvous constants (candidate C).
+const (
+	gateFileName    = ".quince-gate"        // quince touches this in deviceDir when the seed is done
+	infoPlistName   = "Info.plist"          // idevicebackup2 writes this into working/<udid> pre-request
+	gateInfoPoll    = 50 * time.Millisecond // poll cadence while waiting for the fresh Info.plist
+	gateInfoTimeout = 60 * time.Second      // ceiling for the tool to write Info.plist (handshake ~1–2 s)
+)
+
+// runningTool is an already-started idevicebackup2 whose output is being drained; runToolLoop runs
+// the sampler over it, waits, and maps the outcome. Split from supervise so candidate C can start the
+// tool, overlap the seed, then hand the same process to the sampler loop.
+type runningTool struct {
+	parent  context.Context    // the job ctx — parent.Err()!=nil means shutdown
+	runCtx  context.Context    // cancelable child; a group SIGKILL fires when this is cancelled
+	cancel  context.CancelFunc // cancels runCtx (kill), from startTool
+	cmd     *exec.Cmd
+	ss      *superviseState
+	readers *sync.WaitGroup
+	tree    string // working/<udid> — where Manifest.db churns; the sampler watches this
+}
+
+// startTool builds + starts idevicebackup2 (with --gate when gatePath != "") and begins draining its
+// stdout/stderr. The caller MUST eventually call runToolLoop (which Waits + maps the outcome) OR call
+// rt.cancel() + rt.readers.Wait() + rt.cmd.Wait() on an abort — else the child and its context leak.
+// qn.5b: target IS the working/ parent handed to idevicebackup2; the tool writes the tree into
+// <target>/<UDID> by its own convention (no symlink stub; free-space statfs truthful by construction).
+func (e *Engine) startTool(parent context.Context, lj *liveJob, target, gatePath string) (*runningTool, error) {
 	udid := lj.row.UDID
-	// qn.5b: target IS the working/ parent handed to idevicebackup2 (Seed's return); the tool
-	// writes the tree into <target>/<UDID> by its own convention, so no symlink stub is needed and
-	// the free-space statfs is truthful (target is on the storage filesystem by construction). The
-	// sampler watches the actual tree (where Manifest.db churns), not the parent.
-	tree := filepath.Join(target, udid)
-
 	runCtx, cancel := context.WithCancel(parent)
-	defer cancel()
-
-	cmd := e.tool.command(runCtx, lj.row.Transport, udid, target)
+	cmd := e.tool.command(runCtx, lj.row.Transport, udid, target, gatePath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+		cancel()
+		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+		cancel()
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: "start idevicebackup2: " + err.Error()}
+		cancel()
+		return nil, fmt.Errorf("start idevicebackup2: %w", err)
 	}
-
 	ss := &superviseState{}
-	var readers sync.WaitGroup
+	readers := &sync.WaitGroup{}
 	scan := func(rc io.Reader) {
 		defer readers.Done()
 		sc := bufio.NewScanner(rc)
@@ -537,23 +571,33 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 	readers.Add(2)
 	go scan(stdout)
 	go scan(stderr)
+	return &runningTool{
+		parent: parent, runCtx: runCtx, cancel: cancel, cmd: cmd,
+		ss: ss, readers: readers, tree: filepath.Join(target, udid),
+	}, nil
+}
 
-	smp := newSampler(e.cfg, tree, e.freeSpace, e.now())
+// runToolLoop runs the liveness sampler over an already-started tool, drains its output to EOF,
+// waits, and maps the outcome (design §4). It owns rt.cancel.
+func (e *Engine) runToolLoop(lj *liveJob, rt *runningTool) superviseResult {
+	defer rt.cancel()
+
+	smp := newSampler(e.cfg, rt.tree, e.freeSpace, e.now())
 	ticker := time.NewTicker(e.cfg.SampleInterval)
 	defer ticker.Stop()
 	sampleDone := make(chan struct{})
 	go func() {
 		for {
 			select {
-			case <-runCtx.Done():
+			case <-rt.runCtx.Done():
 				return
 			case <-sampleDone:
 				return
 			case <-ticker.C:
-				ss.mu.Lock()
-				paused, out := ss.paused, ss.outputSince
-				ss.outputSince = false
-				ss.mu.Unlock()
+				rt.ss.mu.Lock()
+				paused, out := rt.ss.paused, rt.ss.outputSince
+				rt.ss.outputSince = false
+				rt.ss.mu.Unlock()
 				liveness, kill, low := smp.sample(e.now(), paused, out)
 				e.progress(lj, func(r *store.JobRow) { r.Liveness = liveness })
 				if low != nil {
@@ -565,7 +609,7 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 						lj.killReason = "timeout"
 					}
 					lj.mu.Unlock()
-					cancel()
+					rt.cancel()
 					return
 				}
 			}
@@ -576,23 +620,23 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 	// a lagging scanner and lose the tail (e.g. the final "Backup Successful.") under load — the
 	// documented ordering. The process closing stdout/stderr (normal exit, or a group SIGKILL from
 	// cancel/timeout/shutdown) is what ends the scanners.
-	readers.Wait()
+	rt.readers.Wait()
 	close(sampleDone)
-	waitErr := cmd.Wait()
+	waitErr := rt.cmd.Wait()
 
 	lj.mu.Lock()
 	reason := lj.killReason
 	lj.mu.Unlock()
-	ss.mu.Lock()
-	success, failReason := ss.success, ss.failReason
-	ss.mu.Unlock()
+	rt.ss.mu.Lock()
+	success, failReason := rt.ss.success, rt.ss.failReason
+	rt.ss.mu.Unlock()
 
 	switch {
 	case reason == "cancel":
 		return superviseResult{kind: outcomeCancel, backupSuccessful: success}
 	case reason == "timeout":
 		return superviseResult{kind: outcomeTimeout, backupSuccessful: success}
-	case parent.Err() != nil:
+	case rt.parent.Err() != nil:
 		return superviseResult{kind: outcomeShutdown, backupSuccessful: success}
 	case waitErr != nil:
 		// Prefer the tool's OWN last error line over the exit status: a user can act on
@@ -606,6 +650,127 @@ func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) s
 	default:
 		return superviseResult{kind: outcomeProcOK, backupSuccessful: success}
 	}
+}
+
+// supervise starts idevicebackup2 (no gate) and runs it to completion — the resume / first-backup
+// path where there is no clone to overlap.
+func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) superviseResult {
+	rt, err := e.startTool(parent, lj, target, "")
+	if err != nil {
+		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+	}
+	return e.runToolLoop(lj, rt)
+}
+
+// superviseGatedSeed is candidate C: launch idevicebackup2 with --gate so the on-device passcode
+// prompt fires in ~1–2 s, capture the fresh Info.plist it writes, clone latest/ → working/<udid>
+// while the tool waits at the gate, restore the fresh Info.plist over the clone's stale one, then
+// open the gate. Only reached when a cold clone is pending (seedPending). On any pre-loop failure the
+// tool is reaped; the Finding B sentinel guard owns the partial working/.
+func (e *Engine) superviseGatedSeed(ctx context.Context, lj *liveJob, target string) superviseResult {
+	udid := lj.row.UDID
+	// The gate file lives in deviceDir (parent of working/) so the clone's rm-rf of working/<udid>
+	// never removes it. Clear any stale gate left by a crashed attempt, and clean up on the way out.
+	gatePath := filepath.Join(filepath.Dir(target), gateFileName)
+	_ = os.Remove(gatePath)
+	defer func() { _ = os.Remove(gatePath) }()
+
+	rt, err := e.startTool(ctx, lj, target, gatePath)
+	if err != nil {
+		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+	}
+
+	// Wait for the tool to write its fresh Info.plist (spike C12: ~1 s after launch, before the
+	// gate), or to exit early (a pairing/handshake failure) — in which case hand off to the sampler
+	// loop so the tool's OWN error surfaces, not a synthetic seed error.
+	infoPath := filepath.Join(rt.tree, infoPlistName)
+	info, toolExited := e.awaitInfoPlist(ctx, infoPath, rt)
+	if toolExited {
+		return e.runToolLoop(lj, rt)
+	}
+
+	abort := func(kind outcomeKind, detail string) superviseResult {
+		rt.cancel()
+		rt.readers.Wait()
+		_ = rt.cmd.Wait()
+		return superviseResult{kind: kind, detail: detail}
+	}
+
+	// Clone latest/ → working/<udid> while the tool waits at the gate (the ~O(files) seed).
+	if err := e.storage.SeedWork(udid, lj.row.ID); err != nil {
+		return abort(outcomeSeedErr, err.Error())
+	}
+	// Restore the fresh Info.plist the clone overwrote with latest's: the committed artifact's
+	// Info.plist must reflect THIS device (state honesty), and the incremental handshake sends it to
+	// the device. We own the seed — this is the (cz) preserve/rewrite of that one file.
+	if len(info) > 0 {
+		if err := os.WriteFile(infoPath, info, 0o644); err != nil {
+			return abort(outcomeSeedErr, "restore Info.plist after seed: "+err.Error())
+		}
+	}
+	// Open the gate → the tool proceeds into the message loop against the seeded tree.
+	if err := os.WriteFile(gatePath, []byte("go\n"), 0o644); err != nil {
+		return abort(outcomeSeedErr, "open gate: "+err.Error())
+	}
+
+	// The transfer begins now: narrate backing_up and run the liveness sampler over the tool.
+	e.transition(lj, func(r *store.JobRow) { r.State = StateBackingUp; r.Phase = PhaseStarting; r.Liveness = LivenessActive })
+	return e.runToolLoop(lj, rt)
+}
+
+// awaitInfoPlist waits for idevicebackup2 to write its fresh Info.plist into working/<udid> (returned
+// so the caller can restore it after the clone), or reports the tool exited/was cancelled first. The
+// read is stabilised (size unchanged across two polls) because the tool writes Info.plist in place, so
+// a poll can otherwise catch a partial write.
+func (e *Engine) awaitInfoPlist(ctx context.Context, infoPath string, rt *runningTool) (info []byte, toolExited bool) {
+	exited := make(chan struct{})
+	go func() { rt.readers.Wait(); close(exited) }()
+
+	ticker := time.NewTicker(gateInfoPoll)
+	defer ticker.Stop()
+	deadline := time.NewTimer(gateInfoTimeout)
+	defer deadline.Stop()
+
+	var lastSize int64 = -1
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, true // cancel/shutdown — runToolLoop maps it once the tool is killed
+		case <-exited:
+			// Output closed before Info.plist → the tool failed to start the backup. One last check
+			// covers the race where Info.plist landed exactly as the tool exited.
+			if b, ok := readStableInfo(infoPath, &lastSize); ok {
+				return b, false
+			}
+			return nil, true
+		case <-deadline.C:
+			// A wedged handshake — hand off to the sampler loop (its backstop kills a stuck tool).
+			return nil, true
+		case <-ticker.C:
+			if b, ok := readStableInfo(infoPath, &lastSize); ok {
+				return b, false
+			}
+		}
+	}
+}
+
+// readStableInfo returns the file's bytes only once its size is stable across two polls (guarding the
+// partial-write window); *last carries the previous poll's size.
+func readStableInfo(path string, last *int64) ([]byte, bool) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() == 0 {
+		*last = -1
+		return nil, false
+	}
+	if fi.Size() != *last {
+		*last = fi.Size() // changed since last poll → wait one more tick for the write to settle
+		return nil, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
 }
 
 func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {

@@ -49,9 +49,24 @@ func (b *namespaceBackend) Provision(udid string) error {
 // killed-seed guard — is the shared prepareWorkDir; the closure below is the namespace-specific
 // clone (the backend's SAFE strategy: hardlink→copy, amendment A).
 func (b *namespaceBackend) WorkDir(udid, _ string) (string, error) {
+	return prepareWorkDir(b.backups, udid, b.log, b.seedClosure(udid))
+}
+
+// PrepareWork / SeedWork are WorkDir split for the qn.6b gated seed (candidate C).
+func (b *namespaceBackend) PrepareWork(udid, _ string) (string, bool, error) {
+	return prepareWorkDirPhase1(b.backups, udid, b.log)
+}
+
+func (b *namespaceBackend) SeedWork(udid, _ string) error {
+	return finishSeed(b.backups, udid, b.seedClosure(udid))
+}
+
+// seedClosure is the namespace-specific clone (the backend's SAFE strategy: hardlink→copy,
+// amendment A), shared by WorkDir and SeedWork.
+func (b *namespaceBackend) seedClosure(udid string) func() error {
 	tree := workingTree(b.backups, udid)
 	latest := latestDir(b.backups, udid)
-	return prepareWorkDir(b.backups, udid, b.log, func() error {
+	return func() error {
 		safe := seedStrategy(b.strategy)
 		if safe != b.strategy {
 			b.log.Warn("storage: hardlink seed disabled-to-copy (gate 12c) — seeding working via copy",
@@ -62,7 +77,7 @@ func (b *namespaceBackend) WorkDir(udid, _ string) (string, error) {
 		}
 		b.log.Info("storage: seeded working from latest", "backend", b.name, "udid", udid, "strategy", safe)
 		return nil
-	})
+	}
 }
 
 func (b *namespaceBackend) TreePath(udid, _ string) string {

@@ -72,7 +72,7 @@ const (
 // Config holds the engine's tunables — code constants (design §4; NOT v0.1 config keys, D12).
 // Tests inject small durations. Values are the Named constants recorded in the qn.4a spec.
 type Config struct {
-	LivenessTimeout      time.Duration // zero-activity → connection_lost (15m; "tuned in qn.7")
+	LivenessTimeout      time.Duration // zero-activity backstop → connection_lost (18m; qn.6b, > toolReceiveTimeout)
 	SampleInterval       time.Duration // activity-sampler tick
 	WaitForDeviceTimeout time.Duration // waiting_for_device bound (amendment 2: 60s)
 	ProgressThrottle     time.Duration // ≤2/s job.updated progress throttle (500ms)
@@ -82,10 +82,29 @@ type Config struct {
 
 const gib = 1 << 30
 
+// toolReceiveTimeout mirrors the receive timeout compiled into the PATCHED idevicebackup2
+// (deploy/patches/libimobiledevice/0001-receive-timeout-15min.patch: 30s → 15min, upstream #1413).
+// The tool owns the real value; this Go constant exists so the sampler's LivenessTimeout can be
+// held STRICTLY GREATER than the tool's patience, and TestLivenessBackstopExceedsToolTimeout guards
+// it. Rationale (qn.6b, spike-grounded):
+//   - On a Wi-Fi flap the tool blocks in ONE receive for up to this long, writing nothing to the
+//     tree; a sampler kill shorter than that would SIGKILL a backup the tool was about to finish,
+//     undoing the patch. So the sampler must out-wait the tool.
+//   - On a cleanly-idle DEAD link the tool loops MOBILEBACKUP2_E_RECEIVE_TIMEOUT (-5) forever
+//     without ever exiting (idevicebackup2.c), so the sampler is the SOLE authority that ends such
+//     a job — a backstop just past the tool's patience, not a race with it.
+//
+// Keep in sync with patch 0001 if that value ever changes.
+const toolReceiveTimeout = 15 * time.Minute
+
 // DefaultConfig returns the production tunables (spec Named constants).
 func DefaultConfig() Config {
 	return Config{
-		LivenessTimeout:      15 * time.Minute,
+		// 18m = toolReceiveTimeout + 3m margin (qn.6b): clears a full 15-min tool receive so the
+		// sampler never cuts a flap the tool is riding out, and classifies a genuinely dead link
+		// ~3m past the tool's own give-up — honest and eventual. Fine stage-threshold tuning against
+		// the chaos suite is qn.7; this is the coarse retune to the 15-min reality.
+		LivenessTimeout:      18 * time.Minute,
 		SampleInterval:       2 * time.Second,
 		WaitForDeviceTimeout: 60 * time.Second,
 		ProgressThrottle:     500 * time.Millisecond,
@@ -112,6 +131,13 @@ type Storage interface {
 	// seeded so the tool's own <target>/<UDID> convention lands the tree in working/<udid> with no
 	// symlink (qn.5b). A dirty working/ is resumed; else it is seeded from latest/.
 	Seed(udid, jobID string) (target string, err error)
+
+	// PrepareWork + SeedWork are Seed split for the qn.6b gated seed (candidate C): PrepareWork does
+	// the fast resume-or-prepare and reports whether a clone is still pending (seedPending=false =
+	// resume or first-backup, nothing to clone); SeedWork does the slow clone while idevicebackup2 is
+	// paused at its --gate. Seed == PrepareWork + (if seedPending) SeedWork.
+	PrepareWork(udid, jobID string) (target string, seedPending bool, err error)
+	SeedWork(udid, jobID string) error
 	// VerifyWork is the passwordless structural verification of the job's working tree
 	// (working/<udid>); the kind is the authoritative seed-derived value (qn.5b, finding #9(a)).
 	VerifyWork(udid, jobID string) (ok bool, detail, kind string, encrypted bool)

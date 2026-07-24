@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Fake-CLI harness (the muxsup GO_WANT_HELPER_PROCESS discipline): every wrapper points at
@@ -96,6 +97,13 @@ func fakeValidate(scenario string) {
 	case "locked":
 		fmt.Fprintf(os.Stderr, "ERROR: Could not validate with device %s because a passcode is set. Please enter the passcode on the device and retry.\n", fakeUDID)
 		os.Exit(1)
+	case "slow":
+		// amendment A: a wedged read. Sleep far longer than any bounded validate should wait; the
+		// caller's Go-side deviceOpTimeout must SIGKILL this via exec.CommandContext. (Self-limiting
+		// so a regression fails in seconds rather than hanging CI.)
+		time.Sleep(15 * time.Second)
+		fmt.Printf("SUCCESS: Validated pairing with device %s\n", fakeUDID)
+		os.Exit(0)
 	default:
 		fmt.Printf("SUCCESS: Validated pairing with device %s\n", fakeUDID)
 		os.Exit(0)

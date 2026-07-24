@@ -128,10 +128,20 @@ quince supervises netmuxd as
   container must be able to receive multicast from the LAN (`deploy/compose.nas.yml`).
 
 **Consequence.** The container ships `netmuxd` (pinned, source-built) + `usbmuxd`
-(apk, fallback) + `libimobiledevice-progs` from qn.0; the Wi-Fi hardening rung replaces
-the stock libimobiledevice with a source-built one raising the 30 s service timeouts
-(`src/service.c` — upstream issue #1413, reproduced in the lab) **before** the first
-public release, since Wi-Fi is a primary transport (D13).
+(apk, fallback) + **`libimobiledevice` built from source at a pinned tag with in-tree
+patches** (qn.6b, `LIBIMOBILEDEVICE_REF` in `versions.env`; `deploy/patches/libimobiledevice/`):
+`0001` raises the 30 s default service receive timeouts to **15 min**
+(`src/property_list_service.c` + `src/service.c` — upstream issue #1413, reproduced in the
+lab (ct)) so a slow passcode / large-device transfer / transient Wi-Fi flap does not trip a
+premature receive error; `0002` adds `idevicebackup2 --gate <path>`, a pause after the Backup
+request (passcode already fired) and before the message loop, so quince seeds `working/` in
+parallel and the on-device passcode prompt shows in ~1–2 s (candidate C, the seed-latency fix).
+This lands in **qn.6b** (pulled out of qn.7 (de)), **before** the first public release, since
+Wi-Fi is a primary transport (D13). **The raised timeout is the default for EVERY libimobiledevice
+binary**, so quince bounds its non-backup device ops (pair/validate/enrich) with a Go-side deadline
+(qn.6b amendment A) — the 15-min patience is intentional only on the backup receive path, where the
+liveness sampler (design §4) is the backstop, held **longer** than the tool timeout so a sampler kill
+never cuts a flap the tool was riding out.
 
 ## D3. Backup engine: never-mutate-committed state machine around `idevicebackup2`
 

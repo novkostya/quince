@@ -21,8 +21,26 @@ import (
 // and re-seed instead. The guard discriminates the two by the flag alone; legacy/absent sentinels
 // read false → resume (see workState.SeedInProgress).
 func prepareWorkDir(backups, udid string, log *slog.Logger, seedFn func() error) (string, error) {
+	target, seedPending, err := prepareWorkDirPhase1(backups, udid, log)
+	if err != nil {
+		return "", err
+	}
+	if seedPending {
+		if err := finishSeed(backups, udid, seedFn); err != nil {
+			return "", err
+		}
+	}
+	return target, nil
+}
+
+// prepareWorkDirPhase1 is the FAST half of prepareWorkDir (qn.6b gated seed): resume-or-prepare the
+// target and report whether a clone is still pending. It creates the empty target dir and writes the
+// `seed_in_progress` sentinel for a cold seed, but does NOT clone — the caller launches idevicebackup2
+// gated, then calls finishSeed while the tool waits. seedPending=false means resume (dirty working
+// kept) or first-backup (empty tree) — nothing to clone, no gate needed.
+func prepareWorkDirPhase1(backups, udid string, log *slog.Logger) (target string, seedPending bool, err error) {
 	if !validUDID(udid) {
-		return "", fmt.Errorf("storage: invalid udid %q", udid)
+		return "", false, fmt.Errorf("storage: invalid udid %q", udid)
 	}
 	parent := workingParent(backups, udid)
 	tree := workingTree(backups, udid)
@@ -35,35 +53,52 @@ func prepareWorkDir(backups, udid string, log *slog.Logger, seedFn func() error)
 			log.Warn("storage: discarding a partial working — a seed was killed mid-clone; re-seeding from latest",
 				"udid", udid)
 			if err := os.RemoveAll(parent); err != nil {
-				return "", err
+				return "", false, err
 			}
 		} else {
 			// Completed seed (or a legacy sentinel with no seed_in_progress) → a legit dirty
 			// working; a retry resumes into it with no re-transfer.
 			log.Info("storage: resuming dirty working", "udid", udid)
-			return parent, nil
+			return parent, false, nil
 		}
 	}
 
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
+		return "", false, err
 	}
 	seeded := !isEmptyDir(latestDir(backups, udid))
-	// Mark IN PROGRESS before cloning — a crash/kill during seedFn leaves this true so the next
-	// WorkDir catches the partial (above) instead of resuming it.
+	// Mark IN PROGRESS before cloning — a crash/kill before finishSeed clears it leaves this true so
+	// the next WorkDir catches the partial (above) instead of resuming it.
 	if err := writeWorkState(backups, udid, workState{SeededFromLatest: seeded, SeedInProgress: true}); err != nil {
-		return "", err
+		return "", false, err
 	}
-	if seeded {
-		if err := seedFn(); err != nil {
-			return "", err
+	if !seeded {
+		// First/full backup: an empty tree, nothing to clone. Clear the sentinel and finish here.
+		if err := os.MkdirAll(tree, 0o755); err != nil {
+			return "", false, err
 		}
-	} else if err := os.MkdirAll(tree, 0o755); err != nil { // first/full backup: an empty tree
-		return "", err
+		if err := writeWorkState(backups, udid, workState{SeededFromLatest: false, SeedInProgress: false}); err != nil {
+			return "", false, err
+		}
+		return parent, false, nil
 	}
-	// Seed complete — clear the flag; the tree is now a trustworthy resume target.
-	if err := writeWorkState(backups, udid, workState{SeededFromLatest: seeded, SeedInProgress: false}); err != nil {
-		return "", err
+	return parent, true, nil // clone pending; the sentinel stays seed_in_progress until finishSeed
+}
+
+// finishSeed is the SLOW half: run the backend's clone (latest/ → working/<udid>) and clear the
+// `seed_in_progress` sentinel so the tree becomes a trustworthy resume target. Called only when
+// prepareWorkDirPhase1 reported seedPending.
+//
+// It first clears working/<udid>: on the qn.6b gated path (candidate C) idevicebackup2 has already
+// created working/<udid> and written Info.plist into it before the gate, and the clone expects a
+// clean dst (clonetree overlays and reflink needs a fresh file). No-op on the non-gated path, where
+// the tree is still absent. The caller captures anything worth preserving (Info.plist) beforehand.
+func finishSeed(backups, udid string, seedFn func() error) error {
+	if err := os.RemoveAll(workingTree(backups, udid)); err != nil {
+		return err
 	}
-	return parent, nil
+	if err := seedFn(); err != nil {
+		return err
+	}
+	return writeWorkState(backups, udid, workState{SeededFromLatest: true, SeedInProgress: false})
 }

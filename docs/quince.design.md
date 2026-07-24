@@ -96,9 +96,16 @@ allowed but explicitly discouraged in the UI copy.
 ## 4. The backup job state machine
 
 ```
-queued → waiting_for_device → preflight → backing_up → verifying → committing → succeeded
-   └──────────────┴───────────────┴────────────┴────────────┴──── failed / cancelled / connection_lost
+queued → waiting_for_device → preflight → seeding → backing_up → verifying → committing → succeeded
+   └──────────────┴───────────────┴──────────┴────────────┴────────────┴──── failed / cancelled / connection_lost
 ```
+
+(`seeding` — qn.6a — narrates the `working/` clone from `latest/`. qn.6b overlaps that clone
+with the tool startup on a cold seed via candidate C's `--gate`: the engine launches
+idevicebackup2 gated so the on-device passcode prompt fires in ~1–2 s, captures the fresh
+`Info.plist` the tool writes, seeds `working/` while the tool waits, restores that `Info.plist`
+over the clone's stale copy, then opens the gate. A resume/first-backup has nothing to clone and
+starts the tool straight away. See stack D2 for the patch shape.)
 
 **The invariant above all: `latest/` is never written by `idevicebackup2`** — it writes
 only into the mutable area (`working/` on zfs, `work/<job>` on namespace backends). The
@@ -121,10 +128,15 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   Liveness is judged by a cheap **activity sampler**, not byte growth alone (files can
   be replaced size-neutrally): tree size, recent mtime/ctime churn, `Manifest.db` +
   journal activity, file count, process I/O counters where available. Stall handling is
-  staged — `active → silent_but_connected → suspected_stall → timed out` (15 min of
-  zero activity, tuned in qn.7) — so patched long libimobiledevice timeouts can't be
-  undercut by an impatient app-level kill; the lab proved silent multi-minute stretches
-  are normal.
+  staged — `active → silent_but_connected → suspected_stall → timed out` (**18 min** of
+  zero activity, qn.6b; coarse-tuned to the 15-min reality, fine stage-tuning is qn.7). The
+  backstop is deliberately held **longer than the patched idevicebackup2 receive timeout**
+  (15 min, #1413 — stack D2): on a Wi-Fi flap the tool blocks in one receive, writing nothing
+  for up to that long, and a sampler kill inside the tool's own patience would SIGKILL a backup
+  the tool was about to complete, undoing the patch. On a *cleanly-idle dead link* the tool loops
+  `MOBILEBACKUP2_E_RECEIVE_TIMEOUT` forever without exiting (verified in the qn.6b spike), so the
+  sampler — not the tool — is the sole authority that eventually classifies it `connection_lost`;
+  the lab ((ct)) proved silent multi-minute app_limited stretches are normal and must not be killed.
 - **verifying** — *structural verification*, automatic and passwordless: exit code 0
   AND `Backup Successful` in output AND `Status.plist` parses with
   `SnapshotState == finished` AND `Manifest.plist`/`Info.plist` parse AND `Manifest.db`

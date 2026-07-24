@@ -118,6 +118,21 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 	return m.backend.WorkDir(udid, jobID)
 }
 
+// PrepareWork + SeedWork are Seed split into two phases for the qn.6b gated seed (candidate C):
+// PrepareWork provisions + does the fast resume-or-prepare (reporting whether a clone is pending);
+// SeedWork does the slow clone while idevicebackup2 is paused at its --gate. Seed = PrepareWork +
+// (if seedPending) SeedWork.
+func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
+	if err := m.backend.Provision(udid); err != nil {
+		return "", false, err
+	}
+	return m.backend.PrepareWork(udid, jobID)
+}
+
+func (m *Manager) SeedWork(udid, jobID string) error {
+	return m.backend.SeedWork(udid, jobID)
+}
+
 // seedKind returns the AUTHORITATIVE full|incremental kind for the in-flight job from the work
 // sentinel (whether working/ was seeded from an existing latest/ — finding #9(a), (cj)/(ck)); if
 // the sentinel is missing it infers from whether the device already has a committed version, never

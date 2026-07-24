@@ -60,11 +60,12 @@ func TestFakeIdevicebackup2(t *testing.T) {
 	rest := helperArgsAfter("--")
 	udid := flagVal(rest, "-u")
 	target := posAfter(rest, "backup")
+	gate := flagVal(rest, "--gate") // qn.6b candidate C: block until quince touches this
 	// syscall.Exit, NOT os.Exit: this fake is a -race-instrumented test-binary re-exec, and
 	// os.Exit runs the Go runtime exit hooks (incl. the race finalizer), which can deadlock in a
 	// helper process that has done file I/O. syscall.Exit calls exit_group directly; stdout is an
 	// unbuffered pipe, so no replayed output is lost.
-	syscall.Exit(runFake(p, udid, target))
+	syscall.Exit(runFake(p, udid, target, gate))
 }
 
 func helperArgsAfter(sep string) []string {
@@ -76,9 +77,20 @@ func helperArgsAfter(sep string) []string {
 	return nil
 }
 
-func runFake(p fakeParams, udid, target string) int {
+func runFake(p fakeParams, udid, target, gate string) int {
 	treeDir := filepath.Join(target, udid) // qn.5b: == the storage working/<udid> tree (no symlink)
 	_ = os.MkdirAll(treeDir, 0o755)
+
+	// candidate C (qn.6b): with --gate, mirror idevicebackup2.c's sequence — write the fresh
+	// Info.plist (as the real tool does at line 2028, before the request), print the passcode line,
+	// then BLOCK until quince touches the gate file. quince captures that Info.plist, seeds working/
+	// (rm-rf + clone) while we wait, restores the fresh Info.plist, and opens the gate.
+	gated := gate != ""
+	if gated {
+		writeFile(filepath.Join(treeDir, "Info.plist"), freshInfoPlist())
+		fmt.Println("*** Waiting for passcode to be entered on the device ***")
+		waitForGate(gate)
+	}
 
 	lines := readLinesOrEmpty(p.TranscriptPath)
 	for i, line := range lines {
@@ -92,8 +104,20 @@ func runFake(p fakeParams, udid, target string) int {
 	if p.Hang {
 		select {} // frozen transport: no output, no churn → the engine's timeout kills the group
 	}
-	writeTree(treeDir, p)
+	writeTree(treeDir, p, gated)
 	return p.ExitCode
+}
+
+// waitForGate blocks until the gate file appears (quince touches it when the parallel seed is done),
+// with a generous ceiling so a broken test fails rather than hangs.
+func waitForGate(path string) {
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		sleepMs(10)
+	}
 }
 
 func doStall(p fakeParams, treeDir string) {
@@ -111,7 +135,7 @@ func doStall(p fakeParams, treeDir string) {
 // writeTree lays down a MobileBackup2 tree matching the fixture. "complete" passes storage.Verify
 // (encrypted variant: non-trivial non-SQLite-magic Manifest.db + a populated blob shard on a full
 // backup); "torn" writes an unfinished Status.plist so Verify fails; "none" writes nothing.
-func writeTree(dir string, p fakeParams) {
+func writeTree(dir string, p fakeParams, gated bool) {
 	if p.Tree == "none" {
 		return
 	}
@@ -124,7 +148,11 @@ func writeTree(dir string, p fakeParams) {
 		isFull = "true"
 	}
 	writeFile(filepath.Join(dir, "Status.plist"), statusPlist(snapshotState, isFull))
-	writeFile(filepath.Join(dir, "Info.plist"), infoPlist())
+	if !gated {
+		// The real tool writes Info.plist once, pre-request; on the gated path it was written before
+		// the gate and quince restored the fresh copy after the seed — don't clobber it here.
+		writeFile(filepath.Join(dir, "Info.plist"), infoPlist())
+	}
 	writeFile(filepath.Join(dir, "Manifest.plist"), manifestPlist(p.Encrypted))
 	if p.Tree == "torn" {
 		return // unfinished snapshot → Verify fails before the DB checks
@@ -177,6 +205,14 @@ func manifestPlist(encrypted bool) []byte {
 func infoPlist() []byte {
 	return []byte(plistDoc("<key>Device Name</key><string>test-iphone</string>" +
 		"<key>Product Version</key><string>26.5</string>"))
+}
+
+// freshInfoPlist is the Info.plist the gated fake writes BEFORE the gate (as the real tool does
+// pre-request). It carries a marker distinct from a seeded latest/ Info.plist so a test can prove
+// quince captured it, survived the clone, and restored it (candidate C, story 4).
+func freshInfoPlist() []byte {
+	return []byte(plistDoc("<key>Device Name</key><string>test-iphone</string>" +
+		"<key>quince-info-marker</key><string>FRESH</string>"))
 }
 
 func plistDoc(body string) string {

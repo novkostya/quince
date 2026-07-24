@@ -79,6 +79,16 @@ type Backend interface {
 	// This is design §5's Seed. It is destructive (it re-seeds), so call it once per job.
 	WorkDir(udid, jobID string) (string, error)
 
+	// PrepareWork + SeedWork are WorkDir split into two phases for the qn.6b gated seed (candidate
+	// C): PrepareWork does the FAST part (resume a dirty working/, or create the empty target +
+	// write the seed_in_progress sentinel) and reports whether a clone is still pending;
+	// seedPending=false means resume or first-backup (nothing to clone). SeedWork then does the
+	// SLOW clone (latest/ → working/<udid>) and clears the sentinel — the caller runs it while
+	// idevicebackup2 is paused at its --gate, so the ~O(files) seed overlaps the tool startup
+	// instead of preceding it. Together they are exactly WorkDir; WorkDir = PrepareWork + SeedWork.
+	PrepareWork(udid, jobID string) (target string, seedPending bool, err error)
+	SeedWork(udid, jobID string) error
+
 	// TreePath returns where a job's to-be-committed tree lives WITHOUT mutating it (namespace:
 	// work/<job>; zfs: working/), so the subsystem can Verify before Commit.
 	TreePath(udid, jobID string) string

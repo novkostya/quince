@@ -41,10 +41,11 @@ type Manager struct {
 	log     *slog.Logger
 	newID   func() string
 
-	pairTimeout time.Duration
-	pairPoll    time.Duration
-	opTimeout   time.Duration
-	enrichWait  time.Duration
+	pairTimeout     time.Duration
+	pairPoll        time.Duration
+	opTimeout       time.Duration
+	enrichWait      time.Duration
+	validateTimeout time.Duration // amendment A: bound the non-interactive validate read
 
 	lockdown *LockdownStore // optional: persists pairing records after a successful pair
 
@@ -58,21 +59,32 @@ func (m *Manager) SetLockdown(l *LockdownStore) { m.lockdown = l }
 
 const opsSoftCap = 200 // prune terminal ops beyond this to bound the map
 
+// deviceOpTimeout bounds a fast, non-interactive device READ (idevicepair validate) Go-side
+// (qn.6b amendment A). Patch 0001 raised libimobiledevice's default receive timeout to 15min for
+// the backup path, and that default leaks into EVERY libimobiledevice binary — so without a
+// Go-side deadline a wedged lockdown read here would sit 15min instead of failing in ~30s as it
+// did before the patch. The INTERACTIVE ops keep their longer intentional bounds (pair 2m,
+// encryption 5m): they wait for on-device Trust / passcode entry, and 2m/5m already cap the child
+// well under the 15min receive patience. The event-driven enrichment reads are already bounded
+// (enrichWait / EnrichDriver.timeout, both 20s).
+const deviceOpTimeout = 30 * time.Second
+
 // NewManager wires the ops manager. baseCtx is the serve context; audit may be nil (skipped).
 func NewManager(baseCtx context.Context, tools *Tools, devs Devices, b *bus.Bus, audit AuditSink, log *slog.Logger) *Manager {
 	return &Manager{
-		baseCtx:     baseCtx,
-		tools:       tools,
-		devs:        devs,
-		bus:         b,
-		audit:       audit,
-		log:         log,
-		newID:       id.New,
-		pairTimeout: 2 * time.Minute,
-		pairPoll:    2 * time.Second,
-		opTimeout:   5 * time.Minute,
-		enrichWait:  20 * time.Second,
-		ops:         map[string]wire.Op{},
+		baseCtx:         baseCtx,
+		tools:           tools,
+		devs:            devs,
+		bus:             b,
+		audit:           audit,
+		log:             log,
+		newID:           id.New,
+		pairTimeout:     2 * time.Minute,
+		pairPoll:        2 * time.Second,
+		opTimeout:       5 * time.Minute,
+		enrichWait:      20 * time.Second,
+		validateTimeout: deviceOpTimeout,
+		ops:             map[string]wire.Op{},
 	}
 }
 
@@ -204,6 +216,10 @@ func (m *Manager) Validate(ctx context.Context, udid string) (bool, int, string)
 	if !ok {
 		return false, http.StatusConflict, "device is not connected"
 	}
+	// Bound the read Go-side (amendment A): otherwise a wedged validate would inherit the patched
+	// 15-min receive timeout. WithTimeout takes the earlier of this and any caller deadline.
+	ctx, cancel := context.WithTimeout(ctx, m.validateTimeout)
+	defer cancel()
 	paired, err := m.tools.Validate(ctx, udid, transport)
 	if err != nil {
 		return false, http.StatusBadGateway, "could not query the device"

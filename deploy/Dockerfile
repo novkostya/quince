@@ -62,6 +62,34 @@ WORKDIR /src/netmuxd
 ENV OPENSSL_STATIC=1
 RUN cargo build --release && install -m0755 target/release/netmuxd /netmuxd
 
+# --- libimobiledevice: pinned tag, built from source with quince's in-tree patches (qn.6b) ---
+# Built from SOURCE (not the Alpine `-progs` package) so two in-tree patches ship in the image:
+#   0001  raises the default receive timeout 30s -> 15min (upstream #1413) — a slow passcode,
+#         large-device transfer, or transient Wi-Fi flap no longer trips a premature receive error.
+#   0002  adds `idevicebackup2 --gate <path>` — pause after the Backup request, before the message
+#         loop, so quince can seed working/ in parallel (candidate C).
+# Only THIS repo is built: Alpine 3.24 ships every -dev dependency at a satisfying version, incl.
+# libtatsu (verified live, qn.6b spike). NOTE (amendment A): 0001 raises the default for EVERY
+# libimobiledevice binary, so quince bounds its non-backup tool ops with a Go-side deadline
+# (core/internal/deviceops) — the 15-min patience is intentional only on the backup receive path.
+FROM ${ALPINE_IMAGE} AS libimobiledevice-build
+ARG LIBIMOBILEDEVICE_REF
+RUN apk add --no-cache git build-base autoconf automake libtool pkgconf \
+      openssl-dev libplist-dev libimobiledevice-glue-dev libusbmuxd-dev libtatsu-dev
+WORKDIR /src/libimobiledevice
+RUN git clone --depth 1 --branch ${LIBIMOBILEDEVICE_REF} \
+      https://github.com/libimobiledevice/libimobiledevice .
+COPY deploy/patches/libimobiledevice/ /patches/
+RUN set -eux; for p in /patches/*.patch; do echo "applying $p"; git apply --verbose "$p"; done
+# Drop the unconditional -Werror on configure.ac's CFLAGS line (only that line) so a benign
+# warning on Alpine's GCC can't fail this vendored build; the patched binaries are unchanged.
+# --without-cython: no Python bindings. Install to a DESTDIR the runtime stage copies from.
+# autogen.sh runs ./configure "$@" only when NOCONFIGURE is UNSET (empty) — do not set it.
+RUN sed -i '/CFLAGS+=/ s/ -Werror//' configure.ac \
+    && ./autogen.sh --prefix=/usr --without-cython \
+    && make -j"$(nproc)" \
+    && make DESTDIR=/stage install
+
 # --- core: embed the built UI, cgo-free static binary ---
 FROM toolchain-go AS core-build
 ARG VERSION=0.0.0-dev
@@ -96,8 +124,12 @@ FROM ${ALPINE_IMAGE} AS runtime
 #                            path has a recorded bug (D2), so usbmuxd is the USB default;
 #                            netmuxd serves Wi-Fi. `simple` profile runs it in-container.
 #   netmuxd (source, above)= the Wi-Fi muxer
-#   libimobiledevice-progs = the CLIs (idevicebackup2/idevicepair/ideviceinfo)
-#   libusbmuxd             = the client library the CLIs speak
+#   libimobiledevice       = the CLIs (idevicebackup2/idevicepair/ideviceinfo) — built FROM SOURCE
+#                            in the libimobiledevice-build stage (qn.6b patches), NOT apk'd; only
+#                            its runtime link deps are installed here.
+#   libplist / -glue / libtatsu = runtime link deps of the built libimobiledevice (Alpine 3.24);
+#   libusbmuxd             = the client library the CLIs speak (also a build dep, runtime here).
+#                            libssl3/libcrypto3 come transitively via usbmuxd.
 #   openssh-client         = transport for the zfs `hook` mode — quince runs the constrained
 #                            quince-zfs-helper on the ZFS host over ssh (deploy/storage.md).
 #                            Required whenever storage.zfs.mode: hook; harmless otherwise.
@@ -107,14 +139,18 @@ FROM ${ALPINE_IMAGE} AS runtime
 RUN apk add --no-cache \
       ca-certificates tzdata \
       usbmuxd \
-      libimobiledevice \
-      libimobiledevice-progs \
+      libplist \
+      libimobiledevice-glue \
       libusbmuxd \
+      libtatsu \
       openssh-client \
       python3
 
 COPY --from=vault-build /opt/quince/vault /opt/quince/vault
 COPY --from=netmuxd-build /netmuxd /usr/local/bin/netmuxd
+# The patched libimobiledevice: the CLIs + the shared lib (shared object glob covers .so + soname).
+COPY --from=libimobiledevice-build /stage/usr/bin/ /usr/bin/
+COPY --from=libimobiledevice-build /stage/usr/lib/libimobiledevice-1.0.so* /usr/lib/
 COPY --from=core-build /quince /usr/local/bin/quince
 
 # The vault venv's console script (quince-vault) on PATH.

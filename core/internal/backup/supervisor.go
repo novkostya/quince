@@ -44,10 +44,17 @@ func socketAddr(transport, usbmuxd, netmuxd string) string {
 // the network transport for Wi-Fi (lab-proven), -u pins the device. The whole group is SIGKILLed
 // on ctx cancel (timeout / user cancel / shutdown). No password ever reaches this argv or env: the
 // device encrypts with its own keybag under the assisted model (interface fact 5).
-func (t *tool) command(ctx context.Context, transport, udid, target string) *exec.Cmd {
+func (t *tool) command(ctx context.Context, transport, udid, target, gatePath string) *exec.Cmd {
 	args := append([]string{}, t.argPrefix...) // prod: empty; test: -test.run=… "--"
 	if transport == TransportWiFi {
 		args = append(args, "-n")
+	}
+	// qn.6b candidate C: --gate pauses the tool after the Backup request (passcode already fired),
+	// before the message loop, until <gatePath> appears — so quince seeds working/ in parallel and
+	// the on-device passcode prompt shows in ~1–2 s instead of after the ~O(files) seed. Empty
+	// gatePath = upstream behaviour (no pause), used for a resume (no seed to overlap).
+	if gatePath != "" {
+		args = append(args, "--gate", gatePath)
 	}
 	args = append(args, "-u", udid, "backup", target)
 

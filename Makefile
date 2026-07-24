@@ -44,6 +44,7 @@ BUILD_ARGS := \
 	--build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) \
 	--build-arg PNPM_VERSION=$(PNPM_VERSION) \
 	--build-arg NETMUXD_REF=$(NETMUXD_REF) \
+	--build-arg LIBIMOBILEDEVICE_REF=$(LIBIMOBILEDEVICE_REF) \
 	--build-arg VERSION=$(VERSION)
 
 # `run-in <image> <workdir> <extra-args>` — repo bind-mounted at /src.

@@ -112,11 +112,22 @@ func (b *zfsBackend) Provision(udid string) error {
 // killed-seed guard — is the shared prepareWorkDir; the closure below is the zfs-specific seed
 // (host-side hook `seed` verb where in-container FICLONE is blocked, else the reflink→copy ladder).
 func (b *zfsBackend) WorkDir(udid, _ string) (string, error) {
+	return prepareWorkDir(b.backups, udid, b.log, b.seedClosure(udid))
+}
+
+// PrepareWork / SeedWork are WorkDir split for the qn.6b gated seed (candidate C).
+func (b *zfsBackend) PrepareWork(udid, _ string) (string, bool, error) {
+	return prepareWorkDirPhase1(b.backups, udid, b.log)
+}
+
+func (b *zfsBackend) SeedWork(udid, _ string) error {
+	return finishSeed(b.backups, udid, b.seedClosure(udid))
+}
+
+func (b *zfsBackend) seedClosure(udid string) func() error {
 	tree := workingTree(b.backups, udid)
 	latest := latestDir(b.backups, udid)
-	return prepareWorkDir(b.backups, udid, b.log, func() error {
-		return b.seedWorking(udid, tree, latest)
-	})
+	return func() error { return b.seedWorking(udid, tree, latest) }
 }
 
 // seedWorking clones latest/ → working/<udid>. Hook mode delegates to the host-side `seed` verb

@@ -362,6 +362,15 @@ is the freeze point.**
 
 ### ⚑ `qn.6b` — transport patience (inserted 2026-07-24, (de); **the LAST pre-freeze insert**)
 
+> **BUILT (CI-proven) 2026-07-24 ((df)); spec approved-with-amendments ((dg)/(dh)).** Patched
+> libimobiledevice built from source at `1.4.0` (30 s → 15 min receive timeout #1413 + the
+> `--gate` flag) + candidate C's parallel seed (passcode in ~1–2 s) + `LivenessTimeout` 15m → 18m
+> (out-waits the tool) + amendment A (bound the non-backup tool ops the shared timeout leaks into).
+> `make gates`/image/e2e green; contract changes NONE. **Lab legs owed** (declared, not faked):
+> 15-min patience across a real flap, the gate against a real device, the `-4` hang re-run —
+> sequenced with the Operator; candidate B is the in-rung fallback if the gate-tolerance leg fails.
+> Original scope below.
+
 Pre-freeze because the soak's premise requires it: a Wi-Fi backup that hangs is what makes the
 Operator quietly stop tapping "Back up now" — and then the soak is dead and the freeze plan with
 it. Split OUT of `qn.7` (which keeps its name and stays post-freeze). Scope, deliberately small:

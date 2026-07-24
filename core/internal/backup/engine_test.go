@@ -699,7 +699,7 @@ func TestStoryStartupReconciliation(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Seed returns the idevicebackup2 TARGET (working/ parent); the tree lands at <target>/<udid>.
-	writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"})
+	writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"}, false)
 	if _, err := h.mgr.CommitJob(testUDID, "BBBB"); err != nil {
 		t.Fatalf("seed the rolled-forward version: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestResetWorking(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"})
+		writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"}, false)
 		if s, _ := h.eng.ResetWorking(testUDID); s != http.StatusAccepted {
 			t.Fatalf("reset dirty working = %d, want 202", s)
 		}
@@ -857,7 +857,7 @@ func TestBackupTargetIsOnStorageFilesystem(t *testing.T) {
 	tl := &tool{bin: "idevicebackup2"}
 
 	// The tool is pointed straight at the target — no stub, no symlink derivation.
-	cmd := tl.command(context.Background(), TransportUSB, udid, target)
+	cmd := tl.command(context.Background(), TransportUSB, udid, target, "")
 	if got := cmd.Args[len(cmd.Args)-1]; got != target {
 		t.Fatalf("idevicebackup2 target = %q, want the storage working/ parent %q (no stub)", got, target)
 	}
