@@ -108,37 +108,15 @@ func (b *zfsBackend) Provision(udid string) error {
 }
 
 // WorkDir returns the idevicebackup2 TARGET (workingParent) after seeding working/<udid> from
-// latest/ (design §5 Seed, qn.5b). A non-empty working/<udid> is RESUMED as-is (a prior failed
-// attempt); otherwise it is seeded — host-side via the hook `seed` verb where in-container FICLONE
-// is blocked, else the in-container reflink→copy ladder — or created empty on a first backup. The
-// seed decision (seeded-from-latest ⇒ incremental) is recorded in the work sentinel.
+// latest/ (design §5 Seed, qn.5b). The resume-vs-(re)seed lifecycle — including the Finding B
+// killed-seed guard — is the shared prepareWorkDir; the closure below is the zfs-specific seed
+// (host-side hook `seed` verb where in-container FICLONE is blocked, else the reflink→copy ladder).
 func (b *zfsBackend) WorkDir(udid, _ string) (string, error) {
-	if !validUDID(udid) {
-		return "", fmt.Errorf("storage: invalid udid %q", udid)
-	}
-	parent := workingParent(b.backups, udid)
 	tree := workingTree(b.backups, udid)
-	if !isEmptyDir(tree) {
-		b.log.Info("storage: resuming dirty working (zfs)", "udid", udid)
-		return parent, nil // already seeded; kind recovered from the sentinel at commit
-	}
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
-	}
 	latest := latestDir(b.backups, udid)
-	seeded := false
-	if !isEmptyDir(latest) {
-		if err := b.seedWorking(udid, tree, latest); err != nil {
-			return "", err
-		}
-		seeded = true
-	} else if err := os.MkdirAll(tree, 0o755); err != nil {
-		return "", err
-	}
-	if err := writeWorkState(b.backups, udid, workState{SeededFromLatest: seeded}); err != nil {
-		return "", err
-	}
-	return parent, nil
+	return prepareWorkDir(b.backups, udid, b.log, func() error {
+		return b.seedWorking(udid, tree, latest)
+	})
 }
 
 // seedWorking clones latest/ → working/<udid>. Hook mode delegates to the host-side `seed` verb

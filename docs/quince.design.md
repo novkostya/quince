@@ -211,7 +211,9 @@ Interface (all operations idempotent, all logged with their real commands):
 ```
 Provision(udid) → device store   // zfs: create child dataset via hook + visibility probe; else mkdir latest/
 Seed(udid,job)  → target   // return the idevicebackup2 target (working/ parent); seed working/<udid>
-                           // from latest/ (safe strategy: hardlink→copy), or RESUME a dirty one
+                           // from latest/ (safe strategy: hardlink→copy), or RESUME a dirty one —
+                           // UNLESS the work sentinel says a seed was in progress (a partial clone
+                           // killed mid-seed), in which case discard + re-seed (Finding B, (cw))
 Commit(udid,job) → VersionRef  // verify working/<udid> → atomic exchange into latest/ → snapshot/archive
 Discard(udid,job)          // KEEP the dirty working/ so a retry resumes (all backends; Reset discards)
 RepairWorkingCopy(udid)    // Reset: discard the dirty working/ (the next backup re-seeds from latest/)

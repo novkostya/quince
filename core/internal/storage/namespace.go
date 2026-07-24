@@ -45,42 +45,24 @@ func (b *namespaceBackend) Provision(udid string) error {
 }
 
 // WorkDir returns the idevicebackup2 TARGET (workingParent) after seeding working/<udid> from
-// latest/ (design §5 Seed, qn.5b). A non-empty working/<udid> is RESUMED as-is (a prior failed
-// attempt); otherwise it is seeded via the backend's SAFE strategy (hardlink→copy, amendment A) or
-// created empty on a first backup. The seed decision is recorded in the work sentinel.
+// latest/ (design §5 Seed, qn.5b). The resume-vs-(re)seed lifecycle — including the Finding B
+// killed-seed guard — is the shared prepareWorkDir; the closure below is the namespace-specific
+// clone (the backend's SAFE strategy: hardlink→copy, amendment A).
 func (b *namespaceBackend) WorkDir(udid, _ string) (string, error) {
-	if !validUDID(udid) {
-		return "", fmt.Errorf("storage: invalid udid %q", udid)
-	}
-	parent := workingParent(b.backups, udid)
 	tree := workingTree(b.backups, udid)
-	if !isEmptyDir(tree) {
-		b.log.Info("storage: resuming dirty working", "backend", b.name, "udid", udid)
-		return parent, nil // already seeded; kind recovered from the sentinel at commit
-	}
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
-	}
 	latest := latestDir(b.backups, udid)
-	seeded := false
-	if !isEmptyDir(latest) {
+	return prepareWorkDir(b.backups, udid, b.log, func() error {
 		safe := seedStrategy(b.strategy)
 		if safe != b.strategy {
 			b.log.Warn("storage: hardlink seed disabled-to-copy (gate 12c) — seeding working via copy",
 				"backend", b.name, "udid", udid)
 		}
 		if err := clonetree.Clone(tree, latest, safe); err != nil {
-			return "", fmt.Errorf("storage: seed working from latest: %w", err)
+			return fmt.Errorf("storage: seed working from latest: %w", err)
 		}
-		seeded = true
 		b.log.Info("storage: seeded working from latest", "backend", b.name, "udid", udid, "strategy", safe)
-	} else if err := os.MkdirAll(tree, 0o755); err != nil {
-		return "", err
-	}
-	if err := writeWorkState(b.backups, udid, workState{SeededFromLatest: seeded}); err != nil {
-		return "", err
-	}
-	return parent, nil
+		return nil
+	})
 }
 
 func (b *namespaceBackend) TreePath(udid, _ string) string {
