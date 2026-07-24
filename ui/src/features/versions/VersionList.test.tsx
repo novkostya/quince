@@ -39,7 +39,9 @@ describe("VersionList", () => {
   it("renders a live version with sizes and Unlock, and does NOT show the kind label (ck)", () => {
     render(<VersionList versions={[ver()]} />);
     expect(screen.getByText(/logical/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /unlock/i })).toBeTruthy();
+    // No confusing "Unlock" button (it made no sense for unencrypted versions) — a quiet chevron now.
+    expect(screen.queryByRole("button", { name: /unlock/i })).toBeNull();
+    expect(screen.queryByText(/unlock/i)).toBeNull();
     // "incremental"/"full" imports a false fragile-chain mental model — it must not appear (ck).
     expect(screen.queryByText(/incremental/i)).toBeNull();
     expect(screen.queryByText(/missing/i)).toBeNull();

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import type { Version } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,10 +95,10 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
           <span>{verifyLabel(version)}</span>
         </div>
       </div>
-      {/* Unlock/browse arrive with the vault in qn.8. */}
-      <Button size="sm" variant="outline" disabled title="Browsing arrives in a later release">
-        Unlock
-      </Button>
+      {/* A quiet chevron instead of a disabled "Unlock" button — it reads for BOTH encrypted and
+          unencrypted versions (nothing to "unlock" on an unencrypted one) and hints the row will open
+          into the file browser, which arrives with the vault (qn.8). Non-interactive for now. */}
+      <ChevronRight size={18} className="shrink-0 text-subtle" aria-hidden />
     </div>
   );
 }

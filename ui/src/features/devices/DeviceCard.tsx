@@ -72,8 +72,11 @@ export function DeviceCard({ device }: { device: Device }) {
   const attention = !activeJob && newestJob && isFailed(newestJob.state) ? newestJob : undefined;
 
   return (
-    <Card data-testid="device-card">
-      <CardContent className="p-4 sm:p-5">
+    // h-full + flex column so the primary action pins to the BOTTOM (mt-auto below): grid rows
+    // stretch cards to equal height, so the buttons then line up across cards even when one has an
+    // extra "needs attention" line (qn.6a soak fix).
+    <Card data-testid="device-card" className="flex h-full flex-col">
+      <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link
@@ -121,8 +124,9 @@ export function DeviceCard({ device }: { device: Device }) {
 
         {/* Exactly ONE primary action per card (qn.6a soak fix — a "needs attention" line PLUS a
             separate "Back up now" was two buttons doing the same thing). When the newest attempt
-            failed, Retry IS that action and replaces Back up now, with the failure as context. */}
-        <div className="mt-4">
+            failed, Retry IS that action and replaces Back up now, with the failure as context.
+            mt-auto pins it to the card bottom so buttons align across cards of different heights. */}
+        <div className="mt-auto pt-4">
           {activeJob ? (
             <JobProgressInline job={activeJob} />
           ) : !present ? (

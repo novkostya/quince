@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Job } from "@/lib/types";
 import { groupByIntent } from "./groupByIntent";
 import { humanJobState } from "./state";
@@ -22,14 +23,20 @@ function needsAttention(latest: Job): boolean {
 // failed. Retrying an OLD failed intent is just "back up now" with extra confusion, and it would match
 // the device card, which surfaces needs-attention for the newest attempt only (finding #6). Older
 // failures stay in the history as record, without a Retry.
+// DEFAULT_SHOWN caps the history so a device with many backups doesn't bury the Versions list below
+// it (qn.6a soak fix); "Show all" reveals the rest.
+const DEFAULT_SHOWN = 3;
+
 export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: Job) => void }) {
+  const [expanded, setExpanded] = useState(false);
   const groups = groupByIntent(jobs);
   if (groups.length === 0) {
     return <div className="text-sm text-muted">No backups yet for this device.</div>;
   }
+  const shown = expanded ? groups : groups.slice(0, DEFAULT_SHOWN);
   return (
     <div className="flex flex-col gap-2">
-      {groups.map((g, i) => (
+      {shown.map((g, i) => (
         <div key={g.intentId} className="rounded-card border border-line bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-medium">{g.summary}</div>
@@ -53,6 +60,17 @@ export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: 
           ) : null}
         </div>
       ))}
+      {groups.length > DEFAULT_SHOWN ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-start"
+          onClick={() => setExpanded((e) => !e)}
+          data-testid="history-toggle"
+        >
+          {expanded ? "Show less" : `Show all ${groups.length}`}
+        </Button>
+      ) : null}
     </div>
   );
 }

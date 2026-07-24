@@ -49,4 +49,17 @@ describe("JobHistory", () => {
     render(<JobHistory jobs={[job({ state: "failed" })]} />);
     expect(screen.queryByTestId("retry-backup")).toBeNull();
   });
+
+  it("caps the history at 3 by default and expands on 'Show all'", () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      job({ id: `J${i}`, intent_id: `J${i}`, state: "succeeded", started_at: `2026-07-2${i}T00:00:00Z` }),
+    );
+    render(<JobHistory jobs={jobs} />);
+    expect(screen.getAllByText(/backup completed/i)).toHaveLength(3); // capped
+    const toggle = screen.getByTestId("history-toggle");
+    expect(toggle.textContent).toMatch(/show all 5/i);
+    fireEvent.click(toggle);
+    expect(screen.getAllByText(/backup completed/i)).toHaveLength(5); // expanded
+    expect(screen.getByTestId("history-toggle").textContent).toMatch(/show less/i);
+  });
 });
