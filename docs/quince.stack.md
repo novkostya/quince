@@ -243,7 +243,21 @@ differently (Operator ruling: no hardlink games under ZFS):
      `bclonesaved` +≈file-size, ALLOC flat); (2) *dataset-level accounting lies* —
      ZFS bills BRT clones like dedup (full size per reference in `used`/`du`), so
      sharing is verified ONLY at pool level (`zpool get bcloneused,bclonesaved`, or
-     the `avail` delta reachable via the hook's `list` verb); (3) *the unprivileged
+     the `avail` delta reachable via the hook's `list` verb). **The SNAPSHOT columns
+     lie the same way, with a signature that looks like catastrophe ((dl),
+     2026-07-24):** under qn.5b's reclone-per-generation lifecycle, every snapshot
+     older than the newest bills ~the FULL tree as "unique" `USED` (the next seed's
+     exchange replaced every block *pointer*, so the old snapshot is the sole
+     referent of its pointers — while the physical blocks stay BRT-shared), and the
+     newest snapshot bills ~0 (the head still shares its pointers). A 34 GB device
+     with N generations therefore *lists* ~N×34 GB in `USEDSNAP` while physically
+     paying roughly one tree + real deltas. Verified live: a 177 GB listing resolved
+     to `bclonesaved 122G` + `bcloneused 37G` ≈ ~55 GB actual. Never diagnose from
+     `zfs list -o space`; always the pool ledger. **The one place this cost becomes
+     REAL: `zfs send` does not preserve block cloning** — a syncoid/replication
+     target rematerializes every `@quince-*` snapshot at full billed size, so
+     snapshot RETENTION is a real capacity knob on any replica (not on the origin
+     pool), and pruning old generations is the lever; (3) *the unprivileged
      user-namespace blocks FICLONE outright (`EPERM`)* — measured in the exact
      production shape (rpool child rbind'd into an unprivileged CT, and the OCI
      container inside it), so in-container reflink is unavailable in the
