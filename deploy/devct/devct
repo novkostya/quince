@@ -88,7 +88,7 @@ onboard() {
 	# 2. Write the config, then let the API fill in what it knows better than we do.
 	umask 077
 	{
-		printf '# written by `devct onboard` — site bindings, never committed\n'
+		printf '# written by "devct onboard" — site bindings, never committed\n'
 		printf 'api_host = %s\n' "$_o_host"
 		[ -n "$_o_addr" ] && printf 'api_addr = %s\n' "$_o_addr"
 		printf 'token_id = %s\n' "$_o_token"
