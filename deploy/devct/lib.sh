@@ -28,8 +28,6 @@ devct_need() {
 # Format: plain key=value lines, # comments, no shell execution (the file is read, never
 # sourced — a config file is data, not code).
 
-DEVCT_KEYS="api_host api_addr api_port node pool storage template_storage bridge sdn_zone template_name token_id token_file ssh_key registry ca_pin"
-
 devct_load_conf() {
 	_conf="${DEVCT_CONF:-$DEVCT_CONF_DEFAULT}"
 	[ -f "$_conf" ] || devct_die "no config at $_conf — run: devct onboard"
@@ -41,6 +39,27 @@ devct_load_conf() {
 	*) devct_warn "$_conf is mode $_perm — expected 600" ;;
 	esac
 
+	# Every key is initialised, then assigned by an explicit `case` arm. The obvious shortcut —
+	# eval'ing "DEVCT_$(upper $key)=$val" — would make the key list the only thing standing
+	# between a config file and the shell, and it hides every assignment from static analysis
+	# (shellcheck SC2153, which is how this design got fixed rather than suppressed). An arm per
+	# key is a few more lines and no eval at all.
+	DEVCT_API_HOST=''
+	DEVCT_API_ADDR=''
+	DEVCT_API_PORT=''
+	DEVCT_NODE=''
+	DEVCT_POOL=''
+	DEVCT_STORAGE=''
+	DEVCT_TEMPLATE_STORAGE=''
+	DEVCT_BRIDGE=''
+	DEVCT_SDN_ZONE=''
+	DEVCT_TEMPLATE_NAME=''
+	DEVCT_TOKEN_ID=''
+	DEVCT_TOKEN_FILE=''
+	DEVCT_SSH_KEY=''
+	DEVCT_REGISTRY=''
+	DEVCT_CA_PIN=''
+
 	while IFS= read -r _line; do
 		case "$_line" in
 		'' | \#*) continue ;;
@@ -49,19 +68,29 @@ devct_load_conf() {
 		_val=${_line#*=}
 		_key=$(printf '%s' "$_key" | tr -d ' \t')
 		_val=${_val# }
-		case " $DEVCT_KEYS " in
-		*" $_key "*) ;;
-		*)
-			devct_warn "unknown key in $_conf: $_key (ignored)"
-			continue
-			;;
+		case "$_key" in
+		api_host) DEVCT_API_HOST=$_val ;;
+		api_addr) DEVCT_API_ADDR=$_val ;;
+		api_port) DEVCT_API_PORT=$_val ;;
+		node) DEVCT_NODE=$_val ;;
+		pool) DEVCT_POOL=$_val ;;
+		storage) DEVCT_STORAGE=$_val ;;
+		template_storage) DEVCT_TEMPLATE_STORAGE=$_val ;;
+		bridge) DEVCT_BRIDGE=$_val ;;
+		sdn_zone) DEVCT_SDN_ZONE=$_val ;;
+		template_name) DEVCT_TEMPLATE_NAME=$_val ;;
+		token_id) DEVCT_TOKEN_ID=$_val ;;
+		token_file) DEVCT_TOKEN_FILE=$_val ;;
+		ssh_key) DEVCT_SSH_KEY=$_val ;;
+		registry) DEVCT_REGISTRY=$_val ;;
+		ca_pin) DEVCT_CA_PIN=$_val ;;
+		*) devct_warn "unknown key in $_conf: $_key (ignored)" ;;
 		esac
-		eval "DEVCT_$(printf '%s' "$_key" | tr '[:lower:]' '[:upper:]')=\$_val"
 	done <"$_conf"
 
-	: "${DEVCT_API_PORT:=8006}"
-	: "${DEVCT_CA_PIN:=$HOME/.config/quince/devct-api.pem}"
-	: "${DEVCT_TOKEN_FILE:=$DEVCT_TOKEN_DEFAULT}"
+	[ -n "$DEVCT_API_PORT" ] || DEVCT_API_PORT=8006
+	[ -n "$DEVCT_CA_PIN" ] || DEVCT_CA_PIN="$HOME/.config/quince/devct-api.pem"
+	[ -n "$DEVCT_TOKEN_FILE" ] || DEVCT_TOKEN_FILE="$DEVCT_TOKEN_DEFAULT"
 	DEVCT_API_BASE="https://${DEVCT_API_HOST}:${DEVCT_API_PORT}"
 }
 
@@ -70,11 +99,12 @@ devct_file_mode() {
 	stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || printf 'unknown'
 }
 
+# devct_require_conf <key>=<value>... — callers pass the pairs, so this stays eval-free too.
 devct_require_conf() {
-	for _k in "$@"; do
-		_var="DEVCT_$(printf '%s' "$_k" | tr '[:lower:]' '[:upper:]')"
-		eval "_v=\${$_var:-}"
-		[ -n "$_v" ] || devct_die "config key '$_k' is not set in ${DEVCT_CONF:-$DEVCT_CONF_DEFAULT}"
+	for _pair in "$@"; do
+		if [ -z "${_pair#*=}" ]; then
+			devct_die "config key '${_pair%%=*}' is not set in ${DEVCT_CONF:-$DEVCT_CONF_DEFAULT}"
+		fi
 	done
 }
 

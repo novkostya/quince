@@ -58,7 +58,9 @@ priv_check() {
 doctor() {
 	devct_need curl jq
 	devct_load_conf
-	devct_require_conf api_host node pool storage bridge
+	devct_require_conf \
+		"api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL" \
+		"storage=$DEVCT_STORAGE" "bridge=$DEVCT_BRIDGE"
 
 	printf 'devct doctor — %s\n\n' "$DEVCT_API_BASE"
 
