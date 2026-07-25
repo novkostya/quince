@@ -48,6 +48,8 @@ usage: devct-template build [--vmid N] [--keep] [--skip-keyctl]
   build   run the six-step ladder and leave a template behind
           --vmid N       use this container id instead of the cluster's next free one
           --keep         leave the container running instead of converting it (debugging)
+          --recreate     destroy an existing in-pool container with this id first, instead
+                         of resuming from the first unfinished step
           --skip-keyctl  omit the keyctl flag from the root block — an open measurement:
                          if the container toolchain works without it, that half of the
                          block can be dropped for good (the sshd bootstrap still runs)
@@ -126,31 +128,31 @@ build() {
 		VMID=$(devct_body "$_r" | jq -r '.data')
 	fi
 	devct_info "  vmid $VMID"
-	# `nesting` is the only feature flag PVE lets a non-root user set; `keyctl` is root@pam BY
-	# DESIGN — no ACL can grant it (measured: HTTP 403 "changing feature flags (except nesting)
-	# is only allowed for root@pam"). So the create runs on the token WITHOUT keyctl, and the
-	# flag is added by one named root micro-step below. Clones inherit features from the
-	# template, so this root touch happens once per TEMPLATE REBUILD — `devct create` never
-	# needs root at all.
-	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc" \
-		"vmid=$VMID" \
-		"ostemplate=$_volid" \
-		"hostname=$_tmpl_name" \
-		"pool=$DEVCT_POOL" \
-		"storage=$DEVCT_STORAGE" \
-		"rootfs=$DEVCT_STORAGE:${DEVCT_ROOTFS_GB:-32}" \
-		"cores=${DEVCT_CORES:-4}" \
-		"memory=${DEVCT_MEMORY_MB:-8192}" \
-		"swap=0" \
-		"unprivileged=1" \
-		"features=nesting=1" \
-		"net0=name=eth0,bridge=$DEVCT_BRIDGE,ip=dhcp" \
-		"ssh-public-keys=$(cat "$DEVCT_SSH_KEY")" \
-		"start=1") ||
-		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
-			"container create in /pool/$DEVCT_POOL — SDN.Use on the bridge and Pool.Allocate on the pool are the usual culprits"
-	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "container create failed"
-	devct_info "  created and started (features: nesting only)"
+
+	# Resume. A ladder that can only run on a clean box turns any mid-run failure into an orphan
+	# plus a manual destroy — which is what its own first hardware run produced. An existing
+	# in-pool container with this id is therefore resumed from the first UNFINISHED step, each
+	# skip announced; --recreate takes the clean path by destroying it first (token-only).
+	if verify_in_pool "$VMID"; then
+		if [ -n "${RECREATE:-}" ]; then
+			devct_info "  --recreate: destroying the existing container $VMID"
+			destroy_ct "$VMID" || devct_die "could not destroy $VMID"
+			create_ct "$_volid" "$_tmpl_name"
+		elif is_template "$VMID"; then
+			# Already converted: the ladder is done for this id. A template cannot be started,
+			# so trying to "resume" one would fail on its own success.
+			devct_info "  vmid $VMID is ALREADY a template — nothing left to build"
+			devct_info "  (--recreate rebuilds it from scratch)"
+			printf '\ntemplate %s (vmid %s) is present and converted.\n' "$_tmpl_name" "$VMID"
+			return 0
+		else
+			devct_info "  container $VMID already exists in the pool — RESUMING from the first unfinished step"
+			devct_info "  (--recreate destroys it and takes the clean path instead)"
+			ensure_running "$VMID" || devct_die "container $VMID will not start"
+		fi
+	else
+		create_ct "$_volid" "$_tmpl_name"
+	fi
 
 	root_bootstrap
 
@@ -185,10 +187,12 @@ build() {
 	devct_info "  converted"
 
 	# ---- 6: verify ---------------------------------------------------------
+	# The conversion POST returns before the flag is visible, so this polls instead of asserting
+	# instantly — the first run "failed" here on a template that had in fact been built, which is
+	# a false negative and therefore just as much a state-honesty bug as a false positive.
 	step "verify"
-	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
-	devct_body "$_r" | jq -e --arg n "$_tmpl_name" '.data[] | select(.name==$n and .template==1)' >/dev/null 2>&1 ||
-		devct_die "template $_tmpl_name is not present as a template after conversion"
+	is_template "$VMID" 60 ||
+		devct_die "vmid $VMID did not become a template within 60s of a successful conversion"
 	printf '\ntemplate %s (vmid %s) built.\n' "$_tmpl_name" "$VMID"
 	printf 'stamp: %s\n' "$_stamp"
 	printf 'no root was used.\n'
@@ -211,20 +215,40 @@ build() {
 root_bootstrap() {
 	verify_in_pool "$VMID" || devct_die "vmid $VMID is not in pool $DEVCT_POOL — refusing to run root commands against it"
 
-	if [ -n "${SKIP_KEYCTL:-}" ]; then
-		# The create already set nesting, so with keyctl skipped the flag command has nothing
-		# left to do; the sshd bootstrap still does.
-		set -- \
-			"pct exec $VMID -- apk add --no-cache openssh" \
-			"pct exec $VMID -- rc-update add sshd default" \
-			"pct exec $VMID -- service sshd start"
-	else
-		set -- \
-			"pct set $VMID -features nesting=1,keyctl=1" \
-			"pct exec $VMID -- apk add --no-cache openssh" \
-			"pct exec $VMID -- rc-update add sshd default" \
-			"pct exec $VMID -- service sshd start"
+	# On a resume, root is not re-entered for work already done. Both halves are checked against
+	# the box: the flag against the container's config, ssh against the box itself. Root that is
+	# not needed is root that is not taken.
+	_need_keyctl=1
+	_need_sshd=1
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$VMID/config") &&
+		case "$(devct_body "$_r" | jq -r '.data.features // ""')" in
+		*keyctl=1*) _need_keyctl='' ;;
+		esac
+	if _ip=$(wait_for_ip "$VMID" 15) && ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+		-o BatchMode=yes "root@$_ip" true 2>/dev/null; then
+		_need_sshd=''
 	fi
+	if [ -z "$_need_keyctl" ] && [ -z "$_need_sshd" ]; then
+		printf '\n  ROOT BLOCK — not needed: keyctl is already set and ssh already answers.\n'
+		return 0
+	fi
+
+	# The block carries only what this box still needs — the create already set nesting, and a
+	# resume may need one half and not the other.
+	_cmds=''
+	if [ -n "$_need_keyctl" ] && [ -z "${SKIP_KEYCTL:-}" ]; then
+		_cmds="pct set $VMID -features nesting=1,keyctl=1"
+	fi
+	if [ -n "$_need_sshd" ]; then
+		_cmds="${_cmds:+$_cmds
+}pct exec $VMID -- apk add --no-cache openssh
+pct exec $VMID -- rc-update add sshd default
+pct exec $VMID -- service sshd start"
+	fi
+	[ -n "$_cmds" ] || {
+		printf '\n  ROOT BLOCK — nothing left for it to do on this container.\n'
+		return 0
+	}
 
 	printf '\n  ROOT BLOCK (the ruled fallback — the API cannot do these)\n'
 	printf '    scope: vmid %s, verified in pool %s; once per template rebuild.\n' "$VMID" "$DEVCT_POOL"
@@ -235,19 +259,79 @@ root_bootstrap() {
 		printf '    container toolchain needs it. If step 4 warms the cache and the gates run,\n'
 		printf '    that half of this block can be dropped for good.\n'
 	fi
-	for _c in "$@"; do printf '      %s\n' "$_c"; done
+	printf '%s\n' "$_cmds" | sed 's/^/      /'
 
 	[ -n "$DEVCT_ROOT_SSH" ] || {
 		printf '\n  root_ssh is not set, so this block cannot run unattended.\n' >&2
-		printf '  Run the commands above on the hypervisor, then re-run with --vmid %s.\n' "$VMID" >&2
+		printf '  Run the commands above on the hypervisor, then re-run with --vmid %s —\n' "$VMID" >&2
+		printf '  the ladder resumes from the first unfinished step.\n' >&2
 		printf '  (R3(2b): that access should be an authorized_keys entry carrying expiry-time.)\n' >&2
 		exit 4
 	}
-	for _c in "$@"; do
+	printf '%s\n' "$_cmds" | while IFS= read -r _c; do
+		[ -n "$_c" ] || continue
 		ssh -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_c" ||
 			devct_die "root block failed at: $_c — fix it, then re-run with --vmid $VMID"
 	done
 	printf '    done.\n'
+}
+
+# `nesting` is the only feature flag PVE lets a non-root user set; `keyctl` is root@pam BY DESIGN
+# — no ACL can grant it (measured: HTTP 403 "changing feature flags (except nesting) is only
+# allowed for root@pam"). So the create runs on the token WITHOUT keyctl, and the root block adds
+# it. Clones inherit features from the template, so that root touch happens once per TEMPLATE
+# REBUILD — `devct create` never needs root at all.
+create_ct() {
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc" \
+		"vmid=$VMID" \
+		"ostemplate=$1" \
+		"hostname=$2" \
+		"pool=$DEVCT_POOL" \
+		"storage=$DEVCT_STORAGE" \
+		"rootfs=$DEVCT_STORAGE:${DEVCT_ROOTFS_GB:-32}" \
+		"cores=${DEVCT_CORES:-4}" \
+		"memory=${DEVCT_MEMORY_MB:-8192}" \
+		"swap=0" \
+		"unprivileged=1" \
+		"features=nesting=1" \
+		"net0=name=eth0,bridge=$DEVCT_BRIDGE,ip=dhcp" \
+		"ssh-public-keys=$(cat "$DEVCT_SSH_KEY")" \
+		"start=1") ||
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
+			"container create in /pool/$DEVCT_POOL — SDN.Use on the bridge and Pool.Allocate on the pool are the usual culprits"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "container create failed"
+	devct_info "  created and started (features: nesting only)"
+}
+
+destroy_ct() {
+	verify_in_pool "$1" || devct_die "vmid $1 is not in pool $DEVCT_POOL — refusing to destroy it"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/stop") &&
+		devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || true
+	_r=$(devct_api DELETE "/nodes/$DEVCT_NODE/lxc/$1") ||
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" "VM.Allocate on /pool/$DEVCT_POOL (to destroy)"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
+}
+
+ensure_running() {
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/status/current") || return 1
+	case "$(devct_body "$_r" | jq -r '.data.status')" in
+	running) return 0 ;;
+	esac
+	devct_info "  container is stopped — starting it"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/start") || return 1
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
+}
+
+# is_template <vmid> [seconds] — poll until the conversion flag is visible.
+is_template() {
+	_n=0
+	while :; do
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/config") &&
+			[ "$(devct_body "$_r" | jq -r '.data.template // 0')" = 1 ] && return 0
+		[ "$_n" -ge "${2:-0}" ] && return 1
+		sleep 5
+		_n=$((_n + 5))
+	done
 }
 
 # The guard the ruling names: root commands are only ever aimed at a vmid this token owns.
@@ -269,7 +353,7 @@ versions_digest() {
 wait_for_ip() {
 	_vmid=$1
 	_n=0
-	while [ "$_n" -lt 60 ]; do
+	while [ "$_n" -lt "${2:-60}" ]; do
 		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$_vmid/interfaces") && {
 			_addr=$(devct_body "$_r" | jq -r '[.data[]? | select(.name!="lo") | .inet // empty] | first // empty' | cut -d/ -f1)
 			[ -n "$_addr" ] && {
@@ -296,11 +380,20 @@ wait_for_ssh() {
 
 # The provisioning body runs INSIDE the container, fed over ssh on stdin. Site specifics arrive
 # as values, never baked into the committed text.
+#
+# The heredocs below are UNQUOTED so the caller's values interpolate — which means backticks and
+# $ inside them execute HERE, on the session host, not in the container. Keep prose out of them.
+# (Found by running it: a comment containing backticks ran `apk info -L buildkit` locally.)
+#
+# buildctl is its own Alpine package: buildkit ships only the DAEMON (usr/bin/buildkitd), and
+# nerdctl needs the CLIENT to reach it — without it, "no buildkit host is available … buildctl:
+# executable file not found". Verified against the v3.24 community index at fix time
+# (buildctl 0.29.0-r1) and installed successfully on the box.
 provision_script() {
 	cat <<EOF
 set -eu
 apk update
-apk add --no-cache git make openssh-client curl jq containerd nerdctl buildkit
+apk add --no-cache git make openssh-client curl jq containerd nerdctl buildkit buildctl
 rc-update add containerd default 2>/dev/null || true
 rc-update add buildkitd default 2>/dev/null || true
 service containerd start || true
@@ -320,8 +413,13 @@ EOF
 	fi
 	# Warm the buildkit cache with the real toolchain images, which is what makes a fresh
 	# container reach a green gate in minutes rather than re-pulling everything.
+	# Idempotent, because a resumed build re-runs this whole script.
 	cat <<'EOF'
-git clone --depth 1 https://github.com/novkostya/quince.git /root/quince
+if [ -d /root/quince/.git ]; then
+	git -C /root/quince fetch --depth 1 origin main && git -C /root/quince reset --hard origin/main
+else
+	git clone --depth 1 https://github.com/novkostya/quince.git /root/quince
+fi
 make -C /root/quince toolchains
 EOF
 }
@@ -334,6 +432,10 @@ build)
 		--vmid)
 			VMID=$2
 			shift 2
+			;;
+		--recreate)
+			RECREATE=1
+			shift
 			;;
 		--keep)
 			KEEP=1
