@@ -1,0 +1,148 @@
+#!/bin/sh
+# devct — disposable dev containers on Proxmox, driven by a scoped API token.
+#
+# Verbs implemented here: doctor.
+# Verbs specified but NOT yet built: onboard, create, list, destroy — they say so when called,
+# rather than pretending. See docs/specs/devct/devct.md.
+set -eu
+
+DEVCT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=deploy/devct/lib.sh
+. "$DEVCT_ROOT/lib.sh"
+
+usage() {
+	cat <<'EOF'
+usage: devct <verb>
+
+  doctor    report readiness: bindings, credentials, TLS pin, token privileges,
+            template freshness. Changes nothing. Non-zero exit when not ready.
+
+not built yet (see docs/specs/devct/devct.md):
+  onboard, create, list, destroy
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------
+# The privilege list below is a HYPOTHESIS. doctor's job is to replace it with a measurement:
+# it asks the API what this token can actually do and reports the delta. A recorded scope is
+# an interface fact, and interface facts decay — so nothing here trusts what was written down.
+
+DOCTOR_FAIL=0
+DOCTOR_TODO=""
+
+ok() { printf '  ok      %s\n' "$*"; }
+bad() {
+	printf '  MISSING %s\n' "$*"
+	DOCTOR_FAIL=1
+}
+todo() { DOCTOR_TODO="$DOCTOR_TODO
+    - $*"; }
+
+# priv_check <api-path> <privilege>... — against the fetched permission map.
+priv_check() {
+	_path=$1
+	shift
+	for _priv in "$@"; do
+		if printf '%s' "$DOCTOR_PERMS" | jq -e --arg p "$_path" --arg v "$_priv" \
+			'.[$p][$v] // empty' >/dev/null 2>&1; then
+			ok "$_priv on $_path"
+		else
+			bad "$_priv on $_path"
+			todo "grant $_priv on $_path to $DEVCT_TOKEN_ID (architect, self-service)"
+		fi
+	done
+}
+
+doctor() {
+	devct_need curl jq
+	devct_load_conf
+	devct_require_conf api_host node pool storage bridge
+
+	printf 'devct doctor — %s\n\n' "$DEVCT_API_BASE"
+
+	printf 'local bindings\n'
+	if [ -f "$DEVCT_TOKEN_FILE" ]; then
+		ok "token file present"
+	else
+		bad "token file $DEVCT_TOKEN_FILE"
+		todo "place the API token secret at $DEVCT_TOKEN_FILE (mode 600)"
+	fi
+	if [ -f "$DEVCT_CA_PIN" ]; then
+		ok "TLS pin present"
+	else
+		bad "TLS pin $DEVCT_CA_PIN"
+		todo "capture the API certificate: devct onboard (verification is never disabled)"
+	fi
+	if grep -q 'quince-devct.conf' "$HOME/.ssh/config" 2>/dev/null; then
+		ok "ssh include wired"
+	else
+		bad "ssh include in ~/.ssh/config"
+		todo "add: Include ~/.ssh/quince-devct.conf"
+	fi
+
+	printf '\napi\n'
+	_r=$(devct_api GET /version) && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		ok "reachable, TLS pin valid — PVE $(devct_body "$_r" | jq -r '.data.version // "?"')"
+	else
+		bad "GET /version returned HTTP $(devct_code "$_r")"
+		devct_body "$_r" | sed 's/^/          /'
+		printf '\nnot ready.\n'
+		return 1
+	fi
+
+	printf '\ntoken privileges (measured, not assumed)\n'
+	# Capture the whole response, then check the status: piping straight into jq would hand us
+	# jq's exit code and quietly turn a 403 into an empty permission map.
+	_r=$(devct_api GET /access/permissions) && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		DOCTOR_PERMS=$(devct_body "$_r" | jq -c '.data')
+	else
+		bad "GET /access/permissions returned HTTP $(devct_code "$_r")"
+		printf '\nnot ready.\n'
+		return 1
+	fi
+	priv_check "/pool/$DEVCT_POOL" VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit
+	priv_check "/storage/$DEVCT_STORAGE" Datastore.AllocateSpace Datastore.Audit
+	priv_check "/storage/${DEVCT_TEMPLATE_STORAGE:-$DEVCT_STORAGE}" Datastore.AllocateTemplate
+	priv_check "/sdn/zones/${DEVCT_SDN_ZONE:-localnetwork}/$DEVCT_BRIDGE" SDN.Use
+
+	printf '\ntemplate\n'
+	_tmpl=${DEVCT_TEMPLATE_NAME:-quince-dev-template}
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		if devct_body "$_r" | jq -e --arg n "$_tmpl" '.data[] | select(.name==$n)' >/dev/null 2>&1; then
+			ok "template $_tmpl exists"
+		else
+			bad "template $_tmpl"
+			todo "build it: devct-template build"
+		fi
+	else
+		bad "GET /nodes/$DEVCT_NODE/lxc returned HTTP $(devct_code "$_r")"
+		todo "the token cannot list containers on node $DEVCT_NODE — check VM.Audit and the node name"
+	fi
+
+	if [ -n "$DOCTOR_TODO" ]; then
+		printf '\nto fix:%s\n' "$DOCTOR_TODO"
+	fi
+	if [ "$DOCTOR_FAIL" -eq 0 ]; then
+		printf '\nready.\n'
+		return 0
+	fi
+	printf '\nnot ready.\n'
+	return 1
+}
+
+case "${1:-}" in
+doctor) doctor ;;
+onboard | create | list | destroy)
+	devct_die "verb '$1' is specified but not built yet (docs/specs/devct/devct.md) — this session ships doctor only"
+	;;
+'' | -h | --help | help) usage ;;
+*)
+	usage >&2
+	devct_die "unknown verb: $1"
+	;;
+esac

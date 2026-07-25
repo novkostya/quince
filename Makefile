@@ -101,7 +101,21 @@ tc-uv: preflight
 # Gate ladder.
 # ---------------------------------------------------------------------------
 .PHONY: gates
-gates: gates-go gates-vault gates-ui ## Run the whole gate ladder
+gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
+
+# The script list is explicit and grows as scripts land — a glob would silently start
+# linting (or silently stop linting) files nobody decided on.
+DEVCT_SCRIPTS := deploy/devct/devct deploy/devct/lib.sh
+
+.PHONY: gates-sh
+gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
+	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) -s sh $(DEVCT_SCRIPTS)
+	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
+	@# grep over the scripts themselves is the cheapest possible tooth.
+	@if grep -nE -- '(^|[[:space:]])(-k|--insecure)([[:space:]]|$$)' $(DEVCT_SCRIPTS); then \
+	  echo "gates-sh: 'curl -k/--insecure' is banned in deploy/devct — pin the cert instead"; exit 1; \
+	fi
+	@echo "gates-sh: clean"
 
 .PHONY: gates-go
 gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
