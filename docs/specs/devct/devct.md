@@ -288,8 +288,13 @@ Each is independently checkable.
    check is the tool's own guard; the token's scope is the second line of defence.
 5. **`devct list` shows the pool** — id, alias, status, template stamp, and a stale marker.
 6. **`devct onboard` binds a fresh machine in one command** — writes `devct.conf`, pins the TLS
-   certificate, writes `.claude/settings.local.json` bindings, prints (never applies) the ssh
-   `Include` line.
+   certificate and prints its fingerprint for out-of-band confirmation, discovers the node from the
+   API, verifies the pin and token by calling it, and prints (never applies) the ssh `Include` line.
+   **Amended in build:** the story also said it writes `.claude/settings.local.json` bindings. It
+   does not, because after R4(c) there is nothing left for it to write there — the committed
+   allowlist refers to hosts by convention name, and the only real binding is the ssh alias, which
+   lives in `~/.ssh/config` and in the file `devct` generates. Writing an empty bindings file to
+   satisfy a sentence would be theatre; the sentence was wrong, and this is the correction.
 7. **A CT created by story 3 runs `make gates` green** on a fresh clone of this repo, with no
    toolchain installed on it.
 8. **A CT created by story 3 pushes to the registry unattended** (`make image push REGISTRY=…`).

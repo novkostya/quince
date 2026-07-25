@@ -40,9 +40,17 @@ The committed allowlist refers to hosts by convention, never by address:
 | `quince-dev-N` | a disposable dev container: container runtime, no language toolchains, one per unit of work | `Host quince-dev-1`, `quince-dev-2`, … in `~/.ssh/config`; the allowlist matches `quince-dev-*` |
 
 An ssh alias is the whole binding — `ssh quince-dev-1 'make -C /root/quince gates'` works
-and matches the allowlist, while the real address stays on your machine. The provisioning
-tooling that creates these containers, and the fuller definition of the convention, is the
-`deploy/devct/` work (pr.2); this file is the contract it binds to.
+and matches the allowlist, while the real address stays on your machine. **The tooling that
+creates these containers now exists**: `deploy/devct/` ([its README](../deploy/devct/README.md))
+builds the template and creates, lists and destroys the containers, and it *generates* the
+`quince-dev-N` aliases into `~/.ssh/quince-devct.conf` — so the convention this file describes is
+maintained by a program rather than by hand. One line in your own `~/.ssh/config` connects them:
+
+```
+Include ~/.ssh/quince-devct.conf
+```
+
+`devct onboard` prints that line; it does not edit your ssh config.
 
 ## Notes on individual entries
 
@@ -78,6 +86,10 @@ tooling that creates these containers, and the fuller definition of the conventi
   locally instead of only as a server-side refusal. Force-pushing a *PR branch* is not denied
   — branches are session-local and unshared, so amending and re-pushing one (with
   `--force-with-lease`) is routine; `main` is what must never be rewritten.
-- The curl entry for the Proxmox API constrains an argument, which is fragile by nature
-  (a reordered flag won't match). When `deploy/devct/` ships a wrapper script, the honest
-  fix is to allowlist the script instead.
+- **The Proxmox API is reached through `deploy/devct/`, not through a raw `curl` entry.** The
+  old entry constrained an argument, which is fragile by nature (a reordered flag stops
+  matching), and it has been replaced by the scripts themselves — the allowlist-the-script
+  move this file proposed before those scripts existed. The scripts are the narrower grant in
+  practice: they talk to one API with one token, they refuse any container outside the pool,
+  and they never disable TLS verification (`make gates-sh` fails the build if `curl -k`
+  appears in that tree).

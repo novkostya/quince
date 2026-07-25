@@ -17,6 +17,12 @@ with byte-identical toolchains. All versions are pinned in one place: `versions.
 > byte. Host toolchain drift is exactly the class of "works on my machine" bug we refuse
 > to ship. See the program doc, *Where work runs*.
 
+**Don't have a box to run gates on?** [`devct/`](devct/README.md) provisions one on any Proxmox
+host: it builds a template carrying a container runtime and a pre-warmed toolchain cache, then
+creates and destroys disposable containers from it — one per unit of work, reachable as
+`quince-dev-N`, arriving at a green gate ladder in about three minutes. It runs on a scoped API
+token; the only root it needs is one announced block when the template itself is (re)built.
+
 ## The gate ladder
 
 ```sh
@@ -39,7 +45,7 @@ fast. `make clean` drops those volumes and the local images.
 | `core/` | Go daemon (`quince`) — device tracking, jobs, storage, HTTP/WS API, UI host |
 | `vault/` | Python sidecar (`quince-vault`) — session-scoped encrypted-backup reader |
 | `ui/` | React + Vite + TS web app, embedded into the Go binary at build time |
-| `deploy/` | `Dockerfile`, compose examples, this guide |
+| `deploy/` | `Dockerfile`, compose examples, this guide, and `devct/` (dev-container provisioning) |
 | `docs/` | canon: stack decisions, architecture, frozen contracts, rung specs |
 | `versions.env` | the single source of truth for toolchain + image pins |
 

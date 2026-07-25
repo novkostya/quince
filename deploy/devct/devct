@@ -22,10 +22,107 @@ usage: devct <verb>
                 secrets, and print the ssh alias plus the gate command. No root.
   list          the pool's containers: id, alias, status, and template freshness.
   destroy N     stop and delete one — refuses anything outside the pool.
+  onboard       bind this machine: write devct.conf, pin the API certificate, and print
+                the ssh config line to add. Never edits your ssh config itself.
 
-not built yet (see docs/specs/devct/devct.md):
-  onboard
+onboard options (all optional except --api-host and --token-id):
+  --api-host H          a name the API certificate carries (NOT an address — curl verifies
+                        the URL host against the certificate)
+  --api-addr A          where that name lives, when DNS does not know it
+  --token-id U@R!NAME   the scoped API token's id; its secret stays in its own file
+  --node N              defaults to the node the API reports
+  --pool / --storage / --template-storage / --bridge / --sdn-zone / --registry / --ssh-key
 EOF
+}
+
+# ---------------------------------------------------------------------------
+# onboard — the one command a fresh machine runs. It writes only files it owns, and it prints
+# (never applies) the one line that belongs to the user's own ssh config.
+# ---------------------------------------------------------------------------
+
+onboard() {
+	devct_need curl jq openssl
+	_o_conf="${DEVCT_CONF:-$DEVCT_CONF_DEFAULT}"
+	_o_host='' _o_addr='' _o_token='' _o_node='' _o_pool=quince-dev _o_storage=''
+	_o_tstorage='' _o_bridge=vmbr0 _o_zone=localnetwork _o_registry='' _o_key="$HOME/.ssh/id_ed25519.pub"
+
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--api-host) _o_host=$2 ;;
+		--api-addr) _o_addr=$2 ;;
+		--token-id) _o_token=$2 ;;
+		--node) _o_node=$2 ;;
+		--pool) _o_pool=$2 ;;
+		--storage) _o_storage=$2 ;;
+		--template-storage) _o_tstorage=$2 ;;
+		--bridge) _o_bridge=$2 ;;
+		--sdn-zone) _o_zone=$2 ;;
+		--registry) _o_registry=$2 ;;
+		--ssh-key) _o_key=$2 ;;
+		*)
+			usage >&2
+			devct_die "unknown option: $1"
+			;;
+		esac
+		shift 2
+	done
+
+	[ -n "$_o_host" ] || devct_die "--api-host is required (a name the API certificate carries)"
+	[ -n "$_o_token" ] || devct_die "--token-id is required (user@realm!tokenid)"
+	[ -f "$DEVCT_TOKEN_DEFAULT" ] ||
+		devct_die "no token secret at $DEVCT_TOKEN_DEFAULT — place it there (mode 600) before onboarding"
+	[ -f "$_o_key" ] || devct_die "ssh public key not found: $_o_key"
+
+	# 1. Pin the certificate. Printed as a fingerprint so it can be confirmed out of band — that
+	#    check is the whole security of a self-signed pin, and it is the user's to make.
+	_o_pin="$HOME/.config/quince/devct-api.pem"
+	mkdir -p "$HOME/.config/quince"
+	_o_connect=${_o_addr:-$_o_host}
+	openssl s_client -connect "$_o_connect:8006" -servername "$_o_host" </dev/null 2>/dev/null |
+		openssl x509 -out "$_o_pin" 2>/dev/null ||
+		devct_die "could not fetch the API certificate from $_o_connect:8006"
+	printf 'API certificate pinned at %s\n' "$_o_pin"
+	printf '  SHA-256: %s\n' "$(openssl x509 -in "$_o_pin" -noout -fingerprint -sha256 | cut -d= -f2)"
+	printf '  Confirm that fingerprint against the server before trusting this machine.\n\n'
+
+	# 2. Write the config, then let the API fill in what it knows better than we do.
+	umask 077
+	{
+		printf '# written by `devct onboard` — site bindings, never committed\n'
+		printf 'api_host = %s\n' "$_o_host"
+		[ -n "$_o_addr" ] && printf 'api_addr = %s\n' "$_o_addr"
+		printf 'token_id = %s\n' "$_o_token"
+		printf 'ca_pin = %s\n' "$_o_pin"
+		printf 'pool = %s\n' "$_o_pool"
+		printf 'bridge = %s\n' "$_o_bridge"
+		printf 'sdn_zone = %s\n' "$_o_zone"
+		printf 'ssh_key = %s\n' "$_o_key"
+		[ -n "$_o_storage" ] && printf 'storage = %s\n' "$_o_storage"
+		[ -n "$_o_tstorage" ] && printf 'template_storage = %s\n' "$_o_tstorage"
+		[ -n "$_o_registry" ] && printf 'registry = %s\n' "$_o_registry"
+		[ -n "$_o_node" ] && printf 'node = %s\n' "$_o_node"
+	} >"$_o_conf"
+	chmod 600 "$_o_conf"
+
+	DEVCT_CONF="$_o_conf" devct_load_conf
+	_r=$(devct_api GET /version) ||
+		devct_die "the API is not reachable with this pin and token (HTTP $(devct_code "$_r")): $(devct_body "$_r")"
+	printf 'API reachable, pin valid — PVE %s\n' "$(devct_body "$_r" | jq -r '.data.version // "?"')"
+
+	if [ -z "$_o_node" ]; then
+		_r=$(devct_api GET /nodes) || devct_die "cannot list nodes to discover one — pass --node"
+		_o_node=$(devct_body "$_r" | jq -r '.data[0].node // empty')
+		[ -n "$_o_node" ] || devct_die "the API returned no nodes — pass --node"
+		printf 'node = %s\n' "$_o_node" >>"$_o_conf"
+		printf 'node discovered from the API and recorded\n'
+	fi
+	printf 'config written: %s\n\n' "$_o_conf"
+
+	# 3. The one thing onboard will NOT do for you. Editing a user's ssh config silently is the
+	#    kind of helpfulness that loses someone a jump-host entry at 2am.
+	printf 'Add this line to ~/.ssh/config (devct owns the file it points at):\n\n'
+	printf '  Include ~/.ssh/quince-devct.conf\n\n'
+	printf 'Then: devct doctor\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -353,7 +450,8 @@ destroy)
 	destroy "$@"
 	;;
 onboard)
-	devct_die "verb 'onboard' is specified but not built yet (docs/specs/devct/devct.md) — write devct.conf by hand meanwhile, per deploy/devct/README.md"
+	shift
+	onboard "$@"
 	;;
 '' | -h | --help | help) usage ;;
 *)

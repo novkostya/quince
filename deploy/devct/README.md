@@ -17,7 +17,22 @@ Design and acceptance gates: [`docs/specs/devct/devct.md`](../../docs/specs/devc
 | `devct doctor` | **built** — reports readiness and, crucially, *measures* what the API token can actually do |
 | `devct-template build` | **built** — the six-step ladder, token-first; a step the API refuses stops the build and names the grant |
 | `devct create` / `list` / `destroy` | **built** — the everyday path, and it is **pure scoped token: no root at all** |
-| `devct onboard` | specified, not built — write `devct.conf` by hand meanwhile (below) |
+| `devct onboard` | **built** — binds a fresh machine: config, pinned certificate, node discovery |
+
+## Onboarding a machine
+
+```sh
+devct onboard --api-host pve.example.invalid --token-id 'quince-dev@pve!devct' \
+              --storage local-zfs --template-storage local
+```
+
+It fetches and pins the API certificate, prints the SHA-256 for you to confirm out of band,
+verifies that the pin and token actually work by calling the API, discovers the node, writes
+`devct.conf` (mode 600), and prints the one line to add to `~/.ssh/config`. Add `--api-addr` when
+the certificate's name does not resolve for you.
+
+The one thing it will not do is edit your `~/.ssh/config` — it owns `~/.ssh/quince-devct.conf` and
+nothing else. Then run `devct doctor`.
 
 ## The everyday path
 
