@@ -61,6 +61,15 @@ tooling that creates these containers, and the fuller definition of the conventi
 - **`Bash(ssh quince-pve pct *)`** is narrow deliberately. Host-side container lifecycle is
   moving to a scoped API token (pr.2), and root on the hypervisor is meant to be rare and
   supervised, not a standing convenience.
+- **`bin/gh-bot` is allowlisted, and `GH_TOKEN=… gh …` is not — deliberately.** An allow rule
+  never matches past a leading `VAR=value` assignment (same reason `make image IMAGE_TAG=x` is
+  written in that order above), so `Bash(gh pr *)` grants nothing to a session acting as the
+  bot: every PR, issue and body edit would prompt. The wrapper reads the token from its file,
+  clears any inherited `GITHUB_TOKEN`, and `exec`s `gh` — token in the process environment,
+  never in argv. Missing token file = a loud refusal, never a silent fall back to whoever is
+  signed in, because that would author implementer output under the wrong identity. Put it on
+  your `PATH` (`ln -s "$PWD/bin/gh-bot" ~/.local/bin/gh-bot`) so `gh-bot pr create …` works from
+  any directory; the two path-relative forms are allowlisted for sessions run from a repo root.
 - **`Read(~/.config/quince/**)` is denied.** That directory holds the bot token and other
   credentials; denying the Read tool keeps their contents out of a transcript. Piping a
   token into an environment variable (`GH_TOKEN=$(cat …)`) or into git's credential helper
