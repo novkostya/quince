@@ -7,7 +7,9 @@
 set -eu
 
 DEVCT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=deploy/devct/lib.sh
+# The path is computed at runtime, so the directive names it for the linter; `make gates-sh`
+# passes -P SCRIPTDIR, which resolves it beside this script.
+# shellcheck source=lib.sh
 . "$DEVCT_ROOT/lib.sh"
 
 usage() {
