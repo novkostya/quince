@@ -103,13 +103,21 @@ tc-uv: preflight
 .PHONY: gates
 gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 
-# The script list is explicit and grows as scripts land — a glob would silently start
-# linting (or silently stop linting) files nobody decided on.
-DEVCT_SCRIPTS := deploy/devct/devct deploy/devct/lib.sh
+# The lists are explicit and grow as scripts land — a glob would silently start linting (or
+# silently stop linting) files nobody decided on.
+#
+# Two lists, because shellcheck lints one file at a time: linting a sourced library standalone
+# reports every variable it assigns for its caller as unused (SC2034). So the LINT list holds
+# entry points only and `-x` follows their `source` statements, which is also the analysis that
+# can actually see cross-file usage. `-P SCRIPTDIR` resolves the `source=` directive next to the
+# script, since the real path is computed at runtime.
+DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/lib.sh
+SH_ENTRYPOINTS  := deploy/devct/devct
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
-	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) -s sh $(DEVCT_SCRIPTS)
+	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
+	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
 	@# grep over the scripts themselves is the cheapest possible tooth.
 	@if grep -nE -- '(^|[[:space:]])(-k|--insecure)([[:space:]]|$$)' $(DEVCT_SCRIPTS); then \
