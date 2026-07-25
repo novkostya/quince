@@ -96,6 +96,19 @@ console channel could bootstrap the box without root at all. It costs driving a 
 from shell, which is why the ruling chose `pct exec` — recorded here so the option does not
 evaporate if the root class is ever narrowed.
 
+## Resuming a failed build
+
+A ladder that only runs on a clean box turns any mid-run failure into an orphaned container and a
+manual cleanup. So `--vmid N` on an existing in-pool container **resumes from the first unfinished
+step**: completed work is detected and announced rather than redone, and the root block carries only
+what that box still needs — if the flag is set and ssh already answers, root is not entered at all.
+An id that is already a template reports as built and stops. `--recreate` destroys the container
+first (token-only, pool-guarded) and takes the clean path.
+
+Expect two harmless noises during provisioning: cgroup2 mount and `RC_ULIMIT` warnings when
+containerd starts in an unprivileged container. The services come up regardless; they are not a
+failure and nothing needs chasing.
+
 ## Container ids
 
 `devct-template` takes the cluster's next free id, or `--vmid N`. There is no reserved range: pool

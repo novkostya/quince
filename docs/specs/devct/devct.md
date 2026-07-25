@@ -91,8 +91,10 @@ and the ladder is attempted in order on the token alone:
 4. **Provision over ssh** — install the toolset, write the registry config, warm the toolchain cache.
    No hypervisor privilege at all: this is a session-host-to-container ssh, exactly like `create`'s
    secret injection.
-5. **Stop, then convert to a template** — expected to fall under the granted container privileges for
-   an *in-pool* vmid.
+5. **Stop, then convert to a template** — **MEASURED: no additional privilege.** The conversion the
+   spec recorded as unsettled runs on the pool's existing container privileges, needing neither a
+   grant nor root. The one caveat found by running it: the call returns *before* the flag is
+   visible, so verification polls rather than asserting instantly.
 6. **Stamp and verify.**
 
 **Root is taken only for a step the API demonstrably refuses**, and that step is named in the PR with
@@ -136,6 +138,24 @@ inherit the features and `devct create` stays pure-token.
 200 on the scoped token, so a console channel exists that could bootstrap the box with no root at
 all; it costs driving a websocket console from shell. Recorded in canon and in the README so the
 option survives the ruling that passed it over.
+
+**THE LADDER HAS RUN END TO END (2026-07-26).** A template exists on the reference host, built by
+this script. Final accounting of what the amendment set out to measure:
+
+| Ladder step | Needed |
+| --- | --- |
+| 1 privileges | token |
+| 2 appliance download | token (`Datastore.AllocateTemplate` on the **vztmpl** storage) |
+| 3 create | token (`SDN.Use`, `Datastore.Audit` on the vztmpl storage, pool container privileges) |
+| 3b keyctl + first shell | **root — the one block** |
+| 4 provision | ssh only, no hypervisor privilege |
+| 5 stop + convert | token, **no additional privilege** |
+| 6 verify | token |
+
+So the token-first amendment was right in substance — six of seven segments never touch root — and the
+first draft was right that *something* needs it, for reasons neither of us predicted: a feature flag
+reserved to `root@pam`, and the fact that ssh cannot bootstrap itself onto an appliance that ships no
+sshd. Both are one-time, at template-build cadence, in one announced block.
 
 **Still open, and cheap to settle:** whether the container toolchain needs `keyctl` at all.
 `--skip-keyctl` builds without it; if step 4 warms the cache and the gates run green, half the block
