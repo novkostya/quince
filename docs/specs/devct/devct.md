@@ -1,9 +1,19 @@
 # devct — disposable dev containers, generated from a public script
 
-> Status: **SPEC — proposed, not approved.** No code exists. Tracked as `pr.2` in the devlog's
-> revamp sequence; the deliverable is feature-named (`devct`) because it outlives the sequence
-> label. Reviewed before any code per `CLAUDE.md` ("a rung starts from a spec") and the program
-> doc's spec-first loop.
+> Status: **SPEC — amended after architect review
+> ([#10](https://github.com/novkostya/quince/pull/10)), awaiting re-review.** No code exists.
+> Tracked as `pr.2` in the devlog's revamp sequence; the deliverable is feature-named (`devct`)
+> because it outlives the sequence label. Reviewed before any code per `CLAUDE.md` ("a rung starts
+> from a spec") and the program doc's spec-first loop.
+>
+> **Amendment (blocking review finding, folded in): the template build is TOKEN-FIRST, with
+> supervised root demoted to a named fallback.** The first draft had it inverted — it assumed image
+> download and container conversion needed root, and planned an Operator root session. Under the
+> standing authorization for the architect to extend the devct user's own ACLs self-service, both
+> steps are plausibly grantable privileges, so the plan is now: attempt the full token path, and take
+> root only for a step the API *demonstrably* refuses — naming that step, with the refusal as
+> evidence, in the PR. Ceremonies rewritten accordingly (§Ceremonies). Non-blocking and also folded
+> in: the `bin/gh-bot` wrapper joins PR 4.
 
 ## Goal
 
@@ -24,6 +34,13 @@ a container or reaches for root.
   the wrapper script, as `.claude/README.md` already says is the honest fix; add the vendor
   documentation domain the *pins-and-interface-facts-are-looked-up-live* rule sends this work to.
 - `.claude/README.md`, `deploy/dev.md` — the conventions they already promise this tooling defines.
+- `bin/gh-bot` — a wrapper that reads the bot token from its file and `exec`s `gh`, allowlisted as a
+  script. Accepted from the pr.2 kickoff's friction notes
+  ([devlog#1](https://github.com/novkostya/quince-devlog/issues/1)): `Bash(gh pr *)` is allowlisted
+  and yet every bot-authored `gh` call still prompts, because an allow rule never matches past a
+  leading `VAR=value` assignment — so the documented way to act as the bot is unallowlistable. Same
+  allowlist-the-script move as the Proxmox `curl` entry, and the same shape as the git credential
+  helper that already keeps the token out of the environment.
 - `docs/specs/devct/` — this spec.
 
 **Out of scope:**
@@ -55,10 +72,37 @@ host and are injected at provision; supervised root is a rare, expiring exceptio
 
 | Script | Runs as | When | Why separate |
 | --- | --- | --- | --- |
-| `devct-template` | a privileged host session (supervised, expiring key) | once per `versions.env` change | template creation touches host-level things a pool-scoped token cannot do (image download, container conversion) |
+| `devct-template` | **the scoped token** wherever the API allows; a supervised, expiring root session only as a *named fallback* | once per `versions.env` change | rare, slow, and rebuilds a shared artifact — a different blast radius and a different cadence, not a different privilege class |
 | `devct` | the scoped API token, from the session host | many times a day | the everyday path must never need root — that is the whole point of the ruling |
 
 `devct` verbs: `doctor`, `onboard`, `create`, `list`, `destroy`.
+
+### The template build is token-first; root is a fallback that must justify itself
+
+The split above is about cadence, **not** about root. Each build step names the privilege it expects,
+and the ladder is attempted in order on the token alone:
+
+1. **ACL top-ups** — `doctor` reports the delta; the architect grants it self-service on the devct
+   user under the standing authorization. Not an Operator ceremony.
+2. **Appliance image download** to the template storage — expected to be `Datastore.AllocateTemplate`,
+   a grantable privilege rather than a root-only act.
+3. **Create the container in the pool** from that image, with the authorized key baked in — the same
+   create path `devct create` uses, so it is proven twice.
+4. **Provision over ssh** — install the toolset, write the registry config, warm the toolchain cache.
+   No hypervisor privilege at all: this is a session-host-to-container ssh, exactly like `create`'s
+   secret injection.
+5. **Stop, then convert to a template** — expected to fall under the granted container privileges for
+   an *in-pool* vmid.
+6. **Stamp and verify.**
+
+**Root is taken only for a step the API demonstrably refuses**, and that step is named in the PR with
+the API's own refusal as the evidence — not asserted in advance, which is what the first draft did.
+If no step refuses, the root session dissolves and the template build joins everything else on the
+token.
+
+**The one root micro-step that survives regardless:** a single read-only config read of the
+known-good container, to derive the committed option baseline. It is read-only, one-off, and fine
+inside any supervised moment.
 
 ### Site facts are parameters, secrets stay on the session host
 
@@ -119,7 +163,8 @@ allowlist with no prompt, which is the contract `.claude/README.md` already docu
 ### Interface facts — looked up, and re-proven empirically
 
 Verified live while writing this spec (2026-07-25), because a remembered permission model is how
-this class of work wastes an Operator ceremony:
+this class of work burns a ceremony round-trip — or, as the review caught, invents a privilege wall
+that was never there:
 
 - **`SDN.Use` on the bridge** (`/sdn/zones/<zone>/<bridge>`) is required to create a container with
   a network interface on PVE 8+ — `PVEVMAdmin` alone is not enough, and the failure is a
@@ -129,12 +174,17 @@ this class of work wastes an Operator ceremony:
   privileges automation roles of this shape carry beside `Datastore.AllocateSpace`.
   ([role examples](https://github.com/trfore/packer-proxmox-templates/))
 
+Attempted and **not** settled by lookup: the privilege required by the container-to-template
+conversion endpoint. Recorded as unsettled rather than guessed — it is verified at build time
+against the live API viewer, and step 5 above is where it proves itself either way.
+
 Not remembered, and not trusted either: **`devct doctor` asks the API what the token can actually
 do** (its own permissions endpoint) and reports the delta against the required set. The privilege
 list above is the hypothesis; `doctor` is the proof, and a missing privilege comes back as a named
-Operator ceremony rather than a mysterious 403 mid-provision. The exact token header spelling, the
-`curl -K -` form, the Alpine package names, and the current Alpine CT template tag are all verified
-at build time and cited in the PR's evidence.
+ACL top-up rather than a mysterious 403 mid-provision. The exact token header spelling, the
+`curl -K -` form, the appliance-download and template-conversion endpoints, the Alpine package
+names, and the current Alpine CT template tag are all verified at build time and cited in the PR's
+evidence.
 
 ## Stories
 
@@ -143,10 +193,12 @@ Each is independently checkable.
 1. **`devct doctor` tells the truth about readiness without changing anything.** It reports, item by
    item: conf present, token file present, API reachable, TLS pin valid, each required privilege
    present or missing, template present and fresh, ssh include wired. Missing items name the exact
-   ceremony that fixes them. Non-zero exit when not ready.
-2. **`devct-template build` produces the golden template from scratch** on a Proxmox host with no
-   prior template: current Alpine CT image, the toolset, the baked key, the registry config, the
-   pre-warmed cache, the stamp, joined to the pool so the scoped token can clone it.
+   fix — an ACL top-up, a binding, a build — and who can perform it. Non-zero exit when not ready.
+2. **`devct-template build` produces the golden template from scratch, on the token path**, on a
+   Proxmox host with no prior template: current Alpine CT image, the toolset, the baked key, the
+   registry config, the pre-warmed cache, the stamp, joined to the pool so the scoped token can
+   clone it. Any step the API refuses is reported with its refusal, and only such a step is done
+   under supervised root.
 3. **`devct create` makes a gate-ready box with the token alone.** Clone → start → wait for the
    network → inject the session host's secrets over ssh → rewrite the ssh include → print the alias
    and the exact gate command. No root anywhere in the path.
@@ -174,13 +226,17 @@ Beyond `make gates` / `make image` / `make gates-ui-e2e` in CI on every PR:
 - `make gates-sh` green; it fails on a planted `curl -k` and on a bashism (story 10, and the
   TLS-pin rule with teeth).
 - `devct doctor` run in a clone with no `devct.conf` exits non-zero and lists every missing item
-  with its ceremony (story 1's negative half needs no hypervisor).
+  with its fix (story 1's negative half needs no hypervisor).
 
-**Live legs (owner: this session, against the reference Proxmox; the root leg is Operator-supervised):**
+**Live legs (owner: this session, against the reference Proxmox; any surviving root step is
+Operator-supervised):**
 
-- **G1 — template build.** `devct-template build` end to end on a host with no prior template;
-  `pct config` of the result matches the committed baseline; the stamp is present and correct
-  (story 2).
+- **G1 — template build on the token path.** `devct-template build` end to end on a host with no
+  prior template; the container config of the result matches the committed baseline; the stamp is
+  present and correct (story 2). **The PR states, step by step, which of the six ladder steps ran on
+  the token and which — if any — needed root, quoting the API refusal that forced it.** "No root was
+  needed" is a result worth reporting; "root was used because it was easier" is not an outcome this
+  gate accepts.
 - **G2 — lifecycle on the token alone.** With no root key in the agent's ssh path: `devct create` →
   `ssh quince-dev-N 'git clone … && make gates'` green → `devct list` shows it → `devct destroy`
   removes it → `devct list` shows the pool empty (stories 3, 4, 5, 7). Wall-clock for
@@ -220,8 +276,9 @@ a committed container-option baseline, and docs.
   ready only after the ssh round-trip succeeds; a stale template says so. No step reports success it
   did not observe.
 - **No silent caps or fallbacks.** Missing privilege, missing pin, stale template, absent binding —
-  each fails loudly and names the fix. There is no root fallback path: if the token cannot do
-  something, the tool says which ceremony is owed.
+  each fails loudly and names the fix. The template build's root fallback is the one fallback in the
+  design, and it is the opposite of silent: it is taken only after the API refuses a step, and the
+  refusal is quoted in the PR.
 - **Interface facts and pins are looked up live.** The privilege names above were verified while
   writing this spec and are cited; the Alpine template tag, package names, `curl` flags and the
   token header spelling are verified at build time with the lookup in the PR's evidence. `doctor`
@@ -233,9 +290,12 @@ a committed container-option baseline, and docs.
 - **The resurrection test.** Nothing in `deploy/devct/` requires the private layer: a stranger with
   a Proxmox box, this repo, and their own credentials runs `devct onboard` and gets the same
   environment. The private layer holds bindings only.
-- **Supervised root, bounded.** The one root leg (first template build) is explicitly permitted by
-  R3(2b), is an Operator-added authorized_keys entry carrying `expiry-time` so a forgotten cleanup
-  cannot leave a standing hole, and is not required again until `versions.env` changes.
+- **Root is a fallback that must justify itself, not a plan.** The build attempts every step on the
+  token; root is reached for only when the API demonstrably refuses, and any such session is an
+  Operator-added authorized_keys entry carrying `expiry-time` (R3(2b)) so a forgotten cleanup cannot
+  leave a standing hole. The privilege wall the first draft assumed was never tested — that is
+  exactly the "don't build on an assumption you never wrote down" failure, caught at spec review,
+  which is where it is cheap.
 - **Boundary.** No product code, no contracts, no storage code, no `.github/workflows/**`. The
   `Makefile` edit is one additive target.
 - **Gap protocol.** R3 rules the shape; the choices this spec settles (two entrypoints, conf home,
@@ -244,24 +304,39 @@ a committed container-option baseline, and docs.
   *authority* model — a privilege the token cannot hold, a step that genuinely needs standing root —
   stops and gets proposed, not worked around.
 
-## Ceremonies owed (Operator)
+## Ceremonies
 
-1. **One supervised root session** on the hypervisor for G1's first template build — a temporary
-   authorized_keys entry with `expiry-time` (R3(2b)). Not needed again until `versions.env` moves.
-2. **ACL top-ups, if `doctor` finds them** — `SDN.Use` on the bridge is the likeliest, with
-   `Datastore.AllocateTemplate` and `VM.Clone` next. Reported as a named delta before any work
-   stalls on it, never routed around with root.
-3. **Registry credentials** for the CT, if the session host does not already hold them.
+**Architect, self-service (not Operator ceremonies):**
+
+- **ACL top-ups as `doctor` finds them** — `SDN.Use` on the bridge is the likeliest, with
+  `Datastore.AllocateTemplate` and the template-conversion privilege next. Granted on the devct
+  user under the standing authorization, each one logged in the PR so the final ACL set is a
+  written artifact rather than a box's accumulated state.
+
+**Operator, likely the only one:**
+
+- **Registry credentials** for the container, if the session host does not already hold them.
+
+**Operator, conditional and possibly none:**
+
+- **A supervised root session**, if and only if a build step is demonstrably refused by the API —
+  requested with the refusal already in hand, as an authorized_keys entry with `expiry-time`
+  (R3(2b)). If the token path completes, this dissolves.
+- **One read-only container-config read** of the known-good box, to derive the committed option
+  baseline. Survives regardless of the above, is read-only, and fits inside any supervised moment.
 
 ## PR sequence
 
 1. **this spec** — reviewed before any code exists.
 2. **template generator** — `deploy/devct/devct-template` + the committed option baseline + docs +
-   `make gates-sh`. Claim: a template is buildable from scratch by a public script (G1).
+   `make gates-sh`. Claim: a template is buildable from scratch by a public script, on the token
+   path, with any root step named and justified (G1).
 3. **lifecycle** — `devct doctor|create|list|destroy`. Claim: a disposable CT is created and
    destroyed with the scoped token, no root (G2–G5).
-4. **onboarding + allowlist** — `devct onboard`, the `.claude/settings.json` swap, `.claude/README.md`
-   and `deploy/dev.md`. Claim: a fresh machine binds the conventions in one command (story 6).
+4. **onboarding + allowlist** — `devct onboard`, `bin/gh-bot`, the `.claude/settings.json` swap
+   (Proxmox `curl` entry → the wrapper scripts), `.claude/README.md` and `deploy/dev.md`. Claim: a
+   fresh machine binds the conventions in one command, and acting as the bot stops prompting
+   (story 6).
 
 3 and 4 may land as one PR if the reviewer prefers fewer sibling re-approvals
 ([devlog#1](https://github.com/novkostya/quince-devlog/issues/1) item 8).
