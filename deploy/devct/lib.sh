@@ -182,6 +182,88 @@ devct_has_priv() {
 	printf '%s' "$DEVCT_PERMS" | jq -e --arg p "$1" --arg v "$2" '.[$p][$v] // empty' >/dev/null 2>&1
 }
 
+# ---------------------------------------------------------------------------
+# Containers — shared by `devct` and `devct-template`, because the lifecycle verbs and the
+# template build ask the same questions of the same boxes. One implementation, one place to fix
+# a bug like "the conversion flag lands asynchronously".
+# ---------------------------------------------------------------------------
+
+# The guard: nothing here — a destroy, a root command, a start — is ever aimed at a vmid outside
+# the token's pool. The token's own scope is the second line of defence, not the first.
+devct_in_pool() {
+	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
+	devct_body "$_r" | jq -e --arg v "$1" '.data.members[]? | select((.vmid|tostring)==$v)' >/dev/null 2>&1
+}
+
+# devct_is_template <vmid> [seconds] — poll until the conversion flag is visible (it lands after
+# the API call returns, which once produced a false "not a template" on a template).
+devct_is_template() {
+	_n=0
+	while :; do
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/config") &&
+			[ "$(devct_body "$_r" | jq -r '.data.template // 0')" = 1 ] && return 0
+		[ "$_n" -ge "${2:-0}" ] && return 1
+		sleep 5
+		_n=$((_n + 5))
+	done
+}
+
+devct_status() {
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/status/current") || return 1
+	devct_body "$_r" | jq -r '.data.status // "unknown"'
+}
+
+devct_start() {
+	[ "$(devct_status "$1")" = running ] && return 0
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/start") || return 1
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
+}
+
+devct_destroy() {
+	devct_in_pool "$1" || devct_die "vmid $1 is not in pool $DEVCT_POOL — refusing to destroy it"
+	if [ "$(devct_status "$1")" = running ]; then
+		_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/stop") &&
+			devct_task_wait "$(devct_body "$_r" | jq -r '.data')" ||
+			devct_die "could not stop $1"
+	fi
+	_r=$(devct_api DELETE "/nodes/$DEVCT_NODE/lxc/$1") ||
+		devct_die "destroy refused (HTTP $(devct_code "$_r")): $(devct_body "$_r")"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
+}
+
+# Try first, THEN check the budget — a wait with a 0s budget still gets one attempt, which is
+# what a caller asking "what is its address right now" means. Checking the counter first made
+# `wait 0` skip the request entirely and report failure, which silently wrote an empty ssh
+# include and reported success.
+devct_wait_for_ip() {
+	_n=0
+	while :; do
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/interfaces") && {
+			_addr=$(devct_body "$_r" | jq -r '[.data[]? | select(.name!="lo") | .inet // empty] | first // empty' | cut -d/ -f1)
+			[ -n "$_addr" ] && {
+				printf '%s\n' "$_addr"
+				return 0
+			}
+		}
+		[ "$_n" -ge "${2:-60}" ] && return 1
+		sleep 5
+		_n=$((_n + 5))
+	done
+}
+
+# -n on every ssh: an ssh without it eats the stdin of whatever loop is calling it, which cost
+# this tree three silently-skipped commands once already.
+devct_wait_for_ssh() {
+	_n=0
+	while [ "$_n" -lt "${2:-120}" ]; do
+		ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
+			"root@$1" true 2>/dev/null && return 0
+		sleep 5
+		_n=$((_n + 5))
+	done
+	return 1
+}
+
 # devct_task_wait <upid> — poll a PVE task to completion. Returns non-zero on a failed task,
 # printing its exit status, because a task that starts is not a task that worked.
 devct_task_wait() {

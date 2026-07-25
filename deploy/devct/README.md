@@ -16,8 +16,29 @@ Design and acceptance gates: [`docs/specs/devct/devct.md`](../../docs/specs/devc
 | --- | --- |
 | `devct doctor` | **built** — reports readiness and, crucially, *measures* what the API token can actually do |
 | `devct-template build` | **built** — the six-step ladder, token-first; a step the API refuses stops the build and names the grant |
-| `devct create` / `list` / `destroy` | specified, not built |
+| `devct create` / `list` / `destroy` | **built** — the everyday path, and it is **pure scoped token: no root at all** |
 | `devct onboard` | specified, not built — write `devct.conf` by hand meanwhile (below) |
+
+## The everyday path
+
+```sh
+devct create          # clone the template, boot it, inject this host's secrets, print the alias
+devct list            # what is in the pool, and whether each entry is a container or the template
+devct destroy <vmid>  # stop and delete one
+```
+
+`create` clones the template (so it inherits `nesting`+`keyctl` and the warmed toolchain cache),
+waits for ssh, rewrites the generated ssh include, injects the credentials this host holds, and
+reads the template stamp back **off the box** to compare against your `versions.env` — a mismatch
+prints a loud warning naming `devct-template build --recreate`, because a container whose cached
+toolchains disagree with your checkout will either rebuild them slowly or test the wrong ones.
+
+`destroy` refuses two things: any vmid outside the pool, and the template itself. The pool is the
+boundary of what this tool may touch; the token's own scope is the second line of defence, not the
+first.
+
+Secrets go over ssh **stdin** at create time and live only on the session host, so rotation is one
+file plus a `destroy`, and nothing accumulates on the hypervisor.
 
 Unbuilt verbs say so when you call them. Nothing here stubs a success.
 
