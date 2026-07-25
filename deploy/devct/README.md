@@ -62,25 +62,39 @@ privilege as satisfied on a storage that could never hold the thing it authorise
 The token **secret** is not in this file. It lives at `~/.config/quince/proxmox-devct.token`
 (mode 600) and is read at point of use.
 
-## The one root step, and why it is one
+## The one root block, and why it exists
 
-`keyctl` is the single thing in this workflow the API can never do for you: PVE allows a non-root
-user to set the `nesting` feature flag and nothing else — *"changing feature flags (except nesting)
-is only allowed for root@pam"* — so no ACL grant can ever cover it. `devct-template` therefore
-creates the container on the token with `nesting` alone and adds `keyctl` with one named root
-command, announced before it runs:
+Root touches the box **exactly once, at template build, and never again**. That is a deliberate
+invariant: everything the API cannot do is collected into one announced block rather than sprinkled
+wherever a root command would be convenient.
+
+Two things need it, both measured rather than assumed:
+
+- **`keyctl`** — PVE allows a non-root user to set the `nesting` flag and nothing else (*"changing
+  feature flags (except nesting) is only allowed for root@pam"*), so no ACL grant can ever cover it.
+- **the first shell** — provisioning runs over ssh, and the Alpine appliance ships no sshd. ssh is
+  the one tool that cannot bootstrap itself, so `pct exec` installs and starts it.
 
 ```
-pct set <vmid> -features nesting=1,keyctl=1
+pct set  <vmid> -features nesting=1,keyctl=1
+pct exec <vmid> -- apk add --no-cache openssh
+pct exec <vmid> -- rc-update add sshd default
+pct exec <vmid> -- service sshd start
 ```
 
-Set `root_ssh` in the config to let the build run it, or leave it unset and the build stops with the
-command to run yourself and a `--vmid` to resume with. Clones inherit their template's features, so
-this happens **once per template rebuild** (`versions.env` cadence) and `devct create` never needs
-root at all.
+Each command is printed before it runs, and the block refuses to touch a vmid that is not verified
+in the pool. Set `root_ssh` to let the build run them; leave it unset and the build stops with the
+commands and a `--vmid` to resume with. Clones inherit their template's features, so this is once
+per template rebuild (`versions.env` cadence) and **`devct create` never needs root at all**.
 
-`--skip-keyctl` builds without it — an open measurement, since if the container toolchain turns out
-not to need `keyctl`, the last root step disappears entirely.
+`--skip-keyctl` omits the flag — an open measurement, since if the toolchain turns out not to need
+`keyctl`, half the block goes away.
+
+**A verified no-root alternative exists and is not used:** `POST /nodes/<node>/lxc/<vmid>/termproxy`
+answers 200 on the scoped token (VM.Console rides along with the pool's container privileges), so a
+console channel could bootstrap the box without root at all. It costs driving a websocket console
+from shell, which is why the ruling chose `pct exec` — recorded here so the option does not
+evaporate if the root class is ever narrowed.
 
 ## Container ids
 
