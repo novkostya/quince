@@ -81,7 +81,10 @@
       "Bash(ssh quince-dev-* *)",
       "Bash(scp * quince-dev-*:*)",
       "Bash(ssh quince-pve pct *)",
-      "Bash(curl * https://quince-pve:8006/api2/json/*)"
+      "Bash(deploy/devct/devct *)",
+      "Bash(deploy/devct/devct-template *)",
+      "Bash(./deploy/devct/devct *)",
+      "Bash(./deploy/devct/devct-template *)"
     ]
   }
 }
