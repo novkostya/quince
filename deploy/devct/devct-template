@@ -25,22 +25,32 @@ step() {
 	STEP=$((STEP + 1))
 	printf '\n[%d/6] %s\n' "$STEP" "$1"
 }
+# refused <http-code> <response-body> <what-is-needed>
 refused() {
-	# The amendment's contract: name the step, quote the refusal, name the fix. A build that
-	# stops here has produced evidence, not a failure.
+	# The amendment's contract: name the step, QUOTE THE REFUSAL, name the fix. The body is not
+	# optional decoration — it carries the reason ("changing feature flags … is only allowed for
+	# root@pam" is a different fact from "403"), and the first version of this handler dropped it,
+	# which cost a manual reproduction the tool owed its user. State honesty applies to error
+	# output too.
 	printf '\nSTEP %d REFUSED BY THE API — HTTP %s\n' "$STEP" "$1" >&2
-	printf 'needed: %s\n' "$2" >&2
-	printf 'This is the evidence the spec asks for: report it, get the grant, re-run.\n' >&2
+	printf 'the API said:\n' >&2
+	printf '%s\n' "$2" | jq -r '.errors // .message // .' 2>/dev/null | sed 's/^/  /' >&2 ||
+		printf '%s\n' "$2" | sed 's/^/  /' >&2
+	printf 'needed: %s\n' "$3" >&2
+	printf 'This is the evidence the spec asks for: report it, fix it, re-run.\n' >&2
 	exit 3
 }
 
 usage() {
 	cat <<'EOF'
-usage: devct-template build [--vmid N] [--keep]
+usage: devct-template build [--vmid N] [--keep] [--skip-keyctl]
 
   build   run the six-step ladder and leave a template behind
-          --vmid N  use this container id instead of the cluster's next free one
-          --keep    leave the container running instead of converting it (debugging)
+          --vmid N       use this container id instead of the cluster's next free one
+          --keep         leave the container running instead of converting it (debugging)
+          --skip-keyctl  build without the keyctl feature flag, skipping the root
+                         micro-step — an open measurement: if the container toolchain
+                         works without it, the last root step can be dropped for good
 EOF
 }
 
@@ -63,7 +73,11 @@ build() {
 	_lack=''
 	lack() { _lack="$_lack
   $1 on $2"; }
-	for _p in VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit; do
+	# Pool.Allocate is here on the reviewer's report that it was granted during the step-3
+	# diagnosis and may have been independently required for create-into-pool — its necessity is
+	# MASKED, not measured. To settle it: revoke it, re-run the ladder, and see whether create
+	# still succeeds. Listed with that caveat rather than quietly becoming folklore.
+	for _p in VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit Pool.Allocate; do
 		devct_has_priv "/pool/$DEVCT_POOL" "$_p" || lack "$_p" "/pool/$DEVCT_POOL"
 	done
 	devct_has_priv "/storage/$DEVCT_STORAGE" Datastore.AllocateSpace ||
@@ -85,7 +99,8 @@ build() {
 	_alpine=$(sed -n 's/^ALPINE_VERSION=//p' "$REPO_ROOT/versions.env")
 	[ -n "$_alpine" ] || devct_die "ALPINE_VERSION not found in $REPO_ROOT/versions.env"
 	_r=$(devct_api GET "/nodes/$DEVCT_NODE/aplinfo") ||
-		refused "$(devct_code "$_r")" "Datastore.Audit on /storage/$DEVCT_TEMPLATE_STORAGE (to read the appliance index)"
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
+			"Datastore.Audit on /storage/$DEVCT_TEMPLATE_STORAGE (to read the appliance index)"
 	_appliance=$(devct_body "$_r" | jq -r --arg v "alpine-$_alpine" \
 		'[.data[] | select(.template | startswith($v)) | .template] | sort | last // empty')
 	[ -n "$_appliance" ] || devct_die "no Alpine $_alpine appliance offered by this node"
@@ -94,7 +109,7 @@ build() {
 	_volid="$DEVCT_TEMPLATE_STORAGE:vztmpl/$_appliance"
 	_r=$(devct_api POST "/nodes/$DEVCT_NODE/aplinfo" \
 		"storage=$DEVCT_TEMPLATE_STORAGE" "template=$_appliance") ||
-		refused "$(devct_code "$_r")" \
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
 			"Datastore.AllocateTemplate on /storage/$DEVCT_TEMPLATE_STORAGE — note this is the storage that holds vztmpl content, NOT the container rootfs storage"
 	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "appliance download failed"
 	devct_info "  downloaded to $_volid"
@@ -106,6 +121,12 @@ build() {
 		VMID=$(devct_body "$_r" | jq -r '.data')
 	fi
 	devct_info "  vmid $VMID"
+	# `nesting` is the only feature flag PVE lets a non-root user set; `keyctl` is root@pam BY
+	# DESIGN — no ACL can grant it (measured: HTTP 403 "changing feature flags (except nesting)
+	# is only allowed for root@pam"). So the create runs on the token WITHOUT keyctl, and the
+	# flag is added by one named root micro-step below. Clones inherit features from the
+	# template, so this root touch happens once per TEMPLATE REBUILD — `devct create` never
+	# needs root at all.
 	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc" \
 		"vmid=$VMID" \
 		"ostemplate=$_volid" \
@@ -117,13 +138,16 @@ build() {
 		"memory=${DEVCT_MEMORY_MB:-8192}" \
 		"swap=0" \
 		"unprivileged=1" \
-		"features=nesting=1,keyctl=1" \
+		"features=nesting=1" \
 		"net0=name=eth0,bridge=$DEVCT_BRIDGE,ip=dhcp" \
 		"ssh-public-keys=$(cat "$DEVCT_SSH_KEY")" \
 		"start=1") ||
-		refused "$(devct_code "$_r")" "container create in /pool/$DEVCT_POOL — see the message above; SDN.Use on the bridge is the usual culprit"
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
+			"container create in /pool/$DEVCT_POOL — SDN.Use on the bridge and Pool.Allocate on the pool are the usual culprits"
 	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "container create failed"
-	devct_info "  created and started"
+	devct_info "  created and started (features: nesting only)"
+
+	add_keyctl
 
 	# ---- 4: provision ------------------------------------------------------
 	# No hypervisor privilege at all here: this is session-host-to-container ssh, the same path
@@ -148,10 +172,10 @@ build() {
 	# privileges. It answers for itself here, which is the point.
 	step "stop, then convert to a template"
 	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$VMID/status/stop") ||
-		refused "$(devct_code "$_r")" "VM.PowerMgmt on /pool/$DEVCT_POOL"
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" "VM.PowerMgmt on /pool/$DEVCT_POOL"
 	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "stop failed"
 	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$VMID/template") ||
-		refused "$(devct_code "$_r")" \
+		refused "$(devct_code "$_r")" "$(devct_body "$_r")" \
 			"the container-to-template conversion privilege — the one the spec recorded as unmeasured; this refusal is its measurement"
 	devct_info "  converted"
 
@@ -163,6 +187,37 @@ build() {
 	printf '\ntemplate %s (vmid %s) built.\n' "$_tmpl_name" "$VMID"
 	printf 'stamp: %s\n' "$_stamp"
 	printf 'no root was used.\n'
+}
+
+# The ruled fallback, at its true minimum: ONE command, on ONE flag, once per template rebuild.
+# It announces exactly what it will run and the refusal class that forces it, so a reader can
+# check the claim instead of trusting it.
+add_keyctl() {
+	_cmd="pct set $VMID -features nesting=1,keyctl=1"
+	printf '\n  ROOT MICRO-STEP (the ruled fallback — the API cannot do this)\n'
+	printf '    why:     PVE allows non-root users to set `nesting` only; `keyctl` is root@pam by\n'
+	printf '             design, so no ACL grant can ever cover it.\n'
+	printf '    command: %s\n' "$_cmd"
+	printf '    scope:   one flag, on this container, once per template rebuild. Clones inherit\n'
+	printf '             features, so `devct create` stays pure-token forever.\n'
+
+	if [ -n "${SKIP_KEYCTL:-}" ]; then
+		printf '    SKIPPED (--skip-keyctl): building without keyctl to measure whether the\n'
+		printf '             container toolchain actually needs it. If step 4 warms the cache and\n'
+		printf '             the gates run, this root step can be dropped for good — report the\n'
+		printf '             result either way.\n'
+		return 0
+	fi
+
+	[ -n "$DEVCT_ROOT_SSH" ] || {
+		printf '\n  root_ssh is not set in the config, so this step cannot run unattended.\n' >&2
+		printf '  Run the command above on the hypervisor, then re-run with --vmid %s.\n' "$VMID" >&2
+		printf '  (R3(2b): the access should be an authorized_keys entry carrying expiry-time.)\n' >&2
+		exit 4
+	}
+	ssh -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_cmd" ||
+		devct_die "the root micro-step failed — run it yourself and re-run with --vmid $VMID"
+	printf '    done.\n'
 }
 
 versions_digest() {
@@ -246,6 +301,10 @@ build)
 			;;
 		--keep)
 			KEEP=1
+			shift
+			;;
+		--skip-keyctl)
+			SKIP_KEYCTL=1
 			shift
 			;;
 		*)

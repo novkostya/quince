@@ -59,6 +59,7 @@ devct_load_conf() {
 	DEVCT_SSH_KEY=''
 	DEVCT_REGISTRY=''
 	DEVCT_CA_PIN=''
+	DEVCT_ROOT_SSH=''
 
 	while IFS= read -r _line; do
 		case "$_line" in
@@ -84,6 +85,7 @@ devct_load_conf() {
 		ssh_key) DEVCT_SSH_KEY=$_val ;;
 		registry) DEVCT_REGISTRY=$_val ;;
 		ca_pin) DEVCT_CA_PIN=$_val ;;
+		root_ssh) DEVCT_ROOT_SSH=$_val ;;
 		*) devct_warn "unknown key in $_conf: $_key (ignored)" ;;
 		esac
 	done <"$_conf"

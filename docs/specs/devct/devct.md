@@ -100,6 +100,32 @@ the API's own refusal as the evidence — not asserted in advance, which is what
 If no step refuses, the root session dissolves and the template build joins everything else on the
 token.
 
+### ANSWERED: the root need is real, and it is one flag wide
+
+Step 3 refused, with the reason that settles the amendment's open question:
+
+> HTTP 403 — *"Permission check failed (changing feature flags (except nesting) is only allowed for
+> root@pam)"*
+
+`keyctl` is **root@pam by design**: PVE permits a non-root user to set `nesting` and nothing else, so
+this is not a missing grant and no ACL can ever cover it. The first draft's instinct — that the
+template build needs something a pool-scoped token cannot do — was right for exactly one reason, and
+wrong about which one; the review's demand that the wall be *measured* rather than assumed is what
+produced a fix this narrow instead of a standing root session.
+
+**The consequence is favourable, because features are inherited by clones:**
+
+- the create runs on the token with `nesting` alone;
+- one named root command adds the flag — `pct set <vmid> -features nesting=1,keyctl=1` — announced
+  before it runs, with the refusal class quoted as its justification;
+- it happens **once per template rebuild** (`versions.env` cadence, i.e. rarely), and
+- **`devct create` is pure-token forever**, which is the property the whole ruling exists to protect.
+
+**Still open, and cheap to settle:** whether the container toolchain needs `keyctl` at all.
+`--skip-keyctl` builds without it; if step 4 warms the cache and the gates run green, the last root
+step disappears entirely. Reported either way — a negative result here is worth as much as a
+positive one.
+
 **The one root micro-step that survives regardless:** a single read-only config read of the
 known-good container, to derive the committed option baseline. It is read-only, one-off, and fine
 inside any supervised moment.
@@ -339,11 +365,14 @@ a committed container-option baseline, and docs.
 
 - **Registry credentials** for the container, if the session host does not already hold them.
 
-**Operator, conditional and possibly none:**
+**Operator — measured, and now known to be exactly one thing:**
 
-- **A supervised root session**, if and only if a build step is demonstrably refused by the API —
-  requested with the refusal already in hand, as an authorized_keys entry with `expiry-time`
-  (R3(2b)). If the token path completes, this dissolves.
+- **One root command per template rebuild**: `pct set <vmid> -features nesting=1,keyctl=1`. Requested
+  with the refusal in hand, as an authorized_keys entry with `expiry-time` (R3(2b)), or run by the
+  Operator directly — the build stops and prints the command with a `--vmid` to resume from when no
+  root path is configured. It does not dissolve (the flag is root@pam by design), but it does not
+  recur outside `versions.env` cadence, and it never touches `devct create`.
+  **Possibly zero** if the `--skip-keyctl` measurement shows the toolchain does not need the flag.
 - **One read-only container-config read** of the known-good box, to derive the committed option
   baseline. Survives regardless of the above, is read-only, and fits inside any supervised moment.
 

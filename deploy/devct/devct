@@ -109,7 +109,9 @@ doctor() {
 		printf '\nnot ready.\n'
 		return 1
 	fi
-	priv_check "/pool/$DEVCT_POOL" VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit
+	# Pool.Allocate: granted during the step-3 diagnosis and possibly required for create-into-pool,
+	# but its necessity is masked rather than measured — revoke it and re-run the ladder to settle.
+	priv_check "/pool/$DEVCT_POOL" VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit Pool.Allocate
 	priv_check "/storage/$DEVCT_STORAGE" Datastore.AllocateSpace Datastore.Audit
 	# The appliance image and the container rootfs live on DIFFERENT storages: a zfspool holds
 	# rootdir/images and cannot hold vztmpl content at all. Defaulting template_storage to

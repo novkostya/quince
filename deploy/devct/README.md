@@ -62,6 +62,33 @@ privilege as satisfied on a storage that could never hold the thing it authorise
 The token **secret** is not in this file. It lives at `~/.config/quince/proxmox-devct.token`
 (mode 600) and is read at point of use.
 
+## The one root step, and why it is one
+
+`keyctl` is the single thing in this workflow the API can never do for you: PVE allows a non-root
+user to set the `nesting` feature flag and nothing else — *"changing feature flags (except nesting)
+is only allowed for root@pam"* — so no ACL grant can ever cover it. `devct-template` therefore
+creates the container on the token with `nesting` alone and adds `keyctl` with one named root
+command, announced before it runs:
+
+```
+pct set <vmid> -features nesting=1,keyctl=1
+```
+
+Set `root_ssh` in the config to let the build run it, or leave it unset and the build stops with the
+command to run yourself and a `--vmid` to resume with. Clones inherit their template's features, so
+this happens **once per template rebuild** (`versions.env` cadence) and `devct create` never needs
+root at all.
+
+`--skip-keyctl` builds without it — an open measurement, since if the container toolchain turns out
+not to need `keyctl`, the last root step disappears entirely.
+
+## Container ids
+
+`devct-template` takes the cluster's next free id, or `--vmid N`. There is no reserved range: pool
+membership is the guard that matters, since the token can only touch what is in its pool and
+`devct destroy` refuses anything outside it. A reserved range would be an optional config key if a
+site wants tidier numbering — it is not implemented, and nothing depends on it.
+
 ## Two rules the code enforces on itself
 
 **No secret reaches argv.** curl is driven with `-K -`, reading its options — including the
