@@ -110,9 +110,10 @@ gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 # reports every variable it assigns for its caller as unused (SC2034). So the LINT list holds
 # entry points only and `-x` follows their `source` statements, which is also the analysis that
 # can actually see cross-file usage. `-P SCRIPTDIR` resolves the `source=` directive next to the
-# script, since the real path is computed at runtime.
+# script, since the real path is computed at runtime. gh-bot sources nothing, but it is an entry
+# point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/lib.sh
-SH_ENTRYPOINTS  := deploy/devct/devct
+SH_ENTRYPOINTS  := deploy/devct/devct bin/gh-bot
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
