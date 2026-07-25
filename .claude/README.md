@@ -53,7 +53,11 @@ tooling that creates these containers, and the fuller definition of the conventi
 - **`Bash(nerdctl *)` / `Bash(docker *)` are broad on purpose** — every gate runs inside a
   pinned toolchain container, so a narrower rule would prompt on every gate. Be aware that
   `docker run` and `docker exec` can run arbitrary code: this grant assumes the box is a
-  disposable dev container, which is exactly why dev containers are disposable.
+  disposable dev container, which is exactly why dev containers are disposable. **If you run
+  sessions on a workstation that has a container runtime installed** — against the project's
+  own rule, but it happens — that assumption doesn't hold there: move the two runtime lines
+  into your `settings.local.json` (or narrow them to the exact commands you run) so the
+  committed file keeps granting them only where they are cheap to lose.
 - **`Bash(ssh quince-pve pct *)`** is narrow deliberately. Host-side container lifecycle is
   moving to a scoped API token (pr.2), and root on the hypervisor is meant to be rare and
   supervised, not a standing convenience.
