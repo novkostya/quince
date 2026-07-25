@@ -224,7 +224,7 @@ root_bootstrap() {
 		case "$(devct_body "$_r" | jq -r '.data.features // ""')" in
 		*keyctl=1*) _need_keyctl='' ;;
 		esac
-	if _ip=$(wait_for_ip "$VMID" 15) && ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+	if _ip=$(wait_for_ip "$VMID" 15) && ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
 		-o BatchMode=yes "root@$_ip" true 2>/dev/null; then
 		_need_sshd=''
 	fi
@@ -235,17 +235,23 @@ root_bootstrap() {
 
 	# The block carries only what this box still needs — the create already set nesting, and a
 	# resume may need one half and not the other.
-	_cmds=''
+	#
+	# Positional parameters, NOT a `printf | while read` pipeline. Two POSIX traps killed that
+	# shape on hardware: (1) ssh inherits the pipe as its stdin and swallows the remaining
+	# commands, so only the first ever ran; (2) the right side of a pipeline is a subshell, so
+	# `devct_die` in the loop body killed the subshell while the parent sailed on and printed
+	# `done.`. Together they announced four commands, ran one, and claimed success.
+	set --
 	if [ -n "$_need_keyctl" ] && [ -z "${SKIP_KEYCTL:-}" ]; then
-		_cmds="pct set $VMID -features nesting=1,keyctl=1"
+		set -- "$@" "pct set $VMID -features nesting=1,keyctl=1"
 	fi
 	if [ -n "$_need_sshd" ]; then
-		_cmds="${_cmds:+$_cmds
-}pct exec $VMID -- apk add --no-cache openssh
-pct exec $VMID -- rc-update add sshd default
-pct exec $VMID -- service sshd start"
+		set -- "$@" \
+			"pct exec $VMID -- apk add --no-cache openssh" \
+			"pct exec $VMID -- rc-update add sshd default" \
+			"pct exec $VMID -- service sshd start"
 	fi
-	[ -n "$_cmds" ] || {
+	[ $# -gt 0 ] || {
 		printf '\n  ROOT BLOCK — nothing left for it to do on this container.\n'
 		return 0
 	}
@@ -259,7 +265,7 @@ pct exec $VMID -- service sshd start"
 		printf '    container toolchain needs it. If step 4 warms the cache and the gates run,\n'
 		printf '    that half of this block can be dropped for good.\n'
 	fi
-	printf '%s\n' "$_cmds" | sed 's/^/      /'
+	for _c in "$@"; do printf '      %s\n' "$_c"; done
 
 	[ -n "$DEVCT_ROOT_SSH" ] || {
 		printf '\n  root_ssh is not set, so this block cannot run unattended.\n' >&2
@@ -268,12 +274,27 @@ pct exec $VMID -- service sshd start"
 		printf '  (R3(2b): that access should be an authorized_keys entry carrying expiry-time.)\n' >&2
 		exit 4
 	}
-	printf '%s\n' "$_cmds" | while IFS= read -r _c; do
-		[ -n "$_c" ] || continue
-		ssh -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_c" ||
+	# -n: ssh must not read this shell's stdin. Without it, an ssh in a loop eats whatever is
+	# feeding that loop — which is exactly how three of these four commands disappeared.
+	for _c in "$@"; do
+		ssh -n -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_c" ||
 			devct_die "root block failed at: $_c — fix it, then re-run with --vmid $VMID"
 	done
-	printf '    done.\n'
+
+	# Verify the postcondition rather than trusting exit codes. "done." is a success claim, and a
+	# success claim about work that did not happen is the same lie as a dishonest error — this
+	# block printed it once while having run one command in four.
+	if [ -z "${SKIP_KEYCTL:-}" ]; then
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$VMID/config") &&
+			case "$(devct_body "$_r" | jq -r '.data.features // ""')" in
+			*keyctl=1*) ;;
+			*) devct_die "root block ran but keyctl is still not set on $VMID" ;;
+			esac
+	fi
+	_ip=$(wait_for_ip "$VMID") || devct_die "root block ran but the container reports no address"
+	wait_for_ssh "$_ip" ||
+		devct_die "root block ran but sshd is not answering on $VMID — the commands reported success, the box disagrees"
+	printf '    done — verified: keyctl set, sshd answering.\n'
 }
 
 # `nesting` is the only feature flag PVE lets a non-root user set; `keyctl` is root@pam BY DESIGN
@@ -370,7 +391,7 @@ wait_for_ip() {
 wait_for_ssh() {
 	_n=0
 	while [ "$_n" -lt 120 ]; do
-		ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
+		ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
 			"root@$1" true 2>/dev/null && return 0
 		sleep 5
 		_n=$((_n + 5))
