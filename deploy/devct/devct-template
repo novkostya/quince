@@ -1,0 +1,264 @@
+#!/bin/sh
+# devct-template — build the dev-container template from scratch on any Proxmox host.
+#
+# TOKEN-FIRST (docs/specs/devct/devct.md, the review amendment): every step is attempted with the
+# scoped API token. Root is not a plan here; a step that the API demonstrably refuses stops the
+# build and prints the exact grant or ceremony it needs, so the refusal — not an assumption —
+# is what justifies escalating.
+#
+# The ladder:
+#   1  privileges     — measured, not assumed
+#   2  appliance      — download the Alpine image versions.env pins
+#   3  create         — a container in the pool, authorized key baked in
+#   4  provision      — toolset + registry config + warmed cache, over ssh
+#   5  stop, convert  — to a template
+#   6  stamp, verify
+set -eu
+
+DEVCT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$DEVCT_ROOT/../.." && pwd)
+# shellcheck source=lib.sh
+. "$DEVCT_ROOT/lib.sh"
+
+STEP=0
+step() {
+	STEP=$((STEP + 1))
+	printf '\n[%d/6] %s\n' "$STEP" "$1"
+}
+refused() {
+	# The amendment's contract: name the step, quote the refusal, name the fix. A build that
+	# stops here has produced evidence, not a failure.
+	printf '\nSTEP %d REFUSED BY THE API — HTTP %s\n' "$STEP" "$1" >&2
+	printf 'needed: %s\n' "$2" >&2
+	printf 'This is the evidence the spec asks for: report it, get the grant, re-run.\n' >&2
+	exit 3
+}
+
+usage() {
+	cat <<'EOF'
+usage: devct-template build [--vmid N] [--keep]
+
+  build   run the six-step ladder and leave a template behind
+          --vmid N  use this container id instead of the cluster's next free one
+          --keep    leave the container running instead of converting it (debugging)
+EOF
+}
+
+# ---------------------------------------------------------------------------
+
+build() {
+	devct_need curl jq ssh
+	devct_load_conf
+	devct_require_conf \
+		"api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL" \
+		"storage=$DEVCT_STORAGE" "template_storage=$DEVCT_TEMPLATE_STORAGE" \
+		"bridge=$DEVCT_BRIDGE" "token_id=$DEVCT_TOKEN_ID" "ssh_key=$DEVCT_SSH_KEY"
+
+	_tmpl_name=${DEVCT_TEMPLATE_NAME:-quince-dev-template}
+	_zone=${DEVCT_SDN_ZONE:-localnetwork}
+	[ -f "$DEVCT_SSH_KEY" ] || devct_die "ssh_key not found: $DEVCT_SSH_KEY"
+
+	# ---- 1: privileges -----------------------------------------------------
+	step "privileges — measuring what the token holds"
+	_lack=''
+	lack() { _lack="$_lack
+  $1 on $2"; }
+	for _p in VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit; do
+		devct_has_priv "/pool/$DEVCT_POOL" "$_p" || lack "$_p" "/pool/$DEVCT_POOL"
+	done
+	devct_has_priv "/storage/$DEVCT_STORAGE" Datastore.AllocateSpace ||
+		lack Datastore.AllocateSpace "/storage/$DEVCT_STORAGE"
+	devct_has_priv "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.AllocateTemplate ||
+		lack Datastore.AllocateTemplate "/storage/$DEVCT_TEMPLATE_STORAGE (the vztmpl storage — NOT the rootfs storage)"
+	devct_has_priv "/sdn/zones/$_zone/$DEVCT_BRIDGE" SDN.Use ||
+		lack SDN.Use "/sdn/zones/$_zone/$DEVCT_BRIDGE"
+	if [ -n "$_lack" ]; then
+		printf 'missing privileges:%s\n' "$_lack" >&2
+		devct_die "grant these on $DEVCT_TOKEN_ID and re-run (devct doctor reports the same set)"
+	fi
+	devct_info "  all required privileges held"
+
+	# ---- 2: appliance ------------------------------------------------------
+	# The template tracks the Alpine line versions.env pins, so "rebuild on versions.env change"
+	# has a mechanical meaning rather than being a note in a doc.
+	step "appliance — the Alpine image versions.env pins"
+	_alpine=$(sed -n 's/^ALPINE_VERSION=//p' "$REPO_ROOT/versions.env")
+	[ -n "$_alpine" ] || devct_die "ALPINE_VERSION not found in $REPO_ROOT/versions.env"
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/aplinfo") ||
+		refused "$(devct_code "$_r")" "Datastore.Audit on /storage/$DEVCT_TEMPLATE_STORAGE (to read the appliance index)"
+	_appliance=$(devct_body "$_r" | jq -r --arg v "alpine-$_alpine" \
+		'[.data[] | select(.template | startswith($v)) | .template] | sort | last // empty')
+	[ -n "$_appliance" ] || devct_die "no Alpine $_alpine appliance offered by this node"
+	devct_info "  $_appliance"
+
+	_volid="$DEVCT_TEMPLATE_STORAGE:vztmpl/$_appliance"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/aplinfo" \
+		"storage=$DEVCT_TEMPLATE_STORAGE" "template=$_appliance") ||
+		refused "$(devct_code "$_r")" \
+			"Datastore.AllocateTemplate on /storage/$DEVCT_TEMPLATE_STORAGE — note this is the storage that holds vztmpl content, NOT the container rootfs storage"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "appliance download failed"
+	devct_info "  downloaded to $_volid"
+
+	# ---- 3: create ---------------------------------------------------------
+	step "create — container in the pool, authorized key baked in"
+	if [ -z "${VMID:-}" ]; then
+		_r=$(devct_api GET /cluster/nextid) || devct_die "cannot read /cluster/nextid"
+		VMID=$(devct_body "$_r" | jq -r '.data')
+	fi
+	devct_info "  vmid $VMID"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc" \
+		"vmid=$VMID" \
+		"ostemplate=$_volid" \
+		"hostname=$_tmpl_name" \
+		"pool=$DEVCT_POOL" \
+		"storage=$DEVCT_STORAGE" \
+		"rootfs=$DEVCT_STORAGE:${DEVCT_ROOTFS_GB:-32}" \
+		"cores=${DEVCT_CORES:-4}" \
+		"memory=${DEVCT_MEMORY_MB:-8192}" \
+		"swap=0" \
+		"unprivileged=1" \
+		"features=nesting=1,keyctl=1" \
+		"net0=name=eth0,bridge=$DEVCT_BRIDGE,ip=dhcp" \
+		"ssh-public-keys=$(cat "$DEVCT_SSH_KEY")" \
+		"start=1") ||
+		refused "$(devct_code "$_r")" "container create in /pool/$DEVCT_POOL — see the message above; SDN.Use on the bridge is the usual culprit"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "container create failed"
+	devct_info "  created and started"
+
+	# ---- 4: provision ------------------------------------------------------
+	# No hypervisor privilege at all here: this is session-host-to-container ssh, the same path
+	# `devct create` uses to inject secrets.
+	step "provision — toolset, registry config, warmed cache (over ssh)"
+	_ip=$(wait_for_ip "$VMID") || devct_die "container never reported an address"
+	devct_info "  $_tmpl_name is up"
+	wait_for_ssh "$_ip" || devct_die "ssh never came up on the container"
+
+	_stamp="alpine=$_alpine versions=$(versions_digest) built=${DEVCT_BUILD_DATE:-unknown}"
+	provision_script "$_stamp" | ssh -o StrictHostKeyChecking=accept-new "root@$_ip" 'sh -s' ||
+		devct_die "provisioning failed"
+	devct_info "  provisioned"
+
+	if [ -n "${KEEP:-}" ]; then
+		printf '\n--keep: container %s left running at %s (not converted)\n' "$VMID" "$_ip"
+		exit 0
+	fi
+
+	# ---- 5: stop + convert -------------------------------------------------
+	# The one step no lookup settled: whether conversion is covered by the pool's container
+	# privileges. It answers for itself here, which is the point.
+	step "stop, then convert to a template"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$VMID/status/stop") ||
+		refused "$(devct_code "$_r")" "VM.PowerMgmt on /pool/$DEVCT_POOL"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "stop failed"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$VMID/template") ||
+		refused "$(devct_code "$_r")" \
+			"the container-to-template conversion privilege — the one the spec recorded as unmeasured; this refusal is its measurement"
+	devct_info "  converted"
+
+	# ---- 6: verify ---------------------------------------------------------
+	step "verify"
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
+	devct_body "$_r" | jq -e --arg n "$_tmpl_name" '.data[] | select(.name==$n and .template==1)' >/dev/null 2>&1 ||
+		devct_die "template $_tmpl_name is not present as a template after conversion"
+	printf '\ntemplate %s (vmid %s) built.\n' "$_tmpl_name" "$VMID"
+	printf 'stamp: %s\n' "$_stamp"
+	printf 'no root was used.\n'
+}
+
+versions_digest() {
+	# Ties the template to the pins it was built from; `devct create` compares this and says so
+	# when they diverge, rather than handing out a silently stale box.
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$REPO_ROOT/versions.env" | cut -c1-12
+	else
+		shasum -a 256 "$REPO_ROOT/versions.env" | cut -c1-12
+	fi
+}
+
+wait_for_ip() {
+	_vmid=$1
+	_n=0
+	while [ "$_n" -lt 60 ]; do
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$_vmid/interfaces") && {
+			_addr=$(devct_body "$_r" | jq -r '[.data[]? | select(.name!="lo") | .inet // empty] | first // empty' | cut -d/ -f1)
+			[ -n "$_addr" ] && {
+				printf '%s\n' "$_addr"
+				return 0
+			}
+		}
+		sleep 5
+		_n=$((_n + 5))
+	done
+	return 1
+}
+
+wait_for_ssh() {
+	_n=0
+	while [ "$_n" -lt 120 ]; do
+		ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
+			"root@$1" true 2>/dev/null && return 0
+		sleep 5
+		_n=$((_n + 5))
+	done
+	return 1
+}
+
+# The provisioning body runs INSIDE the container, fed over ssh on stdin. Site specifics arrive
+# as values, never baked into the committed text.
+provision_script() {
+	cat <<EOF
+set -eu
+apk update
+apk add --no-cache git make openssh-client curl jq containerd nerdctl buildkit
+rc-update add containerd default 2>/dev/null || true
+rc-update add buildkitd default 2>/dev/null || true
+service containerd start || true
+service buildkitd start || true
+apk add --no-cache github-cli || echo "note: github-cli not in this Alpine line; gh omitted"
+printf '%s\n' "$1" > /etc/quince-devct-stamp
+EOF
+	if [ -n "${DEVCT_REGISTRY:-}" ]; then
+		cat <<EOF
+mkdir -p /etc/containerd/certs.d/${DEVCT_REGISTRY%%/*}
+cat > /etc/containerd/certs.d/${DEVCT_REGISTRY%%/*}/hosts.toml <<'TOML'
+server = "https://${DEVCT_REGISTRY%%/*}"
+[host."https://${DEVCT_REGISTRY%%/*}"]
+  capabilities = ["pull", "resolve", "push"]
+TOML
+EOF
+	fi
+	# Warm the buildkit cache with the real toolchain images, which is what makes a fresh
+	# container reach a green gate in minutes rather than re-pulling everything.
+	cat <<'EOF'
+git clone --depth 1 https://github.com/novkostya/quince.git /root/quince
+make -C /root/quince toolchains
+EOF
+}
+
+case "${1:-}" in
+build)
+	shift
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--vmid)
+			VMID=$2
+			shift 2
+			;;
+		--keep)
+			KEEP=1
+			shift
+			;;
+		*)
+			usage >&2
+			devct_die "unknown option: $1"
+			;;
+		esac
+	done
+	build
+	;;
+'' | -h | --help | help) usage ;;
+*)
+	usage >&2
+	devct_die "unknown verb: $1"
+	;;
+esac

@@ -189,6 +189,16 @@ certificate names the node. `api_host` must be a name the certificate carries; `
 via `--resolve` where DNS doesn't. Verification stays on either way, which is the whole point of
 banning `-k`.
 
+**Corrected by the generator's first run — the two storages are not one storage.** This spec said
+"the CT storage" throughout, and both the grant and `doctor`'s check followed it onto the zfspool
+that holds container rootfs. A zfspool cannot hold `vztmpl` content at all, so
+`Datastore.AllocateTemplate` there authorises nothing: the appliance download needs it on the
+storage that actually holds templates. `template_storage` is therefore a **required** config key
+with no fallback to `storage` — a default that reports a privilege as satisfied where it can never
+apply is exactly the silent-success this project's rules exist to prevent. The measurement stands as
+the strongest evidence yet for the token-first amendment: the ladder's first blocking gap is again a
+*grant*, not a root operation.
+
 Not remembered, and not trusted either: **`devct doctor` asks the API what the token can actually
 do** (its own permissions endpoint) and reports the delta against the required set. The privilege
 list above is the hypothesis; `doctor` is the proof, and a missing privilege comes back as a named
