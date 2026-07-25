@@ -165,3 +165,40 @@ devct_api() {
 	*) return 1 ;;
 	esac
 }
+
+# devct_perms — fetch the token's permission map once, cached in DEVCT_PERMS.
+devct_perms() {
+	[ -n "${DEVCT_PERMS:-}" ] && return 0
+	_r=$(devct_api GET /access/permissions) || devct_die "cannot read /access/permissions (HTTP $(devct_code "$_r"))"
+	DEVCT_PERMS=$(devct_body "$_r" | jq -c '.data')
+}
+
+# devct_has_priv <api-path> <privilege> — true if the token holds it. The permission map is the
+# authority; a recorded grant is not.
+devct_has_priv() {
+	devct_perms
+	printf '%s' "$DEVCT_PERMS" | jq -e --arg p "$1" --arg v "$2" '.[$p][$v] // empty' >/dev/null 2>&1
+}
+
+# devct_task_wait <upid> — poll a PVE task to completion. Returns non-zero on a failed task,
+# printing its exit status, because a task that starts is not a task that worked.
+devct_task_wait() {
+	_upid=$1
+	_waited=0
+	while :; do
+		_r=$(devct_api GET "/nodes/$DEVCT_NODE/tasks/$_upid/status") ||
+			devct_die "task status unreadable (HTTP $(devct_code "$_r"))"
+		_status=$(devct_body "$_r" | jq -r '.data.status // "unknown"')
+		[ "$_status" = running ] || break
+		[ "$_waited" -ge "${DEVCT_TASK_TIMEOUT:-1800}" ] &&
+			devct_die "task still running after ${_waited}s: $_upid"
+		sleep 5
+		_waited=$((_waited + 5))
+	done
+	_exit=$(devct_body "$_r" | jq -r '.data.exitstatus // "?"')
+	[ "$_exit" = OK ] || {
+		printf 'task failed: %s\n' "$_exit" >&2
+		return 1
+	}
+	return 0
+}

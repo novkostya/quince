@@ -62,7 +62,8 @@ doctor() {
 	devct_load_conf
 	devct_require_conf \
 		"api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL" \
-		"storage=$DEVCT_STORAGE" "bridge=$DEVCT_BRIDGE"
+		"storage=$DEVCT_STORAGE" "template_storage=$DEVCT_TEMPLATE_STORAGE" \
+		"bridge=$DEVCT_BRIDGE"
 
 	printf 'devct doctor — %s\n\n' "$DEVCT_API_BASE"
 
@@ -110,7 +111,11 @@ doctor() {
 	fi
 	priv_check "/pool/$DEVCT_POOL" VM.Allocate VM.Clone VM.Config.Network VM.PowerMgmt VM.Audit
 	priv_check "/storage/$DEVCT_STORAGE" Datastore.AllocateSpace Datastore.Audit
-	priv_check "/storage/${DEVCT_TEMPLATE_STORAGE:-$DEVCT_STORAGE}" Datastore.AllocateTemplate
+	# The appliance image and the container rootfs live on DIFFERENT storages: a zfspool holds
+	# rootdir/images and cannot hold vztmpl content at all. Defaulting template_storage to
+	# `storage` (as this check first did) reports a grant as satisfied on a storage that can
+	# never hold the thing being granted — so it is required separately, and named separately.
+	priv_check "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.AllocateTemplate
 	priv_check "/sdn/zones/${DEVCT_SDN_ZONE:-localnetwork}/$DEVCT_BRIDGE" SDN.Use
 
 	printf '\ntemplate\n'

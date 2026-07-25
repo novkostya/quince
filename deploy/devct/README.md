@@ -15,7 +15,7 @@ Design and acceptance gates: [`docs/specs/devct/devct.md`](../../docs/specs/devc
 | Command | State |
 | --- | --- |
 | `devct doctor` | **built** — reports readiness and, crucially, *measures* what the API token can actually do |
-| `devct-template build` | specified, not built |
+| `devct-template build` | **built** — the six-step ladder, token-first; a step the API refuses stops the build and names the grant |
 | `devct create` / `list` / `destroy` | specified, not built |
 | `devct onboard` | specified, not built — write `devct.conf` by hand meanwhile (below) |
 
@@ -52,6 +52,12 @@ ssh_key          = ~/.ssh/id_ed25519.pub
 registry         = registry.example.invalid/quince
 ca_pin           = ~/.config/quince/devct-api.pem
 ```
+
+`storage` and `template_storage` are **two different storages and both are required** — a zfspool
+holds container rootfs (`rootdir`/`images`) and cannot hold appliance images (`vztmpl`) at all, so
+the grant for downloading a template belongs on the storage that can actually hold one. devct
+refuses to guess one from the other: defaulting `template_storage` to `storage` reported a
+privilege as satisfied on a storage that could never hold the thing it authorises.
 
 The token **secret** is not in this file. It lives at `~/.config/quince/proxmox-devct.token`
 (mode 600) and is read at point of use.
