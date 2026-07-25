@@ -100,7 +100,7 @@ the API's own refusal as the evidence — not asserted in advance, which is what
 If no step refuses, the root session dissolves and the template build joins everything else on the
 token.
 
-### ANSWERED: the root need is real, and it is one flag wide
+### ANSWERED: the root need is real, and it is one block at template-build time
 
 Step 3 refused, with the reason that settles the amendment's open question:
 
@@ -121,10 +121,25 @@ produced a fix this narrow instead of a standing root session.
 - it happens **once per template rebuild** (`versions.env` cadence, i.e. rarely), and
 - **`devct create` is pure-token forever**, which is the property the whole ruling exists to protect.
 
+**And a second root need, found one step later: the first shell.** The Alpine appliance ships no
+sshd, so "provision over ssh" had nothing to connect to. This falsifies a premise written into R3
+and repeated in this spec — *the API cannot exec into CTs, and does not need to, because the box is
+born reachable*. **Born with a key is not born reachable.** Ruled (Operator, 2026-07-25): `pct exec`
+joins the standing root class, bounded to a pool-verified vmid during template builds, because
+Alpine everywhere buys dev/staging parity worth more than a base-image saving.
+
+Both needs are therefore collected into **one announced root block** at template build — the
+readable invariant being *root touches the box exactly once, and never again* — after which clones
+inherit the features and `devct create` stays pure-token.
+
+**A no-root path was verified and deliberately not taken:** `POST …/lxc/<vmid>/termproxy` answers
+200 on the scoped token, so a console channel exists that could bootstrap the box with no root at
+all; it costs driving a websocket console from shell. Recorded in canon and in the README so the
+option survives the ruling that passed it over.
+
 **Still open, and cheap to settle:** whether the container toolchain needs `keyctl` at all.
-`--skip-keyctl` builds without it; if step 4 warms the cache and the gates run green, the last root
-step disappears entirely. Reported either way — a negative result here is worth as much as a
-positive one.
+`--skip-keyctl` builds without it; if step 4 warms the cache and the gates run green, half the block
+disappears. Reported either way — a negative result here is worth as much as a positive one.
 
 **The one root micro-step that survives regardless:** a single read-only config read of the
 known-good container, to derive the committed option baseline. It is read-only, one-off, and fine
@@ -367,12 +382,13 @@ a committed container-option baseline, and docs.
 
 **Operator — measured, and now known to be exactly one thing:**
 
-- **One root command per template rebuild**: `pct set <vmid> -features nesting=1,keyctl=1`. Requested
-  with the refusal in hand, as an authorized_keys entry with `expiry-time` (R3(2b)), or run by the
-  Operator directly — the build stops and prints the command with a `--vmid` to resume from when no
-  root path is configured. It does not dissolve (the flag is root@pam by design), but it does not
-  recur outside `versions.env` cadence, and it never touches `devct create`.
-  **Possibly zero** if the `--skip-keyctl` measurement shows the toolchain does not need the flag.
+- **One root block per template rebuild** — `pct set` for the `keyctl` flag, then `pct exec` to
+  install and start sshd. Run over an authorized_keys entry with `expiry-time` (R3(2b)), or by the
+  Operator directly: with no root path configured the build stops, prints the exact commands, and
+  takes a `--vmid` to resume from. It does not dissolve (the flag is root@pam by design and ssh
+  cannot bootstrap itself), but it does not recur outside `versions.env` cadence and never touches
+  `devct create`. The `keyctl` half is **possibly droppable** pending the `--skip-keyctl`
+  measurement.
 - **One read-only container-config read** of the known-good box, to derive the committed option
   baseline. Survives regardless of the above, is read-only, and fits inside any supervised moment.
 

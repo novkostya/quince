@@ -48,9 +48,9 @@ usage: devct-template build [--vmid N] [--keep] [--skip-keyctl]
   build   run the six-step ladder and leave a template behind
           --vmid N       use this container id instead of the cluster's next free one
           --keep         leave the container running instead of converting it (debugging)
-          --skip-keyctl  build without the keyctl feature flag, skipping the root
-                         micro-step — an open measurement: if the container toolchain
-                         works without it, the last root step can be dropped for good
+          --skip-keyctl  omit the keyctl flag from the root block — an open measurement:
+                         if the container toolchain works without it, that half of the
+                         block can be dropped for good (the sshd bootstrap still runs)
 EOF
 }
 
@@ -84,6 +84,11 @@ build() {
 		lack Datastore.AllocateSpace "/storage/$DEVCT_STORAGE"
 	devct_has_priv "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.AllocateTemplate ||
 		lack Datastore.AllocateTemplate "/storage/$DEVCT_TEMPLATE_STORAGE (the vztmpl storage — NOT the rootfs storage)"
+	# Measured in run 4: creating a container FROM an ostemplate reads the storage holding it, so
+	# downloading a template and consuming one are two different permissions. PVE accepts
+	# AllocateSpace or Audit; Audit is the read-only half, which is the one to ask for.
+	devct_has_priv "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.Audit ||
+		lack Datastore.Audit "/storage/$DEVCT_TEMPLATE_STORAGE (to consume the template at create)"
 	devct_has_priv "/sdn/zones/$_zone/$DEVCT_BRIDGE" SDN.Use ||
 		lack SDN.Use "/sdn/zones/$_zone/$DEVCT_BRIDGE"
 	if [ -n "$_lack" ]; then
@@ -147,7 +152,7 @@ build() {
 	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "container create failed"
 	devct_info "  created and started (features: nesting only)"
 
-	add_keyctl
+	root_bootstrap
 
 	# ---- 4: provision ------------------------------------------------------
 	# No hypervisor privilege at all here: this is session-host-to-container ssh, the same path
@@ -189,35 +194,66 @@ build() {
 	printf 'no root was used.\n'
 }
 
-# The ruled fallback, at its true minimum: ONE command, on ONE flag, once per template rebuild.
-# It announces exactly what it will run and the refusal class that forces it, so a reader can
-# check the claim instead of trusting it.
-add_keyctl() {
-	_cmd="pct set $VMID -features nesting=1,keyctl=1"
-	printf '\n  ROOT MICRO-STEP (the ruled fallback — the API cannot do this)\n'
-	printf '    why:     PVE allows non-root users to set `nesting` only; `keyctl` is root@pam by\n'
-	printf '             design, so no ACL grant can ever cover it.\n'
-	printf '    command: %s\n' "$_cmd"
-	printf '    scope:   one flag, on this container, once per template rebuild. Clones inherit\n'
-	printf '             features, so `devct create` stays pure-token forever.\n'
+# THE ONE ROOT BLOCK (Operator ruling, 2026-07-25). Everything the API cannot do lives here,
+# announced before it runs. The readable invariant is deliberate: root touches the box exactly
+# once, at template build, and never again — not a root command sprinkled wherever one is handy.
+#
+# Two things need it, both measured rather than assumed:
+#   - keyctl: PVE lets a non-root user set nesting and nothing else (root@pam by design), so no
+#     ACL can ever cover it.
+#   - the first shell: provisioning runs over ssh, and the Alpine appliance ships no sshd — ssh
+#     is the one tool that cannot bootstrap itself. pct exec is the authorized bootstrap,
+#     bounded to a pool-verified vmid during template builds.
+#
+# A no-root alternative was verified and is NOT used: POST .../lxc/<vmid>/termproxy answers 200
+# on the scoped token, so a console channel exists if this class is ever narrowed. It costs a
+# websocket console driven from shell, which is why the ruling took pct exec instead.
+root_bootstrap() {
+	verify_in_pool "$VMID" || devct_die "vmid $VMID is not in pool $DEVCT_POOL — refusing to run root commands against it"
 
 	if [ -n "${SKIP_KEYCTL:-}" ]; then
-		printf '    SKIPPED (--skip-keyctl): building without keyctl to measure whether the\n'
-		printf '             container toolchain actually needs it. If step 4 warms the cache and\n'
-		printf '             the gates run, this root step can be dropped for good — report the\n'
-		printf '             result either way.\n'
-		return 0
+		# The create already set nesting, so with keyctl skipped the flag command has nothing
+		# left to do; the sshd bootstrap still does.
+		set -- \
+			"pct exec $VMID -- apk add --no-cache openssh" \
+			"pct exec $VMID -- rc-update add sshd default" \
+			"pct exec $VMID -- service sshd start"
+	else
+		set -- \
+			"pct set $VMID -features nesting=1,keyctl=1" \
+			"pct exec $VMID -- apk add --no-cache openssh" \
+			"pct exec $VMID -- rc-update add sshd default" \
+			"pct exec $VMID -- service sshd start"
 	fi
 
+	printf '\n  ROOT BLOCK (the ruled fallback — the API cannot do these)\n'
+	printf '    scope: vmid %s, verified in pool %s; once per template rebuild.\n' "$VMID" "$DEVCT_POOL"
+	printf '    after this block, nothing in devct needs root again — clones inherit features,\n'
+	printf '    and devct create is pure-token.\n'
+	if [ -n "${SKIP_KEYCTL:-}" ]; then
+		printf '    --skip-keyctl: building WITHOUT the keyctl flag, to measure whether the\n'
+		printf '    container toolchain needs it. If step 4 warms the cache and the gates run,\n'
+		printf '    that half of this block can be dropped for good.\n'
+	fi
+	for _c in "$@"; do printf '      %s\n' "$_c"; done
+
 	[ -n "$DEVCT_ROOT_SSH" ] || {
-		printf '\n  root_ssh is not set in the config, so this step cannot run unattended.\n' >&2
-		printf '  Run the command above on the hypervisor, then re-run with --vmid %s.\n' "$VMID" >&2
-		printf '  (R3(2b): the access should be an authorized_keys entry carrying expiry-time.)\n' >&2
+		printf '\n  root_ssh is not set, so this block cannot run unattended.\n' >&2
+		printf '  Run the commands above on the hypervisor, then re-run with --vmid %s.\n' "$VMID" >&2
+		printf '  (R3(2b): that access should be an authorized_keys entry carrying expiry-time.)\n' >&2
 		exit 4
 	}
-	ssh -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_cmd" ||
-		devct_die "the root micro-step failed — run it yourself and re-run with --vmid $VMID"
+	for _c in "$@"; do
+		ssh -o StrictHostKeyChecking=accept-new "$DEVCT_ROOT_SSH" "$_c" ||
+			devct_die "root block failed at: $_c — fix it, then re-run with --vmid $VMID"
+	done
 	printf '    done.\n'
+}
+
+# The guard the ruling names: root commands are only ever aimed at a vmid this token owns.
+verify_in_pool() {
+	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
+	devct_body "$_r" | jq -e --arg v "$1" '.data.members[]? | select((.vmid|tostring)==$v)' >/dev/null 2>&1
 }
 
 versions_digest() {

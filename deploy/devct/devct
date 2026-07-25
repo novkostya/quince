@@ -117,15 +117,23 @@ doctor() {
 	# rootdir/images and cannot hold vztmpl content at all. Defaulting template_storage to
 	# `storage` (as this check first did) reports a grant as satisfied on a storage that can
 	# never hold the thing being granted — so it is required separately, and named separately.
-	priv_check "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.AllocateTemplate
+	# AllocateTemplate downloads a template; Audit is what lets a create CONSUME one (measured —
+	# PVE checks AllocateSpace|Audit on the ostemplate's storage, and Audit is the read-only half).
+	priv_check "/storage/$DEVCT_TEMPLATE_STORAGE" Datastore.AllocateTemplate Datastore.Audit
 	priv_check "/sdn/zones/${DEVCT_SDN_ZONE:-localnetwork}/$DEVCT_BRIDGE" SDN.Use
 
 	printf '\ntemplate\n'
 	_tmpl=${DEVCT_TEMPLATE_NAME:-quince-dev-template}
 	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") && _rc=0 || _rc=$?
 	if [ "$_rc" -eq 0 ]; then
-		if devct_body "$_r" | jq -e --arg n "$_tmpl" '.data[] | select(.name==$n)' >/dev/null 2>&1; then
+		# A container named like the template is NOT the template: an interrupted build leaves
+		# exactly that behind, and reporting it as present would be the tool lying about the one
+		# thing it is asked to check. The conversion flag is what makes it real.
+		if devct_body "$_r" | jq -e --arg n "$_tmpl" '.data[] | select(.name==$n and .template==1)' >/dev/null 2>&1; then
 			ok "template $_tmpl exists"
+		elif _id=$(devct_body "$_r" | jq -er --arg n "$_tmpl" '.data[] | select(.name==$n) | .vmid' 2>/dev/null); then
+			bad "template $_tmpl — vmid $_id carries the name but is still a CONTAINER, not a template"
+			todo "finish or discard the interrupted build: devct-template build --vmid $_id"
 		else
 			bad "template $_tmpl"
 			todo "build it: devct-template build"
