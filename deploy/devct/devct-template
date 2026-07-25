@@ -133,12 +133,12 @@ build() {
 	# plus a manual destroy — which is what its own first hardware run produced. An existing
 	# in-pool container with this id is therefore resumed from the first UNFINISHED step, each
 	# skip announced; --recreate takes the clean path by destroying it first (token-only).
-	if verify_in_pool "$VMID"; then
+	if devct_in_pool "$VMID"; then
 		if [ -n "${RECREATE:-}" ]; then
 			devct_info "  --recreate: destroying the existing container $VMID"
-			destroy_ct "$VMID" || devct_die "could not destroy $VMID"
+			devct_destroy "$VMID" || devct_die "could not destroy $VMID"
 			create_ct "$_volid" "$_tmpl_name"
-		elif is_template "$VMID"; then
+		elif devct_is_template "$VMID"; then
 			# Already converted: the ladder is done for this id. A template cannot be started,
 			# so trying to "resume" one would fail on its own success.
 			devct_info "  vmid $VMID is ALREADY a template — nothing left to build"
@@ -148,7 +148,7 @@ build() {
 		else
 			devct_info "  container $VMID already exists in the pool — RESUMING from the first unfinished step"
 			devct_info "  (--recreate destroys it and takes the clean path instead)"
-			ensure_running "$VMID" || devct_die "container $VMID will not start"
+			devct_start "$VMID" || devct_die "container $VMID will not start"
 		fi
 	else
 		create_ct "$_volid" "$_tmpl_name"
@@ -160,9 +160,9 @@ build() {
 	# No hypervisor privilege at all here: this is session-host-to-container ssh, the same path
 	# `devct create` uses to inject secrets.
 	step "provision — toolset, registry config, warmed cache (over ssh)"
-	_ip=$(wait_for_ip "$VMID") || devct_die "container never reported an address"
+	_ip=$(devct_wait_for_ip "$VMID") || devct_die "container never reported an address"
 	devct_info "  $_tmpl_name is up"
-	wait_for_ssh "$_ip" || devct_die "ssh never came up on the container"
+	devct_wait_for_ssh "$_ip" || devct_die "ssh never came up on the container"
 
 	# The date is taken at build time, not defaulted to a placeholder: a stamp field that always
 	# reads "unknown" trains readers to ignore stamps, which is worse than having no field.
@@ -194,7 +194,7 @@ build() {
 	# instantly — the first run "failed" here on a template that had in fact been built, which is
 	# a false negative and therefore just as much a state-honesty bug as a false positive.
 	step "verify"
-	is_template "$VMID" 60 ||
+	devct_is_template "$VMID" 60 ||
 		devct_die "vmid $VMID did not become a template within 60s of a successful conversion"
 	printf '\ntemplate %s (vmid %s) built.\n' "$_tmpl_name" "$VMID"
 	printf 'stamp: %s\n' "$_stamp"
@@ -216,7 +216,7 @@ build() {
 # on the scoped token, so a console channel exists if this class is ever narrowed. It costs a
 # websocket console driven from shell, which is why the ruling took pct exec instead.
 root_bootstrap() {
-	verify_in_pool "$VMID" || devct_die "vmid $VMID is not in pool $DEVCT_POOL — refusing to run root commands against it"
+	devct_in_pool "$VMID" || devct_die "vmid $VMID is not in pool $DEVCT_POOL — refusing to run root commands against it"
 
 	# On a resume, root is not re-entered for work already done. Both halves are checked against
 	# the box: the flag against the container's config, ssh against the box itself. Root that is
@@ -227,7 +227,7 @@ root_bootstrap() {
 		case "$(devct_body "$_r" | jq -r '.data.features // ""')" in
 		*keyctl=1*) _need_keyctl='' ;;
 		esac
-	if _ip=$(wait_for_ip "$VMID" 15) && ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+	if _ip=$(devct_wait_for_ip "$VMID" 15) && ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
 		-o BatchMode=yes "root@$_ip" true 2>/dev/null; then
 		_need_sshd=''
 	fi
@@ -297,8 +297,8 @@ root_bootstrap() {
 			*) devct_die "root block ran but keyctl is still not set on $VMID" ;;
 			esac
 	fi
-	_ip=$(wait_for_ip "$VMID") || devct_die "root block ran but the container reports no address"
-	wait_for_ssh "$_ip" ||
+	_ip=$(devct_wait_for_ip "$VMID") || devct_die "root block ran but the container reports no address"
+	devct_wait_for_ssh "$_ip" ||
 		devct_die "root block ran but sshd is not answering on $VMID — the commands reported success, the box disagrees"
 	printf '    done — verified: keyctl set, sshd answering.\n'
 }
@@ -330,24 +330,7 @@ create_ct() {
 	devct_info "  created and started (features: nesting only)"
 }
 
-destroy_ct() {
-	verify_in_pool "$1" || devct_die "vmid $1 is not in pool $DEVCT_POOL — refusing to destroy it"
-	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/stop") &&
-		devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || true
-	_r=$(devct_api DELETE "/nodes/$DEVCT_NODE/lxc/$1") ||
-		refused "$(devct_code "$_r")" "$(devct_body "$_r")" "VM.Allocate on /pool/$DEVCT_POOL (to destroy)"
-	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
-}
 
-ensure_running() {
-	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/status/current") || return 1
-	case "$(devct_body "$_r" | jq -r '.data.status')" in
-	running) return 0 ;;
-	esac
-	devct_info "  container is stopped — starting it"
-	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$1/status/start") || return 1
-	devct_task_wait "$(devct_body "$_r" | jq -r '.data')"
-}
 
 # The build's own privilege report — COMPUTED from what ran, never asserted. The first version
 # of this printed "no root was used." unconditionally, including on runs where the root block had
@@ -366,23 +349,7 @@ report_root_usage() {
 	printf 'everything else — create, provision, convert, verify — ran on the scoped token.\n'
 }
 
-# is_template <vmid> [seconds] — poll until the conversion flag is visible.
-is_template() {
-	_n=0
-	while :; do
-		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/config") &&
-			[ "$(devct_body "$_r" | jq -r '.data.template // 0')" = 1 ] && return 0
-		[ "$_n" -ge "${2:-0}" ] && return 1
-		sleep 5
-		_n=$((_n + 5))
-	done
-}
 
-# The guard the ruling names: root commands are only ever aimed at a vmid this token owns.
-verify_in_pool() {
-	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
-	devct_body "$_r" | jq -e --arg v "$1" '.data.members[]? | select((.vmid|tostring)==$v)' >/dev/null 2>&1
-}
 
 versions_digest() {
 	# Ties the template to the pins it was built from; `devct create` compares this and says so
@@ -394,33 +361,7 @@ versions_digest() {
 	fi
 }
 
-wait_for_ip() {
-	_vmid=$1
-	_n=0
-	while [ "$_n" -lt "${2:-60}" ]; do
-		_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$_vmid/interfaces") && {
-			_addr=$(devct_body "$_r" | jq -r '[.data[]? | select(.name!="lo") | .inet // empty] | first // empty' | cut -d/ -f1)
-			[ -n "$_addr" ] && {
-				printf '%s\n' "$_addr"
-				return 0
-			}
-		}
-		sleep 5
-		_n=$((_n + 5))
-	done
-	return 1
-}
 
-wait_for_ssh() {
-	_n=0
-	while [ "$_n" -lt 120 ]; do
-		ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
-			"root@$1" true 2>/dev/null && return 0
-		sleep 5
-		_n=$((_n + 5))
-	done
-	return 1
-}
 
 # The provisioning body runs INSIDE the container, fed over ssh on stdin. Site specifics arrive
 # as values, never baked into the committed text.

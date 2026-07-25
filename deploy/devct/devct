@@ -16,12 +16,199 @@ usage() {
 	cat <<'EOF'
 usage: devct <verb>
 
-  doctor    report readiness: bindings, credentials, TLS pin, token privileges,
-            template freshness. Changes nothing. Non-zero exit when not ready.
+  doctor        report readiness: bindings, credentials, TLS pin, token privileges,
+                template freshness. Changes nothing. Non-zero exit when not ready.
+  create [N]    clone the template into a disposable dev container, inject this host's
+                secrets, and print the ssh alias plus the gate command. No root.
+  list          the pool's containers: id, alias, status, and template freshness.
+  destroy N     stop and delete one — refuses anything outside the pool.
 
 not built yet (see docs/specs/devct/devct.md):
-  onboard, create, list, destroy
+  onboard
 EOF
+}
+
+# ---------------------------------------------------------------------------
+# create / list / destroy — the everyday path, and it is pure scoped token. The only root in
+# this system is the template build's one block; nothing below ever needs it.
+# ---------------------------------------------------------------------------
+
+SSH_INCLUDE="$HOME/.ssh/quince-devct.conf"
+
+template_vmid() {
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
+	devct_body "$_r" | jq -r --arg n "${DEVCT_TEMPLATE_NAME:-quince-dev-template}" \
+		'[.data[] | select(.name==$n and .template==1) | .vmid] | first // empty'
+}
+
+next_alias_n() {
+	# Lowest free N, so aliases stay short and predictable across a day's churn.
+	_n=1
+	while :; do
+		devct_body "$1" | jq -e --arg h "quince-dev-$_n" '.data[] | select(.name==$h)' >/dev/null 2>&1 || {
+			printf '%s\n' "$_n"
+			return 0
+		}
+		_n=$((_n + 1))
+	done
+}
+
+create() {
+	devct_need curl jq ssh
+	devct_load_conf
+	devct_require_conf \
+		"api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL" \
+		"storage=$DEVCT_STORAGE" "token_id=$DEVCT_TOKEN_ID"
+
+	_tmpl=$(template_vmid)
+	[ -n "$_tmpl" ] || devct_die "no template named ${DEVCT_TEMPLATE_NAME:-quince-dev-template} — build one: devct-template build"
+
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
+	_n=${1:-$(next_alias_n "$_r")}
+	_host="quince-dev-$_n"
+	devct_body "$_r" | jq -e --arg h "$_host" '.data[] | select(.name==$h)' >/dev/null 2>&1 &&
+		devct_die "$_host already exists — destroy it first, or pick another number"
+
+	_r=$(devct_api GET /cluster/nextid) || devct_die "cannot read /cluster/nextid"
+	_vmid=$(devct_body "$_r" | jq -r '.data')
+
+	printf 'creating %s (vmid %s) from template %s\n' "$_host" "$_vmid" "$_tmpl"
+	_r=$(devct_api POST "/nodes/$DEVCT_NODE/lxc/$_tmpl/clone" \
+		"newid=$_vmid" "hostname=$_host" "pool=$DEVCT_POOL") ||
+		devct_die "clone refused (HTTP $(devct_code "$_r")): $(devct_body "$_r")"
+	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "clone failed"
+
+	devct_start "$_vmid" || devct_die "could not start $_vmid"
+	_ip=$(devct_wait_for_ip "$_vmid") || devct_die "$_host never reported an address"
+	devct_wait_for_ssh "$_ip" || devct_die "$_host is up but ssh never answered"
+
+	write_ssh_include
+	inject_secrets "$_ip"
+	check_stamp "$_ip"
+
+	printf '\n%s is ready.\n' "$_host"
+	printf '  ssh %s\n' "$_host"
+	printf '  ssh %s '"'"'git clone https://github.com/novkostya/quince.git ~/work && make -C ~/work gates'"'"'\n' "$_host"
+}
+
+list() {
+	devct_need curl jq
+	devct_load_conf
+	devct_require_conf "api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL"
+
+	_r=$(devct_api GET "/pools/$DEVCT_POOL") || devct_die "cannot read pool $DEVCT_POOL"
+	_members=$(devct_body "$_r" | jq -r '[.data.members[]? | select(.type=="lxc") | .vmid] | join(" ")')
+	[ -n "$_members" ] || {
+		printf 'pool %s is empty.\n' "$DEVCT_POOL"
+		return 0
+	}
+	_l=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
+	printf '%-6s %-22s %-9s %s\n' VMID NAME STATUS KIND
+	for _v in $_members; do
+		devct_body "$_l" | jq -r --arg v "$_v" \
+			'.data[] | select((.vmid|tostring)==$v) |
+			 [(.vmid|tostring), .name, .status, (if .template==1 then "template" else "container" end)] | @tsv' |
+			while IFS="$(printf '\t')" read -r _id _name _st _kind; do
+				printf '%-6s %-22s %-9s %s\n' "$_id" "$_name" "$_st" "$_kind"
+			done
+	done
+}
+
+destroy() {
+	devct_need curl jq
+	devct_load_conf
+	devct_require_conf "api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL"
+	[ -n "${1:-}" ] || devct_die "usage: devct destroy <vmid>"
+
+	devct_in_pool "$1" ||
+		devct_die "vmid $1 is not in pool $DEVCT_POOL — refusing. The pool is the boundary of what this tool may touch."
+	devct_is_template "$1" &&
+		devct_die "vmid $1 is the template, not a dev container — rebuild it with devct-template if that is what you meant"
+
+	printf 'destroying %s\n' "$1"
+	devct_destroy "$1" || devct_die "destroy failed"
+	write_ssh_include
+	printf 'destroyed.\n'
+}
+
+# The tool owns this file and rewrites it whole from live pool state — no parsing of what was
+# there before, so a half-written entry from a crashed run cannot survive.
+write_ssh_include() {
+	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
+	_l=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || return 1
+	# Variable names here are deliberately unshared: POSIX sh has no locals, so a helper reusing
+	# a caller's name silently overwrites it. This function used `_ip` and blanked the address
+	# its caller was about to inject secrets over — the failure surfaced two calls later as
+	# "could not resolve hostname ''".
+	_wsi_tmp="$SSH_INCLUDE.tmp.$$"
+	_wsi_count=0
+	{
+		printf '# generated by devct — do not edit; rewritten on every create/destroy\n'
+		for _wsi_v in $(devct_body "$_r" | jq -r '[.data.members[]? | select(.type=="lxc") | .vmid] | join(" ")'); do
+			_wsi_name=$(devct_body "$_l" | jq -r --arg v "$_wsi_v" '.data[] | select((.vmid|tostring)==$v and .template!=1) | .name')
+			[ -n "$_wsi_name" ] || continue
+			_wsi_ip=$(devct_wait_for_ip "$_wsi_v" 0) || continue
+			printf '\nHost %s\n  HostName %s\n  User root\n  StrictHostKeyChecking accept-new\n' "$_wsi_name" "$_wsi_ip"
+			_wsi_count=$((_wsi_count + 1))
+		done
+	} >"$_wsi_tmp" && mv "$_wsi_tmp" "$SSH_INCLUDE"
+	# Count what was written rather than announcing the path and hoping: this wrote an empty
+	# file once and said nothing was wrong.
+	printf '  ssh config: %s (%s host alias(es))\n' "$SSH_INCLUDE" "$_wsi_count"
+}
+
+# R3(5): secrets live on the session host and are injected at provision, so nothing accumulates
+# on the hypervisor and rotation is one file plus a destroy. They travel over ssh stdin — never
+# argv, never a heredoc that could echo them.
+inject_secrets() {
+	_sent=''
+	if [ -f "$HOME/.config/quince/quince-bot.token" ]; then
+		ssh -o StrictHostKeyChecking=accept-new "root@$1" \
+			'mkdir -p ~/.config/quince && cat > ~/.config/quince/quince-bot.token && chmod 600 ~/.config/quince/quince-bot.token' \
+			<"$HOME/.config/quince/quince-bot.token" || devct_die "could not inject the bot token"
+		_sent="bot token"
+	fi
+	if [ -n "${DEVCT_REGISTRY:-}" ] && [ -f "$HOME/.config/quince/registry.auth" ]; then
+		ssh -o StrictHostKeyChecking=accept-new "root@$1" \
+			'mkdir -p ~/.config/quince && cat > ~/.config/quince/registry.auth && chmod 600 ~/.config/quince/registry.auth' \
+			<"$HOME/.config/quince/registry.auth" || devct_die "could not inject the registry credential"
+		_sent="$_sent, registry credential"
+	fi
+	printf '  secrets injected: %s\n' "${_sent:-none found on this host}"
+}
+
+# Staleness is surfaced, never silently used (spec story 9). The stamp is read from the box
+# itself rather than from a cache, because the box is the thing that will run the gates.
+check_stamp() {
+	_stamp=$(ssh -n -o StrictHostKeyChecking=accept-new "root@$1" 'cat /etc/quince-devct-stamp 2>/dev/null' || true)
+	if [ -z "$_stamp" ]; then
+		printf '  stamp: MISSING on this container — it did not come from a devct-built template\n'
+		return 0
+	fi
+	printf '  stamp: %s\n' "$_stamp"
+	_want=$(versions_digest)
+	case "$_stamp" in
+	*"versions=$_want"*) ;;
+	*)
+		printf '\n  WARNING: this template was built from different versions.env pins.\n'
+		printf '  The toolchain cache inside it does not match this checkout, so gates will\n'
+		printf '  rebuild toolchains (slow) or test against the wrong ones.\n'
+		printf '  Rebuild it: devct-template build --recreate\n\n'
+		;;
+	esac
+}
+
+versions_digest() {
+	_v="$DEVCT_ROOT/../../versions.env"
+	[ -f "$_v" ] || {
+		printf 'unknown'
+		return 0
+	}
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$_v" | cut -c1-12
+	else
+		shasum -a 256 "$_v" | cut -c1-12
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -156,8 +343,17 @@ doctor() {
 
 case "${1:-}" in
 doctor) doctor ;;
-onboard | create | list | destroy)
-	devct_die "verb '$1' is specified but not built yet (docs/specs/devct/devct.md) — this session ships doctor only"
+create)
+	shift
+	create "$@"
+	;;
+list) list ;;
+destroy)
+	shift
+	destroy "$@"
+	;;
+onboard)
+	devct_die "verb 'onboard' is specified but not built yet (docs/specs/devct/devct.md) — write devct.conf by hand meanwhile, per deploy/devct/README.md"
 	;;
 '' | -h | --help | help) usage ;;
 *)

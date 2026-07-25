@@ -323,6 +323,9 @@ Operator-supervised):**
   `ssh quince-dev-N 'git clone … && make gates'` green → `devct list` shows it → `devct destroy`
   removes it → `devct list` shows the pool empty (stories 3, 4, 5, 7). Wall-clock for
   create-to-green is recorded in the PR — the pre-warmed cache is the claim being tested.
+  **RUN (2026-07-26)**, and it is worth noting *how* it ran: the session driving it holds no root
+  path to the hypervisor at all, so "no root" here is structural rather than a promise. The
+  template's warmed cache is what the wall-clock number tests.
 - **G3 — the guard holds.** `devct destroy` aimed at an id outside the pool refuses locally, and a
   read against a non-pool container returns 403, proving the token's scope. **A destroy is never
   attempted against a container outside the pool** — the guard is proven by the refusal and the
@@ -422,10 +425,10 @@ nothing.
 
 1. **the spec** — reviewed before any code existed. ✔ landed
 2. **API core + `doctor`** — `lib.sh`, `devct doctor`, `make gates-sh`. Claim: what the token can do
-   is a *measurement*, not a belief (story 1, story 10).
+   is a *measurement*, not a belief (story 1, story 10). ✔ landed
 3. **template generator** — `devct-template` + the committed option baseline. Claim: a template is
    buildable from scratch by a public script, on the token path, with any root step named and
-   justified (G1, story 2).
+   justified (G1, story 2). ✔ landed; ladder run end to end, template exists
 4. **lifecycle** — `devct create|list|destroy`. Claim: a disposable CT is created and destroyed with
    the scoped token, no root (G2–G5).
 5. **onboarding + allowlist** — `devct onboard`, `bin/gh-bot`, the `.claude/settings.json` swap
