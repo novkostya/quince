@@ -178,6 +178,17 @@ Attempted and **not** settled by lookup: the privilege required by the container
 conversion endpoint. Recorded as unsettled rather than guessed — it is verified at build time
 against the live API viewer, and step 5 above is where it proves itself either way.
 
+**Measured since, by the first live `doctor` run:** the hypothesis held where it mattered. The pool
+already carries the container privileges the ladder needs (allocate, clone, network config, power,
+audit) and the CT storage carries space + audit; the only gaps are the two this section predicted —
+template allocation on the storage (ladder step 2) and bridge use (step 3). Both are **grants, not
+root operations**, which is the first real evidence for the amendment's premise. **One fact no
+lookup predicted, found only by running it:** an address in `api_host` fails certificate
+verification — curl verifies the URL's host against the certificate, and PVE's self-signed
+certificate names the node. `api_host` must be a name the certificate carries; `api_addr` binds it
+via `--resolve` where DNS doesn't. Verification stays on either way, which is the whole point of
+banning `-k`.
+
 Not remembered, and not trusted either: **`devct doctor` asks the API what the token can actually
 do** (its own permissions endpoint) and reports the delta against the required set. The privilege
 list above is the hypothesis; `doctor` is the proof, and a missing privilege comes back as a named
@@ -308,10 +319,11 @@ a committed container-option baseline, and docs.
 
 **Architect, self-service (not Operator ceremonies):**
 
-- **ACL top-ups as `doctor` finds them** — `SDN.Use` on the bridge is the likeliest, with
-  `Datastore.AllocateTemplate` and the template-conversion privilege next. Granted on the devct
-  user under the standing authorization, each one logged in the PR so the final ACL set is a
-  written artifact rather than a box's accumulated state.
+- **ACL top-ups as `doctor` finds them** — granted on the devct user under the standing
+  authorization, each one logged in the PR so the final ACL set is a written artifact rather than a
+  box's accumulated state. **Measured, no longer predicted:** the delta is `SDN.Use` on the bridge
+  and `Datastore.AllocateTemplate` on the CT storage; everything else the ladder needs is already
+  held. The template-conversion privilege remains unmeasured until step 5 runs.
 
 **Operator, likely the only one:**
 
@@ -327,13 +339,21 @@ a committed container-option baseline, and docs.
 
 ## PR sequence
 
-1. **this spec** — reviewed before any code exists.
-2. **template generator** — `deploy/devct/devct-template` + the committed option baseline + docs +
-   `make gates-sh`. Claim: a template is buildable from scratch by a public script, on the token
-   path, with any root step named and justified (G1).
-3. **lifecycle** — `devct doctor|create|list|destroy`. Claim: a disposable CT is created and
-   destroyed with the scoped token, no root (G2–G5).
-4. **onboarding + allowlist** — `devct onboard`, `bin/gh-bot`, the `.claude/settings.json` swap
+**Re-sliced after the amendment** (the original 4 became 5): `doctor` moves ahead of the template
+generator. The amendment makes ladder step 1 *"`doctor` reports the ACL delta"*, so the generator
+cannot be written honestly — nor its root question answered — until the probe exists and has run.
+`doctor` also carries the config/TLS/API core both scripts share, so building it first duplicates
+nothing.
+
+1. **the spec** — reviewed before any code existed. ✔ landed
+2. **API core + `doctor`** — `lib.sh`, `devct doctor`, `make gates-sh`. Claim: what the token can do
+   is a *measurement*, not a belief (story 1, story 10).
+3. **template generator** — `devct-template` + the committed option baseline. Claim: a template is
+   buildable from scratch by a public script, on the token path, with any root step named and
+   justified (G1, story 2).
+4. **lifecycle** — `devct create|list|destroy`. Claim: a disposable CT is created and destroyed with
+   the scoped token, no root (G2–G5).
+5. **onboarding + allowlist** — `devct onboard`, `bin/gh-bot`, the `.claude/settings.json` swap
    (Proxmox `curl` entry → the wrapper scripts), `.claude/README.md` and `deploy/dev.md`. Claim: a
    fresh machine binds the conventions in one command, and acting as the bot stops prompting
    (story 6).
