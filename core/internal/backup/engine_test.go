@@ -148,6 +148,27 @@ func (h *harness) start(t *testing.T, transport, retryOf string) wire.Job {
 // failure than a named one. Reaching it is always a bug, never load.
 const waitCeiling = 2 * time.Minute
 
+// gracePhases are the phases where elapsed time is the EXPECTED behaviour rather than evidence of a
+// stall, so the no-progress window does not accrue while a job sits in one. Every field progressSig
+// reads is legitimately static throughout them, so without this the window degenerates back into the
+// wall-clock budget this file exists to remove — which is how the #31 test still failed under load
+// with the first version of this fix applied, at phase=waiting_for_passcode.
+//
+// This mirrors the engine's own rule rather than inventing one. sampler.sample accrues no idle
+// "before the FIRST sign of life (a re-exec / process startup can take longer than a short timeout),
+// or while paused for the passcode" — the same three graces, for the same reason.
+//
+// What still bounds a job parked in one of these: waitCeiling, plus the engine's OWN configured
+// timeouts (WaitForDeviceTimeout; the passcode pause is deliberate and unbounded by design). What
+// the window still guards is `receiving` — the phase that claims to be moving, and so the only one
+// where stillness is diagnostic rather than expected.
+var gracePhases = map[string]bool{
+	StateWaitingForDevice:   true, // mirrored into phase by run()
+	PhaseSeeding:            true, // an O(files) clone with no per-file signal
+	PhaseStarting:           true, // the re-exec: "before the FIRST sign of life"
+	PhaseWaitingForPasscode: true, // the engine freezes its own liveness clock here
+}
+
 // progressSig is everything the engine updates as a job advances. Comparing it across polls answers
 // "did this job move?" — which is a claim about the ENGINE. Comparing wall-clock against a fixed
 // budget answers "was this machine fast enough?", which is a claim about the runner, and that is the
@@ -185,6 +206,8 @@ func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job 
 		if ok {
 			if sig := progressSig(j); sig != last {
 				last, lastMoved = sig, time.Now()
+			} else if gracePhases[j.Progress.Phase] {
+				lastMoved = time.Now() // a phase that is MEANT to wait accrues no idle
 			}
 		}
 		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
@@ -243,6 +266,8 @@ func waitState(t *testing.T, e *Engine, id, state string, d time.Duration) {
 		if ok {
 			if sig := progressSig(j); sig != last {
 				last, lastMoved = sig, time.Now()
+			} else if gracePhases[j.Progress.Phase] {
+				lastMoved = time.Now() // a phase that is MEANT to wait accrues no idle
 			}
 		}
 		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
