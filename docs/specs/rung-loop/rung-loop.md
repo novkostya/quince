@@ -110,11 +110,14 @@ The fix is not to teach it turns. It is a **backstop that does not classify**:
   latest activity was its own, and reported "nothing owed from me" with three items owed. Attribution
   uses only activity **strictly newer than the previous observation** — the only acts that could
   explain the move — and says `actor=unattributed` when nothing does, rather than naming a bystander.
-  **`unattributed` is not a bug, and the commonest way to reach it is worth naming:** a commit is dated
-  by `committedDate`, not by when it was pushed, so a commit held locally or an older commit
-  cherry-picked forward sorts *older* than the previous observation. The event still fires — that is
-  the part that matters — and degrades to `unattributed` rather than guessing. A label change, a title
-  edit or a base change lands there too, appearing in no activity list at all.
+  **`unattributed` is not a bug, and its commonest cause in this project is mundane: a checkbox tick.**
+  Every PR here carries a checklist, and authors tick the CI and privacy boxes as they land. A body edit
+  moves `updatedAt` and appears in **no** activity list — it produces no timeline event whatsoever — so
+  the event fires and the actor is honestly withheld. Meet that as the normal case, not an exotic one.
+  The other routes: a title or base change (same channel), and a commit dated by `committedDate` rather
+  than by push time, so a commit held locally or an older commit cherry-picked forward sorts *older*
+  than the previous observation. In every case the event still fires, which is the part that matters,
+  and degrades to `unattributed` rather than guessing.
 - **volume, since an unconditional backstop invites the worry that it becomes an unactionable stream:**
   `updatedAt` does not move on check completion, which is the highest-volume signal in the system. It
   moves on comments, reviews, pushes, labels and merges — acts by a human or an agent, roughly one
@@ -129,13 +132,24 @@ caveat about checking for a comment in the same window sat on the line below. Th
 committed by the instrument built to check it: a timestamp moved and the tool named the actor it
 expected rather than the one that explains it.
 
-The measurement that does hold is on **quince-devlog#20**, and it holds by elimination rather than by
-timing: `updatedAt` read `2026-07-26T16:01:31Z`, three seconds after the push's commit
-(`16:01:28Z`); the previous act was a comment at `15:56:13Z`, the next was a comment at `16:04:23Z`,
-and that repo has **zero check runs in its entire history**. A later act cannot produce an earlier
-timestamp, so nothing but the push can account for the value. The protocol for repeating it, since
-"push and then look" is not enough: **push, stay silent for two minutes, poll at ≤15 s** so the gap
-itself is sampled. That is a stream a session can act on.
+It is now measured — **twice, in two repositories, by two methods, by two parties**:
+
+| Where | Method | Reading |
+| --- | --- | --- |
+| quince-devlog#20 | elimination — that repo has **zero check runs in its entire history** | `updatedAt` `16:01:31Z`, 3 s after the push's commit (`16:01:28Z`); previous act a comment at `15:56:13Z`, next at `16:04:23Z` |
+| quince#48 | timing — push, then two minutes of deliberate silence, polled at 10 s | `16:05:31Z → 16:08:32Z`, 3 s after the commit (`16:08:29Z`), no comment or review in the window |
+
+**And the channel that would have invalidated both, closed:** a PR **body or title edit moves
+`updatedAt` and produces no timeline event at all**, so neither elimination nor a timing window would
+notice one. Checked via `userContentEdits` on both PRs; every edit falls outside the respective window.
+So the protocol is: **push, stay silent two minutes, poll at ≤15 s, and confirm no body edit in the
+window.**
+
+**A second measurement fell out of that silence, and it upgrades the volume argument above from
+reasoning to observation.** During the 110 s of silence on quince#48, three check runs were created and
+started (`gates` and `image` at `16:08:53Z`, `e2e` at `16:08:54Z`) and `updatedAt` **did not move** — it
+held at `16:08:32Z` throughout. Check-run creation and progress do not touch it, which is what keeps an
+unconditional backstop down to roughly one event per human or agent act. That is a stream a session can act on.
 - **compare against last-acted-on state, not state-at-arm.** A hand-rolled mitigation during the
   incident baselined against *current* heads at arm time, so both pushes it existed to catch were
   already in its baseline. `step()` diffs against the stored observation, which is what makes a
