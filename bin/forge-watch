@@ -28,9 +28,11 @@ usage: forge-watch <verb>
   session scratchpad is the wrong home for it: the failure this state exists to survive is the
   session process restarting, which is exactly when a scratchpad-scoped file is not there.
 
-  `status` exit codes: 0 live · 3 dead (re-arm from the state, do NOT reseed) · 4 absent (cold
-  start). Three cases, never two — collapsing dead into absent turns a restarted watch into a fresh
-  one that has "seen nothing changed" since a beginning it invented.
+  `status` exit codes: 0 live · 3 dead (nothing running — re-arm from the state, do NOT reseed) ·
+  4 absent (cold start) · 5 wedged (a process IS still running and has stopped ticking — STOP IT
+  FIRST, then re-arm). Four cases, never fewer: collapsing dead into absent turns a restarted watch
+  into a fresh one that has "seen nothing changed" since a beginning it invented, and collapsing
+  wedged into dead tells the reader to start a second watcher beside a live one.
 
   A watcher passes --watcher-pid and --interval so its cadence is on disk; a tick that was due and
   did not happen then emits `event=tick-overdue` instead of being absorbed.
@@ -260,12 +262,26 @@ state_path_for() {
 #            becomes a fresh one that has "seen nothing changed" since a beginning it invented.
 #   live   — state and a watcher. Nothing to do.
 #
-# `dead` names its reason, because "the watcher is gone" and "the watcher is running but wedged" call
-# for different next moves:
-#   no_watcher_record — state exists but no watcher ever armed against it (a hand-run tick).
+# FOUR cases, not three, and the fourth was a review finding against this file's own stated principle
+# ("exit codes so a caller that ignores stdout cannot mistake one for another"). `dead` originally
+# covered both a watcher that is GONE and one that is RUNNING BUT WEDGED, behind one exit code and one
+# identical note telling the reader to re-arm. Those need OPPOSITE remedies:
+#
+#   no_process / no_watcher_record → nothing is running. Re-arm from this state.
+#   stale_heartbeat                → a process IS running, by definition. STOP IT FIRST, then re-arm.
+#
+# Following the old instruction in the wedged case started a second watcher beside a live one, on one
+# state file, with no lock anywhere (quince#50) — so the duplicate was not an unlucky race, it was the
+# designed path, reached by doing what the tool said. `wedged` is now its own class with its own exit
+# code (5) and its own note naming the pid. This is corollary (b) of the project's claim rule — don't
+# collapse two conditions into one message — one level up from where it usually bites.
+#
+# The reasons, and what each proves:
+#   no_watcher_record — state exists but no watcher ever armed against it (a hand-run tick). A file's
+#                       existence proves nothing.
 #   no_process        — the recorded pid is gone.
-#   stale_heartbeat   — the pid exists and the ticks stopped. Invisible to a pid check alone, which is
-#                       why the heartbeat exists beside it.
+#   stale_heartbeat   — the pid exists and the ticks stopped. A process's existence proves nothing,
+#                       which is why the heartbeat exists beside the pid check.
 #
 # TWO instruments, and neither is sufficient alone — which is worth stating because the first version
 # of this leaned on one and was wrong:
@@ -308,7 +324,10 @@ watch_report() {
 			   elif ($age == null or $age > ($iv * $stale)) then "stale_heartbeat"
 			   else null end) as $why
 			| "state=\($st) pid=\($w.pid) interval=\($iv)s last_watcher_tick=\($lw // "never")\(if $age == null then "" else " age=\($age | floor)s" end)" as $facts
-			| if $why != null then
+			| if $why == "stale_heartbeat" then
+				"watch=wedged \($facts) reason=stale_heartbeat",
+				"note: pid \($w.pid) IS STILL RUNNING and has stopped ticking. STOP IT FIRST, then re-arm from this state — do not reseed it. Re-arming beside it puts two watchers on one state file."
+			  elif $why != null then
 				"watch=dead \($facts) reason=\($why)",
 				"note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued."
 			  else
@@ -334,10 +353,13 @@ watch_report() {
 		| if $w == null or ($w.pid // null) == null then "dead"
 		  elif $alive == "no" then "dead"
 		  elif (($w.last_watcher_tick // null) == null
-		        or ($t - ($w.last_watcher_tick | fromdate)) > (($w.interval_s // 60) * $stale)) then "dead"
+		        or ($t - ($w.last_watcher_tick | fromdate)) > (($w.interval_s // 60) * $stale)) then "wedged"
 		  else "live" end' "$_st")
-	[ "$_cls" = live ] || return 3
-	return 0
+	case "$_cls" in
+	live) return 0 ;;
+	dead) return 3 ;;
+	wedged) return 5 ;;
+	esac
 }
 
 # pid_alive — the impure probe, and deliberately only that: does this pid exist. It does NOT try to
