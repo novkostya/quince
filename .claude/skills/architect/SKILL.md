@@ -182,7 +182,9 @@ malfunction.
 should rest on one channel — but it has delivered **nothing** across every arming measured to date on
 this box, against every event the terminating watcher delivered in the same window (quince#62 carries
 the dated tally; it is deliberately not copied here, so this file does not acquire arithmetic that
-needs maintaining). The floor under
+needs maintaining). **On the runner it has delivered once, about an hour late** — so the record differs
+by machine, and "measured on this box" is load-bearing rather than pedantic: the implementer's copy of
+this paragraph dropped the qualifier and was falsified within the hour. The floor under
 you is `watch`'s own `--max-wait`, not this; reasoning as though the fallback protects you is exactly
 what produced the fifty-minute stall. When it does fire, its **first job is a liveness assertion**,
 `bin/forge-watch status --all`; if that says `dead`, say so out loud rather than ticking once and going

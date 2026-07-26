@@ -153,8 +153,15 @@ where it blocks the session it exists to wake.
 
 **Every exit is a re-arm.** A watch that exited is a watch that is not watching, and four forgotten
 re-arms are already on the record (quince#43). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
-it has delivered nothing across every arming measured to date (quince#62), so the floor under you is
-`watch`'s own idle bound, not the fallback.
+**do not treat it as the floor.** On the architect box it has delivered nothing across every arming
+measured (quince#62). On **this** box it has delivered **once, about an hour after it was due**, which
+is the only measurement there is here and is not a cadence you can plan against. The floor under you is
+`watch`'s own `--max-wait`, which is measured to fire.
+
+The earlier version of this paragraph said it *"has delivered nothing across every arming measured to
+date"* — unscoped, from architect-box measurements, in the file the implementer reads. It was
+falsified on the runner within the hour, by the very heartbeat it described. **A measurement carries
+the box it was taken on**; strip that and it becomes a claim about a machine nobody tested.
 
 **Your harness will report exits 6 and 7 as "failed".** A background task that exits non-zero is
 rendered as *"failed with exit code 6"*, and 6 is the tool's designed idle heartbeat. Read the last

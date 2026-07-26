@@ -95,15 +95,23 @@ So:
    session that reads its own heartbeat as a malfunction will either raise a false alarm or start
    distrusting the mechanism, and both are worse than the stall this replaced.
 
-2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Across every
-   arming measured to date on the architect box it has delivered **nothing** (quince#62 carries the
-   dated tally; do not copy the number here, or this file acquires arithmetic nobody has scheduled to
-   maintain), against every event delivered by the terminating watcher in the same window. Arm it
-   anyway — it costs nothing and no design should rest on one channel — but do not reason as though it
-   protects you, which is the mistake that produced the fifty-minute stall. **The floor under a
-   terminating watch is its own `--max-wait`, not the fallback.** When the fallback does fire, its
-   **first job is a liveness assertion** — `forge-watch status` — and if the answer is `dead` it says
-   so out loud instead of quietly ticking once and going back to sleep.
+2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Its record
+   **differs by box, which is the whole reason to write the box down**: on the architect box it has
+   delivered nothing across every arming measured, and on the runner it has delivered **once, roughly
+   an hour after it was due** (quince#62 carries the dated measurements; do not copy the numbers here,
+   or this file acquires arithmetic nobody has scheduled to maintain). Neither of those is a cadence to
+   plan against. Arm it anyway — it costs nothing and no design should rest on one channel — but do not
+   reason as though it protects you, which is the mistake that produced the fifty-minute stall. **The
+   floor under a terminating watch is its own `--max-wait`, not the fallback.** When the fallback does
+   fire, its **first job is a liveness assertion** — `forge-watch status` — and if the answer is `dead`
+   it says so out loud instead of quietly ticking once and going back to sleep.
+
+   **What the late delivery does and does not establish.** The session was continuously busy from
+   arming until the moment the wakeup arrived — every turn re-invoked by a watcher exit — and it landed
+   on the first turn with nothing else in flight. *"Fired late"* and *"deferred until the session was
+   idle"* are **not distinguishable from one observation**, and the difference matters: the second
+   would mean the fallback cannot rescue a session that is stuck rather than sleeping, which is the
+   case it exists for. Recorded as an open question rather than resolved by the reading that suits us.
 
 3. **Arming is not optional, and it is not on your honour.** `bin/forge-watch owed` asks whether there
    are open PRs here with no live watch, and a `Stop` hook in `.claude/settings.json` runs it when a
