@@ -1,0 +1,217 @@
+#!/bin/sh
+# forge-watch — turn forge state into events, so a rung advances without a human relaying
+# "review posted" across the gap. Spec: docs/specs/rung-loop/rung-loop.md.
+#
+# The whole design is one split: a PURE step() and a thin fetch. Every monitor bug this project
+# produced was untestable because the thing deciding what to emit was welded to the thing polling
+# GitHub — so the deciding half takes an observation as JSON and returns events, and the fixtures
+# drive it with no network at all.
+#
+#   forge-watch step --state F --observation F   # pure; what the fixtures exercise
+#   forge-watch tick --state F                   # fetch, then step
+#   forge-watch replay <fixture>...              # run fixtures, compare against expect_events
+set -eu
+
+usage() {
+	cat <<'EOF'
+usage: forge-watch <verb>
+
+  step   --state <file> --observation <file>   emit events for one observation (pure, no network)
+  tick   --state <file> [--repo owner/name]    fetch the queue, then step
+  replay <fixture.json>...                     drive step from recorded pairs; non-zero on mismatch
+
+events: first-observation · queue-empty · opened · review · checks · merged · stalled
+EOF
+}
+
+die() {
+	printf 'forge-watch: %s\n' "$*" >&2
+	exit 1
+}
+
+# ---------------------------------------------------------------------------
+# step — the whole decision, and the only part with interesting behaviour.
+#
+# Rules earned by defects (spec §4), each of which was a real miss:
+#   - a state that has never observed anything is NOT an empty queue. The sentinel discharges as
+#     its own event, so "I never looked" can never read as "nothing happened".
+#   - queue-empty is an EVENT. Silence is not a report.
+#   - the queue is compared wholesale each tick, so a PR opened after arming is seen. Binding a
+#     list at arm time is how one was missed.
+#   - check conclusions are watched beside reviews: a red PR is unreviewable, and that is progress
+#     information, not noise.
+#   - every event carries the observation that produced it, never a bare "something changed".
+# ---------------------------------------------------------------------------
+step() {
+	_prev=$1
+	_obs=$2
+
+	_was_observed=$(jq -r '.observed // false' "$_prev" 2>/dev/null || echo false)
+	_now=$(jq -c '.' "$_obs")
+
+	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
+
+	if [ "$_was_observed" != true ]; then
+		# A first tick reports ITSELF and nothing else. Diffing against a state that never existed
+		# turns every pre-existing PR into "opened", every old merge into "merged", and every past
+		# verdict into a fresh review — which is what the live run did on its first tick: sixty
+		# events for things that finished hours ago. Claiming history as news is the same defect as
+		# claiming silence as calm, so the first observation records the queue and emits only the
+		# sentinel (plus queue-empty, which describes the queue rather than a change in it).
+		printf 'event=first-observation count=%s\n' "$(printf '%s' "$_now_prs" | jq 'map(select(.state != "MERGED")) | length')"
+		if [ "$(printf '%s' "$_now_prs" | jq 'map(select(.state != "MERGED")) | length == 0')" = true ]; then
+			printf 'event=queue-empty\n'
+		fi
+		printf '%s' "$_now" | jq -c '. + {observed: true}' >"$_prev.new" && mv "$_prev.new" "$_prev"
+		return 0
+	fi
+
+	_prev_prs=$(jq -c '.prs // []' "$_prev")
+	_first=''
+
+	# opened: in the new observation, absent from the old.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		[.[] | select(.number as $n | ($old | map(.number) | index($n)) | not)] | .[]
+		| "event=opened pr=\(.number)"'
+
+	# merged / closed: present before, now MERGED or gone.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		[.[] | select(.state == "MERGED")
+		     | select(.number as $n | ($old | map(select(.state == "MERGED") | .number) | index($n)) | not)]
+		| .[] | "event=merged pr=\(.number)"'
+
+	# reviews: a verdict that was not there before. The verdict travels with the event, because
+	# "there is a review" is not the information a caller needs.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		.[] as $p
+		| ($old | map(select(.number == $p.number)) | first) as $o
+		| ($p.reviews // []) as $new | (($o.reviews // [])) as $was
+		| select(($new | length) > ($was | length))
+		| "event=review pr=\($p.number) verdict=\($new | last | .state)"'
+
+	# checks: a FAILURE that was not there before, named. Two deliberate narrowings, both from what
+	# the fixtures encode:
+	#   - a newly-opened PR emits `opened` and nothing else. Its checks are initial state, not a
+	#     transition; reporting them as changes would make every new PR arrive as a burst.
+	#   - SUCCESS is not an event. Red is what changes who must act — a red PR is unreviewable, and
+	#     that was the miss (#16 sat red while a reviews-only watcher reported silence). Terminal
+	#     success is already covered by `merged`.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		.[] as $p
+		| ($old | map(select(.number == $p.number)) | first) as $o
+		| select($o != null)
+		| ($p.checks // [])[] as $c
+		| select($c.conclusion == "FAILURE")
+		| select((($o.checks // []) | map(select(.name == $c.name) | .conclusion) | first) != $c.conclusion)
+		| "event=checks pr=\($p.number) conclusion=\($c.conclusion) name=\($c.name)"'
+
+	# queue-empty: emitted when the queue IS empty — on the first observation, or on the
+	# transition into empty. Not emitted every tick, which would be noise rather than signal.
+	_was_empty=$(printf '%s' "$_prev_prs" | jq 'map(select(.state != "MERGED")) | length == 0')
+	_is_empty=$(printf '%s' "$_now_prs" | jq 'map(select(.state != "MERGED")) | length == 0')
+	if [ "$_is_empty" = true ] && { [ -n "$_first" ] || [ "$_was_empty" = false ]; }; then
+		printf 'event=queue-empty\n'
+	fi
+
+	printf '%s' "$_now" | jq -c '. + {observed: true}' >"$_prev.new" && mv "$_prev.new" "$_prev"
+}
+
+# ---------------------------------------------------------------------------
+# replay — the fixtures ARE the test. Each carries the events it must produce, so a change in
+# behaviour fails here rather than in someone's memory of what the monitor used to do.
+# ---------------------------------------------------------------------------
+replay() {
+	_fail=0
+	for _f in "$@"; do
+		_tmp=$(mktemp -d)
+		jq -c '.before' "$_f" >"$_tmp/state"
+		jq -c '.after' "$_f" >"$_tmp/obs"
+		_got=$(step "$_tmp/state" "$_tmp/obs" | sort)
+		_want=$(jq -r '.expect_events[]' "$_f" | sort)
+		if [ "$_got" = "$_want" ]; then
+			printf 'ok    %s\n' "$(basename "$_f")"
+		else
+			_fail=1
+			printf 'FAIL  %s\n' "$(basename "$_f")"
+			printf '  want:\n%s\n  got:\n%s\n' "$(printf '%s' "$_want" | sed 's/^/    /')" \
+				"$(printf '%s' "$_got" | sed 's/^/    /')"
+		fi
+		rm -rf "$_tmp"
+	done
+	[ "$_fail" -eq 0 ] || die "fixtures failed"
+	printf 'forge-watch: fixtures pass\n'
+}
+
+# ---------------------------------------------------------------------------
+# tick — the thin half: fetch, hand the observation to step. Uses gh-bot so the token stays out of
+# argv and the call is allowlistable.
+# ---------------------------------------------------------------------------
+tick() {
+	_state=$1
+	_repo=$2
+	command -v jq >/dev/null 2>&1 || die "jq is required"
+	_gh=bin/gh-bot
+	[ -x "$_gh" ] || _gh=gh-bot
+	_obs=$(mktemp)
+	"$_gh" pr list -R "$_repo" --state all --limit 20 \
+		--json number,state,updatedAt,statusCheckRollup,reviews |
+		jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
+			checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
+			reviews: [(.reviews // [])[] | {state}]}]}' >"$_obs" ||
+		die "could not fetch the queue for $_repo"
+	[ -f "$_state" ] || printf '{"observed":false}\n' >"$_state"
+	step "$_state" "$_obs"
+	rm -f "$_obs"
+}
+
+case "${1:-}" in
+step)
+	shift
+	_s='' _o=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--state)
+			_s=$2
+			shift 2
+			;;
+		--observation)
+			_o=$2
+			shift 2
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+	[ -n "$_s" ] && [ -n "$_o" ] || die "step needs --state and --observation"
+	[ -f "$_s" ] || printf '{"observed":false}\n' >"$_s"
+	step "$_s" "$_o"
+	;;
+tick)
+	shift
+	_s='' _repo=novkostya/quince
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--state)
+			_s=$2
+			shift 2
+			;;
+		--repo)
+			_repo=$2
+			shift 2
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+	[ -n "$_s" ] || die "tick needs --state"
+	tick "$_s" "$_repo"
+	;;
+replay)
+	shift
+	[ $# -gt 0 ] || die "replay needs at least one fixture"
+	replay "$@"
+	;;
+'' | -h | --help | help) usage ;;
+*)
+	usage >&2
+	die "unknown verb: $1"
+	;;
+esac
