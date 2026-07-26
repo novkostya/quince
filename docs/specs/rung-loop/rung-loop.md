@@ -193,8 +193,24 @@ Therefore:
 - **`forge-watch status` distinguishes FOUR cases and says which**, with exit codes so a caller that
   ignores stdout still cannot mistake one for another: `live` (0) → nothing to do; `dead` (3) → nothing
   is running, **re-arm from this state and do not reseed it**; `absent` (4) → cold start, seed the
-  sentinel; `wedged` (5) → a process **is** still running and has stopped ticking, so **stop it first**,
-  then re-arm.
+  sentinel; `wedged` (5) → a process **is** still running and has stopped ticking, so **`forge-watch
+  stop` it** — never a bare `kill` — then re-arm.
+
+  **`stop` is a verb rather than a sentence, and that is the finding rather than a preference.** A pid
+  is only known to be *our* watcher while its heartbeat is fresh, and `wedged` is *defined* by that
+  heartbeat being stale: the one state in which this tool issues an imperative to signal a process is
+  the one state where its identity is unproven. Demonstrated in review by writing a foreign pid into the
+  state — the tool answered *"pid 1 IS STILL RUNNING … STOP IT FIRST"*, **telling the reader to kill
+  init.** So the watcher records its process start time beside its pid (`/proc/<pid>/stat` field 22,
+  parsed after the last `)` since `comm` is parenthesised and may contain spaces), and `stop` re-reads
+  it at the moment of the signal: a recycled pid necessarily started later, which proves "not ours"
+  without needing to identify what it is instead. **Every branch that cannot prove the identity refuses
+  and says which** — no recorded start time, no readable procfs, or a mismatch. `kill` returning success
+  proves a process died, not that the right one did (corollary (g), pointed outside the repo).
+
+  It is a verb and not two steps joined by prose for the reason this whole unit exists: a session
+  following *"stop that pid, then re-arm"* literally, on a box where the pid had been recycled, had no
+  defence at all.
 
   Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
   nothing changed" since a beginning it invented. **`wedged` was the fourth case, and it was a review
@@ -346,6 +362,8 @@ allowance faster for no benefit.
     either, because the remedy differs.
 16. A hand-run tick cannot make a dead watcher look alive.
 17. A tick that was due and did not happen emits `tick-overdue`, with how late it was.
+17b. `stop` signals the recorded pid only when its process start time still matches; a recycled pid,
+    an unrecorded start time or an unreadable procfs each produce a refusal naming which, never a kill.
 18. A missing, empty or malformed watch-set declaration hard-fails; nothing falls back to one
     repository.
 19. Under `--all` every event names its repository, and `status --all` reports the worst class in

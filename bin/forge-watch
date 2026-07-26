@@ -21,6 +21,8 @@ usage: forge-watch <verb>
          [--interval <s>] [--set-file <f>]     fetch the queue, then step
   status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
                                                live | dead | absent — and which, and what to do
+  stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
+                                               signal it — refuses rather than guessing
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
 
   --all reads the watch set from .claude/forge-set (or --set-file / FORGE_SET_FILE): one owner/name
@@ -35,10 +37,15 @@ usage: forge-watch <verb>
   session process restarting, which is exactly when a scratchpad-scoped file is not there.
 
   `status` exit codes: 0 live · 3 dead (nothing running — re-arm from the state, do NOT reseed) ·
-  4 absent (cold start) · 5 wedged (a process IS still running and has stopped ticking — STOP IT
-  FIRST, then re-arm). Four cases, never fewer: collapsing dead into absent turns a restarted watch
-  into a fresh one that has "seen nothing changed" since a beginning it invented, and collapsing
-  wedged into dead tells the reader to start a second watcher beside a live one.
+  4 absent (cold start) · 5 wedged (a process is still running and has stopped ticking — `stop` it,
+  then re-arm). Four cases, never fewer: collapsing dead into absent turns a restarted watch into a
+  fresh one that has "seen nothing changed" since a beginning it invented, and collapsing wedged into
+  dead tells the reader to start a second watcher beside a live one.
+
+  On `wedged`, use `stop` rather than `kill`. The pid is only known to be OUR watcher while its
+  heartbeat is fresh, and `wedged` is defined by that heartbeat being stale — so a bare kill on a
+  recycled pid signals a bystander. Demonstrated in review: with a foreign pid in the state, an
+  earlier version of this tool told the reader to kill init, in the imperative.
 
   A watcher passes --watcher-pid and --interval so its cadence is on disk; a tick that was due and
   did not happen then emits `event=tick-overdue` instead of being absorbed.
@@ -315,7 +322,8 @@ tag_repo() {
 # identical note telling the reader to re-arm. Those need OPPOSITE remedies:
 #
 #   no_process / no_watcher_record → nothing is running. Re-arm from this state.
-#   stale_heartbeat                → a process IS running, by definition. STOP IT FIRST, then re-arm.
+#   stale_heartbeat                → a process IS running, by definition. `stop` it, then re-arm —
+#                                    via the verb, never a bare kill; see proc_start for why.
 #
 # Following the old instruction in the wedged case started a second watcher beside a live one, on one
 # state file, with no lock anywhere (quince#50) — so the duplicate was not an unlucky race, it was the
@@ -373,7 +381,7 @@ watch_report() {
 			| "state=\($st) pid=\($w.pid) interval=\($iv)s last_watcher_tick=\($lw // "never")\(if $age == null then "" else " age=\($age | floor)s" end)" as $facts
 			| if $why == "stale_heartbeat" then
 				"watch=wedged \($facts) reason=stale_heartbeat",
-				"note: pid \($w.pid) IS STILL RUNNING and has stopped ticking. STOP IT FIRST, then re-arm from this state — do not reseed it. Re-arming beside it puts two watchers on one state file."
+				"note: pid \($w.pid) is running and has stopped ticking. Run `forge-watch stop` — it verifies the pid is still OUR watcher before signalling, and refuses if it was recycled. Then re-arm from this state; do not reseed it."
 			  elif $why != null then
 				"watch=dead \($facts) reason=\($why)",
 				"note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued."
@@ -416,6 +424,28 @@ watch_report() {
 # existence rather than permission.
 pid_alive() {
 	if kill -0 "$1" 2>/dev/null; then printf 'yes\n'; else printf 'no\n'; fi
+}
+
+# proc_start — the process's start time, which is what turns a pid into an identity.
+#
+# A pid alone is not an identity, and the comment on pid_alive above got this half right and half
+# wrong: it argued that pid reuse with a FRESH heartbeat is impossible, which is true — and then the
+# `wedged` class, added later, is DEFINED by the heartbeat being stale. So in the one state where this
+# tool issues an imperative to signal a process, the only thing tying that pid to our watcher was
+# missing. Demonstrated in review by writing a foreign pid into the state: the tool said "pid 1 IS
+# STILL RUNNING … STOP IT FIRST". It told the reader to kill init, in the imperative, with a plausible
+# explanation attached.
+#
+# Start time closes it: a recycled pid necessarily started AFTER the one we recorded, so an unequal
+# value means "not our process" without needing to identify what it is instead.
+#
+# `/proc/<pid>/stat` field 22, parsed after the LAST ')' because `comm` is parenthesised and may itself
+# contain spaces or parens — indexing from the left shifts on any process named unhelpfully. `ps -o
+# lstart=` is the portable alternative and is not available here (BusyBox rejects `-p`), so where
+# procfs cannot answer, the answer is empty and the caller REFUSES. Never a kill on an unverified pid.
+proc_start() {
+	[ -r "/proc/$1/stat" ] || return 0
+	sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'
 }
 
 now_iso() { jq -rn 'now | todate'; }
@@ -590,9 +620,14 @@ tick() {
 	# Operator-private fact that would then live in a file somebody pastes into an issue.
 	_ts=$(now_iso)
 	if [ -n "$_wpid" ]; then
-		jq -c --arg ts "$_ts" --argjson pid "$_wpid" --argjson iv "$_interval" '
+		# pid_start is recorded beside the pid so that a later `stop` can prove the pid still belongs to
+		# this process rather than to whatever the kernel recycled it onto. Recorded even when procfs
+		# cannot answer (empty), because "we never knew" and "it changed" are different refusals.
+		jq -c --arg ts "$_ts" --argjson pid "$_wpid" --argjson iv "$_interval" \
+			--arg start "$(proc_start "$_wpid")" '
 			.last_tick = $ts
-			| .watch = {pid: $pid, interval_s: $iv, last_watcher_tick: $ts,
+			| .watch = {pid: $pid, pid_start: (if $start == "" then null else $start end),
+			            interval_s: $iv, last_watcher_tick: $ts,
 			            due: (($ts | fromdate) + $iv | todate)}' "$_state" >"$_state.new" &&
 			mv "$_state.new" "$_state"
 	else
@@ -765,6 +800,57 @@ status)
 	fi
 	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
 	report_one "$_s" "$_repo"
+	;;
+stop)
+	# Verify-then-signal, in ONE place. The previous arrangement was a `status` that printed "STOP IT
+	# FIRST" and a human or agent running `kill` afterwards — two steps joined by a sentence in a skill,
+	# which is precisely the shape this whole unit exists to remove. An agent following that sentence
+	# literally, on a box where the pid had been recycled, had no defence at all.
+	#
+	# Every branch that cannot PROVE the pid is our watcher refuses. `kill` returning success proves a
+	# process died, not that the right one did.
+	shift
+	_s='' _repo=novkostya/quince
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--state)
+			_s=$2
+			shift 2
+			;;
+		--repo)
+			_repo=$2
+			shift 2
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+	[ -f "$_s" ] || die "no watch state at $_s — nothing recorded to stop"
+	_pid=$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)
+	[ -n "$_pid" ] || die "no watcher pid recorded in $_s — nothing to stop"
+	_was=$(jq -r '.watch.pid_start // empty' "$_s" 2>/dev/null || true)
+	if [ "$(pid_alive "$_pid")" = no ]; then
+		printf 'forge-watch: pid %s is already gone — nothing to stop. Re-arm from the state.\n' "$_pid"
+		exit 0
+	fi
+	if [ -z "$_was" ]; then
+		die "pid $_pid is running, but this state records no start time for it (armed by an older
+    version, or procfs was unreadable at arm time). REFUSING to signal: a pid without a recorded
+    start time cannot be shown to be our watcher rather than whatever reused its number. Identify
+    it by hand before killing anything."
+	fi
+	_now_start=$(proc_start "$_pid")
+	if [ -z "$_now_start" ]; then
+		die "cannot read the start time of pid $_pid (no procfs, or not permitted). REFUSING to
+    signal an unverified pid."
+	fi
+	if [ "$_now_start" != "$_was" ]; then
+		die "pid $_pid HAS BEEN RECYCLED — recorded start $_was, actual $_now_start. That pid now
+    belongs to something else. REFUSING to signal it; the watcher itself is gone, so treat this
+    as \`dead\` and re-arm from the state."
+	fi
+	kill "$_pid" 2>/dev/null || die "pid $_pid verified as our watcher, but the signal failed"
+	printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched)\n' "$_pid" "$_repo" "$_was"
 	;;
 replay)
 	shift

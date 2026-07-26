@@ -28,9 +28,12 @@ bin/forge-watch status --all      # declared set; exits 0 live / 3 dead / 4 abse
 - **`watch=dead`** → **re-arm from that state, and do NOT reseed it.** The next tick diffs against the
   stored observation and emits everything that accrued while nothing was watching. Report that a watch
   was found dead, and its reason.
-- **`watch=wedged`** → a watcher process **is still running** and has stopped ticking. **Stop that pid
-  first**, then re-arm. Re-arming beside it puts two watchers on one state file, and nothing in the tool
-  prevents that (quince#50).
+- **`watch=wedged`** → a watcher process is still running and has stopped ticking. Run
+  **`bin/forge-watch stop --repo <r>`**, then re-arm. Re-arming beside it puts two watchers on one state
+  file, and nothing in the tool prevents that (quince#50). **Do not `kill` the pid yourself:** it is
+  only known to be *our* watcher while its heartbeat is fresh, and `wedged` is defined by that
+  heartbeat being stale — so on a recycled pid a bare kill signals a bystander. `stop` verifies the
+  process start time before signalling and refuses when it cannot prove the identity.
 - **`watch=absent`** → cold start; seed and tick.
 
 Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
