@@ -110,7 +110,7 @@ Events are lines: `event=review pr=19 verdict=CHANGES_REQUESTED`, `event=checks 
 conclusion=FAILURE name=gates`, `event=merged pr=19`, `event=queue-empty`, `event=stalled pr=19
 since=3h`, `event=first-observation` (the sentinel discharging).
 
-On the runner, a systemd timer runs `tick` and pipes events to a dispatcher that starts **one fresh
+On the runner, an OpenRC-supervised timer runs `tick` and pipes events to a dispatcher that starts **one fresh
 session per event** — `/kickoff <pr>` for the implementer side, `/review-pr <n>` for the reviewer
 side. In a laptop session the same binary runs in-session as a fallback, and says which mode it is
 in, because a loop that dies with the lid must not look like a loop that is waiting.
@@ -200,4 +200,4 @@ observed to swallow anything.
    decays.
 2. **`forge-watch`** — the pure `step()` and its `tick` wrapper; G1 replays the fixtures. **After
    pr.5.**
-3. **loop modes + runner supervision** — skills and the systemd unit, G2–G5. **After pr.5.**
+3. **loop modes + runner supervision** — skills and the OpenRC service, G2–G5. **After pr.5.**
