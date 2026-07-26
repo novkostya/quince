@@ -3,7 +3,7 @@
 | Path | What | Committed? |
 | --- | --- | --- |
 | `skills/<name>/SKILL.md` | the workflow as commands: `/onboard`, `/architect`, `/kickoff`, `/report`, `/review-pr`, `/land`, `/qa` | yes |
-| `settings.json` | the shared permission allowlist — generic entries **plus** the documented reference environment | yes |
+| `settings.json` | the shared permission allowlist — generic entries **plus** the documented reference environment — and the one `Stop` hook (below) | yes |
 | `settings.local.json` | per-machine bindings: your real host aliases, your registry | **no** (gitignored) |
 | `settings.local.json.example` | what a binding file looks like | yes |
 | `loop-protocol.md` | the coroutine loop, both halves — normative for `/architect` and `/kickoff` | yes |
@@ -12,6 +12,36 @@
 Permission rules **merge** across settings files rather than overriding, and precedence for
 conflicts is deny → ask → allow, so the committed file can stay generic while your machine
 adds what only it knows.
+
+## The one hook, and what it does to your session
+
+`settings.json` registers a single `Stop` hook: `bin/forge-watch owed --hook`. When a turn ends it asks
+whether this box has **open PRs with no live watch** — the ones you authored, or the declared set if
+this box holds the architect credential — and if so it **blocks the stop once**, naming the exact
+command to arm one. End the turn again and it stops blocking and warns *you* instead. It exists because
+a session with that instruction in prose armed nothing at all and stopped anyway (quince#62); the
+reasoning is in [`loop-protocol.md`](loop-protocol.md) and the design in
+[`../docs/specs/rung-loop/rung-loop.md`](../docs/specs/rung-loop/rung-loop.md) §4f.
+
+Three things worth knowing before it surprises you:
+
+- **It runs on clone, without the trust dialog.** Hooks are not gated by workspace trust — permission
+  entries are, and are ignored in an untrusted workspace while hooks still run (observed). That is the
+  property we want, since a gate a session can skip by declining to trust the workspace is not a gate;
+  it also means checking this repository out means running this command at the end of every turn. It is
+  one local script, it makes one `gh` call, and it writes nothing.
+- **It costs about a second per turn end**, and has a 30 s timeout so a hanging forge cannot hold a
+  session open.
+- **If it cannot answer it says so and lets you go.** No credential, or a forge that will not respond,
+  produces a warning that the question was *not checked* — never a block, and never a quiet pass.
+
+To turn it off on your machine, put `"disableAllHooks": true` in your gitignored
+`settings.local.json` — checked, not assumed, and the obvious guess is wrong: **hooks merge across
+settings files rather than overriding**, so `"hooks": {"Stop": []}` locally does *not* remove the
+project's (verified — the hook still ran). Note what the working switch costs: it is all-or-nothing,
+so a machine that opts out of this gate opts out of every hook this repo ever adds. That is a local
+decision, and it is visible in a file you own; what is not available is turning it off by forgetting
+it exists.
 
 ## The two layers
 

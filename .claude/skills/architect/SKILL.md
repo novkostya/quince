@@ -173,17 +173,30 @@ healthy throughout — fresh heartbeat, state rewritten every 60 s, `status --al
 wake. It exits 0 with the events on stdout, 6 at the idle bound, 7 on repeated fetch failures — and
 **every exit is a re-arm**, because a watch that exited is a watch that is not watching.
 
+**Exits 6 and 7 will be reported to you as failures.** A background task that exits non-zero renders as
+*"failed with exit code 6"* — and 6 is `watch`'s designed idle heartbeat, the floor this section names.
+Read the last line of its output, which says which exit it was and why, before treating it as a
+malfunction.
+
 **`ScheduleWakeup` stays as a fallback heartbeat at ≥1200 s, and it is not cover.** Arm it — no design
-should rest on one channel — but its measured record on this box is three armings and **zero**
-deliveries, against 14/14 for the terminating watcher in the same window (quince#62). The floor under
+should rest on one channel — but it has delivered **nothing** across every arming measured to date on
+this box, against every event the terminating watcher delivered in the same window (quince#62 carries
+the dated tally; it is deliberately not copied here, so this file does not acquire arithmetic that
+needs maintaining). The floor under
 you is `watch`'s own `--max-wait`, not this; reasoning as though the fallback protects you is exactly
 what produced the fifty-minute stall. When it does fire, its **first job is a liveness assertion**,
 `bin/forge-watch status --all`; if that says `dead`, say so out loud rather than ticking once and going
 back to sleep. A due-but-missed tick arrives as `event=tick-overdue` and is reported, not absorbed.
 
 **Some of your wakes are your own doing** — an approval you posted, a merge you made — and the watcher
-does not suppress them (5 of 14 measured here). The event carries `actor=`: read it, rather than reading
-a self-wake as phantom activity.
+does not suppress them (roughly a third of them, measured; quince#62). The event carries `actor=`: read
+it, rather than reading a self-wake as phantom activity.
+
+**Ending a turn with an unwatched queue is blocked once.** A `Stop` hook runs `bin/forge-watch owed
+--all` — open PRs in the declared set with no live watch — and hands you the arming command; end the
+turn again and it stops blocking and tells the Operator instead. It is aimed at the failure that the
+implementer half produced (a session that armed nothing and stopped), and it applies here for the same
+reason: this section is prose, and prose is what was already tried.
 
 Then, on the events:
 

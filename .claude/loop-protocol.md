@@ -89,17 +89,33 @@ So:
    `live` or `wedged` watch, so step 0's four answers are enforced where they matter. **Every exit is a
    re-arm**: a watch that exited is a watch that is not watching.
 
-2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Its measured
-   record on the architect box is **three armings, zero deliveries** (quince#62: due `18:41`, `19:40`,
-   `20:03`; each time the session was idle at the due moment and was next woken by something else),
-   against 14/14 for the terminating watcher in the same window. Arm it anyway — it costs nothing and
-   the design should not depend on one channel — but do not reason as though it protects you, which is
-   the mistake that produced the fifty-minute stall. **The floor under a terminating watch is its own
-   `--max-wait`, not the fallback.** When the fallback does fire, its **first job is a liveness
-   assertion** — `forge-watch status` — and if the answer is `dead` it says so out loud instead of
-   quietly ticking once and going back to sleep.
+   **6 and 7 are not crashes, and your harness will call them crashes.** A background task that exits
+   non-zero is reported as *"failed with exit code 6"* — verified, not predicted — and 6 is the tool's
+   *designed heartbeat*. Read the last line of the output, which says which exit it was and why; a
+   session that reads its own heartbeat as a malfunction will either raise a false alarm or start
+   distrusting the mechanism, and both are worse than the stall this replaced.
 
-3. **A tick that was due and did not happen is reported, not absorbed.** `forge-watch` emits
+2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Across every
+   arming measured to date on the architect box it has delivered **nothing** (quince#62 carries the
+   dated tally; do not copy the number here, or this file acquires arithmetic nobody has scheduled to
+   maintain), against every event delivered by the terminating watcher in the same window. Arm it
+   anyway — it costs nothing and no design should rest on one channel — but do not reason as though it
+   protects you, which is the mistake that produced the fifty-minute stall. **The floor under a
+   terminating watch is its own `--max-wait`, not the fallback.** When the fallback does fire, its
+   **first job is a liveness assertion** — `forge-watch status` — and if the answer is `dead` it says
+   so out loud instead of quietly ticking once and going back to sleep.
+
+3. **Arming is not optional, and it is not on your honour.** `bin/forge-watch owed` asks whether there
+   are open PRs here with no live watch, and a `Stop` hook in `.claude/settings.json` runs it when a
+   turn ends. If a watch is owed, the turn is **blocked once** with the exact command to run; end the
+   turn again and it stops blocking and tells the **human** instead. It exists because the previous
+   version of this file said *arm a watch* and a session simply did not — no watcher, no state, no
+   fallback — and ended on *"the ball is back with the reviewer"* four minutes before the verdict
+   landed. A rule that tells a session to do something is satisfied by a session that does not do it.
+   If it cannot check — no credential, forge unreachable — it says the question was **not checked**,
+   which is not the same as *nothing is owed*, and neither blocks nor reassures.
+
+4. **A tick that was due and did not happen is reported, not absorbed.** `forge-watch` emits
    `event=tick-overdue due=… late=…` for it. The events themselves cannot carry that fact: they arrive
    looking perfectly healthy, all at once, hours late.
 
@@ -161,6 +177,11 @@ user-visible behaviour — and on any review comment it cannot satisfy without a
 **recorded on the PR**, naming what was hit and what is needed, because a push nobody reads leaves no
 trace and the forge is the memory.
 
-**"I finished a PR" is not a stop.** Neither is "over to the architect". The legitimate stops are:
-everything merged and the tail done; a decision that is the Operator's; or an unruled gap — and in the
-last two cases, say exactly what would unblock you.
+**"I finished a PR" is not a stop.** Neither is "over to the architect", and neither is **"the ball is
+back with the reviewer"** — the sentence a session ended on with nothing armed at all, four minutes
+before the verdict it was waiting for landed (quince#62). The list of illegitimate stops is not the
+defence; it has been extended twice, each time by a session inventing the next sentence. The defence is
+that ending a turn with an unwatched PR now blocks once and then tells the human.
+
+The legitimate stops are: everything merged and the tail done; a decision that is the Operator's; or an
+unruled gap — and in the last two cases, say exactly what would unblock you.

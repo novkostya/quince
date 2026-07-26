@@ -386,6 +386,80 @@ replayed against the shipped hand-rolled shape the positive fixture does not *fa
 which is the defect stated precisely — so the harness bounds every loop fixture with `timeout`, and
 says out loud when `timeout` is absent rather than running unguarded in silence.
 
+### 4f. Arming cannot be a thing a session is merely told to do (quince#62, second half)
+
+§4e fixes a loop that was built wrong. An hour after that failure, the implementer half produced a
+different one: **a session that built no loop at all.** No watcher, no state file, no `ScheduleWakeup`
+— checked structurally against the transcript, not guessed. It ended a turn with *"the ball is back
+with the reviewer"* at `19:41:56Z`; the verdict it was waiting for landed at roughly `19:46Z`, and
+nothing anywhere could have told it. The architect at least had a fallback firing into the void; this
+session had no mechanism of any kind and would have slept until a human typed into it.
+
+**Both stops were named as illegitimate by the skill the session was following**, in a section
+rewritten specifically to prevent the previous run's *"over to the architect"*. Rewriting the default
+from *stop* to *proceed* did not stop a session from finding a new sentence for stopping. That is the
+pattern, stated generally: **a rule that tells a session to do something is satisfied by a session that
+does not do it, and nothing observes the difference** — corollary (g) applied to arming rather than to
+checking.
+
+**Three shapes were available. The other two were rejected on structure, not on taste.**
+
+- **"Opening a PR arms the watch as a side effect"** *cannot work*, and fails in exactly the shape of
+  §4e. A session is woken when a background task **the session itself launched** completes; a process
+  forked by a `gh pr create` wrapper is tracked by nothing, so its exit notifies nobody. It would be
+  armed, ticking, `status=live`, and deaf — the bug wearing the fix's clothes.
+- **"A channel that does not depend on the recipient having armed anything"** is correct, and it
+  already exists in this document: the runner dispatcher in *Design*, a supervised `tick` starting
+  **one fresh session per event**. It needs the runner supervision unit, so it is named here rather
+  than built. It is the eventual answer; it is not available today.
+
+What remains is to make the **absence detectable**, aimed at the only actor who can fix it. So
+`forge-watch owed` answers *are there open PRs here with no live watch*, and the session's harness runs
+it when a turn ends (a `Stop` hook in `.claude/settings.json`). The mechanism is the harness's, not the
+model's, which is the entire point: the model cannot decline to run it by reasoning its way past a
+paragraph.
+
+- **The two halves owe over different sets**, exactly as `.claude/forge-set`'s own header says.
+  `--author @me` asks the *forge* which PRs this login has open — not the declared set, because a PR in
+  an undeclared repository still obligates whoever opened it. `--all` is the declared set, since a
+  reviewer's obligation cannot be derived from authorship. Neither is defaulted; the role is chosen by
+  **which credential the box holds**, which is how the two boxes already tell themselves apart, and it
+  is printed rather than assumed.
+- **It blocks ONCE, then tells the human.** A `Stop` hook that always blocks is a session that can
+  never end. The second attempt is allowed and emits a warning to the *user* instead. The goal was
+  never to make stopping impossible — only to make an unwatched stop impossible to do **silently**,
+  which is the whole of "make the absence detectable". No opt-out file, no waiver flag: an escape
+  hatch that can be set once and forgotten is the omission again, with a name.
+- **It fails OPEN, loudly.** No credential, or a forge that will not answer, produces a warning saying
+  the question was **not checked** — never silence, and never a block. A hook that blocked on its own
+  breakage would wedge every session in the repository; a hook that returned silence would be
+  committing the substitution it exists to prevent. *"I could not look"* and *"nothing is owed"* must
+  not print the same, which is this project's founding rule pointed at its newest instrument.
+- **The predicate is split pure/impure like everything else here.** `owed_decide` takes a table of
+  *(repo, watch class)* and returns the report and the exit class, with no forge, no process table and
+  no clock — so it is fixtured. `dead` and `wedged` produce **different instructions**, because they
+  need opposite remedies (§4c) and one message for two situations is the same defect one level up.
+
+**Verified end to end, because the mechanism is a claim about the harness and not about our code.**
+A `Stop` hook in project `.claude/settings.json` was probed in a scratch project and then for real:
+it fires in a **headless `claude -p` run in a never-trusted workspace**, `stop_hook_active` is `false`
+on the first stop and `true` on the second (which is what bounds the block to once), and exit 2 /
+`decision: "block"` prevents the stop and delivers the reason into the model's context. The real hook
+was then run against this repository with `FORGE_STATE_DIR` pointed at an empty directory: a session
+instructed *"reply with the single word PING and do not use any tools"* **tried to arm the watch
+instead**, quoting the exact command. With the watch live it answered `PING` and did not block.
+
+**Limits, stated because a claim without them is the thing this document keeps being rewritten for.**
+
+- It blocks the *model's* stop; it cannot force a correct arming. What it removes is silence.
+- **Hooks are not gated by the workspace trust dialog, and permission entries are** — observed in the
+  same run (`Ignoring 73 permissions.allow entries … this workspace has not been trusted`) while the
+  hook ran anyway. Desirable here, since enforcement that a session can skip by not trusting the
+  workspace is not enforcement; worth stating plainly, because it means cloning this repository runs
+  this command at the end of every turn.
+- It costs one forge call per turn end — measured at ~1.1 s for the `--author` query — and the hook is
+  given a 30 s timeout so a hanging forge cannot hold a session open.
+
 ## Design
 
 `bin/forge-watch` is a **pure state machine plus a thin fetch**: `step(previous_state, observation)
@@ -463,6 +537,13 @@ allowance faster for no benefit.
     `watch-idle` — not silently, and not by running forever.
 22. Arming a watch beside a `live` one is refused, and beside a `wedged` one is refused with `stop`
     named; `dead` and `absent` proceed and say which they were.
+23. A session that tries to end a turn with an open PR it authored and no live watch is **stopped and
+    told, with the exact command** — once. The second attempt is allowed and warns the human instead
+    (quince#62).
+24. A live watch owes nothing and **says so**; a gate whose satisfied answer is silence cannot be seen
+    to have run.
+25. When the check cannot be made — no credential, forge unreachable — it says the question was not
+    checked, and neither blocks nor reports "nothing owed".
 
 ## Gates
 
@@ -470,7 +551,10 @@ allowance faster for no benefit.
   9–17 and **20–21** (the `"kind": "loop"` fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
   Story **22 is a CLI smoke recorded in the PR**: the refusals are argument-time behaviour, and a
-  fixture that seeded a live pid would be asserting the harness rather than the tool.
+  fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**
+  split: the decision half is `"kind": "owed"` fixtures, and the **hook half is proven by running a
+  real headless session** (§4f) — it is a claim about the harness's behaviour, and no fixture of ours
+  can make it.
   Stories **18–19 are proven by a CLI smoke recorded in the PR, not by the replay harness** —
   they are argument handling rather than state transitions, and saying so is better than letting a
   reader assume the fixtures cover them. Story 6 is **not covered because it is not implemented**

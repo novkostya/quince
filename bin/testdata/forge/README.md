@@ -143,3 +143,23 @@ says out loud when `timeout` is not installed rather than running unguarded.
 behaviour, and a fixture that pinned them would fail on a loaded machine and teach everyone to ignore
 it. The **exit class** is asserted, as a line, because it is what a caller reads when it ignores stdout.
 
+## The fifth round: the session that armed nothing (quince#62, second half)
+
+An hour after the deaf watcher, the implementer half produced the complementary failure: **no loop at
+all** — no watcher, no state file, no fallback — ending a turn on *"the ball is back with the
+reviewer"* four minutes before its verdict landed. `forge-watch owed` is the predicate that makes that
+absence detectable, and `"kind": "owed"` drives its **pure** half: given which repositories have open
+PRs and what class their watches are in, what does the session owe.
+
+| Fixture | What it pins |
+| --- | --- |
+| `owed-an-unwatched-pr-is-owed.json` | one watched repository does not excuse an unwatched one — every repository is reported separately and the exit carries the worst case |
+| `owed-dead-and-wedged-need-opposite-remedies.json` | `dead` says re-arm without reseeding; `wedged` says stop the running process first. One message for two situations is the defect that split those classes apart to begin with |
+| `owed-a-live-watch-owes-nothing.json` | the satisfied case **says so**. A gate whose passing answer is silence cannot be seen to have run |
+
+**The half that no fixture here can cover is the hook itself**, because it is a claim about the
+*harness* rather than about this code: that a `Stop` hook in project settings runs, that exit 2 blocks
+the stop, and that `stop_hook_active` bounds the block to once. That was verified by running real
+headless sessions (spec §4f) — including the one that was told *"reply with the single word PING and do
+not use any tools"* and tried to arm a watch instead.
+

@@ -153,8 +153,19 @@ where it blocks the session it exists to wake.
 
 **Every exit is a re-arm.** A watch that exited is a watch that is not watching, and four forgotten
 re-arms are already on the record (quince#43). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
-it has three measured armings and zero deliveries (quince#62), so the floor under you is `watch`'s own
-idle bound, not the fallback.
+it has delivered nothing across every arming measured to date (quince#62), so the floor under you is
+`watch`'s own idle bound, not the fallback.
+
+**Your harness will report exits 6 and 7 as "failed".** A background task that exits non-zero is
+rendered as *"failed with exit code 6"*, and 6 is the tool's designed idle heartbeat. Read the last
+line of its output, which names the exit and the reason, before concluding anything broke.
+
+**You are not trusted to remember this.** Ending a turn with an open PR you authored and no live watch
+is blocked — once — by a `Stop` hook that runs `bin/forge-watch owed` and hands you the exact command;
+end the turn again and it stops blocking and tells the Operator instead. It exists because a session
+that had this instruction in prose armed nothing at all and stopped on *"the ball is back with the
+reviewer"*, four minutes before its verdict landed (quince#62). If you have genuinely finished, the
+second attempt goes through — the gate makes an unwatched stop visible, not impossible.
 
 Then keep going on what the forge says:
 
