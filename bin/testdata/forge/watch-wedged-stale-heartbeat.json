@@ -1,0 +1,16 @@
+{
+  "kind": "watch",
+  "note": "The failure a pid check alone cannot see: the process is alive and it stopped ticking. `pid_alive=yes` would read as healthy to any supervisor that asked only 'is it running', which is the same shape as asking a monitor 'did anything change' when it never looked. Three missed intervals (FORGE_STALE_TICKS) is the threshold; the overdue event fires beside the classification rather than instead of it, because 'the watcher is wedged' and 'a tick was missed' are two facts and either can be true without the other. Its mirror is watch-live-nothing-to-do.json, where the same live pid with a fresh heartbeat is correctly healthy — neither instrument decides alone.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:00:00Z",
+    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-26T10:00:00Z",
+               "due": "2026-07-26T10:01:00Z" }
+  },
+  "now": "2026-07-26T10:10:00Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-26T10:00:00Z age=600s reason=stale_heartbeat",
+    "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued.",
+    "event=tick-overdue due=2026-07-26T10:01:00Z late=540s interval=60s"
+  ]
+}

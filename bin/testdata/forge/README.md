@@ -1,9 +1,10 @@
 # `forge-watch` fixtures
 
-Observations for the pure `step(state, observation) → (state, events)` function. Most files are a
-**pair** — two consecutive observations, asserting which events the second must produce. A file marked
-`"kind": "sequence"` is an initial state plus N observations replayed in order through one state file,
-for the defects that live in what the state *remembers* between ticks.
+Observations for the pure halves of `bin/forge-watch`. Most files are a **pair** — two consecutive
+observations, asserting which events the second must produce. A file marked `"kind": "sequence"` is an
+initial state plus N observations replayed in order through one state file, for the defects that live
+in what the state *remembers* between ticks. A file marked `"kind": "watch"` drives the liveness
+classifier instead of the event one.
 
 **Provenance matters here more than usual**, because these fixtures exist to stop two real defects
 becoming folklore — and a fixture that overstates its own origin would be the same class of defect
@@ -81,3 +82,26 @@ in order. A pair cannot reach this: a pair whose `before` already held the carri
 be asserting the behaviour under test. Its teeth were checked the same way, but more narrowly — the
 current harness run against the *old* state-write, so the only thing that differs is the one hunk:
 tick 2 emits the duplicate, and nothing else in the directory changes.
+
+## The third round: the restart path, and a check that could only pass
+
+A third fixture kind, `"kind": "watch"`, drives the liveness classifier from a state file, a frozen
+`now` and a `pid_alive` answer, because that classifier is exactly as prone to reporting what it never
+checked as the event half is — and a restart path with no fixture is a promise.
+
+| Fixture | What it pins |
+| --- | --- |
+| `watch-absent-cold-start.json` | no state at all → `absent`, the only case where seeding is right |
+| `watch-dead-not-absent.json` | state on disk, process gone → `dead`, **re-arm, do not reseed**. The case the original requirement could not check: its state lived in a session scratchpad, and the failure it defended against destroys the scratchpad, so it would have looked in an empty room |
+| `rearm-emits-what-accrued.json` | re-arming from that state emits the two PRs that opened during the 44-minute gap — not `queue-empty`, not silence |
+| `watch-live-nothing-to-do.json` | live pid, fresh heartbeat → `live`, and it *says* so; a healthy answer that is silence cannot be seen to have run |
+| `watch-wedged-stale-heartbeat.json` | live pid, ticks stopped → `dead`. A pid check alone calls this healthy |
+| `watch-hand-tick-is-not-a-watcher.json` | a hand-run tick must not be able to make a dead watcher look alive |
+
+**One design correction earned during this round, and worth recording because it is the same shape
+again.** The first version confirmed the recorded pid by grepping `/proc/<pid>/cmdline` for
+`forge-watch` — and reported `pid_verified=yes` for the shell that had just *run* forge-watch, whose
+command line contained the string. A check whose positive answer can be produced by the act of asking
+is not a check. It is gone; `live` now requires the pid to exist **and** the heartbeat to be fresh,
+which is strictly stronger and cannot be fooled that way.
+

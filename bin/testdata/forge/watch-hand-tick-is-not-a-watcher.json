@@ -1,0 +1,13 @@
+{
+  "kind": "watch",
+  "note": "State written by a hand-run tick: `last_tick` is fresh, and there is no watcher record. This must read `dead`, not `live` — the trap being closed is that one field serving both facts would let a hand tick, or a human debugging, refresh the very heartbeat a supervisor consults, and a dead watch would then look alive for as long as somebody kept poking it. There is no cadence here to be late for, so no overdue event.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:40:00Z"
+  },
+  "now": "2026-07-26T10:40:19Z",
+  "pid_alive": "no",
+  "expect": [
+    "watch=dead state=STATE reason=no_watcher_record last_tick=2026-07-26T10:40:00Z",
+    "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued."
+  ]
+}

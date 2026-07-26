@@ -17,15 +17,30 @@ usage() {
 usage: forge-watch <verb>
 
   step   --state <file> --observation <file>   emit events for one observation (pure, no network)
-  tick   --state <file> [--repo owner/name] [--gh <cmd>]   fetch the queue, then step
-  replay <fixture.json>...                     drive step from recorded pairs; non-zero on mismatch
+  tick   [--repo owner/name] [--state <file>] [--gh <cmd>] [--watcher-pid <n>] [--interval <s>]
+                                               fetch the queue, then step
+  status [--repo owner/name] [--state <file>] [--now <iso>]
+                                               live | dead | absent — and which, and what to do
+  replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
+
+  State lives at $FORGE_STATE_DIR, else $XDG_STATE_HOME/quince/forge-watch, else
+  ~/.local/state/quince/forge-watch — one file per repo, at a path that OUTLIVES THE SESSION. A
+  session scratchpad is the wrong home for it: the failure this state exists to survive is the
+  session process restarting, which is exactly when a scratchpad-scoped file is not there.
+
+  `status` exit codes: 0 live · 3 dead (re-arm from the state, do NOT reseed) · 4 absent (cold
+  start). Three cases, never two — collapsing dead into absent turns a restarted watch into a fresh
+  one that has "seen nothing changed" since a beginning it invented.
+
+  A watcher passes --watcher-pid and --interval so its cadence is on disk; a tick that was due and
+  did not happen then emits `event=tick-overdue` instead of being absorbed.
 
   --gh defaults to FORGE_GH, else plain `gh`. The runner passes gh-bot; the arch box passes
   gh-arch. The tool does not pick an identity for you — a monitor that hard-coded one could not
   run on the box that most needs it.
 
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
-        merged · fetch-failed · queue-truncated
+        merged · tick-overdue · fetch-failed · queue-truncated
 
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
@@ -209,14 +224,144 @@ step() {
 }
 
 # ---------------------------------------------------------------------------
+# Where the state lives — and why not in the session's scratchpad.
+#
+# The first version of the restart requirement was defended by a check that could only pass: the
+# architect's state lived under /tmp/…/<session-id>/scratchpad/, which is SESSION-scoped, and the
+# failure being defended against — a host-client reconnect restarting the session process — produces
+# a new session with a new scratchpad. The re-arm step would have looked in an empty room, found
+# nothing, and concluded there was nothing to re-arm. A check that cannot fail is not a check.
+#
+# So: a path that outlives the process. Session scratchpads are for artefacts nobody needs tomorrow;
+# watch state is the exact opposite of that.
+# ---------------------------------------------------------------------------
+state_dir() {
+	printf '%s' "${FORGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/quince/forge-watch}"
+}
+
+state_path_for() {
+	# owner/name -> owner-name.state.json, so one file per watched repo and no nesting to create.
+	printf '%s/%s.state.json' "$(state_dir)" "$(printf '%s' "$1" | tr '/' '-')"
+}
+
+# ---------------------------------------------------------------------------
+# watch_report — the PURE half of liveness: (state, now, pid_alive) -> one classification line, plus
+# a tick-overdue event when one was due and did not happen.
+#
+# Pure for the same reason step() is: every liveness bug this project has had was untestable because
+# the deciding half was welded to the probing half. `pid_alive` is passed IN — the caller does the
+# impure poking at the process table.
+#
+# The three cases exist because collapsing two of them is the defect:
+#   absent — no state at all. Cold start; seed the sentinel and let the first tick say so.
+#   dead   — state on disk, nothing watching it. RE-ARM FROM IT. Do not reseed: the next tick diffs
+#            against the stored observation, which is what produces the events that accrued while
+#            nothing was watching. Collapsing this into `absent` is how a restarted watch silently
+#            becomes a fresh one that has "seen nothing changed" since a beginning it invented.
+#   live   — state and a watcher. Nothing to do.
+#
+# `dead` names its reason, because "the watcher is gone" and "the watcher is running but wedged" call
+# for different next moves:
+#   no_watcher_record — state exists but no watcher ever armed against it (a hand-run tick).
+#   no_process        — the recorded pid is gone.
+#   stale_heartbeat   — the pid exists and the ticks stopped. Invisible to a pid check alone, which is
+#                       why the heartbeat exists beside it.
+#
+# TWO instruments, and neither is sufficient alone — which is worth stating because the first version
+# of this leaned on one and was wrong:
+#   - The HEARTBEAT cannot see a watcher that died a moment ago: its last tick is by definition recent,
+#     so a fresh session would read `live`, do nothing, and nothing would ever tick again. That is the
+#     failure this whole verb exists to catch.
+#   - The PID cannot see a wedged watcher, and cannot be trusted to identify one either. The first
+#     version confirmed the pid by grepping /proc/<pid>/cmdline for "forge-watch" — and promptly
+#     reported `pid_verified=yes` for the shell that had just RUN forge-watch, because its own command
+#     line contained the string. A check whose positive answer can be produced by the act of asking is
+#     not a check. The grep is gone: pid reuse with a FRESH heartbeat is impossible (an impostor does
+#     not write our heartbeat), so the heartbeat covers what the grep pretended to.
+# So: `live` requires the pid to exist AND the heartbeat to be fresh. Either failing is `dead`.
+# ---------------------------------------------------------------------------
+STALE_TICKS=${FORGE_STALE_TICKS:-3}
+
+watch_report() {
+	_st=$1
+	_now=$2
+	_alive=$3 # yes or no — the caller does the impure poking at the process table
+
+	if [ ! -f "$_st" ]; then
+		printf 'watch=absent state=%s\n' "$_st"
+		printf 'note: cold start. Seed it and tick; the first tick emits first-observation.\n'
+		return 4
+	fi
+
+	jq -r --arg now "$_now" --arg alive "$_alive" --arg st "$_st" \
+		--argjson stale "$STALE_TICKS" '
+		($now | fromdate) as $t
+		| (.watch // null) as $w
+		| if $w == null or ($w.pid // null) == null then
+			"watch=dead state=\($st) reason=no_watcher_record last_tick=\(.last_tick // "never")",
+			"note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued."
+		  else
+			(($w.interval_s // 60)) as $iv
+			| (($w.last_watcher_tick // null)) as $lw
+			| (if $lw == null then null else ($t - ($lw | fromdate)) end) as $age
+			| (if $alive == "no" then "no_process"
+			   elif ($age == null or $age > ($iv * $stale)) then "stale_heartbeat"
+			   else null end) as $why
+			| "state=\($st) pid=\($w.pid) interval=\($iv)s last_watcher_tick=\($lw // "never")\(if $age == null then "" else " age=\($age | floor)s" end)" as $facts
+			| if $why != null then
+				"watch=dead \($facts) reason=\($why)",
+				"note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued."
+			  else
+				"watch=live \($facts)",
+				"note: nothing to do."
+			  end
+		  end,
+		# A tick that was due and did not happen is REPORTED, not absorbed — silence must stay
+		# distinguishable from not-looking, and the whole reason this file exists on disk is that the
+		# cadence above it died once without saying so. Reported only when a WHOLE interval was
+		# skipped, so ordinary jitter is not dressed up as a miss.
+		( .watch as $w2
+		  | select($w2 != null and ($w2.due // null) != null)
+		  | ($t - ($w2.due | fromdate)) as $late
+		  | select($late > ($w2.interval_s // 60))
+		  | "event=tick-overdue due=\($w2.due) late=\($late | floor)s interval=\($w2.interval_s // 60)s" )
+		' "$_st" || die "could not read watch state: $_st"
+
+	# The exit code carries the class, so a caller that ignores stdout still cannot mistake dead for
+	# live: 0 live, 3 dead, 4 absent.
+	_cls=$(jq -r --arg now "$_now" --arg alive "$_alive" --argjson stale "$STALE_TICKS" '
+		($now | fromdate) as $t | (.watch // null) as $w
+		| if $w == null or ($w.pid // null) == null then "dead"
+		  elif $alive == "no" then "dead"
+		  elif (($w.last_watcher_tick // null) == null
+		        or ($t - ($w.last_watcher_tick | fromdate)) > (($w.interval_s // 60) * $stale)) then "dead"
+		  else "live" end' "$_st")
+	[ "$_cls" = live ] || return 3
+	return 0
+}
+
+# pid_alive — the impure probe, and deliberately only that: does this pid exist. It does NOT try to
+# confirm the process is forge-watch (see watch_report's note — the version that grepped
+# /proc/<pid>/cmdline reported success for the shell that had just run forge-watch). The state file is
+# per-user under $HOME, so the watcher is the same user by construction and `kill -0` answers about
+# existence rather than permission.
+pid_alive() {
+	if kill -0 "$1" 2>/dev/null; then printf 'yes\n'; else printf 'no\n'; fi
+}
+
+now_iso() { jq -rn 'now | todate'; }
+
+# ---------------------------------------------------------------------------
 # replay — the fixtures ARE the test. Each carries the events it must produce, so a change in
 # behaviour fails here rather than in someone's memory of what the monitor used to do.
 #
-# Two shapes. A `before`/`after` PAIR is one transition, which is what most defects are. A
-# `"kind": "sequence"` fixture is an initial state plus N observations replayed in order through the
+# Three shapes, one harness. A `before`/`after` PAIR is one transition, which is what most defects are.
+# A `"kind": "sequence"` fixture is an initial state plus N observations replayed in order through the
 # SAME state file — the only way to pin what the state itself remembers between ticks, which a pair
 # cannot reach: a pair whose `before` already contains the carried-forward value is asserting the
-# behaviour it was supposed to test.
+# behaviour it was supposed to test. A `"kind": "watch"` fixture drives watch_report from a state file,
+# a frozen `now` and a pid_alive answer — because the liveness classifier is exactly as prone to
+# reporting-what-it-never-checked as the event half, and a restart path with no fixture is a promise.
 # ---------------------------------------------------------------------------
 compare_events() {
 	# $1 fixture label, $2 got, $3 want — returns non-zero on mismatch and prints both.
@@ -234,7 +379,8 @@ replay() {
 	_fail=0
 	for _f in "$@"; do
 		_tmp=$(mktemp -d)
-		if [ "$(jq -r '.kind // "pair"' "$_f")" = sequence ]; then
+		_kind=$(jq -r '.kind // "pair"' "$_f")
+		if [ "$_kind" = sequence ]; then
 			jq -c '.initial' "$_f" >"$_tmp/state"
 			_n=$(jq '.steps | length' "$_f")
 			_i=0
@@ -246,6 +392,20 @@ replay() {
 					"$_got" "$_want" || _fail=1
 				_i=$((_i + 1))
 			done
+			rm -rf "$_tmp"
+			continue
+		fi
+		if [ "$_kind" = watch ]; then
+			if [ "$(jq -r 'has("state")' "$_f")" = true ]; then
+				jq -c '.state' "$_f" >"$_tmp/state"
+			fi
+			_got=$(watch_report "$_tmp/state" "$(jq -r '.now' "$_f")" "$(jq -r '.pid_alive // "yes"' "$_f")" || true)
+			# The state path is a mktemp path here and a real one in production, so the fixtures write
+			# `state=STATE` and the harness normalises. The path is still asserted to be REPORTED —
+			# a report that omitted which file it read would be the weaker claim.
+			_got=$(printf '%s\n' "$_got" | sed "s|state=$_tmp/state|state=STATE|" | sort)
+			_want=$(jq -r '.expect[]' "$_f" | sort)
+			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
 			rm -rf "$_tmp"
 			continue
 		fi
@@ -270,7 +430,17 @@ tick() {
 	_state=$1
 	_repo=$2
 	_gh=$3
+	_wpid=$4     # the WATCHER loop's pid, or '' for a hand-run tick
+	_interval=$5 # seconds between watcher ticks, for the heartbeat and the overdue check
 	command -v jq >/dev/null 2>&1 || die "jq is required"
+
+	# A tick that was due and did not happen is reported BEFORE anything else, because it is the one
+	# fact about this tick that the events themselves cannot carry: they will arrive looking perfectly
+	# healthy, all at once, hours late. Only the watcher's own ticks are judged — a hand-run tick has
+	# no cadence to be late for.
+	if [ -n "$_wpid" ] && [ -f "$_state" ]; then
+		watch_report "$_state" "$(now_iso)" yes 2>/dev/null | grep '^event=' || true
+	fi
 
 	# The fetch is captured to a file and checked ON ITS OWN, because piping it straight into jq
 	# hands us JQ's exit status: a missing `gh` wrapper produced no output, jq accepted the empty
@@ -339,6 +509,24 @@ tick() {
 
 	[ -f "$_state" ] || printf '{"observed":false}\n' >"$_state"
 	step "$_state" "$_obs"
+
+	# The heartbeat is written AFTER step(), so a tick that died mid-step does not leave a timestamp
+	# claiming it finished. `last_tick` records any tick; the watcher's own cadence is recorded
+	# separately, so a hand-run tick can never make a dead watcher look alive — which it would, if one
+	# field served both, and that field is precisely what a supervisor consults.
+	#
+	# No hostname is recorded, deliberately: the state file is per-box already, and a hostname is an
+	# Operator-private fact that would then live in a file somebody pastes into an issue.
+	_ts=$(now_iso)
+	if [ -n "$_wpid" ]; then
+		jq -c --arg ts "$_ts" --argjson pid "$_wpid" --argjson iv "$_interval" '
+			.last_tick = $ts
+			| .watch = {pid: $pid, interval_s: $iv, last_watcher_tick: $ts,
+			            due: (($ts | fromdate) + $iv | todate)}' "$_state" >"$_state.new" &&
+			mv "$_state.new" "$_state"
+	else
+		jq -c --arg ts "$_ts" '.last_tick = $ts' "$_state" >"$_state.new" && mv "$_state.new" "$_state"
+	fi
 	rm -f "$_obs" "$_raw" "$_raw.err"
 }
 
@@ -365,7 +553,7 @@ step)
 	;;
 tick)
 	shift
-	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}"
+	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _wpid='' _iv=60
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -380,16 +568,63 @@ tick)
 			_ghcmd=$2
 			shift 2
 			;;
+		--watcher-pid)
+			_wpid=$2
+			shift 2
+			;;
+		--interval)
+			_iv=$2
+			shift 2
+			;;
 		*) die "unknown option: $1" ;;
 		esac
 	done
-	[ -n "$_s" ] || die "tick needs --state"
+	# --state is now optional: without it the path is derived from --repo, at a location that outlives
+	# the session. It stays available because the fixtures and any second opinion need to point the
+	# tool at a scratch file.
+	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+	mkdir -p "$(dirname "$_s")"
+	case "$_wpid" in
+	'') : ;;
+	*[!0-9]*) die "--watcher-pid must be a pid: $_wpid" ;;
+	esac
+	case "$_iv" in *[!0-9]*) die "--interval must be seconds: $_iv" ;; esac
 	# The identity is the caller's choice, never the tool's: the reviewer loop runs on quince-arch,
 	# which by construction holds no bot token, so a hard-coded gh-bot could not run on the box
 	# that most needs this. Default is plain `gh`, which is also what a stranger's clone has.
 	command -v "$_ghcmd" >/dev/null 2>&1 || [ -x "$_ghcmd" ] ||
 		die "gh command not found: $_ghcmd (set --gh or FORGE_GH)"
-	tick "$_s" "$_repo" "$_ghcmd"
+	tick "$_s" "$_repo" "$_ghcmd" "$_wpid" "$_iv"
+	;;
+status)
+	shift
+	_s='' _repo=novkostya/quince _now=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--state)
+			_s=$2
+			shift 2
+			;;
+		--repo)
+			_repo=$2
+			shift 2
+			;;
+		--now)
+			_now=$2
+			shift 2
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+	[ -n "$_now" ] || _now=$(now_iso)
+	_alive=no
+	if [ -f "$_s" ]; then
+		_pid=$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)
+		[ -n "$_pid" ] && _alive=$(pid_alive "$_pid")
+	fi
+	printf 'forge-watch: repo=%s\n' "$_repo"
+	watch_report "$_s" "$_now" "$_alive"
 	;;
 replay)
 	shift
