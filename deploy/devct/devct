@@ -242,13 +242,25 @@ deploy() {
 
 	# 1. Which container.
 	if [ -z "$_d_vmid" ]; then
-		_d_vmid=$(running_dev_vmid)
-		if [ -z "$_d_vmid" ] && [ -n "$_d_create" ]; then
+		_d_running=$(running_dev_vmids)
+		_d_count=$(printf '%s' "$_d_running" | wc -w | tr -d ' ')
+		case "$_d_count" in
+		1) _d_vmid=$_d_running ;;
+		0)
+			[ -n "$_d_create" ] ||
+				devct_die "no running dev container — start one with 'devct create', or pass --create"
 			create
-			_d_vmid=$(running_dev_vmid)
-		fi
-		[ -n "$_d_vmid" ] ||
-			devct_die "no running dev container — start one with 'devct create', or pass --create"
+			_d_running=$(running_dev_vmids)
+			[ "$(printf '%s' "$_d_running" | wc -w | tr -d ' ')" -eq 1 ] ||
+				devct_die "created a container but could not identify it — pass --vmid N"
+			_d_vmid=$_d_running
+			;;
+		*)
+			# Ambiguity is not absence. Naming the containers turns "pick one" into a decision the
+			# reader can make without going to look, and --create here would have added a third.
+			devct_die "more than one running dev container ($(printf '%s' "$_d_running" | tr ' ' ',')) — pass --vmid N"
+			;;
+		esac
 	fi
 	devct_in_pool "$_d_vmid" || devct_die "vmid $_d_vmid is not in pool $DEVCT_POOL"
 	_d_name=$(ct_name "$_d_vmid")
@@ -322,12 +334,16 @@ EOF
 	fi
 }
 
-running_dev_vmid() {
+# Returns EVERY running dev container, space-separated — the caller distinguishes none from
+# several. The first version returned empty for both, so "two are running" was reported as "none
+# are running", and its suggested fix would have created a third. An error message is a claim:
+# collapsing two conditions into one message makes it a false one half the time.
+running_dev_vmids() {
 	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
 	_l=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || return 1
 	devct_body "$_l" | jq -r --argjson m "$(devct_body "$_r" | jq -c '[.data.members[]?|.vmid]')" \
 		'[.data[] | select(.template!=1 and .status=="running" and (.vmid as $v | $m | index($v))) | .vmid] |
-		 if length == 1 then .[0] else empty end'
+		 join(" ")'
 }
 
 ct_name() {
