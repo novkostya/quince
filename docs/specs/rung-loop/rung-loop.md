@@ -208,6 +208,20 @@ Therefore:
 - **a tick that was due and did not happen emits `tick-overdue`.** The events themselves cannot carry
   that fact: they arrive looking perfectly healthy, all at once, hours late. Reported only when a whole
   interval was skipped, so ordinary jitter is not dressed up as a miss.
+- **`--state` is for fixtures and second opinions; the default path is the operational one.** This is a
+  rule about arming rather than a better check, because no check can close it: **liveness is only
+  discoverable through whichever state file you happen to point at**, so a watcher armed under a
+  session-scoped `--state` and one armed under the default path cannot see each other. Neither is
+  lying — both are correct by their own lights. Concretely, at the launchpad pull that makes this
+  protocol live: **stop any watcher armed under a session-scoped `--state` before arming under the
+  default path**, or the first session after the restart will read `absent`, correctly, and arm a
+  second watcher beside a running one.
+- **Nothing yet stops two watchers ticking one state file, and `dead` is a judgement rather than a
+  fact** — a watcher whose fetch hangs past `interval × FORGE_STALE_TICKS` is alive and reported dead,
+  and `status` then tells the reader to start another. Direction of failure is duplicate or lost events,
+  not a corrupted tree. Named here rather than left to be rediscovered; the fix, and the parts of it
+  that need a ruling rather than a patch, are
+  [quince#50](https://github.com/novkostya/quince/issues/50).
 
 **Declared debt:** `stalled` (story 6) is specified and **not implemented** — it needs a wall clock,
 which the pure half deliberately does not have. It was advertised in `--help` while unimplemented,
