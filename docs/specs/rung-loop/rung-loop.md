@@ -523,9 +523,19 @@ merger's, and is silent thereafter.
 - **Corollary (e) is not retired.** This mechanises the **CI park** — the commonest one, and the only
   one where a field moves. A park on a *human* decision moves nothing at all and is still invisible;
   that is story 6 (`stalled`), still unimplemented, and until it exists the discipline stands.
-- **A watch armed *after* a PR went `CLEAN` will not emit it.** The first observation reports itself
-  and nothing else (§4b), by design, so the landable PR is in the baseline rather than in a
-  transition. The session's own enumeration at arm time is what covers that, and it is a session step.
+- **A COLD START armed after a PR went `CLEAN` will not emit it — a re-arm will.** `absent` seeds a
+  first observation, which reports itself and nothing else (§4b), so a PR that is already landable
+  sits in the baseline rather than in a transition; the session's own enumeration at arm time is what
+  covers that, and it is a session step. **`dead` is the opposite case and it is the common one:**
+  re-arming diffs against the *stored* observation rather than reseeding it (§4c), and that
+  observation still holds the old `merge_state` — so a PR that became landable while nothing was
+  watching **is** emitted on the next tick.
+
+  The distinction earns its paragraph because the first draft of this caveat missed it and thereby
+  overstated the hole. A **terminating** watcher makes re-arms the normal path — a dozen in a single
+  evening — and genuinely cold starts rare, so wording that covers only `absent` reads as a gap in the
+  common case when it is a gap in the rare one. Correction from review (quince#67); the shape is the
+  one §4c already names, which is why `dead` and `absent` were never allowed to collapse.
 - **`CLEAN` is GitHub's lazily-computed answer**, and this design rests on it arriving. Measured
   arriving on quince#63 and again on quince#66; a `UNKNOWN` flap in between is already handled by the
   last-known-state carry-forward of §4b, which is the machinery that made this a one-line widening
