@@ -189,9 +189,11 @@ create() {
 	done
 	case "$_role" in implementer | arch) ;; *) devct_die "unknown role '$_role' — expected implementer or arch" ;; esac
 
+	_named=''
 	if [ "${1:-}" = --name ]; then
 		[ -n "${2:-}" ] || devct_die "--name needs a value"
 		_host=$2
+		_named=1
 	else
 		_n=${1:-$(next_alias_n "$_r")}
 		_host="quince-dev-$_n"
@@ -207,6 +209,20 @@ create() {
 		"newid=$_vmid" "hostname=$_host" "pool=$DEVCT_POOL") ||
 		devct_die "clone refused (HTTP $(devct_code "$_r")): $(devct_body "$_r")"
 	devct_task_wait "$(devct_body "$_r" | jq -r '.data')" || devct_die "clone failed"
+
+	# Two tags, because ROLE and PERSISTENCE are different axes and conflating them broke the tool:
+	# tagging every default-role box as "implementer" made the destroy guard refuse DISPOSABLE dev
+	# containers, which is most of what destroy is for. Found by creating one and watching it be
+	# protected.
+	#   quince-role-<role>  — which identity the box carries (implementer | arch)
+	#   quince-persistent   — this box is not a throwaway: it carries a login ceremony
+	# A named box (--name) is persistent by construction; the auto-numbered quince-dev-N series is
+	# not. Tags are API metadata: readable while the container is stopped, which is exactly when a
+	# destroy is most likely to be the mistake.
+	_tags="quince-role-$_role"
+	[ -n "$_named" ] && _tags="$_tags;quince-persistent"
+	_r=$(devct_api PUT "/nodes/$DEVCT_NODE/lxc/$_vmid/config" "tags=$_tags") ||
+		devct_die "could not tag $_host (HTTP $(devct_code "$_r"))"
 
 	devct_start "$_vmid" || devct_die "could not start $_vmid"
 	_ip=$(devct_wait_for_ip "$_vmid") || devct_die "$_host never reported an address"
@@ -382,6 +398,21 @@ running_dev_vmids() {
 		 join(" ")'
 }
 
+# The role tag is the authority. An untagged container is treated as disposable, which is the
+# historical behaviour and the safe default for the dev boxes that predate tagging.
+ct_role() {
+	ct_tags "$1" | sed -n 's/^quince-role-//p' | head -1
+}
+
+ct_tags() {
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc/$1/config") || return 0
+	devct_body "$_r" | jq -r '.data.tags // ""' | tr ";" "\n"
+}
+
+ct_has_tag() {
+	ct_tags "$1" | grep -qx "$2"
+}
+
 ct_name() {
 	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || return 1
 	devct_body "$_r" | jq -r --arg v "$1" '.data[] | select((.vmid|tostring)==$v) | .name'
@@ -427,10 +458,12 @@ destroy() {
 	devct_is_template "$1" &&
 		devct_die "vmid $1 is the template, not a dev container — rebuild it with devct-template if that is what you meant"
 
-	# The runner is persistent and holds credentials the disposable containers do not: destroying it
-	# by reflex is a different kind of mistake from destroying a dev box, so it takes a second word.
-	if [ -z "$_force" ] && [ "$(ct_name "$1")" = "${DEVCT_RUNNER_NAME:-quince-runner}" ]; then
-		devct_die "vmid $1 is the RUNNER, not a disposable container — it holds the claude.ai login and the bot identity, and rebuilding it costs a login ceremony. Pass --force if that is genuinely what you want."
+	# Persistent boxes are protected by their ROLE TAG, not by a hard-coded name (architect ruling
+	# on #26): guarding the literal string "quince-runner" left quince-arch destroyable by reflex,
+	# which is exactly how the runner was lost once. Anything tagged with a persistent role takes a
+	# second word.
+	if [ -z "$_force" ] && ct_has_tag "$1" quince-persistent; then
+		devct_die "vmid $1 is a PERSISTENT box (role: $(ct_role "$1")), not a disposable container — it carries a Claude login ceremony that cannot be scripted, and its credentials. Pass --force if that is genuinely what you want."
 	fi
 
 	printf 'destroying %s\n' "$1"

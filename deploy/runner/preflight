@@ -47,6 +47,15 @@ esac
 # Role comes from the environment, defaulting to implementer — a box that never declares a role
 # gets the stricter, historical behaviour rather than the permissive one.
 ROLE="${QUINCE_RUNNER_ROLE:-implementer}"
+# Say when the role was ASSUMED rather than declared. Without it, running preflight by hand on the
+# arch box reports "no bot token" — true, but it reads as "you are missing a credential" when the
+# cause is "you did not say which box this is". Naming the assumption costs a line and saves the
+# puzzled minute (architect's note on #26).
+if [ -n "${QUINCE_RUNNER_ROLE:-}" ]; then
+	ok "role $ROLE (declared)"
+else
+	printf 'preflight: role %s — ASSUMED, because QUINCE_RUNNER_ROLE is unset. The service sets it from /etc/conf.d; a hand run does not.\n' "$ROLE"
+fi
 case "$ROLE" in
 implementer)
 	if [ ! -f "$TOKEN_FILE" ]; then
