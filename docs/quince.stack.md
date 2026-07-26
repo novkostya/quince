@@ -4,10 +4,12 @@
 > Implementing agents follow these as settled law; reopening one requires the Operator
 > saying so in chat, and the change lands here first.
 >
-> Grounding: the hands-on feasibility lab (`../local/chatgpt-original-idea-chat.md`) proved the
-> protocol path in the target environment — Alpine LXC on Proxmox, libimobiledevice 1.4.0,
-> full encrypted USB backup (143k files) + Wi-Fi incremental via netmuxd (3.6 GB, ~9 min,
-> `Backup Successful`), iMazing opens the result. Decisions below assume those facts.
+> Grounding: every decision below assumes a protocol path that was **measured, not hoped
+> for**. Before any of it was written, a hands-on feasibility pass
+> (`../local/chatgpt-original-idea-chat.md`) drove a full encrypted USB backup (143k files)
+> and a Wi-Fi incremental via netmuxd (3.6 GB, ~9 min, `Backup Successful`) in the target
+> environment — Alpine LXC on Proxmox, libimobiledevice 1.4.0 — and iMazing opened the
+> result. Those facts are load-bearing; decisions resting on them say so where they rest.
 
 ---
 
@@ -23,8 +25,9 @@ HTTP/WebSocket API, UI hosting — is a single Go binary (`quince`).
   runtime into every image layer.
 - *Robustness bias:* explicit error handling, static types, `go test -race`, and a flat
   concurrency model (goroutines supervising subprocesses, fanning out WS events) fit a
-  daemon whose whole job is "never wedge, never lie about state". This is also the
-  Operator's brother's argument, and he'll be a reviewer — house familiarity counts.
+  daemon whose whole job is "never wedge, never lie about state". It is also the language
+  this project's human reviewers already work in, and review familiarity counts when
+  correctness is the entire product.
 - *LLM authorship:* the project will be written by Claude (Opus). Go's small surface and
   enforced explicitness produce reviewable diffs; the race detector and `vet` catch what
   reviews miss.
@@ -357,10 +360,10 @@ are irrelevant, and the ioctl passes through container bind mounts to the real
 filesystem, which is the only layer that must support it (host OpenZFS needs block
 cloning enabled — probed, with a plain-language onboarding message when absent).
 
-**D5a. The offsite-sync contract (the Operator's motivating case).** The offsite model
-is **file-level sync of the whole storage tree** (rclone → B2 class tools, one cron job
-over e.g. `/rpool/userdata` covering quince and everything else), which walks live
-mounted filesystems and uploads whatever is there. The rule:
+**D5a. The offsite-sync contract (the requirement that drove this storage design).** The
+offsite model is **file-level sync of the whole storage tree** (rclone → B2 class tools,
+one cron job over e.g. `/rpool/userdata` covering quince and everything else), which walks
+live mounted filesystems and uploads whatever is there. The rule:
 
 > **The live namespace always presents a consistent last-verified backup per device;
 > working areas are excluded by one static filter rule.**
@@ -460,10 +463,10 @@ tracks can build in parallel.
 **Decision** (revised on Operator ruling: mainstream, highly maintainable, lightweight,
 strong LLM fluency — no niche dependencies):
 - React 19 + Vite + TypeScript.
-- **Tailwind CSS v4** with the design tokens as CSS variables in the theme — the
-  mercury *idiom* (semantic tokens, light/dark one variable deep) carried over without
-  the dependency; mercury remains a taste reference only, `@mercury-fx/ui` is not
-  consumed.
+- **Tailwind CSS v4** with the design tokens as CSS variables in the theme. The *idiom*
+  (semantic tokens, light/dark one variable deep) is carried over from `mercury` — a
+  private design system evaluated as a source of conventions — without the dependency
+  that came with it: `@mercury-fx/ui` is not consumed.
 - **Components vendored, shadcn/ui-style**: accessible primitives from Radix UI, styled
   copies living in our repo — we own the code, no component-library version churn, and
   it is the pattern current LLMs author most fluently. lucide icons.
@@ -559,10 +562,11 @@ than replaces as the source of truth:
   file is safely diffable, shareable, and versionable;
 - `quince config validate` for pre-flight in scripts/CI.
 
-**Why.** The Operator's litmus test: PVE and OpenWrt earn love because their config is
-transparent files you can read, edit, and diff; OPNsense got deleted within an hour for
-burying state in an opaque GUI. Plex is the setup bar: nothing to learn before the UI is
-up. Both properties at once — GUI-first onboarding, file-first truth.
+**Why.** The litmus test is what makes an appliance stay installed: PVE and OpenWrt earn
+loyalty because their config is transparent files you can read, edit, and diff, while a
+GUI that buries state in an opaque store gets uninstalled within the hour. Plex is the
+setup bar: nothing to learn before the UI is up. Both properties at once — GUI-first
+onboarding, file-first truth.
 
 **Staged delivery** (external-review point, accepted): the full subsystem is the
 destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed config,

@@ -3,20 +3,27 @@
 > Visual and interaction canon for the web app. The frontend stack decision is
 > [`quince.stack.md` D7](quince.stack.md); this doc is taste + conventions.
 
-## Taste references (Operator-supplied)
+## Visual target
 
-- **sing-box dashboard (1.14 alpha)** — the primary reference. Light neutral background;
-  left sidebar (product name + version up top, then flat nav items with small line icons,
-  active item as a soft filled pill); content = grid of white rounded-corner cards; each
-  card: muted icon+label header, one large monospace metric, muted secondary stat, minimal
-  monochrome sparkline; instance/uptime pinned at sidebar bottom. Quiet, airy, almost
-  monochrome.
-- **AdGuard Home** — dense-but-calm tables and stat blocks, functional minimalism.
-- **GL.iNet router UI** — friendly cards, clear affordances for non-expert users.
-- **Anti-reference: iMazing** — capable but 2010s-macOS-skeuomorphic-ish; avoid the vibe.
-- **mercury** — a private token-driven design system the Operator likes (family
-  project, not public). Borrow the architecture: semantic CSS tokens, light/dark one
-  variable deep, presentational components + external state (Effector).
+Quiet, airy, nearly monochrome: light neutral surfaces, with colour spent only on state
+that matters. Concretely —
+
+- **Sidebar-first layout.** A left sidebar holds the product name and version at the top,
+  then flat nav items with small line icons; the active item reads as a soft filled pill.
+  A persistent status readout is pinned at the bottom.
+- **Content is a grid of cards.** White, rounded corners, generous spacing. A status card
+  reads: muted icon-and-label header, one large monospace metric, a muted secondary stat,
+  and at most a minimal monochrome sparkline.
+- **Dense but calm.** Tables and stat blocks carry many rows without shouting — functional
+  minimalism, no chrome that isn't load-bearing, no decoration competing with the data.
+- **Legible without expertise.** Cards and actions explain themselves; someone who has
+  never heard of `idevicebackup2` can still tell what is happening and what to press.
+- **What to avoid:** the skeuomorphic, heavily-chromed desktop-utility look — faux
+  materials, gradients, dense toolbars of tiny tinted icons. Capable software can still
+  feel a decade out of date, and that is the failure mode here.
+- **Token-driven, one variable deep.** Semantic CSS tokens are the entire theming layer:
+  light and dark differ by token values, never by a branch inside a component. Components
+  stay presentational and read state from outside themselves.
 
 ## Principles
 
@@ -37,15 +44,16 @@
    - **Home = the Devices dashboard**: one card per device (identity, presence,
      encryption state, last-backup status) with a `Back up now` button and inline
      mini-progress when a job is running, plus the N most recent backups across devices
-     — a couple of family phones don't generate much data, so the dashboard is composed
-     to look alive rather than empty.
+     — a household with two or three devices doesn't generate much data, so the dashboard
+     is composed to look alive rather than empty.
    - **Device details**: everything about one device — status, actions, job history
      (grouped by intent), and its full version list with unlock/browse entry points.
    - *Parked for qn.12*: a phone-first entry point — when the PWA is opened from a
      backed-up device itself, land directly on that device's details with a
      "See all devices" escape hatch.
-   Sidebar layout per the sing-box reference; product name + version top-left;
-   connection status (WS state, backend probe) bottom-left.
+   Sidebar layout per **Visual target** above; product name + version top-left;
+   connection status (WS state, backend probe) bottom-left — that section's pinned status
+   readout is this.
 5. **Numbers are monospace** (tabular figures), units spaced (`7.5 KB/s`, `3.6 GB`),
    sizes humanized consistently (one shared formatter).
 6. **Light + dark from day one** via tokens; system-follow default, manual override.
@@ -62,8 +70,9 @@
 
 - Tokens live as CSS variables in the Tailwind v4 theme (`ui/src/styles/tokens.css`):
   full semantic palette (`--bg`, `--bg-card`, `--fg`, `--fg-muted`, `--accent`, states)
-  — components consume tokens only, never raw colors. This is the mercury idiom carried
-  over; mercury itself is a taste reference, not a dependency.
+  — components consume tokens only, never raw colors, and light/dark is a change of token
+  values rather than a branch in a component (stack D7 records where the idiom came from
+  and why no design-system dependency came with it).
 - Components are vendored shadcn/ui-style on Radix primitives — styled copies in our
   repo, ours to edit; no component-library dependency.
 - State: Zustand stores per feature (`devices`, `jobs`, `versions`, `session`); a
