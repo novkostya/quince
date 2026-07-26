@@ -124,6 +124,12 @@ way to ask the two questions that separate a working watch from a deaf one.
 | `watch-exits-on-the-event.json` | a verdict arriving on tick 3 **ends the loop**, with the events on stdout and exit 0 — and, because those events are in the expectation at all, that the loop did not exit on ticks 1–2 |
 | `watch-silence-keeps-watching.json` | nothing changing does **not** end it; the run ends at the declared `--max-wait` bound, announcing `event=watch-idle` rather than exiting quietly |
 | `watch-baseline-is-not-a-wake.json` | `first-observation` and the `queue-empty` beside it are the baseline, not news — waking on them would make arming a watch a busy circle of arm-exit-arm |
+| `watch-rearm-does-not-wake-on-its-own-gap.json` | the first tick after re-arming from a `dead` watch emits `tick-overdue` **by definition** — the dead watcher's `due` is in the past — and that is a fact about the watch that ended, not news. It is printed and does not wake. A later one still does |
+
+`watch-rearm-…` was **found by arming the verb on a live PR**, not by reading the code: the first real
+arm re-armed from a dead state and exited on its own gap. It carries an `"initial"` state, which is what
+makes a re-arm expressible in a loop fixture at all; its teeth were checked by deleting the one rule
+that implements it, whereupon the fixture exits 0 on tick 1 instead of reaching the idle bound.
 
 **Teeth, and the one place where the standard phrasing does not fit.** Replayed against the shipped
 hand-rolled loop, `watch-exits-on-the-event.json` does not *fail* — it **hangs**, which is the defect

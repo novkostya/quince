@@ -353,7 +353,12 @@ Therefore:
   on it would make arming a watch a busy circle of arm-exit-arm — and **`fetch-failed` until
   `--fail-after` of them in a row**, since one failed fetch is a missed tick while a run of them is a
   watch that is not watching. Neither is swallowed; both are printed, and the second exits with its
-  own class.
+  own class. **`tick-overdue` on the first tick does not wake either** — found by arming the verb for
+  real rather than by reasoning about it: re-arming from a `dead` watch always produces one, since the
+  previous watcher stopped ticking and its `due` is in the past by definition, so waking on it would
+  make every re-arm exit immediately and report as news the gap that the arming step announced one
+  line earlier. It describes the watch that *ended*. A later one — the loop starved while running — is
+  a different claim and still wakes.
 - **`--max-wait` (default 1200 s) makes termination the heartbeat.** Once detection is the *normal*
   exit, every termination is a window covered only by the fallback — and the fallback was measured
   during this incident at **three armings, zero deliveries** (`ScheduleWakeup`, architect box,
