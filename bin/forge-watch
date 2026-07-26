@@ -570,6 +570,19 @@ replay() {
 			rm -rf "$_tmp"
 			continue
 		fi
+		if [ "$_kind" = hint ]; then
+			# The arming command the gate hands a session. Fixtured because the first version printed
+			# the implementer's `--repo` form to BOTH halves, and the architect copying it would have
+			# armed a watch smaller than its declared set — a hint that must be copied verbatim is a
+			# claim, and this directory holds claims to the same standard as the code.
+			_got=$(jq -r '.cases[] | @tsv' "$_f" | while IFS="$(printf '\t')" read -r _c_role _c_gh _c_repo; do
+				owed_arm_hint "$_c_role" "$_c_gh" "$_c_repo"
+			done | sort -u)
+			_want=$(jq -r '.expect[]' "$_f" | sort -u)
+			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
+			rm -rf "$_tmp"
+			continue
+		fi
 		if [ "$_kind" = owed ]; then
 			# The PURE half of the arming gate: given which repositories have open PRs and what class
 			# their watches are in, is a watch owed and what does the session have to do about it. The
@@ -1089,9 +1102,26 @@ owed_arm_hint() {
 	# The exact command, because "arm a watch" is the instruction that has already failed twice. A
 	# message that makes the reader derive the invocation is a message that gets a different
 	# invocation each time — which is how the loop that could not wake anybody got written.
-	_oh_repo=$1
+	#
+	# And therefore the SET is part of it, which the first version got wrong: it printed `--repo` to
+	# both halves. The architect's canon is `--all` over the declared set, so an architect copying a
+	# `--repo` line arms a watch SMALLER than its own declaration — precisely the failure
+	# `.claude/forge-set` exists to prevent, and one already paid for once with a devlog PR sitting
+	# unreviewed while the queue was reported clear (quince-devlog#3). Worse, the resulting state
+	# SATISFIES this gate while half the declared set is unwatched, so a check would have been passed
+	# by obeying its own remedy. A hint written against derivation cannot require the reader to
+	# correct it.
+	#
+	# One line per owed repository on the implementer side, because its set is the PRs it opened; one
+	# line total on the architect side, because `--all` covers the declaration however many
+	# repositories are in it (the caller de-duplicates, so this collapses on its own).
+	_oh_role=$1
 	_oh_gh=$2
-	printf 'bin/forge-watch watch --repo %s --gh "%s" --interval 60' "$_oh_repo" "$_oh_gh"
+	_oh_repo=$3
+	case "$_oh_role" in
+	architect) printf 'bin/forge-watch watch --all --gh "%s" --interval 60\n' "$_oh_gh" ;;
+	*) printf 'bin/forge-watch watch --repo %s --gh "%s" --interval 60\n' "$_oh_repo" "$_oh_gh" ;;
+	esac
 }
 
 case "${1:-}" in
@@ -1431,13 +1461,19 @@ owed)
 		_hout=$(owed_decide "$_hr.tab") && _hrc=0 || _hrc=$?
 		rm -f "$_hr" "$_hr.err" "$_hr.tab"
 		if [ "$_hrc" = 0 ]; then exit 0; fi
+		# The hints are built from the OWED rows themselves, so the message names the real
+		# repositories rather than a placeholder the reader has to fill in — and `sort -u` is what
+		# collapses the architect's N repositories to the single `--all` line its canon calls for.
+		_hhint=$(printf '%s\n' "$_hout" | awk '/^OWED/ {print $2}' | while read -r _hrepo; do
+			owed_arm_hint "$_role" "$_rolegh" "$_hrepo"
+		done | sort -u | sed 's/^/    /')
 		_msg="A WATCH IS OWED AND IS NOT LIVE — you are about to end a turn with open PRs and nothing that can wake you.
 
 $_hout
 
-Arm it as a BACKGROUND task (run_in_background), one per repository above:
+Arm it as a BACKGROUND task (run_in_background):
 
-    $(owed_arm_hint '<owner/name>' "$_rolegh")
+$_hhint
 
 The loop must exit when it finds something; a loop that cannot exit cannot wake you, which is why this is a verb and not a loop you write (quince#62). If you have genuinely finished — everything merged, or a stop that is the Operator's — say so and end the turn again: this blocks once, and the second time it tells the human instead of you."
 		if [ "$_active" = true ]; then

@@ -1,0 +1,15 @@
+{
+  "kind": "hint",
+  "note": "Review finding on quince#66, found by running the architect leg on an architect box. The gate correctly detected the architect role and then printed the implementer's `--repo` form — and the hint exists precisely to be copied verbatim, so requiring the reader to correct it defeats the reason it is spelled out. An architect that copied it would arm a watch SMALLER than its declared set, leaving a repository unwatched: the failure `.claude/forge-set` was built to prevent (quince-devlog#3). It would also then SATISFY this gate, which is a check passed by obeying its own remedy. Two architect repositories are listed here on purpose: `--all` covers the declaration whatever its size, so they must collapse to one line, while the implementer gets one line per repository it opened a PR in.",
+  "cases": [
+    ["architect", "/opt/quince/bin/gh-arch", "novkostya/quince"],
+    ["architect", "/opt/quince/bin/gh-arch", "novkostya/quince-devlog"],
+    ["implementer", "/opt/quince/bin/gh-bot", "novkostya/quince"],
+    ["implementer", "/opt/quince/bin/gh-bot", "novkostya/quince-devlog"]
+  ],
+  "expect": [
+    "bin/forge-watch watch --all --gh \"/opt/quince/bin/gh-arch\" --interval 60",
+    "bin/forge-watch watch --repo novkostya/quince --gh \"/opt/quince/bin/gh-bot\" --interval 60",
+    "bin/forge-watch watch --repo novkostya/quince-devlog --gh \"/opt/quince/bin/gh-bot\" --interval 60"
+  ]
+}
