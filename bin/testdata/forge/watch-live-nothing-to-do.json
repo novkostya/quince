@@ -1,0 +1,15 @@
+{
+  "kind": "watch",
+  "note": "CASE 1: state, a live pid, a fresh heartbeat. Nothing to do — and it must say so, because a re-arm step whose healthy answer is silence is a step that cannot be seen to have run. Note `pid_verified=yes`: the pid was checked against /proc, not merely found in the process table, because a pid is not an identity.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:39:30Z",
+    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-26T10:39:30Z",
+               "due": "2026-07-26T10:40:30Z" }
+  },
+  "now": "2026-07-26T10:40:19Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=live state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-26T10:39:30Z age=49s",
+    "note: nothing to do."
+  ]
+}

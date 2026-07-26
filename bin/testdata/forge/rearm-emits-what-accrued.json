@@ -1,0 +1,25 @@
+{
+  "note": "The step half of CASE 2, and the reason `dead` must not be reseeded. This pair is the 44-minute gap of 2026-07-26 (quince-devlog#13): the last live tick was 09:56:16Z, a host-client reconnect at 09:58:38Z restarted the session process and dropped the pending wakeup, quince#36 and #37 opened into the gap, and the catch-up tick at 10:40:19Z reported them all at once. Because step() diffs against the STORED observation rather than against the world as it is at arm time, re-arming produces the events that accrued — not `queue-empty`, and not silence. A hand-rolled mitigation written during that same incident got this wrong in the opposite direction: it baselined against current heads when it armed, so both of the pushes it existed to catch were already inside its baseline.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 35, "state": "OPEN", "updatedAt": "2026-07-26T09:40:00Z",
+      "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] } ],
+    "last_tick": "2026-07-26T09:56:16Z",
+    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-26T09:56:16Z",
+               "due": "2026-07-26T09:57:16Z" }
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 35, "state": "OPEN", "updatedAt": "2026-07-26T09:40:00Z",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] },
+      { "number": 36, "state": "OPEN", "updatedAt": "2026-07-26T10:12:00Z",
+        "merge_state": "BLOCKED", "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+        "activity": [{"at":"2026-07-26T10:12:00Z","actor":"quince-bot","kind":"commit"}] },
+      { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T10:19:00Z",
+        "merge_state": "BLOCKED", "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+        "activity": [{"at":"2026-07-26T10:19:00Z","actor":"quince-bot","kind":"commit"}] }
+    ]
+  },
+  "expect_events": [ "event=opened pr=36", "event=opened pr=37" ]
+}

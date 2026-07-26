@@ -169,6 +169,46 @@ unconditional backstop down to roughly one event per human or agent act. That is
   whether to adopt a merge queue so this stops happening — is [quince#46](https://github.com/novkostya/quince/issues/46)
   and is deliberately not decided here.
 
+### 4c. Restart safety, and the check that could only pass
+
+The watch died once by having its cadence live one layer above the tool that enforced the discipline:
+a host-client reconnect restarted the session process, the pending wakeup went with it, and 44 minutes
+passed with three PRs unwatched while the watch reported healthy (devlog#13).
+
+The first draft of the fix said: *detect a `forge-watch` state file for this unit with no watcher
+running, and re-arm from it.* That check **could only ever report success**, because the state lived at
+`/tmp/…/<session-id>/scratchpad/forge-watch/…` — a session-scoped path. The failure being defended
+against produces a *new* session with a *new* scratchpad, so the re-arm step would look in an empty
+room and find nothing to re-arm. Same defect class as the incident: a check that cannot fail is not a
+check.
+
+Therefore:
+
+- **state lives at a session-independent path** — `$FORGE_STATE_DIR`, else
+  `$XDG_STATE_HOME/quince/forge-watch`, else `~/.local/state/quince/forge-watch`, one file per repo.
+  Session scratchpads are for artefacts nobody needs tomorrow; watch state is the opposite of that.
+  **No hostname is recorded in it**, deliberately: the file is per-box already, and a hostname is an
+  Operator-private fact that would then live in a file somebody pastes into an issue.
+- **`forge-watch status` distinguishes THREE cases and says which**, with exit codes so a caller that
+  ignores stdout still cannot mistake one for another: `live` (0) → nothing to do; `dead` (3) →
+  **re-arm from this state, and do not reseed it**; `absent` (4) → cold start, seed the sentinel.
+  Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
+  nothing changed" since a beginning it invented.
+- **liveness needs two instruments, and neither is sufficient alone.** The heartbeat cannot see a
+  watcher that died a moment ago — its last tick is recent by definition, so a fresh session would read
+  `live`, do nothing, and nothing would ever tick again. The pid cannot see a *wedged* watcher, and
+  cannot identify one either: the first version confirmed the pid by grepping `/proc/<pid>/cmdline` for
+  `forge-watch` and reported success for the shell that had just **run** forge-watch. A check whose
+  positive answer can be produced by the act of asking is not a check. So `live` requires the pid to
+  exist **and** the heartbeat to be fresh; the grep is gone, since pid reuse with a fresh heartbeat is
+  impossible.
+- **the watcher's cadence is recorded separately from any tick.** One field serving both would let a
+  hand-run tick refresh the very heartbeat a supervisor consults, and a dead watch would look alive for
+  as long as somebody kept poking it.
+- **a tick that was due and did not happen emits `tick-overdue`.** The events themselves cannot carry
+  that fact: they arrive looking perfectly healthy, all at once, hours late. Reported only when a whole
+  interval was skipped, so ordinary jitter is not dressed up as a miss.
+
 **Declared debt:** `stalled` (story 6) is specified and **not implemented** — it needs a wall clock,
 which the pure half deliberately does not have. It was advertised in `--help` while unimplemented,
 which is a tool making the kind of claim this tool exists to stop; it is off the advertised list until
@@ -234,11 +274,17 @@ allowance faster for no benefit.
 11. An update that nothing in the payload explains emits `actor=unattributed`, never a bystander.
 12. A PR made `BEHIND` by someone else's merge emits `mergeability`, while its own `updatedAt` — and
     therefore the backstop — stays correctly silent.
+13. `status` reports `live`, `dead` or `absent`, never two of them collapsed, and says what to do next.
+14. A watch whose state exists with no watcher behind it is re-armed from that state, and the next tick
+    emits everything that accrued while nothing was watching — not `queue-empty`, not silence.
+15. A watcher process that is alive but no longer ticking reads `dead`, not `live`.
+16. A hand-run tick cannot make a dead watcher look alive.
+17. A tick that was due and did not happen emits `tick-overdue`, with how late it was.
 
 ## Gates
 
 - **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4
-  and 9–12. Story 6 is **not covered because it is not implemented** (§4b). Each fixture is a pair of
+  and 9–17. Story 6 is **not covered because it is not implemented** (§4b). Each fixture is a pair of
   consecutive observations; the recorded ones are named for the PRs that produced them
   (`pr17-…`, `pr16-…`, `pr36-…`, `pr37-…`) and the illustrative ones are numbered 100+ to say so.
   G1 also requires the fixtures to have teeth: replayed against the previous `forge-watch`, every

@@ -1,0 +1,10 @@
+{
+  "kind": "watch",
+  "note": "CASE 3: no state at all. The honest cold start, and the only one of the three where seeding is right. It is a separate fixture from the dead case on purpose — the two were one case in the first draft of the requirement, and a check that cannot tell them apart reports success by looking in an empty room.",
+  "now": "2026-07-26T10:40:19Z",
+  "pid_alive": "no",
+  "expect": [
+    "watch=absent state=STATE",
+    "note: cold start. Seed it and tick; the first tick emits first-observation."
+  ]
+}
