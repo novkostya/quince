@@ -165,8 +165,13 @@ tick() {
 	# healthy. `set -o pipefail` would be the obvious fix and is not POSIX sh, so the pipeline is
 	# split instead. A loop wired to the old version would have slept indefinitely — corollary (d)
 	# of this project's own rule, inside the tool built to enforce it.
+	# Sorted by ACTIVITY, not by PR age. The default order is newest-first by number, so a window
+	# of 20 on a repo with 30 PRs is mostly ancient closed rows — the events here are about open
+	# work and merges, and spending the whole budget on history means recent activity can fall out
+	# of view while the window looks full.
 	_raw=$(mktemp)
 	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
+		--search "sort:updated-desc" \
 		--json number,state,updatedAt,statusCheckRollup,reviews >"$_raw" 2>"$_raw.err"; then
 		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" \
 			"$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)"
@@ -181,10 +186,18 @@ tick() {
 		return 1
 	fi
 
-	# No silent caps: if the queue filled the limit, the view is truncated and the tool says so
-	# rather than quietly watching a subset.
-	if [ "$(jq 'length' "$_raw")" -ge "$FETCH_LIMIT" ]; then
-		printf 'event=queue-truncated limit=%s repo=%s\n' "$FETCH_LIMIT" "$_repo"
+	# No silent caps — but a warning that fires every tick is wallpaper, and a consumer learns to
+	# ignore it, which re-creates the silent cap through boredom. The first version compared the raw
+	# row count to the limit, which is true forever in any repo with twenty closed PRs.
+	#
+	# Truncation only matters when it can HIDE something this tool reports on: open work, or a
+	# recent change. Sorted by activity, that is precisely the case where the oldest row in the
+	# window is still OPEN — anything beyond it is both older and unseen, so an open PR could be out
+	# there unwatched. When the window ends on settled history, nothing relevant is behind it.
+	if [ "$(jq 'length' "$_raw")" -ge "$FETCH_LIMIT" ] &&
+		[ "$(jq -r '.[-1].state' "$_raw")" = OPEN ]; then
+		printf 'event=queue-truncated limit=%s repo=%s oldest_in_window_still_open=%s\n' \
+			"$FETCH_LIMIT" "$_repo" "$(jq -r '.[-1].number' "$_raw")"
 	fi
 
 	_obs=$(mktemp)
