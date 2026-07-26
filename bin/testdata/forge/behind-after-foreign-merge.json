@@ -1,0 +1,37 @@
+{
+  "note": "ILLUSTRATIVE, NOT RECORDED — numbered 100/101 to say so. The one blind spot the updatedAt backstop does not cover: PR 101 becomes unmergeable because PR 100 merged. Nothing happened TO 101, so its own updatedAt does not move, and no amount of watching that timestamp would ever show it. Under strict up-to-date protection the architect's own merges invalidate every other open PR this way (quince#46). The shape was derived from how the protection rule works rather than captured from a recorded pair; the pair asserts exactly one thing — that the mergeability transition is seen while the backstop is silent.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 100, "state": "OPEN", "updatedAt": "2026-07-26T09:00:00Z",
+        "merge_state": "CLEAN",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [{"at":"2026-07-26T09:00:00Z","actor":"novkostya","kind":"review"}] },
+      { "number": 101, "state": "OPEN", "updatedAt": "2026-07-26T08:30:00Z",
+        "merge_state": "CLEAN",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+        "activity": [{"at":"2026-07-26T08:30:00Z","actor":"quince-bot","kind":"commit"}] }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 100, "state": "MERGED", "updatedAt": "2026-07-26T09:05:12Z",
+        "merge_state": "UNKNOWN",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [
+          {"at":"2026-07-26T09:00:00Z","actor":"novkostya","kind":"review"},
+          {"at":"2026-07-26T09:05:10Z","actor":"novkostya","kind":"merge"}
+        ] },
+      { "number": 101, "state": "OPEN", "updatedAt": "2026-07-26T08:30:00Z",
+        "merge_state": "BEHIND",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+        "activity": [{"at":"2026-07-26T08:30:00Z","actor":"quince-bot","kind":"commit"}] }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=100 at=2026-07-26T09:05:12Z actor=novkostya kind=merge",
+    "event=merged pr=100",
+    "event=mergeability pr=101 status=BEHIND"
+  ]
+}

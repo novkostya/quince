@@ -1,0 +1,26 @@
+{
+  "note": "The other side of the same transition: the re-review lands. Present because `review` had no fixture at all — the event existed, was believed to work, and nothing would have failed if it stopped. It also pins the backstop firing ALONGSIDE a typed event rather than only when the classifier comes up empty: a backstop that defers to the classifier inherits the classifier's blind spots.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T12:32:21Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"}],
+      "reviews": [{"state":"CHANGES_REQUESTED"}],
+      "activity": [{"at":"2026-07-26T12:32:21Z","actor":"quince-bot","kind":"commit"}] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T13:53:06Z",
+      "merge_state": "CLEAN",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"}],
+      "reviews": [{"state":"CHANGES_REQUESTED"},{"state":"APPROVED"}],
+      "activity": [
+        {"at":"2026-07-26T12:32:21Z","actor":"quince-bot","kind":"commit"},
+        {"at":"2026-07-26T13:53:06Z","actor":"novkostya","kind":"review"}
+      ] } ]
+  },
+  "expect_events": [
+    "event=updated pr=37 at=2026-07-26T13:53:06Z actor=novkostya kind=review",
+    "event=review pr=37 verdict=APPROVED"
+  ]
+}

@@ -1,8 +1,8 @@
 {
-  "note": "checks go red with no review change. A reviews-only watcher emits nothing, so 'no review yet' and 'unreviewable, CI is red' are the same silence.",
+  "note": "checks go red with no review change. A reviews-only watcher emits nothing, so 'no review yet' and 'unreviewable, CI is red' are the same silence. updatedAt is deliberately IDENTICAL across the pair: whether a check-run completion moves a PR's updatedAt is not something this fixture was recorded to answer, so it asserts the narrow thing instead — a red check is seen on its own merit, with no help from the backstop.",
   "before": {
     "observed": true,
-    "prs": [ { "number": 16, "state": "OPEN", "updatedAt": "2026-07-25T21:00:00Z",
+    "prs": [ { "number": 16, "state": "OPEN", "updatedAt": "2026-07-25T21:04:39Z",
       "checks": [{"name":"gates","conclusion":null},{"name":"image","conclusion":null},{"name":"e2e","conclusion":null}],
       "reviews": [] } ]
   },
