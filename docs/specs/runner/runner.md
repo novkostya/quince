@@ -1,6 +1,6 @@
 # runner — a session host that outlives the lid
 
-> Status: **SPEC — ruled on first review (credential concentration + two clarifications), awaiting re-review.** No code exists. Tracked as `pr.5` in the devlog's
+> Status: **SPEC — code landed for PRs 1–3; gates owed pending the ceremony. Extended for devlog#7 (a second box for the architect), which raises a credential question routed to pr.0b.** Tracked as `pr.5` in the devlog's
 > revamp sequence (R6); feature-named. Ruled next on
 > [#20](https://github.com/novkostya/quince/pull/20)'s review: it is the only remaining item that
 > needs the Operator, so it blocks scheduling while nothing blocks it.
@@ -242,10 +242,82 @@ None beyond `preflight`'s environment table, which is inline in its test.
 - **Resurrection test** — a stranger with their own Proxmox box and their own claude.ai login runs
   the same provisioning; only the login is theirs.
 
+## Two boxes, not one — the architect gets its own runner
+
+Taken from [devlog#7](https://github.com/novkostya/quince-devlog/issues/7). The finding is **not a
+symmetry argument, it is a boundary**: this rung's stated win is that the *implementer* identity
+becomes structural, and it achieves that by putting the bot token on a machine. An architect session
+needs a credential that can **approve and merge**. Put both on one box and that box can author *and*
+approve — `approver ≠ author` stops being structural and becomes a convention about which token a
+session happens to pick up, which is the property R1's whole identity ruling exists to protect.
+
+| box | holds | runs | must NOT hold |
+| --- | --- | --- | --- |
+| `quince-runner` | bot token (0600), devct token, dev-CT ssh key | implementer sessions | any approve-capable credential |
+| `quince-arch` | the architect's GitHub credential; optionally the devct token (pool-scoped, guards proven in [#15](https://github.com/novkostya/quince/pull/15)) for verification runs | review, approve, land, and the review loop | the bot token |
+
+A compromised implementer box then cannot approve its own work; a compromised architect box cannot
+author as the bot. This is the credential-concentration finding above, one level up, and it is the
+same fix: separate the things whose combination is the risk.
+
+**Costs, stated:** one more devct-cloned container (cheap) and a **second ceremony** — Claude auth is
+per-machine, so `claude auth login` twice, ~10 minutes rather than 5. Both boxes register their own
+Remote Control session and both appear in the picker.
+
+**The Mac becomes purely a client.** Both roles are reachable from laptop or phone; neither depends
+on a lid staying open, which was pr.5's point in the first place.
+
+### The credential question this raises, and does not answer
+
+`quince-arch` needs something that can approve. Today that is the **Operator's personal GitHub
+account** — so provisioning the box with a personal PAT means a compromise there acts as him on
+GitHub *generally*, not merely on this project. That is a materially worse blast radius than the
+bot's repo-scoped token, and it is exactly the argument **pr.0b** (architect as a GitHub App) was
+deferred on when the cost seemed theoretical. It is not theoretical once the box exists.
+
+**This spec does not decide it.** Per the gap protocol, the shape of an authority credential is
+architectural:
+
+> `PROPOSED (gap):` build `quince-arch` now with its Claude login and (optionally) the pool-scoped
+> devct token, and **defer the GitHub credential until pr.0b is ruled**. The box is useful without
+> it — it can run the review protocol, the gates, and verification runs — and every approval keeps
+> happening from wherever the architect is until the ruling lands. If pr.0b is accepted, the box
+> receives an App token and never holds a personal one; if it is declined, the personal PAT goes on
+> with its blast radius written down.
+
+Building the container while the provisioning path is warm is cheap; putting a personal credential
+on it before that ruling is not reversible in the way the container is.
+
+### Evidence check, since this issue is about identity separation
+
+Before writing this I checked what the record actually shows for every PR in pr.5 and its journals:
+all five were authored by `quince-bot` and approved by `novkostya`. **The separation held in
+practice** — which is the point worth making about *why* this rung matters: it held because a human
+was doing the approving from his own machine, not because anything structural prevented the
+alternative. Two boxes is what turns that from a habit into a property.
+
 ## PR sequence
 
 1. **this spec** — the design and the three corrected facts, reviewed before code.
 2. **`preflight` + the unit + provisioning** — G1 offline, then G2–G5 on the box.
 3. **the ceremony + G6** — the Operator's five minutes, then an implementer loop run entirely from
    the runner. That last gate is what closes the rung: the session that opens its PR is running on
-   the machine this rung built.
+   the machine this rung built. ✔ code landed; **gates owed** — the ceremony is postponed (the
+   sign-in step asked for a recent authentication), so no session has existed yet.
+4. **`quince-arch`** — the second box, per devlog#7: provisioned the same way, holding the Claude
+   login and no bot token, with a `preflight` variant that asserts **the absence** of
+   `~/.config/quince/quince-bot.token` rather than its presence. That inversion is the whole point:
+   each box refuses to hold the other's identity, so the separation is enforced by the thing that
+   starts the service rather than by whoever provisioned it. **The GitHub credential waits on the
+   pr.0b ruling** (above).
+
+### Gates for PR 4
+
+- **G7** — `quince-arch`'s preflight **refuses to start when a bot token is present**, naming it.
+  Exercised by planting one, since a guard proven only in the absence of the thing it guards against
+  is not proven.
+- **G8** — both boxes register distinct Remote Control sessions and both appear in the picker with
+  their own names (needs both ceremonies).
+- **G9** — from `quince-arch`, the review protocol runs end to end on a real PR: gates executed,
+  verdict submitted. Approval identity is whatever pr.0b rules; the gate is that the *work* happens
+  there, not on a laptop.
