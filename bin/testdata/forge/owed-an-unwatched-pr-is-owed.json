@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "quince#62's second defect: a session ended a turn with an open PR and no watcher, no state and no fallback of any kind. One repository watched does not excuse another that is not — the report names every repository separately and the exit carries the worst case, because a session that read the reassuring line and stopped is the failure being fixed.",
+  "table": [
+    ["novkostya/quince", 4],
+    ["novkostya/quince-devlog", 0]
+  ],
+  "expect": [
+    "OWED  novkostya/quince — open PRs, and no watch has ever been armed here.",
+    "ok    novkostya/quince-devlog — open PRs, and a live watch"
+  ],
+  "expect_exit": 8
+}

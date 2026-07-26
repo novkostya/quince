@@ -26,6 +26,8 @@ usage: forge-watch <verb>
                                                live | dead | absent — and which, and what to do
   stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
                                                signal it — refuses rather than guessing
+  owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
+                                               are there open PRs here with no live watch?
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
 
   `watch` OWNS THE LOOP, and the reason it is a verb is the whole of quince#62: a session that
@@ -91,6 +93,26 @@ usage: forge-watch <verb>
   --gh defaults to FORGE_GH, else plain `gh`. The runner passes gh-bot; the arch box passes
   gh-arch. The tool does not pick an identity for you — a monitor that hard-coded one could not
   run on the box that most needs it.
+
+  `owed` answers the OTHER half of quince#62. `watch` fixes a loop built wrong; it does nothing for a
+  session that builds no loop — and that is what happened an hour later on the implementer side: no
+  watcher, no state, no fallback, a turn ended with *"the ball is back with the reviewer"* four
+  minutes before the verdict landed. A rule telling a session to arm a watch is satisfied by a session
+  that does not, and nothing observed the difference. So something other than the session asks.
+
+  --author <login|@me> is the implementer half: every repository where that login has an open PR,
+  asked of the forge rather than of the declared set, because a PR in an undeclared repository still
+  obligates whoever opened it. --all is the architect half: the declared set, since a reviewer's
+  obligation cannot be derived from authorship. Neither is defaulted.
+
+  --hook speaks the Claude Code Stop-hook protocol (JSON in on stdin, JSON out on stdout) and is
+  wired in .claude/settings.json. It BLOCKS ONCE with the exact command to run, and on the second
+  attempt it stops blocking and tells the HUMAN instead: a hook that always blocks is a session that
+  can never end, and the goal is not to make stopping impossible — only to make an unwatched stop
+  impossible to do SILENTLY. If it cannot check (no credential, forge unreachable) it fails OPEN and
+  says so, because "I could not look" and "nothing is owed" must not print the same.
+
+  `owed` exit codes: 0 nothing owed · 8 a watch is owed and is not live.
 
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
         merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing
@@ -548,6 +570,19 @@ replay() {
 			rm -rf "$_tmp"
 			continue
 		fi
+		if [ "$_kind" = owed ]; then
+			# The PURE half of the arming gate: given which repositories have open PRs and what class
+			# their watches are in, is a watch owed and what does the session have to do about it. The
+			# forge query and the process table are the impure halves and are not here — same split as
+			# step() and watch_report(), for the same reason.
+			jq -r '.table[] | "\(.[0]) \(.[1])"' "$_f" >"$_tmp/table"
+			_got=$(owed_decide "$_tmp/table") && _rc=0 || _rc=$?
+			_got=$(printf '%s\nexit=%s\n' "$_got" "$_rc" | grep -v '^$' | sort)
+			_want=$(jq -r '.expect[], "exit=\(.expect_exit)"' "$_f" | sort)
+			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
+			rm -rf "$_tmp"
+			continue
+		fi
 		if [ "$_kind" = loop ]; then
 			# The loop is impure by nature — it sleeps and it fetches — so its fixture drives the REAL
 			# verb as a subprocess against a stub `gh`, and asserts what the loop DID: the events it
@@ -931,6 +966,134 @@ watch_loop() {
 	done
 }
 
+# ---------------------------------------------------------------------------
+# owed — the OTHER half of quince#62, and the harder one.
+#
+# `watch` fixes a loop that was built wrong. It does nothing at all for the failure measured on the
+# implementer side an hour later: a session that built no loop. No watcher, no state file, no fallback
+# — it ended a turn with *"the ball is back with the reviewer"*, four minutes before the verdict it was
+# waiting for landed, and nothing anywhere could have told it. The skill it was following names that
+# stop as illegitimate in its own text, in a section rewritten to prevent exactly it.
+#
+# The pattern this repository keeps rediscovering: **a rule that tells a session to do something is
+# satisfied by a session that does not do it, and nothing observes the difference.** So the fix cannot
+# be another sentence. Something other than the session has to notice.
+#
+# Two shapes were considered and rejected, both on structure rather than taste:
+#
+#   - "opening a PR arms the watch as a side effect" CANNOT WORK, and fails in the exact shape of the
+#     bug above. A session is woken by a background task that the SESSION launched completing; a
+#     process forked by a `gh pr create` wrapper is not tracked by anything, so its exit notifies
+#     nobody. It would be armed, heartbeating, `status=live`, and deaf.
+#   - "a channel that does not depend on the recipient having armed anything" is right, and it is the
+#     runner dispatcher already specified in docs/specs/rung-loop (a supervised tick starting one
+#     FRESH session per event). It needs the runner unit, so it is named rather than built here.
+#
+# What is left is to make the ABSENCE detectable, and to aim that at the only actor who can fix it.
+# `owed` is the predicate; the session's harness runs it when a turn ends (.claude/settings.json).
+# It blocks ONCE — a Stop hook that always blocks is a session that can never end — and on the second
+# attempt it warns the human instead. That is deliberate: the point is not to make stopping impossible,
+# it is to make an unwatched stop impossible to do SILENTLY.
+#
+# Exit codes: 0 nothing owed · 8 a watch is owed and is not live.
+# ---------------------------------------------------------------------------
+owed_decide() {
+	# $1: a file of "<repo> <class>" lines, class being `status`'s exit code. PURE — no forge, no
+	# process table, no clock — for the same reason step() and watch_report() are: the deciding half is
+	# the half that has been wrong, and it can only be fixtured if it does not fetch.
+	_od=0
+	while read -r _od_repo _od_cls; do
+		[ -n "$_od_repo" ] || continue
+		case "$_od_cls" in
+		0) printf 'ok    %s — open PRs, and a live watch\n' "$_od_repo" ;;
+		3) printf 'OWED  %s — open PRs, watch=dead. Re-arm from that state; do NOT reseed it.\n' "$_od_repo" ;;
+		4) printf 'OWED  %s — open PRs, and no watch has ever been armed here.\n' "$_od_repo" ;;
+		5) printf 'OWED  %s — open PRs, watch=wedged. Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_repo" ;;
+		*) printf 'OWED  %s — open PRs, and the watch class could not be read (%s).\n' "$_od_repo" "$_od_cls" ;;
+		esac
+		[ "$_od_cls" = 0 ] || _od=8
+	done <"$1"
+	return "$_od"
+}
+
+owed_classify() {
+	# The impure half: for each repo on stdin, ask the process table and the clock, and print the
+	# table owed_decide() consumes.
+	while read -r _oc_repo; do
+		[ -n "$_oc_repo" ] || continue
+		_oc_st=$(state_path_for "$_oc_repo")
+		_oc_alive=no
+		if [ -f "$_oc_st" ]; then
+			_oc_pid=$(jq -r '.watch.pid // empty' "$_oc_st" 2>/dev/null || true)
+			[ -n "$_oc_pid" ] && _oc_alive=$(pid_alive "$_oc_pid")
+		fi
+		watch_report "$_oc_st" "$(now_iso)" "$_oc_alive" >/dev/null 2>&1 && _oc_cls=0 || _oc_cls=$?
+		printf '%s %s\n' "$_oc_repo" "$_oc_cls"
+	done
+}
+
+owed_repos() {
+	# Which repositories obligate a watch right now. The two halves of the loop answer this
+	# differently, and the difference is the one in .claude/forge-set's own header: the implementer
+	# watches what it OPENED, so its set is self-describing and needs no file; the architect reviews
+	# other people's work, so authorship cannot derive its set and the declared file is the answer.
+	_or_gh=$1
+	_or_mode=$2
+	_or_author=$3
+	_or_tmp=$(mktemp)
+	if [ "$_or_mode" = author ]; then
+		# Asked of the forge as a whole rather than of the declared set: a PR opened in a repository
+		# nobody declared still obligates the session that opened it, and reading the set here would
+		# quietly excuse exactly that case.
+		if ! "$_or_gh" search prs --author "$_or_author" --state open --limit 50 \
+			--json repository >"$_or_tmp" 2>"$_or_tmp.err"; then
+			_or_why=$(head -1 "$_or_tmp.err" 2>/dev/null | cut -c1-120)
+			rm -f "$_or_tmp" "$_or_tmp.err"
+			die "could not ask the forge which PRs $_or_author has open: ${_or_why:-no_stderr_from_gh}
+    REFUSING to answer. \"I could not look\" and \"nothing is owed\" are different sentences, and
+    this tool exists because they were once printed identically."
+		fi
+		jq -r '.[].repository.nameWithOwner' "$_or_tmp" | sort -u
+	else
+		for _or_r in $(forge_set "$FORGE_SET_FILE"); do
+			if ! "$_or_gh" pr list -R "$_or_r" --state open --json number >"$_or_tmp" 2>"$_or_tmp.err"; then
+				_or_why=$(head -1 "$_or_tmp.err" 2>/dev/null | cut -c1-120)
+				rm -f "$_or_tmp" "$_or_tmp.err"
+				die "could not list open PRs in $_or_r: ${_or_why:-no_stderr_from_gh}. REFUSING to
+    answer: a queue that could not be read is not a queue that is empty."
+			fi
+			[ "$(jq 'length' "$_or_tmp")" -gt 0 ] && printf '%s\n' "$_or_r"
+		done
+	fi
+	rm -f "$_or_tmp" "$_or_tmp.err"
+}
+
+owed_role() {
+	# Which half of the loop is this box? Decided by the credential it holds, which is how the two
+	# boxes already tell themselves apart (deploy/runner/preflight asserts the other's is absent), and
+	# printed rather than assumed — a check that silently picks a role can silently pick the wrong one.
+	if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" ]; then
+		printf 'implementer %s/bin/gh-bot author\n' "$(repo_root)"
+	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME/.config/quince/quince-arch.token}" ]; then
+		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
+	else
+		printf 'none - -\n'
+	fi
+}
+
+repo_root() {
+	CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd
+}
+
+owed_arm_hint() {
+	# The exact command, because "arm a watch" is the instruction that has already failed twice. A
+	# message that makes the reader derive the invocation is a message that gets a different
+	# invocation each time — which is how the loop that could not wake anybody got written.
+	_oh_repo=$1
+	_oh_gh=$2
+	printf 'bin/forge-watch watch --repo %s --gh "%s" --interval 60' "$_oh_repo" "$_oh_gh"
+}
+
 case "${1:-}" in
 step)
 	shift
@@ -1198,6 +1361,114 @@ stop)
 	fi
 	kill "$_pid" 2>/dev/null || die "pid $_pid verified as our watcher, but the signal failed"
 	printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched)\n' "$_pid" "$_repo" "$_was"
+	;;
+owed)
+	shift
+	_ghcmd='' _mode='' _author='@me' _hook=no
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--author)
+			_mode=author
+			_author=$2
+			shift 2
+			;;
+		--all)
+			_mode=all
+			shift
+			;;
+		--gh)
+			_ghcmd=$2
+			shift 2
+			;;
+		--set-file)
+			FORGE_SET_FILE=$2
+			shift 2
+			;;
+		--hook)
+			_hook=yes
+			shift
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+
+	# owed_role prints one line of three fields; read out with cut rather than `set --`, because
+	# splitting on IFS is how a path with a space becomes two arguments and nobody notices until it is
+	# somebody's home directory.
+	_roleline=$(owed_role)
+	_role=$(printf '%s' "$_roleline" | cut -d' ' -f1)
+	_rolegh=$(printf '%s' "$_roleline" | cut -d' ' -f2)
+	_rolemode=$(printf '%s' "$_roleline" | cut -d' ' -f3)
+
+	if [ "$_hook" = yes ]; then
+		# The Stop-hook dialect of the same question. It speaks the harness's protocol — JSON in on
+		# stdin, JSON out on stdout — and it lives here rather than in a separate script because the
+		# predicate and its adapter are one claim, and because a file outside $(SH_ENTRYPOINTS) is a
+		# file shellcheck never sees.
+		_payload=$(cat)
+		_active=$(printf '%s' "$_payload" | jq -r '.stop_hook_active // false' 2>/dev/null || printf 'false')
+		if [ "$_role" = none ]; then
+			# FAIL OPEN, LOUDLY. A hook that blocked because it could not check would wedge every
+			# session in the repository on a box with no forge credential; a hook that returned silence
+			# would be the omission it exists to catch, one level up. So it says what it could not do.
+			jq -n '{systemMessage: "forge-watch owed: no forge credential on this box, so whether a watch is owed was NOT checked. Nothing is being claimed about it."}'
+			exit 0
+		fi
+		# Split, never piped: a pipeline's status is its LAST command's, so asking the forge inside one
+		# would turn "I could not look" into "nothing is owed" — the exact substitution this whole tool
+		# exists to prevent, and a trap `tick` already documents one level up.
+		_hr=$(mktemp)
+		if ! owed_repos "$_rolegh" "$_rolemode" "$_author" >"$_hr" 2>"$_hr.err"; then
+			jq -n --arg d "$(cat "$_hr.err")" '{systemMessage: ("forge-watch owed: the check itself failed, so whether a watch is owed is UNKNOWN — which is not the same as \"none\".\n" + $d)}'
+			rm -f "$_hr" "$_hr.err"
+			exit 0
+		fi
+		owed_classify <"$_hr" >"$_hr.tab"
+		if [ ! -s "$_hr.tab" ]; then
+			rm -f "$_hr" "$_hr.err" "$_hr.tab"
+			exit 0
+		fi
+		_hout=$(owed_decide "$_hr.tab") && _hrc=0 || _hrc=$?
+		rm -f "$_hr" "$_hr.err" "$_hr.tab"
+		if [ "$_hrc" = 0 ]; then exit 0; fi
+		_msg="A WATCH IS OWED AND IS NOT LIVE — you are about to end a turn with open PRs and nothing that can wake you.
+
+$_hout
+
+Arm it as a BACKGROUND task (run_in_background), one per repository above:
+
+    $(owed_arm_hint '<owner/name>' "$_rolegh")
+
+The loop must exit when it finds something; a loop that cannot exit cannot wake you, which is why this is a verb and not a loop you write (quince#62). If you have genuinely finished — everything merged, or a stop that is the Operator's — say so and end the turn again: this blocks once, and the second time it tells the human instead of you."
+		if [ "$_active" = true ]; then
+			# Blocked once already. Do NOT block again: a Stop hook that always blocks is a session
+			# that can never end, and the goal was never to make stopping impossible — only to make an
+			# unwatched stop impossible to do SILENTLY. So the second attempt is allowed, and the human
+			# is told, which is the whole of "make the absence detectable".
+			jq -n --arg d "$_hout" '{systemMessage: ("forge-watch owed: this session is ENDING A TURN WITH AN UNWATCHED PR after being told once.\n" + $d)}'
+			exit 0
+		fi
+		jq -n --arg r "$_msg" '{decision: "block", reason: $r}'
+		exit 0
+	fi
+
+	[ -n "$_mode" ] || die "owed needs --author <login|@me> (the implementer half: the PRs you opened)
+    or --all (the architect half: the declared set). It is not defaulted, because the two halves owe
+    watches over different sets and guessing which you are would answer a question you did not ask."
+	[ -n "$_ghcmd" ] || _ghcmd=$_rolegh
+	[ "$_ghcmd" != - ] || die "no forge credential on this box, and no --gh given — nothing to ask."
+	require_gh "$_ghcmd"
+	_or=$(mktemp)
+	owed_repos "$_ghcmd" "$_mode" "$_author" >"$_or"
+	owed_classify <"$_or" >"$_or.tab"
+	if [ ! -s "$_or.tab" ]; then
+		printf 'forge-watch: nothing owed — no open PRs in scope, so no watch is owed for them.\n'
+		rm -f "$_or" "$_or.tab"
+		exit 0
+	fi
+	owed_decide "$_or.tab" && _orc=0 || _orc=$?
+	rm -f "$_or" "$_or.tab"
+	exit "$_orc"
 	;;
 replay)
 	shift

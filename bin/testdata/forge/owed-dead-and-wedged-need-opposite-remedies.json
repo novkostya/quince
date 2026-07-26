@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "Both are owed, and telling them apart is not cosmetic: `dead` means re-arm from that state without reseeding it, and `wedged` means a process is STILL RUNNING and must be stopped first, or arming is starting a second watcher beside a live one (quince#50). One instruction for two situations is the same defect one level up — the finding that split `dead` from `wedged` in the first place.",
+  "table": [
+    ["novkostya/quince", 3],
+    ["novkostya/quince-devlog", 5]
+  ],
+  "expect": [
+    "OWED  novkostya/quince — open PRs, watch=dead. Re-arm from that state; do NOT reseed it.",
+    "OWED  novkostya/quince-devlog — open PRs, watch=wedged. Run \"forge-watch stop --repo novkostya/quince-devlog\" first, then arm."
+  ],
+  "expect_exit": 8
+}

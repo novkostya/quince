@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "The negative case, and it must SAY so rather than printing nothing: a gate whose satisfied answer is silence cannot be seen to have run, which is the rule this directory was built on. Nothing is owed here, and the line says which repositories that judgement covers.",
+  "table": [
+    ["novkostya/quince", 0],
+    ["novkostya/quince-devlog", 0]
+  ],
+  "expect": [
+    "ok    novkostya/quince — open PRs, and a live watch",
+    "ok    novkostya/quince-devlog — open PRs, and a live watch"
+  ],
+  "expect_exit": 0
+}
