@@ -1,0 +1,16 @@
+{
+  "note": "checks go red with no review change. A reviews-only watcher emits nothing, so 'no review yet' and 'unreviewable, CI is red' are the same silence.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 16, "state": "OPEN", "updatedAt": "2026-07-25T21:00:00Z",
+      "checks": [{"name":"gates","conclusion":null},{"name":"image","conclusion":null},{"name":"e2e","conclusion":null}],
+      "reviews": [] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 16, "state": "OPEN", "updatedAt": "2026-07-25T21:04:39Z",
+      "checks": [{"name":"gates","conclusion":"FAILURE"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+      "reviews": [] } ]
+  },
+  "expect_events": [ "event=checks pr=16 conclusion=FAILURE name=gates" ]
+}

@@ -1,0 +1,18 @@
+{
+  "note": "LATENT defect, no observed miss: a watch that binds its PR list at arm time never sees a PR opened afterwards. The queue must be enumerated each tick.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 19, "state": "OPEN", "updatedAt": "2026-07-26T01:20:00Z",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 19, "state": "MERGED", "updatedAt": "2026-07-26T01:32:37Z",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}] },
+      { "number": 20, "state": "OPEN", "updatedAt": "2026-07-26T01:40:00Z",
+        "checks": [], "reviews": [] }
+    ]
+  },
+  "expect_events": [ "event=merged pr=19", "event=opened pr=20" ]
+}
