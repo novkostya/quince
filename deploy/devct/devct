@@ -171,6 +171,24 @@ create() {
 	# persistent runner gets a name outside the disposable series. Anything named for the runner is
 	# then protected by destroy's guard below — the name IS the marker, so there is no second
 	# lifecycle to keep in sync.
+	# --role arch means: do NOT inject the bot token. The architect box can approve, and a box that
+	# can approve must not also hold the identity that authors — that is devlog#7's whole point, and
+	# leaving it to a later cleanup step would mean the separation depends on remembering.
+	# Found by running it: create injected the token onto the arch box, and the box's own preflight
+	# refused to start. The guard worked; the path that fed it did not.
+	_role=implementer
+	while :; do
+		case "${1:-}" in
+		--role)
+			[ -n "${2:-}" ] || devct_die "--role needs a value (implementer|arch)"
+			_role=$2
+			shift 2
+			;;
+		*) break ;;
+		esac
+	done
+	case "$_role" in implementer | arch) ;; *) devct_die "unknown role '$_role' — expected implementer or arch" ;; esac
+
 	if [ "${1:-}" = --name ]; then
 		[ -n "${2:-}" ] || devct_die "--name needs a value"
 		_host=$2
@@ -195,7 +213,11 @@ create() {
 	devct_wait_for_ssh "$_ip" || devct_die "$_host is up but ssh never answered"
 
 	write_ssh_include
-	inject_secrets "$_ip"
+	if [ "$_role" = arch ]; then
+		printf '  secrets: NONE injected (role arch — this box must not hold the bot identity)\n'
+	else
+		inject_secrets "$_ip"
+	fi
 	ensure_tcp_forwarding "$_ip"
 	check_stamp "$_ip"
 
