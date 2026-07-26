@@ -809,6 +809,17 @@ stop)
 	#
 	# Every branch that cannot PROVE the pid is our watcher refuses. `kill` returning success proves a
 	# process died, not that the right one did.
+	#
+	# THE LIMIT OF THIS CHECK, stated because a claim that does not state its own limit is the thing
+	# this file keeps being fixed for: verify-then-signal is two syscalls with a gap between them. If
+	# the watcher exits after the start-time check and the kernel reuses its pid before the `kill`, the
+	# signal lands on a bystander anyway. That race cannot be closed from userspace.
+	#
+	# What the verb buys is the size of the window, and the difference is not marginal: the old
+	# arrangement was `status` printing "stop that pid" and an agent typing `kill` afterwards — a window
+	# of however long a session takes to read a sentence and act, seconds to minutes, and the review
+	# that produced this fix demonstrated a session using exactly that window to kill init. Here it is
+	# microseconds between two syscalls, in one place, behind a refusal. Unbounded to syscall-scale.
 	shift
 	_s='' _repo=novkostya/quince
 	while [ $# -gt 0 ]; do

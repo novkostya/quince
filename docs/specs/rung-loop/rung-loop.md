@@ -212,6 +212,14 @@ Therefore:
   following *"stop that pid, then re-arm"* literally, on a box where the pid had been recycled, had no
   defence at all.
 
+  **And the check states its own limit, because one that did not would be the same defect wearing a
+  fix's clothes.** Verify-then-signal is two syscalls with a gap: if the watcher exits after the
+  start-time check and the kernel reuses its pid before the `kill`, the signal still lands on a
+  bystander. That race cannot be closed from userspace. What the verb buys is the *size* of the window,
+  and the difference is not marginal — the old arrangement's window was however long a session takes to
+  read a sentence and act, seconds to minutes, and the review demonstrated a session using exactly that
+  window to kill init. **Unbounded to syscall-scale, in one place, behind a refusal.**
+
   Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
   nothing changed" since a beginning it invented. **`wedged` was the fourth case, and it was a review
   finding against this design's own stated principle** — it originally shared `dead`'s exit code and its
