@@ -110,6 +110,15 @@ The fix is not to teach it turns. It is a **backstop that does not classify**:
   latest activity was its own, and reported "nothing owed from me" with three items owed. Attribution
   uses only activity **strictly newer than the previous observation** — the only acts that could
   explain the move — and says `actor=unattributed` when nothing does, rather than naming a bystander.
+  **`unattributed` is not a bug, and the commonest way to reach it is worth naming:** a commit is dated
+  by `committedDate`, not by when it was pushed, so a commit held locally or an older commit
+  cherry-picked forward sorts *older* than the previous observation. The event still fires — that is
+  the part that matters — and degrades to `unattributed` rather than guessing. A label change, a title
+  edit or a base change lands there too, appearing in no activity list at all.
+- **volume, since an unconditional backstop invites the worry that it becomes an unactionable stream:**
+  `updatedAt` does not move on check completion, which is the highest-volume signal in the system. It
+  moves on comments, reviews, pushes, labels and merges — acts by a human or an agent, roughly one
+  event per act. That is a stream a session can act on.
 - **compare against last-acted-on state, not state-at-arm.** A hand-rolled mitigation during the
   incident baselined against *current* heads at arm time, so both pushes it existed to catch were
   already in its baseline. `step()` diffs against the stored observation, which is what makes a
@@ -119,7 +128,13 @@ The fix is not to teach it turns. It is a **backstop that does not classify**:
   own `updatedAt` does not move, and no amount of watching that timestamp would ever show it. Under
   strict up-to-date protection the architect's own merges invalidate every other open PR this way.
   Reported on transition into a *known* non-clean state only: `UNKNOWN` is GitHub's "no answer yet",
-  and reporting it would be reporting our own ignorance as the PR's condition. The **policy** half —
+  and reporting it would be reporting our own ignorance as the PR's condition. **The state therefore
+  remembers the last *known* mergeability, not the last observed one** — the first version treated
+  `UNKNOWN` as no-answer for reporting and then wrote it into state as though it were a state, so
+  `BEHIND → UNKNOWN → BEHIND` re-announced a condition that never changed. Reachable rather than
+  theoretical: the recompute that returns `UNKNOWN` is triggered by the base moving, and the base
+  moving is what makes a PR `BEHIND`, so two merges into an open queue produce it. Overwriting
+  knowledge with an absence is how a recompute flap becomes an event. The **policy** half —
   whether to adopt a merge queue so this stops happening — is [quince#46](https://github.com/novkostya/quince/issues/46)
   and is deliberately not decided here.
 
