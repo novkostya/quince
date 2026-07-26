@@ -1,0 +1,133 @@
+# dev-deploy — a PR you can click, without asking anyone
+
+> Status: **SPEC — proposed, not approved.** No code exists. Tracked as `pr.4` in the devlog's
+> revamp sequence; feature-named because the deliverable outlives the label. Reviewed before any
+> code per `CLAUDE.md`, and written this way because pr.2's spec-first round paid for itself twice
+> (the token-first amendment, and the storage correction).
+
+## Goal
+
+A session finishes a change and the PR carries a **working demo URL and a ≤5-line click list
+without anyone asking for them** — deployed onto a disposable dev container by the same scoped
+token that provisions it, with `/report` doing it by default.
+
+## Boundary
+
+**In scope:**
+
+- `deploy/devct/devct` — a `deploy` verb: build the image from a ref on a dev container, run it in
+  `--demo` mode, report the URL.
+- `.claude/skills/report/SKILL.md` — call it by default (R5's "I don't have to ask" requirement).
+- `.claude/skills/qa/SKILL.md` — **replaced, not extended** (its own instruction).
+- `CLAUDE.md` — the DoD line, with the honest non-URL outcomes named.
+- `docs/specs/dev-deploy/` — this spec.
+
+**Out of scope:** staging deploys (by request, unchanged — one instance, one pairing, the soak stays
+clean); real-device QA; any product code (frozen); anything under `.github/workflows/`; the runner
+host (pr.5).
+
+**Expected contract changes: NONE.** `--demo` mode already exists and is exercised by
+`make gates-ui-e2e`.
+
+## The question this spec must settle before code (raised, not assumed)
+
+**A deploy URL contains an address, and addresses are Operator-private.** R5 says the URL goes in
+the PR automatically; the privacy rule says LAN addresses never enter PR text. Both are binding, so
+this rung cannot proceed on a guess. The options, with a recommendation:
+
+1. **Convention name only (recommended).** The PR carries `http://quince-dev-1:8080/`. It is
+   meaningless to a stranger and clickable for anyone holding the binding — the same trick the
+   allowlist already uses for hosts, and consistent with `devct`'s generated ssh aliases. Cost: the
+   reader needs a `hosts` entry, since a browser cannot use an ssh alias. `devct deploy` prints the
+   line to add, exactly as `onboard` prints the ssh `Include` line.
+2. **No URL in the PR; the session prints it locally.** Safest, and it guts R5's requirement — the
+   reviewer is back to asking.
+3. **A reverse proxy with a stable public name.** Real infrastructure, and it changes what "dev
+   container" means. Out of scope for this rung.
+
+**Recommendation: (1), with (2) as the automatic fallback** when no convention name is configured —
+never a bare address in PR text under any option. If the reviewer prefers otherwise, that is a
+ruling and this spec changes before code.
+
+## Design
+
+Links canon rather than repeating it: R5 (demo-by-default, staging-by-request, the DoD),
+`deploy/devct/README.md` (the token model and the pool boundary), `deploy/dev.md` (`--demo` and the
+`make image` path CI already uses).
+
+### `devct deploy [--vmid N] [--ref REF] [--create]`
+
+1. Resolve the container: `--vmid`, or the single running dev container, or `--create` to make one.
+2. `git fetch` the ref inside it and check it out (a dev container already has the repo and a warmed
+   toolchain cache — this is what makes the deploy minutes, not tens of minutes).
+3. `make image` inside the container. This is the **production** image path, so the deploy proves
+   the same artifact CI builds, not a special dev build.
+4. Run it: `--demo`, port 8080, restart-on-boot off, replacing any previous deploy container so a
+   re-deploy is idempotent rather than accumulating.
+5. **Verify before claiming**: poll `GET /api/health` until it answers, then report. A URL printed
+   without a successful fetch is the rung-2 defect class again, and this spec names it in advance.
+6. Print the convention URL for the PR, the real URL for the session, and the `hosts` line to add.
+
+### `/report` and `/qa`
+
+`/report` calls `devct deploy` by default and pastes the URL + click list into the PR. When it
+cannot deploy, it must print **one of two named outcomes** — never an improvised sentence:
+
+- `deploy: not applicable — no runnable change` (docs/config-only), or
+- `deploy: unavailable — <reason>` (no dev container, deploy failed), with the reason.
+
+That is devlog#1 item 4's refinement, and it is what stops "not applicable" from covering for
+"couldn't be bothered". `/qa` becomes the explicit form of the same machinery plus the click list;
+the placeholder text goes.
+
+## Stories
+
+1. `devct deploy --ref <branch>` builds and serves that ref on a dev container and reports a URL it
+   has actually fetched.
+2. A second `devct deploy` on the same container replaces the first — no accumulation, no port
+   clash.
+3. `devct deploy` on a container with no image cache still works (slower, and says so).
+4. `/report` produces URL + click list with no one asking.
+5. A docs-only PR gets `deploy: not applicable — no runnable change`, and a failed deploy gets
+   `deploy: unavailable — <reason>`; neither can be silently omitted.
+6. No PR text ever contains an address.
+
+## Gates
+
+- **G1** — `devct deploy --ref <this branch>` → `/api/health` returns 200 from the session host →
+  the demo device list renders in a browser (stories 1, 3).
+- **G2** — re-deploy replaces (story 2): two deploys, one container, one listener.
+- **G3** — this rung's own PR carries the URL and click list, produced by `/report` rather than by
+  hand (stories 4, 6). The rung dogfoods its own deliverable or it is not done.
+- **G4** — a docs-only PR shows the "not applicable" line; a deliberately broken deploy shows
+  "unavailable" with its reason (story 5).
+- **Privacy gate** — `make privacy-check` plus a read of the PR body: convention names only.
+
+## Fixtures
+
+None. `--demo` mode is the fixture, and it is already exercised by `make gates-ui-e2e`.
+
+## Rule check
+
+- **Privacy** — the entire open question above is a privacy question; no address enters PR text
+  under any option, and the recommendation keeps the binding on the reader's machine.
+- **State honesty** — a URL is reported only after a successful health fetch; "not applicable" and
+  "unavailable" are distinct and both explicit. The rung's own PR must carry a real URL (G3).
+- **No silent fallbacks** — a missing container, a failed build, an unreachable demo each produce a
+  named outcome, never a quiet omission of the deploy line.
+- **Secrets** — the deploy needs none beyond what `devct create` already injects; the demo runs on
+  fixtures, with no device and no backup data.
+- **Boundary** — no product code, no contracts, no workflow files. The `--demo` flag is used as-is.
+- **Docs are part of the diff** — `CLAUDE.md`'s DoD, both skills, and `deploy/devct/README.md` land
+  with the behaviour.
+- **Frozen product code** — deploying the demo changes nothing in `core/`, `vault/`, or `ui/`.
+- **Resurrection test** — a stranger with their own Proxmox box gets the same deploy verb; only the
+  convention binding is local.
+
+## PR sequence
+
+1. **this spec** — the URL question ruled before code exists.
+2. **`devct deploy`** — the verb plus its README section. Claim: a ref becomes a clickable demo on a
+   disposable container (G1, G2).
+3. **skills + DoD** — `/report` by default, `/qa` replaced, `CLAUDE.md`'s DoD with the two named
+   outcomes. Claim: a PR arrives with the URL nobody asked for (G3, G4).
