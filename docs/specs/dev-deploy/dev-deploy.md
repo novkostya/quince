@@ -1,6 +1,6 @@
 # dev-deploy — a PR you can click, without asking anyone
 
-> Status: **SPEC — proposed, not approved.** No code exists. Tracked as `pr.4` in the devlog's
+> Status: **SPEC — ruled on first review, awaiting re-review.** No code exists. Tracked as `pr.4` in the devlog's
 > revamp sequence; feature-named because the deliverable outlives the label. Reviewed before any
 > code per `CLAUDE.md`, and written this way because pr.2's spec-first round paid for itself twice
 > (the token-first amendment, and the storage correction).
@@ -29,25 +29,36 @@ host (pr.5).
 **Expected contract changes: NONE.** `--demo` mode already exists and is exercised by
 `make gates-ui-e2e`.
 
-## The question this spec must settle before code (raised, not assumed)
+## The URL question — RULED (architect, on this spec's first review)
 
 **A deploy URL contains an address, and addresses are Operator-private.** R5 says the URL goes in
 the PR automatically; the privacy rule says LAN addresses never enter PR text. Both are binding, so
-this rung cannot proceed on a guess. The options, with a recommendation:
+this was raised rather than decided in code.
 
-1. **Convention name only (recommended).** The PR carries `http://quince-dev-1:8080/`. It is
-   meaningless to a stranger and clickable for anyone holding the binding — the same trick the
-   allowlist already uses for hosts, and consistent with `devct`'s generated ssh aliases. Cost: the
-   reader needs a `hosts` entry, since a browser cannot use an ssh alias. `devct deploy` prints the
-   line to add, exactly as `onboard` prints the ssh `Include` line.
-2. **No URL in the PR; the session prints it locally.** Safest, and it guts R5's requirement — the
-   reviewer is back to asking.
-3. **A reverse proxy with a stable public name.** Real infrastructure, and it changes what "dev
-   container" means. Out of scope for this rung.
+**Ruled: the convention name, and never a bare address in PR text under any option.**
+`http://quince-dev-1:8080/` carries no site information — meaningless to a stranger, resolvable for
+anyone holding the binding, the same trick the allowlist and `devct`'s generated ssh aliases already
+use. The privacy rule is satisfied *by construction* rather than by a reviewer catching a leak.
 
-**Recommendation: (1), with (2) as the automatic fallback** when no convention name is configured —
-never a bare address in PR text under any option. If the reviewer prefers otherwise, that is a
-ruling and this spec changes before code.
+**Four reader paths, in the order the PR should present them:**
+
+1. **The convention URL is the identifier** — `http://quince-dev-1:8080/`, always in the PR.
+2. **`ssh -L` is the documented desktop path** (architect's addition, and it removes the cost the
+   first draft accepted):
+   ```
+   ssh -L 8080:localhost:8080 quince-dev-1   # then open http://localhost:8080
+   ```
+   It reuses the binding `devct` already generates, needs no file editing, and **dies with the
+   session** — no stale `hosts` entry left pointing at a recycled DHCP address, which is a real
+   hazard when containers are disposable by design.
+3. **Direct resolution where the site's DNS registers DHCP hostnames** — then the convention URL
+   simply works, including in mobile Safari with nothing configured. This matters: the Operator QAs
+   from a phone (qn.6a exists because mobile *is* the soak surface), and `ssh -L` is not a phone
+   workflow.
+4. **Fallback: no URL, with the reason printed** — when no convention name is configured. Honest
+   absence, never a bare address.
+
+A `hosts` line stays available for anyone who prefers it; `devct deploy` prints it on request.
 
 ## Design
 
@@ -66,7 +77,10 @@ Links canon rather than repeating it: R5 (demo-by-default, staging-by-request, t
    re-deploy is idempotent rather than accumulating.
 5. **Verify before claiming**: poll `GET /api/health` until it answers, then report. A URL printed
    without a successful fetch is the rung-2 defect class again, and this spec names it in advance.
-6. Print the convention URL for the PR, the real URL for the session, and the `hosts` line to add.
+6. Print, in the ruled order: the **convention URL** (goes in the PR), the **`ssh -L` command** (the
+   desktop click path), and the real address **for the session only** — never for PR text. A
+   `hosts` line on request, for readers who want direct resolution and whose DNS does not provide
+   it.
 
 ### `/report` and `/qa`
 
@@ -90,12 +104,14 @@ the placeholder text goes.
 4. `/report` produces URL + click list with no one asking.
 5. A docs-only PR gets `deploy: not applicable — no runnable change`, and a failed deploy gets
    `deploy: unavailable — <reason>`; neither can be silently omitted.
-6. No PR text ever contains an address.
+6. No PR text ever contains an address — and the PR's click path works for a desktop reader via
+   `ssh -L` without any file editing on their machine.
 
 ## Gates
 
 - **G1** — `devct deploy --ref <this branch>` → `/api/health` returns 200 from the session host →
-  the demo device list renders in a browser (stories 1, 3).
+  the demo device list renders in a browser **reached over `ssh -L`**, which proves the ruled click
+  path rather than only the container's own port (stories 1, 3, 6).
 - **G2** — re-deploy replaces (story 2): two deploys, one container, one listener.
 - **G3** — this rung's own PR carries the URL and click list, produced by `/report` rather than by
   hand (stories 4, 6). The rung dogfoods its own deliverable or it is not done.
