@@ -379,6 +379,10 @@ provision_script() {
 set -eu
 apk update
 apk add --no-cache git make openssh-client curl jq containerd nerdctl buildkit buildctl
+# Alpine's sshd ships AllowTcpForwarding no, which blocks "ssh -L" — the ruled desktop path for
+# clicking a deployed demo. Set it in the template so containers cloned from it work out of the box.
+sed -i -E 's/^[[:space:]]*#?[[:space:]]*AllowTcpForwarding.*/AllowTcpForwarding yes/I' /etc/ssh/sshd_config
+grep -qiE '^AllowTcpForwarding yes' /etc/ssh/sshd_config || printf 'AllowTcpForwarding yes\n' >> /etc/ssh/sshd_config
 rc-update add containerd default 2>/dev/null || true
 rc-update add buildkitd default 2>/dev/null || true
 service containerd start || true

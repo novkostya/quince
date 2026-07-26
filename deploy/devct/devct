@@ -24,6 +24,12 @@ usage: devct <verb>
   destroy N     stop and delete one — refuses anything outside the pool.
   onboard       bind this machine: write devct.conf, pin the API certificate, and print
                 the ssh config line to add. Never edits your ssh config itself.
+  deploy        build a ref's production image on a dev container and serve it in --demo
+                mode, then report a URL it has actually fetched.
+                  --ref R    branch, tag or sha to deploy (default: the current branch)
+                  --vmid N   which container (default: the only running one)
+                  --create   make one first if none is running
+                  --hosts    also print a hosts line, for direct browser resolution
 
 onboard options (all optional except --api-host and --token-id):
   --api-host H          a name the API certificate carries (NOT an address — curl verifies
@@ -181,11 +187,148 @@ create() {
 
 	write_ssh_include
 	inject_secrets "$_ip"
+	ensure_tcp_forwarding "$_ip"
 	check_stamp "$_ip"
 
 	printf '\n%s is ready.\n' "$_host"
 	printf '  ssh %s\n' "$_host"
 	printf '  ssh %s '"'"'git clone https://github.com/novkostya/quince.git ~/work && make -C ~/work gates'"'"'\n' "$_host"
+}
+
+# ---------------------------------------------------------------------------
+# deploy — the PR's clickable half. Builds THE PRODUCTION IMAGE on a dev container (QA against an
+# artifact that differs from what CI builds is QA of something nobody ships), serves it in --demo
+# mode, and reports a URL only after fetching it.
+#
+# The URL rule, ruled on the spec's first review: the PR gets the CONVENTION name and never an
+# address. `ssh -L` is the documented desktop path because it reuses the binding devct already
+# generates and dies with the session, leaving nothing stale pointing at a recycled DHCP lease.
+# ---------------------------------------------------------------------------
+
+DEMO_CONTAINER=quince-demo
+DEMO_PORT=8080
+
+deploy() {
+	devct_need curl jq ssh
+	devct_load_conf
+	devct_require_conf "api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL"
+
+	_d_ref='' _d_vmid='' _d_create='' _d_hosts=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--ref)
+			_d_ref=$2
+			shift 2
+			;;
+		--vmid)
+			_d_vmid=$2
+			shift 2
+			;;
+		--create)
+			_d_create=1
+			shift
+			;;
+		--hosts)
+			_d_hosts=1
+			shift
+			;;
+		*)
+			usage >&2
+			devct_die "unknown option: $1"
+			;;
+		esac
+	done
+	[ -n "$_d_ref" ] || _d_ref=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+
+	# 1. Which container.
+	if [ -z "$_d_vmid" ]; then
+		_d_vmid=$(running_dev_vmid)
+		if [ -z "$_d_vmid" ] && [ -n "$_d_create" ]; then
+			create
+			_d_vmid=$(running_dev_vmid)
+		fi
+		[ -n "$_d_vmid" ] ||
+			devct_die "no running dev container — start one with 'devct create', or pass --create"
+	fi
+	devct_in_pool "$_d_vmid" || devct_die "vmid $_d_vmid is not in pool $DEVCT_POOL"
+	_d_name=$(ct_name "$_d_vmid")
+	_d_ip=$(devct_wait_for_ip "$_d_vmid") || devct_die "$_d_name reports no address"
+	printf 'deploying %s to %s (vmid %s)\n' "$_d_ref" "$_d_name" "$_d_vmid"
+
+	# 2 + 3. Fetch the ref and build the production image, in the container.
+	printf '  building the production image (this is the same target CI builds)…\n'
+	# NO -n here: this ssh's stdin IS the payload. `-n` is the fix for an ssh that would otherwise
+	# eat a loop's stdin; applied to a heredoc-fed call it silently feeds the remote shell nothing,
+	# which exits 0 and looks like success. Found by running it — the build never happened and the
+	# deploy only noticed three steps later, at the health check.
+	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s" <<EOF || devct_die "the image build failed on $_d_name"
+set -eu
+if [ -d /root/deploy-src/.git ]; then
+  cd /root/deploy-src && git fetch -q --depth 50 origin '$_d_ref'
+else
+  git clone -q --depth 50 https://github.com/novkostya/quince.git /root/deploy-src
+  cd /root/deploy-src && git fetch -q --depth 50 origin '$_d_ref'
+fi
+git -C /root/deploy-src checkout -q FETCH_HEAD
+make -C /root/deploy-src image
+EOF
+
+	# 4. Serve it, replacing any previous deploy so re-deploys do not accumulate.
+	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s" <<EOF || devct_die "could not start the demo"
+set -eu
+nerdctl rm -f $DEMO_CONTAINER >/dev/null 2>&1 || true
+nerdctl run -d --name $DEMO_CONTAINER -p $DEMO_PORT:$DEMO_PORT \
+  -e QUINCE_LISTEN=:$DEMO_PORT -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+  quince:local serve --demo >/dev/null
+EOF
+
+	# 5. Verify before claiming. A URL printed without a successful fetch is the defect class this
+	#    rung's predecessor produced six times; the spec named it in advance, so it gets checked.
+	printf '  waiting for the demo to answer…\n'
+	# 127.0.0.1, not localhost: nerdctl's port proxy binds IPv4 only, and `localhost` resolves to
+	# ::1 first, so a probe through the name gets "connection refused" from a perfectly healthy
+	# app. Measured here — the first run reported a dead demo that was serving fine.
+	_d_n=0
+	while :; do
+		ssh -n -o StrictHostKeyChecking=accept-new "root@$_d_ip" \
+			"wget -qO- http://127.0.0.1:$DEMO_PORT/api/health" 2>/dev/null | grep -q '"status"' && break
+		[ "$_d_n" -ge 60 ] && {
+			ssh -n "root@$_d_ip" "nerdctl logs --tail 20 $DEMO_CONTAINER" 2>&1 | sed 's/^/    /' >&2
+			devct_die "the demo never answered /api/health — logs above"
+		}
+		sleep 3
+		_d_n=$((_d_n + 3))
+	done
+
+	# 6. Report. Convention name for the PR; the address stays in this session.
+	printf '\n%s is serving %s.\n\n' "$_d_name" "$_d_ref"
+	printf 'For the PR (convention name — carries no site information):\n'
+	printf '  http://%s:%s/\n\n' "$_d_name" "$DEMO_PORT"
+	# The forward's remote end resolves ON THE CONTAINER, where `localhost` means ::1 and nothing
+	# is listening there. 127.0.0.1 is what makes the ruled click path actually click — found by
+	# walking it, which is why G1 gates the path rather than the port.
+	printf 'To click it from a desktop, no configuration needed:\n'
+	printf '  ssh -L %s:127.0.0.1:%s %s     # then open http://localhost:%s\n\n' \
+		"$DEMO_PORT" "$DEMO_PORT" "$_d_name" "$DEMO_PORT"
+	printf 'This session only (never paste this into a PR):\n'
+	printf '  http://%s:%s/\n' "$_d_ip" "$DEMO_PORT"
+	if [ -n "$_d_hosts" ]; then
+		printf '\nFor direct browser resolution, add to /etc/hosts:\n'
+		printf '  %s %s\n' "$_d_ip" "$_d_name"
+	fi
+}
+
+running_dev_vmid() {
+	_r=$(devct_api GET "/pools/$DEVCT_POOL") || return 1
+	_l=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || return 1
+	devct_body "$_l" | jq -r --argjson m "$(devct_body "$_r" | jq -c '[.data.members[]?|.vmid]')" \
+		'[.data[] | select(.template!=1 and .status=="running" and (.vmid as $v | $m | index($v))) | .vmid] |
+		 if length == 1 then .[0] else empty end'
+}
+
+ct_name() {
+	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || return 1
+	devct_body "$_r" | jq -r --arg v "$1" '.data[] | select((.vmid|tostring)==$v) | .name'
 }
 
 list() {
@@ -272,6 +415,28 @@ inject_secrets() {
 		_sent="$_sent, registry credential"
 	fi
 	printf '  secrets injected: %s\n' "${_sent:-none found on this host}"
+}
+
+# The ruled desktop click path is `ssh -L`, and Alpine's sshd ships `AllowTcpForwarding no` — so a
+# reviewer following the PR's own instructions gets "administratively prohibited" and no page.
+# Fixed here because it is container-local (no hypervisor privilege, no template rebuild needed for
+# containers already cloned), and announced rather than done quietly. The template carries the same
+# setting from now on, so this becomes a no-op for anything built after it.
+ensure_tcp_forwarding() {
+	_fwd=$(ssh -o StrictHostKeyChecking=accept-new "root@$1" 'sh -s' <<'EOF'
+set -eu
+if grep -qiE '^[[:space:]]*AllowTcpForwarding[[:space:]]+yes' /etc/ssh/sshd_config; then
+	printf 'already enabled\n'
+	exit 0
+fi
+sed -i -E 's/^[[:space:]]*#?[[:space:]]*AllowTcpForwarding.*/AllowTcpForwarding yes/I' /etc/ssh/sshd_config
+grep -qiE '^AllowTcpForwarding yes' /etc/ssh/sshd_config || printf 'AllowTcpForwarding yes\n' >>/etc/ssh/sshd_config
+rc-service sshd restart >/dev/null 2>&1 || /etc/init.d/sshd restart >/dev/null 2>&1
+grep -qiE '^AllowTcpForwarding yes' /etc/ssh/sshd_config && printf 'enabled (Alpine ships it off)\n'
+EOF
+	) || devct_die "could not enable ssh forwarding on the container"
+	[ -n "$_fwd" ] || devct_die "ssh forwarding could not be verified after the edit"
+	printf '  ssh -L forwarding: %s\n' "$_fwd"
 }
 
 # Staleness is surfaced, never silently used (spec story 9). The stamp is read from the box
@@ -452,6 +617,10 @@ destroy)
 onboard)
 	shift
 	onboard "$@"
+	;;
+deploy)
+	shift
+	deploy "$@"
 	;;
 '' | -h | --help | help) usage ;;
 *)

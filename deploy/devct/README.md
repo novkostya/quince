@@ -19,6 +19,42 @@ Design and acceptance gates: [`docs/specs/devct/devct.md`](../../docs/specs/devc
 | `devct create` / `list` / `destroy` | **built** — the everyday path, and it is **pure scoped token: no root at all** |
 | `devct onboard` | **built** — binds a fresh machine: config, pinned certificate, node discovery |
 
+## Deploying a PR so someone can click it
+
+```sh
+devct deploy --ref my-branch     # or --create to make a container first
+```
+
+It fetches the ref onto a dev container, builds **the production image** there (the same target CI
+builds — QA against a different artifact is QA of something nobody ships), serves it in `--demo`
+mode replacing any previous deploy, and **polls `/api/health` until it answers** before reporting
+anything. A URL it has not fetched is not a URL it will print.
+
+What it prints, in the order the spec rules:
+
+```
+For the PR (convention name — carries no site information):
+  http://quince-dev-1:8080/
+
+To click it from a desktop, no configuration needed:
+  ssh -L 8080:127.0.0.1:8080 quince-dev-1     # then open http://localhost:8080
+
+This session only (never paste this into a PR):
+  http://<address>:8080/
+```
+
+Two details that are not cosmetic, both found by walking the path rather than reading it:
+
+- **`127.0.0.1`, not `localhost`, on the forward's remote end.** nerdctl's port proxy binds IPv4
+  only; `localhost` resolves to `::1` first and the connection is refused by a perfectly healthy
+  app.
+- **`AllowTcpForwarding`**. Alpine's sshd ships it *off*, which makes `ssh -L` fail with
+  *"administratively prohibited"*. The template sets it, and `devct create` ensures it on
+  containers cloned from an older template — saying which of the two happened.
+
+Timings measured on the reference host: **~3.5 min** for the first deploy on a fresh container
+(cold production image build), **~5 s** for a re-deploy once the image layers are cached.
+
 ## Onboarding a machine
 
 ```sh
