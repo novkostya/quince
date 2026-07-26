@@ -40,15 +40,31 @@ lab-log excerpts. On a box without the pattern file the target no-ops — saniti
 
 ## 3. Deploy + click list (DoD)
 
-The default is a dev deploy of the built image in demo mode with the URL in the PR, plus a
-≤5-line what-to-click list. Until the dev-CT tooling exists, `/qa` is a placeholder — so:
+**Deploy by default. Don't ask, don't wait to be asked:**
 
-- run the demo locally on the container host and click it yourself (`/qa` has the exact
-  command), then post the click list with the honest line **"no dev-deploy URL — tooling
-  pending (pr.4)"**;
-- or, for a change with nothing runnable in it (docs, config), write **"deploy leg not
-  applicable: no runnable change"**. Not applicable and skipped are different words; use
-  the true one.
+```sh
+deploy/devct/devct deploy --ref <this branch>     # add --create if no container is running
+```
+
+It builds the production image on a dev container, serves it in `--demo` mode, and prints
+three lines. **Exactly one of them goes in the PR:**
+
+- **the convention URL** (`http://quince-dev-N:8080/`) — this is the one to paste;
+- the address — **never**; it is Operator-private and the tool labels it session-only;
+- the `ssh -L` line — paste it *below* the URL as the address-free path for a reader who
+  has the alias but not the LAN.
+
+Then click it yourself and write ≤5 imperative lines a reviewer can follow. Demo mode
+asks for an admin password first — that is line 1 of most click lists.
+
+**When there is no URL, say which of these two is true.** They are different, and the
+second one exists so the first cannot quietly cover for it:
+
+- **`deploy: not applicable — no runnable change`** — docs, config, spec. Nothing to click.
+- **`deploy: unavailable — <reason>`** — a container could not be had, the build failed,
+  the demo never answered. Name the reason; it is a finding, not a formality.
+
+An error message is a claim, and so is a missing one (program doc, *State honesty*).
 
 ## 4. Write the PR description
 
