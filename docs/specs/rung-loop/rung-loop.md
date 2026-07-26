@@ -16,9 +16,10 @@ ruling.
 
 ## Boundary
 
-**In scope:** `bin/forge-watch` (the event source and its state machine), loop modes in
-`.claude/skills/kickoff/SKILL.md` and `.claude/skills/review-pr/SKILL.md`, the runner-side
-supervision unit, `docs/specs/rung-loop/`, fixtures under `bin/testdata/forge/`.
+**In scope:** `bin/forge-watch` (the event source and its state machine), `.claude/forge-set` (the
+declared watch set), loop modes in `.claude/skills/kickoff/SKILL.md` and
+`.claude/skills/review-pr/SKILL.md`, the runner-side supervision unit, `docs/specs/rung-loop/`,
+fixtures under `bin/testdata/forge/`.
 
 **Out of scope:** the runner host itself (pr.5); any change to what review *means* (`/review-pr`'s
 protocol is untouched — only its triggering); auto-merge (landing stays `/land`, deliberate);
@@ -232,6 +233,29 @@ Therefore:
   that need a ruling rather than a patch, are
   [quince#50](https://github.com/novkostya/quince/issues/50).
 
+### 4d. The watch set is declared, never defaulted
+
+*"Watch both repos, every time"* was the instruction for a day, and it was wrong-in-waiting: it goes
+stale the moment a third repository matters, and a stale watch set produces the failure this project
+keeps paying for — devlog#3, a watch that reported both queues clear while covering one of them.
+
+- **The set is a versioned file, `.claude/forge-set`** — one `owner/name` per line, `#` comments. Adding
+  a repository is a PR against it, which is the point: the set becomes reviewable, and a session that
+  would otherwise have quietly watched less has to be told.
+- **Missing, empty, or malformed is a HARD FAILURE**, never a fallback to one repository. Falling back
+  would reproduce the historic bug and reproduce it silently, which is worse than not running. A
+  malformed line fails too rather than being skipped — a silently smaller set is the same lie one level
+  down.
+- **Under `--all`, every event carries `repo=`.** PR numbers collide across repositories by
+  construction, so `event=opened pr=20` from a two-repo watch is ambiguous by design rather than by bad
+  luck. `status --all` reports the **worst** class across the set — wedged, then dead, then absent,
+  then live — not the first or last: a session that
+  re-armed one repo and left another dead would otherwise read the reassuring line and stop.
+- **Only the architect side needs the file.** The implementer watches the PRs it opened, recording repo
+  and number as it opens them, so its set is self-describing. The architect reviews other people's
+  work, so authorship cannot derive its set — and a reviewer's watch set is exactly the thing that must
+  not be a habit.
+
 **Declared debt:** `stalled` (story 6) is specified and **not implemented** — it needs a wall clock,
 which the pure half deliberately does not have. It was advertised in `--help` while unimplemented,
 which is a tool making the kind of claim this tool exists to stop; it is off the advertised list until
@@ -305,11 +329,18 @@ allowance faster for no benefit.
     either, because the remedy differs.
 16. A hand-run tick cannot make a dead watcher look alive.
 17. A tick that was due and did not happen emits `tick-overdue`, with how late it was.
+18. A missing, empty or malformed watch-set declaration hard-fails; nothing falls back to one
+    repository.
+19. Under `--all` every event names its repository, and `status --all` reports the worst class in
+    the set.
 
 ## Gates
 
 - **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4
-  and 9–17. Story 6 is **not covered because it is not implemented** (§4b). Each fixture is a pair of
+  and 9–17. Stories **18–19 are proven by a CLI smoke recorded in the PR, not by the replay harness** —
+  they are argument handling rather than state transitions, and saying so is better than letting a
+  reader assume the fixtures cover them. Story 6 is **not covered because it is not implemented**
+  (§4b). Each fixture is a pair of
   consecutive observations; the recorded ones are named for the PRs that produced them
   (`pr17-…`, `pr16-…`, `pr36-…`, `pr37-…`) and the illustrative ones are numbered 100+ to say so.
   G1 also requires the fixtures to have teeth: replayed against the previous `forge-watch`, every

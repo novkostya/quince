@@ -17,11 +17,17 @@ usage() {
 usage: forge-watch <verb>
 
   step   --state <file> --observation <file>   emit events for one observation (pure, no network)
-  tick   [--repo owner/name] [--state <file>] [--gh <cmd>] [--watcher-pid <n>] [--interval <s>]
-                                               fetch the queue, then step
-  status [--repo owner/name] [--state <file>] [--now <iso>]
+  tick   [--repo owner/name | --all] [--state <file>] [--gh <cmd>] [--watcher-pid <n>]
+         [--interval <s>] [--set-file <f>]     fetch the queue, then step
+  status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
                                                live | dead | absent — and which, and what to do
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
+
+  --all reads the watch set from .claude/forge-set (or --set-file / FORGE_SET_FILE): one owner/name
+  per line, `#` comments. It HARD-FAILS when that file is missing, empty or malformed — it never
+  falls back to one repository, because a watch set that quietly shrinks is how a monitor reports
+  both queues clear while covering one of them. Under --all every event carries `repo=`, since PR
+  numbers collide across repositories by construction.
 
   State lives at $FORGE_STATE_DIR, else $XDG_STATE_HOME/quince/forge-watch, else
   ~/.local/state/quince/forge-watch — one file per repo, at a path that OUTLIVES THE SESSION. A
@@ -244,6 +250,47 @@ state_dir() {
 state_path_for() {
 	# owner/name -> owner-name.state.json, so one file per watched repo and no nesting to create.
 	printf '%s/%s.state.json' "$(state_dir)" "$(printf '%s' "$1" | tr '/' '-')"
+}
+
+# ---------------------------------------------------------------------------
+# The declared forge set — the watch set is read from a versioned file, and NEVER defaulted.
+#
+# "Watch both repos" was the instruction for a day. It was already wrong-in-waiting: it goes stale the
+# moment a third repository matters, and the failure mode of a stale watch set is the one this project
+# keeps paying for — a watch that reported both queues clear while covering one of them
+# (quince-devlog#3). So the set is declared in `.claude/forge-set`, and a missing, empty or malformed
+# declaration is a HARD FAILURE rather than a fallback to one repository. Falling back would produce
+# exactly the historic bug, and produce it silently, which is worse than not running at all.
+#
+# A malformed line fails too, naming the line number. Skipping it would be a silent cap: the set would
+# then be quietly smaller than the file says, which is the same lie one indentation level down.
+# ---------------------------------------------------------------------------
+FORGE_SET_FILE=${FORGE_SET_FILE:-.claude/forge-set}
+
+forge_set() {
+	_f=$1
+	[ -f "$_f" ] || die "no forge set at $_f — declare the repositories to watch, one owner/name per line.
+    This is deliberately not defaulted: a watch set that falls back to one repository is how a
+    monitor reports both queues clear while covering one of them (quince-devlog#3)."
+	_out=$(sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$_f" | grep -v '^$' || true)
+	[ -n "$_out" ] || die "the forge set at $_f is empty — nothing would be watched, and the watch would say nothing about it"
+	_bad=$(printf '%s\n' "$_out" | grep -vE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || true)
+	[ -z "$_bad" ] || die "$_f: not owner/name: $(printf '%s' "$_bad" | tr '\n' ' ')"
+	printf '%s\n' "$_out"
+}
+
+# Every event from a multi-repo run carries the repository it came from. Without it, `event=opened
+# pr=20` from two repositories is one ambiguous line — and PR numbers collide across repositories by
+# construction, so the ambiguity is guaranteed rather than unlucky. `fetch-failed` and
+# `queue-truncated` already name their repo, so the tag is added only where it is missing.
+tag_repo() {
+	_r=$1
+	while IFS= read -r _line; do
+		case "$_line" in
+		*repo=*) printf '%s\n' "$_line" ;;
+		*) printf '%s repo=%s\n' "$_line" "$_r" ;;
+		esac
+	done
 }
 
 # ---------------------------------------------------------------------------
@@ -484,8 +531,10 @@ tick() {
 	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
 		--search "sort:updated-desc" \
 		--json number,state,updatedAt,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
-		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" \
-			"$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)"
+		# A `reason=` with nothing after it reads as "there was no reason" rather than "the tool could
+		# not tell" — a wrapper that fails silently produces exactly that, and it was doing so.
+		_why=$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
+		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" "${_why:-no_stderr_from_gh}"
 		rm -f "$_raw" "$_raw.err"
 		return 1
 	fi
@@ -575,7 +624,7 @@ step)
 	;;
 tick)
 	shift
-	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _wpid='' _iv=60
+	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _wpid='' _iv=60 _all=no
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -584,6 +633,14 @@ tick)
 			;;
 		--repo)
 			_repo=$2
+			shift 2
+			;;
+		--all)
+			_all=yes
+			shift
+			;;
+		--set-file)
+			FORGE_SET_FILE=$2
 			shift 2
 			;;
 		--gh)
@@ -601,6 +658,30 @@ tick)
 		*) die "unknown option: $1" ;;
 		esac
 	done
+	if [ "$_all" = yes ]; then
+		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
+		command -v "$_ghcmd" >/dev/null 2>&1 || [ -x "$_ghcmd" ] ||
+			die "gh command not found: $_ghcmd (set --gh or FORGE_GH)"
+		_set=$(forge_set "$FORGE_SET_FILE")
+		_rc=0
+		_evt=$(mktemp)
+		for _r in $_set; do
+			_st=$(state_path_for "$_r")
+			mkdir -p "$(dirname "$_st")"
+			# NOT `tick … | tag_repo`: a pipeline's exit status is the LAST command's, so piping into
+			# the tagger would discard tick's failure and a total fetch failure would exit 0 — measured,
+			# not theorised. This is the same trap `tick` itself documents for `set -o pipefail` (not
+			# POSIX sh), one level up, and the same fix: split the pipeline and check the half that can
+			# fail. A watcher wired to the piped version would have read "all repos failed" as a healthy
+			# tick, which is corollary (a) — silence is not a result — in the tool built to enforce it.
+			if tick "$_st" "$_r" "$_ghcmd" "$_wpid" "$_iv" >"$_evt"; then :; else _rc=1; fi
+			tag_repo "$_r" <"$_evt"
+		done
+		rm -f "$_evt"
+		# One repository failing does not silence the others, and does not read as success either: the
+		# fetch-failed event names the repo, and the exit code carries the failure out of the loop.
+		exit "$_rc"
+	fi
 	# --state is now optional: without it the path is derived from --repo, at a location that outlives
 	# the session. It stays available because the fixtures and any second opinion need to point the
 	# tool at a scratch file.
@@ -620,7 +701,7 @@ tick)
 	;;
 status)
 	shift
-	_s='' _repo=novkostya/quince _now=''
+	_s='' _repo=novkostya/quince _now='' _all=no
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -631,6 +712,14 @@ status)
 			_repo=$2
 			shift 2
 			;;
+		--all)
+			_all=yes
+			shift
+			;;
+		--set-file)
+			FORGE_SET_FILE=$2
+			shift 2
+			;;
 		--now)
 			_now=$2
 			shift 2
@@ -638,15 +727,44 @@ status)
 		*) die "unknown option: $1" ;;
 		esac
 	done
-	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
 	[ -n "$_now" ] || _now=$(now_iso)
-	_alive=no
-	if [ -f "$_s" ]; then
-		_pid=$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)
-		[ -n "$_pid" ] && _alive=$(pid_alive "$_pid")
+	report_one() {
+		_rs=$1
+		_rr=$2
+		_ra=no
+		if [ -f "$_rs" ]; then
+			_rp=$(jq -r '.watch.pid // empty' "$_rs" 2>/dev/null || true)
+			[ -n "$_rp" ] && _ra=$(pid_alive "$_rp")
+		fi
+		printf 'forge-watch: repo=%s\n' "$_rr"
+		watch_report "$_rs" "$_now" "$_ra"
+	}
+	if [ "$_all" = yes ]; then
+		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
+		_set=$(forge_set "$FORGE_SET_FILE")
+		# The WORST class is reported, not the first or the last: a session that re-armed one repo and
+		# left another dead would otherwise read the reassuring line and stop.
+		#
+		# Ranking, worst first — wedged(5), dead(3), absent(4), live(0). Wedged outranks dead because it
+		# is dead PLUS a live process that must be stopped before re-arming; dead outranks absent because
+		# it is the one carrying accrued events on disk that a reseed would throw away. The per-repo
+		# lines are all printed regardless, so the exit code narrows nothing — it only refuses to let the
+		# best case speak for the set.
+		_worst=0
+		for _r in $_set; do
+			report_one "$(state_path_for "$_r")" "$_r" || _c=$?
+			_c=${_c:-0}
+			case "$_c" in
+			5) _worst=5 ;;
+			3) [ "$_worst" = 5 ] || _worst=3 ;;
+			4) case "$_worst" in 5 | 3) : ;; *) _worst=4 ;; esac ;;
+			esac
+			_c=0
+		done
+		exit "$_worst"
 	fi
-	printf 'forge-watch: repo=%s\n' "$_repo"
-	watch_report "$_s" "$_now" "$_alive"
+	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+	report_one "$_s" "$_repo"
 	;;
 replay)
 	shift
