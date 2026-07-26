@@ -167,8 +167,17 @@ create() {
 	[ -n "$_tmpl" ] || devct_die "no template named ${DEVCT_TEMPLATE_NAME:-quince-dev-template} — build one: devct-template build"
 
 	_r=$(devct_api GET "/nodes/$DEVCT_NODE/lxc") || devct_die "cannot list containers"
-	_n=${1:-$(next_alias_n "$_r")}
-	_host="quince-dev-$_n"
+	# `create <n>` picks quince-dev-<n>; `create --name X` takes the name whole, which is how the
+	# persistent runner gets a name outside the disposable series. Anything named for the runner is
+	# then protected by destroy's guard below — the name IS the marker, so there is no second
+	# lifecycle to keep in sync.
+	if [ "${1:-}" = --name ]; then
+		[ -n "${2:-}" ] || devct_die "--name needs a value"
+		_host=$2
+	else
+		_n=${1:-$(next_alias_n "$_r")}
+		_host="quince-dev-$_n"
+	fi
 	devct_body "$_r" | jq -e --arg h "$_host" '.data[] | select(.name==$h)' >/dev/null 2>&1 &&
 		devct_die "$_host already exists — destroy it first, or pick another number"
 
@@ -383,12 +392,24 @@ destroy() {
 	devct_need curl jq
 	devct_load_conf
 	devct_require_conf "api_host=$DEVCT_API_HOST" "node=$DEVCT_NODE" "pool=$DEVCT_POOL"
-	[ -n "${1:-}" ] || devct_die "usage: devct destroy <vmid>"
+
+	_force=''
+	if [ "${1:-}" = --force ]; then
+		_force=1
+		shift
+	fi
+	[ -n "${1:-}" ] || devct_die "usage: devct destroy [--force] <vmid>"
 
 	devct_in_pool "$1" ||
 		devct_die "vmid $1 is not in pool $DEVCT_POOL — refusing. The pool is the boundary of what this tool may touch."
 	devct_is_template "$1" &&
 		devct_die "vmid $1 is the template, not a dev container — rebuild it with devct-template if that is what you meant"
+
+	# The runner is persistent and holds credentials the disposable containers do not: destroying it
+	# by reflex is a different kind of mistake from destroying a dev box, so it takes a second word.
+	if [ -z "$_force" ] && [ "$(ct_name "$1")" = "${DEVCT_RUNNER_NAME:-quince-runner}" ]; then
+		devct_die "vmid $1 is the RUNNER, not a disposable container — it holds the claude.ai login and the bot identity, and rebuilding it costs a login ceremony. Pass --force if that is genuinely what you want."
+	fi
 
 	printf 'destroying %s\n' "$1"
 	devct_destroy "$1" || devct_die "destroy failed"

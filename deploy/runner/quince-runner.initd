@@ -39,3 +39,26 @@ start_pre() {
 	# because a log that implies continuity across a restart would be claiming something untrue.
 	einfo "starting a NEW Remote Control session (a restart never resumes the previous one)"
 }
+
+# `rc-service status` reports on the SUPERVISOR, so it says "started" while the supervised process
+# crash-loops — which is exactly the claim-nobody-checked defect this project has canon about.
+# Found by running it before the login ceremony: status said started, the log said "You must be
+# logged in". So status answers the question a reader is actually asking: is a session up?
+status() {
+	if ! service_started; then
+		einfo "quince-runner: stopped"
+		return 3
+	fi
+	if [ -f "$output_log" ] && tail -n 20 "$output_log" 2>/dev/null | grep -qi 'must be logged in'; then
+		ewarn "quince-runner: supervisor is up, but NO SESSION — not logged in."
+		ewarn "  the ceremony is owed: claude auth login (a token cannot do Remote Control)"
+		return 1
+	fi
+	if [ -f "$output_log" ] && tail -n 20 "$output_log" 2>/dev/null | grep -qiE 'error|failed'; then
+		ewarn "quince-runner: supervisor is up, but the session log ends in an error:"
+		tail -n 3 "$output_log" | sed 's/^/    /'
+		return 1
+	fi
+	einfo "quince-runner: supervisor up; no session error in the recent log"
+	return 0
+}

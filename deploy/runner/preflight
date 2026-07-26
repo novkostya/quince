@@ -53,6 +53,17 @@ fi
 # --- the thing we are about to run ----------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
 	ok "claude present ($(claude --version 2>/dev/null || echo 'version unreadable'))"
+	# apk installs never auto-update, so nothing else would ever mention that this box is behind.
+	# REPORTED, NOT ENFORCED: a runner that refuses to start because a newer version exists would
+	# turn a cosmetic lag into an outage. Drift is made visible at the moment someone is already
+	# looking at the output, which is the cheapest moment it can be.
+	if command -v apk >/dev/null 2>&1; then
+		avail=$(apk policy claude-code 2>/dev/null | awk '/^ *[0-9]/ {gsub(/:/,"",$1); print $1; exit}')
+		have=$(apk info -e claude-code >/dev/null 2>&1 && apk version claude-code 2>/dev/null | awk 'NR==2 {print $1}')
+		if [ -n "$avail" ] && [ -n "$have" ] && ! printf '%s' "$have" | grep -q "$avail"; then
+			printf 'preflight: note — a newer claude-code is available in the repository (%s). apk does not auto-update; `apk update && apk upgrade claude-code` when convenient.\n' "$avail"
+		fi
+	fi
 else
 	bad "claude is not installed — run deploy/runner/provision."
 fi
