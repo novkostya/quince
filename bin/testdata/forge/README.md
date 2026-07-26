@@ -157,6 +157,37 @@ PRs and what class their watches are in, what does the session owe.
 | `owed-dead-and-wedged-need-opposite-remedies.json` | `dead` says re-arm without reseeding; `wedged` says stop the running process first. One message for two situations is the defect that split those classes apart to begin with |
 | `owed-a-live-watch-owes-nothing.json` | the satisfied case **says so**. A gate whose passing answer is silence cannot be seen to have run |
 
+## The sixth round: the state a PR spends most of its waiting in (quince#65)
+
+quince#63 was approved, green and mergeable, and **sat unmerged for sixteen minutes** behind a live,
+quiet watch. The sixth blind spot, and the first one that did not hide in code: it hid in a
+**justification**. `event=checks` fires only on `FAILURE`, and the note explaining why that was free
+said *"the push preceding those checks moves `updatedAt`, so `updated` carries the transition"* — true
+where a push exists (fix → re-review), false where none does (approved, then CI finishes).
+
+Both halves were measured live on quince#66 rather than reasoned about, in a window with no push,
+comment or review:
+
+| what | reading |
+| --- | --- |
+| `updatedAt` across two check completions | **frozen** at `21:07:11Z`, fourteen samples at ~10 s |
+| the same PR, approved at `21:14:47Z`, CI running | `ms=BLOCKED` … `ms=BLOCKED` … **`ms=CLEAN` at `21:19:39Z`**, `updatedAt` still `21:14:47Z` |
+
+So the only field that moves when a PR becomes landable is `mergeStateStatus`, and the `updated`
+backstop is structurally blind to it — nothing happens *to* the PR, which is exactly why its timestamp
+does not move.
+
+| Fixture | What it pins |
+| --- | --- |
+| `pr63-approved-then-ci-goes-clean.json` | the pure transition: identical `updatedAt` in both halves, so `updated` must **not** appear, and `mergeability … status=CLEAN` must |
+| `watch-wakes-when-a-pr-becomes-landable.json` | the **live path** — the real verb, three ticks, `updatedAt` identical throughout, and the loop ends on the third |
+
+The second one exists because the first is not enough, and that is the lesson rather than a detail: a
+pure fixture for green checks **already passed** while the live path delivered nothing for sixteen
+minutes. Teeth, measured: against the classifier as it stood, the pure fixture emits **nothing at all**
+and the loop fixture runs to its idle bound and exits 6 — the sixteen-minute silence, reproduced in
+twelve seconds.
+
 **The half that no fixture here can cover is the hook itself**, because it is a claim about the
 *harness* rather than about this code: that a `Stop` hook in project settings runs, that exit 2 blocks
 the stop, and that `stop_hook_active` bounds the block to once. That was verified by running real

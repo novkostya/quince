@@ -214,6 +214,12 @@ Then, on the events:
   protection, landing one PR invalidates every other open one, and the invalidated PR's own `updatedAt`
   does not move because nothing happened to it. Say so on those PRs rather than waiting for their
   authors to discover it.
+- **`event=mergeability status=CLEAN` is yours to act on immediately — it means merge it.** A PR you
+  approved while CI was running has **nothing happen to it** when the checks finish: the approval was
+  the last mover, and check completion does not move `updatedAt`. That is why quince#63 sat landable
+  and unmerged for sixteen minutes behind a live watch, and why this event exists (quince#65). It fires
+  once. **It does not cover a park on a person** — that still moves no field at all, and corollary (e)
+  is still yours.
 
 A stalled rung (no movement on a PR for hours) is reported with what it was waiting for. A loop
 that cannot say why it is waiting has nothing to wait for.

@@ -1,0 +1,51 @@
+{
+  "kind": "loop",
+  "note": "quince#65's ask taken literally: the pure fixture for this transition is necessary and not sufficient, because a pure fixture for green checks ALREADY passed while the live path delivered nothing for sixteen minutes. Only a live-path fixture can hold the line. Three ticks: a baseline with the PR approved and CI running, a tick where nothing moves, then CI completing — with `updatedAt` IDENTICAL throughout, which is the whole difficulty. The loop must end on tick 3. Against the classifier as it stood, it runs to the idle bound instead.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 12,
+  "timeout_s": 90,
+  "payloads": [
+    [
+      {
+        "number": 63, "state": "OPEN", "updatedAt": "2026-07-26T20:44:13Z", "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [
+          { "name": "gates", "conclusion": "SUCCESS" },
+          { "name": "image", "conclusion": null },
+          { "name": "e2e", "conclusion": null }
+        ],
+        "reviews": [{ "state": "APPROVED", "submittedAt": "2026-07-26T20:44:13Z", "author": { "login": "novkostya" } }],
+        "comments": [], "commits": [], "mergedAt": null, "mergedBy": null
+      }
+    ],
+    [
+      {
+        "number": 63, "state": "OPEN", "updatedAt": "2026-07-26T20:44:13Z", "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [
+          { "name": "gates", "conclusion": "SUCCESS" },
+          { "name": "image", "conclusion": "SUCCESS" },
+          { "name": "e2e", "conclusion": null }
+        ],
+        "reviews": [{ "state": "APPROVED", "submittedAt": "2026-07-26T20:44:13Z", "author": { "login": "novkostya" } }],
+        "comments": [], "commits": [], "mergedAt": null, "mergedBy": null
+      }
+    ],
+    [
+      {
+        "number": 63, "state": "OPEN", "updatedAt": "2026-07-26T20:44:13Z", "mergeStateStatus": "CLEAN",
+        "statusCheckRollup": [
+          { "name": "gates", "conclusion": "SUCCESS" },
+          { "name": "image", "conclusion": "SUCCESS" },
+          { "name": "e2e", "conclusion": "SUCCESS" }
+        ],
+        "reviews": [{ "state": "APPROVED", "submittedAt": "2026-07-26T20:44:13Z", "author": { "login": "novkostya" } }],
+        "comments": [], "commits": [], "mergedAt": null, "mergedBy": null
+      }
+    ]
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=mergeability pr=63 status=CLEAN"
+  ],
+  "expect_exit": 0
+}

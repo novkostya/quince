@@ -120,6 +120,13 @@ events: first-observation · queue-empty · updated · opened · review · check
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
 
+  Except for one state, which is why `mergeability` exists and why it reports `CLEAN` as well as
+  `BEHIND`/`DIRTY`: when a PR is APPROVED and its CI then completes, NOTHING HAPPENS TO THE PR — the
+  approval was the last mover, and check completion does not touch `updatedAt` (measured on quince#66:
+  frozen across fourteen samples while two checks finished). So the backstop cannot see the moment a
+  PR becomes landable, and that is the state a PR spends most of its waiting in. quince#63 sat
+  mergeable and unmerged for sixteen minutes behind a live, quiet watch (quince#65).
+
   `stalled` is specified (docs/specs/rung-loop/rung-loop.md story 6) and NOT implemented — it
   needs a wall clock, which the pure half deliberately does not have. It was advertised here
   while unimplemented; a tool that lists an event it cannot emit is making the same kind of
@@ -214,19 +221,44 @@ step() {
 		| (if $a == null then "actor=unattributed" else "actor=\($a.actor) kind=\($a.kind)" end) as $who
 		| "event=updated pr=\($p.number) at=\($p.updatedAt) \($who)"'
 
-	# mergeability: a transition INTO a state that cannot merge. Two narrowings, both deliberate:
+	# mergeability: a transition into a state whose LANDABILITY changed — in either direction. The
+	# narrowings that remain are deliberate:
 	#   - UNKNOWN is not a state, it is the absence of an answer (GitHub computes mergeability lazily
 	#     and the first request for a PR routinely returns it). Reporting UNKNOWN → BEHIND is real;
 	#     reporting anything → UNKNOWN would be reporting our own ignorance as the PR's condition.
 	#   - BLOCKED and UNSTABLE are the ordinary condition of an open PR awaiting review or checks, so
 	#     they are not reported: an event every open PR emits on arrival is wallpaper.
+	#
+	# CLEAN was added by quince#65, and the reason is worth keeping because it is the sixth blind spot
+	# and it hid in a JUSTIFICATION rather than in code. quince#63 was APPROVED with CI still running,
+	# went green, became landable, and sat unmerged for sixteen minutes with a live watch running quiet.
+	# Measured on quince#66 while it happened: `updatedAt` frozen at 21:07:11Z across fourteen samples
+	# while `image` and then `e2e` both completed. So the `updated` BACKSTOP — the thing built so that
+	# nothing is invisible — structurally cannot cover a PR parked on CI: nothing happens TO the PR,
+	# which is exactly why its timestamp does not move.
+	#
+	# The `checks` classifier could not cover it either, and the note there said why it did not need to:
+	# "the push preceding those checks moves updatedAt, so `updated` carries the transition". True for
+	# changes-requested → fix → green, where a push exists. FALSE for approved → CI completes, where the
+	# last mover was the approval and it happened BEFORE the checks finished. A narrowing is a claim
+	# about what cannot matter, and this one was right about the case it was written for and silent
+	# about the one nobody tried.
+	#
+	# The fix is NOT to emit on green. "Green" is not "someone must act": every PR here goes green
+	# minutes after opening while still awaiting its first review, so that event would be the wallpaper
+	# this classifier already rejected once — and which of the two it means depends on whose turn it is,
+	# which this classifier still has no notion of. CLEAN is the only value in the payload that means
+	# NOTHING IS BLOCKING THE MERGE: not behind, not failing, not missing an approval. It fires once, at
+	# the moment the ball becomes the merger's, and being a transition it cannot spin — an implementer
+	# whose own PR goes CLEAN is woken once and cannot merge it, which would be intolerable on any
+	# every-tick shape.
 	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
 		.[] as $p
 		| ($old | map(select(.number == $p.number)) | first) as $o
 		| select($o != null)
 		| select($p.state == "OPEN")
 		| ($p.merge_state // "UNKNOWN") as $ms
-		| select($ms == "BEHIND" or $ms == "DIRTY")
+		| select($ms == "BEHIND" or $ms == "DIRTY" or $ms == "CLEAN")
 		| select($ms != ($o.merge_state // "UNKNOWN"))
 		| "event=mergeability pr=\($p.number) status=\($ms)"'
 
@@ -260,7 +292,12 @@ step() {
 	#     changes-requested fix, green is exactly what changes who must act. The same signal means
 	#     different things depending on whose turn it is, and this classifier has no notion of turns.
 	#     It still does not — the fix is not to teach it, it is that the push preceding those checks
-	#     moves updatedAt, so `updated` carries the transition and the narrowing here costs nothing.
+	#     moves updatedAt, so `updated` carries the transition. **That justification was incomplete,
+	#     and quince#65 is what it cost:** it holds where a push exists (fix → re-review) and fails
+	#     where none does (APPROVED, then CI finishes) — the state a PR spends most of its waiting in.
+	#     The answer is still not to emit on green, which every PR reaches while awaiting first review;
+	#     it is that `mergeability` now reports the transition into CLEAN, which is the one value that
+	#     means nothing is blocking the merge. See the note there.
 	#     Red stays typed because a red PR is unreviewable, and that was the miss (#16 sat red while a
 	#     reviews-only watcher reported silence).
 	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
