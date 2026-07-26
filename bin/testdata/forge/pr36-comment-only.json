@@ -1,0 +1,23 @@
+{
+  "note": "A comment, and nothing else. quince#36 was held at comment-not-approve pending one confirming line from the Operator; the line was posted at 11:16:35Z and went unseen for 64 minutes while the watch reported healthy, because a comment was not an event. The PR was approvable the whole time. Recorded as quince-devlog#16 rule 2, and the reason its general form is canon: where you are blocked on someone else's action, being wrong about what can matter costs the most.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 36, "state": "OPEN", "updatedAt": "2026-07-26T10:54:03Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+      "reviews": [],
+      "activity": [{"at":"2026-07-26T10:54:03Z","actor":"novkostya","kind":"comment"}] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 36, "state": "OPEN", "updatedAt": "2026-07-26T11:16:35Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+      "reviews": [],
+      "activity": [
+        {"at":"2026-07-26T10:54:03Z","actor":"novkostya","kind":"comment"},
+        {"at":"2026-07-26T11:16:35Z","actor":"novkostya","kind":"comment"}
+      ] } ]
+  },
+  "expect_events": [ "event=updated pr=36 at=2026-07-26T11:16:35Z actor=novkostya kind=comment" ]
+}

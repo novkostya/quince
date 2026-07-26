@@ -24,8 +24,16 @@ usage: forge-watch <verb>
   gh-arch. The tool does not pick an identity for you — a monitor that hard-coded one could not
   run on the box that most needs it.
 
-events: first-observation · queue-empty · opened · review · checks · merged · fetch-failed ·
-        queue-truncated · stalled
+events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
+        merged · fetch-failed · queue-truncated
+
+  `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
+  event also fired. The typed events classify; the backstop guarantees nothing is invisible.
+
+  `stalled` is specified (docs/specs/rung-loop/rung-loop.md story 6) and NOT implemented — it
+  needs a wall clock, which the pure half deliberately does not have. It was advertised here
+  while unimplemented; a tool that lists an event it cannot emit is making the same kind of
+  claim this tool exists to stop, so it is off the list until it can be produced.
 EOF
 }
 
@@ -46,6 +54,28 @@ die() {
 #   - check conclusions are watched beside reviews: a red PR is unreviewable, and that is progress
 #     information, not noise.
 #   - every event carries the observation that produced it, never a bare "something changed".
+#
+# And the rule that arrived later, from the deadlock of 2026-07-26 (quince#43): an ENUMERATED event
+# model is a claim about what can matter, and this one was wrong four times over on a single
+# transition — changes-requested → fixed → awaiting re-review. A push is not an event; green checks
+# were deliberately not an event; a comment is not an event; and reviewDecision does not move across
+# a fix, so no review fires either. Two agents sat on opposite sides of that transition for over two
+# hours, each waiting for the other, both watches reporting healthy.
+#
+# So `updated` is unconditional: every change to a PR's updatedAt emits it, and it emits ALONGSIDE
+# whatever typed event also fired rather than only when the classifier came up empty. A backstop
+# that trusts the classifier is not a backstop — it inherits exactly the blindness it exists to
+# cover. The typed events stay, for classification.
+#
+#   - and it names WHO, not only WHEN. `updatedAt` is a timestamp; a session that read one and
+#     assumed the latest activity was its own reported "nothing owed from me" with three items
+#     owed. Attribution is computed from activity strictly NEWER than the previous observation —
+#     the only activity that could explain this update — and when nothing explains it the event
+#     says `actor=unattributed` rather than naming the most recent bystander.
+#   - mergeability is watched, because blind spot five is not covered by the backstop at all: a PR
+#     that goes BEHIND or DIRTY because something ELSE merged has had nothing happen to it, so its
+#     own updatedAt does not move. The architect's own merges silently invalidate every other open
+#     PR, and no amount of watching the invalidated PR's timestamp would show it.
 # ---------------------------------------------------------------------------
 step() {
 	_prev=$1
@@ -74,6 +104,42 @@ step() {
 	_prev_prs=$(jq -c '.prs // []' "$_prev")
 	_first=''
 
+	# updated: THE BACKSTOP. Any movement of updatedAt, on a PR that existed in the previous
+	# observation, with the actor that can account for it.
+	#
+	# Only PRs present in BOTH observations qualify: a PR absent before has no previous timestamp to
+	# have moved, and `opened` already carries it. Emitting both would report a beginning as a change.
+	#
+	# Attribution considers only activity strictly newer than the PREVIOUS updatedAt, because that is
+	# the only activity capable of explaining the move. Anything older is a bystander, and naming a
+	# bystander is worse than saying nothing: it is a wrong answer that looks like an answer. A label
+	# change, a title edit or a base change moves updatedAt and appears in no activity list, so those
+	# legitimately land on `unattributed` — the tool says it cannot tell, which is the true statement.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		.[] as $p
+		| ($old | map(select(.number == $p.number)) | first) as $o
+		| select($o != null)
+		| select($p.updatedAt != $o.updatedAt)
+		| ([($p.activity // [])[] | select(.at > $o.updatedAt)] | sort_by(.at) | last) as $a
+		| (if $a == null then "actor=unattributed" else "actor=\($a.actor) kind=\($a.kind)" end) as $who
+		| "event=updated pr=\($p.number) at=\($p.updatedAt) \($who)"'
+
+	# mergeability: a transition INTO a state that cannot merge. Two narrowings, both deliberate:
+	#   - UNKNOWN is not a state, it is the absence of an answer (GitHub computes mergeability lazily
+	#     and the first request for a PR routinely returns it). Reporting UNKNOWN → BEHIND is real;
+	#     reporting anything → UNKNOWN would be reporting our own ignorance as the PR's condition.
+	#   - BLOCKED and UNSTABLE are the ordinary condition of an open PR awaiting review or checks, so
+	#     they are not reported: an event every open PR emits on arrival is wallpaper.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		.[] as $p
+		| ($old | map(select(.number == $p.number)) | first) as $o
+		| select($o != null)
+		| select($p.state == "OPEN")
+		| ($p.merge_state // "UNKNOWN") as $ms
+		| select($ms == "BEHIND" or $ms == "DIRTY")
+		| select($ms != ($o.merge_state // "UNKNOWN"))
+		| "event=mergeability pr=\($p.number) status=\($ms)"'
+
 	# opened: in the new observation, absent from the old.
 	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
 		[.[] | select(.number as $n | ($old | map(.number) | index($n)) | not)] | .[]
@@ -98,9 +164,15 @@ step() {
 	# the fixtures encode:
 	#   - a newly-opened PR emits `opened` and nothing else. Its checks are initial state, not a
 	#     transition; reporting them as changes would make every new PR arrive as a burst.
-	#   - SUCCESS is not an event. Red is what changes who must act — a red PR is unreviewable, and
-	#     that was the miss (#16 sat red while a reviews-only watcher reported silence). Terminal
-	#     success is already covered by `merged`.
+	#   - SUCCESS is not a CHECKS event. The original note here read "red is what changes who must
+	#     act", and that reasoning was half wrong in a way worth preserving: it is true while a PR
+	#     awaits its FIRST review and false the moment it awaits a RE-review, because after a
+	#     changes-requested fix, green is exactly what changes who must act. The same signal means
+	#     different things depending on whose turn it is, and this classifier has no notion of turns.
+	#     It still does not — the fix is not to teach it, it is that the push preceding those checks
+	#     moves updatedAt, so `updated` carries the transition and the narrowing here costs nothing.
+	#     Red stays typed because a red PR is unreviewable, and that was the miss (#16 sat red while a
+	#     reviews-only watcher reported silence).
 	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
 		.[] as $p
 		| ($old | map(select(.number == $p.number)) | first) as $o
@@ -169,10 +241,16 @@ tick() {
 	# of 20 on a repo with 30 PRs is mostly ancient closed rows — the events here are about open
 	# work and merges, and spending the whole budget on history means recent activity can fall out
 	# of view while the window looks full.
+	#
+	# The field list is wider than the events strictly need, and the cost was measured rather than
+	# guessed: 92 KB → 229 KB per tick for a 20-PR window on this repo (2026-07-26). `comments` and
+	# `commits` carry bodies and messages that are thrown away by the shaping below — `gh pr list`
+	# cannot select subfields — and they are fetched anyway because they are the only way to answer
+	# WHO moved a PR. FORGE_LIMIT is the knob if that ever stops being a good trade.
 	_raw=$(mktemp)
 	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
 		--search "sort:updated-desc" \
-		--json number,state,updatedAt,statusCheckRollup,reviews >"$_raw" 2>"$_raw.err"; then
+		--json number,state,updatedAt,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
 		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" \
 			"$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)"
 		rm -f "$_raw" "$_raw.err"
@@ -200,10 +278,22 @@ tick() {
 			"$FETCH_LIMIT" "$_repo" "$(jq -r '.[-1].number' "$_raw")"
 	fi
 
+	# `activity` is the attribution channel: every dated act this payload can see, flattened, so the
+	# PURE half decides who moved a PR. Shaping the answer here instead would put the WHEN-is-not-WHO
+	# logic on the untestable side of the split, which is where the last four monitor bugs lived.
+	# A login that GitHub does not resolve (a commit author who is not a GitHub user) becomes
+	# `unknown` — distinct from `unattributed`, which means no act explains the update at all.
 	_obs=$(mktemp)
 	jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
+		merge_state: (.mergeStateStatus // "UNKNOWN"),
 		checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
-		reviews: [(.reviews // [])[] | {state}]}]}' "$_raw" >"$_obs" ||
+		reviews: [(.reviews // [])[] | {state}],
+		activity: (
+			  [(.comments // [])[] | {at: .createdAt,    actor: (.author.login // "unknown"), kind: "comment"}]
+			+ [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login // "unknown"), kind: "review"}]
+			+ [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login // "unknown"), kind: "commit"}]
+			+ (if .mergedAt then [{at: .mergedAt, actor: (.mergedBy.login // "unknown"), kind: "merge"}] else [] end)
+		)}]}' "$_raw" >"$_obs" ||
 		die "could not shape the observation for $_repo"
 
 	[ -f "$_state" ] || printf '{"observed":false}\n' >"$_state"

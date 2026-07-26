@@ -1,0 +1,18 @@
+{
+  "note": "ILLUSTRATIVE (102): updatedAt moves and nothing in the payload explains it — a label, a title edit, a base change. The event still fires, because the backstop's whole job is to be unconditional, and it says `actor=unattributed` rather than naming the most recent bystander. This is the fixture for the failure that produced the rule: a session read a bare updatedAt, assumed the latest activity was its own, and reported nothing owed from it while three items were owed. WHEN is not WHO, and a wrong answer that looks like an answer is worse than no answer.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 102, "state": "OPEN", "updatedAt": "2026-07-26T15:00:00Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+      "activity": [{"at":"2026-07-26T14:59:00Z","actor":"quince-bot","kind":"commit"}] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 102, "state": "OPEN", "updatedAt": "2026-07-26T15:20:00Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [],
+      "activity": [{"at":"2026-07-26T14:59:00Z","actor":"quince-bot","kind":"commit"}] } ]
+  },
+  "expect_events": [ "event=updated pr=102 at=2026-07-26T15:20:00Z actor=unattributed" ]
+}

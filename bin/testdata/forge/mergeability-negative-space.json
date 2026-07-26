@@ -1,0 +1,26 @@
+{
+  "note": "ILLUSTRATIVE (103-105): what mergeability must NOT say. GitHub computes mergeability lazily, so UNKNOWN is routine and means 'no answer yet' — 103 goes CLEAN -> UNKNOWN and must produce nothing, because reporting that would be reporting our own ignorance as the PR's condition. 104 goes UNKNOWN -> BEHIND and must report, since the ignorance was ours and the BEHIND is real. 105 was already BEHIND and stays BEHIND: a transition is reported once, not re-announced every tick, or the consumer learns to ignore it and the silent cap comes back through boredom. No updatedAt moves anywhere here, so the backstop is correctly silent throughout.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 103, "state": "OPEN", "updatedAt": "2026-07-26T16:00:00Z", "merge_state": "CLEAN",
+        "checks": [], "reviews": [], "activity": [] },
+      { "number": 104, "state": "OPEN", "updatedAt": "2026-07-26T16:01:00Z", "merge_state": "UNKNOWN",
+        "checks": [], "reviews": [], "activity": [] },
+      { "number": 105, "state": "OPEN", "updatedAt": "2026-07-26T16:02:00Z", "merge_state": "BEHIND",
+        "checks": [], "reviews": [], "activity": [] }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 103, "state": "OPEN", "updatedAt": "2026-07-26T16:00:00Z", "merge_state": "UNKNOWN",
+        "checks": [], "reviews": [], "activity": [] },
+      { "number": 104, "state": "OPEN", "updatedAt": "2026-07-26T16:01:00Z", "merge_state": "BEHIND",
+        "checks": [], "reviews": [], "activity": [] },
+      { "number": 105, "state": "OPEN", "updatedAt": "2026-07-26T16:02:00Z", "merge_state": "BEHIND",
+        "checks": [], "reviews": [], "activity": [] }
+    ]
+  },
+  "expect_events": [ "event=mergeability pr=104 status=BEHIND" ]
+}

@@ -1,6 +1,8 @@
 # rung-loop — a rung that runs without a human carrying "review posted"
 
-> Status: **SPEC — ruled on first review (sequencing + attribution), awaiting re-review.** No code exists beyond fixtures. Takes
+> Status: **PARTLY BUILT.** `bin/forge-watch` exists — the pure `step()`, `tick`, `replay`, and the
+> complete event model of §4b (quince#43). What remains: restart safety, the declared watch set, the
+> loop modes in the skills, and the runner supervision unit. Takes
 > [devlog#4](https://github.com/novkostya/quince-devlog/issues/4); feature-named because the
 > deliverable outlives the issue. **Implementation is gated on pr.5 (runner host)** — see
 > *Sequencing*; this PR settles the design the issue asked to settle before building.
@@ -83,6 +85,49 @@ program doc): the silence asserted "nothing happened" while meaning "I never loo
 authors produced it independently, in one night, on the same substrate, is the argument for encoding
 it in a state machine with fixtures rather than in anybody's care.
 
+### 4b. Enumerating the events was itself the bug (quince#43)
+
+Everything in §4 was right and insufficient. The list of typed events **is a claim about what can
+matter**, and on 2026-07-26 it was wrong four times over on one transition — *changes requested →
+fixed → awaiting re-review* — which deadlocked two agent sessions for over two hours, each waiting
+for the other, both watches reporting healthy. A push is not an event; green checks were deliberately
+not an event; a comment is not an event ([devlog#16](https://github.com/novkostya/quince-devlog/issues/16)
+rule 2, and 64 minutes of a held approvable PR); and `reviewDecision` does not move across a fix, so
+no `review` fires either.
+
+**Where §4's own reasoning went wrong, kept verbatim because the shape recurs:** the code's note read
+*"SUCCESS is not an event. Red is what changes who must act."* That is true while a PR awaits its
+**first** review and false the moment it awaits a **re**-review — after a changes-requested fix,
+green is exactly what changes who must act. One signal, two meanings, decided by whose turn it is,
+and the classifier has no notion of turns.
+
+The fix is not to teach it turns. It is a **backstop that does not classify**:
+
+- **any change to a PR's `updatedAt` emits `updated`** — unconditionally, and *alongside* whatever
+  typed event also fired. A backstop that only fires when the classifier came up empty inherits the
+  classifier's blind spots, which is the bug wearing a hat. Typed events stay, for classification.
+- **the event names WHO, not only WHEN.** `updatedAt` is a timestamp; a session read one, assumed the
+  latest activity was its own, and reported "nothing owed from me" with three items owed. Attribution
+  uses only activity **strictly newer than the previous observation** — the only acts that could
+  explain the move — and says `actor=unattributed` when nothing does, rather than naming a bystander.
+- **compare against last-acted-on state, not state-at-arm.** A hand-rolled mitigation during the
+  incident baselined against *current* heads at arm time, so both pushes it existed to catch were
+  already in its baseline. `step()` diffs against the stored observation, which is what makes a
+  re-armed watch produce the events that accrued while nothing was watching (§4c).
+- **mergeability is watched separately, because the backstop does not cover blind spot five.** A PR
+  that goes `BEHIND` or `DIRTY` because something **else** merged has had nothing happen to it: its
+  own `updatedAt` does not move, and no amount of watching that timestamp would ever show it. Under
+  strict up-to-date protection the architect's own merges invalidate every other open PR this way.
+  Reported on transition into a *known* non-clean state only: `UNKNOWN` is GitHub's "no answer yet",
+  and reporting it would be reporting our own ignorance as the PR's condition. The **policy** half —
+  whether to adopt a merge queue so this stops happening — is [quince#46](https://github.com/novkostya/quince/issues/46)
+  and is deliberately not decided here.
+
+**Declared debt:** `stalled` (story 6) is specified and **not implemented** — it needs a wall clock,
+which the pure half deliberately does not have. It was advertised in `--help` while unimplemented,
+which is a tool making the kind of claim this tool exists to stop; it is off the advertised list until
+it can be produced.
+
 Therefore, mechanically:
 
 - state initialises to a **sentinel**, so `never observed` ≠ `observed empty`;
@@ -106,9 +151,11 @@ forge-watch step   --state <file> --observation <json>   # pure, no network — 
 forge-watch arm    --state <file> --watch pr:19 --watch queue:bot-open
 ```
 
-Events are lines: `event=review pr=19 verdict=CHANGES_REQUESTED`, `event=checks pr=18
-conclusion=FAILURE name=gates`, `event=merged pr=19`, `event=queue-empty`, `event=stalled pr=19
-since=3h`, `event=first-observation` (the sentinel discharging).
+Events are lines: `event=updated pr=19 at=2026-07-26T12:32:21Z actor=quince-bot kind=commit` (the
+backstop), `event=review pr=19 verdict=CHANGES_REQUESTED`, `event=checks pr=18 conclusion=FAILURE
+name=gates`, `event=mergeability pr=19 status=BEHIND`, `event=merged pr=19`, `event=queue-empty`,
+`event=first-observation` (the sentinel discharging). `event=stalled` is specified by story 6 and not
+yet implemented — see the declared debt in §4b.
 
 On the runner, an OpenRC-supervised timer runs `tick` and pipes events to a dispatcher that starts **one fresh
 session per event** — `/kickoff <pr>` for the implementer side, `/review-pr <n>` for the reviewer
@@ -136,13 +183,20 @@ allowance faster for no benefit.
 7. A gap-protocol trigger stops the loop and leaves a PR comment naming what needs ruling.
 8. `/kickoff --loop` and `/review-pr --loop` arm the watch and say so; without `--loop` both behave
    exactly as today.
+9. A changes-requested PR whose only change is a push that goes green emits an event (quince#43).
+10. A PR whose only change is a new comment emits an event (devlog#16).
+11. An update that nothing in the payload explains emits `actor=unattributed`, never a bystander.
+12. A PR made `BEHIND` by someone else's merge emits `mergeability`, while its own `updatedAt` — and
+    therefore the backstop — stays correctly silent.
 
 ## Gates
 
-- **G1 (fixtures, no network)** — `forge-watch step` replayed over `bin/testdata/forge/*.json`
-  covers stories 1–4 and 6. Each fixture is a recorded pair of consecutive observations; the two
-  regression fixtures are named for the PRs that produced them (`pr17-opened-after-arm.json`,
-  `pr16-red-unreviewed.json`).
+- **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4
+  and 9–12. Story 6 is **not covered because it is not implemented** (§4b). Each fixture is a pair of
+  consecutive observations; the recorded ones are named for the PRs that produced them
+  (`pr17-…`, `pr16-…`, `pr36-…`, `pr37-…`) and the illustrative ones are numbered 100+ to say so.
+  G1 also requires the fixtures to have teeth: replayed against the previous `forge-watch`, every
+  fixture added for a newly-fixed blind spot must FAIL.
 - **G2 (live, one PR)** — arm on a real PR, push a commit, observe the `checks` event; post a
   review, observe the `review` event with its verdict.
 - **G3 (the coroutine, end to end)** — an implementer loop and a reviewer loop run against one

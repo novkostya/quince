@@ -1,0 +1,23 @@
+{
+  "note": "THE DEADLOCK, 2026-07-26. A changes-requested PR is fixed: a commit is pushed and the checks come back green. The review array does not change, reviewDecision does not change, the checks were green before and are green after, and nothing was opened or merged. Every typed event this tool has is silent on the single most consequential transition in the workflow — the one where the ball goes back to the reviewer. The implementer waited for a re-review, the architect waited for an event, and no event existed or could exist. Only the backstop fires, and it names the pusher.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T10:50:19Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+      "reviews": [{"state":"CHANGES_REQUESTED"}],
+      "activity": [{"at":"2026-07-26T10:50:19Z","actor":"novkostya","kind":"review"}] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T12:32:21Z",
+      "merge_state": "BLOCKED",
+      "checks": [{"name":"gates","conclusion":"SUCCESS"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+      "reviews": [{"state":"CHANGES_REQUESTED"}],
+      "activity": [
+        {"at":"2026-07-26T10:50:19Z","actor":"novkostya","kind":"review"},
+        {"at":"2026-07-26T12:32:21Z","actor":"quince-bot","kind":"commit"}
+      ] } ]
+  },
+  "expect_events": [ "event=updated pr=37 at=2026-07-26T12:32:21Z actor=quince-bot kind=commit" ]
+}
