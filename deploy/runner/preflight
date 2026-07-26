@@ -39,16 +39,40 @@ case "${ANTHROPIC_BASE_URL:-}" in
 *) bad "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL} — Remote Control is disabled for any host other than api.anthropic.com (gateway or proxy). Unset it." ;;
 esac
 
-# --- the bot identity this host exists to carry ---------------------------------------------
-if [ ! -f "$TOKEN_FILE" ]; then
-	bad "no bot token at $TOKEN_FILE — the runner is the machine that holds the implementer identity; without it a session would author as whoever is logged in."
-else
-	mode=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || echo unknown)
-	case "$mode" in
-	600 | 400) ok "bot token present, mode $mode" ;;
-	*) bad "bot token at $TOKEN_FILE is mode $mode — expected 600." ;;
-	esac
-fi
+# --- identity: each box asserts the OTHER's absence -------------------------------------------
+# This inversion is the whole separation mechanism (devlog#7). The implementer box must hold the
+# bot token; the architect box must not. Enforced by the thing that STARTS the service, so the
+# boundary survives whoever provisioned the machine and whatever they meant to do.
+#
+# Role comes from the environment, defaulting to implementer — a box that never declares a role
+# gets the stricter, historical behaviour rather than the permissive one.
+ROLE="${QUINCE_RUNNER_ROLE:-implementer}"
+case "$ROLE" in
+implementer)
+	if [ ! -f "$TOKEN_FILE" ]; then
+		bad "no bot token at $TOKEN_FILE — the implementer runner is the machine that holds that identity; without it a session would author as whoever is logged in."
+	else
+		mode=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || echo unknown)
+		case "$mode" in
+		600 | 400) ok "role implementer: bot token present, mode $mode" ;;
+		*) bad "bot token at $TOKEN_FILE is mode $mode — expected 600." ;;
+		esac
+	fi
+	;;
+arch)
+	# The architect box can approve. A bot token here would let one machine author AND approve,
+	# which is `approver ≠ author` degrading from a property into a convention about which
+	# credential a session happens to pick up.
+	if [ -f "$TOKEN_FILE" ]; then
+		bad "a BOT TOKEN is present at $TOKEN_FILE on a box whose role is 'arch'. This machine can approve; holding the implementer identity too would let one box author and approve its own work. Remove it — or run this box as role=implementer, but not both."
+	else
+		ok "role arch: no bot token present (the implementer identity is absent, as required)"
+	fi
+	;;
+*)
+	bad "unknown QUINCE_RUNNER_ROLE='$ROLE' — expected 'implementer' or 'arch'. Refusing rather than guessing which identity rules apply."
+	;;
+esac
 
 # --- the thing we are about to run ----------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
@@ -57,11 +81,16 @@ if command -v claude >/dev/null 2>&1; then
 	# REPORTED, NOT ENFORCED: a runner that refuses to start because a newer version exists would
 	# turn a cosmetic lag into an outage. Drift is made visible at the moment someone is already
 	# looking at the output, which is the cheapest moment it can be.
+	# Ask apk whether an upgrade exists instead of comparing version strings myself. The first
+	# version of this took the first line of `apk policy` and string-compared it, and reported "a
+	# newer claude-code is available (2.1.108-r1)" on a box running 2.1.212 — while `apk version -l
+	# '<'` said nothing was upgradable. A drift reporter that invents drift is the same unchecked
+	# claim it exists to catch, so the comparison belongs to the tool that owns the version scheme.
 	if command -v apk >/dev/null 2>&1; then
-		avail=$(apk policy claude-code 2>/dev/null | awk '/^ *[0-9]/ {gsub(/:/,"",$1); print $1; exit}')
-		have=$(apk info -e claude-code >/dev/null 2>&1 && apk version claude-code 2>/dev/null | awk 'NR==2 {print $1}')
-		if [ -n "$avail" ] && [ -n "$have" ] && ! printf '%s' "$have" | grep -q "$avail"; then
-			printf 'preflight: note — a newer claude-code is available in the repository (%s). apk does not auto-update; run "apk update && apk upgrade claude-code" when convenient.\n' "$avail"
+		upgradable=$(apk version -l '<' 2>/dev/null | grep '^claude-code' || true)
+		if [ -n "$upgradable" ]; then
+			printf 'preflight: note — apk reports an upgrade available: %s\n' "$upgradable"
+			printf 'preflight:        apk does not auto-update; run "apk update && apk upgrade claude-code" when convenient.\n'
 		fi
 	fi
 else

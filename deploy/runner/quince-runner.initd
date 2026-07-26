@@ -15,10 +15,14 @@ description="Claude Code Remote Control session host"
 
 : "${runner_dir:=/root/quince}"
 : "${runner_name:=quince-runner}"
+: "${runner_role:=implementer}"
 
 supervisor=supervise-daemon
 command="/usr/bin/claude"
 command_args="remote-control --spawn same-dir --name ${runner_name}"
+# The role travels to preflight through the environment, so the identity assertion a box makes is
+# a property of the box rather than of whoever typed the start command.
+export QUINCE_RUNNER_ROLE="${runner_role}"
 command_user="root"
 directory="${runner_dir}"
 supervise_daemon_args="--respawn-delay 10 --respawn-max 0"
@@ -33,11 +37,11 @@ depend() {
 start_pre() {
 	# The environment is asserted before every start, not once at install: a variable added later
 	# by a well-meaning edit is exactly how the billing trap would arrive.
-	/root/quince/deploy/runner/preflight || return 1
+	QUINCE_RUNNER_ROLE="${runner_role}" /root/quince/deploy/runner/preflight || return 1
 
 	# A restart registers a NEW Remote Control session rather than resuming the old one. Say so,
 	# because a log that implies continuity across a restart would be claiming something untrue.
-	einfo "starting a NEW Remote Control session (a restart never resumes the previous one)"
+	einfo "role=${runner_role}: starting a NEW Remote Control session (a restart never resumes the previous one)"
 }
 
 # `rc-service status` reports on the SUPERVISOR, so it says "started" while the supervised process
