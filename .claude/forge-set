@@ -1,0 +1,17 @@
+# The forge set — every repository the loop watches.
+#
+# One `owner/name` per line; `#` starts a comment; blank lines ignored. Read by
+# `bin/forge-watch tick --all` and `bin/forge-watch status --all`, which HARD-FAIL if this file is
+# missing, empty, or malformed rather than falling back to one repository.
+#
+# Why a file rather than a default: "watch both repos" was the instruction for a day, it went stale
+# the moment a third mattered, and the failure mode of a stale watch set is the one this project keeps
+# paying for — a watch reporting both queues clear while covering one of them (quince-devlog#3). The
+# implementer side does not need this file: it watches the PRs it opened, so its set is
+# self-describing. The architect reviews other people's work, so authorship cannot derive its set, and
+# a reviewer's watch set is exactly the thing that must not be a habit.
+#
+# Adding a repo is a PR against this file, which is the point: the set becomes reviewable, and a
+# session that would otherwise have quietly watched less has to be told.
+novkostya/quince
+novkostya/quince-devlog
