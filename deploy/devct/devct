@@ -273,25 +273,30 @@ deploy() {
 	# eat a loop's stdin; applied to a heredoc-fed call it silently feeds the remote shell nothing,
 	# which exits 0 and looks like success. Found by running it — the build never happened and the
 	# deploy only noticed three steps later, at the health check.
-	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s" <<EOF || devct_die "the image build failed on $_d_name"
+	# The heredoc is QUOTED and the ref arrives as a positional parameter: with an unquoted one
+	# every $ in the remote script would expand here instead of there (SC2087), which works by
+	# luck until the remote script wants a variable of its own.
+	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s '$_d_ref'" <<'EOF' || devct_die "the image build failed on $_d_name"
 set -eu
-if [ -d /root/deploy-src/.git ]; then
-  cd /root/deploy-src && git fetch -q --depth 50 origin '$_d_ref'
-else
-  git clone -q --depth 50 https://github.com/novkostya/quince.git /root/deploy-src
-  cd /root/deploy-src && git fetch -q --depth 50 origin '$_d_ref'
+ref=$1
+if [ ! -d /root/deploy-src/.git ]; then
+	git clone -q --depth 50 https://github.com/novkostya/quince.git /root/deploy-src
 fi
-git -C /root/deploy-src checkout -q FETCH_HEAD
-make -C /root/deploy-src image
+cd /root/deploy-src
+git fetch -q --depth 50 origin "$ref"
+git checkout -q FETCH_HEAD
+make image
 EOF
 
 	# 4. Serve it, replacing any previous deploy so re-deploys do not accumulate.
-	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s" <<EOF || devct_die "could not start the demo"
+	ssh -o StrictHostKeyChecking=accept-new "root@$_d_ip" "sh -s '$DEMO_CONTAINER' '$DEMO_PORT'" <<'EOF' || devct_die "could not start the demo"
 set -eu
-nerdctl rm -f $DEMO_CONTAINER >/dev/null 2>&1 || true
-nerdctl run -d --name $DEMO_CONTAINER -p $DEMO_PORT:$DEMO_PORT \
-  -e QUINCE_LISTEN=:$DEMO_PORT -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
-  quince:local serve --demo >/dev/null
+name=$1
+port=$2
+nerdctl rm -f "$name" >/dev/null 2>&1 || true
+nerdctl run -d --name "$name" -p "$port:$port" \
+	-e QUINCE_LISTEN=":$port" -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	quince:local serve --demo >/dev/null
 EOF
 
 	# 5. Verify before claiming. A URL printed without a successful fetch is the defect class this
