@@ -1,0 +1,52 @@
+#!/bin/sh
+# gh-arch — run `gh` as the architect, with the credential out of argv and out of the command line.
+#
+# The mirror of bin/gh-bot, and it exists for the same allowlist reason: a permission rule never
+# matches past a leading `VAR=value` assignment, so `GH_TOKEN=$(cat …) gh …` is unallowlistable by
+# construction. Allowlist the script instead.
+#
+# Why a SEPARATE wrapper rather than a flag on gh-bot: the two credentials must not be reachable
+# from one command. A single wrapper with `--as arch` would put both identities one typo apart, on
+# a box whose whole purpose (devlog#7) is that it cannot hold the other's. Two scripts, two files,
+# two boxes.
+set -eu
+
+TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$HOME/.config/quince/quince-arch.token}"
+
+if ! command -v gh >/dev/null 2>&1; then
+	printf 'gh-arch: gh is not installed\n' >&2
+	exit 1
+fi
+
+if [ $# -eq 0 ]; then
+	printf 'usage: gh-arch <gh arguments...>\n' >&2
+	printf '  runs gh with the architect credential from %s\n' "$TOKEN_FILE" >&2
+	exit 2
+fi
+
+# The architect box must not hold the bot identity (devlog#7). If a bot token is present here, the
+# box can author and approve — so refuse rather than run, and say which file to remove. This is the
+# same assertion `preflight` makes at service start; making it again here means a hand-run command
+# cannot quietly cross the boundary that the service refuses to cross.
+if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" ]; then
+	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" >&2
+	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
+	printf 'gh-arch: author and approve its own work. Remove it, or run gh-bot on the implementer box.\n' >&2
+	exit 1
+fi
+
+if [ ! -f "$TOKEN_FILE" ]; then
+	printf 'gh-arch: no architect credential at %s\n' "$TOKEN_FILE" >&2
+	# Deliberately not a fallback: using the ambient login would approve as whoever is signed in,
+	# which is the failure this whole separation exists to prevent. Also honest about *why* the
+	# file may be absent — the credential shape is still an open ruling.
+	printf 'gh-arch: refusing to fall back to the ambient gh credentials.\n' >&2
+	printf 'gh-arch: note — pr.0b has not been ruled, so this box holds no GitHub credential yet.\n' >&2
+	exit 1
+fi
+
+unset GITHUB_TOKEN
+GH_TOKEN=$(cat "$TOKEN_FILE")
+export GH_TOKEN
+
+exec gh "$@"
