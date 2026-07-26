@@ -38,10 +38,13 @@ fi
 if [ ! -f "$TOKEN_FILE" ]; then
 	printf 'gh-arch: no architect credential at %s\n' "$TOKEN_FILE" >&2
 	# Deliberately not a fallback: using the ambient login would approve as whoever is signed in,
-	# which is the failure this whole separation exists to prevent. Also honest about *why* the
-	# file may be absent — the credential shape is still an open ruling.
+	# which is the failure this whole separation exists to prevent.
 	printf 'gh-arch: refusing to fall back to the ambient gh credentials.\n' >&2
-	printf 'gh-arch: note — pr.0b has not been ruled, so this box holds no GitHub credential yet.\n' >&2
+	# Describe the FILE, not the world. An earlier version added "pr.0b has not been ruled, so this
+	# box holds no credential yet" — true when written, false within the day, and unknowable to a
+	# wrapper either way. A script can check whether a path exists; it cannot check the state of a
+	# ruling, so it should not claim to.
+	printf 'gh-arch: place the credential there (mode 600), or set QUINCE_ARCH_TOKEN_FILE.\n' >&2
 	exit 1
 fi
 
