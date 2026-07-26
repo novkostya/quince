@@ -439,6 +439,13 @@ paragraph.
   *(repo, watch class)* and returns the report and the exit class, with no forge, no process table and
   no clock — so it is fixtured. `dead` and `wedged` produce **different instructions**, because they
   need opposite remedies (§4c) and one message for two situations is the same defect one level up.
+- **The arming command it prints is role-shaped, and the first version was not.** It printed the
+  implementer's `--repo` form to both halves, so an architect copying it — and the hint exists to be
+  copied, which is the entire reason it is spelled out — would have armed a watch **smaller than its
+  declared set**, the failure `.claude/forge-set` was built to prevent. The resulting state then
+  *satisfies* this gate, which is a check passed by obeying its own remedy. Found by running the
+  architect leg on an architect box, and fixtured, because a hint that must be copied verbatim is a
+  claim like any other.
 
 **Verified end to end, because the mechanism is a claim about the harness and not about our code.**
 A `Stop` hook in project `.claude/settings.json` was probed in a scratch project and then for real:

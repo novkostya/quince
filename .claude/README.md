@@ -30,8 +30,11 @@ Three things worth knowing before it surprises you:
   property we want, since a gate a session can skip by declining to trust the workspace is not a gate;
   it also means checking this repository out means running this command at the end of every turn. It is
   one local script, it makes one `gh` call, and it writes nothing.
-- **It costs about a second per turn end**, and has a 30 s timeout so a hanging forge cannot hold a
-  session open.
+- **It puts a forge round-trip on the end of every turn.** One search call on the implementer side
+  (~1.1 s measured); on the architect side **one `pr list` per repository in `.claude/forge-set`**, so
+  the cost grows with the declared set. A 30 s timeout bounds it, so a hanging forge cannot hold a
+  session open — but this is now on the latency and rate-limit path of every turn, which is worth
+  knowing before you add the fourth repository.
 - **If it cannot answer it says so and lets you go.** No credential, or a forge that will not respond,
   produces a warning that the question was *not checked* — never a block, and never a quiet pass.
 
