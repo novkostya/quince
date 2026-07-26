@@ -19,11 +19,49 @@ usage: forge-watch <verb>
   step   --state <file> --observation <file>   emit events for one observation (pure, no network)
   tick   [--repo owner/name | --all] [--state <file>] [--gh <cmd>] [--watcher-pid <n>]
          [--interval <s>] [--set-file <f>]     fetch the queue, then step
+  watch  [--repo owner/name | --all] [--state <file>] [--gh <cmd>] [--interval <s>]
+         [--max-wait <s>] [--fail-after <n>] [--set-file <f>]
+                                               tick until there is something to say, THEN EXIT
   status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
                                                live | dead | absent — and which, and what to do
   stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
                                                signal it — refuses rather than guessing
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
+
+  `watch` OWNS THE LOOP, and the reason it is a verb is the whole of quince#62: a session that
+  assembles the loop itself writes `while :; do tick; sleep 60; done`, which is correct-looking,
+  reports healthy from every angle, and CAN NEVER WAKE ANYTHING. An agent session is woken by a
+  background task COMPLETING, so a loop with no exit condition delivers nothing it detects — fresh
+  heartbeat, state updating, `status=live`, session deaf for fifty minutes. The rule, stated once
+  here so a reader who hand-rolls anyway knows the constraint: **the loop must exit when it finds
+  something; a loop that cannot exit cannot wake you.**
+
+  Run it as a BACKGROUND task, never in the foreground: in the foreground it blocks the session it
+  is supposed to wake.
+
+  `watch` exit codes: 0 an event (the wake — the events are on stdout) · 6 the --max-wait bound
+  with nothing seen (`event=watch-idle`) · 7 --fail-after consecutive failing ticks. It refuses to
+  arm beside a `live` watch and refuses to arm beside a `wedged` one (run `stop` first) — the four
+  answers of `status` are enforced here rather than left to a paragraph someone remembers. A refusal
+  exits 1, as every refusal in this tool does; `dead` and `absent` proceed and say which they were.
+
+  Every tick's output is printed whether or not it wakes anybody; the filter decides what WAKES,
+  never what is SEEN. Two kinds of line do not wake:
+    - the baseline. `first-observation` (and the `queue-empty` that accompanies it) is the
+      observation that establishes the baseline, not a change from it — exiting on it would make
+      arming a watch a busy loop of arm-exit-arm.
+    - `fetch-failed`, until --fail-after of them in a row (default 3). One failed fetch is a missed
+      tick, not news; a run of them is. Meanwhile the heartbeat does not advance across a failing
+      tick, so such a watcher ages into `wedged` and says so there too.
+
+  `--max-wait` (default 1200s) makes TERMINATION the heartbeat: the loop exits idle, the session
+  wakes, re-arms, and the only channel involved is the one measured to work. It does not replace the
+  `ScheduleWakeup` fallback the skills arm — that fallback stays, and it is belt to this braces.
+
+  `watch` does NOT suppress events caused by the session running it — roughly a third of an
+  architect's wakes are its own approvals and merges (quince#62). Said out loud rather than fixed,
+  because a suppression rule is a claim about what cannot matter, and this tool has already been
+  wrong about that once: `actor=` is on the event, and the woken session can read it.
 
   --all reads the watch set from .claude/forge-set (or --set-file / FORGE_SET_FILE): one owner/name
   per line, `#` comments. It HARD-FAILS when that file is missing, empty or malformed — it never
@@ -55,7 +93,7 @@ usage: forge-watch <verb>
   run on the box that most needs it.
 
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
-        merged · tick-overdue · fetch-failed · queue-truncated
+        merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing
 
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
@@ -454,13 +492,17 @@ now_iso() { jq -rn 'now | todate'; }
 # replay — the fixtures ARE the test. Each carries the events it must produce, so a change in
 # behaviour fails here rather than in someone's memory of what the monitor used to do.
 #
-# Three shapes, one harness. A `before`/`after` PAIR is one transition, which is what most defects are.
+# Four shapes, one harness. A `before`/`after` PAIR is one transition, which is what most defects are.
 # A `"kind": "sequence"` fixture is an initial state plus N observations replayed in order through the
 # SAME state file — the only way to pin what the state itself remembers between ticks, which a pair
 # cannot reach: a pair whose `before` already contains the carried-forward value is asserting the
 # behaviour it was supposed to test. A `"kind": "watch"` fixture drives watch_report from a state file,
 # a frozen `now` and a pid_alive answer — because the liveness classifier is exactly as prone to
 # reporting-what-it-never-checked as the event half, and a restart path with no fixture is a promise.
+# A `"kind": "loop"` fixture drives the `watch` VERB itself against a stub `gh` and asserts what the
+# loop did: silence left it running, an event ended it, and the exit class says which. That one needs
+# a subprocess and a clock, which is why it is the only shape here that is not pure — and it exists
+# because the deaf watcher of quince#62 satisfied every pure fixture in this directory.
 # ---------------------------------------------------------------------------
 compare_events() {
 	# $1 fixture label, $2 got, $3 want — returns non-zero on mismatch and prints both.
@@ -472,6 +514,18 @@ compare_events() {
 	printf '  want:\n%s\n  got:\n%s\n' "$(printf '%s' "$3" | sed 's/^/    /')" \
 		"$(printf '%s' "$2" | sed 's/^/    /')"
 	return 1
+}
+
+loop_run() {
+	# The hang guard, in a function so the guarded and unguarded forms are one argv rather than two
+	# copies that can drift.
+	_b=$1
+	shift
+	if command -v timeout >/dev/null 2>&1; then
+		timeout "$_b" "$@"
+	else
+		"$@"
+	fi
 }
 
 replay() {
@@ -491,6 +545,55 @@ replay() {
 					"$_got" "$_want" || _fail=1
 				_i=$((_i + 1))
 			done
+			rm -rf "$_tmp"
+			continue
+		fi
+		if [ "$_kind" = loop ]; then
+			# The loop is impure by nature — it sleeps and it fetches — so its fixture drives the REAL
+			# verb as a subprocess against a stub `gh`, and asserts what the loop DID: the events it
+			# printed, and the exit class it ended on.
+			#
+			# It asserts TERMINATION, and deliberately asserts nothing about watch health. Every health
+			# signal was green throughout the fifty minutes of quince#62 — fresh heartbeat, state
+			# rewritten every 60 s, `status` reporting `live` — so a fixture that asserts health cannot
+			# tell a working watch from the deaf one. Only two questions distinguish them: does silence
+			# leave the loop running, and does an event end it.
+			_np=$(jq '.payloads | length' "$_f")
+			_pi=0
+			while [ "$_pi" -lt "$_np" ]; do
+				jq -c --argjson i "$_pi" '.payloads[$i]' "$_f" >"$_tmp/payload.$_pi"
+				_pi=$((_pi + 1))
+			done
+			cat >"$_tmp/gh" <<EOF
+#!/bin/sh
+# stub gh for a loop fixture: the Nth call answers with the Nth recorded payload, and the LAST
+# payload repeats forever — so "nothing changed" is the steady state, which is what a watch must
+# keep running through.
+c=\$(cat "$_tmp/calls" 2>/dev/null || echo 0)
+c=\$((c + 1))
+printf '%s\n' "\$c" >"$_tmp/calls"
+i=\$((c - 1))
+[ "\$i" -lt $_np ] || i=\$(($_np - 1))
+cat "$_tmp/payload.\$i"
+EOF
+			chmod +x "$_tmp/gh"
+			command -v timeout >/dev/null 2>&1 ||
+				printf 'note  %s: timeout(1) is not installed — the loop runs UNGUARDED here, so a\n      non-terminating regression HANGS instead of failing. Said out loud because a guard\n      nobody was told is missing is worse than no guard.\n' "$(basename "$_f")"
+			_out=$(loop_run "$(jq -r '.timeout_s // 120' "$_f")" \
+				"$0" watch --repo "$(jq -r '.repo // "novkostya/quince"' "$_f")" \
+				--state "$_tmp/state" --gh "$_tmp/gh" \
+				--interval "$(jq -r '.interval // 2' "$_f")" \
+				--max-wait "$(jq -r '.max_wait // 60' "$_f")" \
+				--fail-after "$(jq -r '.fail_after // 3' "$_f")" 2>&1) && _rc=0 || _rc=$?
+			# `elapsed` and `ticks` are wall-clock facts about the box, not about the behaviour, so they
+			# are normalised rather than asserted — a fixture that pinned them would fail on a loaded
+			# machine and teach everyone to ignore it. The EXIT CLASS is asserted, as a line, because it
+			# is the part a caller reads when it ignores stdout.
+			_got=$(printf '%s\n' "$_out" | grep '^event=' |
+				sed 's/elapsed=[0-9]*s/elapsed=Ns/; s/ticks=[0-9]*/ticks=N/' || true)
+			_got=$(printf '%s\nexit=%s\n' "$_got" "$_rc" | grep -v '^$' | sort)
+			_want=$(jq -r '.expect_events[], "exit=\(.expect_exit)"' "$_f" | sort)
+			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
 			rm -rf "$_tmp"
 			continue
 		fi
@@ -636,6 +739,177 @@ tick() {
 	rm -f "$_obs" "$_raw" "$_raw.err"
 }
 
+# tick_all — one tick across the DECLARED set. Extracted from the `tick` verb so that `watch` runs
+# exactly the same code path the verb does; a loop with its own private copy of the multi-repo fan-out
+# would be a second implementation of the thing whose failures this file catalogues.
+tick_all() {
+	_agh=$1
+	_awpid=$2
+	_aiv=$3
+	_set=$(forge_set "$FORGE_SET_FILE")
+	_arc=0
+	_aevt=$(mktemp)
+	for _r in $_set; do
+		_st=$(state_path_for "$_r")
+		mkdir -p "$(dirname "$_st")"
+		# NOT `tick … | tag_repo`: a pipeline's exit status is the LAST command's, so piping into
+		# the tagger would discard tick's failure and a total fetch failure would exit 0 — measured,
+		# not theorised. This is the same trap `tick` itself documents for `set -o pipefail` (not
+		# POSIX sh), one level up, and the same fix: split the pipeline and check the half that can
+		# fail. A watcher wired to the piped version would have read "all repos failed" as a healthy
+		# tick, which is corollary (a) — silence is not a result — in the tool built to enforce it.
+		if tick "$_st" "$_r" "$_agh" "$_awpid" "$_aiv" >"$_aevt"; then :; else _arc=1; fi
+		tag_repo "$_r" <"$_aevt"
+	done
+	rm -f "$_aevt"
+	# One repository failing does not silence the others, and does not read as success either: the
+	# fetch-failed event names the repo, and the exit code carries the failure out of the loop.
+	return "$_arc"
+}
+
+require_gh() {
+	# The identity is the caller's choice, never the tool's: the reviewer loop runs on the architect
+	# box, which by construction holds no bot token, so a hard-coded gh-bot could not run on the box
+	# that most needs this. Default is plain `gh`, which is also what a stranger's clone has.
+	command -v "$1" >/dev/null 2>&1 || [ -x "$1" ] ||
+		die "gh command not found: $1 (set --gh or FORGE_GH)"
+}
+
+# ---------------------------------------------------------------------------
+# watch — the loop, and the whole point of it is that IT ENDS.
+#
+# quince#62: the first architect session under the rewritten protocol armed
+#
+#     sh -c 'while :; do forge-watch tick --all …; sleep 60; done'
+#
+# and went deaf for fifty minutes while every instrument agreed it was healthy — heartbeat fresh,
+# both state files rewritten every 60 s, `status --all` reporting `live`. A session is woken by a
+# background task COMPLETING; a loop with no exit condition completes never, so nothing it detects
+# can ever be delivered. It had degraded, silently, to the twenty-minute poll this whole unit
+# existed to remove, wearing the new mechanism's clothes.
+#
+# Documenting the requirement was necessary and not sufficient: the next session reads the same
+# text and makes the same plausible choice, because `while :; do … done` is what a watching loop
+# looks like everywhere else. So the loop stops being something a session assembles. The correct
+# shape is the only shape, and hand-rolling is no longer the path of least resistance.
+#
+# What wakes, and what does not:
+#   - any event, including `tick-overdue` and `queue-empty` as a TRANSITION, ends the loop;
+#   - the baseline does not. `first-observation` is the observation that establishes the baseline,
+#     not a change from it, and the `queue-empty` printed beside it describes the same baseline.
+#     Waking on those would make arming a watch a busy loop: arm, exit, arm, exit;
+#   - `fetch-failed` does not, until --fail-after in a row. A single failed fetch is a missed tick,
+#     and this tool already has an idiom for those. A run of them is a watch that is not watching,
+#     and the exit says so. Nothing is swallowed either way: every tick's output is printed.
+#
+# `--max-wait` exists because termination is now the ONLY thing that wakes a session, and the
+# fallback that was supposed to cover the gaps between watches — `ScheduleWakeup` — has three
+# measured armings on the architect box and zero measured deliveries (quince#62). So the loop
+# provides its own floor: it exits idle at the bound, through the channel that is measured to work.
+# The skills still arm the fallback; this is not a replacement for it, and neither is treated as
+# cover for the other.
+# ---------------------------------------------------------------------------
+wake_worthy() {
+	# $1 is a file holding ONE tick's output; prints the lines that justify waking a session.
+	# Two passes over the same file, because the baseline decision for a `queue-empty` line depends
+	# on whether its repository also emitted `first-observation` on this tick — and under --all the
+	# lines of several repositories are interleaved, so `repo=` is the only thing that pairs them.
+	awk '
+		function repo(l,   i, n, a) {
+			n = split(l, a, " ")
+			for (i = 1; i <= n; i++)
+				if (a[i] ~ /^repo=/) return a[i]
+			return ""
+		}
+		NR == FNR { if ($0 ~ /^event=first-observation/) base[repo($0)] = 1; next }
+		/^event=first-observation/ { next }
+		/^event=fetch-failed/ { next }
+		/^event=queue-empty/ { if (base[repo($0)]) next }
+		/^event=/ { print }
+	' "$1" "$1"
+}
+
+watch_preflight() {
+	# The four answers of `status`, enforced instead of recited. `live` and `wedged` REFUSE — the
+	# first because two watchers on one state file is a race that presents as missing events
+	# (quince#50), the second because "wedged" means a process is still running by definition, so
+	# arming beside it is starting the second watcher rather than replacing the first. `dead` and
+	# `absent` proceed, and the tool SAYS WHICH: re-arming from a dead state must not reseed it, and
+	# the session is expected to report that it found one.
+	_ps=$1
+	_pr=$2
+	_pa=no
+	if [ -f "$_ps" ]; then
+		_pp=$(jq -r '.watch.pid // empty' "$_ps" 2>/dev/null || true)
+		[ -n "$_pp" ] && _pa=$(pid_alive "$_pp")
+	fi
+	_prep=$(watch_report "$_ps" "$(now_iso)" "$_pa") && _pcls=0 || _pcls=$?
+	printf 'forge-watch: %s\n' "$_pr"
+	printf '%s\n' "$_prep"
+	case "$_pcls" in
+	0) die "a watch is ALREADY LIVE for $_pr — refusing to arm a second one. Two watchers on one
+    state file is a race that presents as missing events (quince#50). If you meant to replace it,
+    \`forge-watch stop --repo $_pr\` first." ;;
+	5) die "the watch for $_pr is WEDGED — a process is still running and has stopped ticking.
+    Run \`forge-watch stop --repo $_pr\` (it verifies the pid is still ours and refuses if it was
+    recycled), then arm again. Do not kill the pid by hand." ;;
+	3) printf 'forge-watch: re-arming from a DEAD watch — not reseeded, so the next tick emits what accrued while nothing was watching.\n' ;;
+	4) printf 'forge-watch: cold start — the first tick establishes the baseline and does not wake anybody.\n' ;;
+	esac
+}
+
+watch_loop() {
+	_wall=$1
+	_wrepo=$2
+	_wstate=$3
+	_wgh=$4
+	_wiv=$5
+	_wmax=$6
+	_wfail=$7
+
+	_wstart=$(date +%s)
+	_wfails=0
+	_wticks=0
+	_wevt=$(mktemp)
+	while :; do
+		if [ "$_wall" = yes ]; then
+			tick_all "$_wgh" "$$" "$_wiv" >"$_wevt" && _wrc=0 || _wrc=$?
+		else
+			tick "$_wstate" "$_wrepo" "$_wgh" "$$" "$_wiv" >"$_wevt" && _wrc=0 || _wrc=$?
+		fi
+		_wticks=$((_wticks + 1))
+		# Printed before anything is decided: the filter below chooses what WAKES a session, never
+		# what a session may see. A watcher that hid its own failing ticks would be the silence this
+		# tool exists to make impossible.
+		cat "$_wevt"
+		_wwake=$(wake_worthy "$_wevt")
+		if [ -n "$_wwake" ]; then
+			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
+			rm -f "$_wevt"
+			return 0
+		fi
+		if [ "$_wrc" != 0 ]; then
+			_wfails=$((_wfails + 1))
+			if [ "$_wfails" -ge "$_wfail" ]; then
+				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
+				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
+				rm -f "$_wevt"
+				return 7
+			fi
+		else
+			_wfails=0
+		fi
+		_welapsed=$(($(date +%s) - _wstart))
+		if [ "$_welapsed" -ge "$_wmax" ]; then
+			printf 'event=watch-idle elapsed=%ss ticks=%s\n' "$_welapsed" "$_wticks"
+			printf 'forge-watch: watch EXITING on the idle bound — nothing happened, which is a report and not a silence. ARM AGAIN.\n'
+			rm -f "$_wevt"
+			return 6
+		fi
+		sleep "$_wiv"
+	done
+}
+
 case "${1:-}" in
 step)
 	shift
@@ -695,27 +969,9 @@ tick)
 	done
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
-		command -v "$_ghcmd" >/dev/null 2>&1 || [ -x "$_ghcmd" ] ||
-			die "gh command not found: $_ghcmd (set --gh or FORGE_GH)"
-		_set=$(forge_set "$FORGE_SET_FILE")
-		_rc=0
-		_evt=$(mktemp)
-		for _r in $_set; do
-			_st=$(state_path_for "$_r")
-			mkdir -p "$(dirname "$_st")"
-			# NOT `tick … | tag_repo`: a pipeline's exit status is the LAST command's, so piping into
-			# the tagger would discard tick's failure and a total fetch failure would exit 0 — measured,
-			# not theorised. This is the same trap `tick` itself documents for `set -o pipefail` (not
-			# POSIX sh), one level up, and the same fix: split the pipeline and check the half that can
-			# fail. A watcher wired to the piped version would have read "all repos failed" as a healthy
-			# tick, which is corollary (a) — silence is not a result — in the tool built to enforce it.
-			if tick "$_st" "$_r" "$_ghcmd" "$_wpid" "$_iv" >"$_evt"; then :; else _rc=1; fi
-			tag_repo "$_r" <"$_evt"
-		done
-		rm -f "$_evt"
-		# One repository failing does not silence the others, and does not read as success either: the
-		# fetch-failed event names the repo, and the exit code carries the failure out of the loop.
-		exit "$_rc"
+		require_gh "$_ghcmd"
+		tick_all "$_ghcmd" "$_wpid" "$_iv"
+		exit $?
 	fi
 	# --state is now optional: without it the path is derived from --repo, at a location that outlives
 	# the session. It stays available because the fixtures and any second opinion need to point the
@@ -727,12 +983,71 @@ tick)
 	*[!0-9]*) die "--watcher-pid must be a pid: $_wpid" ;;
 	esac
 	case "$_iv" in *[!0-9]*) die "--interval must be seconds: $_iv" ;; esac
-	# The identity is the caller's choice, never the tool's: the reviewer loop runs on quince-arch,
-	# which by construction holds no bot token, so a hard-coded gh-bot could not run on the box
-	# that most needs this. Default is plain `gh`, which is also what a stranger's clone has.
-	command -v "$_ghcmd" >/dev/null 2>&1 || [ -x "$_ghcmd" ] ||
-		die "gh command not found: $_ghcmd (set --gh or FORGE_GH)"
+	require_gh "$_ghcmd"
 	tick "$_s" "$_repo" "$_ghcmd" "$_wpid" "$_iv"
+	;;
+watch)
+	shift
+	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _iv=60 _all=no _max=1200 _fail=3
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--state)
+			_s=$2
+			shift 2
+			;;
+		--repo)
+			_repo=$2
+			shift 2
+			;;
+		--all)
+			_all=yes
+			shift
+			;;
+		--set-file)
+			FORGE_SET_FILE=$2
+			shift 2
+			;;
+		--gh)
+			_ghcmd=$2
+			shift 2
+			;;
+		--interval)
+			_iv=$2
+			shift 2
+			;;
+		--max-wait)
+			_max=$2
+			shift 2
+			;;
+		--fail-after)
+			_fail=$2
+			shift 2
+			;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+	case "$_iv" in *[!0-9]* | '') die "--interval must be seconds: $_iv" ;; esac
+	case "$_max" in *[!0-9]* | '') die "--max-wait must be seconds: $_max" ;; esac
+	case "$_fail" in *[!0-9]* | '') die "--fail-after must be a count: $_fail" ;; esac
+	# A zero interval is a busy loop against the forge, and a zero fail-after would exit before the
+	# first tick could fail. Refused rather than clamped: a silent clamp is a cap nobody was told about.
+	[ "$_iv" -ge 1 ] || die "--interval must be at least 1 second (got $_iv)"
+	[ "$_fail" -ge 1 ] || die "--fail-after must be at least 1 (got $_fail)"
+	require_gh "$_ghcmd"
+	if [ "$_all" = yes ]; then
+		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
+		# The set is read BEFORE the preflight so a malformed declaration fails here rather than
+		# after the first repo has been reported healthy.
+		for _r in $(forge_set "$FORGE_SET_FILE"); do
+			watch_preflight "$(state_path_for "$_r")" "$_r"
+		done
+	else
+		[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+		mkdir -p "$(dirname "$_s")"
+		watch_preflight "$_s" "$_repo"
+	fi
+	watch_loop "$_all" "$_repo" "$_s" "$_ghcmd" "$_iv" "$_max" "$_fail"
+	exit $?
 	;;
 status)
 	shift

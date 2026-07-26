@@ -4,7 +4,8 @@ Observations for the pure halves of `bin/forge-watch`. Most files are a **pair**
 observations, asserting which events the second must produce. A file marked `"kind": "sequence"` is an
 initial state plus N observations replayed in order through one state file, for the defects that live
 in what the state *remembers* between ticks. A file marked `"kind": "watch"` drives the liveness
-classifier instead of the event one.
+classifier instead of the event one. A file marked `"kind": "loop"` is the one impure shape: it runs
+the real `watch` verb against a stub `gh` and asserts what the loop *did*.
 
 **Provenance matters here more than usual**, because these fixtures exist to stop two real defects
 becoming folklore — and a fixture that overstates its own origin would be the same class of defect
@@ -104,4 +105,35 @@ again.** The first version confirmed the recorded pid by grepping `/proc/<pid>/c
 command line contained the string. A check whose positive answer can be produced by the act of asking
 is not a check. It is gone; `live` now requires the pid to exist **and** the heartbeat to be fresh,
 which is strictly stronger and cannot be fooled that way.
+
+## The fourth round: everything here was green while the watch was deaf (quince#62)
+
+The armed loop had no exit condition — `while :; do tick; sleep 60; done` — and a session is woken by a
+background task *completing*, so it detected everything and delivered nothing for fifty minutes. **Every
+fixture above passes on that watcher**, and so does every liveness check: fresh heartbeat, state
+rewritten every 60 s, `status` reporting `live`. Health was never what was broken, so a fourth kind was
+needed that asserts **termination**.
+
+`"kind": "loop"` runs the real `watch` verb as a subprocess against a generated stub `gh` that answers
+the Nth call with the Nth recorded payload and then repeats the last one forever. It is the only impure
+shape in this directory — a subprocess, a clock and real sleeps — and it earns that by being the only
+way to ask the two questions that separate a working watch from a deaf one.
+
+| Fixture | What it pins |
+| --- | --- |
+| `watch-exits-on-the-event.json` | a verdict arriving on tick 3 **ends the loop**, with the events on stdout and exit 0 — and, because those events are in the expectation at all, that the loop did not exit on ticks 1–2 |
+| `watch-silence-keeps-watching.json` | nothing changing does **not** end it; the run ends at the declared `--max-wait` bound, announcing `event=watch-idle` rather than exiting quietly |
+| `watch-baseline-is-not-a-wake.json` | `first-observation` and the `queue-empty` beside it are the baseline, not news — waking on them would make arming a watch a busy circle of arm-exit-arm |
+
+**Teeth, and the one place where the standard phrasing does not fit.** Replayed against the shipped
+hand-rolled loop, `watch-exits-on-the-event.json` does not *fail* — it **hangs**, which is the defect
+stated exactly. Measured rather than asserted: the same stub, the same three payloads, `timeout 20 sh -c
+'while :; do forge-watch tick …; sleep 2; done'` printed `event=review pr=61
+verdict=CHANGES_REQUESTED` and was still running when the bound killed it (exit 143), while the verb
+exited 0 on tick 3 carrying the same line. So the harness bounds every loop fixture with `timeout`, and
+says out loud when `timeout` is not installed rather than running unguarded.
+
+`elapsed=` and `ticks=` are normalised before comparison: they are facts about the box, not about the
+behaviour, and a fixture that pinned them would fail on a loaded machine and teach everyone to ignore
+it. The **exit class** is asserted, as a line, because it is what a caller reads when it ignores stdout.
 

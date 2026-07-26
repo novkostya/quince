@@ -23,6 +23,11 @@ the four answers you got**:
 bin/forge-watch status --all      # declared set; exits 0 live / 3 dead / 4 absent / 5 wedged
 ```
 
+`bin/forge-watch watch` (§6) runs this same check before arming and **refuses** on `live` and on
+`wedged`, so neither of the two answers that must not lead to a second watcher depends on this section
+being read. Ask anyway: the tool can refuse to arm, but it cannot report on your behalf that a watch was
+found dead.
+
 - **`watch=live`** → nothing to do. Do not arm a second watcher; two writing one state file is a race
   that presents as missing events.
 - **`watch=dead`** → **re-arm from that state, and do NOT reseed it.** The next tick diffs against the
@@ -151,23 +156,34 @@ smaller than the declared one. The hard-fail cannot catch that: a stale set is n
 and not malformed, it just describes yesterday. Observed on a real arch box, where the launchpad sat at
 a commit predating the file entirely (#33).
 
-**A background watcher over `bin/forge-watch tick` does the waking**, and it wakes the session only on
-events. Its command is a shell loop, which matters for one small reason: inside `sh -c 'while …'`, `$$`
-is the loop's own pid, so the watcher can record itself in the state file:
+**`bin/forge-watch watch`, run as a BACKGROUND task, does the waking** — and the loop belongs to the
+tool, not to you:
 
 ```sh
 git -C "$PWD" pull --ff-only          # the watch set is this checkout's copy
-while :; do
-  bin/forge-watch tick --all --gh "$PWD/bin/gh-arch" --watcher-pid "$$" --interval 60
-  sleep 60
-done
+bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 ```
 
-**`ScheduleWakeup` is demoted to a fallback heartbeat at ≥1200 s** — long, because the watcher does the
-waking and two chatty loops spend the allowance for nothing. Its **first job on firing is a liveness
-assertion**, `bin/forge-watch status --all`; if that says `dead`, say so out loud rather than ticking
-once and going back to sleep. A due-but-missed tick arrives as `event=tick-overdue` and is reported, not
-absorbed.
+**The loop must exit when it finds something; a loop that cannot exit cannot wake you.** A session is
+woken by a background task *completing*, so the `while :; do tick; sleep 60; done` this section used to
+print detects everything and delivers nothing. Not hypothetical: the first architect session under this
+skill armed exactly that, slept through quince#61 for fifty minutes, and every instrument agreed it was
+healthy throughout — fresh heartbeat, state rewritten every 60 s, `status --all` saying `live`
+(quince#62). Run it in the **background**; in the foreground it blocks the session it is supposed to
+wake. It exits 0 with the events on stdout, 6 at the idle bound, 7 on repeated fetch failures — and
+**every exit is a re-arm**, because a watch that exited is a watch that is not watching.
+
+**`ScheduleWakeup` stays as a fallback heartbeat at ≥1200 s, and it is not cover.** Arm it — no design
+should rest on one channel — but its measured record on this box is three armings and **zero**
+deliveries, against 14/14 for the terminating watcher in the same window (quince#62). The floor under
+you is `watch`'s own `--max-wait`, not this; reasoning as though the fallback protects you is exactly
+what produced the fifty-minute stall. When it does fire, its **first job is a liveness assertion**,
+`bin/forge-watch status --all`; if that says `dead`, say so out loud rather than ticking once and going
+back to sleep. A due-but-missed tick arrives as `event=tick-overdue` and is reported, not absorbed.
+
+**Some of your wakes are your own doing** — an approval you posted, a merge you made — and the watcher
+does not suppress them (5 of 14 measured here). The event carries `actor=`: read it, rather than reading
+a self-wake as phantom activity.
 
 Then, on the events:
 
