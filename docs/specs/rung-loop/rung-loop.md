@@ -1,8 +1,11 @@
 # rung-loop — a rung that runs without a human carrying "review posted"
 
-> Status: **PARTLY BUILT.** `bin/forge-watch` exists — the pure `step()`, `tick`, `replay`, and the
-> complete event model of §4b (quince#43). What remains: restart safety, the declared watch set, the
-> loop modes in the skills, and the runner supervision unit. Takes
+> Status: **PARTLY BUILT.** `bin/forge-watch` exists — the pure `step()`, `tick`, `replay`, the
+> complete event model of §4b (quince#43), restart safety and `stop` (§4c, quince#49/#56), the
+> declared watch set (§4d, quince#51), and the terminating `watch` loop (§4e, quince#62). What
+> remains: **arming that a session cannot silently omit** — the other half of quince#62, since a verb
+> that terminates correctly does nothing for a session that never runs it — the runner supervision
+> unit, and story 6 (`stalled`). Takes
 > [devlog#4](https://github.com/novkostya/quince-devlog/issues/4); feature-named because the
 > deliverable outlives the issue. **Implementation is gated on pr.5 (runner host)** — see
 > *Sequencing*; this PR settles the design the issue asked to settle before building.
@@ -313,6 +316,71 @@ Therefore, mechanically:
 - every emitted event carries the observation that produced it (`#18 gates:FAILURE`), never a bare
   "something changed".
 
+### 4e. The loop must END, and that is why it is a verb (quince#62)
+
+Everything above concerns what the watch *sees*. This is about how what it sees reaches a session,
+and it was wrong in a way none of the instruments above could show.
+
+The first architect session under the rewritten protocol armed the loop the skills described:
+
+```sh
+sh -c 'while :; do bin/forge-watch tick --all …; sleep 60; done'
+```
+
+**No exit condition.** A session is woken by a background task *completing*, so a loop that never
+completes can never deliver anything it detects. quince#61 opened at `19:07:16Z`; the session's last
+activity was `18:21:38Z`, and it was still asleep fifty minutes later when a human intervened. Every
+liveness signal was green throughout — heartbeat fresh, both state files rewritten every 60 s,
+`status --all` reporting `live`. The watch was running perfectly and delivering nothing: corollary
+(g) — *a check whose positive answer can be produced without the thing being true* — occurring inside
+the mechanism built to eliminate it.
+
+**What it degraded to is the interesting part.** Not silence: the session still woke on whatever else
+could reach it, so the loop fell back to the twenty-minute poll this rung existed to replace. The
+predecessor mechanism, wearing the new one's clothes, with every gauge reading nominal.
+
+Therefore:
+
+- **`forge-watch watch` owns the loop**, and the skills say *run this*. Documenting the requirement is
+  necessary and not sufficient — the next session reads the same text and writes `while :; do … done`
+  again, because that is what a watching loop looks like everywhere else. The property is stated in
+  the tool's own `--help` and in both skills for a reader who hand-rolls anyway: **the loop must exit
+  when it finds something; a loop that cannot exit cannot wake you.** It runs as a *background* task;
+  in the foreground it blocks the session it exists to wake.
+- **The filter decides what WAKES, never what is SEEN.** Every tick's output is printed. Two classes of
+  line do not end the loop: the **baseline** — `first-observation`, and the `queue-empty` printed
+  beside it, because the observation that establishes the baseline is not a change from it and waking
+  on it would make arming a watch a busy circle of arm-exit-arm — and **`fetch-failed` until
+  `--fail-after` of them in a row**, since one failed fetch is a missed tick while a run of them is a
+  watch that is not watching. Neither is swallowed; both are printed, and the second exits with its
+  own class.
+- **`--max-wait` (default 1200 s) makes termination the heartbeat.** Once detection is the *normal*
+  exit, every termination is a window covered only by the fallback — and the fallback was measured
+  during this incident at **three armings, zero deliveries** (`ScheduleWakeup`, architect box,
+  2026-07-26: due `18:41`, `19:40`, `20:03`; each time the session was idle at the due moment, was not
+  invoked, and was next woken minutes later by a different mechanism). So the loop provides its own
+  floor through the channel that *is* measured to work — 14/14 deliveries within ~60 s over the same
+  window. The skills still arm the `ScheduleWakeup` fallback: it is belt to this braces, and neither is
+  treated as cover for the other.
+- **The four answers of `status` are enforced at arming.** `watch` refuses to arm beside a `live` watch
+  and refuses to arm beside a `wedged` one (naming `stop`), and it announces `dead` — re-arming without
+  reseeding — or `absent`. The four-case discipline of §4c stops being a paragraph a session has to
+  remember at the exact moment it is arming something.
+- **Self-caused wakes are NOT suppressed, and that is a decision rather than an omission.** A
+  terminating watcher wakes its session on the session's own acts — measured at 5 of 14 wakes (~36%)
+  on the architect box: its own approvals, its own comment, its own changes-requested. Suppressing by
+  actor would be a fresh claim about what cannot matter, which is the §4b defect exactly, and
+  `unattributed` is common enough (a checklist tick) that such a rule would land on honest uncertainty.
+  The event carries `actor=`; the woken session reads it.
+
+**Its fixture asserts termination, and deliberately asserts nothing about health.** Every health check
+in this directory was green while the deaf watcher ran, so a health fixture cannot tell the two apart.
+The `"kind": "loop"` fixtures drive the real verb against a stub `gh` and assert the two questions that
+do: silence leaves the loop running to a declared idle bound, and an event ends it. Teeth, per G1:
+replayed against the shipped hand-rolled shape the positive fixture does not *fail*, it **hangs** —
+which is the defect stated precisely — so the harness bounds every loop fixture with `timeout`, and
+says out loud when `timeout` is absent rather than running unguarded in silence.
+
 ## Design
 
 `bin/forge-watch` is a **pure state machine plus a thin fetch**: `step(previous_state, observation)
@@ -320,16 +388,24 @@ Therefore, mechanically:
 split is the whole reason this can be tested at all without a forge.
 
 ```
+forge-watch watch  --repo owner/name | --all # THE LOOP: tick until there is something to say, then EXIT
 forge-watch tick   --state <file>            # one poll; emits events on stdout
 forge-watch step   --state <file> --observation <json>   # pure, no network — what the fixtures drive
-forge-watch arm    --state <file> --watch pr:19 --watch queue:bot-open
+forge-watch status --repo owner/name | --all # live | dead | absent | wedged, and what to do about it
+forge-watch stop   --repo owner/name         # verify the recorded pid is still ours, then signal it
 ```
 
 Events are lines: `event=updated pr=19 at=2026-07-26T12:32:21Z actor=quince-bot kind=commit` (the
 backstop), `event=review pr=19 verdict=CHANGES_REQUESTED`, `event=checks pr=18 conclusion=FAILURE
 name=gates`, `event=mergeability pr=19 status=BEHIND`, `event=merged pr=19`, `event=queue-empty`,
-`event=first-observation` (the sentinel discharging). `event=stalled` is specified by story 6 and not
-yet implemented — see the declared debt in §4b.
+`event=first-observation` (the sentinel discharging), `event=watch-idle` / `event=watch-failing` (the
+loop's own two exits, §4e). `event=stalled` is specified by story 6 and not yet implemented — see the
+declared debt in §4b.
+
+*(The earlier draft of this block listed a `forge-watch arm --watch pr:19` verb. Nothing of the sort
+was ever built — the watch enumerates the queue every tick precisely so that nothing is bound at arm
+time — and a design doc advertising a verb that does not exist is the claim rule pointed at ourselves.
+Corrected here rather than left for a reader to try.)*
 
 On the runner, an OpenRC-supervised timer runs `tick` and pipes events to a dispatcher that starts **one fresh
 session per event** — `/kickoff <pr>` for the implementer side, `/review-pr <n>` for the reviewer
@@ -376,11 +452,21 @@ allowance faster for no benefit.
     repository.
 19. Under `--all` every event names its repository, and `status --all` reports the worst class in
     the set.
+20. A watch that finds something **exits**, so the session that armed it is woken by the completion —
+    the loop is the tool's own verb, and the events are on its stdout when it ends (quince#62).
+21. A watch that finds nothing keeps watching, and ends at a **declared** idle bound with
+    `watch-idle` — not silently, and not by running forever.
+22. Arming a watch beside a `live` one is refused, and beside a `wedged` one is refused with `stop`
+    named; `dead` and `absent` proceed and say which they were.
 
 ## Gates
 
-- **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4
-  and 9–17. Stories **18–19 are proven by a CLI smoke recorded in the PR, not by the replay harness** —
+- **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
+  9–17 and **20–21** (the `"kind": "loop"` fixtures, which drive the real `watch` verb against a stub
+  `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
+  Story **22 is a CLI smoke recorded in the PR**: the refusals are argument-time behaviour, and a
+  fixture that seeded a live pid would be asserting the harness rather than the tool.
+  Stories **18–19 are proven by a CLI smoke recorded in the PR, not by the replay harness** —
   they are argument handling rather than state transitions, and saying so is better than letting a
   reader assume the fixtures cover them. Story 6 is **not covered because it is not implemented**
   (§4b). Each fixture is a pair of

@@ -1,0 +1,58 @@
+{
+  "kind": "loop",
+  "note": "quince#62. The property no existing fixture could see: an event ENDS the loop. Three ticks — a baseline, a tick where nothing moved, then a review verdict. If the loop cannot exit, this fixture hangs (the harness bounds it with `timeout`); if it exits on the baseline, the tick-3 events never appear.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 60,
+  "timeout_s": 60,
+  "payloads": [
+    [
+      {
+        "number": 61,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T19:07:16Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "comments": [],
+        "commits": [{ "committedDate": "2026-07-26T19:07:10Z", "authors": [{ "login": "quince-bot" }] }],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ],
+    [
+      {
+        "number": 61,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T19:07:16Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "comments": [],
+        "commits": [{ "committedDate": "2026-07-26T19:07:10Z", "authors": [{ "login": "quince-bot" }] }],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ],
+    [
+      {
+        "number": 61,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T19:28:36Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [{ "state": "CHANGES_REQUESTED", "submittedAt": "2026-07-26T19:28:36Z", "author": { "login": "novkostya" } }],
+        "comments": [],
+        "commits": [{ "committedDate": "2026-07-26T19:07:10Z", "authors": [{ "login": "quince-bot" }] }],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ]
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=updated pr=61 at=2026-07-26T19:28:36Z actor=novkostya kind=review",
+    "event=review pr=61 verdict=CHANGES_REQUESTED"
+  ],
+  "expect_exit": 0
+}

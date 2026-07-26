@@ -41,6 +41,11 @@ face: "wedged" means a process is still running, by definition, so "re-arm from 
 second watcher beside a live one. The duplicate is then not an unlucky race, it is the designed path,
 reached by doing what the tool said.
 
+`bin/forge-watch watch` runs this same check before it arms and **refuses** on `live` and on `wedged`,
+so the two answers that must not lead to a second watcher no longer depend on the paragraph above being
+read. Ask anyway, and say which answer you got: the tool can refuse to arm, and it cannot report on your
+behalf that a watch was found dead.
+
 Both were found the same way, and neither by reasoning. The first version of this check looked for state
 in the *session scratchpad*, which the very failure it defended against destroys, so it could only ever
 report `absent`; the second gave `wedged` and `dead` one exit code and one note. **A check that cannot
@@ -61,22 +66,38 @@ So:
    empty and not malformed, it merely describes yesterday. Seen on a real arch box, at a commit
    predating the file entirely (quince#33).
 
-1. **A background watcher over `bin/forge-watch tick` does the waking.** Its command is a shell loop,
-   which matters for one small reason: inside `sh -c 'while …'` the `$$` is the loop's own pid, so the
-   watcher can record itself.
+1. **`bin/forge-watch watch`, as a BACKGROUND task, does the waking — and the loop is the tool's, not
+   yours.**
 
    ```sh
-   while :; do
-     bin/forge-watch tick --all --gh "$PWD/bin/gh-arch" --watcher-pid "$$" --interval 60
-     sleep 60
-   done
+   bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60     # architect
+   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60   # implementer
    ```
 
-   Implementer side: `--repo <owner/name>` per repo you have PRs in, and `bin/gh-bot`.
+   **The loop must exit when it finds something; a loop that cannot exit cannot wake you.** That is
+   the whole of quince#62, and it is stated here because a reader who hand-rolls anyway needs the
+   constraint: a session is woken by a background task *completing*, so `while :; do tick; sleep 60;
+   done` — which is what a watching loop looks like everywhere else, and which the previous version of
+   this file printed — detects everything and delivers nothing. It ran for fifty minutes with a fresh
+   heartbeat, updating state, `status` reporting `live`, and a deaf session behind it. Every check
+   available agreed it was healthy, because health was never the thing that was broken.
 
-2. **`ScheduleWakeup` is demoted to a fallback heartbeat, ≥1200 s**, so the loop survives the watcher
-   dying. Its **first job on firing is a liveness assertion** — `forge-watch status` — and if the answer
-   is `dead` it says so out loud instead of quietly ticking once and going back to sleep.
+   Run it in the **background**. In the foreground it blocks the session it exists to wake.
+
+   It exits 0 on events (they are on its stdout), **6** at the `--max-wait` idle bound (default 1200 s,
+   `event=watch-idle`), **7** after `--fail-after` failing ticks in a row. It refuses to arm beside a
+   `live` or `wedged` watch, so step 0's four answers are enforced where they matter. **Every exit is a
+   re-arm**: a watch that exited is a watch that is not watching.
+
+2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Its measured
+   record on the architect box is **three armings, zero deliveries** (quince#62: due `18:41`, `19:40`,
+   `20:03`; each time the session was idle at the due moment and was next woken by something else),
+   against 14/14 for the terminating watcher in the same window. Arm it anyway — it costs nothing and
+   the design should not depend on one channel — but do not reason as though it protects you, which is
+   the mistake that produced the fifty-minute stall. **The floor under a terminating watch is its own
+   `--max-wait`, not the fallback.** When the fallback does fire, its **first job is a liveness
+   assertion** — `forge-watch status` — and if the answer is `dead` it says so out loud instead of
+   quietly ticking once and going back to sleep.
 
 3. **A tick that was due and did not happen is reported, not absorbed.** `forge-watch` emits
    `event=tick-overdue due=… late=…` for it. The events themselves cannot carry that fact: they arrive

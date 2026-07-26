@@ -29,6 +29,11 @@ Collapsing `dead` into `absent` turns a restarted watch into a fresh one that ha
 since a beginning it invented; collapsing `wedged` into `dead` tells you to start a second watcher
 beside a live one. Reasoning: [`../../loop-protocol.md`](../../loop-protocol.md).
 
+`bin/forge-watch watch` (§6) runs this same check before arming and **refuses** on `live` and on
+`wedged`, so the two answers that must not lead to a second watcher no longer depend on this section
+being read. Ask anyway: the tool can refuse to arm, and it cannot report on your behalf that a watch was
+found dead.
+
 ## 1. Resolve the target
 
 **Use `bin/gh-bot`, not bare `gh`.** It is *the* tool for every forge call on this side: an allow rule
@@ -126,10 +131,32 @@ the deploy + click-list and the journal entry now, not at the end.
 
 ## 6. The implementer half of the coroutine — after opening PRs the session does NOT end
 
-"I finished a PR" is not a stop. Neither is "over to the architect", which is how the first run ended
-one session that then had to be restarted by hand. Record the repo and number of every PR you open —
-that is your watch set, self-describing, and it needs no declared file because you know what you
-opened — then keep going on what the forge says:
+"I finished a PR" is not a stop. Neither is "over to the architect", nor **"the ball is back with the
+reviewer"** — which is the sentence one session ended on at `19:41Z` with no watcher, no state and no
+fallback armed, four minutes before the verdict it was waiting for landed (quince#62). Rewriting the
+default from *stop* to *proceed* did not stop a session finding a new sentence for stopping.
+
+**So: the moment your first PR is open, ARM THE WATCH.** Record the repo and number of every PR you
+open — that is your watch set, self-describing, and it needs no declared file because you know what you
+opened — and run this as a **background** task, one per repo you have PRs in:
+
+```sh
+bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60
+```
+
+**The loop must exit when it finds something; a loop that cannot exit cannot wake you.** You are woken
+by a background task *completing*, so `while :; do tick; sleep 60; done` detects everything and delivers
+nothing — that shape ran for fifty minutes on the architect box with every liveness signal green and a
+deaf session behind it (quince#62). `watch` owns the loop and ends it: exit 0 with the events on stdout,
+6 at the `--max-wait` idle bound, 7 after repeated fetch failures. Do not run it in the foreground,
+where it blocks the session it exists to wake.
+
+**Every exit is a re-arm.** A watch that exited is a watch that is not watching, and four forgotten
+re-arms are already on the record (quince#43). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
+it has three measured armings and zero deliveries (quince#62), so the floor under you is `watch`'s own
+idle bound, not the fallback.
+
+Then keep going on what the forge says:
 
 | What you see | What you do |
 | --- | --- |
