@@ -30,18 +30,30 @@ builds — QA against a different artifact is QA of something nobody ships), ser
 mode replacing any previous deploy, and **polls `/api/health` until it answers** before reporting
 anything. A URL it has not fetched is not a URL it will print.
 
-What it prints, in the order the spec rules:
+What it prints:
 
 ```
+Open it (this session only — never paste this into a PR):
+  http://<address>:8080/
+
 For the PR (convention name — carries no site information):
   http://quince-dev-1:8080/
 
-To click it from a desktop, no configuration needed:
+Address-free path, for a reader who has the alias but not the LAN:
   ssh -L 8080:127.0.0.1:8080 quince-dev-1     # then open http://localhost:8080
-
-This session only (never paste this into a PR):
-  http://<address>:8080/
+  (a second concurrent deploy needs a different LOCAL port: -L 8081:127.0.0.1:8080)
 ```
+
+**On the LAN, just open the address.** It needs no setup, and it stays collision-free when several
+rungs run in parallel — every container has its own `8080`, so N deploys are N addresses.
+`ssh -L` exists so the **PR** can give an actionable instruction without naming an address; it is a
+fallback, not a requirement, and it is the one path that *does* collide locally when two deploys
+are live at once (fix it by hand with a different local port; auto-allocating one would be
+complexity bought for a path nobody is required to use).
+
+The demo binds `0.0.0.0:8080` inside its container, so it is reachable to anything on that LAN for
+as long as it runs — a real property of a disposable demo on a trusted network, stated rather than
+implied.
 
 Two details that are not cosmetic, both found by walking the path rather than reading it:
 

@@ -43,8 +43,14 @@ use. The privacy rule is satisfied *by construction* rather than by a reviewer c
 **Four reader paths, in the order the PR should present them:**
 
 1. **The convention URL is the identifier** — `http://quince-dev-1:8080/`, always in the PR.
-2. **`ssh -L` is the documented desktop path** (architect's addition, and it removes the cost the
-   first draft accepted):
+2. **`ssh -L` is the address-free path — a fallback, not a requirement** (Operator amendment,
+   2026-07-26, after the first implementation): on the LAN, the address the deploy prints is the
+   fastest path and needs no setup, so the tool prints it first. `ssh -L` earns its place only
+   where an address is unavailable or unusable — which is exactly the PR, and a reader off the LAN.
+   **It is also the one path that does not scale to parallel rungs**, which the revamp exists to
+   enable: every container has its own `8080`, so N deploys are N addresses, while N tunnels
+   collide on the *local* port. Fixed by hand with a different local port when it happens;
+   auto-allocating one is complexity bought for a path nobody is required to use.
    ```
    ssh -L 8080:localhost:8080 quince-dev-1   # then open http://localhost:8080
    ```
