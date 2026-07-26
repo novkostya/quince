@@ -17,10 +17,15 @@ usage() {
 usage: forge-watch <verb>
 
   step   --state <file> --observation <file>   emit events for one observation (pure, no network)
-  tick   --state <file> [--repo owner/name]    fetch the queue, then step
+  tick   --state <file> [--repo owner/name] [--gh <cmd>]   fetch the queue, then step
   replay <fixture.json>...                     drive step from recorded pairs; non-zero on mismatch
 
-events: first-observation · queue-empty · opened · review · checks · merged · stalled
+  --gh defaults to FORGE_GH, else plain `gh`. The runner passes gh-bot; the arch box passes
+  gh-arch. The tool does not pick an identity for you — a monitor that hard-coded one could not
+  run on the box that most needs it.
+
+events: first-observation · queue-empty · opened · review · checks · merged · fetch-failed ·
+        queue-truncated · stalled
 EOF
 }
 
@@ -146,22 +151,51 @@ replay() {
 # tick — the thin half: fetch, hand the observation to step. Uses gh-bot so the token stays out of
 # argv and the call is allowlistable.
 # ---------------------------------------------------------------------------
+FETCH_LIMIT=${FORGE_LIMIT:-20}
+
 tick() {
 	_state=$1
 	_repo=$2
+	_gh=$3
 	command -v jq >/dev/null 2>&1 || die "jq is required"
-	_gh=bin/gh-bot
-	[ -x "$_gh" ] || _gh=gh-bot
+
+	# The fetch is captured to a file and checked ON ITS OWN, because piping it straight into jq
+	# hands us JQ's exit status: a missing `gh` wrapper produced no output, jq accepted the empty
+	# input, and the tool emitted `first-observation count=` on every tick, forever, while looking
+	# healthy. `set -o pipefail` would be the obvious fix and is not POSIX sh, so the pipeline is
+	# split instead. A loop wired to the old version would have slept indefinitely — corollary (d)
+	# of this project's own rule, inside the tool built to enforce it.
+	_raw=$(mktemp)
+	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
+		--json number,state,updatedAt,statusCheckRollup,reviews >"$_raw" 2>"$_raw.err"; then
+		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" \
+			"$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)"
+		rm -f "$_raw" "$_raw.err"
+		return 1
+	fi
+	# A payload that does not parse, or is not an array, is a failed fetch wearing a success exit
+	# code. Assert the shape before treating it as an observation.
+	if ! jq -e 'type == "array"' "$_raw" >/dev/null 2>&1; then
+		printf 'event=fetch-failed repo=%s reason=payload_not_an_array\n' "$_repo"
+		rm -f "$_raw" "$_raw.err"
+		return 1
+	fi
+
+	# No silent caps: if the queue filled the limit, the view is truncated and the tool says so
+	# rather than quietly watching a subset.
+	if [ "$(jq 'length' "$_raw")" -ge "$FETCH_LIMIT" ]; then
+		printf 'event=queue-truncated limit=%s repo=%s\n' "$FETCH_LIMIT" "$_repo"
+	fi
+
 	_obs=$(mktemp)
-	"$_gh" pr list -R "$_repo" --state all --limit 20 \
-		--json number,state,updatedAt,statusCheckRollup,reviews |
-		jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
-			checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
-			reviews: [(.reviews // [])[] | {state}]}]}' >"$_obs" ||
-		die "could not fetch the queue for $_repo"
+	jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
+		checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
+		reviews: [(.reviews // [])[] | {state}]}]}' "$_raw" >"$_obs" ||
+		die "could not shape the observation for $_repo"
+
 	[ -f "$_state" ] || printf '{"observed":false}\n' >"$_state"
 	step "$_state" "$_obs"
-	rm -f "$_obs"
+	rm -f "$_obs" "$_raw" "$_raw.err"
 }
 
 case "${1:-}" in
@@ -187,7 +221,7 @@ step)
 	;;
 tick)
 	shift
-	_s='' _repo=novkostya/quince
+	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}"
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -198,11 +232,20 @@ tick)
 			_repo=$2
 			shift 2
 			;;
+		--gh)
+			_ghcmd=$2
+			shift 2
+			;;
 		*) die "unknown option: $1" ;;
 		esac
 	done
 	[ -n "$_s" ] || die "tick needs --state"
-	tick "$_s" "$_repo"
+	# The identity is the caller's choice, never the tool's: the reviewer loop runs on quince-arch,
+	# which by construction holds no bot token, so a hard-coded gh-bot could not run on the box
+	# that most needs this. Default is plain `gh`, which is also what a stranger's clone has.
+	command -v "$_ghcmd" >/dev/null 2>&1 || [ -x "$_ghcmd" ] ||
+		die "gh command not found: $_ghcmd (set --gh or FORGE_GH)"
+	tick "$_s" "$_repo" "$_ghcmd"
 	;;
 replay)
 	shift
