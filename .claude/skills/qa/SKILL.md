@@ -1,55 +1,68 @@
 ---
 name: qa
-description: Deploy the built image so a change can be clicked, and produce the PR's what-to-click list. PLACEHOLDER — the self-serve dev-container deploy does not exist yet; today this runs the demo locally on the container host and tells you what to write in the PR.
-argument-hint: "[optional: PR number]"
+description: Deploy a branch to a disposable dev container in demo mode and produce the PR's URL + what-to-click list. Uses `devct deploy`; the URL is fetched before it is reported.
+argument-hint: "[optional: branch or ref; defaults to the current branch]"
 disable-model-invocation: true
 ---
 
-# /qa $ARGUMENTS — placeholder, and it says so
+# /qa $ARGUMENTS
 
-**This skill is not finished, and it will not pretend otherwise.** The ruled design is:
-a PR's dev container deploys the built image in `--demo` mode and the deploy URL is posted
-in the PR automatically, with real-device QA staying on the staging stand (one instance,
-one pairing, the soak stays clean). That needs the dev-container tooling and the deploy
-hook in `/report` — neither exists yet. Until they do, do the honest manual version below.
+Deploy the change so somebody can click it, and write the ≤5 lines telling them what to
+click. `/report` does this by default — reach for `/qa` on its own when you are iterating
+and want the demo refreshed.
 
 **Never invent a URL.** A fabricated deploy link is the exact class of lie the state-honesty
-rule exists to prevent, and it is invisible to a reviewer who doesn't click it.
+rule exists to prevent, and it is invisible to a reviewer who doesn't click it. Nothing
+below asks you to type a URL: the tool prints one it has already fetched.
 
-## Today: run the demo yourself on the container host
+## Deploy
 
 ```sh
-make image
-docker run --rm -p 8080:8080 \
-  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
-  quince:local serve --demo            # nerdctl run … on a containerd host
+deploy/devct/devct deploy --ref <branch>      # --create if nothing is running
 ```
 
-(That is the same invocation `make gates-ui-e2e` uses for its Playwright run, so demo mode
-is exercised by CI too.) Reach it at `http://<the container host>:8080` from the LAN, click
-the change through yourself, and if the UI moved, take a screenshot for the PR.
+That fetches the ref onto a dev container, builds **the production image** (the same target
+CI builds — QA against a different artifact is QA of something nobody ships), serves it in
+`--demo` mode replacing any previous deploy, and **polls `/api/health` until it answers**
+before printing anything.
 
-Demo mode is also the public face of quince for anyone evaluating it without a device —
-if you find it thin or broken while using it here, that is a real finding worth an issue.
+If it refuses, read the refusal: it names the condition it observed, and each one has a
+different fix.
 
-## Then: write the click list
+- `no running dev container` → add `--create`.
+- `more than one running dev container (116,117)` → choose with `--vmid N`.
+- a build failure, or a demo that never answered → that is a **finding**. It goes in the PR
+  as `deploy: unavailable — <reason>`, never as silence.
 
-≤5 lines, imperative, each line something a reviewer can do in the demo without a device:
+## What goes in the PR
+
+The tool prints three lines. **Paste the convention URL** — `http://quince-dev-N:8080/` —
+and, under it, the `ssh -L` line for a reader who has the alias but not the LAN.
+
+**Never paste the address.** It is Operator-private, the tool labels it session-only, and
+the convention name carries no site information by design.
+
+On the LAN the address is the fastest way for *you* to click it. The tunnel is for the
+reader, and it collides on the local port when two deploys run at once (use a different
+local port) — which is why it is a fallback, not the path.
+
+## The click list
+
+≤5 imperative lines, each doable in the demo without a device:
 
 ```
-1. Open <url> → Devices; the demo iPhone is listed with a USB badge.
-2. Open it → Back up now; watch the job phases advance live.
-3. …
+1. Open <url> → set an admin password (demo asks on first load).
+2. Devices → the demo iPhone is listed with a USB badge.
+3. Open it → Back up now; watch the job phases advance live.
 ```
 
-In the PR, pair the list with the honest status line:
+Walk them yourself before pasting them. A click list nobody has walked is a claim, and a
+documented path nobody has walked is how this rung found a broken one.
 
-- `no dev-deploy URL — tooling pending (pr.4); demo run locally on the container host`, or
-- `deploy leg not applicable: no runnable change` (docs/config-only PRs).
+## When the demo is not the right surface
 
-## When the tooling lands
+Real-device QA stays on the staging stand — one instance, one pairing, so the soak stays
+clean. Staging deploys are by request, never by default.
 
-Replace this skill; don't extend it. The finished version provisions or reuses the PR's dev
-container, deploys the image built from the PR head, posts the URL as a PR comment, and
-`/report` calls it by default. Everything above becomes the fallback path for a session with
-no dev container.
+Demo mode is also the public face of quince for anyone evaluating it without a device: if
+you find it thin or broken while using it here, that is a real finding worth an issue.
