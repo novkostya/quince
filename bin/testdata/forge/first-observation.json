@@ -2,5 +2,5 @@
   "note": "The sentinel discharging. 'never observed' must not read as 'observed empty' — the first tick reports itself and invents no changes.",
   "before": { "observed": false },
   "after": { "observed": true, "prs": [] },
-  "expect_events": [ "event=first-observation", "event=queue-empty" ]
+  "expect_events": [ "event=first-observation count=0", "event=queue-empty" ]
 }

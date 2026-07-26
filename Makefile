@@ -114,7 +114,7 @@ gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 # point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
-                   deploy/runner/preflight deploy/runner/provision
+                   deploy/runner/preflight deploy/runner/provision bin/forge-watch
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban

@@ -1,0 +1,15 @@
+{
+  "note": "A first tick against a queue that already has PRs. It must report ITSELF and the count, and must NOT replay the existing queue as opened/merged/review events — found live, where the first tick emitted sixty events for work that had finished hours earlier. Claiming history as news is the same defect as claiming silence as calm.",
+  "before": { "observed": false },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 30, "state": "OPEN", "updatedAt": "2026-07-26T04:00:00Z",
+        "checks": [{"name":"gates","conclusion":"FAILURE"}],
+        "reviews": [{"state":"CHANGES_REQUESTED"}] },
+      { "number": 29, "state": "MERGED", "updatedAt": "2026-07-26T03:00:00Z",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}] }
+    ]
+  },
+  "expect_events": [ "event=first-observation count=1" ]
+}
