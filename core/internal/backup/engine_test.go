@@ -79,7 +79,57 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 	for _, m := range mods {
 		m(&o, dev)
 	}
-	return &harness{eng: New(o), mgr: mgr, dev: dev, bus: b, st: st, dir: dir}
+	h := &harness{eng: New(o), mgr: mgr, dev: dev, bus: b, st: st, dir: dir}
+
+	// Registered AFTER t.TempDir() above, and cleanups run LIFO — so this drains the engine before
+	// the TempDir RemoveAll walks the tree. See drain for why that ordering is load-bearing.
+	t.Cleanup(func() { h.drain(t) })
+	return h
+}
+
+// drain cancels every job still live on the engine and waits for each run goroutine to release its
+// per-UDID slot. A test that returns with a job still running leaves a supervised idevicebackup2
+// writing under t.TempDir() while RemoveAll walks it — "directory not empty" (issue #9).
+//
+// Terminal state is NOT the quiescence signal, so waiting on the job row is not enough: run() emits
+// the terminal row, THEN discards working/, and only frees the slot on its way out (defer release).
+// The gap is already known to this file — see startWhenReleased's note about "the brief single-flight
+// window between a job's terminal row and the release of its per-UDID slot". e.running going empty
+// is the signal that every run goroutine has finished touching the tree.
+func (h *harness) drain(t *testing.T) {
+	t.Helper()
+	for _, id := range h.liveJobIDs() {
+		h.eng.CancelJob(id)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(h.liveJobIDs()) == 0 {
+			return
+		}
+		time.Sleep(4 * time.Millisecond)
+	}
+	// Loudly, not silently: proceeding into RemoveAll with a live writer is the very race this
+	// exists to close, and a test that cannot quiesce its engine has not proven what it claims.
+	t.Errorf("engine did not quiesce within 30s — jobs still live: %v", h.liveJobIDs())
+}
+
+// liveJobIDs snapshots the ids of the engine's currently-running jobs. The two locks are taken in
+// sequence, never nested: e.mu only to copy the map's values, then each lj.mu to read its row.
+func (h *harness) liveJobIDs() []string {
+	h.eng.mu.Lock()
+	live := make([]*liveJob, 0, len(h.eng.running))
+	for _, lj := range h.eng.running {
+		live = append(live, lj)
+	}
+	h.eng.mu.Unlock()
+
+	ids := make([]string, 0, len(live))
+	for _, lj := range live {
+		lj.mu.Lock()
+		ids = append(ids, lj.row.ID)
+		lj.mu.Unlock()
+	}
+	return ids
 }
 
 func (h *harness) start(t *testing.T, transport, retryOf string) wire.Job {
@@ -394,9 +444,9 @@ func TestStorySingleFlight(t *testing.T) {
 	}
 
 	waitTerminal(t, h.eng, j1.ID, 6*time.Second)
-	if j3, ok := h.eng.Job(""); ok {
-		_ = j3
-	}
+	// The second device's job is deliberately left running — that IS the assertion, that it was
+	// never blocked by the first. The harness drain owns its lifetime from here (issue #9): before
+	// it, this test returned with that job still writing into t.TempDir().
 }
 
 // Story 8: cancel kills the process group; the job ends cancelled with no version.
