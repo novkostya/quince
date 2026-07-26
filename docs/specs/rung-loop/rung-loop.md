@@ -189,11 +189,20 @@ Therefore:
   Session scratchpads are for artefacts nobody needs tomorrow; watch state is the opposite of that.
   **No hostname is recorded in it**, deliberately: the file is per-box already, and a hostname is an
   Operator-private fact that would then live in a file somebody pastes into an issue.
-- **`forge-watch status` distinguishes THREE cases and says which**, with exit codes so a caller that
-  ignores stdout still cannot mistake one for another: `live` (0) → nothing to do; `dead` (3) →
-  **re-arm from this state, and do not reseed it**; `absent` (4) → cold start, seed the sentinel.
+- **`forge-watch status` distinguishes FOUR cases and says which**, with exit codes so a caller that
+  ignores stdout still cannot mistake one for another: `live` (0) → nothing to do; `dead` (3) → nothing
+  is running, **re-arm from this state and do not reseed it**; `absent` (4) → cold start, seed the
+  sentinel; `wedged` (5) → a process **is** still running and has stopped ticking, so **stop it first**,
+  then re-arm.
+
   Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
-  nothing changed" since a beginning it invented.
+  nothing changed" since a beginning it invented. **`wedged` was the fourth case, and it was a review
+  finding against this design's own stated principle** — it originally shared `dead`'s exit code and its
+  identical *"re-arm from this state"* note, while needing the opposite remedy: "wedged" means a process
+  is still running by definition, so re-arming beside it puts two watchers on one state file. The
+  duplicate was therefore not an unlucky race but **the designed path, reached by doing what the tool
+  said**. Corollary (b) — don't collapse two conditions into one message — one level up from where it
+  usually bites.
 - **liveness needs two instruments, and neither is sufficient alone.** The heartbeat cannot see a
   watcher that died a moment ago — its last tick is recent by definition, so a fresh session would read
   `live`, do nothing, and nothing would ever tick again. The pid cannot see a *wedged* watcher, and
@@ -288,10 +297,12 @@ allowance faster for no benefit.
 11. An update that nothing in the payload explains emits `actor=unattributed`, never a bystander.
 12. A PR made `BEHIND` by someone else's merge emits `mergeability`, while its own `updatedAt` — and
     therefore the backstop — stays correctly silent.
-13. `status` reports `live`, `dead` or `absent`, never two of them collapsed, and says what to do next.
+13. `status` reports `live`, `dead`, `absent` or `wedged`, never two of them collapsed, and says what
+    to do next — including that a wedged watcher must be stopped before re-arming.
 14. A watch whose state exists with no watcher behind it is re-armed from that state, and the next tick
     emits everything that accrued while nothing was watching — not `queue-empty`, not silence.
-15. A watcher process that is alive but no longer ticking reads `dead`, not `live`.
+15. A watcher process that is alive but no longer ticking reads `wedged` — not `live`, and not `dead`
+    either, because the remedy differs.
 16. A hand-run tick cannot make a dead watcher look alive.
 17. A tick that was due and did not happen emits `tick-overdue`, with how late it was.
 
