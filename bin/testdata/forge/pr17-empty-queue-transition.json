@@ -1,0 +1,13 @@
+{
+  "note": "empty -> non-empty. A monitor that only emits when the PREVIOUS state was non-empty produces nothing here, and reports the queue clear while a PR waits.",
+  "before": { "observed": true, "prs": [] },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 17, "state": "OPEN", "updatedAt": "2026-07-26T00:12:00Z",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"},{"name":"image","conclusion":"SUCCESS"},{"name":"e2e","conclusion":"SUCCESS"}],
+        "reviews": [] }
+    ]
+  },
+  "expect_events": [ "event=opened pr=17" ]
+}

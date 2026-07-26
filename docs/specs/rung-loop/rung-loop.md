@@ -1,6 +1,6 @@
 # rung-loop — a rung that runs without a human carrying "review posted"
 
-> Status: **SPEC — proposed, not approved.** No code exists. Takes
+> Status: **SPEC — ruled on first review (sequencing + attribution), awaiting re-review.** No code exists beyond fixtures. Takes
 > [devlog#4](https://github.com/novkostya/quince-devlog/issues/4); feature-named because the
 > deliverable outlives the issue. **Implementation is gated on pr.5 (runner host)** — see
 > *Sequencing*; this PR settles the design the issue asked to settle before building.
@@ -58,20 +58,30 @@ memory.
 The polite deadlock — implementer waiting for review, reviewer waiting for a push, one signal
 missed, both asleep looking busy — is defeated by making the *absence* of movement an event.
 
-Each loop tracks the PR's `updatedAt`. No movement for `stall_hours` (default **3**) → post
-`rung stalled at PR #<n>` with what it was waiting for, notify, and stop. A loop that cannot say
-why it is still waiting has nothing to wait for.
+Each loop tracks the PR's `updatedAt`. No movement for `stall_hours` (default **3**) → **post
+`rung stalled at PR #<n>` as a PR comment first**, naming what it was waiting for; the push is
+secondary. A stall at 02:00 that only pushes gets read at 09:00 either way, while a stall that
+comments is legible to whoever opens the PR next — including a fresh `/kickoff` session, which is
+the reader this whole design is built around. A loop that cannot say why it is still waiting has
+nothing to wait for.
 
 ### 4. The monitor bug becomes a fixture, not folklore
 
-**Origin, first-hand:** tonight's in-session poller enumerated the PR list at arm time and compared
-against a baseline captured then. A PR opened *after* the arm — or the first one after the queue
-emptied — was invisible to it, which is how **#17 sat unnoticed**. Its sibling defect: a watcher
-that observed reviews but not checks let **#16 sit red for an hour**, because "no review yet" and
-"unreviewable, CI is red" printed the same silence.
+**Origin — two independent monitors, two different bugs, one class.** The first draft of this spec
+collapsed both into "I was the buggy monitor", which was wrong twice over: it took someone else's
+defect and it hid the more interesting fact that two sessions wrote two different versions of the
+same mistake without seeing each other's code.
 
-Both are the class this project now has canon for (*an error message is a claim* — program doc): the
-poller's silence asserted "nothing happened" while meaning "I never looked".
+| Monitor | The bug | What it cost |
+| --- | --- | --- |
+| the **architect's** | emitted only when the *previous* state was non-empty, so an empty→non-empty transition produced nothing | **#17 sat unnoticed** while the queue was reported clear |
+| the **implementer's** | watched reviews but not check conclusions | **#16 sat red for ~an hour**; "no review yet" and "unreviewable, CI is red" were the same silence |
+| the implementer's, **latent** | bound its PR list at arm time, so a PR opened afterwards was outside the watch | nothing observed — recorded as latent, not as a miss |
+
+Both realised bugs are the class this project now has canon for (*an error message is a claim* —
+program doc): the silence asserted "nothing happened" while meaning "I never looked". That two
+authors produced it independently, in one night, on the same substrate, is the argument for encoding
+it in a state machine with fixtures rather than in anybody's care.
 
 Therefore, mechanically:
 
@@ -164,19 +174,26 @@ which is the issue's "fixture, not folklore" requirement taken literally.
 - **Cost** — pacing is specified rather than left to a default, because the failure mode is a
   quietly expensive loop.
 
-## Sequencing — why this is a spec now and code later
+## Sequencing — RULED: pr.5 first, then all of this
 
-**Implementation waits for pr.5 (runner host).** A loop in a laptop session dies with the lid;
-supervised on the runner it is durable and the monitor is a systemd unit rather than an in-session
-poller. Building it before the runner means building it twice, and the second build would throw away
-the first.
+The first draft proposed splitting `forge-watch` out as landable-now, since it needs no runner.
+**Ruled otherwise (architect), and on a better axis than technical merit: critical path.** pr.5 is
+the only remaining item that needs the *Operator* — five minutes of `claude /login` on the runner —
+so every hour it waits is an hour nobody can schedule it, while `forge-watch` blocks nobody. With
+parallel sessions the split would have been right; with one implementer it is not.
 
-What lands now is the design, and one thing that needs no runner at all: the **fixtures**, which can
-be recorded from this session's real failures while they are fresh.
+So: **pr.5 next, this rung after it, whole.**
+
+What is captured now, because it is the one thing that decays: the **fixtures**
+(`bin/testdata/forge/`). Reconstructing "#16 sat red for an hour" from a journal entry in a week is
+exactly the folklore this rung exists to prevent, so the observations are recorded while they are
+still exact — including which monitor produced which defect, and which defect was never actually
+observed to swallow anything.
 
 ## PR sequence
 
-1. **this spec** — the four design notes settled before code.
-2. **`forge-watch` + fixtures** — the state machine and G1. Can land before pr.5; it is a pure
-   function with a `tick` wrapper.
-3. **loop modes + runner supervision** — skills and the systemd unit, G2–G5. **Gated on pr.5.**
+1. **this spec + the fixtures** — the four design notes settled, and the evidence captured before it
+   decays.
+2. **`forge-watch`** — the pure `step()` and its `tick` wrapper; G1 replays the fixtures. **After
+   pr.5.**
+3. **loop modes + runner supervision** — skills and the systemd unit, G2–G5. **After pr.5.**
