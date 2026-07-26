@@ -1,0 +1,39 @@
+{
+  "kind": "sequence",
+  "note": "ILLUSTRATIVE (50), and a defect caught in review of the PR that introduced the mergeability event. UNKNOWN is treated as 'no answer' for reporting — correctly — and was then STORED as though it were a state, so a PR already BEHIND that saw one UNKNOWN tick and came back BEHIND emitted a second `mergeability status=BEHIND` for a condition that never changed. Reachable rather than theoretical: the recompute that returns UNKNOWN is triggered by the base moving, and the base moving is what makes a PR BEHIND, so two merges into an open queue produce it — which is exactly the queue shape quince#46 exists to address. Direction of failure was noise rather than blindness, and it contradicted this family's own rule that a transition is reported once. Fixed by storing the last KNOWN mergeability instead of overwriting knowledge with an absence. This needs three ticks through one state file, which is why the sequence fixture kind exists: a pair whose `before` already held the carried-forward value would be asserting the very behaviour under test.",
+  "initial": {
+    "observed": true,
+    "prs": [ { "number": 50, "state": "OPEN", "updatedAt": "2026-07-26T12:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ]
+  },
+  "steps": [
+    {
+      "label": "first foreign merge: CLEAN -> BEHIND, reported",
+      "observation": { "observed": true, "prs": [
+        { "number": 50, "state": "OPEN", "updatedAt": "2026-07-26T12:00:00Z",
+          "merge_state": "BEHIND", "checks": [], "reviews": [], "activity": [] } ] },
+      "expect_events": [ "event=mergeability pr=50 status=BEHIND" ]
+    },
+    {
+      "label": "second merge triggers a recompute: BEHIND -> UNKNOWN, silent",
+      "observation": { "observed": true, "prs": [
+        { "number": 50, "state": "OPEN", "updatedAt": "2026-07-26T12:00:00Z",
+          "merge_state": "UNKNOWN", "checks": [], "reviews": [], "activity": [] } ] },
+      "expect_events": []
+    },
+    {
+      "label": "the recompute answers BEHIND again — nothing happened to PR 50, so nothing is reported",
+      "observation": { "observed": true, "prs": [
+        { "number": 50, "state": "OPEN", "updatedAt": "2026-07-26T12:00:00Z",
+          "merge_state": "BEHIND", "checks": [], "reviews": [], "activity": [] } ] },
+      "expect_events": []
+    },
+    {
+      "label": "and knowledge carried forward does not mask a REAL change: BEHIND -> DIRTY is reported",
+      "observation": { "observed": true, "prs": [
+        { "number": 50, "state": "OPEN", "updatedAt": "2026-07-26T12:00:00Z",
+          "merge_state": "DIRTY", "checks": [], "reviews": [], "activity": [] } ] },
+      "expect_events": [ "event=mergeability pr=50 status=DIRTY" ]
+    }
+  ]
+}

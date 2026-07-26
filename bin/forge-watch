@@ -190,29 +190,70 @@ step() {
 		printf 'event=queue-empty\n'
 	fi
 
-	printf '%s' "$_now" | jq -c '. + {observed: true}' >"$_prev.new" && mv "$_prev.new" "$_prev"
+	# The state stores the last KNOWN mergeability, not the last one observed — and the distinction is
+	# a defect that was caught in review. The reporting pass treats UNKNOWN as "no answer", correctly,
+	# and the first version then wrote that non-answer into state as though it were a state. So a PR
+	# already BEHIND that saw one UNKNOWN tick and came back BEHIND emitted a SECOND
+	# `mergeability status=BEHIND` for a condition that never changed — reachable rather than
+	# theoretical, because the recompute that returns UNKNOWN is triggered by the base moving, and the
+	# base moving is what makes a PR BEHIND in the first place. Two merges into an open queue produce
+	# it. Overwriting knowledge with an absence is how a recompute flap becomes an event, and a
+	# transition re-announced every tick is the wallpaper this tool has already been fixed for once.
+	printf '%s' "$_now" | jq -c --argjson old "$_prev_prs" '
+		. + {observed: true, prs: [
+			.prs[] as $p
+			| if ($p.merge_state // "UNKNOWN") != "UNKNOWN" then $p
+			  else (($old | map(select(.number == $p.number)) | first | .merge_state) // null) as $k
+			       | if $k == null then $p else $p + {merge_state: $k} end
+			  end ]}' >"$_prev.new" && mv "$_prev.new" "$_prev"
 }
 
 # ---------------------------------------------------------------------------
 # replay — the fixtures ARE the test. Each carries the events it must produce, so a change in
 # behaviour fails here rather than in someone's memory of what the monitor used to do.
+#
+# Two shapes. A `before`/`after` PAIR is one transition, which is what most defects are. A
+# `"kind": "sequence"` fixture is an initial state plus N observations replayed in order through the
+# SAME state file — the only way to pin what the state itself remembers between ticks, which a pair
+# cannot reach: a pair whose `before` already contains the carried-forward value is asserting the
+# behaviour it was supposed to test.
 # ---------------------------------------------------------------------------
+compare_events() {
+	# $1 fixture label, $2 got, $3 want — returns non-zero on mismatch and prints both.
+	if [ "$2" = "$3" ]; then
+		printf 'ok    %s\n' "$1"
+		return 0
+	fi
+	printf 'FAIL  %s\n' "$1"
+	printf '  want:\n%s\n  got:\n%s\n' "$(printf '%s' "$3" | sed 's/^/    /')" \
+		"$(printf '%s' "$2" | sed 's/^/    /')"
+	return 1
+}
+
 replay() {
 	_fail=0
 	for _f in "$@"; do
 		_tmp=$(mktemp -d)
+		if [ "$(jq -r '.kind // "pair"' "$_f")" = sequence ]; then
+			jq -c '.initial' "$_f" >"$_tmp/state"
+			_n=$(jq '.steps | length' "$_f")
+			_i=0
+			while [ "$_i" -lt "$_n" ]; do
+				jq -c --argjson i "$_i" '.steps[$i].observation' "$_f" >"$_tmp/obs"
+				_got=$(step "$_tmp/state" "$_tmp/obs" | sort)
+				_want=$(jq -r --argjson i "$_i" '.steps[$i].expect_events[]' "$_f" | sort)
+				compare_events "$(basename "$_f") [tick $_i: $(jq -r --argjson i "$_i" '.steps[$i].label // "-"' "$_f")]" \
+					"$_got" "$_want" || _fail=1
+				_i=$((_i + 1))
+			done
+			rm -rf "$_tmp"
+			continue
+		fi
 		jq -c '.before' "$_f" >"$_tmp/state"
 		jq -c '.after' "$_f" >"$_tmp/obs"
 		_got=$(step "$_tmp/state" "$_tmp/obs" | sort)
 		_want=$(jq -r '.expect_events[]' "$_f" | sort)
-		if [ "$_got" = "$_want" ]; then
-			printf 'ok    %s\n' "$(basename "$_f")"
-		else
-			_fail=1
-			printf 'FAIL  %s\n' "$(basename "$_f")"
-			printf '  want:\n%s\n  got:\n%s\n' "$(printf '%s' "$_want" | sed 's/^/    /')" \
-				"$(printf '%s' "$_got" | sed 's/^/    /')"
-		fi
+		compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
 		rm -rf "$_tmp"
 	done
 	[ "$_fail" -eq 0 ] || die "fixtures failed"

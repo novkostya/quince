@@ -1,7 +1,9 @@
 # `forge-watch` fixtures
 
-Observation pairs for the pure `step(state, observation) → (state, events)` function. Each file is
-two consecutive observations; the test asserts which events the second must produce.
+Observations for the pure `step(state, observation) → (state, events)` function. Most files are a
+**pair** — two consecutive observations, asserting which events the second must produce. A file marked
+`"kind": "sequence"` is an initial state plus N observations replayed in order through one state file,
+for the defects that live in what the state *remembers* between ticks.
 
 **Provenance matters here more than usual**, because these fixtures exist to stop two real defects
 becoming folklore — and a fixture that overstates its own origin would be the same class of defect
@@ -66,5 +68,16 @@ so it exercises attribution positively (`actor=novkostya kind=merge`) instead of
 `unattributed` by omission.
 
 **The fixtures have teeth, and that was checked rather than assumed.** Replayed against the
-pre-quince#43 `bin/forge-watch`, every fixture in this round fails and both amended ones fail;
-`pr16` and `pr17` pass either way, which is correct — their behaviour did not change.
+pre-quince#43 `bin/forge-watch`: the six new fixtures fail, and of the two amended ones `pr20` fails
+while `pr16` passes either way — correctly, since `pr16` was narrowed rather than changed. `pr17` also
+passes either way, for the same reason.
+
+**One more, found in review of this round and fixed with a third fixture shape.** `UNKNOWN` was treated
+as "no answer" for reporting — correctly — and then *stored* as though it were a state, so a PR already
+`BEHIND` that saw one `UNKNOWN` tick and came back `BEHIND` re-announced a condition that never
+changed. `mergeability-unknown-flap.json` pins it, and it needs **three ticks through one state file**,
+which is why fixtures may now be `"kind": "sequence"` — an initial state plus N observations replayed
+in order. A pair cannot reach this: a pair whose `before` already held the carried-forward value would
+be asserting the behaviour under test. Its teeth were checked the same way, but more narrowly — the
+current harness run against the *old* state-write, so the only thing that differs is the one hunk:
+tick 2 emits the duplicate, and nothing else in the directory changes.
