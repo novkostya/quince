@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,18 +143,70 @@ func (h *harness) start(t *testing.T, transport, retryOf string) wire.Job {
 	return j
 }
 
+// waitCeiling is the absolute backstop for the waits below: a job that keeps reporting progress
+// forever would otherwise never fail them, and dying at `go test`'s 10-minute panic is a worse
+// failure than a named one. Reaching it is always a bug, never load.
+const waitCeiling = 2 * time.Minute
+
+// progressSig is everything the engine updates as a job advances. Comparing it across polls answers
+// "did this job move?" — which is a claim about the ENGINE. Comparing wall-clock against a fixed
+// budget answers "was this machine fast enough?", which is a claim about the runner, and that is the
+// claim that keeps failing on a loaded one (issue #31).
+func progressSig(j wire.Job) string {
+	p := j.Progress
+	pct := "nil"
+	if p.Percent != nil {
+		pct = strconv.FormatFloat(*p.Percent, 'f', 2, 64)
+	}
+	return strings.Join([]string{
+		j.State, p.Phase, p.Liveness, pct,
+		strconv.FormatInt(p.BytesDone, 10), strconv.FormatInt(p.FilesReceived, 10),
+	}, "|")
+}
+
+// waitTerminal waits for a job to reach a terminal state. `d` is a NO-PROGRESS window, not a total
+// budget: it restarts every time the job visibly advances, so a slow machine buys time while a
+// genuinely stuck engine still fails in `d`. That is strictly stronger than the fixed budget it
+// replaces — an engine that took 30 s to notice a dead transport used to pass a 60 s budget and now
+// fails, because 30 s of silence is 30 s of silence however fast the box is.
+//
+// On failure it reports what it observed — phase and liveness alongside state — because `state=
+// backing_up` alone does not say whether the job was progressing, which is exactly what made the
+// #31 CI failure unreadable.
 func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job {
 	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if j, ok := e.Job(id); ok && isTerminal(j.State) {
+	start := time.Now()
+	last, lastMoved := "", time.Now()
+	for {
+		j, ok := e.Job(id)
+		if ok && isTerminal(j.State) {
 			return j
+		}
+		if ok {
+			if sig := progressSig(j); sig != last {
+				last, lastMoved = sig, time.Now()
+			}
+		}
+		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
+			t.Fatalf("job %s did not terminate: no progress for %v (elapsed %v, %s)",
+				id, stalled.Round(time.Millisecond), time.Since(start).Round(time.Millisecond), describe(e, id))
 		}
 		time.Sleep(4 * time.Millisecond)
 	}
-	j, _ := e.Job(id)
-	t.Fatalf("job %s did not terminate within %v (state=%s)", id, d, j.State)
-	return wire.Job{}
+}
+
+// describe renders a job's observable state for a failure message.
+func describe(e *Engine, id string) string {
+	j, ok := e.Job(id)
+	if !ok {
+		return "job row absent"
+	}
+	pct := "nil"
+	if j.Progress.Percent != nil {
+		pct = strconv.FormatFloat(*j.Progress.Percent, 'f', 1, 64)
+	}
+	return fmt.Sprintf("state=%s phase=%s liveness=%s percent=%s files=%d",
+		j.State, j.Progress.Phase, j.Progress.Liveness, pct, j.Progress.FilesReceived)
 }
 
 // startWhenReleased starts a retry, tolerating the brief single-flight window between a job's
@@ -169,17 +223,34 @@ func startWhenReleased(t *testing.T, e *Engine, transport, retryOf string) (wire
 	}
 }
 
+// waitState waits for a job to reach one state. `d` is a no-progress window, as in waitTerminal.
+// A job that runs to a terminal state without ever passing through the wanted one fails IMMEDIATELY
+// rather than waiting the window out: it can no longer get there, and the missed state is the
+// finding — worth naming at once instead of dressing it as a timeout.
 func waitState(t *testing.T, e *Engine, id, state string, d time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if j, ok := e.Job(id); ok && j.State == state {
+	start := time.Now()
+	last, lastMoved := "", time.Now()
+	for {
+		j, ok := e.Job(id)
+		if ok && j.State == state {
 			return
+		}
+		if ok && isTerminal(j.State) {
+			t.Fatalf("job %s terminated as %s without ever reaching %s (elapsed %v, %s)",
+				id, j.State, state, time.Since(start).Round(time.Millisecond), describe(e, id))
+		}
+		if ok {
+			if sig := progressSig(j); sig != last {
+				last, lastMoved = sig, time.Now()
+			}
+		}
+		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
+			t.Fatalf("job %s never reached %s: no progress for %v (elapsed %v, %s)",
+				id, state, stalled.Round(time.Millisecond), time.Since(start).Round(time.Millisecond), describe(e, id))
 		}
 		time.Sleep(3 * time.Millisecond)
 	}
-	j, _ := e.Job(id)
-	t.Fatalf("job %s never reached %s within %v (state=%s)", id, state, d, j.State)
 }
 
 func isTerminal(s string) bool {
