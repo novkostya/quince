@@ -10,7 +10,7 @@
   "pid_alive": "yes",
   "expect": [
     "watch=wedged state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-26T10:00:00Z age=600s reason=stale_heartbeat",
-    "note: pid 4242 IS STILL RUNNING and has stopped ticking. STOP IT FIRST, then re-arm from this state — do not reseed it. Re-arming beside it puts two watchers on one state file.",
+    "note: pid 4242 is running and has stopped ticking. Run `forge-watch stop` — it verifies the pid is still OUR watcher before signalling, and refuses if it was recycled. Then re-arm from this state; do not reseed it.",
     "event=tick-overdue due=2026-07-26T10:01:00Z late=540s interval=60s"
   ]
 }

@@ -21,8 +21,9 @@ bin/forge-watch status --repo novkostya/quince   # 0 live · 3 dead · 4 absent 
 
 `live` → nothing to do, and do not arm a second watcher. **`dead` → re-arm from that state and do NOT
 reseed it**; the next tick emits everything that accrued while nothing was watching, and you say that a
-watch was found dead. **`wedged` → a watcher is still running and has stopped ticking: stop that pid
-first**, then re-arm. `absent` → cold start.
+watch was found dead. **`wedged` → a watcher is still running and has stopped ticking: run
+`bin/forge-watch stop --repo <r>`**, then re-arm — never a bare `kill`, because the pid is only known
+to be *ours* while its heartbeat is fresh and `wedged` means it is not. `absent` → cold start.
 
 Collapsing `dead` into `absent` turns a restarted watch into a fresh one that has "seen nothing changed"
 since a beginning it invented; collapsing `wedged` into `dead` tells you to start a second watcher
@@ -166,5 +167,8 @@ write with a heredoc, and state **"lost N minutes to M unanswered hook calls"** 
 it looks like a slow machine, and the first hypothesis it produces is wrong.
 
 The only legitimate stops: everything merged and the tail done; a decision that is the Operator's; or an
-unruled gap. In the last two, say exactly what would unblock you. Full protocol and the reasoning behind
-all of the above: [`../../loop-protocol.md`](../../loop-protocol.md).
+unruled gap. In the last two, say exactly what would unblock you — **and record the park on the PR
+itself, not only in your report.** A stop that cannot be seen from the forge is how a held, approvable
+PR waited 64 minutes for a confirmation that had already been posted: the reviewer must be able to
+discover *your* stop without you, which is the whole reason the forge is the memory. Full protocol and
+the reasoning behind all of the above: [`../../loop-protocol.md`](../../loop-protocol.md).

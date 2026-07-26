@@ -24,7 +24,15 @@ Four answers, four different actions, and **say out loud which one you got**:
 | `watch=live` | 0 | nothing. Do not arm a second watcher — two watchers writing one state file is a race that presents as missing events. |
 | `watch=dead` | 3 | nothing is running. **Re-arm from that state, and do not reseed it.** The next tick diffs against the stored observation and emits everything that accrued while nothing was watching. Report that a watch was found dead, and why (`no_process`, `no_watcher_record`). |
 | `watch=absent` | 4 | cold start. Seed and tick; the first tick emits `first-observation`. |
-| `watch=wedged` | 5 | a watcher **is still running** and has stopped ticking. **Stop that pid first**, then re-arm. Nothing in the tool prevents two watchers on one state file (quince#50). |
+| `watch=wedged` | 5 | a watcher is still running and has stopped ticking. Run **`bin/forge-watch stop --repo <r>`**, then re-arm — **never a bare `kill`**. Nothing in the tool prevents two watchers on one state file (quince#50). |
+
+**Why `stop` and not `kill`.** The pid is only known to be *our* watcher while its heartbeat is fresh,
+and `wedged` is *defined* by that heartbeat being stale — so "the pid exists" and "the pid is ours" come
+apart in exactly the state where the tool asks you to signal it. On a box where the kernel has recycled
+that pid, a bare kill hits a bystander. Demonstrated in review: with a foreign pid in the state, an
+earlier version told the reader **to kill init**, in the imperative, with a plausible explanation
+attached. `stop` records the process start time at arming and re-checks it at the moment of the signal;
+every branch that cannot prove the identity refuses instead of guessing.
 
 **Why these must never collapse.** Reseeding a *dead* watch turns it into a fresh one that has "seen
 nothing changed" since a beginning it invented — the accrued events are silently swallowed at the exact
