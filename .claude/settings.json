@@ -27,7 +27,6 @@
       "Bash(make image *)",
       "Bash(make push *)",
       "Bash(make clean)",
-
       "Bash(git status)",
       "Bash(git status *)",
       "Bash(git diff *)",
@@ -49,7 +48,6 @@
       "Bash(git rebase *)",
       "Bash(git cherry-pick *)",
       "Bash(git push origin *)",
-
       "Bash(gh auth status)",
       "Bash(gh repo view *)",
       "Bash(gh pr *)",
@@ -59,14 +57,14 @@
       "Bash(gh-bot *)",
       "Bash(bin/gh-bot *)",
       "Bash(./bin/gh-bot *)",
-
+      "Bash(gh-arch *)",
+      "Bash(bin/gh-arch *)",
+      "Bash(./bin/gh-arch *)",
       "Bash(gh api repos/novkostya/*)",
       "Bash(gh api -X PATCH repos/novkostya/*)",
       "Bash(gh api -X POST repos/novkostya/*)",
-
       "Bash(nerdctl *)",
       "Bash(docker *)",
-
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:docs.claude.com)",
       "WebFetch(domain:github.com)",
@@ -77,7 +75,6 @@
       "WebFetch(domain:*.alpinelinux.org)",
       "WebFetch(domain:*.libimobiledevice.org)",
       "WebFetch(domain:openzfs.github.io)",
-
       "Bash(ssh quince-dev-* *)",
       "Bash(scp * quince-dev-*:*)",
       "Bash(ssh quince-pve pct *)",
