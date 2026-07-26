@@ -19,15 +19,29 @@ Ends with a report and an armed loop. It writes no code.
 one credential and not the other:
 
 ```sh
-gh auth status                         # must be an approve-capable identity, NOT the bot
-ls -l ~/.config/quince/quince-bot.token 2>/dev/null   # on an architect host: must NOT exist
+[ -f ~/.config/quince/quince-bot.token ] && echo "BOT TOKEN PRESENT — stop"   # must NOT exist here
+bin/gh-arch api user -q .login                                                # must answer, and not with the bot
 ```
+
+**Do not use `gh auth status` for this.** An architect host is expected to show *unauthenticated*
+there: its credential is a token file read by `bin/gh-arch` at point of use, never a `gh auth
+login` session — that is deliberate, so the credential cannot leak into an ambient session. The
+question is not "is `gh` logged in" but "can this box cast a real verdict", and `bin/gh-arch api
+user` is what answers it. (This skill originally asserted `gh auth status`, written before
+`bin/gh-arch` existed; the first architect session on a real arch box hard-stopped on a correctly
+configured host. A protocol that checks the wrong thing fails closed, which is the right direction
+to fail — but it still fails.)
 
 - **Bot token present on an architect host** → say so and stop. A box that can author *and*
   approve dissolves the property the whole identity ruling protects (devlog#7). Reviewing from a
   host that holds both is a finding about the host, not a detail to work around.
-- **`gh` unauthenticated, or authenticated as the bot** → stop. An architect session that cannot
-  submit a real review verdict is a session pretending to be one.
+- **`bin/gh-arch` cannot answer** (no credential file, or it refuses) → stop, and quote its own
+  message: it names the path and how to place it. An architect session that cannot submit a real
+  review verdict is a session pretending to be one.
+- **It answers as the bot** → stop. Same reason, worse: the identities have been crossed.
+- Verdicts and merges in later steps run through **`bin/gh-arch`**, not bare `gh`, for the same
+  reason the implementer side uses `bin/gh-bot` (an allow rule never matches past a leading
+  `VAR=value`, so `GH_TOKEN=$(cat …) gh …` is unallowlistable by construction).
 
 The mirror image on the implementer side is `deploy/runner/preflight`; this is the same assertion
 pointed the other way.
