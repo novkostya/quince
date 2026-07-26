@@ -52,7 +52,7 @@ use. The privacy rule is satisfied *by construction* rather than by a reviewer c
    collide on the *local* port. Fixed by hand with a different local port when it happens;
    auto-allocating one is complexity bought for a path nobody is required to use.
    ```
-   ssh -L 8080:localhost:8080 quince-dev-1   # then open http://localhost:8080
+   ssh -L 8080:127.0.0.1:8080 quince-dev-1   # then open http://localhost:8080
    ```
    It reuses the binding `devct` already generates, needs no file editing, and **dies with the
    session** — no stale `hosts` entry left pointing at a recycled DHCP address, which is a real
