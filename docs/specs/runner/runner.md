@@ -13,7 +13,7 @@ discipline the session must remember and becomes a property of the machine it ru
 
 ## Boundary
 
-**In scope:** `deploy/runner/` (provisioning script, systemd unit, the environment preflight),
+**In scope:** `deploy/runner/` (provisioning script, OpenRC service, the environment preflight),
 a `devct` guard so the runner is not treated as disposable, `docs/specs/runner/`, and the
 `deploy/dev.md` pointer.
 
@@ -178,7 +178,7 @@ item 5).
 
 The lookup surfaced two native mechanisms the rung-loop spec did not consider: **Channels** (external
 events — a chat app or your own server — waking a local session) and **scheduled tasks** (CLI,
-Desktop, or cloud). devlog#4 specced a systemd timer plus a dispatcher; one of these may be the
+Desktop, or cloud). devlog#4 specced a supervised timer plus a dispatcher; one of these may be the
 better substrate. **Recorded, not acted on** — rung-loop's design was reviewed and ruled, and
 quietly re-architecting it here would be exactly the improvisation its own point 2 forbids.
 
@@ -189,7 +189,7 @@ quietly re-architecting it here would be exactly the improvisation its own point
 3. `preflight` refuses when the bot token is missing or world-readable.
 4. With a clean environment the unit starts and the session appears in the session list.
 5. The Operator connects from a phone and sends a message that reaches the session.
-6. Killing the process causes systemd to restart it, and a new session registers.
+6. Killing the process causes `supervise-daemon` to restart it, and a new session registers.
 7. The container reboots and the unit comes back without intervention.
 8. `devct destroy` refuses the runner without `--force`, naming why.
 9. A session **on the runner** completes an implementer loop end to end: fresh clone → `devct
@@ -199,9 +199,9 @@ quietly re-architecting it here would be exactly the improvisation its own point
 
 - **G1 (no runner needed)** — `preflight` against a table of environments: each rejection names the
   offending variable; the clean case exits 0 (stories 1–3).
-- **G2** — the unit starts, `systemctl status` shows it active, the session appears at
+- **G2** — the service starts, `rc-service quince-runner status` reports a live session, and it appears at
   claude.ai/code (story 4). **Operator leg:** connect from the phone and send one message (story 5).
-- **G3** — `kill` the process; systemd restarts it; a new session registers. The report states the
+- **G3** — `kill` the process; `supervise-daemon` restarts it; a new session registers. The report states the
   session id changed rather than implying continuity, **and counts the `quince-runner` entries in
   the picker before and after**, which settles whether superseded sessions linger (story 6). A
   number, not an impression.
