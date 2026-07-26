@@ -2,10 +2,12 @@
 
 | Path | What | Committed? |
 | --- | --- | --- |
-| `skills/<name>/SKILL.md` | the workflow as commands: `/onboard`, `/kickoff`, `/report`, `/review-pr`, `/land`, `/qa` | yes |
+| `skills/<name>/SKILL.md` | the workflow as commands: `/onboard`, `/architect`, `/kickoff`, `/report`, `/review-pr`, `/land`, `/qa` | yes |
 | `settings.json` | the shared permission allowlist — generic entries **plus** the documented reference environment | yes |
 | `settings.local.json` | per-machine bindings: your real host aliases, your registry | **no** (gitignored) |
 | `settings.local.json.example` | what a binding file looks like | yes |
+| `loop-protocol.md` | the coroutine loop, both halves — normative for `/architect` and `/kickoff` | yes |
+| `forge-set` | the repositories the loop watches, one `owner/name` per line | yes |
 
 Permission rules **merge** across settings files rather than overriding, and precedence for
 conflicts is deny → ask → allow, so the committed file can stay generic while your machine
@@ -78,6 +80,11 @@ Include ~/.ssh/quince-devct.conf
   signed in, because that would author implementer output under the wrong identity. Put it on
   your `PATH` (`ln -s "$PWD/bin/gh-bot" ~/.local/bin/gh-bot`) so `gh-bot pr create …` works from
   any directory; the two path-relative forms are allowlisted for sessions run from a repo root.
+- **`Bash(bin/forge-watch *)` is allowlisted because the loop cannot ask.** The watcher runs
+  detached and ticks on an interval; a permission prompt per tick would stall the whole coroutine on
+  a human tap, which is the one thing this loop exists to remove. It is also the cheapest grant in
+  the file: `forge-watch` reads the forge through whichever `gh` wrapper the caller names, writes one
+  JSON state file per repo under `$XDG_STATE_HOME`, and holds no credential of its own.
 - **`Read(~/.config/quince/**)` is denied.** That directory holds the bot token and other
   credentials; denying the Read tool keeps their contents out of a transcript. Piping a
   token into an environment variable (`GH_TOKEN=$(cat …)`) or into git's credential helper

@@ -60,6 +60,8 @@
       "Bash(gh-arch *)",
       "Bash(bin/gh-arch *)",
       "Bash(./bin/gh-arch *)",
+      "Bash(bin/forge-watch *)",
+      "Bash(./bin/forge-watch *)",
       "Bash(gh api repos/novkostya/*)",
       "Bash(gh api -X PATCH repos/novkostya/*)",
       "Bash(gh api -X POST repos/novkostya/*)",
