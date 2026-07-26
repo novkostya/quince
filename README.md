@@ -7,23 +7,33 @@ storage — ZFS snapshots, or reflink/hardlink versions on plain filesystems —
 progress, honest failure states, and a layout that is safe to sync offsite while
 backups run.
 
-**Status: working, pre-release.** Full encrypted backup cycles over both transports are
-hardware-proven and the app runs under real daily use. Browsing backup contents
+**Status: working, pre-release.** Encrypted backups run start to finish over both USB and
+Wi-Fi, on real phones rather than only in tests, and quince is in daily use. There is no
+tagged release yet, so setup still means reading the docs. Browsing backup contents
 (Messages, files) is the next major arc. Development is agent-driven; the journal —
 progress, decisions, roadmap — lives in
 [**quince-devlog**](https://github.com/novkostya/quince-devlog).
 
 ## Why
 
-- Finder/iTunes keeps one overwritable copy; iMazing is desktop-bound and struggles
-  over SMB with 143k-file backups.
-- A server sitting next to the storage can back up, verify, version, and (eventually)
-  decrypt and serve your data to any browser — including the iPhone itself.
-- Runs like Plex: one container, `compose up`, configure in the web UI — while all
-  settings live in one hand-editable config file.
-- Committed versions are immutable and exist only after verification — ZFS-native
-  snapshots per device, or journaled atomic version dirs elsewhere. One rclone job over
-  the storage tree never uploads a half-written backup.
+- **One copy is not a backup.** Finder and iTunes keep a single copy and overwrite it on
+  every sync: a file you deleted last month is already gone, and one corrupted backup
+  takes the only good one with it. quince keeps a history of versions instead, each
+  immutable once written.
+- **A desktop app needs a desktop.** iMazing and its peers back up only while your Mac or
+  PC is awake and running them, and they can crawl when the backup library lives on
+  network storage rather than local disk — a full iPhone backup can run to six figures of
+  files.
+- **The server is already next to the storage.** It can back up, verify, version, and
+  (eventually) decrypt and serve your data to any browser — including the phone that made
+  the backup.
+- **Set up like Plex, configured like a router.** One container, `compose up`, everything
+  editable in the web UI — and every setting lives in one hand-editable config file, with
+  no secrets in it.
+- **Safe to sync offsite while a backup is running.** A version exists only after it has
+  been verified, and never changes afterwards — ZFS snapshots per device, or journaled
+  atomic version dirs elsewhere. One rclone job over the storage tree can never upload a
+  half-written backup.
 
 ## Shape
 
