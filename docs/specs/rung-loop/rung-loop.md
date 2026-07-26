@@ -218,6 +218,13 @@ Therefore:
 - **a tick that was due and did not happen emits `tick-overdue`.** The events themselves cannot carry
   that fact: they arrive looking perfectly healthy, all at once, hours late. Reported only when a whole
   interval was skipped, so ordinary jitter is not dressed up as a miss.
+- **A failing tick does not advance the heartbeat, so the two halves compose in the safe direction.**
+  The heartbeat is written after `step()`, and a failed fetch returns before reaching it. The
+  consequence is the part worth stating, because it is not visible from either half alone: **a watcher
+  that is running but cannot tick can never present as `live`.** It ages into `wedged` — its pid is
+  alive, its heartbeat is stale — or into `dead` if that pid has since gone, and both say so loudly.
+  Verified by driving three consecutive failing ticks against a seeded state and watching
+  `last_watcher_tick` stay put.
 - **`--state` is for fixtures and second opinions; the default path is the operational one.** This is a
   rule about arming rather than a better check, because no check can close it: **liveness is only
   discoverable through whichever state file you happen to point at**, so a watcher armed under a
