@@ -123,6 +123,7 @@ Project skills live in `.claude/skills/`; invoke them by name.
 
 | Command | What it does |
 | --- | --- |
+| `/architect` | become the architect session: assert the identity boundary, load state, sweep both repos, arm the review loop |
 | `/onboard` | resume the project cold: read the state, verify tooling, report where things stand |
 | `/kickoff [issue\|rung]` | take one unit of work: read its context, fresh clone, branch, plan |
 | `/report` | turn finished work into a PR description + a devlog journal entry |
