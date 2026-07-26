@@ -118,7 +118,24 @@ The fix is not to teach it turns. It is a **backstop that does not classify**:
 - **volume, since an unconditional backstop invites the worry that it becomes an unactionable stream:**
   `updatedAt` does not move on check completion, which is the highest-volume signal in the system. It
   moves on comments, reviews, pushes, labels and merges — acts by a human or an agent, roughly one
-  event per act. That is a stream a session can act on.
+  event per act.
+
+**The one measurement this rests on, and how it was nearly botched twice.** *A push moves `updatedAt`*
+is load-bearing: it is what carries the green-after-fix transition. It is also unobservable after the
+fact, because a merged PR's `updatedAt` is pinned to its merge. Both first attempts to measure it were
+confounded by the author commenting ~40 s after pushing, and one of them — a watcher armed specifically
+to measure it independently — printed a confident *"updatedAt MOVED with the push"* while its own
+caveat about checking for a comment in the same window sat on the line below. That is corollary (f)
+committed by the instrument built to check it: a timestamp moved and the tool named the actor it
+expected rather than the one that explains it.
+
+The measurement that does hold is on **quince-devlog#20**, and it holds by elimination rather than by
+timing: `updatedAt` read `2026-07-26T16:01:31Z`, three seconds after the push's commit
+(`16:01:28Z`); the previous act was a comment at `15:56:13Z`, the next was a comment at `16:04:23Z`,
+and that repo has **zero check runs in its entire history**. A later act cannot produce an earlier
+timestamp, so nothing but the push can account for the value. The protocol for repeating it, since
+"push and then look" is not enough: **push, stay silent for two minutes, poll at ≤15 s** so the gap
+itself is sampled. That is a stream a session can act on.
 - **compare against last-acted-on state, not state-at-arm.** A hand-rolled mitigation during the
   incident baselined against *current* heads at arm time, so both pushes it existed to catch were
   already in its baseline. `step()` diffs against the stored observation, which is what makes a
