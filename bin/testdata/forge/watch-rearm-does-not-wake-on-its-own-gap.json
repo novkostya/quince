@@ -1,0 +1,49 @@
+{
+  "kind": "loop",
+  "note": "Found by arming the verb for real, not by reasoning about it. Re-arming from a `dead` watch ALWAYS produces `tick-overdue` — the previous watcher stopped ticking, so its `due` is in the past by definition. If that woke the session, every re-arm-from-dead would exit immediately and report as news the gap that the arming step announced one line earlier. It is a fact about the watch that ENDED. So the first tick's overdue is printed and does not wake; the run here ends on the idle bound, and the PR that was already in the state produces nothing because nothing happened to it. A later `tick-overdue` — the loop starved while running — is a different claim and still wakes.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 4,
+  "timeout_s": 60,
+  "initial": {
+    "observed": true,
+    "last_tick": "2026-07-26T19:00:00Z",
+    "watch": {
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-26T19:00:00Z",
+      "due": "2026-07-26T19:01:00Z"
+    },
+    "prs": [
+      {
+        "number": 61,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T19:07:16Z",
+        "merge_state": "BLOCKED",
+        "checks": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "activity": []
+      }
+    ]
+  },
+  "payloads": [
+    [
+      {
+        "number": 61,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T19:07:16Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ]
+  ],
+  "expect_events": [
+    "event=tick-overdue due=2026-07-26T19:01:00Z late=Ns interval=60s",
+    "event=watch-idle elapsed=Ns ticks=N"
+  ],
+  "expect_exit": 6
+}

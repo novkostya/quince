@@ -558,6 +558,11 @@ replay() {
 			# rewritten every 60 s, `status` reporting `live` — so a fixture that asserts health cannot
 			# tell a working watch from the deaf one. Only two questions distinguish them: does silence
 			# leave the loop running, and does an event end it.
+			# An `initial` state, when the fixture carries one, is what makes a RE-ARM expressible: the
+			# interesting first tick is the one that diffs against a watch that stopped.
+			if [ "$(jq -r 'has("initial")' "$_f")" = true ]; then
+				jq -c '.initial' "$_f" >"$_tmp/state"
+			fi
 			_np=$(jq '.payloads | length' "$_f")
 			_pi=0
 			while [ "$_pi" -lt "$_np" ]; do
@@ -590,7 +595,7 @@ EOF
 			# machine and teach everyone to ignore it. The EXIT CLASS is asserted, as a line, because it
 			# is the part a caller reads when it ignores stdout.
 			_got=$(printf '%s\n' "$_out" | grep '^event=' |
-				sed 's/elapsed=[0-9]*s/elapsed=Ns/; s/ticks=[0-9]*/ticks=N/' || true)
+				sed 's/elapsed=[0-9]*s/elapsed=Ns/; s/ticks=[0-9]*/ticks=N/; s/late=[0-9]*s/late=Ns/' || true)
 			_got=$(printf '%s\nexit=%s\n' "$_got" "$_rc" | grep -v '^$' | sort)
 			_want=$(jq -r '.expect_events[], "exit=\(.expect_exit)"' "$_f" | sort)
 			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
@@ -810,11 +815,23 @@ require_gh() {
 # cover for the other.
 # ---------------------------------------------------------------------------
 wake_worthy() {
-	# $1 is a file holding ONE tick's output; prints the lines that justify waking a session.
+	# $1 is a file holding ONE tick's output, $2 is "first" for the first tick of this watch; prints
+	# the lines that justify waking a session.
+	#
 	# Two passes over the same file, because the baseline decision for a `queue-empty` line depends
 	# on whether its repository also emitted `first-observation` on this tick — and under --all the
 	# lines of several repositories are interleaved, so `repo=` is the only thing that pairs them.
-	awk '
+	#
+	# `tick-overdue` on the FIRST tick is dropped, and that is a finding from arming this verb for
+	# real rather than a tidiness. Re-arming from a `dead` watch ALWAYS produces one: the previous
+	# watcher stopped ticking, so its `due` is by definition in the past. Waking on it means every
+	# re-arm-from-dead immediately exits again, reporting as news the very gap that `watch_preflight`
+	# announced one line earlier — a description of the watch that ENDED, not of anything that
+	# happened while this one was watching. A later one is a different claim (the loop was starved
+	# while running) and still wakes.
+	_ww_first=${2:-later}
+	awk -v first="$_ww_first" '
+		first == "first" && /^event=tick-overdue/ { next }
 		function repo(l,   i, n, a) {
 			n = split(l, a, " ")
 			for (i = 1; i <= n; i++)
@@ -845,7 +862,10 @@ watch_preflight() {
 	fi
 	_prep=$(watch_report "$_ps" "$(now_iso)" "$_pa") && _pcls=0 || _pcls=$?
 	printf 'forge-watch: %s\n' "$_pr"
-	printf '%s\n' "$_prep"
+	# The classification, without watch_report's `event=` lines: the first tick re-emits `tick-overdue`
+	# a moment later from the same state, and printing it twice would make one missed tick look like
+	# two. The classification is what this step is for.
+	printf '%s\n' "$_prep" | grep -v '^event=' || true
 	case "$_pcls" in
 	0) die "a watch is ALREADY LIVE for $_pr — refusing to arm a second one. Two watchers on one
     state file is a race that presents as missing events (quince#50). If you meant to replace it,
@@ -882,7 +902,8 @@ watch_loop() {
 		# what a session may see. A watcher that hid its own failing ticks would be the silence this
 		# tool exists to make impossible.
 		cat "$_wevt"
-		_wwake=$(wake_worthy "$_wevt")
+		if [ "$_wticks" -eq 1 ]; then _wfirst=first; else _wfirst=later; fi
+		_wwake=$(wake_worthy "$_wevt" "$_wfirst")
 		if [ -n "$_wwake" ]; then
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
 			rm -f "$_wevt"
