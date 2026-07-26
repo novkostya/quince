@@ -255,6 +255,16 @@ keeps paying for — devlog#3, a watch that reported both queues clear while cov
   and number as it opens them, so its set is self-describing. The architect reviews other people's
   work, so authorship cannot derive its set — and a reviewer's watch set is exactly the thing that must
   not be a habit.
+- **The effective watch set is the checkout's copy, so pulling the launchpad is part of arming the
+  watch, not separate housekeeping.** The hard-fail catches *missing*, *empty* and *malformed* — and a
+  **stale** set fails none of those: it parses, it is non-empty, and it confidently describes
+  yesterday's world. Observed rather than anticipated: on the architect box, `/root/quince` sat at a
+  commit where `.claude/forge-set` did not exist at all, on the machine whose watch would read it. The
+  two failure modes compose — a stale launchpad plus a declared set yields a watch that is confidently
+  wrong about its own scope, and neither half looks broken alone. The ordering belongs to the ceremony
+  ([quince#33](https://github.com/novkostya/quince/issues/33)), not to a freshness check inside this
+  tool: such a check would be a claim about the *repository* wearing the costume of a claim about the
+  *watch*, passing on a pulled-but-unmerged branch and failing on a deliberate pin.
 
 **Declared debt:** `stalled` (story 6) is specified and **not implemented** — it needs a wall clock,
 which the pure half deliberately does not have. It was advertised in `--help` while unimplemented,
