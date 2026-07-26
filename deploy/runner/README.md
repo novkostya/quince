@@ -31,6 +31,22 @@ rc-service quince-runner start
 *"requires a full-scope login token"* — so there is no headless path, and a script that appeared to
 offer one would be lying.
 
+## The service comes from the launchpad, which tracks `main`
+
+`provision` installs `/etc/init.d/quince-runner` **from the launchpad clone**, so the runner runs
+whatever version of that file is on `main` — not whatever is on the branch you are reading. A change
+to the service reaches the box only after it lands **and** the launchpad is pulled:
+
+```sh
+ssh quince-runner 'git -C /root/quince pull && sh /root/quince/deploy/runner/provision'
+```
+
+This is not a footnote. It is how a runner ended up reporting a false `started` *after* the commit
+fixing that had already been written: the fix was on a branch, the box was on `main`. `provision`
+now prints the ref it installed from — `service installed from <sha> (<branch>)` — and warns when
+the installed file predates the `status()` override, so a service older than its own fix is visible
+rather than puzzling.
+
 ## What `status` means here
 
 `rc-service` reports on the *supervisor*, which says `started` while the supervised process

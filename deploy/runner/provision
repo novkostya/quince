@@ -72,9 +72,21 @@ else
 fi
 
 # --- 5. the service --------------------------------------------------------------------------
+# PROVENANCE, and it is not decoration: the service file comes from the launchpad clone, which
+# tracks main. So a fix merged into a branch reaches this box only after it LANDS and the launchpad
+# is pulled — a runner can therefore be running a service that predates its own fix, which is
+# exactly how a false "started" survived the commit that fixed it. Say which ref this came from so
+# that situation is visible rather than puzzling.
+_ref_sha=$(git -C "$RUNNER_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)
+_ref_name=$(git -C "$RUNNER_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
 install -m 0755 "$RUNNER_DIR/deploy/runner/quince-runner.initd" /etc/init.d/quince-runner
 rc-update add quince-runner default >/dev/null 2>&1 || true
-say "service installed and added to the default runlevel"
+say "service installed from ${_ref_sha} (${_ref_name}) and added to the default runlevel"
+if ! grep -q '^status()' /etc/init.d/quince-runner 2>/dev/null; then
+	say "note: this service file predates the status() override — 'rc-service status' will report"
+	say "      the SUPERVISOR (started) rather than whether a session is alive. Pull the launchpad"
+	say "      once that change is on main and re-run this script."
+fi
 
 # --- 6. report, including what is NOT done ----------------------------------------------------
 printf '\n'
