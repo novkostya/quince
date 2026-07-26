@@ -123,8 +123,12 @@ allowance faster for no benefit.
 
 1. `forge-watch tick` on a queue that has never been observed emits `first-observation` and does not
    invent a change.
-2. A PR opened *after* arming is picked up on the next tick (the #17 defect).
-3. A check turning `FAILURE` emits an event carrying the check name (the #16 defect).
+2. The queue going empty→non-empty emits (the **#17** defect — the architect's monitor emitted only
+   when the previous state was non-empty), **and** a PR opened after arming is picked up on the next
+   tick (the implementer's *latent* list-binding defect). Two different bugs, one fix: enumerate the
+   queue every tick.
+3. A check turning `FAILURE` emits an event carrying the check name (the **#16** defect — the
+   implementer's monitor watched reviews only).
 4. An empty queue emits `queue-empty` once, not silence, and re-emits when it becomes non-empty.
 5. A review verdict emits with the verdict, and a fresh session started from it can continue from
    the PR alone.
