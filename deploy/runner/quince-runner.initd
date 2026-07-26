@@ -1,0 +1,41 @@
+#!/sbin/openrc-run
+# quince-runner — Claude Code Remote Control, supervised.
+#
+# OpenRC, not systemd: the dev template is Alpine (the Operator's ruling in pr.2 kept Alpine
+# everywhere for dev/staging parity), and Alpine ships OpenRC with no systemd at all. The spec's
+# first draft said "systemd unit"; that was wrong for this platform, found by looking at the box
+# rather than at the spec.
+#
+# supervise-daemon gives the restart-always semantics this needs, and it needs them for a measured
+# reason: a network outage of ~10 minutes times the session out and the PROCESS EXITS. Supervision
+# here is correctness, not tidiness.
+
+name="quince-runner"
+description="Claude Code Remote Control session host"
+
+: "${runner_dir:=/root/quince}"
+: "${runner_name:=quince-runner}"
+
+supervisor=supervise-daemon
+command="/usr/bin/claude"
+command_args="remote-control --spawn same-dir --name ${runner_name}"
+command_user="root"
+directory="${runner_dir}"
+supervise_daemon_args="--respawn-delay 10 --respawn-max 0"
+output_log="/var/log/quince-runner.log"
+error_log="/var/log/quince-runner.log"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	# The environment is asserted before every start, not once at install: a variable added later
+	# by a well-meaning edit is exactly how the billing trap would arrive.
+	/root/quince/deploy/runner/preflight || return 1
+
+	# A restart registers a NEW Remote Control session rather than resuming the old one. Say so,
+	# because a log that implies continuity across a restart would be claiming something untrue.
+	einfo "starting a NEW Remote Control session (a restart never resumes the previous one)"
+}

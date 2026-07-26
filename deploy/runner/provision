@@ -1,0 +1,97 @@
+#!/bin/sh
+# provision — make a container into the runner. Run it ON the runner, as root.
+#
+#   ssh quince-runner 'sh -s' < deploy/runner/provision
+#
+# Everything here is idempotent and announces what it did rather than what it intended. What it
+# CANNOT do is the login: a setup-token cannot establish Remote Control, so the Operator's
+# interactive `claude auth login` is the only path — the script ends by saying exactly that.
+set -eu
+
+REPO_URL="${REPO_URL:-https://github.com/novkostya/quince.git}"
+RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
+# Verified at pin time from the Claude Code setup docs (2026-07-26). The apk repository is signed;
+# this is the published checksum of the signing key, and provisioning refuses a key that does not
+# match rather than trusting whatever it downloaded.
+CLAUDE_APK_KEY_URL="https://downloads.claude.ai/keys/claude-code.rsa.pub"
+CLAUDE_APK_KEY_SHA="395759c1f7449ef4cdef305a42e820f3c766d6090d142634ebdb049f113168b6"
+CLAUDE_APK_REPO="https://downloads.claude.ai/claude-code/apk/stable"
+
+say() { printf '==> %s\n' "$*"; }
+
+# --- 1. base packages ------------------------------------------------------------------------
+# ripgrep is a runtime dependency on musl, and the built-in one is disabled below per the docs.
+say "installing base packages"
+apk add --no-cache git make openssh-client curl bash ripgrep libgcc libstdc++ jq >/dev/null
+say "base packages present"
+
+# --- 2. Claude Code, from the signed apk repository -------------------------------------------
+# The `stable` channel deliberately: apk installs do not auto-update, so the runner's version moves
+# when someone runs an upgrade — which suits a project that pins toolchains and dislikes silent
+# drift. `latest` is one line away if that trade is ever wrong.
+if command -v claude >/dev/null 2>&1; then
+	say "claude already installed ($(claude --version 2>/dev/null || echo '?'))"
+else
+	say "adding the Claude Code apk repository (signed)"
+	wget -qO /etc/apk/keys/claude-code.rsa.pub "$CLAUDE_APK_KEY_URL"
+	got=$(sha256sum /etc/apk/keys/claude-code.rsa.pub | cut -d' ' -f1)
+	if [ "$got" != "$CLAUDE_APK_KEY_SHA" ]; then
+		rm -f /etc/apk/keys/claude-code.rsa.pub
+		printf 'provision: signing key checksum mismatch\n  expected %s\n  got      %s\nRefusing to add the repository.\n' \
+			"$CLAUDE_APK_KEY_SHA" "$got" >&2
+		exit 1
+	fi
+	say "signing key verified against the published checksum"
+	grep -q "$CLAUDE_APK_REPO" /etc/apk/repositories || printf '%s\n' "$CLAUDE_APK_REPO" >>/etc/apk/repositories
+	apk update >/dev/null
+	apk add --no-cache claude-code >/dev/null
+	say "claude installed ($(claude --version 2>/dev/null || echo '?'))"
+fi
+
+# --- 3. musl setting -------------------------------------------------------------------------
+# On musl the bundled ripgrep is not used; the docs require pointing Claude Code at the system one.
+mkdir -p /root/.claude
+if [ -f /root/.claude/settings.json ]; then
+	tmp=$(mktemp)
+	jq '.env = ((.env // {}) + {"USE_BUILTIN_RIPGREP":"0"})' /root/.claude/settings.json >"$tmp" &&
+		mv "$tmp" /root/.claude/settings.json
+else
+	printf '{\n  "env": { "USE_BUILTIN_RIPGREP": "0" }\n}\n' >/root/.claude/settings.json
+fi
+say "USE_BUILTIN_RIPGREP=0 set (musl: the system ripgrep is used)"
+
+# --- 4. the launchpad ------------------------------------------------------------------------
+# A pristine checkout used to START sessions. Never a workspace: every unit of work is a fresh
+# clone elsewhere, so anything modified here is a finding rather than a habit.
+if [ -d "$RUNNER_DIR/.git" ]; then
+	git -C "$RUNNER_DIR" fetch -q origin main && git -C "$RUNNER_DIR" reset -q --hard origin/main
+	say "launchpad updated at $RUNNER_DIR (pristine checkout — not a workspace)"
+else
+	git clone -q "$REPO_URL" "$RUNNER_DIR"
+	say "launchpad cloned at $RUNNER_DIR (pristine checkout — not a workspace)"
+fi
+
+# --- 5. the service --------------------------------------------------------------------------
+install -m 0755 "$RUNNER_DIR/deploy/runner/quince-runner.initd" /etc/init.d/quince-runner
+rc-update add quince-runner default >/dev/null 2>&1 || true
+say "service installed and added to the default runlevel"
+
+# --- 6. report, including what is NOT done ----------------------------------------------------
+printf '\n'
+if "$RUNNER_DIR/deploy/runner/preflight"; then
+	printf '\n'
+	say "environment is fit — but the session still needs YOUR login:"
+else
+	printf '\n'
+	say "preflight is not satisfied yet (above); fix that, then:"
+fi
+cat <<'EOF'
+
+    claude auth login          # full-scope claude.ai login. A setup-token CANNOT do Remote
+                               # Control, so this interactive step is the only path.
+    cd /root/quince && claude  # once, to accept workspace trust
+    /config                    # enable "Push when Claude decides" and "Push when actions required"
+
+  then:  rc-service quince-runner start
+
+EOF

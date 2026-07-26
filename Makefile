@@ -113,7 +113,8 @@ gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 # script, since the real path is computed at runtime. gh-bot sources nothing, but it is an entry
 # point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
-SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot
+SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
+                   deploy/runner/preflight deploy/runner/provision
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
