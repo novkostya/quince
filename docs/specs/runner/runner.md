@@ -47,6 +47,17 @@ once by running `claude` in the project directory.
    supervision a correctness requirement rather than tidiness, and it means a restart produces a
    *new* session — which the design has to state rather than paper over.
 
+**Found while building, and load-bearing for the install:**
+
+4. **Alpine is supported (3.19+) and Claude Code publishes a signed apk repository** — so the
+   runner needs no distro change and no `curl | bash`. Provisioning adds the repo after verifying
+   the signing key against its published checksum, and refuses on a mismatch rather than trusting
+   what it downloaded. The `stable` channel is chosen deliberately: apk installs do not auto-update,
+   which suits a project that pins toolchains and dislikes silent drift.
+5. **On musl, the bundled ripgrep is not used** — `libgcc`, `libstdc++` and the system `ripgrep`
+   are runtime dependencies and `USE_BUILTIN_RIPGREP=0` must be set in `settings.json`. Missed, this
+   surfaces later as search silently failing inside sessions.
+
 ## Design
 
 ### The runner is persistent, and `devct` must know that
@@ -56,13 +67,23 @@ runtime and `gh`), but it is **not disposable**: it is named `quince-runner` rat
 `quince-dev-N`, and `devct destroy` refuses it unless `--force` is passed. One guard, no new
 lifecycle — and the refusal names why, per canon.
 
-### The systemd unit, and the guard that runs before it
+### The supervised service, and the guard that runs before it
+
+**Corrected during the build: OpenRC, not systemd.** The spec's first draft said "systemd unit".
+The template is Alpine — the Operator's pr.2 ruling kept Alpine everywhere for dev/staging parity —
+and **Alpine ships OpenRC with no systemd at all** (verified on a live container: `rc-service`
+present, `systemctl` absent, `supervise-daemon` at `/sbin/supervise-daemon`). Writing a systemd unit
+would have produced a file nothing on that host could run.
 
 ```
-ExecStartPre=  deploy/runner/preflight        # refuses to start on a mis-set environment
-ExecStart=     claude remote-control --spawn same-dir --name quince-runner
-Restart=always
+/etc/init.d/quince-runner          # openrc-run, supervisor=supervise-daemon
+  start_pre  → deploy/runner/preflight     # refuses on a mis-set environment
+  command    → claude remote-control --spawn same-dir --name quince-runner
+  respawn    → --respawn-delay 10 --respawn-max 0   (unlimited: outages are the normal case)
 ```
+
+`supervise-daemon` supplies the restart-always semantics, and it needs them for the measured reason
+in fact 3 rather than for tidiness.
 
 **`deploy/runner/preflight` asserts, and names what it found:**
 

@@ -1,0 +1,65 @@
+#!/bin/sh
+# preflight — refuse to start the runner in an environment where Remote Control cannot work, or
+# where it would work against the wrong credential.
+#
+# Every check names what it OBSERVED, never just that something is wrong: an error message is a
+# claim (program doc, State honesty), and "the environment is bad" is a claim about a condition
+# nobody can act on.
+#
+# The three facts this enforces were looked up live rather than recalled (2026-07-26):
+#   - an API key takes precedence over the subscription login — the billing trap;
+#   - a setup-token / CLAUDE_CODE_OAUTH_TOKEN credential CANNOT establish Remote Control at all
+#     ("requires a full-scope login token"), so its presence means the runner is misconfigured;
+#   - ANTHROPIC_BASE_URL pointing anywhere but api.anthropic.com disables Remote Control.
+set -eu
+
+TOKEN_FILE="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
+fail=0
+
+bad() {
+	printf 'preflight: %s\n' "$*" >&2
+	fail=1
+}
+ok() { printf 'preflight: ok — %s\n' "$*"; }
+
+# --- credentials that must NOT be set -------------------------------------------------------
+# Names only. A preflight that echoed a credential to fix a credential problem would be its own
+# incident.
+for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
+	eval "val=\${$var:-}"
+	if [ -n "$val" ]; then
+		bad "$var is set. It takes precedence over the claude.ai login, and Remote Control needs a full-scope login — unset it in the service environment."
+	fi
+done
+[ "$fail" -eq 0 ] && ok "no API-key or token credential in the environment"
+
+# --- the endpoint must be Anthropic's -------------------------------------------------------
+case "${ANTHROPIC_BASE_URL:-}" in
+'' | https://api.anthropic.com | https://api.anthropic.com/) ok "ANTHROPIC_BASE_URL is unset or api.anthropic.com" ;;
+*) bad "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL} — Remote Control is disabled for any host other than api.anthropic.com (gateway or proxy). Unset it." ;;
+esac
+
+# --- the bot identity this host exists to carry ---------------------------------------------
+if [ ! -f "$TOKEN_FILE" ]; then
+	bad "no bot token at $TOKEN_FILE — the runner is the machine that holds the implementer identity; without it a session would author as whoever is logged in."
+else
+	mode=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || echo unknown)
+	case "$mode" in
+	600 | 400) ok "bot token present, mode $mode" ;;
+	*) bad "bot token at $TOKEN_FILE is mode $mode — expected 600." ;;
+	esac
+fi
+
+# --- the thing we are about to run ----------------------------------------------------------
+if command -v claude >/dev/null 2>&1; then
+	ok "claude present ($(claude --version 2>/dev/null || echo 'version unreadable'))"
+else
+	bad "claude is not installed — run deploy/runner/provision."
+fi
+
+if [ "$fail" -ne 0 ]; then
+	printf 'preflight: REFUSING to start. A runner that comes up unable to do Remote Control, or\n' >&2
+	printf 'preflight: billing against an API key, is worse than one that did not start.\n' >&2
+	exit 1
+fi
+printf 'preflight: environment is fit to start.\n'
