@@ -302,16 +302,20 @@ EOF
 
 	# 6. Report. Convention name for the PR; the address stays in this session.
 	printf '\n%s is serving %s.\n\n' "$_d_name" "$_d_ref"
+	# The address first, because it is what the person running this actually uses: on the LAN it
+	# needs no setup, and it stays collision-free when several rungs run in parallel — each
+	# container has its own 8080. It is the one line that must never reach a PR.
+	printf 'Open it (this session only — never paste this into a PR):\n'
+	printf '  http://%s:%s/\n\n' "$_d_ip" "$DEMO_PORT"
 	printf 'For the PR (convention name — carries no site information):\n'
 	printf '  http://%s:%s/\n\n' "$_d_name" "$DEMO_PORT"
 	# The forward's remote end resolves ON THE CONTAINER, where `localhost` means ::1 and nothing
-	# is listening there. 127.0.0.1 is what makes the ruled click path actually click — found by
-	# walking it, which is why G1 gates the path rather than the port.
-	printf 'To click it from a desktop, no configuration needed:\n'
-	printf '  ssh -L %s:127.0.0.1:%s %s     # then open http://localhost:%s\n\n' \
+	# listens. 127.0.0.1 is what makes this actually click — found by walking it.
+	printf 'Address-free path, for a reader who has the alias but not the LAN:\n'
+	printf '  ssh -L %s:127.0.0.1:%s %s     # then open http://localhost:%s\n' \
 		"$DEMO_PORT" "$DEMO_PORT" "$_d_name" "$DEMO_PORT"
-	printf 'This session only (never paste this into a PR):\n'
-	printf '  http://%s:%s/\n' "$_d_ip" "$DEMO_PORT"
+	printf '  (a second concurrent deploy needs a different LOCAL port: -L 8081:127.0.0.1:%s)\n' \
+		"$DEMO_PORT"
 	if [ -n "$_d_hosts" ]; then
 		printf '\nFor direct browser resolution, add to /etc/hosts:\n'
 		printf '  %s %s\n' "$_d_ip" "$_d_name"
