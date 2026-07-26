@@ -145,7 +145,10 @@ func (h *harness) start(t *testing.T, transport, retryOf string) wire.Job {
 
 // waitCeiling is the absolute backstop for the waits below: a job that keeps reporting progress
 // forever would otherwise never fail them, and dying at `go test`'s 10-minute panic is a worse
-// failure than a named one. Reaching it is always a bug, never load.
+// failure than a named one. Reaching it is always a bug, never load — an assertion #37 made
+// untested and #57 then put in question when CI reached it. It has since been reproduced under load
+// and run down: the ceiling was right, and the bug it caught is #59. So the claim stands as written,
+// and whyWaitEnded is what makes the NEXT one readable without a load repro to interpret it.
 const waitCeiling = 2 * time.Minute
 
 // gracePhases are the phases where elapsed time is the EXPECTED behaviour rather than evidence of a
@@ -193,11 +196,11 @@ func progressSig(j wire.Job) string {
 //
 // On failure it reports what it observed — phase and liveness alongside state — because `state=
 // backing_up` alone does not say whether the job was progressing, which is exactly what made the
-// #31 CI failure unreadable.
+// #31 CI failure unreadable. whyWaitEnded says which bound fired and why.
 func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job {
 	t.Helper()
 	start := time.Now()
-	last, lastMoved := "", time.Now()
+	last, lastMoved, movedBy := "", time.Now(), "nothing yet"
 	for {
 		j, ok := e.Job(id)
 		if ok && isTerminal(j.State) {
@@ -205,17 +208,39 @@ func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job 
 		}
 		if ok {
 			if sig := progressSig(j); sig != last {
-				last, lastMoved = sig, time.Now()
+				last, lastMoved, movedBy = sig, time.Now(), "progress"
 			} else if gracePhases[j.Progress.Phase] {
-				lastMoved = time.Now() // a phase that is MEANT to wait accrues no idle
+				// a phase that is MEANT to wait accrues no idle
+				lastMoved, movedBy = time.Now(), "the grace phase "+j.Progress.Phase
 			}
 		}
-		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
-			t.Fatalf("job %s did not terminate: no progress for %v (elapsed %v, %s)",
-				id, stalled.Round(time.Millisecond), time.Since(start).Round(time.Millisecond), describe(e, id))
+		if stalled, elapsed := time.Since(lastMoved), time.Since(start); stalled >= d || elapsed >= waitCeiling {
+			t.Fatalf("job %s did not terminate: %s", id, whyWaitEnded(e, id, stalled, d, elapsed, movedBy))
 		}
 		time.Sleep(4 * time.Millisecond)
 	}
+}
+
+// whyWaitEnded names WHICH of the two bounds ended a wait, because they are claims about different
+// things and only one of them fired. The window firing says the engine stopped moving. The ceiling
+// firing says the window never got the chance to accrue — so reporting a stall at all is reporting
+// the wrong quantity, and reporting one of `0s` (what a grace phase produces, since it resets the
+// window on every poll) is the project's own "an error message is a claim" rule failing in the
+// meaningless direction, which is what #57 was filed for.
+//
+// It also reports whether the engine still OWNS the job, because that single fact separates the two
+// ways a non-terminal row outlives its job, and they have nothing to do with each other: a run
+// goroutine that is genuinely stuck (still owned), versus a run goroutine that finished and left
+// behind a row that disagrees with it (no longer owned). The second is the fingerprint of #59 — a
+// terminal row overwritten by a stale progress write — and finding it the first time cost a load
+// repro and a SIGQUIT dump, which is exactly the cost this message exists to stop paying.
+func whyWaitEnded(e *Engine, id string, stalled, window, elapsed time.Duration, movedBy string) string {
+	cause := fmt.Sprintf("no progress for %v", stalled.Round(time.Millisecond))
+	if stalled < window {
+		cause = fmt.Sprintf("exceeded the %v ceiling; the %v no-progress window never accrued "+
+			"because it was last reset by %s", waitCeiling, window, movedBy)
+	}
+	return fmt.Sprintf("%s (elapsed %v, %s)", cause, elapsed.Round(time.Millisecond), describe(e, id))
 }
 
 // describe renders a job's observable state for a failure message.
@@ -228,8 +253,92 @@ func describe(e *Engine, id string) string {
 	if j.Progress.Percent != nil {
 		pct = strconv.FormatFloat(*j.Progress.Percent, 'f', 1, 64)
 	}
-	return fmt.Sprintf("state=%s phase=%s liveness=%s percent=%s files=%d",
-		j.State, j.Progress.Phase, j.Progress.Liveness, pct, j.Progress.FilesReceived)
+	return fmt.Sprintf("state=%s phase=%s liveness=%s percent=%s files=%d engine_owns=%s",
+		j.State, j.Progress.Phase, j.Progress.Liveness, pct, j.Progress.FilesReceived, yesNo(engineOwns(e, id)))
+}
+
+// engineOwns reports whether the engine still has a run goroutine for this job. Reported as plain
+// fact, never interpreted here: a terminal row can legitimately still be owned during the
+// single-flight window startWhenReleased documents, and a non-terminal row that is NOT owned is the
+// one combination that cannot be explained by a slow box. See whyWaitEnded for what it is for.
+//
+// The two locks are taken in sequence, never nested — the discipline liveJobIDs documents.
+func engineOwns(e *Engine, id string) bool {
+	e.mu.Lock()
+	live := make([]*liveJob, 0, len(e.running))
+	for _, lj := range e.running {
+		live = append(live, lj)
+	}
+	e.mu.Unlock()
+	for _, lj := range live {
+		lj.mu.Lock()
+		match := lj.row.ID == id
+		lj.mu.Unlock()
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// TestWaitFailureNamesWhichBoundFired guards #57 at the point it actually went wrong: when the
+// CEILING ends a wait, the message must not report a stall, because none was observed. "no progress
+// for 0s" is not false so much as meaningless, and a message that names no mechanism is what turned
+// one CI failure into a load repro and a SIGQUIT dump before anyone could say what had happened.
+//
+// engineOwns is asserted both ways here. The `no` case is the one with diagnostic value — a
+// non-terminal row the engine no longer owns is #59's fingerprint — and the load repro exercises it;
+// the `yes` case is asserted because a lookup that silently never matched would report `no` for
+// everything and still read as a perfectly clean failure message.
+func TestWaitFailureNamesWhichBoundFired(t *testing.T) {
+	m := loadMeta(t, "disk-full-105")
+	h := newHarness(t, m.params(t), m.Transport)
+	const absent = "01NOSUCHJOB0000000000000000"
+
+	// The ceiling fired: the window had not elapsed, so nothing stalled.
+	msg := whyWaitEnded(h.eng, absent, 0, 10*time.Second, waitCeiling, "the grace phase "+PhaseWaitingForPasscode)
+	if strings.Contains(msg, "no progress for") {
+		t.Fatalf("ceiling message reports a stall it never observed: %q", msg)
+	}
+	for _, want := range []string{"ceiling", "never accrued", PhaseWaitingForPasscode} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ceiling message = %q; want it to name %q", msg, want)
+		}
+	}
+
+	// The window fired: the stall IS the finding, and the message says so and blames nothing else.
+	msg = whyWaitEnded(h.eng, absent, 10*time.Second, 10*time.Second, 12*time.Second, "progress")
+	if !strings.Contains(msg, "no progress for 10s") {
+		t.Fatalf("window message = %q; want the stall it observed", msg)
+	}
+	if strings.Contains(msg, "ceiling") {
+		t.Fatalf("window message blames the ceiling instead: %q", msg)
+	}
+
+	if engineOwns(h.eng, absent) {
+		t.Fatal("engineOwns said yes for a job the engine never ran")
+	}
+	// Registered directly rather than by running a job: ownership would otherwise be a race against
+	// the job finishing, and a flaky test is the last thing this file needs. Removed before the
+	// harness drain, which would cancel a liveJob that has no cancel func.
+	h.eng.mu.Lock()
+	h.eng.running["owned-udid"] = &liveJob{row: store.JobRow{ID: "01OWNEDJOB00000000000000000"}}
+	h.eng.mu.Unlock()
+	defer func() {
+		h.eng.mu.Lock()
+		delete(h.eng.running, "owned-udid")
+		h.eng.mu.Unlock()
+	}()
+	if !engineOwns(h.eng, "01OWNEDJOB00000000000000000") {
+		t.Fatal("engineOwns said no for a job in e.running")
+	}
 }
 
 // startWhenReleased starts a retry, tolerating the brief single-flight window between a job's
@@ -253,7 +362,7 @@ func startWhenReleased(t *testing.T, e *Engine, transport, retryOf string) (wire
 func waitState(t *testing.T, e *Engine, id, state string, d time.Duration) {
 	t.Helper()
 	start := time.Now()
-	last, lastMoved := "", time.Now()
+	last, lastMoved, movedBy := "", time.Now(), "nothing yet"
 	for {
 		j, ok := e.Job(id)
 		if ok && j.State == state {
@@ -265,14 +374,14 @@ func waitState(t *testing.T, e *Engine, id, state string, d time.Duration) {
 		}
 		if ok {
 			if sig := progressSig(j); sig != last {
-				last, lastMoved = sig, time.Now()
+				last, lastMoved, movedBy = sig, time.Now(), "progress"
 			} else if gracePhases[j.Progress.Phase] {
-				lastMoved = time.Now() // a phase that is MEANT to wait accrues no idle
+				// a phase that is MEANT to wait accrues no idle
+				lastMoved, movedBy = time.Now(), "the grace phase "+j.Progress.Phase
 			}
 		}
-		if stalled := time.Since(lastMoved); stalled >= d || time.Since(start) >= waitCeiling {
-			t.Fatalf("job %s never reached %s: no progress for %v (elapsed %v, %s)",
-				id, state, stalled.Round(time.Millisecond), time.Since(start).Round(time.Millisecond), describe(e, id))
+		if stalled, elapsed := time.Since(lastMoved), time.Since(start); stalled >= d || elapsed >= waitCeiling {
+			t.Fatalf("job %s never reached %s: %s", id, state, whyWaitEnded(e, id, stalled, d, elapsed, movedBy))
 		}
 		time.Sleep(3 * time.Millisecond)
 	}
