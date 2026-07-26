@@ -1,5 +1,5 @@
 {
-  "note": "The other side of the same transition: the re-review lands. Present because `review` had no fixture at all — the event existed, was believed to work, and nothing would have failed if it stopped. It also pins the backstop firing ALONGSIDE a typed event rather than only when the classifier comes up empty: a backstop that defers to the classifier inherits the classifier's blind spots.",
+  "note": "The other side of the same transition: the re-review lands. Present because `review` had no fixture at all — the event existed, was believed to work, and nothing would have failed if it stopped. It also pins the backstop firing ALONGSIDE a typed event rather than only when the classifier comes up empty: a backstop that defers to the classifier inherits the classifier's blind spots. quince#65 added the third expected line, and it is recorded data rather than a new claim: this PR really did go BLOCKED -> CLEAN when the approval landed on an already-green head, which is the moment it became landable. Suppressing it because `review` fired in the same tick would be the exact reasoning that CAUSED quince#65 — 'the other event carries it' — and it fails the same way: a reader of `review verdict=APPROVED` learns that a verdict was cast, not that nothing is blocking the merge.",
   "before": {
     "observed": true,
     "prs": [ { "number": 37, "state": "OPEN", "updatedAt": "2026-07-26T12:32:21Z",
@@ -21,6 +21,7 @@
   },
   "expect_events": [
     "event=updated pr=37 at=2026-07-26T13:53:06Z actor=novkostya kind=review",
-    "event=review pr=37 verdict=APPROVED"
+    "event=review pr=37 verdict=APPROVED",
+    "event=mergeability pr=37 status=CLEAN"
   ]
 }

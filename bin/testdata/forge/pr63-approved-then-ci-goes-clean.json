@@ -1,0 +1,34 @@
+{
+  "note": "quince#65, the sixth blind spot: an APPROVED PR whose CI then completes. Nothing happens TO the PR — `updatedAt` is frozen at the approval, measured across fourteen samples on quince#66 while `image` and `e2e` both completed — so the unenumerated `updated` backstop structurally cannot see it, and `checks` never fired because SUCCESS is deliberately not a checks event. quince#63 sat landable and unmerged for sixteen minutes behind a live, quiet watch. The only field that moves is `mergeStateStatus`, and the value it moves to is the one that means nothing is blocking the merge. Note the whole point of the pair: identical `updatedAt`, and no `updated` event in the expectation.",
+  "before": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 63, "state": "OPEN", "updatedAt": "2026-07-26T20:44:13Z", "merge_state": "BLOCKED",
+        "checks": [
+          { "name": "gates", "conclusion": "SUCCESS" },
+          { "name": "image", "conclusion": null },
+          { "name": "e2e", "conclusion": null }
+        ],
+        "reviews": [{ "state": "APPROVED" }],
+        "activity": [{ "at": "2026-07-26T20:44:13Z", "actor": "novkostya", "kind": "review" }]
+      }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 63, "state": "OPEN", "updatedAt": "2026-07-26T20:44:13Z", "merge_state": "CLEAN",
+        "checks": [
+          { "name": "gates", "conclusion": "SUCCESS" },
+          { "name": "image", "conclusion": "SUCCESS" },
+          { "name": "e2e", "conclusion": "SUCCESS" }
+        ],
+        "reviews": [{ "state": "APPROVED" }],
+        "activity": [{ "at": "2026-07-26T20:44:13Z", "actor": "novkostya", "kind": "review" }]
+      }
+    ]
+  },
+  "expect_events": ["event=mergeability pr=63 status=CLEAN"]
+}

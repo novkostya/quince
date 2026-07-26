@@ -162,8 +162,10 @@ unconditional backstop down to roughly one event per human or agent act. That is
   that goes `BEHIND` or `DIRTY` because something **else** merged has had nothing happen to it: its
   own `updatedAt` does not move, and no amount of watching that timestamp would ever show it. Under
   strict up-to-date protection the architect's own merges invalidate every other open PR this way.
-  Reported on transition into a *known* non-clean state only: `UNKNOWN` is GitHub's "no answer yet",
-  and reporting it would be reporting our own ignorance as the PR's condition. **The state therefore
+  Reported on transition into a *known* state whose landability differs — originally the non-clean
+  ones only, and **§4g widened it to `CLEAN`, which was the sixth blind spot**. `UNKNOWN` is still
+  never reported: it is GitHub's "no answer yet", and reporting it would be reporting our own
+  ignorance as the PR's condition. **The state therefore
   remembers the last *known* mergeability, not the last observed one** — the first version treated
   `UNKNOWN` as no-answer for reporting and then wrote it into state as though it were a state, so
   `BEHIND → UNKNOWN → BEHIND` re-announced a condition that never changed. Reachable rather than
@@ -467,6 +469,75 @@ instead**, quoting the exact command. With the watch live it answered `PING` and
 - It costs one forge call per turn end — measured at ~1.1 s for the `--author` query — and the hook is
   given a 30 s timeout so a hanging forge cannot hold a session open.
 
+### 4g. The state a PR spends most of its waiting in was invisible (quince#65)
+
+quince#63 was `APPROVED`, all three checks green, `mergeStateStatus: CLEAN` — and **sat unmerged for
+roughly sixteen minutes** while a live watch ran quiet. The merge was the architect's to make, and
+nothing woke them. It is the sixth blind spot, and unlike the first five it did not hide in code. **It
+hid in a justification.**
+
+**The two measurements, both taken live rather than reasoned.** On quince#66, while its CI ran and with
+no push, comment or review in the window (`reviews=1 comments=0` across fourteen samples at ~10 s):
+
+| sample | `updatedAt` | checks |
+| --- | --- | --- |
+| `21:07:26Z` | `21:07:11Z` | `gates:SUCCESS, image:—, e2e:—` |
+| `21:08:20Z` | `21:07:11Z` | `gates:SUCCESS, **image:SUCCESS**, e2e:—` |
+| `21:09:35Z` | `21:07:11Z` | `gates:SUCCESS, image:SUCCESS, **e2e:SUCCESS**` |
+
+**Two check completions, `updatedAt` frozen.** So the `updated` backstop — built precisely so that
+*nothing is invisible* — **structurally cannot cover a PR parked on CI.** That is not a defect in the
+backstop; it is the one thing outside its reach, because nothing is happening *to* the PR. The other
+half was reproduced through the pure `step()`: an approved PR whose checks go green emits **nothing at
+all**.
+
+**Why `checks` did not cover it, which is the interesting part.** `event=checks` fires only on
+`FAILURE`, deliberately, and §4b's note said why the narrowing was free: *"the push preceding those
+checks moves `updatedAt`, so `updated` carries the transition"*. That is **true for
+changes-requested → fix → green**, where a push exists, and **false for approved → CI completes**,
+where the last mover was the approval and it happened *before* the checks finished. So the classifier
+did exactly what it said. **A narrowing is a claim about what cannot matter, and this one was right
+about the case it was written for and silent about the case nobody tried** — which makes it the same
+family as §4b, one level further in: there the enumeration was wrong, here the *reason given for an
+exclusion* was.
+
+**The fix is not a new event, and it is not "emit on green".** Green is not "someone must act": every
+PR here goes green minutes after opening while still awaiting its first review, so that event would be
+the wallpaper this classifier already rejected for `BLOCKED`/`UNSTABLE` — and which of the two meanings
+green carries depends on whose turn it is, which the classifier still has no notion of and should not
+acquire. `CLEAN` is the only value in the payload that means **nothing is blocking this merge**: not
+behind, not failing, not missing an approval. So `mergeability` — the channel already built for *"its
+own `updatedAt` did not move and its landability changed"*, which is this case exactly — now reports
+the transition **into** `CLEAN` as well as into `BEHIND`/`DIRTY`. One narrowing removed, in the channel
+whose whole purpose it already was.
+
+**Why a transition and not an every-tick re-examination.** Corollary (e) says a parked PR is
+re-examined on every tick regardless of what fired, and mechanising *that* literally would mean
+emitting for every landable PR forever. An implementer's own PR goes `CLEAN` and they **cannot merge
+it** (approver ≠ author), so an every-tick shape would spin a watch that exits on detection into
+arm-exit-arm until somebody else acted. A transition fires **once**, at the moment the ball becomes the
+merger's, and is silent thereafter.
+
+**What this does NOT close, stated because the issue's framing invites the opposite reading:**
+
+- **Corollary (e) is not retired.** This mechanises the **CI park** — the commonest one, and the only
+  one where a field moves. A park on a *human* decision moves nothing at all and is still invisible;
+  that is story 6 (`stalled`), still unimplemented, and until it exists the discipline stands.
+- **A watch armed *after* a PR went `CLEAN` will not emit it.** The first observation reports itself
+  and nothing else (§4b), by design, so the landable PR is in the baseline rather than in a
+  transition. The session's own enumeration at arm time is what covers that, and it is a session step.
+- **`CLEAN` is GitHub's lazily-computed answer**, and this design rests on it arriving. Measured
+  arriving on quince#63 and again on quince#66; a `UNKNOWN` flap in between is already handled by the
+  last-known-state carry-forward of §4b, which is the machinery that made this a one-line widening
+  rather than a new channel.
+
+**Its fixture is a live-path fixture, and that is the point.** A pure fixture for green checks already
+existed and already passed while the live path delivered nothing for sixteen minutes — the same shape
+as quince#62, where every fixture passed while the verb was deaf. So `"kind": "loop"` drives the real
+verb across three ticks with `updatedAt` **identical throughout**, and the loop must end on the third.
+Against the classifier as it stood it runs to the idle bound instead: the sixteen-minute silence,
+reproduced in twelve seconds.
+
 ## Design
 
 `bin/forge-watch` is a **pure state machine plus a thin fetch**: `step(previous_state, observation)
@@ -551,6 +622,11 @@ allowance faster for no benefit.
     to have run.
 25. When the check cannot be made — no credential, forge unreachable — it says the question was not
     checked, and neither blocks nor reports "nothing owed".
+26. An **approved** PR whose checks then complete emits `mergeability status=CLEAN` and **wakes the
+    session that must merge it**, even though its own `updatedAt` never moved and no push, comment or
+    review occurred (quince#65).
+27. That transition fires **once**, not every tick: an author whose own PR goes `CLEAN` cannot merge it,
+    and a repeating signal would spin a watch that exits on detection.
 
 ## Gates
 
@@ -561,7 +637,9 @@ allowance faster for no benefit.
   fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**
   split: the decision half is `"kind": "owed"` fixtures, and the **hook half is proven by running a
   real headless session** (§4f) — it is a claim about the harness's behaviour, and no fixture of ours
-  can make it.
+  can make it. Stories **26–27** need **both** a pure and a loop fixture, and the reason is quince#65's
+  own finding: a pure fixture in that area already passed while the live path delivered nothing for
+  sixteen minutes, so the pure one alone would be a fixture that cannot fail on the defect it names.
   Stories **18–19 are proven by a CLI smoke recorded in the PR, not by the replay harness** —
   they are argument handling rather than state transitions, and saying so is better than letting a
   reader assume the fixtures cover them. Story 6 is **not covered because it is not implemented**

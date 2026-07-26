@@ -137,6 +137,13 @@ four blind spots of quince#43 all live in that gap. So, when deciding whether yo
   fired (program doc, corollary (e)). Being wrong about what can matter costs most exactly where you are
   blocked on someone else — a held, approvable PR waited 64 minutes for a confirmation that had already
   been posted. Record the park **on the PR**, so a fresh session can rebuild the set without you.
+- **`event=mergeability pr=N status=CLEAN` means the ball is the merger's**, and it is the one park the
+  tool now covers for you. A PR that is approved and whose CI then completes has **nothing happen to
+  it** — the approval was the last mover, and check completion does not move `updatedAt` (measured) —
+  so the backstop is structurally blind there and quince#63 sat landable for sixteen minutes behind a
+  live, quiet watch (quince#65). **This does not retire corollary (e).** It mechanises the *CI* park,
+  which is the commonest one and the only one where a field moves; a park on a human decision moves
+  nothing at all and is still yours to re-examine every tick.
 
 ## Rebase discipline — when to move the branch under a verdict
 
