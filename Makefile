@@ -117,6 +117,7 @@ gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 # point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
+                   deploy/runner/preflight-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test
 
@@ -135,6 +136,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@# Synthetic fixtures only: no private layer needed, so it runs here, on CI, and anywhere.
 	@$(MAKE) --no-print-directory privacy-check-test
 	@$(MAKE) --no-print-directory forge-watch-test
+	@$(MAKE) --no-print-directory preflight-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -162,6 +164,15 @@ forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~2
 	  exit 1; \
 	}
 	@bin/forge-watch replay bin/testdata/forge/*.json
+
+# The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and
+# pasted into a PR until now (quince#32). preflight's refusals ARE its product: it exists to stop a
+# runner coming up unable to do Remote Control, billing against an API key, or holding the identity
+# of the box it is meant to be separate from. Synthetic throughout — a stub `claude`, fake token
+# files, no private layer and no runner — so it runs on CI and anywhere.
+.PHONY: preflight-test
+preflight-test: ## preflight's refusals — the runner spec's G1 (synthetic; no runner needed)
+	@deploy/runner/preflight-test
 
 .PHONY: gates-go
 gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
