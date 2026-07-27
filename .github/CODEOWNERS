@@ -13,8 +13,7 @@
 # can neither read nor set it. The file is therefore INERT until the Operator flips that toggle,
 # and it is committed in that state deliberately: quince#113's shape, where a check that an agent
 # identity cannot wire is landed built-and-unwired with an issue against the wiring (quince#137),
-# rather than
-# worked around or escalated to a seat that cannot do it either.
+# rather than worked around or escalated to a seat that cannot do it either.
 #
 # Do not read a green PR as evidence this file did something.
 # ---------------------------------------------------------------------------------------------
@@ -76,3 +75,16 @@
 #                       seat that is deliberately not in the loop.
 #   /.claude/skills/**  process, not canon. They change often and by the sessions that run them;
 #                       CLAUDE.md already outranks them where the two disagree about process.
+#                       THIS IS SAFE ONLY BECAUSE CANON RESTATES ANYTHING LOAD-BEARING THEY
+#                       CONTAIN, and that redundancy is therefore structural rather than stylistic.
+#                       /architect §1 holds an Operator ruling — bin/gh-review is the AUTHORING path
+#                       for canon — in an unowned file; CLAUDE.md carries the same ruling in its own
+#                       words, and CLAUDE.md is owned. The next reader who notices the duplication
+#                       and trims one side is doing the project a favour right up until they trim
+#                       the owned side, at which point the ruling moves entirely into a file an
+#                       ordinary implementer PR can edit with one architect approval. Do not
+#                       deduplicate across that line without moving the ownership with it.
+#   /deploy/dev.md      operational, not authority: how to build and run the gates. CLAUDE.md's
+#                       "Where state lives" table lists it beside the four canon docs, so its
+#                       absence here would otherwise read as an oversight. Being wrong about it
+#                       costs a confusing build, not a governance failure.

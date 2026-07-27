@@ -164,6 +164,26 @@ a session escalated a workflow push to the architect, which cannot do it either.
 is silent from the asker's side, and both parties then wait correctly for a signal that cannot
 arrive. Ask for something the holder *can* emit — a comment is always available to everyone.
 
+**The Operator's Mac is the deliberate break-glass host, and its exemption is a design decision
+rather than an unfinished lockout** (`pr.6` constraint 6). `pr.6` turns every remaining root path
+into a forced-command wrapper, and the natural reading of *every* is that the Mac should be narrowed
+with them. It is not, on purpose: **a lockout that leaves no host outside itself has no recovery
+path.** Both boxes are supervised by a service that a bad provision can stop from starting —
+`preflight` refuses rather than degrades, by design — and the seat that repairs a box which will not
+start cannot be a seat that lives on it.
+
+So the Mac keeps capability the boxes deliberately do not, and the identity table above already
+records the sharpest instance: an SSH push consults no OAuth scope, so **the Operator can always
+push a workflow** where neither agent identity can. Read that row as break-glass, not as an
+inconsistency nobody got around to closing.
+
+**What it costs, stated rather than implied.** The Mac is a host that can bypass the authority
+model, and it sits outside the two-box identity boundary the rest of this section builds. That is
+accepted, which is why the exemption is **narrow**: it is a recovery seat, not a third work seat.
+Work happens on the boxes. The moment routine work moves back to the Mac the exemption stops being
+break-glass and becomes an ordinary hole — and the private-layer section below is this project's own
+record of what it costs when a document describes a different reality from the one that exists.
+
 ### Issues
 
 - product bugs and feature work → issues **here**, **sanitized at filing** (no LAN IPs,
