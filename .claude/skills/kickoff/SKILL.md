@@ -13,17 +13,28 @@ the plan is a checkpoint, not the deliverable.
 ## 0. A watch may already exist, and it may already be dead
 
 If this session is resuming work — a `/kickoff <pr>` woken by an event, or a session whose process
-restarted — ask before arming anything, and **say which of the four answers you got**:
+restarted — ask before arming anything, and **say which of the five answers you got**:
 
 ```sh
-bin/forge-watch status --repo novkostya/quince   # 0 live · 3 dead · 4 absent · 5 wedged
+bin/forge-watch status --repo novkostya/quince   # 0 live · 9 starting · 3 dead · 4 absent · 5 wedged
 ```
 
-`live` → nothing to do, and do not arm a second watcher. **`dead` → re-arm from that state and do NOT
-reseed it**; the next tick emits everything that accrued while nothing was watching, and you say that a
-watch was found dead. **`wedged` → a watcher is still running and has stopped ticking: run
-`bin/forge-watch stop --repo <r>`**, then re-arm — never a bare `kill`, because the pid is only known
-to be *ours* while its heartbeat is fresh and `wedged` means it is not. `absent` → cold start.
+`live` → nothing to do, and do not arm a second watcher. **`starting` → a watch was armed and its
+first tick has not landed yet: nothing is owed and nothing is wrong. Wait.** **`dead` → re-arm from
+that state and do NOT reseed it**; the next tick emits everything that accrued while nothing was
+watching, and you say that a watch was found dead. **`wedged` → a watcher is still running and has
+stopped ticking: run `bin/forge-watch stop --repo <r>`**, then re-arm — never a bare `kill`, because
+the pid is only known to be *ours* while its heartbeat is fresh and `wedged` means it is not.
+`absent` → cold start.
+
+**`starting` exists because `dead` used to cover it, and the two want opposite remedies** (quince#95).
+A watch reads `starting` from arming until its first tick lands — ~4 s with nothing declared, 17–18 s
+against a 20-issue set, since a first tick is one `gh pr list` plus one `gh issue view` per declared
+issue. During that window the `Stop` hook read `dead` and handed sessions the command to arm a
+*second* watcher onto one state file, which is quince#50's race reached by obeying a guard. It was
+measured at **one false block in two** on the architect box. It is bounded at one interval and
+degrades to `dead reason=never_ticked`, so a watcher that is armed and never ticks cannot sit healthy
+forever.
 
 Collapsing `dead` into `absent` turns a restarted watch into a fresh one that has "seen nothing changed"
 since a beginning it invented; collapsing `wedged` into `dead` tells you to start a second watcher
@@ -218,7 +229,7 @@ exit is a re-arm — false on the one it omitted, and following it there loops f
 | **6** | `--max-wait` idle bound | nothing happened, which is a report and not a silence — **re-arm** |
 | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
-`status` is a different question with its own exit codes: **0** live · **3** dead · **4** absent · **5** wedged.
+`status` is a different question with its own exit codes: **0** live · **9** starting · **3** dead · **4** absent · **5** wedged.
 An exit of **2** is not the tool's — it is jq failing underneath and the script
 aborting, so read the error rather than looking it up here.
 
@@ -234,7 +245,7 @@ quince#75's loop lacked, and the two-attempt bound is belt over braces.
 with the act it guards; a conditional beside it is check-then-act across a window in which the watcher
 can die. Both `status …; exec watch …` (which gates nothing, because `;` sequences rather than
 conditions) and the correctly-composed `if` form were measured failing. §0's duty is unchanged: read
-`status` and **say which of the four answers you got**. The window is narrowed, not closed — the `Stop`
+`status` and **say which of the five answers you got**. The window is narrowed, not closed — the `Stop`
 hook is the declared backstop, which is not a resolution.
 
 Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but

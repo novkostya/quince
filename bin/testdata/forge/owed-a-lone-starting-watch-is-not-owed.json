@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "The isolated case, split from owed-a-starting-watch-owes-nothing.json deliberately: there, exit 8 comes from the DEAD repo beside it, so that fixture cannot prove `starting` fails to contribute — a `starting` that wrongly owed would produce the same 8. Only a set where every entry is starting can show the exit is 0. This is the shape a session actually hits: it armed its watches as the last act of a turn, the hook fires inside the first tick, and nothing is owed. Before quince#95 this returned 8 and blocked the turn.",
+  "table": [
+    ["novkostya/quince", 9],
+    ["novkostya/quince-devlog", 9]
+  ],
+  "expect": [
+    "ok    novkostya/quince — open PRs, and a watch that is starting (armed, first tick not finished)",
+    "ok    novkostya/quince-devlog — open PRs, and a watch that is starting (armed, first tick not finished)"
+  ],
+  "expect_exit": 0
+}

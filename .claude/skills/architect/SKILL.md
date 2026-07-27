@@ -17,16 +17,24 @@ Ends with a report and an armed loop. It writes no code.
 
 **Before the identity check, before anything.** A watch's state lives on disk precisely so it survives
 this session's process restarting; the loop is rebuilt from it, never assumed. Ask, and **say which of
-the four answers you got**:
+the five answers you got**:
 
 ```sh
-bin/forge-watch status --all      # declared set; exits 0 live / 3 dead / 4 absent / 5 wedged
+bin/forge-watch status --all      # declared set; exits 0 live / 9 starting / 3 dead / 4 absent / 5 wedged
 ```
 
-`bin/forge-watch watch` (§6) runs this same check before arming and **refuses** on `live` and on
-`wedged`, so neither of the two answers that must not lead to a second watcher depends on this section
-being read. Ask anyway: the tool can refuse to arm, but it cannot report on your behalf that a watch was
-found dead.
+`bin/forge-watch watch` (§6) runs this same check before arming and **refuses** on `live`, on
+`starting` and on `wedged`, so none of the three answers that must not lead to a second watcher
+depends on this section being read. Ask anyway: the tool can refuse to arm, but it cannot report on
+your behalf that a watch was found dead.
+
+**`starting` (exit 9) is the one this seat will meet most** (quince#95). It means armed, first tick
+not finished — nothing owed, nothing wrong, do not arm a second one. The window is one `gh pr list`
+plus one `gh issue view` per declared issue: ~4 s with nothing declared, **17–18 s against a 20-issue
+set**, and this seat's declared set is the larger one and grows. Before the class existed, `status`
+reported `dead` here and the `Stop` hook's remedy for `dead` — *arm another one* — was quince#50's
+race handed over as an instruction. One false block in two, measured on this box. It is bounded at one
+interval and degrades to `dead reason=never_ticked` past it.
 
 - **`watch=live`** → nothing to do. Do not arm a second watcher; two writing one state file is a race
   that presents as missing events.
@@ -232,7 +240,7 @@ not a mechanism (quince#75).
 | **6** | `--max-wait` idle bound, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
 | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
-`status` answers a different question with its own codes: exit **0** live · **3** dead · **4** absent
+`status` answers a different question with its own codes: exit **0** live · **9** starting · **3** dead · **4** absent
 · **5** wedged. An exit of **2** is not the tool's at all — it is an underlying tool (jq) failing and
 the script aborting, so read the error rather than looking it up here.
 
@@ -246,11 +254,15 @@ only check here that is atomic with the act it guards; a conditional beside it i
 a window in which the watcher can die, and both the sequenced form (`status …; exec watch …`, which
 gates nothing because `;` does not condition) and the correctly-composed `if` form were measured
 failing. **This retires the pre-arm conditional, not §0**: §0 still requires you to read `status` and
-**report which of the four answers you got**, which the tool cannot do on your behalf.
+**report which of the five answers you got**, which the tool cannot do on your behalf.
 
-**The window is narrowed, not closed.** quince#102's arm-last ordering shrinks it from one side and
-this from the other; closing it is a tool change that wants quince#95 answered first. The `Stop` hook
-is the declared **backstop** for the remainder — a backstop, not a resolution.
+**The window is narrowed, and the part of it that mattered is now CLOSED.** quince#102's arm-last
+ordering shrank it from one side and the rule above from the other; quince#95's `starting` class shut
+the consequence, which was the hook reading `dead` on a freshly-armed watch and instructing you to
+arm a second one. What remains is genuinely small: a watcher that is `live` at the instant you check
+can still die on your own next forge write, so a refusal you acted on can be stale. That is what the
+`status`-then-arm-again rule above is for, and the `Stop` hook remains the **backstop** — a backstop,
+not a resolution.
 
 **Exits 6 and 7 will be reported to you as failures.** A background task that exits non-zero renders as
 *"failed with exit code 6"* — and 6 is `watch`'s designed idle heartbeat, the floor this section names.
