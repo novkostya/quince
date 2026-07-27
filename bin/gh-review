@@ -88,7 +88,13 @@ case "$count" in
 1) : ;;
 *) # Picking .[0] would work today and silently pick the wrong one later. A wrapper that guesses
 	# which identity it is acting as is the thing this file exists to prevent.
-	die "app id $APP_ID has $count installations; refusing to guess which one to act as." \
+	#
+	# The guard is on the OVERRIDE being absent, not on the count. An earlier version died
+	# unconditionally here while its own message said to set QUINCE_REVIEW_INSTALLATION_ID — an
+	# error naming a remedy the code could not honour, because the `install_id=` line below was
+	# unreachable from this branch. Caught in review of the PR that introduced this file.
+	[ -n "${QUINCE_REVIEW_INSTALLATION_ID:-}" ] || die \
+		"app id $APP_ID has $count installations; refusing to guess which one to act as." \
 		"Set QUINCE_REVIEW_INSTALLATION_ID to the one this box should use." ;;
 esac
 
