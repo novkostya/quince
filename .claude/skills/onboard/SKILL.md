@@ -44,13 +44,26 @@ In that clone, in this order:
 `docs/ui.design.md`, and the newest spec under `docs/specs/`. Don't read all of it: read
 the index and then what the frontier rung touches.
 
-## 4. Read the open work
+## 4. Read the open work — from the declared set, never a hand-list
 
 ```sh
-gh issue list --repo novkostya/quince --state open
-gh pr list   --repo novkostya/quince --state open
-gh issue list --repo novkostya/quince-devlog --state open --label process
+for r in $(sed 's/#.*//' .claude/forge-set | grep -v '^[[:space:]]*$'); do
+  gh issue list --repo "$r" --state open
+  gh pr list   --repo "$r" --state open
+done
 ```
+
+**Enumerating the repos by hand is the bug this closes** (quince#53). The old form hardcoded two and
+filtered the devlog to `--label process`; the moment a third repo matters, `/onboard` reports less
+open work than exists while looking exactly as authoritative — the quince-devlog#3 shape, a report
+that covers a subset and says nothing about the subset. `.claude/forge-set` exists so that cannot
+happen: `bin/forge-watch --all` and `/architect` §3 already read it and hard-fail when it is absent
+rather than falling back to one repo. The `--label process` filter is dropped so every declared repo
+is listed the same way — an unfiltered "what is open" is the honest report; the per-repo filter is
+the special case that goes stale.
+
+The devlog `git clone` in §2 is a **document location** (the journal lives in that repo
+specifically), not an enumeration, and stays hardcoded on purpose — do not "fix" it into the loop.
 
 No `gh` auth? Say so and use the web URLs; do not treat an empty list as "no open work".
 
