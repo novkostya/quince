@@ -153,6 +153,7 @@ Project skills live in `.claude/skills/`; invoke them by name.
 | `/review-pr [number\|all]` | the reviewer protocol; `all` sweeps every open PR |
 | `/land [number]` | verify, rebase-merge, tidy up, flip the devlog state line |
 | `/qa` | dev deploy + click-list (placeholder until the dev-CT tooling lands) |
+| `/retire` | end a session so nothing it knows dies with it: prove the boundary, flush to the forge, declare the ephemeral, record what could not be recorded |
 
 Permission allowlists are layered: the committed `.claude/settings.json` carries the
 generic entries plus the documented reference environment; machine-specific bindings live
