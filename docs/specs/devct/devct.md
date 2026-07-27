@@ -54,6 +54,23 @@ a container or reaches for root.
 - **Anything under `.github/workflows/`** — the bot token has no `workflow` scope, and none is
   needed: CI calls
   only `make`, so a new gate target is picked up by the existing workflow.
+
+  > **Correction, 2026-07-27 (quince#112, quince#115).** The scope statement is still true; the
+  > reasoning after the colon is not, and it was falsified rather than merely aged. *"A new gate
+  > target is picked up by the existing workflow"* holds only for a gate wanting the **triggers
+  > `ci.yml` already declares**. quince#112 needed `pull_request: types: [opened, edited,
+  > reopened]` — a PR title can be made wrong *after* its PR is opened, and `ci.yml` does not
+  > subscribe to `edited` — so it required a new workflow **file**, not a new `make` target.
+  > **A new trigger is not a new gate target.**
+  >
+  > That made this bullet load-bearing in the direction it did not anticipate: the change was owed
+  > by a token that could not make it, and the escalation `CLAUDE.md` documented (*"pushed by the
+  > architect"*) dead-ended, because the architect's token is refused on that path too — `403`,
+  > measured (quince#113). Only the Operator can, and the corrected canon is in quince#115.
+  >
+  > Left in place rather than rewritten: this rung decided what it decided, and the counterexample
+  > arrived later. Erasing the sentence would erase that something was learned; leaving it
+  > unannotated would let a reader at this line believe it today.
 - Staging/lab deployment and the soak. Untouched.
 
 **Expected contract changes: NONE.** No REST/WS surface, no vault RPC, no storage semantics. If
