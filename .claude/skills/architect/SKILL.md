@@ -179,11 +179,19 @@ self-inflicted; this is that same fact arriving one step earlier.
 correctly emits what accrued, and what accrued is your own actions from the turn just finished — so the
 first tick exits immediately and reaching a *quiet* watch takes two arms, only the second of which can
 survive the end of the turn. The foreground tick eats that catch-up in the open rather than delivering
-it as a task notification after the turn has ended. It is safe there because a hand-run `tick`
-deliberately does **not** write the watcher record (quince#49), so it cannot make a dead watch look
-alive. The measurement is the implementer's — three `Stop`-hook firings before the tick step, none
-after — and it is quoted here with that seat named, because a measurement carries the box it was taken
-on.
+it as a task notification after the turn has ended. The measurement is the implementer's — three
+`Stop`-hook firings before the tick step, none after — and it is quoted here with that seat named,
+because a measurement carries the box it was taken on.
+
+**Why step 2 is safe there — and it is a two-directional claim.** A hand-run `tick` leaves the
+liveness verdict exactly as it found it: it never refreshes `.watch.last_watcher_tick`, so it cannot
+make a **dead** watch look **alive** (quince#49), and `step()` carries the watcher record forward, so
+it cannot make a **live** watch look **dead** (quince#103). **The second direction is the one that was
+broken**, and the one that matters here: `watch` refuses to arm beside a live watcher by reading that
+record, so a tick that erased it turned step 3 into a *second* watcher on one state file — quince#50's
+race, reached through the guard rather than around it. Worth carrying from this seat in particular:
+the one-directional version was **verified before being ruled**, and the verification was of the
+direction that could not fail. Checking one direction of a two-directional property is not a check.
 
 **The reviewer declares too, and its case is the one quince#80 was filed from.** The blocked list that
 went unwatched was an *architect's* — quince#70/#71/#72/#75/#78/#80, most with no PR at all — and the
