@@ -204,11 +204,28 @@ events: first-observation · queue-empty · updated · opened · review · check
   `updatedAt` has moved, or after it. Anything that reads two of them and infers an order is reading
   a race (quince#72).
 
-  Measured, not reasoned, across both boxes. On the runner: **12 review deliveries — 11 arriving in
-  a single tick, 1 split across two watcher generations.** On the architect box the same act was
-  seen both ways on different PRs. That 11-of-12 is precisely the trap: a consumer that tried this a
-  few times would see one tick every time, conclude the pairing is dependable, and be wrong about
-  one review in twelve — which is frequent enough to matter and rare enough to survive testing.
+  Measured on BOTH boxes, same method, same sample size, 2026-07-27 — and the numbers DISAGREE BY
+  A FACTOR OF FOUR, which is the strongest part of the evidence:
+
+      runner box      12 deliveries — 11 in one tick,  1 split      (~8% split)
+      architect box   12 deliveries —  8 in one tick,  4 split      (~33% split)
+
+  Both figures are here because either one alone is a lie by omission. The first version of this
+  paragraph carried the runner's 11-of-12 as though it were THE rate and gave the other box a
+  qualitative phrase; a consumer would have read ~8%, planned for it, and been wrong by 4× on the
+  box where a reviewer's own code runs. That is quince#69's lesson — **a measurement carries the box
+  it was taken on** — committed a second time by the session that had just written it into a journal
+  entry, and caught in review by the box whose number was missing.
+
+  So: **the spread is the finding, not either ratio.** Same tool, same configuration, same day, same
+  sample size, 4× apart means the pairing is not a property you can characterise and plan around at
+  all. Do not average these. Do not treat either as a rate. **Why they differ is NOT established**
+  and is discussed on quince#72; nothing here depends on the answer.
+
+  The lower figure is also the more dangerous one, which is why it must not stand alone: a consumer
+  that tried this on the runner would see one tick every time across a dozen attempts, conclude the
+  pairing is dependable, and be wrong roughly one review in twelve — frequent enough to matter,
+  rare enough to survive testing.
 
   There is deliberately NO de-duplication. Recognising "I have already seen this act" needs state
   carried across ticks — more machinery, and a new place to be wrong — to save ONE EXTRA WAKE per
