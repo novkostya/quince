@@ -1,0 +1,37 @@
+name: pr-title
+
+# quince#94: forge-watch derives its watch set from PR TITLES, so a bare `#N` here is claimed
+# by THIS repository — a devlog title reading `(#102, #104)` made two quince PRs into derived
+# issues of the devlog, costing two failing gh calls per tick on the reviewer's box.
+#
+# Separate from ci.yml because this must fire on `edited`: a title can be wrong from the start
+# OR made wrong later, and today's instance was edited twice after creation. Widening ci.yml's
+# trigger instead would re-run the whole gate ladder on every retitle.
+#
+# No logic here, as in ci.yml — it calls a make target. The title is passed by ENV NAME and
+# never interpolated into the recipe: a PR title is attacker-controlled, and `TITLE=` would be
+# command execution on the runner.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bare "#N" in the title must resolve in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: make pr-title-check REPO='${{ github.repository }}' TITLE_ENV=PR_TITLE
