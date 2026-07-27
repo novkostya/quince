@@ -69,6 +69,22 @@ unusable matcher. A `2` is not a clean result and must never be reported as one:
 without the private layer that is exactly what you will get, and the sweep is then **owed**,
 with the head named, not done (quince#41).
 
+**And read WHAT it swept, not only that it was clean.** A clean run ends
+`swept branch-diff commit-message branch-name text against N patterns` — that list is an
+**assertion about coverage**, and a short one is a signal rather than a formality:
+
+| ends with | means |
+| --- | --- |
+| `branch-diff commit-message branch-name text` | the whole claim: diff, messages, branch, PR body |
+| `branch-name` **only** | **there is no diff and no commit** — you are sweeping an empty branch |
+| no `text` | the PR body was never swept; `TEXT=` was omitted |
+
+Found by getting it wrong: a failed rebase short-circuited an `&&` chain, the commit never ran,
+and the sweep reported **clean** — truthfully, over nothing. The exit code was `0` and the
+coverage list was one word. `0` answers *did anything match*; only the list answers *was
+anything looked at*, and this project has already been bitten once by a gate whose satisfied
+answer could not be distinguished from a gate that never ran.
+
 ## 3. Deploy + click list (DoD)
 
 **Deploy by default. Don't ask, don't wait to be asked:**
