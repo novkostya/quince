@@ -157,6 +157,35 @@ make_repo "$msgrepo" "nothing private here" "wire up 203.0.113.42 for the demo"
 expect "commit message violation is caught" 1 "commit-message:" -- \
 	at "$msgrepo" "$CHECK" --patterns "$good" --ref main...HEAD
 
+# …but ONLY the branch's own commits. `git diff A...B` is merge-base→B while `git log A...B` is
+# the SYMMETRIC difference, so one $REF string read by two commands swept commits that are only
+# on the base — failing a branch over a message its author never wrote. Safe direction (a false
+# positive), but it fires whenever main is ahead, which is the normal state of a queued PR under
+# strict up-to-date protection and the state /land creates by rebasing.
+basejunk="$TMP/base-junk"
+mkdir -p "$basejunk"
+git -C "$basejunk" init -q -b main
+git -C "$basejunk" config user.email fixture@example.invalid
+git -C "$basejunk" config user.name 'fixture'
+echo baseline >"$basejunk/README.md"
+git -C "$basejunk" add -A
+git -C "$basejunk" commit -qm "baseline"
+git -C "$basejunk" checkout -q -b topic
+echo "ordinary branch content" >"$basejunk/notes.md"
+git -C "$basejunk" add -A
+git -C "$basejunk" commit -qm "an ordinary branch commit"
+# main moves ahead with a commit the branch does not contain, whose MESSAGE would match.
+git -C "$basejunk" checkout -q main
+echo more >>"$basejunk/README.md"
+git -C "$basejunk" add -A
+git -C "$basejunk" commit -qm "a base-only commit mentioning zzsecrethostzz"
+git -C "$basejunk" checkout -q topic
+expect "a commit only on the BASE is not swept" 0 "clean" -- \
+	at "$basejunk" "$CHECK" --patterns "$good" --ref main...HEAD
+# The two-dot form must keep working — --right-only is a no-op there (measured, not assumed).
+expect "two-dot range still sweeps the branch" 0 "clean" -- \
+	at "$basejunk" "$CHECK" --patterns "$good" --ref main..HEAD
+
 # PR text is written by a session and reaches the forge without ever passing through git.
 prtext="$TMP/pr-body.md"
 printf 'The deploy answered on zzsecrethostzz.\n' >"$prtext"
@@ -228,6 +257,35 @@ make_patterns "$canary_bad"
 printf 'this string matches none of the patterns\n' >"$canary_bad/privacy-canary.txt"
 expect "a canary that matches nothing REFUSES" 2 "matched NOTHING" -- \
 	at "$clean_repo" "$CHECK" --patterns "$canary_bad" --ref main...HEAD
+
+# The SAME probe with no trailing newline. Plain `read` discards an unterminated final line, so
+# a single-probe canary was skipped entirely — while the "canary ok" line still printed. Same
+# bytes, opposite verdicts, decided by one invisible character; and a hand-written first canary
+# is exactly where a missing \n comes from.
+canary_noeol="$TMP/canary-noeol"
+make_patterns "$canary_noeol"
+printf 'this string matches none of the patterns' >"$canary_noeol/privacy-canary.txt"
+expect "an UNTERMINATED failing canary probe still REFUSES" 2 "matched NOTHING" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_noeol" --ref main...HEAD
+
+# …and the unterminated PASSING case must still be seen, not merely not-crash.
+canary_noeol_ok="$TMP/canary-noeol-ok"
+make_patterns "$canary_noeol_ok"
+printf 'zzsecrethostzz' >"$canary_noeol_ok/privacy-canary.txt"
+expect "an UNTERMINATED matching canary probe is honoured" 0 "canary ok" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_noeol_ok" --ref main...HEAD
+
+# A canary of nothing but comments tests zero probes. It must not announce a verification it
+# did not perform — the same defect as the unterminated-line case, one layer further in.
+canary_vacuous="$TMP/canary-vacuous"
+make_patterns "$canary_vacuous"
+printf '# only a comment\n\n' >"$canary_vacuous/privacy-canary.txt"
+expect "a canary with no usable probes REFUSES" 2 "no usable probes" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_vacuous" --ref main...HEAD
+
+# A real canary states HOW MANY probes it proved, so "canary ok" is countable rather than bare.
+expect "canary ok states the probe count" 0 "1 probe(s)" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_ok" --ref main...HEAD
 
 # No canary is a degraded mode: proven to compile, not proven to match. Say so.
 expect "absent canary is announced as unproven" 0 "not to match anything" -- \
