@@ -59,7 +59,11 @@ while [ $# -gt 0 ]; do
 	# it from the environment means the value never crosses a parser: not make's, not the
 	# shell's. CI passes --title-env and never --title.
 	--title-env)
-		_tv="${2:?--title-env needs a variable NAME}"
+		# `${2-}` and not `${2:?…}`: the latter makes the SHELL exit on an empty value, with a
+		# status that is not this script's 2 — a usage error would leave as exit 1, which means
+		# "a reference does not resolve". The three codes are the contract; nothing may leave by
+		# a fourth door.
+		_tv="${2-}"
 		case "$_tv" in
 		*[!A-Za-z0-9_]* | "" | [0-9]*) die2 "--title-env takes a variable NAME, got '$_tv'" ;;
 		esac
