@@ -132,6 +132,16 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@if grep -nE -- '(^|[[:space:]])(-k|--insecure)([[:space:]]|$$)' $(DEVCT_SCRIPTS); then \
 	  echo "gates-sh: 'curl -k/--insecure' is banned in deploy/devct — pin the cert instead"; exit 1; \
 	fi
+	@# A PR title must never reach a recipe as a MAKE variable. make expands a command-line value
+	@# whether or not the recipe references it — command-line variables are exported to the recipe
+	@# environment, and exporting forces expansion — so `make … TITLE='$$(shell cmd)'` executes cmd
+	@# no matter how carefully the recipe is written. Un-interpolating the recipe satisfies the
+	@# letter and leaves the vector; the value has to arrive in the ENVIRONMENT instead, which is
+	@# why pr-title-check takes TITLE_ENV=<NAME>. Same tooth as the curl ban above, for the same
+	@# reason: the rule was already written in a comment once and a comment is not a control.
+	@if grep -n 'title-env "$$(TITLE)"\|--title "$$(TITLE)"' Makefile; then \
+	  echo "gates-sh: a PR title must not be interpolated into a recipe — pass TITLE_ENV=<NAME> (quince#94)"; exit 1; \
+	fi
 	@# The privacy gate's failure paths. Gated rather than hand-run, because "the gate passes
 	@# when it cannot run" is precisely the bug this suite exists to hold shut — leaving its
 	@# proof to whoever remembers would reproduce the defect one level up (quince#41, #64).
@@ -192,22 +202,30 @@ pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-
 #
 #   make pr-title-check REPO=owner/name TITLE_ENV=PR_TITLE   <- CI USES THIS
 #   make pr-title-check REPO=owner/name PR=42
-#   make pr-title-check REPO=owner/name TITLE='the title'    <- LOCAL ONLY, see below
+#   PR_TITLE='the title' make pr-title-check REPO=owner/name TITLE_ENV=PR_TITLE   <- hand-run
 #
-# TITLE= IS INJECTABLE AND IS FOR HAND-RUNS ONLY. make expands $(TITLE) into the recipe before
-# the shell parses it, so a title containing a quote and a semicolon executes. Demonstrated
-# rather than assumed:
+# THERE IS DELIBERATELY NO `TITLE=`. It existed, marked "local only, injectable", and the review
+# asked that the title never be interpolated into the recipe text. Measuring how to do that
+# found something worse: **`make` expands a command-line value whether the recipe references it
+# or not**, because command-line variables are exported to the recipe's environment, and
+# exporting forces expansion. Both probes, on this box:
 #
-#   make pr-title-check REPO=o/n TITLE='x"; touch /tmp/proof; echo "'   -> /tmp/proof exists
-#   PR_TITLE='<same>' make pr-title-check REPO=o/n TITLE_ENV=PR_TITLE   -> it does not
+#   make -f p probe TITLE='$(shell touch /tmp/x)'     recipe references TITLE   -> /tmp/x EXISTS
+#   make -f p probe TITLE='$(shell touch /tmp/x)'     recipe NEVER mentions it  -> /tmp/x EXISTS
+#   PR_TITLE='$(shell touch /tmp/x)' make -f p probe                            -> it does NOT
 #
-# A PR title is attacker-controlled on a public repository, so CI passes TITLE_ENV and the value
-# never crosses make's parser or the shell's. TITLE= is kept because typing your own title at
-# your own shell is not an attack on yourself, and removing it would push people to a longer
-# incantation for the safe-by-construction local case.
+# So un-interpolating the recipe would have satisfied the letter of the ruling and left the
+# vector open one level up — a fix that reads as safe and is not. A title arriving as a make
+# variable cannot be made safe at any recipe; a title arriving in the ENVIRONMENT never becomes
+# a make variable and is never expanded. That is the whole reason TITLE_ENV takes a NAME.
+#
+# A PR title is attacker-controlled on a public repository, so this matters for CI and for
+# anything anyone later wires this into — which was the review's actual argument for deleting
+# it, and it is stronger than either of us realised. `gates-sh` greps for a reintroduced
+# `$(TITLE)` so the rule has teeth rather than living in this comment.
 .PHONY: pr-title-check
 pr-title-check: ## Bare #N in a PR title must resolve in that repo (0 clean · 1 match · 2 DID NOT RUN)
-	@bin/pr-title-refs --repo "$(REPO)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",--title "$(TITLE)"))
+	@bin/pr-title-refs --repo "$(REPO)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",))
 
 # The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and
 # pasted into a PR until now (quince#32). preflight's refusals ARE its product: it exists to stop a
