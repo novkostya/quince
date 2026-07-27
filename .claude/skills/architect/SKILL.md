@@ -157,12 +157,33 @@ and not malformed, it just describes yesterday. Observed on a real arch box, whe
 a commit predating the file entirely (#33).
 
 **`bin/forge-watch watch`, run as a BACKGROUND task, does the waking** — and the loop belongs to the
-tool, not to you:
+tool, not to you. **Arm it LAST, as the final action of the turn, after a foreground catch-up tick:**
 
 ```sh
 git -C "$PWD" pull --ff-only          # the watch set is this checkout's copy
+# 1. do all the work first: every review, every merge, every comment
+# 2. consume the catch-up SYNCHRONOUSLY, where you can read it   (FOREGROUND — one pass, returns)
+bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"
+# 3. arm, last, against a now-current observation                (BACKGROUND task)
 bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 ```
+
+**This section named the mechanism and never said when in the turn to run it** (quince#100). The
+natural reading — arm once you know you need one, right after handling the events that woke you — is
+the broken one: self-caused events are deliberately not suppressed (quince#62, item 6), so a watch
+armed *before* your next approval or merge is dead by design by the time the turn ends, and the `Stop`
+hook is telling the truth when it says so. Roughly a third of an architect's wakes are already
+self-inflicted; this is that same fact arriving one step earlier.
+
+**Arming last is necessary and not sufficient, which is what step 2 is for.** A re-arm from `dead`
+correctly emits what accrued, and what accrued is your own actions from the turn just finished — so the
+first tick exits immediately and reaching a *quiet* watch takes two arms, only the second of which can
+survive the end of the turn. The foreground tick eats that catch-up in the open rather than delivering
+it as a task notification after the turn has ended. It is safe there because a hand-run `tick`
+deliberately does **not** write the watcher record (quince#49), so it cannot make a dead watch look
+alive. The measurement is the implementer's — three `Stop`-hook firings before the tick step, none
+after — and it is quoted here with that seat named, because a measurement carries the box it was taken
+on.
 
 **The reviewer declares too, and its case is the one quince#80 was filed from.** The blocked list that
 went unwatched was an *architect's* — quince#70/#71/#72/#75/#78/#80, most with no PR at all — and the

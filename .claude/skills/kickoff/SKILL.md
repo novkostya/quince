@@ -148,13 +148,33 @@ reviewer"** — which is the sentence one session ended on at `19:41Z` with no w
 fallback armed, four minutes before the verdict it was waiting for landed (quince#62). Rewriting the
 default from *stop* to *proceed* did not stop a session finding a new sentence for stopping.
 
-**So: the moment your first PR is open, ARM THE WATCH.** Record the repo and number of every PR you
-open — that is your watch set, self-describing, and it needs no declared file because you know what you
-opened — and run this as a **background** task, one per repo you have PRs in:
+**So: once you have a PR open, you owe a watch — and you arm it LAST, as the final action of the turn,
+after a foreground catch-up tick.** Record the repo and number of every PR you open; that is your watch
+set, self-describing, and it needs no declared file because you know what you opened.
 
 ```sh
+# 1. do all the work first: every push, every comment
+# 2. consume the catch-up SYNCHRONOUSLY, where you can read it       (FOREGROUND — one pass, returns)
+bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"
+# 3. arm, last, against a now-current observation                    (BACKGROUND task)
 bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60
 ```
+
+**This section used to say "the moment your first PR is open, ARM THE WATCH" and never said when in the
+turn**, and the natural reading of that — arm as soon as you know you need one — is the broken one
+(quince#100). Self-caused events are deliberately not suppressed (quince#62), and **an implementer's
+last act is almost always a push or a comment**, which is precisely an event on a PR it is watching. So
+a watch armed before that act is dead *by design* by the time the turn ends, and the `Stop` hook below
+is telling the truth when it says so. That is worse for you than for the architect, whose self-caused
+events are approvals and merges — occasional — where yours are *how a turn ends*.
+
+**Arming last is necessary and not sufficient, which is what step 2 is for.** A re-arm from `dead`
+correctly emits what accrued, and what accrued is your own actions from the turn just finished — so the
+first tick exits immediately and reaching a *quiet* watch takes two arms, only the second of which can
+survive the end of the turn. The foreground tick eats that catch-up where you can see it, instead of it
+arriving as a task notification after your turn is already over. It is safe to put there because a
+hand-run `tick` deliberately does **not** write the watcher record (quince#49), so it cannot make a dead
+watch look alive. Measured on this side: three `Stop`-hook firings before the tick step, none after.
 
 **And DECLARE WHAT YOU ARE BLOCKED ON, in the same command.** Your PR set is self-describing; your
 *blocked* set is not, and the channel that carries authority here is an **issue** — an Operator ruling
