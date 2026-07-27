@@ -1,0 +1,31 @@
+# The minimum number of usable patterns the privacy list must carry.
+#
+# WHY THIS NUMBER LIVES HERE, IN THE PUBLIC REPO, AND NOT IN THE PRIVATE LAYER
+#
+# `privacy-check` refuses an EMPTY pattern list (exit 2) and accepts a SHORTENED one (exit 0). The
+# identity that can shorten it is the implementer — which is the identity the list constrains, and
+# which holds `write` on `quince-local` by ruling (quince#44, 2026-07-27), because the layer is a
+# living document an agent must be able to maintain without the Operator as a hop.
+#
+# The control that resolves this everywhere else in the project is a reviewed PR against a
+# protected branch. It is NOT AVAILABLE on `quince-local`: branch protection there returns
+# "Upgrade to GitHub Pro or make this repository public to enable this feature", because the repo
+# is private and protection on private repositories needs a paid plan. Measured, not assumed.
+#
+# So the floor lives in `quince`, which IS protected: one approval, required checks, no force
+# pushes, admins included. Trimming the list now fails the gate on every box and in CI until this
+# number is lowered — and lowering it is a reviewed change in a protected repo, by an approver who
+# is not the author. That restores the review model to the one artifact that could not have it,
+# without moving the list itself.
+#
+# A count, deliberately, not a checksum: the list is expected to CHANGE, and a checksum would fail
+# on every legitimate edit until someone updated it, which trains people to update it without
+# looking — the exact reflex this project keeps filing issues about. A count only moves when the
+# list shrinks, which is the only direction that weakens the gate.
+#
+# RAISE THIS when the list grows, in the same PR that grows it if the two are ever in one place.
+# A floor left below the real count still blocks the shrink it was set for; it simply protects
+# less than it could.
+#
+# This number is not sensitive. It says how many patterns exist, never what they are.
+9

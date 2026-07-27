@@ -161,7 +161,7 @@ else
 		# First line only: the gate's second line is "this is NOT a clean result", addressed to
 		# somebody reading a sweep, and it reads as a non-sequitur inside a start-up refusal.
 		layer_why=$(printf '%s\n' "$layer_why" | head -n 1)
-		bad "this box cannot run the privacy gate on $PRIVATE_LAYER, so it must not start. The gate observed — ${layer_why:-no reason reported}. Fix: place a usable pattern list at $PATTERN_FILE (file 0600, directory 0700). Not saying WHY beyond what the gate reported: this cannot tell 'never placed' from 'placed and since lost'."
+		bad "this box cannot run the privacy gate on $PRIVATE_LAYER, so it must not start. The gate observed — ${layer_why:-no reason reported}. Fix: run deploy/runner/provision, which clones the private layer onto this box; or place a usable pattern list at $PATTERN_FILE by hand (file 0600, directory 0700). Not saying WHY beyond what the gate reported: this cannot tell 'never placed' from 'placed and since lost'."
 	fi
 fi
 

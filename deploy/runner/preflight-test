@@ -57,6 +57,13 @@ chmod 600 "$GOOD_LAYER/privacy-patterns.txt"
 
 ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
 
+# preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
+# from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
+# a synthetic floor every passing case here would be asserting the size of the Operator’s list —
+# the ninth variable, and the same read-the-box trap one delegation deeper.
+FLOOR_SYNTH="$TMP/floor-1"
+printf "1\n" >"$FLOOR_SYNTH"
+
 EMPTY_LAYER="$TMP/layer-empty"
 mkdir -p "$EMPTY_LAYER"
 : >"$EMPTY_LAYER/privacy-patterns.txt"
@@ -99,7 +106,7 @@ chmod 644 "$LOOSE_LAYER/privacy-patterns.txt"
 # shellcheck disable=SC2086
 PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
 	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
-	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK"
+	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK -u PRIVACY_FLOOR_FILE"
 
 # Every case gets a SYNTHETIC private layer by default. preflight now refuses without one, so
 # otherwise every want-exit-0 case would be asserting "this box happens to have
@@ -108,7 +115,7 @@ PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKE
 # measured on this platform, `env A=1 A=2` yields 2, rather than erroring or taking the first.
 run_preflight() {
 	# shellcheck disable=SC2086
-	env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
+	env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" "PRIVACY_FLOOR_FILE=$FLOOR_SYNTH" "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
 }
 
 # expect <name> <want-exit> <substring> -- <env assignments...>
@@ -200,7 +207,7 @@ mkdir -p "$emptybin"
 # The SAME $PF_UNSET, not a copy of it — this case cannot use run_preflight because it must point
 # PATH at a directory with no `claude`, which run_preflight deliberately does not allow.
 # shellcheck disable=SC2086
-out=$(env $PF_UNSET PATH="$emptybin" QUINCE_RUNNER_ROLE=arch \
+out=$(env $PF_UNSET "PRIVACY_FLOOR_FILE=$FLOOR_SYNTH" PATH="$emptybin" QUINCE_RUNNER_ROLE=arch \
 	"QUINCE_PRIVATE_LAYER=$GOOD_LAYER" \
 	"QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "$PREFLIGHT" 2>&1) && got=0 || got=$?
 if [ "$got" -eq 1 ] && printf '%s\n' "$out" | grep -qF "claude is not installed"; then
@@ -225,7 +232,7 @@ expect "an unreachable private layer refuses" 1 "cannot run the privacy gate" --
 # The message must NAME THE FIX THAT EXISTS TODAY — hand-placement. When `provision` learns to
 # place the layer, correcting this belongs to that change, and this assertion is what will fail and
 # force it rather than letting the text rot into naming a fix nobody has built.
-expect "…and names the fix that exists today" 1 "place a usable pattern list at" -- \
+expect "…and names the fix that exists today: provision" 1 "run deploy/runner/provision" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
 
@@ -287,7 +294,7 @@ git -C "$staged_repo" commit -qm baseline
 printf 'the host is zzsecrethostzz\n' >"$staged_repo/leak.md"
 git -C "$staged_repo" add leak.md
 # shellcheck disable=SC2086
-out=$(cd "$staged_repo" && env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" \
+out=$(cd "$staged_repo" && env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" "PRIVACY_FLOOR_FILE=$FLOOR_SYNTH" \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1) && got=0 || got=$?
 if [ "$got" -eq 0 ] && printf '%s\n' "$out" | grep -qF "private layer present"; then
@@ -345,6 +352,11 @@ expect "ambient auth token does not reach the credential case" 0 "no API-key or 
 # The seventh variable needs the same guard as the other six, or the newest read is the only
 # unprotected one. Pointed at a layer that does not exist: if it leaked, the passing cases would
 # refuse.
+export PRIVACY_FLOOR_FILE=/nonexistent/floor
+expect "ambient floor path does not reach a passing case" 0 "private layer present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+unset PRIVACY_FLOOR_FILE
+
 export QUINCE_PRIVATE_LAYER="$ABSENT_LAYER"
 expect "ambient private-layer path does not reach a passing case" 0 "private layer present" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
