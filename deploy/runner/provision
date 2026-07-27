@@ -17,6 +17,47 @@ case "$ROLE" in implementer|arch) ;; *) printf 'provision: unknown role %s\n' "$
 SERVICE_NAME="quince-runner"
 [ "$ROLE" = arch ] && SERVICE_NAME="quince-arch"
 
+# --- THE ROLE MUST MATCH THE BOX, AND THIS REFUSES BEFORE ANYTHING IS TOUCHED (quince#121) -----
+# Placed HERE, above the package install and the launchpad update, because a refusal that arrives
+# after the script has begun mutating the box is a refusal that has already changed it. Everything
+# this check needs is known at argument-parse time; the first draft sat beside the layer section a
+# hundred lines down and reported `exit=2` having already installed packages and updated the
+# launchpad. Correct verdict, wrong moment.
+#
+# WHAT WENT WRONG, so the guard is not mistaken for ceremony. `--role` is an ARGUMENT and defaults
+# to `implementer`. `QUINCE_RUNNER_ROLE` is NOT read as input — it appears once in this file,
+# exported TO `preflight` — so an invocation setting it in the environment silently gets the
+# default. On the architect box that default found no bot token (correctly: that box must never
+# hold one), printed "NOT placing the private layer" as a NOTE, and then carried on to install an
+# implementer-role service on the architect's machine. Nothing was repaired, and the box was left
+# holding exactly the artifact the two-box identity model exists to prevent.
+#
+# The missing flag was the trigger. The DEFECT is that this script warned and continued: a run that
+# cannot do the thing it exists to do must not proceed to configure the box for it.
+#
+# Only this one shape refuses, because only this one is unambiguous: the OTHER role's credential is
+# present and this role's is not. That is a wrong `--role`, not a box awaiting its first token.
+# Neither-token and this-token-present are both left alone — "no credentials yet" is a legitimate
+# first-provision state, and the layer section's note already covers it.
+_bot_token="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
+_arch_token="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
+if [ "$ROLE" = arch ]; then
+	_role_token="$_arch_token" _other_token="$_bot_token" _other_role=implementer
+else
+	_role_token="$_bot_token" _other_token="$_arch_token" _other_role=arch
+fi
+if [ ! -f "$_role_token" ] && [ -f "$_other_token" ]; then
+	printf 'provision: role %s needs %s, which is absent — but this box HOLDS the %s credential.\n' \
+		"$ROLE" "$_role_token" "$_other_role" >&2
+	printf 'provision: refusing rather than provisioning this box as %s, and refusing BEFORE touching\n' "$ROLE" >&2
+	printf '    anything. That is near-certainly a missing or wrong --role: it is an ARGUMENT\n' >&2
+	printf '    (--role %s), and QUINCE_RUNNER_ROLE in the environment is NOT read as input.\n' "$_other_role" >&2
+	printf '    Re-run as: %s --role %s\n' "$0" "$_other_role" >&2
+	printf '    Continuing would install a %s-role service on a %s box (quince#121).\n' \
+		"$ROLE" "$_other_role" >&2
+	exit 2
+fi
+
 REPO_URL="${REPO_URL:-https://github.com/novkostya/quince.git}"
 RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
 # Verified at pin time from the Claude Code setup docs (2026-07-26). The apk repository is signed;
@@ -103,13 +144,11 @@ fi
 # the bot on the arch box would mean placing the one credential that box must never hold.
 LAYER_DIR="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
 LAYER_URL="${LAYER_URL:-https://github.com/novkostya/quince-local.git}"
-if [ "$ROLE" = arch ]; then
-	LAYER_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
-	LAYER_USER=novkostya
-else
-	LAYER_TOKEN="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
-	LAYER_USER=quince-bot
-fi
+# The role/box mismatch was already refused at argument-parse time, above, before anything on this
+# box was touched. Here we only need the credential this role actually uses.
+LAYER_TOKEN="$_role_token"
+LAYER_USER=quince-bot
+[ "$ROLE" = arch ] && LAYER_USER=novkostya
 
 # The token reaches git through a credential helper — never argv, never the remote URL, never
 # .git/config. The same discipline as every other credential in this project.
