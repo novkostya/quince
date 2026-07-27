@@ -812,6 +812,14 @@ allowance faster for no benefit.
     declaration is a request; a reference is the tool's own inference, and one bad guess must not exit
     the watch.
 
+41. **An empty queue is not a finish for the REVIEWER.** `owed --all` returns the whole declared set
+    unconditionally, with no queue query at all, so the arming gate blocks whenever no watch is live
+    regardless of queue depth. `owed --author` is unchanged: an implementer's set is what it authored,
+    so an empty queue there genuinely owes nothing.
+42. The two halves state different REASONS — `declared` versus `open PRs`. A true verdict with a
+    false justification is harder to catch than either error alone, and a reviewer resting on an
+    empty queue has no open PRs to cite.
+
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
@@ -819,7 +827,7 @@ allowance faster for no benefit.
   this work proved it by hand and pasted the output into the PR, which is honest only while somebody
   keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
-  and this is its answer. Measured at ~23 s for all 36 fixtures — and the count is **asserted, not
+  and this is its answer. Measured at ~23 s for all 38 fixtures — and the count is **asserted, not
   just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently
   shrunk is visible in the CI log rather than passing as though it were whole. A bare `fixtures
   pass` could not tell 28 from 18, and the fixtures likeliest to be dropped under time pressure are
@@ -838,7 +846,7 @@ allowance faster for no benefit.
   Story **22 is a CLI smoke recorded in the PR** and story **34 is asserted by `forge-watch-exits-test`**:
   the refusals are argument-time behaviour, and a
   fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**
-  split: the decision half is `"kind": "owed"` fixtures, and the **hook half is proven by running a
+  split: the decision half is `"kind": "owed"` fixtures — which now carry a `mode`, since quince#71 made the reviewer and implementer halves answer different questions (stories **41–42**), and the **hook half is proven by running a
   real headless session** (§4f) — it is a claim about the harness's behaviour, and no fixture of ours
   can make it. Stories **26–27** need **both** a pure and a loop fixture, and the reason is quince#65's
   own finding: a pure fixture in that area already passed while the live path delivered nothing for

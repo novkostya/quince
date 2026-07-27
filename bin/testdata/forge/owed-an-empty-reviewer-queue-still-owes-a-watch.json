@@ -1,0 +1,14 @@
+{
+  "kind": "owed",
+  "mode": "all",
+  "note": "quince#71's ruling, as a fixture: AN EMPTY QUEUE IS NOT A LEGITIMATE FINISH FOR THE REVIEWER. Before this, `owed --all` listed open PRs per repo and returned only the non-empty ones — accurate about the PRESENT and wrong as a FINISH CONDITION. It was faithful to `/architect` §7, and §7 was what was wrong. The asymmetry: an implementer's set is what it AUTHORED and cannot change without it; a reviewer's set is what ARRIVES, and nothing inside the session can know that nothing further is coming. Measured on both sides before it was ruled — twice an architect overrode the gate, armed against its 'nothing owed', and a PR arrived within ~15 minutes (quince#69, quince#73); once an architect OBEYED it, stopped on an empty queue, and went dark with the gate silent throughout, because by its own definition nothing was owed. Two overrides that were right and one obedience that was wrong is a gate wrong in one direction only. The table here is the whole declared set with no queue anywhere in it — which is the point: under `all` the class arrives from the process table alone, so the reason printed is `declared`, not `open PRs`. Printing 'open PRs' for a reviewer with an empty queue would be a false reason bolted to a true verdict.",
+  "table": [
+    ["novkostya/quince", 3],
+    ["novkostya/quince-devlog", 4]
+  ],
+  "expect": [
+    "OWED  novkostya/quince — declared, watch=dead. Re-arm from that state; do NOT reseed it.",
+    "OWED  novkostya/quince-devlog — declared, and no watch has ever been armed here."
+  ],
+  "expect_exit": 8
+}

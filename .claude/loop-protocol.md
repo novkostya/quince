@@ -152,15 +152,28 @@ So:
    would mean the fallback cannot rescue a session that is stuck rather than sleeping, which is the
    case it exists for. Recorded as an open question rather than resolved by the reading that suits us.
 
-3. **Arming is not optional, and it is not on your honour.** `bin/forge-watch owed` asks whether there
-   are open PRs here with no live watch, and a `Stop` hook in `.claude/settings.json` runs it when a
-   turn ends. If a watch is owed, the turn is **blocked once** with the exact command to run; end the
-   turn again and it stops blocking and tells the **human** instead. It exists because the previous
-   version of this file said *arm a watch* and a session simply did not — no watcher, no state, no
-   fallback — and ended on *"the ball is back with the reviewer"* four minutes before the verdict
-   landed. A rule that tells a session to do something is satisfied by a session that does not do it.
-   If it cannot check — no credential, forge unreachable — it says the question was **not checked**,
-   which is not the same as *nothing is owed*, and neither blocks nor reassures.
+3. **Arming is not optional, and it is not on your honour.** `bin/forge-watch owed` asks whether a
+   live watch is owed, and a `Stop` hook in `.claude/settings.json` runs it when a turn ends. If one
+   is owed, the turn is **blocked once** with the exact command to run; end the turn again and it
+   stops blocking and tells the **human** instead. It exists because the previous version of this
+   file said *arm a watch* and a session simply did not — no watcher, no state, no fallback — and
+   ended on *"the ball is back with the reviewer"* four minutes before the verdict landed. A rule
+   that tells a session to do something is satisfied by a session that does not do it. If it cannot
+   check — no credential, forge unreachable — it says the question was **not checked**, which is not
+   the same as *nothing is owed*, and neither blocks nor reassures.
+
+   **The two halves are asked different questions, and only one of them is about the queue**
+   (quince#71). `--author` asks the forge which repositories that login has open PRs in: an
+   implementer's set is what it AUTHORED, so an empty queue genuinely means nothing is owed.
+   `--all` returns **the whole declared set unconditionally**, with no queue query at all: a
+   reviewer's set is what ARRIVES, and **an empty queue is not a finish** — the work is done when
+   nothing further is coming, which is not knowable from inside. So a reviewer at rest is *armed and
+   idle*, never *stopped because the queue was empty*, and the tool's answer says `declared` rather
+   than `open PRs` so the reason cannot be a lie attached to a true verdict.
+
+   That change also takes the forge off the hook's path for the reviewer half: whether a watch is
+   live on a declared set is answerable from local state alone, so `owed --all` can no longer be
+   wedged by an unreachable forge.
 
 4. **A tick that was due and did not happen is reported, not absorbed.** `forge-watch` emits
    `event=tick-overdue due=… late=…` for it. The events themselves cannot carry that fact: they arrive

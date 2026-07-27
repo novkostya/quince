@@ -273,6 +273,29 @@ hook calls" in your report rather than absorbing it.
 
 One short report: what is open across every declared repo, what you reviewed and ruled, what landed,
 what is owed and by whom, and any stall time lost. Then let the watcher wake you — the architect's
-normal state is asleep with a watch armed, not polling, and not finished. Finishing is: the queue empty,
-or a decision that is the Operator's, or an unruled gap, and in the last two cases say exactly what
-would unblock you.
+normal state is asleep with a watch armed, not polling, and not finished.
+
+**AN EMPTY QUEUE IS NOT A FINISH.** This section used to name it as one, and that was wrong
+(quince#71). A reviewer's work is not done when the queue is empty; it is done when nothing further
+is coming, **and that is not knowable from inside the session.** The asymmetry is the whole of it: an
+implementer's set is what it AUTHORED and cannot change without it, while a reviewer's set is what
+ARRIVES.
+
+So the resting state is **watch armed and idle**, and the report says so — *"armed, pid N, idle"*,
+never *"queue empty, stopping"*. A session that stops because the queue is empty is a session that
+has stopped watching, which is quince#62's failure re-entering through the front door.
+
+Measured on both sides before it was ruled, which is why it is stated rather than suggested:
+
+- **Twice** an architect overrode the gate, armed against its *"nothing owed"*, and a PR arrived
+  within ~15 minutes — quince#69 and quince#73, two sessions, about six hours apart.
+- **Once** an architect obeyed it, stopped on an empty queue, and went dark with no watch and no
+  fallback. The gate was silent throughout, because by its own definition nothing was owed.
+
+Two overrides that were right and one obedience that was wrong is a gate wrong in one direction only.
+**`owed --all` now returns the whole declared set unconditionally**, so the `Stop` hook blocks
+whenever no watch is live regardless of queue depth — the tool no longer has to be overridden to be
+correct, and its answer for a reviewer reads `declared` rather than `open PRs`.
+
+Finishing is: **a decision that is the Operator's, or an unruled gap** — and in both cases say
+exactly what would unblock you.

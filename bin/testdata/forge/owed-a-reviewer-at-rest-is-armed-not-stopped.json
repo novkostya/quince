@@ -1,0 +1,14 @@
+{
+  "kind": "owed",
+  "mode": "all",
+  "note": "The positive side of quince#71, and the reason it needs its own fixture: the ruling replaces one resting state with another rather than simply making the gate stricter. The reviewer's correct rest is WATCH ARMED AND IDLE — never 'queue empty, therefore stopped' — so `owed --all` must have a satisfied answer, and that answer must be visible. A gate whose satisfied answer is silence cannot be seen to have run, which is this directory's founding rule; here it also has to say the right REASON, because 'open PRs, and a live watch' would be a lie about a reviewer resting on an empty queue. The verdict and the reason are separately capable of being wrong, and only fixing the verdict is how a true statement acquires a false justification.",
+  "table": [
+    ["novkostya/quince", 0],
+    ["novkostya/quince-devlog", 0]
+  ],
+  "expect": [
+    "ok    novkostya/quince — declared, and a live watch",
+    "ok    novkostya/quince-devlog — declared, and a live watch"
+  ],
+  "expect_exit": 0
+}
