@@ -29,7 +29,7 @@
   },
   "expect_events": [
     "event=issue-updated issue=75 at=2026-07-27T08:15:02Z actor=novkostya kind=comment",
-    "event=issue-comment issue=75 at=2026-07-27T08:14:50Z actor=novkostya",
+    "event=issue-comment issue=75 count=1 at=2026-07-27T08:14:50Z actor=novkostya",
     "event=issue-closed issue=75 at=2026-07-27T08:15:02Z reason=COMPLETED"
   ]
 }

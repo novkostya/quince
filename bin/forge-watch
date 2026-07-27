@@ -148,6 +148,14 @@ usage: forge-watch <verb>
   session is waiting for. (Issue tidying is the argument against, and it does not apply to an issue
   somebody has explicitly declared they are stuck on.)
 
+  UNDECLARING AN ISSUE DOES NOT FORGET IT. Its record stays in the state, so RE-DECLARING it later
+  diffs against the old baseline and reports everything that accrued while it was undeclared. That is
+  deliberate and it is the same shape as re-arming a `dead` watch — which also refuses to reseed,
+  precisely so the gap is reported rather than invented away. No stale events result from the record
+  merely sitting there: the diff iterates the OBSERVATION, so an issue nobody is fetching produces
+  nothing. Stated here because it is a decision, and an undocumented decision is indistinguishable
+  from an accident (raised in review of quince#87).
+
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
         merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
         issue-first-observation · issue-updated · issue-comment · issue-closed · issue-reopened ·
@@ -406,6 +414,16 @@ step() {
 	# issue-comment: the typed event this whole channel was built for. A ruling IS a comment, so the
 	# event names the issue, when, and WHO — a blocked session needs to know a ruling landed, not
 	# that something about an issue changed.
+	#
+	# `count=` is how many arrived since the last observation; `at=` and `actor=` describe the NEWEST
+	# of them. Without the count, a session woken by three rulings reads the event as one and acts on
+	# the last — confident about a thread it has only partly seen, which is the same class of wrong as
+	# `updated` naming a bystander. Added on review of quince#87.
+	#
+	# The trigger is a count INCREASE, so a delete-plus-add inside one interval emits no typed event.
+	# Reasoned rather than missed: `issue-updated` still fires, because updatedAt moved, and that is
+	# exactly what a backstop is for. Matching comments by identity to catch it would add carried
+	# state to the half of this tool that has been wrong most often.
 	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
 		(.issues.items // [])[] as $i
 		| ($old | map(select(.number == $i.number)) | first) as $o
@@ -414,7 +432,7 @@ step() {
 		| [($o.activity // [])[] | select(.kind == "comment")] as $was
 		| select(($new | length) > ($was | length))
 		| ($new | sort_by(.at) | last) as $c
-		| "event=issue-comment issue=\($i.number) at=\($c.at) actor=\($c.actor)"'
+		| "event=issue-comment issue=\($i.number) count=\(($new | length) - ($was | length)) at=\($c.at) actor=\($c.actor)"'
 
 	# issue-closed / issue-reopened: a CLOSE wakes a session that declared the issue, because a
 	# closed blocker is exactly the news it is blocked waiting for. No actor: `gh issue view` does
@@ -933,12 +951,34 @@ declare_issues() {
 # So it refuses, in the same spirit as `.claude/forge-set` refusing to default.
 issue_specs_ok() {
 	_iso_all=$1
-	[ "$_iso_all" = yes ] || return 0
+	_iso_repo=$3
 	for _iso_s in $2; do
-		case "$_iso_s" in
-		*/*'#'*) : ;;
-		*) die "--issue $_iso_s is ambiguous under --all: issue numbers collide across repositories.
+		if [ "$_iso_all" = yes ]; then
+			case "$_iso_s" in
+			*/*'#'*) : ;;
+			*) die "--issue $_iso_s is ambiguous under --all: issue numbers collide across repositories.
     Give it as owner/name#number, e.g. --issue novkostya/quince#$_iso_s" ;;
+			esac
+			continue
+		fi
+		# The SINGLE-REPO path, and the case that was silent (review of quince#87). `declare_issues`
+		# filters specs by repository with a bare `continue`, which is load-bearing and correct under
+		# --all — every repo there is handed the WHOLE spec list and must keep only its own — and is a
+		# silent no-op when it is the only filter. So `--repo novkostya/quince --issue
+		# novkostya/quince-devlog#26` declared nothing and said nothing, and worse: one unmatched spec
+		# replaced an existing declaration with an empty one, byte-identical to `--no-issues`.
+		#
+		# Not a contrived case. This is a two-repo project, `/kickoff` documents the bare-number
+		# single-repo form as the implementer's shape, and an implementer blocked on a devlog issue is
+		# ordinary. It is also exactly the failure this feature exists to remove, one level in: a
+		# declaration that reaches nothing, with no way to tell from the outside.
+		case "$_iso_s" in
+		*/*'#'*)
+			[ "${_iso_s%%#*}" = "$_iso_repo" ] ||
+				die "--issue $_iso_s names ${_iso_s%%#*}, but --repo is $_iso_repo — nothing would watch it,
+    and the watch would say nothing about that. Watch the other repository with its own \`watch
+    --repo ${_iso_s%%#*}\`, or use --all and declare against the whole set."
+			;;
 		esac
 	done
 }
@@ -1547,7 +1587,7 @@ tick)
 		*) die "unknown option: $1" ;;
 		esac
 	done
-	issue_specs_ok "$_all" "$_ispecs"
+	issue_specs_ok "$_all" "$_ispecs" "$_repo"
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
 		require_gh "$_ghcmd"
@@ -1629,7 +1669,7 @@ watch)
 	require_gh "$_ghcmd"
 	# Validated BEFORE the preflight, and before anything is written: a malformed --issue must not
 	# leave half a declaration behind on the repos that happened to be processed first.
-	issue_specs_ok "$_all" "$_ispecs"
+	issue_specs_ok "$_all" "$_ispecs" "$_repo"
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
 		# The set is read BEFORE the preflight so a malformed declaration fails here rather than

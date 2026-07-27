@@ -1,0 +1,36 @@
+{
+  "note": "`count=` earns a fixture rather than riding along untested. Raised in review of quince#87: 'Only the newest comment is named when several land in one interval. Fine for waking; a count=N would let the woken session know whether it is reading one ruling or three.' Three comments land on a declared issue inside one interval — a real shape, since a watch re-armed after an outage diffs the whole gap at once, and the quince#62 thread took fifteen comments. Without the count the session reads one event, acts on the newest, and is confident about a thread it has only partly seen: the same class of wrong as `updated` naming a bystander. `at=` and `actor=` still describe the NEWEST comment, which is what a woken session needs to find its place; the count is what tells it to keep reading upward.",
+  "before": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [62],
+      "declared_at": "2026-07-27T03:00:00Z",
+      "items": [
+        { "number": 62, "state": "OPEN", "updatedAt": "2026-07-27T03:57:20Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T03:57:20Z","actor":"novkostya","kind":"comment"} ] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "items": [
+        { "number": 62, "state": "OPEN", "updatedAt": "2026-07-27T04:46:42Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [
+            {"at":"2026-07-27T03:57:20Z","actor":"novkostya","kind":"comment"},
+            {"at":"2026-07-27T04:12:05Z","actor":"quince-bot","kind":"comment"},
+            {"at":"2026-07-27T04:30:11Z","actor":"novkostya","kind":"comment"},
+            {"at":"2026-07-27T04:46:42Z","actor":"quince-bot","kind":"comment"}
+          ] }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-updated issue=62 at=2026-07-27T04:46:42Z actor=quince-bot kind=comment",
+    "event=issue-comment issue=62 count=3 at=2026-07-27T04:46:42Z actor=quince-bot"
+  ]
+}
