@@ -55,6 +55,17 @@ mkdir -p "$GOOD_LAYER"
 printf '# synthetic\nzzsecrethostzz\n' >"$GOOD_LAYER/privacy-patterns.txt"
 chmod 600 "$GOOD_LAYER/privacy-patterns.txt"
 
+# A SPLIT layer — usable patterns across BOTH lists (privacy-patterns.txt + privacy-patterns-cs.txt,
+# quince#109). The banner used to run `grep -cvE` over the case-INSENSITIVE file alone, so a split
+# layer read one pattern short of its true size: "8 usable patterns" beside a floor of 9 on the real
+# box, which reads as a list that has shrunk below its floor (quince#132). Here it is 1 + 1, and the
+# banner — now quoting the gate's own count over both lists — must say so.
+SPLIT_LAYER="$TMP/layer-split"
+mkdir -p "$SPLIT_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$SPLIT_LAYER/privacy-patterns.txt"
+printf '# synthetic\nZZSecretHostZZ\n' >"$SPLIT_LAYER/privacy-patterns-cs.txt"
+chmod 600 "$SPLIT_LAYER/privacy-patterns.txt" "$SPLIT_LAYER/privacy-patterns-cs.txt"
+
 ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
 
 # Two GIT-CLONE layers for quince#121: present and readable, differing only in whether they can ever
@@ -471,9 +482,19 @@ else
 fi
 
 # A usable layer passes and states the pattern COUNT, so a reader can tell a real layer from a
-# nearly-empty one — the same reason privacy-check and forge-watch print their counts.
-expect "a usable private layer passes, stating the count" 0 "private layer present, 1 usable patterns" -- \
+# nearly-empty one — the same reason privacy-check and forge-watch print their counts. The count is
+# now QUOTED from the gate's own line rather than re-counted from one list (quince#132), so this
+# asserts the gate's wording — which counts both lists — rather than a locally-derived number.
+expect "a usable private layer passes, stating the count" 0 "the gate reports lists 1 case-insensitive" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+
+# THE quince#132 REGRESSION: a SPLIT list is counted across BOTH files. The old banner counted the
+# case-insensitive list alone and would have printed "1 usable patterns" for this 1+1 layer; the
+# quoted gate count says "lists 1 case-insensitive + 1 case-sensitive". If this ever reverts to a
+# single-list count, this fails.
+expect "a split private layer counts both lists" 0 "the gate reports lists 1 case-insensitive + 1 case-sensitive" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$SPLIT_LAYER"
 
 # A loose mode is REPORTED, NOT ENFORCED — matching the apk-drift reporter, and for the same
 # reason: refusing to start over a permission bit turns a one-command fix into an outage. It must
