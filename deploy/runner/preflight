@@ -163,14 +163,27 @@ PRIVACY_CHECK="${QUINCE_PRIVACY_CHECK:-$_here/../privacy/privacy-check}"
 if [ ! -x "$PRIVACY_CHECK" ]; then
 	bad "the privacy gate is missing at $PRIVACY_CHECK — this checkout is incomplete, so preflight cannot establish whether the box can gate. Pull the launchpad."
 else
-	# stderr carries the gate's reason; stdout is its progress chatter and is discarded.
-	layer_why=$("$PRIVACY_CHECK" --patterns "$PRIVATE_LAYER" 2>&1 >/dev/null) && layer_rc=0 || layer_rc=$?
+	# Capture the gate's two streams SEPARATELY. stdout is its progress report, including the
+	# pattern-count line; stderr carries the reason on exit 2 AND the matched lines on exit 1
+	# (deploy/privacy/privacy-check:268), which are Operator-private and must never be printed on a
+	# non-2 path — so they cannot be merged into one capture. A temp file holds stderr; stdout is
+	# captured directly. mktemp with a pid-named fallback so `set -e` cannot abort start_pre here.
+	_perr=$(mktemp 2>/dev/null || echo "/tmp/quince-preflight.$$.err")
+	layer_out=$("$PRIVACY_CHECK" --patterns "$PRIVATE_LAYER" 2>"$_perr") && layer_rc=0 || layer_rc=$?
+	layer_why=$(cat "$_perr" 2>/dev/null); rm -f "$_perr"
 	if [ "$layer_rc" -ne 2 ]; then
-		# `grep -c` prints 0 AND exits 1 on a zero count, so the one-line `|| echo 0` form emits
-		# the count and the fallback both, and $patterns becomes two lines. Documented at
-		# deploy/privacy/privacy-check and re-learned here the hard way; written the long way.
-		if patterns=$(grep -cvE '^[[:space:]]*(#|$)' "$PATTERN_FILE" 2>/dev/null); then :; else patterns=0; fi
-		ok "private layer present, $patterns usable patterns — the privacy gate can run on this box"
+		# THE COUNT IS QUOTED, NOT RE-COUNTED (quince#132). This banner used to run its own
+		# `grep -cvE` over privacy-patterns.txt ALONE — so a box with a legitimately split list
+		# (privacy-patterns-cs.txt, quince#109) printed "8 usable patterns" beside a floor of 9,
+		# which reads as "the list has SHRUNK below its floor": the one alarm the floor exists to
+		# raise. The gate already counts BOTH lists and prints the total on stdout ("lists N
+		# case-insensitive + M case-sensitive"); preflight discarded that stream and re-derived a
+		# worse number. Same :110 principle as the verdict above — borrow the gate's report, do not
+		# re-implement it. Match on ": lists " rather than the tool name, so a QUINCE_PRIVACY_CHECK
+		# override still resolves; take the first such line only.
+		gate_count=$(printf '%s\n' "$layer_out" | sed -n 's/^[^:]*: \(lists .*\)$/\1/p' | head -1)
+		[ -n "$gate_count" ] || gate_count="pattern count unavailable — the gate reported none"
+		ok "private layer present — the gate reports $gate_count — the privacy gate can run on this box"
 		# REPORTED, NOT ENFORCED, matching the apk-drift reporter below and for the same reason:
 		# this is a list OF the sensitive strings, so a loose mode is worth saying loudly, but
 		# refusing to start over a permission bit turns a one-command fix into an outage.
