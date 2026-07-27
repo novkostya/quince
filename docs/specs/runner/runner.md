@@ -198,7 +198,13 @@ quietly re-architecting it here would be exactly the improvisation its own point
 ## Gates
 
 - **G1 (no runner needed)** — `preflight` against a table of environments: each rejection names the
-  offending variable; the clean case exits 0 (stories 1–3).
+  offending variable; the clean case exits 0 (stories 1–3). **Run by `make preflight-test`, which
+  `make gates-sh` invokes**, so the table is exercised on every PR rather than by whoever remembers
+  (quince#32). Thirteen cases, all synthetic — a stub `claude`, fake token files at 600 and 644, no
+  private layer and no runner — asserting the **refusals**, since preflight's failure paths are its
+  whole product. Each asserts the message as well as the exit code: preflight returns 1 for every
+  refusal, so the code alone cannot tell *you set an API key* from *this box holds the wrong
+  identity*, and conflating those is how someone fixes the wrong thing.
 - **G2** — the service starts, `rc-service quince-runner status` reports a live session, and it appears at
   claude.ai/code (story 4). **Operator leg:** connect from the phone and send one message (story 5).
 - **G3** — `kill` the process; `supervise-daemon` restarts it; a new session registers. The report states the

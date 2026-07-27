@@ -10,7 +10,12 @@
 # reason: a network outage of ~10 minutes times the session out and the PROCESS EXITS. Supervision
 # here is correctness, not tidiness.
 
-name="quince-runner"
+# From RC_SVCNAME, not hardcoded (quince#32). This one file is installed as BOTH
+# /etc/init.d/quince-runner and /etc/init.d/quince-arch, so a literal name meant
+# `rc-service quince-arch status` answered about a differently-named service — on a two-box design
+# whose entire point is that the boxes are NOT interchangeable, and in a project whose canon says an
+# error message is a claim. The fallback covers a hand run outside OpenRC, where RC_SVCNAME is unset.
+name="${RC_SVCNAME:-quince-runner}"
 description="Claude Code Remote Control session host"
 
 : "${runner_dir:=/root/quince}"

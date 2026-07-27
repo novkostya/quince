@@ -1,0 +1,150 @@
+#!/bin/sh
+# preflight-test — the runner spec's G1, run by a gate instead of by hand.
+#
+# G1 is "`preflight` against a table of environments: each rejection names the offending variable;
+# the clean case exits 0". That table was proven by running it and pasting the output — the same
+# honour system quince#64 closed for `forge-watch replay`, and the same one quince#41 closed for
+# the privacy gate. A rejection nobody exercises is a promise.
+#
+# What this asserts is the REFUSALS, deliberately. preflight exists to stop a runner coming up
+# unable to do Remote Control, or billing against an API key, or holding the identity of the box
+# it is supposed to be separate from — so its failure paths are its whole product, and a suite
+# that only proved the happy case would prove the least interesting thing about it.
+#
+# Every case is synthetic: a temp HOME, a fake token file, and a stub `claude` on PATH. Nothing
+# reads the real credentials, nothing needs the private layer, and nothing needs a runner — so
+# this runs on CI and on any contributor's box, which is what makes it a gate rather than a ritual.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PREFLIGHT="$HERE/preflight"
+[ -x "$PREFLIGHT" ] || { printf 'preflight-test: %s is not executable\n' "$PREFLIGHT" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+# A stub `claude`, because preflight checks for it and every case would otherwise fail on the same
+# missing binary — which would make the suite assert "claude is absent" over and over rather than
+# the thing each case is about. The stub answers --version and nothing else; preflight asks nothing
+# else of it.
+STUB="$TMP/bin"
+mkdir -p "$STUB"
+cat >"$STUB/claude" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = --version ] && { echo "0.0.0-stub"; exit 0; }
+exit 0
+EOF
+chmod +x "$STUB/claude"
+
+# A token file at the mode preflight demands, and one at a mode it must reject.
+GOOD_TOKEN="$TMP/good.token"
+printf 'not-a-real-token\n' >"$GOOD_TOKEN"
+chmod 600 "$GOOD_TOKEN"
+LOOSE_TOKEN="$TMP/loose.token"
+printf 'not-a-real-token\n' >"$LOOSE_TOKEN"
+chmod 644 "$LOOSE_TOKEN"
+ABSENT_TOKEN="$TMP/no-such.token"
+
+# expect <name> <want-exit> <substring> -- <env assignments...>
+# The substring matters as much as the code: preflight returns 1 for every refusal, so the exit
+# alone cannot tell "you set an API key" from "this box holds the wrong identity", and conflating
+# those is how someone fixes the wrong thing.
+expect() {
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$(env "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	if [ -n "$substr" ] && ! printf '%s\n' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right, but output lacked: %s\n' "$name" "$got" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	printf 'ok   %s (exit %s)\n' "$name" "$got"
+	pass=$((pass + 1))
+}
+
+# =============================================================================================
+# 1. CREDENTIALS THAT MUST NOT BE SET — the billing trap and the Remote-Control trap
+# =============================================================================================
+# An API key takes precedence over the claude.ai login, so a runner with one set comes up billing
+# against it. A setup-token / OAuth token cannot establish Remote Control at all, so its presence
+# means the box is misconfigured rather than merely unusual. Each refusal must NAME the variable:
+# "the environment is bad" is a claim nobody can act on.
+for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
+	expect "$var set is refused, by name" 1 "$var is set" -- \
+		"$var=whatever" QUINCE_RUNNER_ROLE=implementer "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+done
+
+# =============================================================================================
+# 2. THE ENDPOINT MUST BE ANTHROPIC'S
+# =============================================================================================
+# Remote Control is disabled for any host other than api.anthropic.com, so a gateway or proxy
+# silently removes the runner's whole purpose.
+expect "a non-Anthropic base URL is refused" 1 "Remote Control is disabled" -- \
+	ANTHROPIC_BASE_URL=https://gateway.example.invalid QUINCE_RUNNER_ROLE=implementer \
+	"QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "the canonical base URL is accepted" 0 "api.anthropic.com" -- \
+	ANTHROPIC_BASE_URL=https://api.anthropic.com QUINCE_RUNNER_ROLE=implementer \
+	"QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+
+# =============================================================================================
+# 3. IDENTITY — each box asserts the OTHER's absence (devlog#7)
+# =============================================================================================
+# This inversion is the entire separation mechanism, and it is enforced where the service STARTS
+# so it survives whoever provisioned the machine. approver ≠ author stops being a property of
+# machines the moment either half of this stops being checked.
+expect "implementer without the bot token is refused" 1 "no bot token at" -- \
+	QUINCE_RUNNER_ROLE=implementer "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+expect "implementer with the bot token passes" 0 "bot token present, mode 600" -- \
+	QUINCE_RUNNER_ROLE=implementer "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "a world-readable bot token is refused, naming the mode" 1 "expected 600" -- \
+	QUINCE_RUNNER_ROLE=implementer "QUINCE_BOT_TOKEN_FILE=$LOOSE_TOKEN"
+
+# The arch box must NOT hold the implementer identity: one box that can author AND approve turns
+# `approver ≠ author` from a property into a coincidence about which credential a session picks up.
+expect "arch WITH a bot token is refused" 1 "BOT TOKEN is present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "arch without a bot token passes" 0 "the implementer identity is absent" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+
+# An unknown role refuses rather than guessing which identity rules apply — guessing would pick
+# one of two opposite assertions.
+expect "an unknown role refuses rather than guessing" 1 "unknown QUINCE_RUNNER_ROLE" -- \
+	QUINCE_RUNNER_ROLE=nonsense "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+
+# An undeclared role defaults to the STRICTER historical behaviour, and says that it assumed.
+# Without the announcement, a hand run on the arch box reports "no bot token" — true, but it reads
+# as "you are missing a credential" when the cause is "you did not say which box this is".
+expect "an unset role is ASSUMED implementer, and says so" 0 "ASSUMED" -- \
+	"QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+
+# =============================================================================================
+# 4. THE THING WE ARE ABOUT TO RUN
+# =============================================================================================
+# Proven by pointing PATH at a directory with no `claude` in it — the one case the stub must not
+# cover, since it is the stub's own subject.
+emptybin="$TMP/emptybin"
+mkdir -p "$emptybin"
+out=$(env PATH="$emptybin" QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"$PREFLIGHT" 2>&1) && got=0 || got=$?
+if [ "$got" -eq 1 ] && printf '%s\n' "$out" | grep -qF "claude is not installed"; then
+	printf 'ok   an absent claude is refused, naming provision (exit %s)\n' "$got"
+	pass=$((pass + 1))
+else
+	printf 'FAIL an absent claude is refused, naming provision\n  exit=%s\n' "$got"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+fi
+
+# =============================================================================================
+printf '\npreflight-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
