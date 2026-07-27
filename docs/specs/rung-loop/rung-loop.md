@@ -825,8 +825,11 @@ allowance faster for no benefit.
     GitHub's PR fields do not move atomically, so anything reading two of them and inferring an
     order is reading a race. Measured 11-of-12 same-tick on one box, which is the trap rather than
     the reassurance: frequent enough to look dependable, rare enough for the exception to survive
-    testing on that box — while the SAME method on the architect box gave 8-of-12, a 4x different
-    rate. The spread is the finding, not either ratio; why they differ is not established. No
+    testing on that box — while the SAME method on the architect box gave 9-of-13, a 4x different
+    rate, which MOVED from 8-of-12 while this very change was under review because reviewing it was
+    itself a delivery. The spread is the finding, not either ratio; a figure that drifts as you read
+    it is the better argument. Why they differ is not established, and both counts share a bias:
+    they count deliveries a watcher was alive to observe. No
     de-duplication: one extra wake per split act is cheaper than state carried across
     ticks.
 
