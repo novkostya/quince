@@ -209,6 +209,24 @@ states **what you ran**, not only what you think.
 re-swept over the whole branch, rebase-merge, then tidy up. A branch that is behind gets rebased,
 re-run and re-approved, not merged around.
 
+**Merge through `bin/gh-review`. On a refusal: retry once, then merge through `bin/gh-arch` and say
+so on the PR.** Operator ruling, devlog#52. The primary path works — every merge since the App's
+first, quince#135 at `2026-07-27T21:53:23Z` (then #138, #142, devlog#54, #57), reads `mergedBy:
+app/quince-review`; everything merged earlier that day was `novkostya`'s — and the fallback exists
+because the harness classifier refuses
+the merge verb **intermittently**, leaving no trace on the forge. Without it written down the next
+session to meet a refusal concludes the App cannot merge and escalates, which is §1's own warning
+arriving from a new direction. `gh-arch` rather than the Operator, because **a merge carries no
+verdict**: the judgement is the approval, which is structurally the App's, and the merge only
+executes it — so the attribution costs a timestamp rather than an authority. This is the one place
+`gh-arch` may act where §1 otherwise forbids it, and it is narrow: merging only, never approving,
+requesting changes, or commenting.
+
+**You cannot re-run a red check, and neither can the App** (quince#141): `run rerun` is refused for
+both, and it **exits `0` while printing the refusal**, so read its output rather than its exit code.
+`quince-bot` can. Ask the implementer to re-run — a mechanism they can emit — rather than asking for
+a push, which would dismiss your approval and move the head off the tree you reviewed.
+
 ## 6. Arm the loop — the MECHANISM, not only the properties
 
 This section used to specify the loop's properties and leave the mechanism to whoever read it. A
