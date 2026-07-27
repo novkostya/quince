@@ -60,26 +60,56 @@ one credential and not the other:
 
 ```sh
 [ -f ~/.config/quince/quince-bot.token ] && echo "BOT TOKEN PRESENT — stop"   # must NOT exist here
-bin/gh-arch api user -q .login                                                # must answer, and not with the bot
+bin/gh-review api /installation/repositories -q '.total_count'                # must answer with a count
 ```
 
-**Do not use `gh auth status` for this.** An architect host is expected to show *unauthenticated*
-there: its credential is a token file read by `bin/gh-arch` at point of use, never a `gh auth
-login` session — that is deliberate, so the credential cannot leak into an ambient session. The
-question is not "is `gh` logged in" but "can this box cast a real verdict", and `bin/gh-arch api
-user` is what answers it. (This skill originally asserted `gh auth status`, written before
-`bin/gh-arch` existed; the first architect session on a real arch box hard-stopped on a correctly
-configured host. A protocol that checks the wrong thing fails closed, which is the right direction
-to fail — but it still fails.)
+**Verdicts are cast with `bin/gh-review`, which is a GitHub App and not a person.** That is
+quince#47's fix and the reason it is structural rather than a convention: a review from
+`quince-review[bot]` cannot be read as the Operator's, because it is not a login at all. Under the
+previous wrapper the architect and the Operator shared the `novkostya` account, which first muddied
+the record and then, on quince#115, **blocked** it — GitHub refuses a review on a PR the same
+account authored, so the one class of PR that must come from the Operator was the one class the
+architect could not review.
+
+**`bin/gh-review api user` does not work, and that is not a broken credential.** An installation
+token has no user context, so GitHub answers `403 Resource not accessible by integration`. The
+question was never "who am I logged in as" but "can this box cast a verdict", and for an App the
+thing that answers it is whether an installation token mints and reaches repositories. Asserting
+`api user` here would be the third time this section has checked the wrong thing.
+
+**Do not use `gh auth status` either.** A reviewer host is expected to show *unauthenticated*: its
+credential is a key read at point of use, never a `gh auth login` session, deliberately, so it
+cannot leak into an ambient session. (This section originally asserted `gh auth status`, written
+before the wrappers existed, and hard-stopped the first architect session on a correctly configured
+host. A protocol that checks the wrong thing fails closed — the right direction to fail, and still
+a failure.)
+
+**`bin/gh-arch` is not retired, and is not the verdict path.** Two things still hold it in place,
+and both are named so nobody assumes it is legacy that can simply be deleted:
+
+1. the private layer's git credential helper reads the architect PAT, not the App;
+2. **`forge-watch` still reads through it** (§6). `gh-review` mints a fresh installation token per
+   call and caches nothing, which is right for a handful of verdicts per turn and wrong for a
+   watcher making several calls every 60 seconds. Moving the watch onto the App needs a cache
+   first, and a cache is a second secret at rest with a lifetime to manage — so it is its own
+   change, not a line in this one.
+
+**Do not cast verdicts with `gh-arch`.** Reading through it is fine and is what §6 does; approving,
+requesting changes, merging or commenting through it re-creates quince#47 on the box built to end
+it, and does so invisibly, because the output looks identical.
 
 - **Bot token present on an architect host** → say so and stop. A box that can author *and*
   approve dissolves the property the whole identity ruling protects (devlog#7). Reviewing from a
   host that holds both is a finding about the host, not a detail to work around.
-- **`bin/gh-arch` cannot answer** (no credential file, or it refuses) → stop, and quote its own
-  message: it names the path and how to place it. An architect session that cannot submit a real
-  review verdict is a session pretending to be one.
-- **It answers as the bot** → stop. Same reason, worse: the identities have been crossed.
-- Verdicts and merges in later steps run through **`bin/gh-arch`**, not bare `gh`, for the same
+- **`bin/gh-review` cannot answer** (no key, no app id, no `openssl`, or it refuses) → stop, and
+  quote its own message: it names the file and the likely cause. An architect session that cannot
+  submit a real review verdict is a session pretending to be one.
+- **It answers `0` repositories** → stop. The App exists and is installed nowhere, so every verdict
+  it casts would 404. Zero is a successful call reporting an unusable identity, which is the
+  shape this project keeps filing — read the number, not the exit code.
+- **It refuses on multiple installations** → stop and set `QUINCE_REVIEW_INSTALLATION_ID`. The
+  wrapper will not guess which identity it is acting as, and neither should you.
+- Verdicts and merges in later steps run through **`bin/gh-review`**, not bare `gh`, for the same
   reason the implementer side uses `bin/gh-bot` (an allow rule never matches past a leading
   `VAR=value`, so `GH_TOKEN=$(cat …) gh …` is unallowlistable by construction).
 

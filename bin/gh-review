@@ -1,0 +1,109 @@
+#!/bin/sh
+# gh-review — run `gh` as the reviewer identity: a GitHub App, not a person.
+#
+# The third wrapper, and the first whose identity is not a user account. bin/gh-bot runs as the
+# implementer, bin/gh-arch runs as the architect — and quince#47 is the finding that the second of
+# those is indistinguishable from the Operator, because they are the same login. A reader of a
+# ruling cannot tell a subordinate's verdict from its principal's, and on quince#115 that stopped
+# being a record-keeping annoyance and became a refusal: GitHub would not let the architect review
+# a PR the Operator authored, since it was the same account.
+#
+# An App fixes that structurally rather than by convention. Verdicts render as `quince-review[bot]`,
+# which is not a name anybody can mistake for a human, and the credential is a short-lived
+# installation token minted from a private key rather than a long-lived PAT.
+#
+# Same allowlist reason as the other two: a permission rule never matches past a leading
+# `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
+set -eu
+
+KEY_FILE="${QUINCE_REVIEW_KEY_FILE:-$HOME/.config/quince/quince-review.pem}"
+APP_ID_FILE="${QUINCE_REVIEW_APP_ID_FILE:-$HOME/.config/quince/quince-review.app-id}"
+API="${QUINCE_GITHUB_API:-https://api.github.com}"
+AH="Accept: application/vnd.github+json"
+
+die() {
+	printf 'gh-review: %s\n' "$1" >&2
+	shift
+	for line in "$@"; do printf 'gh-review: %s\n' "$line" >&2; done
+	exit 1
+}
+
+if [ $# -eq 0 ]; then
+	printf 'usage: gh-review <gh arguments...>\n' >&2
+	printf '  runs gh as the quince-review App, minting a fresh installation token per call\n' >&2
+	printf '  key %s\n  app id %s\n' "$KEY_FILE" "$APP_ID_FILE" >&2
+	exit 2
+fi
+
+for tool in gh openssl curl jq; do
+	command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed" \
+		"this wrapper needs gh, openssl, curl and jq. On Alpine: apk add openssl curl jq." \
+		"openssl in particular is NOT in a minimal Alpine image and RS256 signing cannot proceed without it."
+done
+
+# The reviewer box must not hold the implementer identity (devlog#7). Asserted here as well as in
+# preflight, so a hand-run command cannot quietly cross a boundary the service refuses to cross.
+BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}"
+if [ -f "$BOT_TOKEN" ]; then
+	die "a BOT TOKEN is present at $BOT_TOKEN." \
+		"This machine can approve; holding the implementer identity too would let one box author" \
+		"and approve its own work. Remove it, or run gh-bot on the implementer box."
+fi
+
+[ -f "$KEY_FILE" ] || die "no App private key at $KEY_FILE" \
+	"Refusing to fall back to the ambient gh credentials: doing so would cast a verdict as whoever" \
+	"is signed in, which is the failure this separation exists to prevent." \
+	"Generate a key from the App's settings page and place it there, mode 600."
+[ -f "$APP_ID_FILE" ] || die "no App id at $APP_ID_FILE" \
+	"The id is not a secret — it is on the App's settings page — but it is environment-specific," \
+	"so it is configuration and not a constant in a public repository."
+
+APP_ID=$(cat "$APP_ID_FILE")
+
+# --- mint a JWT, then exchange it for an installation token ----------------------------------
+# NOT CACHED, deliberately. An installation token lives one hour, so a cache would be a second
+# secret at rest with a lifetime this wrapper would have to manage, plus an invalidation bug
+# waiting to happen. The cost is two HTTPS round-trips per call. If that ever bites, cache it —
+# but measure the latency first rather than assuming it, and say where the cached token lives.
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+now=$(date +%s)
+header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+# 60s of backdate absorbs clock skew between this box and GitHub; 9 minutes of life is well inside
+# the 10-minute maximum GitHub accepts for an App JWT.
+payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
+signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -binary -sign "$KEY_FILE" | b64url)
+jwt="$header.$payload.$signature"
+
+installations=$(curl -sS --fail-with-body -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations" 2>&1) || die "could not list installations" \
+	"$(printf '%s' "$installations" | head -n 3)" \
+	"Most likely: the key does not match app id $APP_ID, or the key has been revoked."
+
+count=$(printf '%s' "$installations" | jq -r 'if type=="array" then length else 0 end')
+case "$count" in
+0) die "app id $APP_ID has no installations" \
+	"The App exists but is installed nowhere, so it can reach no repository. Install it on the" \
+	"account and select the repositories in .claude/forge-set." ;;
+1) : ;;
+*) # Picking .[0] would work today and silently pick the wrong one later. A wrapper that guesses
+	# which identity it is acting as is the thing this file exists to prevent.
+	die "app id $APP_ID has $count installations; refusing to guess which one to act as." \
+		"Set QUINCE_REVIEW_INSTALLATION_ID to the one this box should use." ;;
+esac
+
+install_id="${QUINCE_REVIEW_INSTALLATION_ID:-$(printf '%s' "$installations" | jq -r '.[0].id')}"
+
+token=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations/$install_id/access_tokens" 2>&1) || die \
+	"could not mint an installation token for installation $install_id" \
+	"$(printf '%s' "$token" | head -n 3)"
+
+GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
+[ -n "$GH_TOKEN" ] || die "installation $install_id returned no token" \
+	"Refusing to continue: an empty token would fall through to the ambient credentials."
+
+unset GITHUB_TOKEN
+export GH_TOKEN
+
+exec gh "$@"
