@@ -91,9 +91,13 @@ repo is not a message bus, and no human is an RPC layer.
   at `~/.config/quince/quince-bot.token`. Never print a token or put one in argv, a
   remote URL, a commit, or a PR body; feed it to git through a credential helper and to
   `gh` through `GH_TOKEN`.
-- The token is scoped to this repo and has **no `workflow` scope** — a change under
-  `.github/workflows/**` must be pushed by the architect. Say so in the PR rather than
-  working around it.
+- The token is scoped to this repo and has **no `workflow` scope** — and **neither does the
+  architect's**. Measured (quince#113): a `PUT` under `.github/workflows/**` returns `403
+  Resource not accessible by personal access token`, while an ordinary contents write to the
+  same branch succeeds. **Only the Operator can push a workflow.** Put the file verbatim in
+  the PR thread, say plainly in the PR that the check is built and **unwired**, and open an
+  issue for the wiring — rather than working around it, or escalating to a seat that cannot
+  do it either.
 - The architect reviews/approves/merges as the repo owner; the Operator is admin of last
   resort and the approver for architect-authored docs.
 
