@@ -589,7 +589,15 @@ loop_run() {
 
 replay() {
 	_fail=0
+	# COUNTED, not merely reported. A bare `fixtures pass` cannot tell a full suite from a shrunken
+	# one: remove the ten `watch-*.json` loop fixtures and the remaining eighteen still print pass.
+	# That is quince#41's vacuous success one level down — and the fixtures most likely to be
+	# dropped under time pressure are exactly those loop ones, since they are the only shape here
+	# that spends real seconds in sleeps. The number in the success line is what makes a shrink
+	# visible in a CI log and in the evidence a PR pastes.
+	_ran=0
 	for _f in "$@"; do
+		_ran=$((_ran + 1))
 		_tmp=$(mktemp -d)
 		_kind=$(jq -r '.kind // "pair"' "$_f")
 		if [ "$_kind" = sequence ]; then
@@ -709,7 +717,11 @@ EOF
 		rm -rf "$_tmp"
 	done
 	[ "$_fail" -eq 0 ] || die "fixtures failed"
-	printf 'forge-watch: fixtures pass\n'
+	# No `[ "$_ran" -gt 0 ]` guard here: it would be unreachable. The dispatcher already refuses an
+	# empty argument list (exit 1), and a glob that matches nothing arrives as its own literal, which
+	# increments the counter and then dies in jq (exit 2) — both measured. A guard that cannot fire
+	# reads as a safety net in review while asserting nothing, which is this file's own subject.
+	printf 'forge-watch: %d fixtures pass\n' "$_ran"
 }
 
 # ---------------------------------------------------------------------------
