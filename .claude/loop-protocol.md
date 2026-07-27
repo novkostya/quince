@@ -88,14 +88,27 @@ self-caused events are *how a turn ends*, where an architect's approvals and mer
 emits what accrued — and what accrued is the session's own actions from the turn just finished. So the
 first tick exits immediately, and reaching a *quiet* watch takes two arms, only the second of which can
 survive the end of the turn. The foreground tick absorbs that catch-up in the open, rather than as a
-task notification arriving after the turn has already ended. It composes safely because a hand-run
-`tick` deliberately does **not** write the watcher record (quince#49), so it cannot make a dead watch
-look alive — the one way this ordering could have been unsound, closed by a narrowing written for an
-unrelated reason.
+task notification arriving after the turn has already ended.
+
+**Why the tick is safe to put there, in both directions.** A hand-run `tick` leaves the liveness
+verdict exactly as it found it: it never refreshes `.watch.last_watcher_tick`, so it cannot make a
+**dead** watch look **alive** (quince#49); and `step()` carries the watcher record forward, so it
+cannot make a **live** watch look **dead** (quince#103). **Both halves are load-bearing, and the
+second is the one that was broken.** It is also the one that matters more, because `watch`'s refusal
+to arm beside a live watcher *reads that record*: erasing it did not merely mislabel a watch, it
+disabled the guard, so the very next arm — the one this ordering prescribes — put a second watcher on
+one state file, which is quince#50's race reached **through** the guard rather than around it.
+
+That is worth stating as a rule and not just as history: **a safety argument that checks one direction
+of a two-directional property has not been checked.** The first version of this section asserted only
+that a hand tick cannot make a dead watch look alive and called it *"the one way this ordering could
+have been unsound"*. It was not the one way. It was the way that happened to be true, and the ordering
+was ruled and nearly landed on it.
 
 Measured on the implementer side: three `Stop`-hook firings before the tick step was adopted, none
-after (quince#100). **Not a tool change** — `watch` and `tick` both behave correctly; what was missing
-was the sentence saying when to run them.
+after (quince#100). The ordering itself needed **no** change to `watch` or `tick`, which is how
+quince#100 was filed and it was right; making it *sound* did need one, and quince#103 is it. A skill
+change and a tool change, and the skill change was not safe to land alone.
 
 So:
 
