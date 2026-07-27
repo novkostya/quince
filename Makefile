@@ -120,7 +120,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/runner/preflight-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
-                   bin/forge-watch-exits-test
+                   bin/forge-watch-exits-test \
+                   bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
@@ -139,6 +140,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-test
 	@$(MAKE) --no-print-directory preflight-test
 	@$(MAKE) --no-print-directory forge-watch-exits-test
+	@$(MAKE) --no-print-directory pr-title-refs-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -174,6 +176,38 @@ forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~2
 .PHONY: forge-watch-exits-test
 forge-watch-exits-test: ## Every exit forge-watch can return is named in the skills (quince#75)
 	@bin/forge-watch-exits-test
+
+# quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
+# title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two
+# quince PRs into derived issues of the devlog, costing two failing `gh` calls PER TICK on the
+# reviewer's box until somebody noticed. Synthetic (stub `gh`, no network), so it runs in gates-sh
+# beside the other failure-path suites and needs neither a token nor the private layer.
+.PHONY: pr-title-refs-test
+pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-RUN (quince#94)
+	@bin/pr-title-refs-test
+
+# The check itself, for CI and for a hand-run. It stays a make target because ci.yml is
+# deliberately logic-free — "CI calls only `make` targets (no logic here)" — so the workflow is
+# three lines and the behaviour it invokes is reviewable, runnable and testable right here.
+#
+#   make pr-title-check REPO=owner/name TITLE_ENV=PR_TITLE   <- CI USES THIS
+#   make pr-title-check REPO=owner/name PR=42
+#   make pr-title-check REPO=owner/name TITLE='the title'    <- LOCAL ONLY, see below
+#
+# TITLE= IS INJECTABLE AND IS FOR HAND-RUNS ONLY. make expands $(TITLE) into the recipe before
+# the shell parses it, so a title containing a quote and a semicolon executes. Demonstrated
+# rather than assumed:
+#
+#   make pr-title-check REPO=o/n TITLE='x"; touch /tmp/proof; echo "'   -> /tmp/proof exists
+#   PR_TITLE='<same>' make pr-title-check REPO=o/n TITLE_ENV=PR_TITLE   -> it does not
+#
+# A PR title is attacker-controlled on a public repository, so CI passes TITLE_ENV and the value
+# never crosses make's parser or the shell's. TITLE= is kept because typing your own title at
+# your own shell is not an attack on yourself, and removing it would push people to a longer
+# incantation for the safe-by-construction local case.
+.PHONY: pr-title-check
+pr-title-check: ## Bare #N in a PR title must resolve in that repo (0 clean · 1 match · 2 DID NOT RUN)
+	@bin/pr-title-refs --repo "$(REPO)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",--title "$(TITLE)"))
 
 # The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and
 # pasted into a PR until now (quince#32). preflight's refusals ARE its product: it exists to stop a

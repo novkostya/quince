@@ -1,0 +1,146 @@
+#!/bin/sh
+# pr-title-refs — every bare `#N` in a PR title must resolve in THIS repository.
+#
+# The defect (quince#94, quince#19): a PR title in quince-devlog reading
+# `journal: … (#102, #104)` names two quince PRs, but a bare `#N` belongs to the repository
+# it is written in. `forge-watch` derives its watch set from PR titles, so those two became
+# derived issues of quince-devlog, where they do not exist — two failing `gh` calls and two
+# `issue-fetch-failed` lines PER TICK, on the reviewer's box, for as long as the PR stayed
+# open. It was noticed ninety minutes later, by the person paying for it.
+#
+# This is that same question — "does this reference resolve?" — moved from tick time to
+# authorship, where the answer is actionable and costs one call instead of one per tick.
+#
+# WHY THE PREDICATE IS RESOLUTION AND NOT A PATTERN. The first scoping was "a bare `#N` in a
+# title that ALSO carries a qualified `owner#M`" — a heuristic for "the author was thinking
+# cross-repo". It does not catch the case that produced the bug: `(#102, #104)` has no
+# qualified sibling. Resolution guesses nothing, catches that case, and takes the TYPO class
+# (`#1042` for `#104`) with it for free. A legitimate same-repo reference resolves and this
+# says nothing.
+#
+# Three exit codes, because "wrong" and "could not look" are different facts (quince#41):
+#
+#   0  every bare reference resolved here, or there were none
+#   1  a bare reference does not resolve in this repository
+#   2  DID NOT RUN — bad arguments, no usable gh, or the forge would not answer
+#
+# A 2 is NEVER clean. A title check that fails open is absent on exactly the days the forge
+# is flaky, which are the days a rushed title is most likely. Ruled on quince#94.
+set -eu
+
+ME=$(basename "$0")
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME --repo <owner/name> (--title <s> | --title-env <NAME> | --pr <n>) [--gh <path>]
+
+  --repo <owner/name>  the repository the title belongs to — bare refs are resolved HERE
+  --title <string>     the title to check
+  --title-env <NAME>   read the title from the environment variable NAME — USE THIS FROM CI
+  --pr <number>        fetch the title of this PR instead of passing it
+  --gh <path>          the gh wrapper to use (default: \$GH_CLI, else gh)
+
+exit: 0 clean · 1 an unresolvable bare reference · 2 DID NOT RUN
+EOF
+}
+
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+# --- arguments ---------------------------------------------------------------------------
+REPO="" TITLE="" PR="" HAVE_TITLE=no
+GH="${GH_CLI:-gh}"
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--repo) REPO="${2:?--repo needs owner/name}"; shift 2 ;;
+	--title) TITLE="${2?--title needs a string}"; HAVE_TITLE=yes; shift 2 ;;
+	# A PR title is ATTACKER-CONTROLLED on a public repository. Interpolating one into a
+	# `make` recipe — `--title "$(TITLE)"` — hands it to a shell after make has expanded it,
+	# so a title containing a quote and a semicolon is command execution on the runner. Reading
+	# it from the environment means the value never crosses a parser: not make's, not the
+	# shell's. CI passes --title-env and never --title.
+	--title-env)
+		_tv="${2:?--title-env needs a variable NAME}"
+		case "$_tv" in
+		*[!A-Za-z0-9_]* | "" | [0-9]*) die2 "--title-env takes a variable NAME, got '$_tv'" ;;
+		esac
+		eval "TITLE=\${$_tv-__PR_TITLE_REFS_UNSET__}"
+		[ "$TITLE" != "__PR_TITLE_REFS_UNSET__" ] || die2 "\$$_tv is not set — refusing rather than checking an empty title, which would pass"
+		HAVE_TITLE=yes; shift 2 ;;
+	--pr) PR="${2:?--pr needs a number}"; shift 2 ;;
+	--gh) GH="${2:?--gh needs a path}"; shift 2 ;;
+	-h | --help) usage; exit 0 ;;
+	*) printf '%s: unknown option: %s\n' "$ME" "$1" >&2; usage; exit 2 ;;
+	esac
+done
+
+[ -n "$REPO" ] || die2 "no --repo. Bare references are only meaningful against a repository."
+case "$REPO" in
+*/*) : ;;
+*) die2 "--repo must be owner/name, got '$REPO'" ;;
+esac
+if [ "$HAVE_TITLE" = no ] && [ -z "$PR" ]; then
+	die2 "neither --title nor --pr. Refusing rather than checking an empty string, which would pass."
+fi
+[ "$HAVE_TITLE" = no ] || [ -z "$PR" ] || die2 "--title and --pr are exclusive; pass one."
+case "${PR:-0}" in
+*[!0-9]*) die2 "--pr must be a number, got '$PR'" ;;
+esac
+
+command -v "$GH" >/dev/null 2>&1 || die2 "no usable gh at '$GH'. Cannot resolve anything."
+
+ERR=$(mktemp) || die2 "cannot create a temporary file"
+trap 'rm -f "$ERR"' EXIT INT TERM
+
+# --- the title ----------------------------------------------------------------------------
+if [ -n "$PR" ]; then
+	if TITLE=$("$GH" api "repos/$REPO/pulls/$PR" --jq '.title' 2>"$ERR"); then
+		:
+	else
+		die2 "could not read the title of $REPO#$PR: $(tr '\n' ' ' <"$ERR")"
+	fi
+fi
+
+# --- extract the BARE references ----------------------------------------------------------
+# A reference is bare when `#N` is not preceded by the tail of a qualifier: `quince#102` and
+# `novkostya/quince#102` are qualified and correct, `(#102` and ` #102` are bare. The class
+# excludes alphanumerics, `-`, `_` and `/` — every character a repo or owner name can end in.
+#
+# grep -oE keeps the leading delimiter, so it is stripped after. Empty output is not an error
+# here (grep exits 1 on no match), which is the common and silent case.
+refs=$(printf '%s' "$TITLE" | grep -oE '(^|[^A-Za-z0-9_/-])#[0-9]+' 2>/dev/null | sed 's/.*#//' | sort -un || true)
+
+if [ -z "$refs" ]; then
+	printf '%s: clean — no bare #N in the title of %s\n' "$ME" "$REPO"
+	exit 0
+fi
+
+# --- resolve each one ----------------------------------------------------------------------
+# The issues endpoint answers for BOTH issues and pull requests, which is what we want: a
+# title citing a same-repo PR by number is legitimate.
+bad=0 checked=0
+for n in $refs; do
+	checked=$((checked + 1))
+	if "$GH" api "repos/$REPO/issues/$n" --jq '.number' >/dev/null 2>"$ERR"; then
+		continue
+	fi
+	# gh exits non-zero for "it is not there" and for "I could not ask". Conflating those is
+	# the quince#41 defect in miniature, so they are separated on the ONE signal the forge
+	# gives us — a 404 body — and everything else refuses.
+	if grep -qE 'HTTP 404|Not Found' "$ERR" 2>/dev/null; then
+		printf '%s: BARE REFERENCE #%s does not resolve in %s\n' "$ME" "$n" "$REPO" >&2
+		printf '        title: %s\n' "$TITLE" >&2
+		printf '        → if it means another repository, qualify it: owner#%s or owner/name#%s\n' "$n" "$n" >&2
+		printf '        → if it is a typo, fix the number. forge-watch reads PR TITLES (quince#94).\n' >&2
+		bad=$((bad + 1))
+	else
+		die2 "the forge would not answer for #$n in $REPO: $(tr '\n' ' ' <"$ERR")"
+	fi
+done
+
+if [ "$bad" -gt 0 ]; then
+	printf '%s: %s of %s bare reference(s) do not resolve in %s\n' "$ME" "$bad" "$checked" "$REPO" >&2
+	exit 1
+fi
+
+printf '%s: clean — %s bare reference(s) all resolve in %s\n' "$ME" "$checked" "$REPO"
+exit 0

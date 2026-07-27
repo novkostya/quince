@@ -1,0 +1,189 @@
+#!/bin/sh
+# pr-title-refs-test — the failure paths of the title check, asserted.
+#
+# quince#94's ruling made the DID-NOT-RUN status part of the decision rather than a nicety,
+# with the reason that a title check which fails open is absent on exactly the days the forge
+# is flaky. A status nothing exercises is a status nobody can rely on — quince#108's genre,
+# where a gate's central behaviour has never been shown to happen — so every exit-2 path
+# below is asserted by name and not merely by exit code.
+#
+# THE CONTROL FOR THE DEFECT THIS SCRIPT COULD HAVE. The one interesting piece of logic is
+# the split between "the forge says it is not there" (404 → exit 1, a real finding) and "the
+# forge would not answer" (anything else → exit 2, refuse). Collapsing those is the quince#41
+# defect in miniature: a network blip would read as a violation, or worse, an outage would
+# read as clean. `refuses-when-the-forge-errors` and `reports-a-real-404` are the same input
+# shape with only the stub's answer changed, so they fail together if that split is removed.
+#
+# Every case is SYNTHETIC — a stub `gh` and a title string. Nothing here touches the network
+# or the private layer, so this suite runs on any box, which is the property that matters for
+# a gate CI must be able to run.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Overridable so the NEGATIVE CONTROL is reproducible by a reviewer rather than a thing the
+# author did once by hand and reported. quince#104's control passed for the wrong reason (a
+# `sed` that produced invalid jq, so the code under test never changed) and was only caught
+# because it was rebuilt before being trusted. Point this at a deliberately-broken copy and
+# the suite must FAIL; see the header of pr-title-refs for which line to break.
+CHECK="${PR_TITLE_REFS_BIN:-$HERE/pr-title-refs}"
+[ -x "$CHECK" ] || { printf 'pr-title-refs-test: %s is not executable\n' "$CHECK" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+# --- the stub forge -------------------------------------------------------------------------
+# Answers `repos/<owner>/<name>/issues/<n>` and `repos/<owner>/<name>/pulls/<n>` according to
+# STUB_MODE. Written as one script rather than four so the cases differ ONLY in the forge's
+# answer, which is what makes the 404-vs-error pair a control rather than two unrelated tests.
+STUB="$TMP/gh"
+cat >"$STUB" <<'STUBEOF'
+#!/bin/sh
+# stub gh — $STUB_MODE decides the answer. $STUB_MISSING is a space-separated list of numbers
+# that 404 in the `missing-some` mode.
+set -eu
+path=""
+for a in "$@"; do case "$a" in repos/*) path=$a ;; esac; done
+n=${path##*/}
+case "${STUB_MODE:-ok}" in
+ok) ;;
+all-404) printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
+boom) printf 'error connecting to api.github.com: dial tcp: lookup failed\n' >&2; exit 1 ;;
+forbidden) printf 'gh: Resource not accessible by integration (HTTP 403)\n' >&2; exit 1 ;;
+missing-some)
+	for m in ${STUB_MISSING:-}; do
+		[ "$n" = "$m" ] && { printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1; }
+	done
+	;;
+esac
+case "$path" in
+*/pulls/*) printf '%s\n' "${STUB_TITLE:-a fetched title with no refs}" ;;
+*) printf '%s\n' "$n" ;;
+esac
+STUBEOF
+chmod +x "$STUB"
+
+# --- assertions ------------------------------------------------------------------------------
+# Exit code AND a substring, because the code alone cannot tell "refused because the forge
+# errored" from "refused because the arguments were wrong", and a suite that cannot tell those
+# apart would pass against a script that refuses everything for one reason.
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	if ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+run() { STUB_MODE=$1; shift; export STUB_MODE; "$CHECK" --gh "$STUB" "$@"; }
+
+# `run` is a shell function, so `env VAR=v run …` cannot work — env execs a BINARY and the
+# function is invisible to it. The stub's extra knobs are therefore exported around the call.
+# Recorded because the first version of this suite did use `env` and three cases exited 127,
+# which `expect` reported as a wrong exit code: a harness bug wearing a finding's clothes.
+missing() { STUB_MISSING=$1; export STUB_MISSING; }
+no_missing() { STUB_MISSING=""; export STUB_MISSING; }
+fetched_title() { STUB_TITLE=$1; export STUB_TITLE; }
+
+# --- exit 2: DID NOT RUN. Ruled explicitly on quince#94, so asserted explicitly. -------------
+expect "refuses with no --repo — a bare ref is meaningless without one" 2 "no --repo" -- \
+	"$CHECK" --gh "$STUB" --title 'x (#1)'
+expect "refuses a --repo that is not owner/name" 2 "must be owner/name" -- \
+	"$CHECK" --gh "$STUB" --repo quince --title 'x (#1)'
+expect "refuses with neither --title nor --pr, rather than passing an empty string" 2 "neither --title nor --pr" -- \
+	"$CHECK" --gh "$STUB" --repo o/n
+expect "refuses --title and --pr together" 2 "exclusive" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title x --pr 5
+expect "refuses a non-numeric --pr" 2 "must be a number" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --pr abc
+expect "refuses an unknown option" 2 "unknown option" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title x --wat
+expect "refuses when gh is absent — cannot resolve anything" 2 "no usable gh" -- \
+	"$CHECK" --gh "$TMP/not-a-thing" --repo o/n --title 'x (#1)'
+expect "refuses when the forge will not answer (network)" 2 "would not answer" -- \
+	run boom --repo o/n --title 'x (#1)'
+expect "refuses when the forge answers 403 — not a 404, so not a finding" 2 "would not answer" -- \
+	run forbidden --repo o/n --title 'x (#1)'
+expect "refuses when the title of a --pr cannot be read" 2 "could not read the title" -- \
+	run boom --repo o/n --pr 42
+
+# --- exit 1: a real finding ------------------------------------------------------------------
+expect "reports a real 404 as a finding, not as a refusal" 1 "does not resolve" -- \
+	run all-404 --repo o/n --title 'x (#1)'
+expect "THE OBSERVED CASE: (#102, #104) in the wrong repo, no qualified sibling" 1 "2 of 2 bare reference(s) do not resolve" -- \
+	run all-404 --repo novkostya/quince-devlog --title 'journal: the safety argument … (#102, #104)'
+missing 104
+expect "names the offending number so the fix is obvious" 1 "#104 does not resolve" -- \
+	run missing-some --repo o/n --title "x (#103, #104)"
+missing 1042
+expect "catches the typo class: a plausible-but-absent number" 1 "#1042 does not resolve" -- \
+	run missing-some --repo o/n --title "fix the thing (#1042)"
+expect "says how to fix it rather than only that it is wrong" 1 "qualify it" -- \
+	run all-404 --repo o/n --title 'x (#1)'
+
+# --- exit 0: clean, and silent about the common case -----------------------------------------
+expect "clean when there are no references at all" 0 "no bare #N" -- \
+	run ok --repo o/n --title 'journal: a title with no numbers'
+expect "clean when a bare ref resolves here — the legitimate same-repo case" 0 "all resolve" -- \
+	run ok --repo o/n --title 'skills: the watch is armed LAST (#100)'
+expect "QUALIFIED refs are not bare and are never resolved locally" 0 "no bare #N" -- \
+	run all-404 --repo novkostya/quince-devlog --title 'journal: … (quince#102, quince#104)'
+expect "an owner/name-qualified ref is not bare either" 0 "no bare #N" -- \
+	run all-404 --repo o/n --title 'journal: … (novkostya/quince#102)'
+fetched_title "a real title (#7)"
+no_missing
+expect "a fetched --pr title is checked the same way" 0 "all resolve" -- \
+	run ok --repo o/n --pr 42
+expect "duplicate references are resolved once" 0 "1 bare reference(s) all resolve" -- \
+	run ok --repo o/n --title 'x (#5) and again (#5)'
+# --- --title-env: the CI path, and the injection that motivated it -----------------------------
+# A PR title is attacker-controlled on a public repo. These assert the value is never parsed:
+# the shell metacharacters below would be command execution if the title reached a `make` recipe
+# or an `eval`, and here they are simply characters that are not `#N`.
+expect "reads a title from the environment" 0 "all resolve" -- \
+	env PR_TITLE='skills: the watch is armed LAST (#100)' STUB_MODE=ok \
+	"$CHECK" --gh "$STUB" --repo o/n --title-env PR_TITLE
+expect "a title full of shell metacharacters is data, not code" 0 "no bare #N" -- \
+	env PR_TITLE='"; touch /tmp/pwned-by-a-title; echo "' STUB_MODE=ok \
+	"$CHECK" --gh "$STUB" --repo o/n --title-env PR_TITLE
+# shellcheck disable=SC2016  # The single quotes are the assertion: this must reach the script
+# as the literal characters `$(...)` and backticks. Double-quoting would expand them HERE, in
+# the suite, and the case would silently become a test of an already-substituted string —
+# passing while proving nothing, which is the failure mode quince#104's negative control hit.
+expect "command substitution in a title is not substituted" 0 "no bare #N" -- \
+	env PR_TITLE='$(touch /tmp/pwned-by-a-title)`touch /tmp/pwned-by-a-title`' STUB_MODE=ok \
+	"$CHECK" --gh "$STUB" --repo o/n --title-env PR_TITLE
+expect "refuses an unset variable rather than checking an empty title" 2 "is not set" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title-env DEFINITELY_NOT_SET_ANYWHERE
+expect "refuses a --title-env that is not a variable name" 2 "takes a variable NAME" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title-env 'PR_TITLE; rm -rf /'
+# The proof that the three cases above are not vacuous: nothing was executed.
+if [ -e /tmp/pwned-by-a-title ]; then
+	printf 'FAIL a title was EXECUTED — /tmp/pwned-by-a-title exists\n'
+	rm -f /tmp/pwned-by-a-title
+	fail=$((fail + 1))
+else
+	printf 'ok    no title was executed (the injection cases are not vacuous)\n'
+	pass=$((pass + 1))
+fi
+
+expect "a # not followed by digits is not a reference" 0 "no bare #N" -- \
+	run all-404 --repo o/n --title 'the #hashtag case and C# too'
+
+# --- summary ----------------------------------------------------------------------------------
+printf '\npr-title-refs-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
