@@ -58,6 +58,45 @@ did: `/loop` plus a 1200 s `ScheduleWakeup`, giving up to twenty minutes of late
 session that shows busy on every tick. Worse, a client reconnect restarted the session process, the
 pending wakeup died with it, and the watch reported healthy for 44 minutes.
 
+**And the command is not enough either, if it is run at the wrong moment.** Both skills said a session
+must arm a watch and neither said **when in the turn**. The natural reading — arm once you know you
+need one, which is right after handling the events that woke you — is the broken one, and it was
+measured six times in a single session before anybody read it as an ordering defect rather than as
+forgetfulness (quince#100).
+
+**Arm as the LAST action of the turn, after a foreground catch-up tick:**
+
+```sh
+# 1. do all the work first: every push, every comment, every review, every merge
+# 2. consume the catch-up SYNCHRONOUSLY, where the session that caused it can read it
+bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"                  # architect
+bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"     # implementer
+# 3. arm, last, against a now-current observation                     (BACKGROUND task)
+bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
+```
+
+`tick` is one pass and returns, so it belongs in the foreground; it is `watch` — the loop — that must
+never run there.
+
+**Why last.** Self-caused events are deliberately not suppressed (quince#62), and a session's last act
+is almost always a push, a comment, a review or a merge — which is precisely an event on something it
+is watching. So a watch armed *before* that act is dead by design by the time the turn ends, and the
+`Stop` hook is telling the truth when it says so. The rate is worst on the implementer side, whose
+self-caused events are *how a turn ends*, where an architect's approvals and merges are occasional.
+
+**Why the tick, and why arming last is necessary but not sufficient.** A re-arm from `dead` correctly
+emits what accrued — and what accrued is the session's own actions from the turn just finished. So the
+first tick exits immediately, and reaching a *quiet* watch takes two arms, only the second of which can
+survive the end of the turn. The foreground tick absorbs that catch-up in the open, rather than as a
+task notification arriving after the turn has already ended. It composes safely because a hand-run
+`tick` deliberately does **not** write the watcher record (quince#49), so it cannot make a dead watch
+look alive — the one way this ordering could have been unsound, closed by a narrowing written for an
+unrelated reason.
+
+Measured on the implementer side: three `Stop`-hook firings before the tick step was adopted, none
+after (quince#100). **Not a tool change** — `watch` and `tick` both behave correctly; what was missing
+was the sentence saying when to run them.
+
 So:
 
 0. **Pull the launchpad first — it is part of arming, not housekeeping.** `--all` reads
