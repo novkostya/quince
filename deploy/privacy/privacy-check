@@ -141,13 +141,24 @@ fi
 # --- the matcher is verified against known-positive input, when the Operator supplies it ------
 # Everything above proves the patterns COMPILE. Only a known-positive probe proves they MATCH.
 if [ -s "$CANARY" ]; then
-	while IFS= read -r probe; do
+	# `|| [ -n "$probe" ]` catches a final line with NO trailing newline, which plain `read`
+	# discards. Without it a single-probe canary — the likely shape of a hand-written first
+	# version — is skipped entirely while the success line below still prints: a check that
+	# could not run, reporting that it did, inside the file whose whole subject is that defect.
+	probes=0
+	while IFS= read -r probe || [ -n "$probe" ]; do
 		case "$probe" in '' | \#*) continue ;; esac
+		probes=$((probes + 1))
 		if printf '%s\n' "$probe" | "$GREP" -qiEf "$CI_LIST" 2>/dev/null; then continue; fi
 		if [ "$CS_COUNT" -gt 0 ] && printf '%s\n' "$probe" | "$GREP" -qEf "$CS_LIST" 2>/dev/null; then continue; fi
 		cannot_run "canary probe from $CANARY matched NOTHING — the matcher compiles the lists but does not match what they are meant to catch"
 	done <"$CANARY"
-	say "canary ok — the matcher matches known-positive input"
+	# A canary of nothing but comments passes `test -s`, tests zero probes, and would have
+	# printed "canary ok" — the third instance of this PR's own thesis inside its own
+	# implementation, found while writing the fixture for the second. Count what was actually
+	# proven and refuse to announce a verification of nothing.
+	[ "$probes" -gt 0 ] || cannot_run "canary $CANARY holds no usable probes (only blanks/comments) — nothing was verified"
+	say "canary ok — the matcher matches known-positive input ($probes probe(s))"
 else
 	say "no canary at $CANARY — matcher proven to COMPILE the lists, not to match anything"
 fi
@@ -171,7 +182,14 @@ if [ -n "$REF" ]; then
 	add_source "branch-diff" "$WORK/diff"
 	# Commit messages are public forever and are covered by the same rule as the diff
 	# (CLAUDE.md: "...never enter committed files, commit messages, branch names...").
-	git log "$REF" --format='%s%n%b' >"$WORK/messages" 2>/dev/null || true
+	#
+	# --right-only, because one $REF string reaches two commands that read three-dot notation
+	# DIFFERENTLY: `git diff A...B` is merge-base→B, but `git log A...B` is the symmetric
+	# difference and so includes commits that are only on A. Without this the gate fails a
+	# branch over a commit message the author never wrote — whenever main is ahead, which under
+	# strict up-to-date protection is the normal state of a queued PR and the state /land
+	# deliberately creates by rebasing. Measured: no-op for the two-dot form, so both work.
+	git log --right-only "$REF" --format='%s%n%b' >"$WORK/messages" 2>/dev/null || true
 	add_source "commit-message" "$WORK/messages"
 	# The branch name travels to the forge too, and costs one line to cover.
 	git rev-parse --abbrev-ref HEAD >"$WORK/branch" 2>/dev/null || true
