@@ -1,0 +1,238 @@
+#!/bin/sh
+# privacy-check-test — the failure paths of the privacy gate, asserted.
+#
+# quince#41 is a bug about a gate that PASSES WHEN IT CANNOT RUN. A fix for that is not
+# demonstrated by the gate reporting clean; it is demonstrated by the gate reporting
+# FAILURE on inputs where failure is correct. So every case below asserts a non-zero exit
+# and the reason attached to it, and the clean cases exist only to prove the failures are
+# not the script refusing everything.
+#
+# Every fixture is SYNTHETIC — its own throwaway git repo and its own fake pattern list.
+# Nothing here reads the Operator's private layer, so this suite runs on ANY box, including
+# CI and a contributor's laptop. That property is the point: the failure path of a gate that
+# only some boxes can run must be testable on all of them.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+CHECK="$HERE/privacy-check"
+[ -x "$CHECK" ] || { printf 'privacy-check-test: %s is not executable\n' "$CHECK" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+# --- assertions ---------------------------------------------------------------------------
+# Each check asserts the exit CODE and a substring of the output, because the code alone
+# cannot tell "refused because there is no list" from "refused because a pattern matched" —
+# and conflating those two is how the original defect read as clean.
+# Run a command in a directory. NOT `env -C`, which is GNU-only: busybox env rejects it, and
+# busybox is what /bin/grep and much of this box is. A suite that only runs on GNU userland
+# would be testing the gate on a platform the gate does not run on.
+at() { d=$1; shift; (cd "$d" && exec "$@"); }
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4 # name, want, substr, and the literal --
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	if [ -n "$substr" ] && ! printf '%s\n' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right, but output lacked: %s\n' "$name" "$got" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	printf 'ok   %s (exit %s)\n' "$name" "$got"
+	pass=$((pass + 1))
+}
+
+# --- fixture builders -----------------------------------------------------------------------
+# The synthetic patterns are deliberately absurd strings, so a fixture can never accidentally
+# match real content, and the case-sensitive one mirrors the SHAPE of the device-name heuristic
+# from quince#41 req 3 without being it.
+make_patterns() { # <dir>
+	mkdir -p "$1"
+	cat >"$1/privacy-patterns.txt" <<'EOF'
+# synthetic — case-insensitive list
+zzsecrethostzz
+203\.0\.113\.[0-9]{1,3}
+EOF
+}
+make_cs_patterns() { # <dir>
+	cat >"$1/privacy-patterns-cs.txt" <<'EOF'
+# synthetic — case-SENSITIVE list. Relies on case discrimination, which is exactly the
+# class that becomes meaningless when the whole set is run under -i (quince#41 req 3).
+Quince[A-Z][a-z]+
+EOF
+}
+
+# A git repo whose branch carries `content` in a file, COMMITTED — the state the old gate was
+# blind to, because `git diff --cached` is empty once you have committed.
+make_repo() { # <dir> <file-content> [commit-subject]
+	repo=$1 content=$2 subject=${3:-add a file}
+	mkdir -p "$repo"
+	git -C "$repo" init -q -b main
+	git -C "$repo" config user.email fixture@example.invalid
+	git -C "$repo" config user.name 'fixture'
+	echo "baseline" >"$repo/README.md"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm "baseline"
+	git -C "$repo" checkout -q -b topic
+	printf '%s\n' "$content" >"$repo/notes.md"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm "$subject"
+}
+
+# =============================================================================================
+# 1. THE GATE CANNOT RUN  →  exit 2, never 0
+# =============================================================================================
+
+# The original defect, verbatim: no pattern list. The old implementation printed
+# "…(contributor/CI box) — skipped" and exited 0, so every PR in the 2026-07-26 cycle had to
+# hand-declare that the sweep had not really run in order to stop that 0 reading as clean.
+empty_dir="$TMP/no-patterns"
+mkdir -p "$empty_dir"
+expect "absent pattern list refuses" 2 "DID NOT RUN" -- \
+	"$CHECK" --patterns "$empty_dir"
+
+# An empty list is the same vacuous pass wearing a costume: the file exists, so `test -f`
+# is satisfied, and it matches nothing forever.
+zero_dir="$TMP/empty-patterns"
+mkdir -p "$zero_dir"
+: >"$zero_dir/privacy-patterns.txt"
+expect "empty pattern list refuses" 2 "EMPTY" -- \
+	"$CHECK" --patterns "$zero_dir"
+
+# A list of nothing but comments and blank lines passes `test -s` and still matches nothing.
+comment_dir="$TMP/comments-only"
+mkdir -p "$comment_dir"
+printf '# only a comment\n\n' >"$comment_dir/privacy-patterns.txt"
+expect "comments-only list refuses" 2 "no usable patterns" -- \
+	"$CHECK" --patterns "$comment_dir"
+
+# An unusable matcher must refuse rather than fall back to whatever $PATH offers. On the runner
+# `grep` is ugrep and `/bin/grep` is busybox; a gate that silently picks one is a gate whose
+# semantics depend on the box.
+good="$TMP/good"
+make_patterns "$good"
+expect "missing matcher refuses" 2 "not found" -- \
+	env PRIVACY_GREP=/nonexistent/definitely-not-a-grep "$CHECK" --patterns "$good"
+
+# A typo'd flag must not read as a clean sweep.
+expect "unknown argument refuses" 2 "DID NOT RUN" -- \
+	"$CHECK" --patterns "$good" --no-such-flag
+
+# A --text file that cannot be read is a sweep that did not happen.
+expect "unreadable --text refuses" 2 "not readable" -- \
+	"$CHECK" --patterns "$good" --text "$TMP/does-not-exist"
+
+# =============================================================================================
+# 2. THE GATE CAN RUN AND SOMETHING MATCHES  →  exit 1
+# =============================================================================================
+
+# The whole-branch hole (quince#41 req 2). The violation is COMMITTED, so the staged diff is
+# empty. The default mode is a commit-time gate and correctly reports clean on an empty stage —
+# and that is precisely why a --ref mode has to exist, or /land's "re-check the whole branch
+# diff before a merge" has no gate behind it at all.
+committed="$TMP/committed"
+make_repo "$committed" "the host is zzsecrethostzz today"
+# …and the staged-diff mode must not call that "clean". The scope is empty, so there is nothing
+# to be clean ABOUT — borrowing the word is how a vacuous pass gets ticked as a real one.
+expect "empty staged scope says NOTHING TO SWEEP, not clean" 0 "NOTHING TO SWEEP" -- \
+	at "$committed" "$CHECK" --patterns "$good"
+expect "committed violation IS caught by whole-branch mode" 1 "PRIVACY VIOLATION" -- \
+	at "$committed" "$CHECK" --patterns "$good" --ref main...HEAD
+expect "whole-branch hit names its source" 1 "branch-diff:" -- \
+	at "$committed" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# Commit messages are public history under the same rule as the diff, and no gate covered them.
+msgrepo="$TMP/msg"
+make_repo "$msgrepo" "nothing private here" "wire up 203.0.113.42 for the demo"
+expect "commit message violation is caught" 1 "commit-message:" -- \
+	at "$msgrepo" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# PR text is written by a session and reaches the forge without ever passing through git.
+prtext="$TMP/pr-body.md"
+printf 'The deploy answered on zzsecrethostzz.\n' >"$prtext"
+clean_repo="$TMP/clean"
+make_repo "$clean_repo" "entirely ordinary content"
+expect "PR text violation is caught" 1 "text:" -- \
+	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD --text "$prtext"
+
+# The staged-diff mode still works — the commit-time gate is the one that must not regress.
+staged="$TMP/staged"
+make_repo "$staged" "ordinary"
+printf 'contact 203.0.113.9\n' >"$staged/leak.md"
+git -C "$staged" add leak.md
+expect "staged diff mode still catches a violation" 1 "staged-diff:" -- \
+	at "$staged" "$CHECK" --patterns "$good"
+
+# =============================================================================================
+# 3. THE CASE SPLIT IS REAL  (quince#41 req 3)
+# =============================================================================================
+# Run wholesale under -i, a pattern that relies on case discrimination is not merely noisy —
+# it is meaningless, and a recurring false positive on ordinary prose trains the sweeper to
+# wave that pattern through. These two cases prove the case-sensitive list keeps its case.
+split="$TMP/split"
+make_patterns "$split"
+make_cs_patterns "$split"
+
+cs_hit="$TMP/cs-hit"
+make_repo "$cs_hit" "the box is called QuinceRunner in the lab"
+expect "case-sensitive list matches the cased form" 1 "PRIVACY VIOLATION" -- \
+	at "$cs_hit" "$CHECK" --patterns "$split" --ref main...HEAD
+
+cs_miss="$TMP/cs-miss"
+make_repo "$cs_miss" "the quincerunner conventions are ordinary prose"
+expect "case-sensitive list does NOT match the lowercased form" 0 "clean" -- \
+	at "$cs_miss" "$CHECK" --patterns "$split" --ref main...HEAD
+
+# The case-INSENSITIVE list keeps ignoring case, so the split does not quietly harden it.
+ci_case="$TMP/ci-case"
+make_repo "$ci_case" "shouting about ZZSECRETHOSTZZ"
+expect "case-insensitive list still ignores case" 1 "PRIVACY VIOLATION" -- \
+	at "$ci_case" "$CHECK" --patterns "$split" --ref main...HEAD
+
+# Absence of the case-sensitive list is a DEGRADED MODE and must be announced, not swallowed.
+expect "missing case-sensitive list is announced" 0 "NO case-sensitive list" -- \
+	at "$cs_miss" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# =============================================================================================
+# 4. A CLEAN RESULT SAYS WHAT IT SWEPT  (so a vacuous run is visible)
+# =============================================================================================
+expect "clean names the pattern count" 0 "against 2 patterns" -- \
+	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD
+expect "clean names the matcher" 0 "matcher" -- \
+	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# =============================================================================================
+# 5. THE CANARY — patterns that compile but match nothing  (the architect's finding on #44)
+# =============================================================================================
+# Everything above proves the patterns COMPILE. Only a known-positive probe proves they MATCH,
+# which is the property that actually fails when a box's grep differs from the one the list was
+# authored against.
+canary_ok="$TMP/canary-ok"
+make_patterns "$canary_ok"
+printf 'zzsecrethostzz\n' >"$canary_ok/privacy-canary.txt"
+expect "a matching canary passes and says so" 0 "canary ok" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_ok" --ref main...HEAD
+
+canary_bad="$TMP/canary-bad"
+make_patterns "$canary_bad"
+printf 'this string matches none of the patterns\n' >"$canary_bad/privacy-canary.txt"
+expect "a canary that matches nothing REFUSES" 2 "matched NOTHING" -- \
+	at "$clean_repo" "$CHECK" --patterns "$canary_bad" --ref main...HEAD
+
+# No canary is a degraded mode: proven to compile, not proven to match. Say so.
+expect "absent canary is announced as unproven" 0 "not to match anything" -- \
+	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# =============================================================================================
+printf '\nprivacy-check-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1

@@ -63,20 +63,23 @@ help: ## Show this help
 preflight:
 	@test -n "$(RUNTIME)" || { echo "ERROR: no container runtime (nerdctl/docker) found. This box must be a container host — see deploy/dev.md."; exit 1; }
 
+# The logic lives in deploy/privacy/privacy-check, not here. A recipe of backslash
+# continuations cannot be shellchecked and cannot be unit-tested — and for THIS gate the
+# untested path was the whole defect (quince#41): it exited 0 when it could not run, so a
+# checklist could tick itself on every box that was unable to sweep.
+#
+#   make privacy-check                          the staged diff (the commit-time gate)
+#   make privacy-check REF=origin/main...HEAD   the whole branch: diff AND commit messages
+#   make privacy-check REF=... TEXT=body.md     …and the PR text (TEXT=/dev/stdin to pipe)
+#
+# exit 0 clean · 1 violation · 2 DID NOT RUN. The third code is the point of the rewrite.
 .PHONY: privacy-check
-privacy-check: ## Scan the staged diff for Operator-private patterns (no-op without local/privacy-patterns.txt)
-	@if [ -f local/privacy-patterns.txt ]; then \
-	  hits=$$(git diff --cached -U0 | grep -E '^\+' | grep -inEf local/privacy-patterns.txt || true); \
-	  if [ -n "$$hits" ]; then \
-	    echo "PRIVACY VIOLATION — staged diff matches local/privacy-patterns.txt:"; \
-	    echo "$$hits"; \
-	    echo "Unstage/fix before committing (program doc: privacy is a commit-time gate)."; \
-	    exit 1; \
-	  fi; \
-	  echo "privacy-check: staged diff clean"; \
-	else \
-	  echo "privacy-check: no local/privacy-patterns.txt (contributor/CI box) — skipped"; \
-	fi
+privacy-check: ## Sweep for Operator-private strings (REF=<range> whole-branch, TEXT=<file>); FAILS when it cannot run
+	@deploy/privacy/privacy-check $(if $(REF),--ref $(REF)) $(if $(TEXT),--text $(TEXT))
+
+.PHONY: privacy-check-test
+privacy-check-test: ## The privacy gate's own failure-path suite (synthetic — needs no private layer)
+	@deploy/privacy/privacy-check-test
 
 # ---------------------------------------------------------------------------
 # Toolchain images — built once from the Dockerfile stages, reused by gates.
@@ -114,7 +117,8 @@ gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
 # point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
-                   deploy/runner/preflight deploy/runner/provision bin/forge-watch
+                   deploy/runner/preflight deploy/runner/provision bin/forge-watch \
+                   deploy/privacy/privacy-check deploy/privacy/privacy-check-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
@@ -125,6 +129,11 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@if grep -nE -- '(^|[[:space:]])(-k|--insecure)([[:space:]]|$$)' $(DEVCT_SCRIPTS); then \
 	  echo "gates-sh: 'curl -k/--insecure' is banned in deploy/devct — pin the cert instead"; exit 1; \
 	fi
+	@# The privacy gate's failure paths. Gated rather than hand-run, because "the gate passes
+	@# when it cannot run" is precisely the bug this suite exists to hold shut — leaving its
+	@# proof to whoever remembers would reproduce the defect one level up (quince#41, #64).
+	@# Synthetic fixtures only: no private layer needed, so it runs here, on CI, and anywhere.
+	@$(MAKE) --no-print-directory privacy-check-test
 	@echo "gates-sh: clean"
 
 .PHONY: gates-go

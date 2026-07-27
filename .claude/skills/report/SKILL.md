@@ -28,15 +28,21 @@ something you ran, or is labelled as not run with an owner. No fabricated URLs, 
 
 ## 2. Privacy sweep — the whole branch, not just the last commit
 
+One command, and it covers the branch diff, the commit messages **and** the PR text you are
+about to post — write the body to a file first and hand it over:
+
 ```sh
-make privacy-check                                    # staged diff
-git diff main...HEAD | grep '^+' | grep -inEf local/privacy-patterns.txt   # whole branch
-git log main..HEAD --format='%s%n%b'                  # commit messages are public too
+make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md
 ```
 
-Then re-read the PR text and journal entry you are about to write against the same rule:
-no hostnames, LAN IPs, MACs, topology, hardware sizing, UDIDs/serials, personal paths, or
-lab-log excerpts. On a box without the pattern file the target no-ops — sanitize by hand.
+Then re-read the PR text and journal entry against the same rule: no hostnames, LAN IPs,
+MACs, topology, hardware sizing, UDIDs/serials, personal paths, or lab-log excerpts.
+
+**Read the exit code, not the silence.** `0` clean, and it names what it swept · `1` a
+match, with source and line · **`2` DID NOT RUN** — no pattern list, an empty one, an
+unusable matcher. A `2` is not a clean result and must never be reported as one: on a box
+without the private layer that is exactly what you will get, and the sweep is then **owed**,
+with the head named, not done (quince#41).
 
 ## 3. Deploy + click list (DoD)
 

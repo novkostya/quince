@@ -66,9 +66,10 @@ defect in a docs PR exactly as a failing test is in a code PR.
 ## 4. Process gates
 
 - CI: `gh pr checks <n> --repo novkostya/quince` — all required checks green.
-- Privacy: `git diff main...HEAD | grep '^+' | grep -inEf local/privacy-patterns.txt`, plus
-  the commit messages (`git log main..HEAD --format='%s%n%b'`), plus the PR text itself. On
-  a box without the pattern file, read for it by hand.
+- Privacy: `make privacy-check REF=origin/main...HEAD TEXT=<pr-body>` — one command over the
+  diff, the commit messages and the PR text. **Exit `2` is DID NOT RUN, not clean**: treat it
+  as an owed sweep, never as a ticked box (quince#41). A clean run names the matcher and the
+  pattern count, so you can tell a real sweep from a vacuous one.
 - DoD: CI green · privacy swept · review approved · deploy URL (or an honest
   not-applicable/pending line) · ≤5-line click list · journal entry written or handed over.
 - Canon: does the change contradict a doc it didn't update? Is there an unruled gap being
