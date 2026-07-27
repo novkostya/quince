@@ -197,6 +197,24 @@ events: first-observation · queue-empty · updated · opened · review · check
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
 
+  A CONSUMER MUST NOT RELY ON EITHER ORDERING. The typed event and the `updated` backstop describe
+  the SAME ACT, and they arrive either in one tick or a tick apart. Neither is canonical and neither
+  is guaranteed to be first. This is a property of THE FORGE rather than of this tool — **GitHub's
+  PR fields do not move atomically**, so `reviews` can carry a verdict before the PR's own
+  `updatedAt` has moved, or after it. Anything that reads two of them and infers an order is reading
+  a race (quince#72).
+
+  Measured, not reasoned, across both boxes. On the runner: **12 review deliveries — 11 arriving in
+  a single tick, 1 split across two watcher generations.** On the architect box the same act was
+  seen both ways on different PRs. That 11-of-12 is precisely the trap: a consumer that tried this a
+  few times would see one tick every time, conclude the pairing is dependable, and be wrong about
+  one review in twelve — which is frequent enough to matter and rare enough to survive testing.
+
+  There is deliberately NO de-duplication. Recognising "I have already seen this act" needs state
+  carried across ticks — more machinery, and a new place to be wrong — to save ONE EXTRA WAKE per
+  split act. The guarantee that matters, that nothing is invisible, held under both orderings, so
+  the churn is accepted and named rather than engineered away.
+
   Except for one state, which is why `mergeability` exists and why it reports `CLEAN` as well as
   `BEHIND`/`DIRTY`: when a PR is APPROVED and its CI then completes, NOTHING HAPPENS TO THE PR — the
   approval was the last mover, and check completion does not touch `updatedAt` (measured on quince#66:
