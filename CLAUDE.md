@@ -118,6 +118,24 @@ existing: quince#47 established that the architect and the Operator share a logi
 refuses an architect verdict on an Operator-authored PR, and that is the one class of PR the
 Operator structurally must author. An identity that is not a person is what breaks the deadlock.
 
+**Which identity must approve a class of PR is written in `.github/CODEOWNERS`, not only here.**
+Canon — this file and the four docs it names as canon, plus `CODEOWNERS` itself — is owned by
+`@novkostya`, the human account. **A GitHub App cannot be a code owner**: code owners must be users
+or teams with write permission, and an installation is neither. That refusal is the mechanism rather
+than an obstacle, because it means an architect verdict *structurally cannot* satisfy a code-owner
+requirement on those paths. It became expressible only when quince#134 moved verdicts to the App;
+before that, naming `@novkostya` distinguished nothing, because the architect approved as
+`@novkostya`. If the architect ever reviews as a user account again, that file silently stops
+separating the two seats.
+
+**The file enforces nothing until *"Require review from Code Owners"* is enabled**, which is
+admin-only and therefore the Operator's — CODEOWNERS alone only auto-*requests* review. It is
+committed unwired on purpose, the same shape as an unpushable workflow (quince#113). **Enabling it
+deadlocks one class and that is unruled:** the architect still *authors* canon as `@novkostya`, and
+GitHub does not count an author's approval of their own PR, so architect-authored canon would become
+admin-merge-only. The deadlock is the identity model's true state made visible, not a new defect —
+but which identity authors canon is a ruling, and it is open — quince#137.
+
 **No per-verdict disclosure is required, and the reason is structural rather than trusting.** The
 signing key exists in one place — the arch box — so the sessions that can cast an App verdict are
 architect sessions, which review before approving. A rule making every verdict declare its
