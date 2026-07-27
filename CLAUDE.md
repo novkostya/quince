@@ -146,8 +146,11 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   device UDIDs/serials, personal names and paths, lab-log excerpts — never enter
   committed files, **commit messages**, branch names, tags, PR/issue text, or fixtures.
   Before every push run `make privacy-check`; before a merge re-run it over the whole
-  branch — `make privacy-check REF=origin/main...HEAD TEXT=<pr-body>`, which covers the
-  diff, the commit messages and the PR text in one command. **Exit `0` clean · `1` a match
+  branch — `make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md`, which covers the
+  diff, the commit messages and the PR text in one command. **`TEXT=` takes a PATH to a file
+  holding the body, never the body itself** — pass the prose and it word-splits, so the gate
+  refuses naming the first word of your own PR as an unreadable filename (quince#105).
+  **Exit `0` clean · `1` a match
   · `2` DID NOT RUN**, and a `2` is never a clean result: on a box with no usable pattern
   list the gate refuses instead of exiting 0, so the sweep is *owed*, with the head named,
   rather than silently ticked (quince#41). A leak that reaches history is an incident:

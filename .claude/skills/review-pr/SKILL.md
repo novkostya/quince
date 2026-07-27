@@ -69,10 +69,15 @@ defect in a docs PR exactly as a failing test is in a code PR.
 - Privacy: one command over the diff, the commit messages and the PR text — **and the form differs
   by repository, because `quince-devlog` has no Makefile** (quince#78):
   ```sh
-  make privacy-check REF=origin/main...HEAD TEXT=<pr-body>                     # in quince
+  make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md               # in quince
   /path/to/your/quince/deploy/privacy/privacy-check \
-      --ref origin/main...HEAD --text <pr-body>                                # in quince-devlog
+      --ref origin/main...HEAD --text /tmp/pr-body.md                          # in quince-devlog
   ```
+  **`TEXT=` / `--text` take a PATH to a file holding the body, never the body itself.** Write the
+  body out first. Passing the prose word-splits it and the gate refuses with a `2` naming the first
+  word of the PR as an unreadable filename — which reads like a corrupted invocation rather than a
+  wrong argument type (quince#105).
+
   Run it **from the repository being swept** — `--ref` resolves against the current directory's git
   repo — and do **not** pass `--patterns`: it defaults to `./local`, which both clones carry, and
   handing it a file instead of a directory produces a `2`. Prefer **your work clone's** copy of the
