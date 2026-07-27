@@ -119,7 +119,8 @@ DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/l
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
                    deploy/runner/preflight-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
-                   deploy/privacy/privacy-check deploy/privacy/privacy-check-test
+                   deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
+                   bin/forge-watch-exits-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
@@ -137,6 +138,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory privacy-check-test
 	@$(MAKE) --no-print-directory forge-watch-test
 	@$(MAKE) --no-print-directory preflight-test
+	@$(MAKE) --no-print-directory forge-watch-exits-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -164,6 +166,14 @@ forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~2
 	  exit 1; \
 	}
 	@bin/forge-watch replay bin/testdata/forge/*.json
+
+# quince#75: the skills enumerated forge-watch's exits as 0, 6 and 7 and said "every exit is a
+# re-arm" — false on the refusal (exit 1), where obeying it loops forever with no watch running.
+# This asserts every exit DERIVED from the tool is MEASURED and is NAMED in every document that
+# enumerates them, so the next omission fails here rather than in a session.
+.PHONY: forge-watch-exits-test
+forge-watch-exits-test: ## Every exit forge-watch can return is named in the skills (quince#75)
+	@bin/forge-watch-exits-test
 
 # The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and
 # pasted into a PR until now (quince#32). preflight's refusals ARE its product: it exists to stop a

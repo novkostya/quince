@@ -170,8 +170,27 @@ print detects everything and delivers nothing. Not hypothetical: the first archi
 skill armed exactly that, slept through quince#61 for fifty minutes, and every instrument agreed it was
 healthy throughout — fresh heartbeat, state rewritten every 60 s, `status --all` saying `live`
 (quince#62). Run it in the **background**; in the foreground it blocks the session it is supposed to
-wake. It exits 0 with the events on stdout, 6 at the idle bound, 7 on repeated fetch failures — and
-**every exit is a re-arm**, because a watch that exited is a watch that is not watching.
+wake.
+
+**Every exit `watch` can return, and which are re-arms.** This list said *0, 6 and 7* and *"every exit
+is a re-arm"* — false on the one it omitted. `watch` **refuses** to arm beside a `live` or `wedged`
+watch, and refusing is exit **1**. Obeying the old rule there is refuse → re-arm → refuse → re-arm,
+unbounded, with no watch running throughout; it was hit on this box and escaped by noticing, which is
+not a mechanism (quince#75).
+
+| exit | means | what to do |
+| --- | --- | --- |
+| **0** | events found, on stdout | handle them, then **re-arm** |
+| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** `live` needs no second watch; `wedged` needs `forge-watch stop` first. Re-arming loops forever. |
+| **6** | `--max-wait` idle bound, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
+| **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
+
+`status` answers a different question with its own codes: exit **0** live · **3** dead · **4** absent
+· **5** wedged. An exit of **2** is not the tool's at all — it is an underlying tool (jq) failing and
+the script aborting, so read the error rather than looking it up here.
+
+**Re-arm on 0, 6 and 7. On 1, read what it refused and why**: a watch that exited is a watch that is
+not watching, but a watch that *refused to start* is usually one that was not needed.
 
 **Exits 6 and 7 will be reported to you as failures.** A background task that exits non-zero renders as
 *"failed with exit code 6"* — and 6 is `watch`'s designed idle heartbeat, the floor this section names.
