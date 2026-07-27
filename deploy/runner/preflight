@@ -115,9 +115,23 @@ PATTERN_FILE="$PRIVATE_LAYER/privacy-patterns.txt"
 # on this box" and every sweep afterwards said DID NOT RUN — quince#44's own failure, inside the
 # change that closes it. So: run the gate's validator and take its exit code.
 #
-#   0 → the list is usable      2 → it is not, and the gate says why
+# ONLY 2 MEANS "COULD NOT LOOK", and "could not look" is the only thing preflight is asking about:
 #
-# (1 is "a match was found", which cannot occur here: no --ref and no --text means an empty scope.)
+#   0 → swept, nothing matched   1 → swept, something matched   2 → DID NOT SWEEP
+#
+# So `-ne 2`. Both 0 and 1 PROVE the gate can run — the lists compiled and the sweep executed —
+# which is quince#41's three-code contract used as designed rather than worked around.
+#
+# An earlier version of this comment claimed "1 cannot occur here: no --ref and no --text means an
+# empty scope". FALSE, and measured: no --ref means the STAGED DIFF OF THE CURRENT DIRECTORY, and
+# preflight inherits the service's cwd, which is `runner_dir` — /root/quince, a real repo that
+# sessions work in. An interrupted commit leaving a staged match there made preflight refuse with
+# "this box cannot run the privacy gate" while the gate had just run perfectly, and prescribe
+# replacing a healthy pattern list. In start_pre, that is a box that will not come up and a log
+# telling you to overwrite the one artifact that must not be casually replaced.
+#
+# NEVER print $layer_why on a non-2 path: on exit 1 it contains the MATCHED LINES, which are
+# Operator-private by construction, and this output goes to /var/log/quince-runner.log.
 _here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 PRIVACY_CHECK="${QUINCE_PRIVACY_CHECK:-$_here/../privacy/privacy-check}"
 if [ ! -x "$PRIVACY_CHECK" ]; then
@@ -125,7 +139,7 @@ if [ ! -x "$PRIVACY_CHECK" ]; then
 else
 	# stderr carries the gate's reason; stdout is its progress chatter and is discarded.
 	layer_why=$("$PRIVACY_CHECK" --patterns "$PRIVATE_LAYER" 2>&1 >/dev/null) && layer_rc=0 || layer_rc=$?
-	if [ "$layer_rc" -eq 0 ]; then
+	if [ "$layer_rc" -ne 2 ]; then
 		# `grep -c` prints 0 AND exits 1 on a zero count, so the one-line `|| echo 0` form emits
 		# the count and the fallback both, and $patterns becomes two lines. Documented at
 		# deploy/privacy/privacy-check and re-learned here the hard way; written the long way.

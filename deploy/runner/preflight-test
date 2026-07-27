@@ -269,6 +269,46 @@ expect "a missing privacy-check refuses rather than assuming" 1 "privacy gate is
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	QUINCE_PRIVACY_CHECK=/nonexistent/privacy-check
 
+# A STAGED VIOLATION IN THE CWD MUST NOT STOP THE BOX STARTING. preflight inherits the service's
+# cwd — `runner_dir`, /root/quince, a real repo sessions work in — and privacy-check with no --ref
+# sweeps the staged diff there. Exit 1 therefore means "the gate ran and matched something in an
+# unrelated working tree", which PROVES the gate can run; only 2 means it could not look. Against
+# the first version of this borrowing, an interrupted commit in the launchpad made preflight refuse
+# with "this box cannot run the privacy gate" — while the gate had just run perfectly — and print a
+# fix telling someone to replace a healthy pattern list.
+staged_repo="$TMP/staged-cwd"
+mkdir -p "$staged_repo"
+git -C "$staged_repo" init -q -b main
+git -C "$staged_repo" config user.email fixture@example.invalid
+git -C "$staged_repo" config user.name 'fixture'
+echo baseline >"$staged_repo/README.md"
+git -C "$staged_repo" add -A
+git -C "$staged_repo" commit -qm baseline
+printf 'the host is zzsecrethostzz\n' >"$staged_repo/leak.md"
+git -C "$staged_repo" add leak.md
+# shellcheck disable=SC2086
+out=$(cd "$staged_repo" && env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1) && got=0 || got=$?
+if [ "$got" -eq 0 ] && printf '%s\n' "$out" | grep -qF "private layer present"; then
+	printf 'ok   a staged violation in the cwd does not stop the box starting (exit %s)\n' "$got"
+	pass=$((pass + 1))
+else
+	printf 'FAIL a staged violation in the cwd does not stop the box starting\n  exit=%s\n' "$got"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+fi
+# …and the matched line must NEVER reach preflight's output. This goes to
+# /var/log/quince-runner.log, and on exit 1 the gate's stderr carries the private content it
+# matched — so a leak here would be preflight publishing exactly what the gate exists to contain.
+if printf '%s\n' "$out" | grep -qF "zzsecrethostzz"; then
+	printf 'FAIL preflight leaked the matched private content into its own output\n'
+	fail=$((fail + 1))
+else
+	printf 'ok   the matched content never reaches preflight output (service-log safety)\n'
+	pass=$((pass + 1))
+fi
+
 # A usable layer passes and states the pattern COUNT, so a reader can tell a real layer from a
 # nearly-empty one — the same reason privacy-check and forge-watch print their counts.
 expect "a usable private layer passes, stating the count" 0 "private layer present, 1 usable patterns" -- \
