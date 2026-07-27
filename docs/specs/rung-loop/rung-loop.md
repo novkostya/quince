@@ -624,6 +624,66 @@ forward the record of any issue missing from an observation; absence is reported
 `issue-fetch-failed` and is never allowed to mean *nothing there*. It is corollary (a) — silence is
 not a result — reached from inside the tool that enforces it, for the third time.
 
+
+**Half two: issues referenced by open PRs, automatic.** Half one is a declaration and therefore still
+something a session must *do*; the ruling is explicit that it is insufficient alone, and the reason is
+the ordinary case — a session should not have to remember to declare the issue its own PR is for.
+
+**The discovery signal is the UNION of GitHub's link data and a `#N` scan of the PR TITLE**, and that
+is measured rather than tidy. Over 25 PRs in this repository (`gh pr list -R novkostya/quince --state
+all --limit 25`, 2026-07-27T09:57Z):
+
+| signal | covers |
+| --- | --- |
+| `closingIssuesReferences` alone | 9 / 25 |
+| `#N` in the title alone | 22 / 25 |
+| **union** | **23 / 25** (only quince#34 and quince#30 name nothing anywhere) |
+
+**The decisive case is quince#87 itself** — the PR that built half one. Its body says *"Closes half one
+of #80"*, which GitHub does not parse as a closing keyword because the keyword and the reference are
+not adjacent, so its link data is **empty** while its title carries `(#80)`. A derived half resting on
+link data alone would have missed the very PR written to fix this issue.
+
+*(The first version of this table said 9 was 10. It was counted by eye and corrected in review of the
+journal entry carrying the same figure — which is why the command and the window are stated, and why
+the ratio is named as the weaker half of the argument. The load-bearing claim is quince#87, and it
+does not depend on a ratio at all.)*
+
+**The BODY is deliberately not scanned.** quince#87's body cites eleven issue numbers, nearly all as
+history and citation. Watching every issue a PR mentions is the wallpaper this classifier has already
+rejected twice — `SUCCESS` checks and `BLOCKED`/`UNSTABLE` mergeability — and wallpaper on the
+escalation channel is worse than anywhere else, because the channel's value is that an event on it
+means something.
+
+**A repo-qualified reference is NOT ours, and this is a defect the tool found in itself in production,
+on the branch adding it.** A devlog PR titled *"journal: … a declaration now reaches it (quince#87)"*
+made a naive `#[0-9]+` scan derive `quince-devlog#87`, which does not exist. That is
+[devlog#18](https://github.com/novkostya/quince-devlog/issues/18)'s class — a bare cross-repo reference
+resolved against the wrong repository — **reproduced mechanically by a regex**. It surfaced as
+`issue-fetch-failed … reason=GraphQL:_Could_not_resolve_to_an_issue…`, which is the tool answering
+correctly a question it should never have asked. The scan now requires the `#` not to follow a word
+character. Its regression guard is a `"kind": "loop"` fixture, and it is **verified to fail against
+the old regex** rather than merely to pass against the new one.
+
+**A failed read fails the TICK only for a DECLARED issue**, and that narrowing is the same incident's
+second lesson. A declaration is a *request*: the session named that issue, so being unable to read it
+is a real failure and `--fail-after` of them must exit the watch. A reference is an *inference this
+tool made from a PR title* — if it is unreadable the inference was wrong, and failing the tick would
+let one bad guess kill the watch after three ticks, which is the tool punishing the session for its
+own mistake. Reported either way, with `via=` naming which, so a wrong inference is visible rather
+than swallowed.
+
+**`via=` is on every issue event**, because the derived half makes *"why am I watching this?"* a real
+question — the session never asked for these. It is also what lets a **close** wake on a declared
+issue and not on a merely-referenced one without inventing a second event name for the same fact: the
+line is printed either way, and `wake_worthy` drops only `via=referenced` closes. Tidying an issue that
+an open PR happens to name is not news; a blocker you declared clearing is.
+
+**OPEN PRs only.** A merged PR's issues leave the derived set — the set tracks what is being worked on
+now. Their stored records survive under the same carry-forward that covers a failed fetch, so
+re-referencing one later diffs against its old baseline instead of re-announcing it, which is exactly
+what undeclaring already does.
+
 ## Design
 
 `bin/forge-watch` is a **pure state machine plus a thin fetch**: `step(previous_state, observation)
@@ -738,6 +798,20 @@ allowance faster for no benefit.
 35. `issue-comment` carries `count=` — how many arrived since the last observation — while `at=` and
     `actor=` describe the newest. A session woken by three rulings must not read the event as one.
 
+36. An issue referenced by an **open PR** is watched with **no declaration** — the ordinary case, since
+    a session should not have to remember to declare the issue its own PR is for. Discovery is the
+    union of `closingIssuesReferences` and a `#N` scan of the **title**; the body is not scanned.
+37. A **repo-qualified** reference in a title (`quince#87` read from a devlog PR) is **not** ours and
+    is never fetched. Its guard is verified to **fail against the old regex**, not merely to pass
+    against the new one.
+38. Every issue event carries `via=declared` / `via=referenced` / `via=declared,referenced`, so
+    "why am I watching this" is answerable from the event.
+39. A **close** wakes for a declared issue and **does not** wake for a merely-referenced one — but is
+    printed either way, because this filter has never decided what is *seen*.
+40. A failed issue read counts against `--fail-after` **only when the issue was declared**. A
+    declaration is a request; a reference is the tool's own inference, and one bad guess must not exit
+    the watch.
+
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
@@ -745,17 +819,22 @@ allowance faster for no benefit.
   this work proved it by hand and pasted the output into the PR, which is honest only while somebody
   keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
-  and this is its answer. Measured at ~23 s for all 34 fixtures — and the count is **asserted, not
+  and this is its answer. Measured at ~23 s for all 36 fixtures — and the count is **asserted, not
   just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently
   shrunk is visible in the CI log rather than passing as though it were whole. A bare `fixtures
   pass` could not tell 28 from 18, and the fixtures likeliest to be dropped under time pressure are
   the loop ones, which are the only shape here that spends real seconds in sleeps.
   `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
-  9–17, **28–33** and **35** (the issue channel of §4h — the two the ruling named as its fixture bar are
+  9–17, **28–33**, **35–36** and **38–39** (the issue channel of §4h — the two the ruling named as its fixture bar are
   stories 28 and 29, and 31–32 need a `"kind": "sequence"` fixture because a pair's `before`
   would already hold the carried-forward value under test) and **20–21** (the `"kind": "loop"`
   fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
+  Story **37** is a `"kind": "loop"` fixture, which needed the stub to grow a second call queue — a
+  tick that watches issues makes two KINDS of `gh` call, and a single queue fed one kind's payload to
+  the other, so no loop fixture could reach the issue path at all. That was the gap quince#87 declared
+  as owed. Story **40** is asserted by the same fixture, which runs three failing referenced reads and
+  must still exit **6** (idle) rather than **7**.
   Story **22 is a CLI smoke recorded in the PR** and story **34 is asserted by `forge-watch-exits-test`**:
   the refusals are argument-time behaviour, and a
   fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**

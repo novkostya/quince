@@ -24,7 +24,7 @@
         { "number": 80, "state": "OPEN", "updatedAt": "2026-07-27T07:00:58Z",
           "closed_at": null, "state_reason": "", "labels": ["bug"],
           "activity": [ {"at":"2026-07-27T07:00:58Z","actor":"novkostya","kind":"comment"} ] } ] } },
-      "expect_events": [ "event=issue-first-observation issue=80 state=OPEN" ]
+      "expect_events": [ "event=issue-first-observation issue=80 state=OPEN via=declared" ]
     },
     {
       "label": "the read of #80 fails: it is absent from the observation, and its baseline must SURVIVE",
@@ -46,8 +46,8 @@
             {"at":"2026-07-27T07:00:58Z","actor":"novkostya","kind":"comment"},
             {"at":"2026-07-27T09:41:12Z","actor":"novkostya","kind":"comment"} ] } ] } },
       "expect_events": [
-        "event=issue-updated issue=80 at=2026-07-27T09:41:12Z actor=novkostya kind=comment",
-        "event=issue-comment issue=80 count=1 at=2026-07-27T09:41:12Z actor=novkostya"
+        "event=issue-updated issue=80 at=2026-07-27T09:41:12Z actor=novkostya kind=comment via=declared",
+        "event=issue-comment issue=80 count=1 at=2026-07-27T09:41:12Z actor=novkostya via=declared"
       ]
     }
   ]

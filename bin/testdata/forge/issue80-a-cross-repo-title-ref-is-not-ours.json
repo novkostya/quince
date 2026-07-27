@@ -1,0 +1,25 @@
+{
+  "kind": "loop",
+  "repo": "novkostya/quince-devlog",
+  "note": "REGRESSION GUARD for a defect this tool found in ITSELF, in production, on the branch that added the derived half. A devlog PR titled 'journal: … a declaration now reaches it (quince#87)' was scanned with a naive `#[0-9]+`, deriving quince-devlog#87 — a CROSS-REPO reference resolved against the wrong repository, which is devlog#18's exact class reproduced mechanically. It surfaced as `event=issue-fetch-failed repo=novkostya/quince-devlog issue=87 reason=GraphQL:_Could_not_resolve_to_an_issue…`, the tool answering correctly a question it should never have asked. `quince#87` is quince's, and a repo-qualified reference is exactly the one a per-repo fetch must not claim. This fixture carries NO issue payloads, so the stub errors if any issue is fetched at all — a regression therefore shows up as an `issue-fetch-failed` line that the expectation does not contain, rather than as a silent extra call. It is a loop fixture rather than a pair because the derivation lives in tick()'s impure half, which only the real verb reaches; expressing it at all needed the stub's second queue, which is the `\"kind\": \"loop\"` gap quince#87 declared as owed.",
+  "interval": 2,
+  "max_wait": 4,
+  "timeout_s": 60,
+  "payloads": [
+    [
+      { "number": 38, "state": "OPEN", "updatedAt": "2026-07-27T10:01:00Z",
+        "title": "journal: the escalation channel was unwatched, and a declaration now reaches it (quince#87)",
+        "closingIssuesReferences": [],
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [], "reviews": [], "comments": [],
+        "commits": [{"committedDate":"2026-07-27T10:00:50Z","authors":[{"login":"quince-bot"}]}],
+        "mergedAt": null, "mergedBy": null }
+    ]
+  ],
+  "issue_payloads": [],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=watch-idle elapsed=Ns ticks=N"
+  ],
+  "expect_exit": 6
+}
