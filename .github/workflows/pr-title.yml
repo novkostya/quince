@@ -5,12 +5,22 @@ name: pr-title
 # issues of the devlog, costing two failing gh calls per tick on the reviewer's box.
 #
 # Separate from ci.yml because this must fire on `edited`: a title can be wrong from the start
-# OR made wrong later, and today's instance was edited twice after creation. Widening ci.yml's
-# trigger instead would re-run the whole gate ladder on every retitle.
+# OR made wrong later, and the instance that produced this check was edited twice after
+# creation. Widening ci.yml's trigger instead would re-run the whole gate ladder on every
+# retitle.
 #
-# No logic here, as in ci.yml — it calls a make target. The title is passed by ENV NAME and
-# never interpolated into the recipe: a PR title is attacker-controlled, and `TITLE=` would be
-# command execution on the runner.
+# No logic here, as in ci.yml — it calls a make target.
+#
+# TWO INTERPOLATIONS, DELIBERATELY DIFFERENT, so nobody "fixes" the safe one by pattern-match:
+#
+#   REPO='${{ github.repository }}'  is interpolated into `run:` AND THAT IS FINE. It is set by
+#     the forge, is `owner/name` constrained to [A-Za-z0-9._-], carries no shell metacharacters
+#     and is not contributor-controlled.
+#   PR_TITLE  is passed as an ENV VALUE and never interpolated. A PR title IS contributor-
+#     controlled, and `TITLE=` would be arbitrary code execution on the runner — measured, not
+#     assumed. It is also why the make target has no TITLE= at all.
+#
+# The title is different in KIND from the repository name, not in degree.
 
 on:
   pull_request:
