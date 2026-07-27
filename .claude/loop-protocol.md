@@ -169,10 +169,17 @@ So:
    | **6** | `--max-wait` idle bound, default 1200 s, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
    | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
-   So step 0's four answers are enforced rather than recited: `live` and `wedged` refuse, `dead` and
+   So step 0's answers are enforced rather than recited: `live`, `starting` and `wedged` refuse, `dead` and
    `absent` proceed and the tool says which.
 
-   `status` exit codes: **0** live, **3** dead, **4** absent, **5** wedged.
+   `status` exit codes: **0** live, **9** starting, **3** dead, **4** absent, **5** wedged.
+
+   **`starting` (exit 9) is armed-but-not-yet-ticked, and it is NOT owed** (quince#95). A watch reads
+   this from the moment it is armed until its first tick lands — measured at 4 s with nothing declared
+   and 17–18 s against a 20-issue set, because a first tick is one `gh pr list` plus one `gh issue
+   view` per declared issue. Do not arm a second one; `watch` refuses if you try. It is bounded at one
+   interval from arming and degrades to `dead reason=never_ticked` past it, because an unbounded
+   `starting` would be a state that cannot fail while nothing is watched — quince#62 in a new place.
 
    An exit code of **2** is not the tool's at all — it is jq failing underneath and the script
    aborting, so read the error rather than looking it up here.
@@ -200,16 +207,21 @@ So:
    The second form was measured failing: the check was right, and ten seconds later the watcher exited
    on the session's own approval. Neither belongs in a session's hands. Note that this is a rule about
    *gating*, not about *asking* — `/architect` §0 and `/kickoff` §0 still require you to read `status`
-   and **report which of the four answers you got**, which is an obligation the tool cannot discharge
+   and **report which of the five answers you got**, which is an obligation the tool cannot discharge
    on your behalf. What is retired is the pre-arm conditional, which nothing ever prescribed; it was
    invented from §0's tone.
 
-   **The window is narrowed, not closed, and this file must not claim otherwise.** Between the `status`
-   read and the arm, a live watcher can still die on your own forge write. quince#102's arm-last
-   ordering shrinks it from one side and this rule shrinks it from the other; closing it needs a tool
-   change, and that change wants quince#95's `waiting`/`starting` liveness question answered first. The
-   `Stop` hook is the declared **backstop** for what remains — a backstop, which is not the same thing
-   as a resolution.
+   **The window is narrowed, and its worst consequence is now closed — but it is not gone, and this
+   file must not claim otherwise.** Between the `status` read and the arm, a live watcher can still
+   die on your own forge write, so a refusal you acted on can be stale by the time you act. quince#102's
+   arm-last ordering shrinks that from one side and the rule above from the other.
+
+   What quince#95's `starting` class closed is the *other* direction, which was the damaging one: a
+   watch that had just been armed correctly read as `dead`, and the `Stop` hook's remedy for `dead` is
+   *arm another one*. That is how a guard came to hand out quince#50's race as an instruction. The
+   class is a distinct exit (**9**) precisely so the hook, which reads the code and not the prose,
+   sees the difference. The `Stop` hook remains the **backstop** for what is left — a backstop, which
+   is not the same thing as a resolution.
 
    **6 and 7 are not crashes, and your harness will call them crashes.** A background task that exits
    non-zero is reported as *"failed with exit code 6"* — verified, not predicted — and 6 is the tool's

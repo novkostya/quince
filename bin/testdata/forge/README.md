@@ -96,7 +96,9 @@ checked as the event half is — and a restart path with no fixture is a promise
 | `watch-dead-not-absent.json` | state on disk, process gone → `dead`, **re-arm, do not reseed**. The case the original requirement could not check: its state lived in a session scratchpad, and the failure it defended against destroys the scratchpad, so it would have looked in an empty room |
 | `rearm-emits-what-accrued.json` | re-arming from that state emits the two PRs that opened during the 44-minute gap — not `queue-empty`, not silence |
 | `watch-live-nothing-to-do.json` | live pid, fresh heartbeat → `live`, and it *says* so; a healthy answer that is silence cannot be seen to have run |
-| `watch-wedged-stale-heartbeat.json` | live pid, ticks stopped → `dead`. A pid check alone calls this healthy |
+| `watch-wedged-stale-heartbeat.json` | live pid, ticks stopped → `wedged`. A pid check alone calls this healthy |
+| `watch-starting-is-not-dead.json` | armed, first tick unfinished → `starting` (exit 9), not `dead`. The hook reads the exit code, and `dead` told it to arm a second watcher |
+| `watch-starting-is-bounded.json` | the same record past its bound → `dead reason=never_ticked`. An unbounded `starting` would be a state that cannot fail |
 | `watch-hand-tick-is-not-a-watcher.json` | a hand-run tick must not be able to make a dead watcher look alive |
 
 **One design correction earned during this round, and worth recording because it is the same shape
@@ -155,6 +157,8 @@ PRs and what class their watches are in, what does the session owe.
 | --- | --- |
 | `owed-an-unwatched-pr-is-owed.json` | one watched repository does not excuse an unwatched one — every repository is reported separately and the exit carries the worst case |
 | `owed-dead-and-wedged-need-opposite-remedies.json` | `dead` says re-arm without reseeding; `wedged` says stop the running process first. One message for two situations is the defect that split those classes apart to begin with |
+| `owed-a-starting-watch-owes-nothing.json` | a starting watch beside a dead one: `ok` for the first, still exit 8 for the second |
+| `owed-a-lone-starting-watch-is-not-owed.json` | every entry starting → exit 0. The only shape that can prove `starting` does not contribute |
 | `owed-a-live-watch-owes-nothing.json` | the satisfied case **says so**. A gate whose passing answer is silence cannot be seen to have run |
 
 ## The sixth round: the state a PR spends most of its waiting in (quince#65)

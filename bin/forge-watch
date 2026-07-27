@@ -25,7 +25,7 @@ usage: forge-watch <verb>
          [--issue <n>|<owner/name#n>] [--no-issues]
                                                tick until there is something to say, THEN EXIT
   status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
-                                               live | dead | absent — and which, and what to do
+                                               live | starting | dead | absent | wedged — which, and what to do
   stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
                                                signal it — refuses rather than guessing
   owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
@@ -46,7 +46,7 @@ usage: forge-watch <verb>
 
   `watch` exit codes: 0 an event (the wake — the events are on stdout) · 6 the --max-wait bound
   with nothing seen (`event=watch-idle`) · 7 --fail-after consecutive failing ticks. It refuses to
-  arm beside a `live` watch and refuses to arm beside a `wedged` one (run `stop` first) — the four
+  arm beside a `live` watch, a `starting` one, and a `wedged` one (run `stop` first) — the five
   answers of `status` are enforced here rather than left to a paragraph someone remembers. A refusal
   exits 1, as every refusal in this tool does; `dead` and `absent` proceed and say which they were.
 
@@ -81,9 +81,18 @@ usage: forge-watch <verb>
 
   `status` exit codes: 0 live · 3 dead (nothing running — re-arm from the state, do NOT reseed) ·
   4 absent (cold start) · 5 wedged (a process is still running and has stopped ticking — `stop` it,
-  then re-arm). Four cases, never fewer: collapsing dead into absent turns a restarted watch into a
-  fresh one that has "seen nothing changed" since a beginning it invented, and collapsing wedged into
-  dead tells the reader to start a second watcher beside a live one.
+  then re-arm) · 9 starting (armed, first tick not finished — nothing is owed and nothing is wrong;
+  do NOT arm a second one). FIVE cases, never fewer: collapsing dead into absent turns a restarted
+  watch into a fresh one that has "seen nothing changed" since a beginning it invented, collapsing
+  wedged into dead tells the reader to start a second watcher beside a live one, and collapsing
+  STARTING into dead is how a freshly-armed watch got reported as owed — which sent the `owed` Stop
+  hook, whose remedy for `dead` is "arm another one", into quince#50's race by obeying it (quince#95).
+
+  `starting` is BOUNDED at one interval from arming, and the bound is not decoration: an unbounded
+  `starting` is a state that cannot fail, reporting healthy while nothing is watched — quince#62
+  rebuilt in a new place, passing every check. Past the bound it degrades to `dead` with
+  `reason=never_ticked`. `watch` refuses at arm time when --interval is below the floor a first tick
+  needs, so the bound cannot expire under a healthy watcher (see first_tick_floor).
 
   On `wedged`, use `stop` rather than `kill`. The pid is only known to be OUR watcher while its
   heartbeat is fresh, and `wedged` is defined by that heartbeat being stale — so a bare kill on a
@@ -660,7 +669,22 @@ tag_repo() {
 #            becomes a fresh one that has "seen nothing changed" since a beginning it invented.
 #   live   — state and a watcher. Nothing to do.
 #
-# FOUR cases, not three, and the fourth was a review finding against this file's own stated principle
+# FIVE cases now, and the fifth is `starting` — armed, first tick not yet finished. Added by Operator
+# ruling on quince#95, for the same reason `wedged` was added below: the classes that get collapsed
+# are the ones whose REMEDIES are opposite. `dead` says "arm one"; `starting` says "wait, and do not
+# arm a second one". Collapsed, the `owed` Stop hook read `dead` on a watch that had just been armed
+# correctly and handed the session the command to start a SECOND watcher on one state file —
+# quince#50's race, reached by OBEYING a guard. Measured at one false block in two on the architect box.
+#
+# A qualifier on `dead` was the alternative and was ruled against: it fixes the human-readable line and
+# leaves the EXIT CODE — the thing `owed` actually reads — still saying dead. A fix invisible to the
+# consumer that needed it.
+#
+# `starting` is BOUNDED at one interval from `armed_at`, degrading to `dead` with `reason=never_ticked`.
+# Unbounded, it would be a state that cannot fail, reporting healthy while nothing is watched —
+# quince#62 rebuilt somewhere new, passing every check on the way.
+#
+# FOUR cases before that, and the fourth was a review finding against this file's own stated principle
 # ("exit codes so a caller that ignores stdout cannot mistake one for another"). `dead` originally
 # covered both a watcher that is GONE and one that is RUNNING BUT WEDGED, behind one exit code and one
 # identical note telling the reader to re-arm. Those need OPPOSITE remedies:
@@ -718,12 +742,23 @@ watch_report() {
 		  else
 			(($w.interval_s // 60)) as $iv
 			| (($w.last_watcher_tick // null)) as $lw
+			| (($w.armed_at // null)) as $am
+			| (($w.starting_bound_s // $iv)) as $sb
 			| (if $lw == null then null else ($t - ($lw | fromdate)) end) as $age
+			| (if $am == null then null else ($t - ($am | fromdate)) end) as $since_arm
 			| (if $alive == "no" then "no_process"
+			   elif ($lw == null and $am != null and $since_arm <= $sb) then "starting"
+			   elif ($lw == null and $am != null) then "never_ticked"
 			   elif ($age == null or $age > ($iv * $stale)) then "stale_heartbeat"
 			   else null end) as $why
 			| "state=\($st) pid=\($w.pid) interval=\($iv)s last_watcher_tick=\($lw // "never")\(if $age == null then "" else " age=\($age | floor)s" end)" as $facts
-			| if $why == "stale_heartbeat" then
+			| if $why == "starting" then
+				"watch=starting \($facts) armed_at=\($am) since_arm=\($since_arm | floor)s bound=\($sb)s",
+				"note: armed and has NOT completed its first tick yet. This is not dead and nothing is owed — do not arm a second one. It becomes dead if it has not ticked within \($sb)s of arming (quince#95)."
+			  elif $why == "never_ticked" then
+				"watch=dead \($facts) reason=never_ticked armed_at=\($am) since_arm=\($since_arm | floor)s bound=\($sb)s",
+				"note: armed \($since_arm | floor)s ago and STILL has not completed a first tick, which is past its \($sb)s bound. `starting` is bounded precisely so this cannot sit healthy forever (quince#62). Run `forge-watch stop`, then re-arm."
+			  elif $why == "stale_heartbeat" then
 				"watch=wedged \($facts) reason=stale_heartbeat",
 				"note: pid \($w.pid) is running and has stopped ticking. Run `forge-watch stop` — it verifies the pid is still OUR watcher before signalling, and refuses if it was recycled. Then re-arm from this state; do not reseed it."
 			  elif $why != null then
@@ -763,16 +798,26 @@ watch_report() {
 		' "$_st" 2>/dev/null || true
 
 	# The exit code carries the class, so a caller that ignores stdout still cannot mistake dead for
-	# live: 0 live, 3 dead, 4 absent.
+	# live: 0 live, 3 dead, 4 absent, 5 wedged, 9 starting.
 	_cls=$(jq -r --arg now "$_now" --arg alive "$_alive" --argjson stale "$STALE_TICKS" '
 		($now | fromdate) as $t | (.watch // null) as $w
 		| if $w == null or ($w.pid // null) == null then "dead"
 		  elif $alive == "no" then "dead"
+		  elif (($w.last_watcher_tick // null) == null and ($w.armed_at // null) != null
+		        and ($t - ($w.armed_at | fromdate))
+		            <= ($w.starting_bound_s // $w.interval_s // 60)) then "starting"
+		  elif (($w.last_watcher_tick // null) == null and ($w.armed_at // null) != null) then "dead"
 		  elif (($w.last_watcher_tick // null) == null
 		        or ($t - ($w.last_watcher_tick | fromdate)) > (($w.interval_s // 60) * $stale)) then "wedged"
 		  else "live" end' "$_st")
 	case "$_cls" in
 	live) return 0 ;;
+	# `starting` is a CLASS and not a qualifier on `dead`, by Operator ruling on quince#95: a qualifier
+	# would fix the human-readable line and leave the exit code — which is what `owed`'s Stop hook
+	# actually reads — still saying `dead`. That is a fix invisible to the consumer that needed it.
+	# 9 because 0/1/3/4/5/6/7 are taken by watch_report, watch_loop and die(), 8 is `owed`'s, and 2 is
+	# what an underlying jq failure aborts with.
+	starting) return 9 ;;
 	dead) return 3 ;;
 	wedged) return 5 ;;
 	esac
@@ -1537,7 +1582,7 @@ wake_worthy() {
 }
 
 watch_preflight() {
-	# The four answers of `status`, enforced instead of recited. `live` and `wedged` REFUSE — the
+	# The five answers of `status`, enforced instead of recited. `live`, `starting` and `wedged` REFUSE — the
 	# first because two watchers on one state file is a race that presents as missing events
 	# (quince#50), the second because "wedged" means a process is still running by definition, so
 	# arming beside it is starting the second watcher rather than replacing the first. `dead` and
@@ -1563,9 +1608,108 @@ watch_preflight() {
 	5) die "the watch for $_pr is WEDGED — a process is still running and has stopped ticking.
     Run \`forge-watch stop --repo $_pr\` (it verifies the pid is still ours and refuses if it was
     recycled), then arm again. Do not kill the pid by hand." ;;
+	# `starting` refuses for the same reason `live` does — a process IS running — but it needs its own
+	# arm because the remedy differs: there is nothing to stop and nothing to fix, only to wait
+	# (quince#95). Without this arm it would fall through to the `esac` and arm a second watcher beside
+	# a healthy one, which is the exact race this class was added to stop a hook from causing.
+	9) die "a watch for $_pr is STARTING — armed, and its first tick has not finished yet. Refusing to
+    arm a second one beside it. Nothing is wrong and nothing is owed: wait for the tick, or run
+    \`forge-watch status --repo $_pr\` to watch it become live." ;;
 	3) printf 'forge-watch: re-arming from a DEAD watch — not reseeded, so the next tick emits what accrued while nothing was watching.\n' ;;
 	4) printf 'forge-watch: cold start — the first tick establishes the baseline and does not wake anybody.\n' ;;
 	esac
+}
+
+# first_tick_floor — the smallest --interval that can plausibly contain a first tick, given how many
+# issues that tick will fetch.
+#
+# WHY THIS EXISTS AT ALL. `starting` (quince#95) is bounded, and the natural bound is `armed_at +
+# interval`. That bound is only sound while an interval is longer than a first tick, and `--interval`
+# is a flag, so it need not be: `--interval 15` against a 20-issue declared set is a first tick that
+# CANNOT finish inside its own bound, and `starting` would expire under a watcher that is fine —
+# this issue rebuilt inside its own fix, and worse, because it would be correct on every box using
+# defaults and wrong only on the one that tuned the interval down.
+#
+# WHY A LOWER BOUND AND NOT A REFUSAL, having built the refusal first. I proposed refusing an
+# interval below this floor on quince#95, and the architect preferred it weakly. Writing it falsified
+# it: the refusal makes legitimate configurations impossible, and the first casualty was this repo's
+# OWN fixture suite, which drives `watch` at `--interval 2` (replay, :1053) precisely because
+# fixtures must not sleep. A guard that forbids the test harness is a guard whose premise — that a
+# short interval means a mistake — is wrong.
+#
+# `max(interval, floor)` is correct where the refusal was merely safe. At `--interval 2` with nothing
+# declared the bound becomes 5 s, so a first tick that really takes 4 s still lands inside it, and a
+# watcher that never ticks still degrades at 5 s. Nothing is forbidden and nothing is unbounded.
+#
+# THE CONSTANTS, and why they are allowed to be constants here when the BOUND deliberately is not.
+# Measured on the runner box, 2026-07-27, against the real forge — a first tick is one `gh pr list`
+# plus one `gh issue view` per declared or derived issue (quince#89):
+#
+#   0 declared →  4 s      20 declared → 17 s        3 repeats at 20: 16, 17, 18 s  (~12 % spread)
+#   5 declared →  7 s                                3 repeats at  0:  4,  4,  4 s
+#  10 declared → 10 s      ≈ 4 s + 0.65 s per issue
+#
+# `5 + N` is deliberately above that line — ~1.4× the worst observed at N=20 — because this is a
+# FLOOR and not an estimate. A bound built from these numbers would rot silently as latency changed;
+# a floor built from them fails in the safe direction when it is wrong, which is the whole reason the
+# bound is `interval` and only the floor is arithmetic.
+first_tick_floor() {
+	# $1: how many issues the first tick will fetch.
+	printf '%s\n' $((5 + $1))
+}
+
+# watch_arm — write the arm-time record, so `starting` is distinguishable from `dead`.
+#
+# The heartbeat still lands after step(), exactly as before and as quince#95's ruling requires: this
+# does not move that write. It ADDS `armed_at` and the pid at arm time, which is the fact that was
+# missing — until the first tick completed, `.watch.pid` still named the PREVIOUS watcher, so
+# `watch_report` saw a dead predecessor and every consumer of its exit code was told `dead`. Both
+# consumers read the same field (`watch_report` for `status`, `owed_classify` at the hook), so one
+# write at the right moment corrects both.
+watch_arm() {
+	_as=$1
+	_aiv=$2
+	_ar=$3
+	[ -f "$_as" ] || printf '{}\n' >"$_as"
+	# What the first tick will fetch: the declared set plus whatever references are already on record.
+	# The genuinely-derived set is not knowable until the PR list comes back, so prior items are the
+	# proxy — an under-count makes the floor more permissive, never less, which is the direction a
+	# floor may be wrong in.
+	_an=$(jq -r '((.issues.declared // []) + ((.issues.items // []) | map(.number))) | unique | length' "$_as" 2>/dev/null || printf '0')
+	case "$_an" in '' | *[!0-9]*) _an=0 ;; esac
+	_afloor=$(first_tick_floor "$_an")
+	# The bound is COMPUTED HERE and stored, rather than recomputed by watch_report. watch_report is
+	# pure by design — (state, now, pid_alive) and nothing else — and the issue count it would need is
+	# a property of the tick that is about to run, not of the state it is reading. Storing it also
+	# means `status` reports the bound a watcher was actually armed with, rather than one re-derived
+	# from a declared set that may have changed underneath it.
+	_abound=$_aiv
+	[ "$_abound" -ge "$_afloor" ] || _abound=$_afloor
+	_ats=$(now_iso)
+	# `due` is CARRIED FORWARD from the generation being replaced, not reset. It is what
+	# `tick-overdue` is computed from, so wiping it here would silently delete the gap that accrued
+	# while nothing was watching — the exact property "re-arm from a dead watch, do NOT reseed it"
+	# exists to preserve, and the one quince#104 fixed once already in step(). Caught by
+	# watch-rearm-does-not-wake-on-its-own-gap.json, which is why that fixture is worth its runtime.
+	#
+	# `last_watcher_tick` DOES reset to null: that is the fact `starting` is defined by, and it is
+	# this generation's, not the dead one's.
+	# `interval_s` is carried forward TOO, whenever a `due` is, and that is not an oversight. While a
+	# `due` from the previous generation is still on the record, the record describes THAT
+	# generation's cadence — `tick-overdue` prints `due=` and `interval=` together, and pairing a due
+	# computed at 60 s with the new watcher's 2 s is a line that cannot be true of any one watcher.
+	# The first tick of this generation overwrites both with its own. The bound this generation runs
+	# under is unaffected, because it is stored explicitly as `starting_bound_s` rather than re-derived
+	# from whichever interval happens to be on the record.
+	jq -c --arg ts "$_ats" --argjson pid "$$" --argjson iv "$_aiv" --argjson bd "$_abound" \
+		--arg start "$(proc_start "$$")" '
+		((.watch // {}) | .due // null) as $prev_due
+		| ((.watch // {}) | .interval_s // null) as $prev_iv
+		| .watch = {pid: $pid, pid_start: (if $start == "" then null else $start end),
+		            interval_s: (if $prev_due == null then $iv else ($prev_iv // $iv) end),
+		            armed_at: $ts, starting_bound_s: $bd,
+		            last_watcher_tick: null, due: $prev_due}' \
+		"$_as" >"$_as.new" && mv "$_as.new" "$_as"
 }
 
 watch_loop() {
@@ -1672,12 +1816,17 @@ owed_decide() {
 		[ -n "$_od_repo" ] || continue
 		case "$_od_cls" in
 		0) printf 'ok    %s — %s, and a live watch\n' "$_od_repo" "$_od_why" ;;
+		# `starting` is NOT owed, and this line is the reason the class exists at all (quince#95). A
+		# session that armed a watch and ended its turn inside the first tick has done nothing wrong;
+		# blocking it here is what handed a correct-looking instruction to arm a SECOND watcher onto
+		# one state file — quince#50's race, reached by obeying a guard rather than by ignoring one.
+		9) printf 'ok    %s — %s, and a watch that is starting (armed, first tick not finished)\n' "$_od_repo" "$_od_why" ;;
 		3) printf 'OWED  %s — %s, watch=dead. Re-arm from that state; do NOT reseed it.\n' "$_od_repo" "$_od_why" ;;
 		4) printf 'OWED  %s — %s, and no watch has ever been armed here.\n' "$_od_repo" "$_od_why" ;;
 		5) printf 'OWED  %s — %s, watch=wedged. Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_why" "$_od_repo" ;;
 		*) printf 'OWED  %s — %s, and the watch class could not be read (%s).\n' "$_od_repo" "$_od_why" "$_od_cls" ;;
 		esac
-		[ "$_od_cls" = 0 ] || _od=8
+		case "$_od_cls" in 0 | 9) ;; *) _od=8 ;; esac
 	done <"$1"
 	return "$_od"
 }
@@ -1947,11 +2096,17 @@ watch)
 			watch_preflight "$(state_path_for "$_r")" "$_r"
 		done
 		declare_all "$_imode" "$_ispecs"
+		# AFTER the declaration, because the interval floor is a function of how many issues the first
+		# tick will fetch, and that is not known until the declaration is on disk.
+		for _r in $(forge_set "$FORGE_SET_FILE"); do
+			watch_arm "$(state_path_for "$_r")" "$_iv" "$_r"
+		done
 	else
 		[ -n "$_s" ] || _s=$(state_path_for "$_repo")
 		mkdir -p "$(dirname "$_s")"
 		watch_preflight "$_s" "$_repo"
 		declare_issues "$_imode" "$_ispecs" "$_repo" "$_s"
+		watch_arm "$_s" "$_iv" "$_repo"
 	fi
 	watch_loop "$_all" "$_repo" "$_s" "$_ghcmd" "$_iv" "$_max" "$_fail"
 	exit $?

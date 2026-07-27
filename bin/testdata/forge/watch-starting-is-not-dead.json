@@ -1,0 +1,15 @@
+{
+  "kind": "watch",
+  "note": "The window this class exists for (quince#95): a watcher armed, its pid on the record, and its first tick NOT finished. Before `starting` existed this classified as `dead` — `last_watcher_tick` was null, which the staleness arm read as infinitely stale — and the exit code was 3. That mattered far more than the printed line, because the consumer is `owed`'s Stop hook, whose remedy for `dead` is 'arm another one'. A session that complied put a second watcher on one state file: quince#50's race, reached by OBEYING a guard rather than ignoring one, measured at one false block in two on the architect box. Pinned here as its own class with its own exit so a future collapse back into `dead` fails a test rather than a session. Its mirrors: watch-starting-is-bounded.json, where the same record past its bound is correctly dead, and owed-a-starting-watch-owes-nothing.json, where the hook consumes this class.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:00:00Z",
+    "watch": { "pid": 4242, "interval_s": 60, "armed_at": "2026-07-26T10:00:00Z",
+               "starting_bound_s": 60, "last_watcher_tick": null, "due": null }
+  },
+  "now": "2026-07-26T10:00:11Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=starting state=STATE pid=4242 interval=60s last_watcher_tick=never armed_at=2026-07-26T10:00:00Z since_arm=11s bound=60s",
+    "note: armed and has NOT completed its first tick yet. This is not dead and nothing is owed — do not arm a second one. It becomes dead if it has not ticked within 60s of arming (quince#95)."
+  ]
+}

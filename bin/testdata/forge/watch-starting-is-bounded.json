@@ -1,0 +1,15 @@
+{
+  "kind": "watch",
+  "note": "The bound, which is the half of quince#95's ruling that is easy to skip and is the reason the class is safe. An UNBOUNDED `starting` would be a state that cannot fail: a watcher armed and never ticking would report healthy forever while nothing was watched, which is quince#62 rebuilt somewhere new and passing every check on the way. So past `starting_bound_s` from `armed_at` the same record degrades to `dead reason=never_ticked`, with a note naming `stop`-then-re-arm rather than the plain re-arm — because a pid IS still alive here, exactly as in the wedged case. Same state as watch-starting-is-not-dead.json; only `now` differs, which is the point: one clock reading separates a healthy watcher from a stuck one, and the class must not be decided by anything else.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:00:00Z",
+    "watch": { "pid": 4242, "interval_s": 60, "armed_at": "2026-07-26T10:00:00Z",
+               "starting_bound_s": 60, "last_watcher_tick": null, "due": null }
+  },
+  "now": "2026-07-26T10:05:00Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=never reason=never_ticked armed_at=2026-07-26T10:00:00Z since_arm=300s bound=60s",
+    "note: armed 300s ago and STILL has not completed a first tick, which is past its 60s bound. `starting` is bounded precisely so this cannot sit healthy forever (quince#62). Run `forge-watch stop`, then re-arm."
+  ]
+}

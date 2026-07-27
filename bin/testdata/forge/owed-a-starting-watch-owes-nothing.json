@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "The consumer the class was added FOR, and the assertion that matters most in this change (quince#95). `owed` is what the Stop hook reads, and it reads the EXIT CODE, not the printed line — which is precisely why the ruling made `starting` a class rather than a qualifier on `dead`: a qualifier would have fixed the human-readable output and left this exit at 8, a fix invisible to the consumer that needed it. Here a starting watch sits beside a genuinely dead one, and the two must not be answered the same way: exit 8 overall because of the dead repo, but the starting repo prints `ok` and does not contribute. If a future change collapses `starting` back into the owed classes, this fixture fails rather than a session being told to arm a second watcher onto one state file.",
+  "table": [
+    ["novkostya/quince", 9],
+    ["novkostya/quince-devlog", 3]
+  ],
+  "expect": [
+    "ok    novkostya/quince — open PRs, and a watch that is starting (armed, first tick not finished)",
+    "OWED  novkostya/quince-devlog — open PRs, watch=dead. Re-arm from that state; do NOT reseed it."
+  ],
+  "expect_exit": 8
+}
