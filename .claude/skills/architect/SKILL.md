@@ -98,6 +98,27 @@ and both are named so nobody assumes it is legacy that can simply be deleted:
 requesting changes, merging or commenting through it re-creates quince#47 on the box built to end
 it, and does so invisibly, because the output looks identical.
 
+**AUTHOR canon through `bin/gh-review` too — commit and `pr create` as the App, not as `gh-arch`.**
+Operator ruling on quince#137, 2026-07-27. The App holds `contents: write` and `pull_requests:
+write`, so an architect-authored canon PR can be authored by `quince-review[bot]` rather than by
+`@novkostya` — and that is what lets `@novkostya` approve it as **code owner** under
+`.github/CODEOWNERS`, since GitHub does not count an author's approval of their own PR. Authoring
+canon as `@novkostya` is what would make the code-owner requirement unsatisfiable, so this clause is
+load-bearing for the file rather than a stylistic preference.
+
+**This is not a missing capability you have to work around; it is a habit.** quince-devlog#51 was
+authored through `gh-arch` and merged with `reviews: []`, while quince-devlog#53 — filed the same
+hour — was authored by `app/quince-review`. Nothing in canon said which wrapper authors, so the one
+that was reached for first won.
+
+**Narrow, and record it as the exception it is.** Routing authorship through the App collapses
+author and approver into one principal wherever the App is *also* the approver, which is exactly
+what `approver ≠ author` forbids (quince#136). It does not collapse **here**, and only here: the
+approver for canon is the **Operator**, not the App, so the separation stays where `CLAUDE.md`
+already puts it — architect authors, Operator approves. It holds for this class *because* the
+Operator's approval is already mandatory on it. **It does not license the App to author any class it
+also approves**, which is every other class in this repository.
+
 - **Bot token present on an architect host** → say so and stop. A box that can author *and*
   approve dissolves the property the whole identity ruling protects (devlog#7). Reviewing from a
   host that holds both is a finding about the host, not a detail to work around.
