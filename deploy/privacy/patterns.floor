@@ -13,10 +13,22 @@
 # is private and protection on private repositories needs a paid plan. Measured, not assumed.
 #
 # So the floor lives in `quince`, which IS protected: one approval, required checks, no force
-# pushes, admins included. Trimming the list now fails the gate on every box and in CI until this
-# number is lowered — and lowering it is a reviewed change in a protected repo, by an approver who
-# is not the author. That restores the review model to the one artifact that could not have it,
-# without moving the list itself.
+# pushes, admins included. Lowering this number is therefore a reviewed change in a protected repo,
+# by an approver who is not the author — which restores the review model to the one artifact that
+# could not have it, without moving the list itself.
+#
+# WHERE IT ACTUALLY BITES, because an earlier version of this line said "on every box and in CI"
+# and the second half is false. Measured: `gates` runs `privacy-check-test`, `forge-watch-test` and
+# `preflight-test`, all of which build SYNTHETIC layers by design — that is what makes them runnable
+# anywhere — and the `privacy-check` target that reads the real list is standalone rather than part
+# of the ladder. Nothing in .github/workflows/ci.yml references the private layer at all.
+#
+# **CI never sees the real pattern list, so nothing there can detect a trim.** The floor bites ON
+# THE BOXES: the commit-time sweep a session runs before every push, and `preflight`, which
+# delegates its verdict to `privacy-check` against the real layer at service start. That is a real
+# control and not an always-on independent one, and the difference is the whole of what a reader
+# needs when weighing the residual risk on quince#44 — whose ruling says detection is all that
+# remains once prevention is unavailable and narrowing is ruled out.
 #
 # A count, deliberately, not a checksum: the list is expected to CHANGE, and a checksum would fail
 # on every legitimate edit until someone updated it, which trains people to update it without
