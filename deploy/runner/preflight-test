@@ -57,6 +57,24 @@ chmod 600 "$GOOD_LAYER/privacy-patterns.txt"
 
 ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
 
+# Two GIT-CLONE layers for quince#121: present and readable, differing only in whether they can ever
+# ADVANCE. Built with `git init` rather than a real clone so the suite stays offline and needs no
+# credential — which is possible precisely because preflight asserts the LOCAL wiring rather than
+# attempting a fetch. A fetch-based check could not be fixtured this way, and would refuse a box over
+# a flaky link.
+WIRED_LAYER="$TMP/layer-git-wired"
+mkdir -p "$WIRED_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$WIRED_LAYER/privacy-patterns.txt"
+chmod 600 "$WIRED_LAYER/privacy-patterns.txt"
+git -C "$WIRED_LAYER" init -q
+git -C "$WIRED_LAYER" config credential.helper 'zz-synthetic-helper'
+
+FROZEN_LAYER="$TMP/layer-git-frozen"
+mkdir -p "$FROZEN_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$FROZEN_LAYER/privacy-patterns.txt"
+chmod 600 "$FROZEN_LAYER/privacy-patterns.txt"
+git -C "$FROZEN_LAYER" init -q
+
 # preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
 # from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
 # a synthetic floor every passing case here would be asserting the size of the Operator’s list —
@@ -228,6 +246,35 @@ fi
 expect "an unreachable private layer refuses" 1 "cannot run the privacy gate" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
+
+# quince#121: PRESENT IS NOT FRESH. A git clone with no credential helper can never fetch, so the box
+# would sweep forever with whatever it was built holding — and on the arch box that sweep is the last
+# gate before public history. It reports `clean` exactly as a current one does, which is why this
+# refuses rather than notes. Both boxes were in this state and only one showed it, because only one
+# ever tried to pull.
+expect "a git layer with no credential helper refuses" 1 "can never fetch" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$FROZEN_LAYER"
+
+# …and names the fix, which must be the one that EXISTS: `provision` persisting the helper with
+# `git config`. Pinned because the previous version of this file used `git -c`, which configures
+# nothing, and a message naming a fix nobody has built is the defect class this suite exists for.
+expect "…and names provision as the fix" 1 "run deploy/runner/provision" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$FROZEN_LAYER"
+
+# The mirror, and it is what stops the refusal above from being vacuous: the SAME layer, wired,
+# passes. Without this a check that refused every git clone would look correct.
+expect "a wired git layer passes and says it can advance" 0 "can advance" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER"
+
+# A HAND-PLACED layer is not a clone and has no remote to be wired to. preflight's own refusal text
+# prescribes hand-placement as a documented path, so refusing it here would forbid the fallback this
+# file recommends one screen earlier — the contradiction being pinned rather than trusted.
+expect "a hand-placed (non-git) layer is not asked to fetch" 0 "privacy gate can run" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$GOOD_LAYER"
 
 # The message must NAME THE FIX THAT EXISTS TODAY — hand-placement. When `provision` learns to
 # place the layer, correcting this belongs to that change, and this assertion is what will fail and
