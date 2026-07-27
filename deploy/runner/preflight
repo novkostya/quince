@@ -205,11 +205,30 @@ else
 		# Only for a GIT clone. A hand-placed layer is a documented path (the refusal below names it)
 		# and has no remote to be wired to; refusing it here would forbid the fallback this file
 		# already prescribes.
+		#
+		# ASK THE QUESTION GIT ASKS, WHICH IS NOT `--get credential.helper`. A helper may be wired
+		# UNSCOPED (`credential.helper`, which is what `provision` writes) or URL-SCOPED
+		# (`credential.https://github.com.helper`, which is how the Operator wired the arch box).
+		# `--get credential.helper` sees only the first and returns exit 1 on the second — so the
+		# first version of this check would have REFUSED TO START the architect box in the exact
+		# configuration that had just been confirmed working on it. Measured:
+		#
+		#   url-scoped wiring:  config --get credential.helper                    → exit 1, nothing
+		#                       config --get-urlmatch credential.helper <url>     → the helper
+		#
+		# `--get-urlmatch` is the resolution git itself performs for a given remote, so it answers
+		# "will a fetch from THIS url find a helper" rather than "is one key set". Both wirings pass
+		# it and an unwired clone still fails it. A false refusal here does not degrade a box, it
+		# stops it booting — the same reason `ls-remote` was rejected above, arrived at from the
+		# other direction, and caught only because the Operator's wiring differed from ours.
 		if [ -d "$PRIVATE_LAYER/.git" ]; then
-			if [ -n "$(git -C "$PRIVATE_LAYER" config --get credential.helper 2>/dev/null)" ]; then
-				ok "private layer can advance — a credential helper is wired into the clone"
+			layer_remote=$(git -C "$PRIVATE_LAYER" remote get-url origin 2>/dev/null || true)
+			if [ -z "$layer_remote" ]; then
+				bad "the private layer at $PRIVATE_LAYER is a git clone with NO 'origin' remote, so it can never fetch: it is frozen at whatever it holds now (quince#121). Fix: run deploy/runner/provision, or re-clone the layer."
+			elif [ -n "$(git -C "$PRIVATE_LAYER" config --get-urlmatch credential.helper "$layer_remote" 2>/dev/null)" ]; then
+				ok "private layer can advance — a credential helper resolves for its remote"
 			else
-				bad "the private layer at $PRIVATE_LAYER is a git clone with NO credential helper, so it can never fetch: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box. Present is not fresh (quince#121). Fix: run deploy/runner/provision, which now persists the helper with \`git config\` instead of \`git -c\`, and re-run this. Refusing rather than warning because this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
+				bad "the private layer at $PRIVATE_LAYER is a git clone with NO credential helper for its remote, so it can never fetch: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box. Present is not fresh (quince#121). Fix: run deploy/runner/provision, which persists the helper with \`git config\` instead of \`git -c\`, and re-run this. Refusing rather than warning because this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
 			fi
 		fi
 	else

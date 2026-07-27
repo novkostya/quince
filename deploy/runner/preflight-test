@@ -62,18 +62,44 @@ ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
 # credential — which is possible precisely because preflight asserts the LOCAL wiring rather than
 # attempting a fetch. A fetch-based check could not be fixtured this way, and would refuse a box over
 # a flaky link.
+ZZ_REMOTE="https://github.com/zz-synthetic/zz-synthetic.git"
+
+# UNSCOPED wiring — what `provision` writes: `credential.helper`, applying to every URL.
 WIRED_LAYER="$TMP/layer-git-wired"
 mkdir -p "$WIRED_LAYER"
 printf '# synthetic\nzzsecrethostzz\n' >"$WIRED_LAYER/privacy-patterns.txt"
 chmod 600 "$WIRED_LAYER/privacy-patterns.txt"
 git -C "$WIRED_LAYER" init -q
+git -C "$WIRED_LAYER" remote add origin "$ZZ_REMOTE"
 git -C "$WIRED_LAYER" config credential.helper 'zz-synthetic-helper'
+
+# URL-SCOPED wiring — `credential.<url>.helper`, a DIFFERENT KEY. The first version of this check
+# used `config --get credential.helper`, which returns exit 1 here, so it would have REFUSED TO
+# START the architect box in the exact configuration just confirmed working on it: the Operator
+# wired that box URL-scoped while `provision` writes unscoped. Both are correct and git resolves
+# both; only `--get-urlmatch` sees both (quince#121).
+URLSCOPED_LAYER="$TMP/layer-git-urlscoped"
+mkdir -p "$URLSCOPED_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$URLSCOPED_LAYER/privacy-patterns.txt"
+chmod 600 "$URLSCOPED_LAYER/privacy-patterns.txt"
+git -C "$URLSCOPED_LAYER" init -q
+git -C "$URLSCOPED_LAYER" remote add origin "$ZZ_REMOTE"
+git -C "$URLSCOPED_LAYER" config "credential.https://github.com.helper" 'zz-synthetic-helper'
 
 FROZEN_LAYER="$TMP/layer-git-frozen"
 mkdir -p "$FROZEN_LAYER"
 printf '# synthetic\nzzsecrethostzz\n' >"$FROZEN_LAYER/privacy-patterns.txt"
 chmod 600 "$FROZEN_LAYER/privacy-patterns.txt"
 git -C "$FROZEN_LAYER" init -q
+git -C "$FROZEN_LAYER" remote add origin "$ZZ_REMOTE"
+
+# A helper wired but NO remote: it cannot fetch either, and must not pass on the helper alone.
+NOREMOTE_LAYER="$TMP/layer-git-noremote"
+mkdir -p "$NOREMOTE_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$NOREMOTE_LAYER/privacy-patterns.txt"
+chmod 600 "$NOREMOTE_LAYER/privacy-patterns.txt"
+git -C "$NOREMOTE_LAYER" init -q
+git -C "$NOREMOTE_LAYER" config credential.helper 'zz-synthetic-helper'
 
 # preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
 # from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
@@ -268,6 +294,22 @@ expect "…and names provision as the fix" 1 "run deploy/runner/provision" -- \
 expect "a wired git layer passes and says it can advance" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER"
+
+# THE REGRESSION TEST FOR THIS CHECK'S OWN FIRST VERSION. A URL-scoped helper is a different config
+# KEY from an unscoped one, and `config --get credential.helper` cannot see it — so the first draft
+# refused this shape. It is not hypothetical: it is how the Operator wired the architect box, and
+# that box was confirmed fetching in that state. A boot-blocking check that refuses a working
+# machine is worse than the staleness it guards against.
+expect "a URL-SCOPED helper also counts as wired" 0 "can advance" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$URLSCOPED_LAYER"
+
+# A helper with no remote to apply to cannot fetch. Asserted separately because `--get-urlmatch`
+# needs a URL: without an explicit refusal here the code would have to invent one, and a check that
+# guesses its own input is the shape this file keeps removing.
+expect "a git layer with a helper but NO remote refuses" 1 "NO 'origin' remote" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$NOREMOTE_LAYER"
 
 # A HAND-PLACED layer is not a clone and has no remote to be wired to. preflight's own refusal text
 # prescribes hand-placement as a documented path, so refusing it here would forbid the fallback this
