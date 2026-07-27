@@ -131,6 +131,29 @@ if [ -s "$CS_LIST" ]; then
 	CS_COUNT=$(count_patterns "$CS_LIST")
 fi
 
+# --- a list that SHRINKS must be as loud as a list that is ABSENT ------------------------------
+# This gate refused an empty list and accepted a shortened one, so a trimmed list was silently as
+# good as a full one — and the identity that can trim it is the implementer, which is the identity
+# the list constrains and which holds `write` on the private layer by ruling (quince#44). Branch
+# protection is unavailable on that repository, so the reviewed-change control lives here instead:
+# the floor is a tracked file in this protected repo, and lowering it takes an approval from
+# somebody who is not the author. Full reasoning in deploy/privacy/patterns.floor.
+#
+# An ABSENT floor is not a silent pass — it is the same DID NOT RUN as a missing pattern list,
+# because a control that can be deleted to disable itself is not a control.
+FLOOR_FILE="${PRIVACY_FLOOR_FILE:-$(dirname -- "$0")/patterns.floor}"
+if [ ! -e "$FLOOR_FILE" ]; then
+	cannot_run "no pattern floor at $FLOOR_FILE — the check that the list has not been trimmed cannot itself run, and a control that can be deleted to disable itself is not a control"
+fi
+FLOOR=$("$GREP" -vE '^[[:space:]]*(#|$)' "$FLOOR_FILE" 2>/dev/null | head -n 1 || true)
+case "${FLOOR:-}" in
+'' | *[!0-9]*) cannot_run "the pattern floor at $FLOOR_FILE is not a number ('${FLOOR:-}') — refusing rather than guessing what it meant" ;;
+esac
+TOTAL_COUNT=$((CI_COUNT + CS_COUNT))
+if [ "$TOTAL_COUNT" -lt "$FLOOR" ]; then
+	cannot_run "the pattern list has SHRUNK — $TOTAL_COUNT usable patterns, floor is $FLOOR ($FLOOR_FILE). A shorter list silently sweeps less, so this refuses exactly as an absent list does. If the reduction is intended, lower the floor in a reviewed PR against this repo: that approval is the control."
+fi
+
 # --- prove the matcher can actually compile the lists ---------------------------------------
 # grep exits 2 on a bad pattern, 1 on no-match. Feeding it empty input separates "your regex
 # does not compile here" from "nothing matched", which is the divergence that would otherwise

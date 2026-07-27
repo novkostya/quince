@@ -32,6 +32,14 @@ fail=0
 # would be testing the gate on a platform the gate does not run on.
 at() { d=$1; shift; (cd "$d" && exec "$@"); }
 
+# A SYNTHETIC floor, exported so every case uses it instead of the repo's real one — these fixtures
+# carry 1–2 patterns and the real floor is 9, so without this the suite would be asserting the size
+# of the Operator's list. Exporting also overrides any ambient PRIVACY_FLOOR_FILE, so the suite
+# cannot read the box: the lesson preflight-test learned the hard way, applied before it bites here.
+FLOOR_OK="$TMP/floor-1"
+printf '# synthetic floor\n1\n' >"$FLOOR_OK"
+export PRIVACY_FLOOR_FILE="$FLOOR_OK"
+
 expect() { # <name> <want-exit> <want-substring> -- <command...>
 	name=$1 want=$2 substr=$3
 	shift 4 # name, want, substr, and the literal --
@@ -293,5 +301,46 @@ expect "absent canary is announced as unproven" 0 "not to match anything" -- \
 	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD
 
 # =============================================================================================
+
+# =============================================================================================
+# 6. A LIST THAT SHRINKS IS AS LOUD AS A LIST THAT IS ABSENT (quince#44)
+# =============================================================================================
+# The gate refused an EMPTY list and accepted a SHORTENED one, so a trim was silently as good as
+# the full list — and the identity that can trim it is the one the list constrains, holding `write`
+# on the private layer by ruling. Branch protection is unavailable on that repo, so the floor lives
+# in this protected one and lowering it needs an approval from somebody who is not the author.
+floor_hi="$TMP/floor-5"
+printf '# synthetic\n5\n' >"$floor_hi"
+expect "a SHRUNKEN list refuses, exactly as an absent one does" 2 "has SHRUNK" -- \
+	env "PRIVACY_FLOOR_FILE=$floor_hi" "$CHECK" --patterns "$good"
+
+# The refusal must name the remedy that carries the approval, or it teaches people to edit the
+# list instead of the floor — which is the direction that weakens the gate.
+expect "…and names the reviewed-PR remedy" 2 "reviewed PR" -- \
+	env "PRIVACY_FLOOR_FILE=$floor_hi" "$CHECK" --patterns "$good"
+
+# A list AT the floor is fine: the control is against shrinking, not against a particular size.
+floor_exact="$TMP/floor-2"
+printf '2\n' >"$floor_exact"
+expect "a list exactly at the floor passes" 0 "clean" -- \
+	at "$clean_repo" env "PRIVACY_FLOOR_FILE=$floor_exact" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# A floor that can be deleted to disable itself is not a control.
+expect "an ABSENT floor refuses rather than skipping the check" 2 "no pattern floor" -- \
+	env "PRIVACY_FLOOR_FILE=$TMP/no-such-floor" "$CHECK" --patterns "$good"
+
+# …and one that is not a number refuses rather than being coerced to 0, which would disable it
+# silently — the same vacuous pass, one field over.
+floor_junk="$TMP/floor-junk"
+printf '# synthetic\nnine\n' >"$floor_junk"
+expect "a non-numeric floor refuses rather than guessing" 2 "is not a number" -- \
+	env "PRIVACY_FLOOR_FILE=$floor_junk" "$CHECK" --patterns "$good"
+
+# The floor counts BOTH lists, so moving patterns into the case-sensitive file is not a shrink.
+floor_two="$TMP/floor-2b"
+printf '2\n' >"$floor_two"
+expect "the floor counts both lists, so a case split is not a shrink" 0 "clean" -- \
+	at "$clean_repo" env "PRIVACY_FLOOR_FILE=$floor_two" "$CHECK" --patterns "$split" --ref main...HEAD
+
 printf '\nprivacy-check-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

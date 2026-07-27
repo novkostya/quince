@@ -193,9 +193,25 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
 
 ## The private layer
 
-`local/` is gitignored and exists only on the Operator's machines: lab topology, the
-privacy pattern list, and personal transcripts. Public docs may reference it by path;
-they never quote its contents. Nothing in it is required to resume this project — **the
-resurrection test**: a stranger who clones the public repos and starts an agent must be
-able to continue. If something you need in order to resume is missing from the public
-repos, that is a bug worth an issue, not a reason to reconstruct it from a private file.
+`local/` is gitignored: lab topology, the privacy pattern list, and personal transcripts.
+It lives in the **private `quince-local` repository**, and **both session hosts hold a full
+clone of it** — `deploy/runner/provision` places it and `preflight` refuses to start a box
+that cannot reach it (quince#44, ruled 2026-07-27). This paragraph used to say the layer
+existed *"only on the Operator's machines"*; that stopped being true the moment work moved
+onto the boxes, and a document describing a narrower reality than the one that exists is the
+defect class this project keeps filing.
+
+**What that means, stated rather than implied:** each box carries the complete private
+record — ~610 KB across 8 files, including the lab topology and the external review
+transcripts — not merely the pattern list. Compromise of a box is compromise of all of it,
+and `pr.6`'s credential-concentration boundary is owed a line saying so. The implementer
+identity holds **write** on that repository by ruling, because the layer is a living document
+an agent must be able to maintain without the Operator becoming a required hop; branch
+protection is unavailable there (private repo, paid feature), so the guard against a
+*weakened* pattern list lives here instead, as `deploy/privacy/patterns.floor`.
+
+Public docs may reference the layer by path; they never quote its contents. Nothing in it is
+required to resume this project — **the resurrection test**: a stranger who clones the public
+repos and starts an agent must be able to continue. If something you need in order to resume
+is missing from the public repos, that is a bug worth an issue, not a reason to reconstruct
+it from a private file.

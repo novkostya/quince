@@ -80,6 +80,73 @@ else
 	say "launchpad cloned at $RUNNER_DIR (pristine checkout — not a workspace)"
 fi
 
+# --- 4b. the private layer ----------------------------------------------------------------------
+# quince#44, Operator ruling 2026-07-27: the private layer is a PROPERTY OF THE BOX, cloned here
+# rather than hand-placed and remembered. Before this, a rebuilt box silently returned to a state
+# where the privacy gate could not run, while sessions had learned to trust a file the rebuild
+# removed, and nothing announced the regression. `preflight` now refuses to start such a box; this
+# is what stops that refusal from being the normal case.
+#
+# A FULL CLONE, ruled deliberately over a narrow single-file fetch. The two rulings are coherent:
+# the implementer holds `write` because the layer is a living document it must be able to maintain,
+# and an implementer that can write `environment.md` but cannot see it would reintroduce the human
+# hop the write grant exists to remove.
+#
+# ACCEPTED EXPOSURE, stated where somebody reading the provisioning will meet it: this places the
+# COMPLETE private record on the box — ~610 KB across 8 files, including the lab topology and the
+# external review transcripts — not the 107-byte pattern list. `pr.6`'s credential-concentration
+# boundary owes a line saying so.
+#
+# THE CREDENTIAL IS ROLE-DEPENDENT, and the ruling did not say so because it could not: the arch
+# box must NOT hold the bot token — `preflight` refuses to start if it does, and that inversion is
+# the whole separation mechanism (devlog#7). So each box clones with its OWN identity; cloning as
+# the bot on the arch box would mean placing the one credential that box must never hold.
+LAYER_DIR="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
+LAYER_URL="${LAYER_URL:-https://github.com/novkostya/quince-local.git}"
+if [ "$ROLE" = arch ]; then
+	LAYER_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
+	LAYER_USER=novkostya
+else
+	LAYER_TOKEN="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
+	LAYER_USER=quince-bot
+fi
+
+# The token reaches git through a credential helper — never argv, never the remote URL, never
+# .git/config. The same discipline as every other credential in this project.
+# SC2016 is correct that `$(cat …)` does not expand here, and that is the point: it must be
+# evaluated by GIT when it runs the helper, not by this shell when it builds the string. Expanding
+# it now would put the token into a variable, and from there into `git config` and `.git/config` —
+# which is the one thing the helper exists to prevent.
+# shellcheck disable=SC2016
+_layer_helper='!f() { echo username='"$LAYER_USER"'; echo "password=$(cat '"$LAYER_TOKEN"')"; }; f'
+
+if [ ! -f "$LAYER_TOKEN" ]; then
+	say "NOT placing the private layer: no credential at $LAYER_TOKEN for role $ROLE."
+	say "     preflight will refuse to start this box until the layer is present. Place the"
+	say "     credential and re-run, or hand-place $LAYER_DIR/privacy-patterns.txt (0600)."
+elif [ -d "$LAYER_DIR/.git" ]; then
+	git -C "$LAYER_DIR" -c credential.helper="$_layer_helper" fetch -q origin main &&
+		git -C "$LAYER_DIR" reset -q --hard origin/main
+	say "private layer updated at $LAYER_DIR ($(git -C "$LAYER_DIR" rev-parse --short HEAD))"
+elif [ -e "$LAYER_DIR" ]; then
+	# A hand-placed layer from before this landed. NOT deleted: it is the artifact the privacy gate
+	# depends on, and a provisioning script that silently replaced the Operator's own file would be
+	# the kind of quiet mutation this project has canon against.
+	if [ -e "$LAYER_DIR.superseded" ]; then
+		say "REFUSING to move $LAYER_DIR aside: $LAYER_DIR.superseded already exists. Resolve by hand."
+	else
+		mv "$LAYER_DIR" "$LAYER_DIR.superseded"
+		git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
+		chmod 700 "$LAYER_DIR"
+		say "private layer cloned at $LAYER_DIR; the previous hand-placed copy is at $LAYER_DIR.superseded"
+		say "     (kept, not deleted — compare and remove it yourself)"
+	fi
+else
+	git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
+	chmod 700 "$LAYER_DIR"
+	say "private layer cloned at $LAYER_DIR"
+fi
+
 # --- 5. the service --------------------------------------------------------------------------
 # PROVENANCE, and it is not decoration: the service file comes from the launchpad clone, which
 # tracks main. So a fix merged into a branch reaches this box only after it LANDS and the launchpad
