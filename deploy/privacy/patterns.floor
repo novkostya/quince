@@ -20,8 +20,25 @@
 #
 # A count, deliberately, not a checksum: the list is expected to CHANGE, and a checksum would fail
 # on every legitimate edit until someone updated it, which trains people to update it without
-# looking — the exact reflex this project keeps filing issues about. A count only moves when the
-# list shrinks, which is the only direction that weakens the gate.
+# looking — the exact reflex this project keeps filing issues about.
+#
+# WHAT THIS FLOOR COVERS, AND WHAT IT DOES NOT. It covers SHRINK: patterns removed, so the gate
+# sweeps for less. It does NOT cover SUBSTITUTION — a same-count rewrite is invisible to it, and
+# measured to be so:
+#
+#   3 real patterns,  floor 3 → a planted match exits 1 (caught)
+#   3 junk patterns,  floor 3 → the SAME planted match exits 0 (clean, and the protection is gone)
+#
+# Same count, floor satisfied, gate green. The identity that can trim the list can equally rewrite
+# it, and the rewrite is the quieter of the two. So this closes one of two weakening modes, and
+# anyone weighing the residual risk on quince#44 should read it as exactly that rather than as
+# "the list is protected".
+#
+# A count cannot close substitution; only known-positive probes can, by proving the matcher still
+# MATCHES rather than merely compiling. `privacy-check` already supports a canary for that and it
+# is unpopulated everywhere. It is not a free fix: the probes must match the private patterns, so
+# they are sensitive themselves and would live in the private layer — writable by the same identity,
+# the same problem one level down. Recorded on quince#44's residual-risk register, not solved here.
 #
 # RAISE THIS when the list grows, in the same PR that grows it if the two are ever in one place.
 # A floor left below the real count still blocks the shrink it was set for; it simply protects
