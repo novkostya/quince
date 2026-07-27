@@ -640,7 +640,13 @@ allowance faster for no benefit.
 
 ## Gates
 
-- **G1 (fixtures, no network)** — `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
+- **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
+  runs it on every PR** (quince#64). Until 2026-07-27 this gate was run by nothing: every round of
+  this work proved it by hand and pasted the output into the PR, which is honest only while somebody
+  keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
+  because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
+  and this is its answer. Measured at ~23 s for all 28 fixtures.
+  `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
   9–17 and **20–21** (the `"kind": "loop"` fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
   Story **22 is a CLI smoke recorded in the PR**: the refusals are argument-time behaviour, and a
