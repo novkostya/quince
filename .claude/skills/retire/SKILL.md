@@ -72,7 +72,8 @@ an entry filed and awaiting review is a record on the forge, which is this whole
 
 ## 3. Declare the ephemeral state
 
-Say which watchers ran, where their state lives, and that it dies with you:
+Say which watchers ran and where their state lives. **Describe here; stop them in §6, not now** —
+a live watcher is the instrument that tells you §1 needs re-running, and this step changes nothing:
 
 ```sh
 bin/forge-watch status --all      # quote the output
@@ -123,9 +124,23 @@ A WATCH IS OWED AND IS NOT LIVE — you are about to end a turn with nothing tha
 **Every word of it is true, and obeying it would be wrong.** `owed` answers *"can anything wake
 this session?"* — and at retirement the correct answer is that **nothing should**. Arming a watcher
 now creates quince#111's Face 1 deliberately: a watcher orphaned seconds later by a session that no
-longer exists, reporting `dead` / `no_process` with a note telling the successor to re-arm and emit
-an accrued backlog. That is **strictly worse than `absent`**, which is what §3 wants, so the
-successor cold-starts and emits `first-observation`.
+longer exists.
+
+**State the comparison honestly, because both branches end at `dead`.** Arming does not lose you an
+`absent`: `absent` means *no state file*, and the only way to reach it is to delete one — which
+reseeds, discards the accrued observation, and is exactly what §3 and quince#49 forbid. **`absent` is
+not available at retirement, and a retirement that produced it would have destroyed something.** So
+the real choice is:
+
+| if you arm | if you do not |
+| --- | --- |
+| `dead` / `no_process`, **plus** an orphaned process and a backlog the successor is told to replay | `dead` / `no_process`, quiet, with the accrued observation intact |
+
+Same class, same note, and the difference is entirely the orphan and the replay. That is enough to
+decide it — and it is less than the first draft of this section claimed, which asserted the
+successor would cold-start and emit `first-observation`. It will not. It will read `dead`, and the
+note it reads will tell it to re-arm, which after a retirement is only right because there *is* a
+successor coming and the accrued events are genuinely owed to it.
 
 The hook's own escape names *"everything merged, or a stop that is the Operator's"*. **Retirement is
 a third state and is in neither**, so a correctly-retiring session must override a gate that is
@@ -135,7 +150,30 @@ telling the truth.
 arms nothing *and* has not flushed is the exact failure the hook exists for. A session that has
 flushed to the forge is the one case where an unwatched queue is correct. Say which you are.
 
-## 6. Then stop
+## 6. Stop the watchers deliberately — LAST, and not before
+
+```sh
+bin/forge-watch stop --repo <owner/name>     # one per repo: `stop` has no --all (quince#118)
+```
+
+**Not earlier.** A live watcher is what makes §1's loop work: in the retirements on quince#55 it is
+the watcher firing that caught a PR merging mid-flush and a correction landing on an open PR while
+the record was being written. One of those sessions says plainly that it re-asserted *"by accident,
+because the watcher fired"*. Stop it at the start and you remove the instrument that tells you §1
+needs running again.
+
+**Stop it rather than leaving it to die with the session.** A watcher left running is quince#111's
+Face 1 reached by doing nothing — an orphan reporting `live` to a successor while able to wake
+nobody. On some harnesses background watchers die with the session and it is self-correcting; **that
+is an observation about a harness, not a property anyone has established**, and a retirement should
+not rest on it.
+
+`stop` verifies the recorded pid is still ours before signalling and refuses if it cannot prove it
+(quince#49) — so it is safe in the one case a bare `kill` is not. **Then record that you stopped
+them on purpose**, because §3's ambiguity means the state itself cannot say so: deliberately
+stopped, exited on an event, and crashed all read `dead` / `no_process`.
+
+## 7. Then stop
 
 No new work. No approvals. **Anything done after §2 is by definition unrecorded** — and if
 something does land after it, that is §1's loop firing, so go back and re-assert rather than
