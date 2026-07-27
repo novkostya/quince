@@ -820,6 +820,14 @@ allowance faster for no benefit.
     false justification is harder to catch than either error alone, and a reviewer resting on an
     empty queue has no open PRs to cite.
 
+43. The typed event and the `updated` backstop describe the **same act** and may arrive in one tick
+    or a tick apart. **Neither ordering is canonical and a consumer must not rely on either** —
+    GitHub's PR fields do not move atomically, so anything reading two of them and inferring an
+    order is reading a race. Measured 11-of-12 same-tick on one box, which is the trap rather than
+    the reassurance: frequent enough to look dependable, rare enough for the exception to survive
+    testing. No de-duplication: one extra wake per split act is cheaper than state carried across
+    ticks.
+
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
