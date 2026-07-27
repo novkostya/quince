@@ -77,6 +77,32 @@ arch)
 	else
 		ok "role arch: no bot token present (the implementer identity is absent, as required)"
 	fi
+
+	# --- the reviewer identity must be able to MINT, not merely to exist (quince#121) ---------
+	# quince#121's lesson, applied to the thing it taught us about: that issue's whole cost was a
+	# check satisfied by PRESENCE — CLAUDE.md said preflight "refuses to start a box that cannot
+	# reach" the private layer, and a clone that could never fetch satisfied it. So this does not
+	# ask whether a key file is there. It asks the credential to produce a token, which is the only
+	# question a reviewer box's start actually depends on.
+	#
+	# A key can be present and unusable in ways a stat cannot see: revoked, mismatched against the
+	# app id, unreadable, or sitting on a box with no openssl to sign with. Every one of those
+	# reads as "credential installed" to a check that looks at the filesystem.
+	REVIEW_KEY="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
+	if [ ! -f "$REVIEW_KEY" ]; then
+		# NOT `bad`. A box provisioned before the App existed is a correct box that predates a
+		# change, and refusing to start it would strand the seat that reviews everything. gh-arch
+		# still works; what is lost is that verdicts are distinguishable from the Operator's.
+		printf 'preflight: role arch: no reviewer key at %s — verdicts will post as the Operator (quince#47 unfixed on this box). Run deploy/runner/provision to install it.\n' "$REVIEW_KEY"
+	elif ! command -v openssl >/dev/null 2>&1; then
+		bad "a reviewer key is present at $REVIEW_KEY but openssl is not installed, so no token can be signed from it. A minimal Alpine image does not ship openssl. Fix: apk add openssl. Refusing rather than starting a box whose reviewer identity would fail at the first verdict."
+	elif review_why=$("$(dirname "$0")/../../bin/gh-review" api /installation/repositories -q '.total_count' 2>&1); then
+		ok "role arch: reviewer identity can mint a token and reaches $review_why repositories"
+	else
+		# Print gh-review's own message: it names the file and the likely cause, and a second
+		# implementation of that reasoning here is how the two answers diverge (quince#86).
+		bad "the reviewer key at $REVIEW_KEY cannot produce a usable token, so this box would fail at its first verdict rather than at start. The wrapper reported — $(printf '%s' "$review_why" | head -n 2 | tr '\n' ' ')"
+	fi
 	;;
 *)
 	bad "unknown QUINCE_RUNNER_ROLE='$ROLE' — expected 'implementer' or 'arch'. Refusing rather than guessing which identity rules apply."

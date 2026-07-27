@@ -109,7 +109,23 @@ each costing a session the time to work out that the failure was structural rath
 | --- | --- |
 | **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) |
-| **Operator** | — the only identity that can push a workflow: an SSH push consults no OAuth scope |
+| **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` |
+| **Operator** | — an SSH push consults no OAuth scope, so this identity can always push a workflow; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
+
+**The reviewer's approval satisfies branch protection on its own** — Operator ruling, 2026-07-27
+(quince#130). One approving review is required and an App's counts, which is the point of it
+existing: quince#47 established that the architect and the Operator share a login, so GitHub
+refuses an architect verdict on an Operator-authored PR, and that is the one class of PR the
+Operator structurally must author. An identity that is not a person is what breaks the deadlock.
+
+**No per-verdict disclosure is required, and the reason is structural rather than trusting.** The
+signing key exists in one place — the arch box — so the sessions that can cast an App verdict are
+architect sessions, which review before approving. A rule making every verdict declare its
+provenance would be guarding a case the key's location already makes rare. Two things keep that
+true and are worth knowing if either changes: **root on the arch box can sign** (so the claim is
+"whoever holds the box", not "whoever ran a review"), and the first App approval ever cast —
+quince#123 — was a **relay** of two other seats' verdicts rather than the caster's own reading. If
+the key is ever copied off that box, revisit this paragraph before assuming it still holds.
 
 Two rules follow, and both are about the asker rather than the holder.
 
