@@ -645,7 +645,11 @@ allowance faster for no benefit.
   this work proved it by hand and pasted the output into the PR, which is honest only while somebody
   keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
-  and this is its answer. Measured at ~23 s for all 28 fixtures.
+  and this is its answer. Measured at ~23 s for all 28 fixtures — and the count is **asserted, not
+  just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently
+  shrunk is visible in the CI log rather than passing as though it were whole. A bare `fixtures
+  pass` could not tell 28 from 18, and the fixtures likeliest to be dropped under time pressure are
+  the loop ones, which are the only shape here that spends real seconds in sleeps.
   `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
   9–17 and **20–21** (the `"kind": "loop"` fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).

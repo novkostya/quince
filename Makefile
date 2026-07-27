@@ -149,11 +149,16 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 # privacy-check-test already uses, and no network is involved either way.
 .PHONY: forge-watch-test
 forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~23s, host-side)
-	@# jq is asserted, not assumed. The fixtures ARE json; without jq `replay` would fail
-	@# somewhere further in, and a suite that cannot run must say so rather than produce a
-	@# confusing failure — the lesson of quince#41 applied to the gate that quince#64 adds.
+	@# jq is asserted, not assumed. The fixtures ARE json; without jq `replay` would fail somewhere
+	@# further in with a confusing message, so this refuses up front and names the cause.
+	@#
+	@# NOT a quince#41-style exit-code distinction, and worth saying so where the code is rather
+	@# than only in a PR body: `make` returns its own generic recipe-failure code for ANY failed
+	@# target, so "could not run" and "ran and found a failure" both surface as the same exit here.
+	@# The distinction lives in the MESSAGE, not in the status. A caller that needs to tell them
+	@# apart has to invoke bin/forge-watch directly.
 	@command -v jq >/dev/null 2>&1 || { \
-	  echo "forge-watch-test: jq is absent, and the fixtures are JSON — REFUSING rather than skipping."; \
+	  echo "forge-watch-test: DID NOT RUN — jq is absent and the fixtures are JSON. Refusing rather than skipping."; \
 	  exit 1; \
 	}
 	@bin/forge-watch replay bin/testdata/forge/*.json
