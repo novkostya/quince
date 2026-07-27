@@ -107,7 +107,7 @@ each costing a session the time to work out that the failure was structural rath
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`; use `gh api -X PATCH`, devlog#1) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) |
 | **Operator** | — the only identity that can push a workflow: an SSH push consults no OAuth scope |
 
