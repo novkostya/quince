@@ -396,7 +396,7 @@ step() {
 		(.issues.items // [])[] as $i
 		| ($old | map(select(.number == $i.number)) | first) as $o
 		| select($o == null)
-		| "event=issue-first-observation issue=\($i.number) state=\($i.state)"'
+		| "event=issue-first-observation issue=\($i.number) state=\($i.state) via=\($i.via // "declared")"'
 
 	# issue-updated: THE BACKSTOP, identical in role to `updated` on the PR half. A label change, a
 	# title edit or a body edit moves updatedAt and appears in no activity list, so those land on
@@ -409,7 +409,7 @@ step() {
 		| select($i.updatedAt != $o.updatedAt)
 		| ([($i.activity // [])[] | select(.at > $o.updatedAt)] | sort_by(.at) | last) as $a
 		| (if $a == null then "actor=unattributed" else "actor=\($a.actor) kind=\($a.kind)" end) as $who
-		| "event=issue-updated issue=\($i.number) at=\($i.updatedAt) \($who)"'
+		| "event=issue-updated issue=\($i.number) at=\($i.updatedAt) \($who) via=\($i.via // "declared")"'
 
 	# issue-comment: the typed event this whole channel was built for. A ruling IS a comment, so the
 	# event names the issue, when, and WHO — a blocked session needs to know a ruling landed, not
@@ -432,20 +432,25 @@ step() {
 		| [($o.activity // [])[] | select(.kind == "comment")] as $was
 		| select(($new | length) > ($was | length))
 		| ($new | sort_by(.at) | last) as $c
-		| "event=issue-comment issue=\($i.number) count=\(($new | length) - ($was | length)) at=\($c.at) actor=\($c.actor)"'
+		| "event=issue-comment issue=\($i.number) count=\(($new | length) - ($was | length)) at=\($c.at) actor=\($c.actor) via=\($i.via // "declared")"'
 
-	# issue-closed / issue-reopened: a CLOSE wakes a session that declared the issue, because a
-	# closed blocker is exactly the news it is blocked waiting for. No actor: `gh issue view` does
-	# not report who closed an issue, and this tool has already been fixed once for naming a
-	# bystander in place of an answer.
+	# issue-closed / issue-reopened: a CLOSE wakes a session that DECLARED the issue, because a
+	# closed blocker is exactly the news it is blocked waiting for. It does NOT wake for an issue that
+	# is merely REFERENCED by an open PR — that is the tidying case the ruling worried about, and
+	# nobody is blocked on it. `via=` is what carries that distinction to `wake_worthy`; the line is
+	# still PRINTED either way, because the filter decides what wakes and never what is seen.
+	#
+	# No actor: `gh issue view` does not report who closed an issue, and this tool has already been
+	# fixed once for naming a bystander in place of an answer.
 	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
 		(.issues.items // [])[] as $i
 		| ($old | map(select(.number == $i.number)) | first) as $o
 		| select($o != null)
 		| select($i.state != $o.state)
+		| ($i.via // "declared") as $via
 		| if $i.state == "CLOSED" then
-			"event=issue-closed issue=\($i.number) at=\($i.closed_at // "unknown")\(if ($i.state_reason // "") == "" then "" else " reason=\($i.state_reason)" end)"
-		  else "event=issue-reopened issue=\($i.number)" end'
+			"event=issue-closed issue=\($i.number) at=\($i.closed_at // "unknown")\(if ($i.state_reason // "") == "" then "" else " reason=\($i.state_reason)" end) via=\($via)"
+		  else "event=issue-reopened issue=\($i.number) via=\($via)" end'
 
 	# queue-empty: emitted when the queue IS empty — on the first observation, or on the
 	# transition into empty. Not emitted every tick, which would be noise rather than signal.
@@ -828,20 +833,40 @@ replay() {
 			_np=$(jq '.payloads | length' "$_f")
 			_pi=0
 			while [ "$_pi" -lt "$_np" ]; do
-				jq -c --argjson i "$_pi" '.payloads[$i]' "$_f" >"$_tmp/payload.$_pi"
+				jq -c --argjson i "$_pi" '.payloads[$i]' "$_f" >"$_tmp/payload.pr.$_pi"
+				_pi=$((_pi + 1))
+			done
+			# The issue payloads, and why the stub had to grow a second queue at all. It answered the
+			# Nth CALL with the Nth payload regardless of what was asked, which was right while a tick
+			# made exactly one `gh pr list`. A tick that also reads declared issues makes two KINDS of
+			# call, so a single queue hands a `pr list` an issue object — and the tool correctly
+			# rejects it as `payload_not_an_array`, meaning no loop fixture could ever reach the issue
+			# path. That is the gap quince#87 declared as owed rather than papered over; this closes
+			# it. Dispatching on argv is also more honest than counting: the stub now answers the
+			# question it was actually asked.
+			_ni=$(jq '.issue_payloads // [] | length' "$_f")
+			_pi=0
+			while [ "$_pi" -lt "$_ni" ]; do
+				jq -c --argjson i "$_pi" '.issue_payloads[$i]' "$_f" >"$_tmp/payload.issue.$_pi"
 				_pi=$((_pi + 1))
 			done
 			cat >"$_tmp/gh" <<EOF
 #!/bin/sh
-# stub gh for a loop fixture: the Nth call answers with the Nth recorded payload, and the LAST
-# payload repeats forever — so "nothing changed" is the steady state, which is what a watch must
-# keep running through.
-c=\$(cat "$_tmp/calls" 2>/dev/null || echo 0)
+# stub gh for a loop fixture: the Nth call OF EACH KIND answers with the Nth recorded payload of that
+# kind, and the LAST payload of a kind repeats forever — so "nothing changed" is the steady state,
+# which is what a watch must keep running through. Two queues, because a tick that watches issues
+# makes two kinds of call and a single queue would feed one kind's payload to the other.
+case "\$1" in
+issue) k=issue; n=$_ni ;;
+*) k=pr; n=$_np ;;
+esac
+[ "\$n" -gt 0 ] || { printf 'stub: no %s payloads in this fixture\n' "\$k" >&2; exit 1; }
+c=\$(cat "$_tmp/calls.\$k" 2>/dev/null || echo 0)
 c=\$((c + 1))
-printf '%s\n' "\$c" >"$_tmp/calls"
+printf '%s\n' "\$c" >"$_tmp/calls.\$k"
 i=\$((c - 1))
-[ "\$i" -lt $_np ] || i=\$(($_np - 1))
-cat "$_tmp/payload.\$i"
+[ "\$i" -lt "\$n" ] || i=\$((n - 1))
+cat "$_tmp/payload.\$k.\$i"
 EOF
 			chmod +x "$_tmp/gh"
 			command -v timeout >/dev/null 2>&1 ||
@@ -1020,25 +1045,51 @@ fetch_issues() {
 	_fi_repo=$2
 	_fi_gh=$3
 	_fi_out=$4 # a file to append the shaped issue objects to, one JSON object per line
+	_fi_refs=$5 # issues DERIVED from open PRs (quince#80 half two); may be empty
 	_fi_rc=0
 	_fi_decl=$(jq -r '.issues.declared // [] | .[]' "$_fi_state" 2>/dev/null || true)
-	[ -n "$_fi_decl" ] || return 0
+	# The union, deduped: an issue that is BOTH declared and referenced is fetched once and carries
+	# both sources. Deduping matters more than it looks — the ordinary case is a session declaring the
+	# issue its own PR is for, which is exactly the overlap, and fetching it twice would emit every
+	# event about it twice.
+	_fi_all=$(printf '%s\n%s\n' "$_fi_decl" "$_fi_refs" | grep -v '^$' | sort -n -u || true)
+	[ -n "$_fi_all" ] || return 0
 	_fi_raw=$(mktemp)
-	for _fi_n in $_fi_decl; do
+	for _fi_n in $_fi_all; do
+		# `via=` answers "why am I watching this", which the derived half makes a real question: the
+		# session never declared these, so an event about one is otherwise unexplained. It is also what
+		# lets a CLOSE wake on a declared issue and not on a merely-referenced one, without inventing a
+		# second event name for the same fact.
+		if printf '%s\n' "$_fi_decl" | grep -qx "$_fi_n"; then _fi_d=yes; else _fi_d=no; fi
+		if printf '%s\n' "$_fi_refs" | grep -qx "$_fi_n"; then _fi_r=yes; else _fi_r=no; fi
+		case "$_fi_d$_fi_r" in
+		yesyes) _fi_via=declared,referenced ;;
+		yesno) _fi_via=declared ;;
+		*) _fi_via=referenced ;;
+		esac
+		# A failed read FAILS THE TICK only for a DECLARED issue, and the distinction is the second
+		# lesson of the cross-repo incident above. A declaration is a request: the session named that
+		# issue, so being unable to read it is a real failure and three in a row must exit the watch.
+		# A reference is an INFERENCE this tool made from a PR title — if it is unreadable, the
+		# inference was wrong, and failing the tick would let one bad guess kill the watch after three
+		# ticks. That is the tool punishing the session for its own mistake. Reported either way, with
+		# `via=` saying which, so a wrong inference is visible rather than swallowed; but only the
+		# request counts against --fail-after.
 		if ! "$_fi_gh" issue view "$_fi_n" -R "$_fi_repo" \
 			--json number,state,updatedAt,closedAt,stateReason,labels,comments >"$_fi_raw" 2>"$_fi_raw.err"; then
 			_fi_why=$(head -1 "$_fi_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
-			printf 'event=issue-fetch-failed repo=%s issue=%s reason=%s\n' \
-				"$_fi_repo" "$_fi_n" "${_fi_why:-no_stderr_from_gh}"
-			_fi_rc=1
+			printf 'event=issue-fetch-failed repo=%s issue=%s reason=%s via=%s\n' \
+				"$_fi_repo" "$_fi_n" "${_fi_why:-no_stderr_from_gh}" "$_fi_via"
+			[ "$_fi_d" = no ] || _fi_rc=1
 			continue
 		fi
 		if ! jq -e 'type == "object" and has("number")' "$_fi_raw" >/dev/null 2>&1; then
-			printf 'event=issue-fetch-failed repo=%s issue=%s reason=payload_not_an_issue\n' "$_fi_repo" "$_fi_n"
-			_fi_rc=1
+			printf 'event=issue-fetch-failed repo=%s issue=%s reason=payload_not_an_issue via=%s\n' \
+				"$_fi_repo" "$_fi_n" "$_fi_via"
+			[ "$_fi_d" = no ] || _fi_rc=1
 			continue
 		fi
-		jq -c '{number, state, updatedAt,
+		jq -c --arg via "$_fi_via" '{number, state, updatedAt, via: $via,
 			closed_at: .closedAt, state_reason: (.stateReason // ""),
 			labels: [(.labels // [])[] | .name],
 			activity: [(.comments // [])[] | {at: .createdAt, actor: (.author.login // "unknown"), kind: "comment"}]}' \
@@ -1089,7 +1140,7 @@ tick() {
 	_raw=$(mktemp)
 	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
 		--search "sort:updated-desc" \
-		--json number,state,updatedAt,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
+		--json number,state,updatedAt,title,closingIssuesReferences,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
 		# A `reason=` with nothing after it reads as "there was no reason" rather than "the tool could
 		# not tell" — a wrapper that fails silently produces exactly that, and it was doing so.
 		_why=$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
@@ -1145,9 +1196,48 @@ tick() {
 	# session — but it does make the tick FAIL, so a run of them exits the watch rather than
 	# producing a watch that reports on a queue and silently reads nothing on the channel that
 	# carries rulings.
+	# The DERIVED half of quince#80: issues referenced by OPEN PRs, automatic, no declaration. It
+	# costs no extra `gh` call — `title` and `closingIssuesReferences` ride along on the queue fetch.
+	#
+	# The signal is the UNION of GitHub's link data and a `#N` scan of the TITLE, and that is measured
+	# rather than tidy. Over 25 PRs in this repository (2026-07-27):
+	#
+	#   closingIssuesReferences alone  9/25  ·  title #N alone  22/25  ·  union  23/25
+	#
+	# (`gh pr list -R novkostya/quince --state all --limit 25`, 2026-07-27T09:57Z. The first version of
+	# this comment said 10/25 — counted by eye, corrected in review of the journal entry carrying the
+	# same figure, and recomputed in jq. The ratio is the weaker half of the argument anyway.)
+	#
+	# The decisive case is quince#87 ITSELF — the PR that built half one of this ruling. Its body says
+	# "Closes half one of #80", which GitHub does not parse as a closing keyword, so its link data is
+	# EMPTY while its title carries `(#80)`. A derived half resting on link data alone would have
+	# missed the very PR written to fix this issue.
+	#
+	# The BODY is deliberately NOT scanned. quince#87's body cites eleven issue numbers, nearly all as
+	# history — watching every issue a PR mentions is the wallpaper this tool has rejected twice
+	# already (SUCCESS checks, BLOCKED/UNSTABLE mergeability), and wallpaper on the escalation channel
+	# is worse than anywhere else.
+	#
+	# OPEN PRs only, which is the point: the derived set tracks what is being worked on now. A merged
+	# PR's issues leave it, and their stored records survive under the same carry-forward that covers a
+	# failed fetch — so re-referencing one later diffs against its old baseline instead of
+	# re-announcing it, consistent with what undeclaring already does.
+	# The `#N` scan requires the `#` NOT to be preceded by a word character, and that narrowing is a
+	# defect this tool found IN ITSELF, in production, on the branch that added it. A devlog PR titled
+	# "… a declaration now reaches it (quince#87)" made a naive `#[0-9]+` scan derive
+	# quince-devlog#87 — a CROSS-REPO reference resolved against the wrong repository, which is
+	# devlog#18's exact class reproduced mechanically. It surfaced as
+	# `issue-fetch-failed … reason=GraphQL:_Could_not_resolve_to_an_issue…`: the tool answering
+	# correctly about a question it should never have asked. `quince#87` is quince's, not ours, and a
+	# repo-qualified reference is precisely the one a per-repo fetch must NOT claim.
+	_refs=$(jq -r '[.[] | select(.state == "OPEN")
+		| [(.closingIssuesReferences // [])[] | .number]
+		  + [(.title // "") | scan("(?:^|[^A-Za-z0-9_/-])#([0-9]+)") | .[0] | tonumber]]
+		| flatten | unique | .[]' "$_raw" 2>/dev/null || true)
+
 	_iss=$(mktemp)
 	_irc=0
-	fetch_issues "$_state" "$_repo" "$_gh" "$_iss" || _irc=1
+	fetch_issues "$_state" "$_repo" "$_gh" "$_iss" "$_refs" || _irc=1
 	if [ -s "$_iss" ]; then
 		jq -c --slurpfile items "$_iss" '.issues = {items: $items}' "$_obs" >"$_obs.new" &&
 			mv "$_obs.new" "$_obs"
@@ -1285,6 +1375,11 @@ wake_worthy() {
 		# not: one is a missed read, a run of them is a watch that is not watching, and --fail-after
 		# is what tells the two apart. It is PRINTED either way.
 		/^event=issue-fetch-failed/ { next }
+		# A close/reopen on a MERELY-REFERENCED issue does not wake: nobody declared it, so nobody is
+		# blocked on it, and tidying an issue an open PR happens to name is the noise the ruling
+		# flagged. A close on a DECLARED issue does wake — that is the blocker clearing. Printed
+		# either way; this filter has never decided what is SEEN.
+		/^event=issue-(closed|reopened)/ { if ($0 ~ /via=referenced/) next }
 		/^event=queue-empty/ { if (base[repo($0)]) next }
 		/^event=/ { print }
 	' "$1" "$1"

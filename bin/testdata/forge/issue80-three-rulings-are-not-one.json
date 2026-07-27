@@ -30,7 +30,7 @@
     }
   },
   "expect_events": [
-    "event=issue-updated issue=62 at=2026-07-27T04:46:42Z actor=quince-bot kind=comment",
-    "event=issue-comment issue=62 count=3 at=2026-07-27T04:46:42Z actor=quince-bot"
+    "event=issue-updated issue=62 at=2026-07-27T04:46:42Z actor=quince-bot kind=comment via=declared",
+    "event=issue-comment issue=62 count=3 at=2026-07-27T04:46:42Z actor=quince-bot via=declared"
   ]
 }

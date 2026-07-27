@@ -1,0 +1,40 @@
+{
+  "note": "quince#80 half two: issues referenced by open PRs are watched AUTOMATICALLY, with no declaration. The ruling is explicit that half one alone is insufficient — a session must not have to remember to declare the issue its own PR is for. `via=referenced` is on every event, because the session never asked for this issue and an unexplained event about one it did not declare is the kind of signal a reader learns to ignore. Here #64 is watched purely because an open PR names it, and it gains a comment. Note the DISCOVERY signal is measured, not assumed: over 25 PRs in this repo, closingIssuesReferences alone covers 10 and the title `#N` convention covers 22, so the union is what this rests on — see the tick() comment. The decisive case was quince#87 itself, whose body says 'Closes half one of #80' and whose link data is therefore empty.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 74, "state": "OPEN", "updatedAt": "2026-07-27T05:00:00Z",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "issues": {
+      "declared": [],
+      "declared_at": null,
+      "items": [
+        { "number": 64, "state": "OPEN", "updatedAt": "2026-07-27T05:10:00Z", "via": "referenced",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T05:10:00Z","actor":"quince-bot","kind":"comment"} ] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 74, "state": "OPEN", "updatedAt": "2026-07-27T05:00:00Z",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "issues": {
+      "items": [
+        { "number": 64, "state": "OPEN", "updatedAt": "2026-07-27T06:02:14Z", "via": "referenced",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [
+            {"at":"2026-07-27T05:10:00Z","actor":"quince-bot","kind":"comment"},
+            {"at":"2026-07-27T06:02:14Z","actor":"novkostya","kind":"comment"}
+          ] }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-updated issue=64 at=2026-07-27T06:02:14Z actor=novkostya kind=comment via=referenced",
+    "event=issue-comment issue=64 count=1 at=2026-07-27T06:02:14Z actor=novkostya via=referenced"
+  ]
+}
