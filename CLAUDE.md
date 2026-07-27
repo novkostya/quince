@@ -101,6 +101,25 @@ repo is not a message bus, and no human is an RPC layer.
 - The architect reviews/approves/merges as the repo owner; the Operator is admin of last
   resort and the approver for architect-authored docs.
 
+**What each identity cannot do.** These have been discovered one at a time, by hitting them,
+each costing a session the time to work out that the failure was structural rather than local
+(devlog#48). Consult this before designing around a refusal.
+
+| identity | cannot |
+| --- | --- |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`; use `gh api -X PATCH`, devlog#1) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) |
+| **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) |
+| **Operator** | — the only identity that can push a workflow: an SSH push consults no OAuth scope |
+
+Two rules follow, and both are about the asker rather than the holder.
+
+**A refusal is not a reason to escalate to another seat.** Check the table first: on quince#113
+a session escalated a workflow push to the architect, which cannot do it either.
+
+**Never ask an identity for an action it cannot perform.** The ask looks answerable, the failure
+is silent from the asker's side, and both parties then wait correctly for a signal that cannot
+arrive. Ask for something the holder *can* emit — a comment is always available to everyone.
+
 ### Issues
 
 - product bugs and feature work → issues **here**, **sanitized at filing** (no LAN IPs,
@@ -207,6 +226,18 @@ that cannot reach it (quince#44, ruled 2026-07-27). This paragraph used to say t
 existed *"only on the Operator's machines"*; that stopped being true the moment work moved
 onto the boxes, and a document describing a narrower reality than the one that exists is the
 defect class this project keeps filing.
+
+**`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
+defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
+with no credential helper. Present, readable, and unable to advance. `preflight` was satisfied,
+the box started, and the last privacy sweep before a merge therefore ran a matcher with neither
+the canary nor the case-sensitive list — while reporting `clean`. The two boxes were running
+materially different privacy gates and neither could tell.
+
+Until `preflight` asserts that the clone can **fetch** and not merely exist, a box's private
+layer can be silently stale. **Read the gate's own banner rather than its exit code**: it names
+the lists it loaded and whether the canary proved the matcher, and those lines are the only
+thing that distinguishes *swept* from *compiled the lists and matched nothing*.
 
 **What that means, stated rather than implied:** each box carries the complete private
 record — ~610 KB across 8 files, including the lab topology and the external review
