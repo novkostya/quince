@@ -2041,7 +2041,19 @@ owed)
 		_hhint=$(printf '%s\n' "$_hout" | awk '/^OWED/ {print $2}' | while read -r _hrepo; do
 			owed_arm_hint "$_role" "$_rolegh" "$_hrepo"
 		done | sort -u | sed 's/^/    /')
-		_msg="A WATCH IS OWED AND IS NOT LIVE — you are about to end a turn with open PRs and nothing that can wake you.
+		# NEUTRAL about WHY, deliberately, and that is the structural half of the fix rather than a
+		# preference. The reason a watch is owed differs by half — open PRs for the implementer, the
+		# declared set for the reviewer (quince#71) — and this headline stated one of them as a
+		# constant. It was true for the half it was written for and became routinely false for the
+		# other the moment `owed --all` stopped consulting the queue: after quince#71 a reviewer is
+		# blocked on an empty queue *as the normal case*, and was told every time that it had open PRs.
+		#
+		# The fix is not to switch this line on the mode as well. The defect exists BECAUSE the reason
+		# lived in two places and only one of them was updated; adding a second mode-dependent copy
+		# recreates the condition that produced it. So the reason is stated ONCE, in the OWED rows
+		# immediately below, which are already mode-aware and already name the repositories. The
+		# headline carries the VERDICT, which is the same for both halves and cannot drift.
+		_msg="A WATCH IS OWED AND IS NOT LIVE — you are about to end a turn with nothing that can wake you.
 
 $_hout
 
@@ -2055,7 +2067,12 @@ The loop must exit when it finds something; a loop that cannot exit cannot wake 
 			# that can never end, and the goal was never to make stopping impossible — only to make an
 			# unwatched stop impossible to do SILENTLY. So the second attempt is allowed, and the human
 			# is told, which is the whole of "make the absence detectable".
-			jq -n --arg d "$_hout" '{systemMessage: ("forge-watch owed: this session is ENDING A TURN WITH AN UNWATCHED PR after being told once.\n" + $d)}'
+			# "AN UNWATCHED PR" was the same mistake one line further on, and this copy is the one that
+			# reaches a HUMAN. A reviewer blocked under quince#71 may have no PR at all — the whole
+			# point is that the declared set owes a watch regardless — so the escalation would have
+			# told the Operator about a PR that does not exist. Same fix: the verdict here, the reason
+			# in $d.
+			jq -n --arg d "$_hout" '{systemMessage: ("forge-watch owed: this session is ENDING A TURN WITH NO LIVE WATCH after being told once.\n" + $d)}'
 			exit 0
 		fi
 		jq -n --arg r "$_msg" '{decision: "block", reason: $r}'
