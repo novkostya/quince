@@ -48,6 +48,26 @@ printf 'not-a-real-token\n' >"$LOOSE_TOKEN"
 chmod 644 "$LOOSE_TOKEN"
 ABSENT_TOKEN="$TMP/no-such.token"
 
+# run_preflight <env assignments...> — every variable preflight reads, UNSET first.
+#
+# `env FOO=1 cmd` ADDS to the caller's environment; it does not replace it. So a case that asserts
+# a variable is *absent* by simply not passing it was asserting a property of the shell running the
+# suite, not of the code. That is a claim the TEST cannot support — the same shape this unit keeps
+# removing, arriving one layer out — and it made the suite's result depend on the box: on a box
+# exporting QUINCE_RUNNER_ROLE=arch (which the architect box does, from conf.d) the "unset role"
+# case failed, and with ANTHROPIC_API_KEY exported four cases failed. That variable is the one this
+# gate exists to refuse, and anyone working with Claude plausibly has it set, so `make gates` would
+# have failed on their shell rather than on their change.
+#
+# The list is EVERY variable preflight reads, not only the ones observed to break: the three
+# credentials, the base URL, the role, and the token-file override. **If preflight learns to read a
+# new variable, it must be added here**, or the same silent coupling returns.
+run_preflight() {
+	env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+		-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
+		"$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
+}
+
 # expect <name> <want-exit> <substring> -- <env assignments...>
 # The substring matters as much as the code: preflight returns 1 for every refusal, so the exit
 # alone cannot tell "you set an API key" from "this box holds the wrong identity", and conflating
@@ -55,7 +75,7 @@ ABSENT_TOKEN="$TMP/no-such.token"
 expect() {
 	name=$1 want=$2 substr=$3
 	shift 4
-	out=$(env "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1) && got=0 || got=$?
+	out=$(run_preflight "$@") && got=0 || got=$?
 	if [ "$got" -ne "$want" ]; then
 		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
 		printf '%s\n' "$out" | sed 's/^/    | /'
@@ -134,7 +154,11 @@ expect "an unset role is ASSUMED implementer, and says so" 0 "ASSUMED" -- \
 # cover, since it is the stub's own subject.
 emptybin="$TMP/emptybin"
 mkdir -p "$emptybin"
-out=$(env PATH="$emptybin" QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+# Same unset list as run_preflight — this case cannot use it, because it must override PATH to a
+# directory with no `claude`, which run_preflight deliberately does not allow.
+out=$(env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
+	PATH="$emptybin" QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"$PREFLIGHT" 2>&1) && got=0 || got=$?
 if [ "$got" -eq 1 ] && printf '%s\n' "$out" | grep -qF "claude is not installed"; then
 	printf 'ok   an absent claude is refused, naming provision (exit %s)\n' "$got"
@@ -144,6 +168,29 @@ else
 	printf '%s\n' "$out" | sed 's/^/    | /'
 	fail=$((fail + 1))
 fi
+
+# =============================================================================================
+# 5. THE SUITE MUST NOT READ THE BOX
+# =============================================================================================
+# The isolation above is itself a claim, and an untested one would rot the first time someone adds
+# a variable or "simplifies" the unset list. So: export the hostile values that actually broke this
+# suite and assert the results do not move. Without `env -u` these four cases fail — which is
+# precisely how the defect presented on the architect box.
+export QUINCE_RUNNER_ROLE=arch
+export ANTHROPIC_API_KEY=sk-ambient-not-real
+export ANTHROPIC_BASE_URL=https://gateway.example.invalid
+export ANTHROPIC_AUTH_TOKEN=ambient-not-real
+
+expect "ambient role does not reach the unset-role case" 0 "ASSUMED" -- \
+	"QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "ambient API key does not fail an unrelated case" 0 "bot token present, mode 600" -- \
+	QUINCE_RUNNER_ROLE=implementer "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "ambient base URL does not reach the endpoint case" 0 "unset or api.anthropic.com" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+expect "ambient auth token does not reach the credential case" 0 "no API-key or token credential" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+
+unset QUINCE_RUNNER_ROLE ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
 
 # =============================================================================================
 printf '\npreflight-test: %d passed, %d failed\n' "$pass" "$fail"
