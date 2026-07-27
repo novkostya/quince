@@ -106,25 +106,49 @@ esac
 #    taken on quince#44 before the grant was found.
 PRIVATE_LAYER="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
 PATTERN_FILE="$PRIVATE_LAYER/privacy-patterns.txt"
-if [ ! -e "$PATTERN_FILE" ]; then
-	bad "this box cannot reach the private layer — no $PATTERN_FILE. The privacy gate runs on every push from here, and without the pattern list it cannot run at all. Place the list at that path (file 0600, directory 0700). Not saying WHY it is absent, because this cannot tell 'never placed' from 'placed and since lost'."
-elif [ ! -s "$PATTERN_FILE" ]; then
-	# `test -s`, not `test -e`. An empty list matches nothing and reports clean forever, which is
-	# the same vacuous pass in a costume — privacy-check exits 2 on it (quince#41), and preflight
-	# refuses to start a box that would produce it.
-	bad "the private layer at $PATTERN_FILE is EMPTY. An empty pattern list matches nothing and would report every sweep clean — worse than an absent one, because it looks like it ran."
+
+# THE VERDICT IS BORROWED, NOT RE-IMPLEMENTED. preflight's question — "can the privacy gate run on
+# this box?" — is a question only the gate can answer, and answering it twice is how the two
+# answers diverge. The first version of this block did exactly that: it used `test -s`, so a list
+# of nothing but comments (bytes present, zero usable patterns) PASSED preflight while
+# `privacy-check` returned 2 on the same file. The box came up asserting "the privacy gate can run
+# on this box" and every sweep afterwards said DID NOT RUN — quince#44's own failure, inside the
+# change that closes it. So: run the gate's validator and take its exit code.
+#
+#   0 → the list is usable      2 → it is not, and the gate says why
+#
+# (1 is "a match was found", which cannot occur here: no --ref and no --text means an empty scope.)
+_here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PRIVACY_CHECK="${QUINCE_PRIVACY_CHECK:-$_here/../privacy/privacy-check}"
+if [ ! -x "$PRIVACY_CHECK" ]; then
+	bad "the privacy gate is missing at $PRIVACY_CHECK — this checkout is incomplete, so preflight cannot establish whether the box can gate. Pull the launchpad."
 else
-	patterns=$(grep -cvE '^[[:space:]]*(#|$)' "$PATTERN_FILE" 2>/dev/null || echo 0)
-	ok "private layer present, $patterns patterns — the privacy gate can run on this box"
-	# REPORTED, NOT ENFORCED, matching the apk-drift reporter below and for the same reason: this
-	# is a list OF the sensitive strings, so a loose mode is worth saying loudly, but refusing to
-	# start over a permission bit turns a one-command fix into an outage. Said where somebody is
-	# already reading the output.
-	pmode=$(stat -c '%a' "$PATTERN_FILE" 2>/dev/null || stat -f '%Lp' "$PATTERN_FILE" 2>/dev/null || echo unknown)
-	case "$pmode" in
-	600 | 400) ;;
-	*) printf 'preflight: note — %s is mode %s, expected 600. It is a list OF the sensitive strings; chmod 600 it.\n' "$PATTERN_FILE" "$pmode" ;;
-	esac
+	# stderr carries the gate's reason; stdout is its progress chatter and is discarded.
+	layer_why=$("$PRIVACY_CHECK" --patterns "$PRIVATE_LAYER" 2>&1 >/dev/null) && layer_rc=0 || layer_rc=$?
+	if [ "$layer_rc" -eq 0 ]; then
+		# `grep -c` prints 0 AND exits 1 on a zero count, so the one-line `|| echo 0` form emits
+		# the count and the fallback both, and $patterns becomes two lines. Documented at
+		# deploy/privacy/privacy-check and re-learned here the hard way; written the long way.
+		if patterns=$(grep -cvE '^[[:space:]]*(#|$)' "$PATTERN_FILE" 2>/dev/null); then :; else patterns=0; fi
+		ok "private layer present, $patterns usable patterns — the privacy gate can run on this box"
+		# REPORTED, NOT ENFORCED, matching the apk-drift reporter below and for the same reason:
+		# this is a list OF the sensitive strings, so a loose mode is worth saying loudly, but
+		# refusing to start over a permission bit turns a one-command fix into an outage.
+		pmode=$(stat -c '%a' "$PATTERN_FILE" 2>/dev/null || stat -f '%Lp' "$PATTERN_FILE" 2>/dev/null || echo unknown)
+		case "$pmode" in
+		600 | 400) ;;
+		*) printf 'preflight: note — %s is mode %s, expected 600. It is a list OF the sensitive strings; chmod 600 it.\n' "$PATTERN_FILE" "$pmode" ;;
+		esac
+	else
+		# One refusal for every unusable shape — absent, empty, comments-only, uncompilable —
+		# because they are one fact: this box cannot gate. The gate's own line is quoted as the
+		# OBSERVATION; preflight supplies the fix, which the gate must not, since its message has
+		# to stay correct for callers that are not a starting runner.
+		# First line only: the gate's second line is "this is NOT a clean result", addressed to
+		# somebody reading a sweep, and it reads as a non-sequitur inside a start-up refusal.
+		layer_why=$(printf '%s\n' "$layer_why" | head -n 1)
+		bad "this box cannot run the privacy gate on $PRIVATE_LAYER, so it must not start. The gate observed — ${layer_why:-no reason reported}. Fix: place a usable pattern list at $PATTERN_FILE (file 0600, directory 0700). Not saying WHY beyond what the gate reported: this cannot tell 'never placed' from 'placed and since lost'."
+	fi
 fi
 
 # --- the thing we are about to run ----------------------------------------------------------

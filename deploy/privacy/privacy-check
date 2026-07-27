@@ -105,7 +105,12 @@ fi
 # --- the lists must exist and be non-empty --------------------------------------------------
 # `test -s`, not `test -f`: an empty list matches nothing and would report clean forever. That
 # is the same vacuous pass in a costume.
-[ -e "$CI_LIST" ] || cannot_run "no pattern list at $CI_LIST — on a provisioned box the private layer is placed by deploy/runner/provision (quince#44)"
+# The fix named here must be one that EXISTS (quince#44's ruling, 2026-07-27). This line used to
+# say the layer "is placed by deploy/runner/provision" — provision does no such thing yet, so it
+# named a fix nobody had built, which is the defect class this very file exists to close. When
+# provision learns to place the layer, correcting this belongs to that change and not to a
+# follow-up.
+[ -e "$CI_LIST" ] || cannot_run "no pattern list at $CI_LIST — place one there (file 0600, directory 0700), or link the private layer into this clone: ln -s /root/quince-local local"
 [ -s "$CI_LIST" ] || cannot_run "pattern list $CI_LIST is EMPTY — an empty list matches nothing and would report clean forever"
 
 count_patterns() {
