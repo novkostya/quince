@@ -101,6 +101,37 @@ chmod 600 "$NOREMOTE_LAYER/privacy-patterns.txt"
 git -C "$NOREMOTE_LAYER" init -q
 git -C "$NOREMOTE_LAYER" config credential.helper 'zz-synthetic-helper'
 
+# Non-http(s) remotes, NONE of which can carry a credential helper — the mechanism is http-only, so
+# an SSH clone fetches forever without one. The first shipped version of this check demanded a helper
+# from EVERY remote, which made each of these a box that would not start.
+#
+# Three shapes, because they fail the underlying git command in TWO different ways and a fix aimed at
+# either one alone leaves the other refusing. Measured on git 2.54.0 (quince#121):
+#
+#   scp-style `git@host:path` is NOT A URL   → `--get-urlmatch` FATALS, exit 128, stdout empty
+#   `ssh://` and `file://` ARE valid URLs    → exit 1, stdout empty, and NO error printed at all
+#
+# The fatal was masked by a `2>/dev/null`; the clean exit 1 was never masked, because there was
+# nothing to mask — it is a true answer to the wrong question. Un-masking the stderr would have
+# fixed the first shape and left `ssh://` refusing silently, which is why the fix dispatches on the
+# SCHEME rather than stopping discarding the error. These three pin that distinction.
+for zz_transport in ssh-scp ssh-url file-url; do
+	case "$zz_transport" in
+	ssh-scp) zz_url="git@github.com:zz-synthetic/zz-synthetic.git" ;;
+	ssh-url) zz_url="ssh://git@github.com/zz-synthetic/zz-synthetic.git" ;;
+	file-url) zz_url="file:///zz-synthetic/zz-synthetic.git" ;;
+	esac
+	zz_layer="$TMP/layer-git-$zz_transport"
+	mkdir -p "$zz_layer"
+	printf '# synthetic\nzzsecrethostzz\n' >"$zz_layer/privacy-patterns.txt"
+	chmod 600 "$zz_layer/privacy-patterns.txt"
+	git -C "$zz_layer" init -q
+	git -C "$zz_layer" remote add origin "$zz_url"
+done
+SSH_SCP_LAYER="$TMP/layer-git-ssh-scp"
+SSH_URL_LAYER="$TMP/layer-git-ssh-url"
+FILE_URL_LAYER="$TMP/layer-git-file-url"
+
 # preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
 # from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
 # a synthetic floor every passing case here would be asserting the size of the Operator’s list —
@@ -310,6 +341,40 @@ expect "a URL-SCOPED helper also counts as wired" 0 "can advance" -- \
 expect "a git layer with a helper but NO remote refuses" 1 "NO 'origin' remote" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$NOREMOTE_LAYER"
+
+# A CREDENTIAL HELPER IS AN HTTP(S) MECHANISM, so demanding one from a transport that cannot use it
+# refuses a box that fetches perfectly. This is the same defect as the `--get credential.helper`
+# draft one transport further out: a boot-blocking check refusing a working machine, which the
+# comment in `preflight` calls worse than the staleness it guards against. Caught in review, before
+# anyone cloned the layer over SSH — and the message it would have handed them was actively wrong,
+# since `provision` writes an HTTPS helper, so "run provision" would have repaired a working box by
+# replacing its transport.
+expect "an SSH (scp-style) layer is not asked for a helper" 0 "nothing to assert" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER"
+
+# The sibling that un-masking the stderr would NOT have fixed, which is why it is asserted
+# separately rather than folded into the case above. `ssh://` is a valid URL, so `--get-urlmatch`
+# does not fatal on it: it exits 1 with empty output and prints nothing. There was never an error to
+# discard here — the old code simply read a true answer to the wrong question and refused.
+expect "an ssh:// layer is not asked for a helper" 0 "nothing to assert" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$SSH_URL_LAYER"
+
+# `file://` behaves as `ssh://` does and is pinned so the fix is not read as SSH-specific. One
+# scheme dispatch covers every non-http(s) transport; without this, a later reader could narrow the
+# `*)` arm to SSH and break local-path clones with every test still passing.
+expect "a file:// layer is not asked for a helper" 0 "nothing to assert" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$FILE_URL_LAYER"
+
+# …and the non-http(s) arm must not quietly claim the box is FRESH. It says what it did not
+# establish: an ssh key is not a local fact preflight can read. Pinned because the tempting message
+# here is "can advance", which would be the check reporting a property it never checked — the exact
+# shape quince#121 was filed about, arrived at from the opposite side.
+expect "…and does not claim the layer can advance" 0 "whether it can fetch depends on" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER"
 
 # A HAND-PLACED layer is not a clone and has no remote to be wired to. preflight's own refusal text
 # prescribes hand-placement as a documented path, so refusing it here would forbid the fallback this
