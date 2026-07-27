@@ -48,6 +48,24 @@ printf 'not-a-real-token\n' >"$LOOSE_TOKEN"
 chmod 644 "$LOOSE_TOKEN"
 ABSENT_TOKEN="$TMP/no-such.token"
 
+# Synthetic private layers (quince#44). Never the Operator's — these hold obvious nonsense, so a
+# fixture can neither read the real list nor accidentally match real content.
+GOOD_LAYER="$TMP/layer-ok"
+mkdir -p "$GOOD_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$GOOD_LAYER/privacy-patterns.txt"
+chmod 600 "$GOOD_LAYER/privacy-patterns.txt"
+
+ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
+
+EMPTY_LAYER="$TMP/layer-empty"
+mkdir -p "$EMPTY_LAYER"
+: >"$EMPTY_LAYER/privacy-patterns.txt"
+
+LOOSE_LAYER="$TMP/layer-loose"
+mkdir -p "$LOOSE_LAYER"
+printf '# synthetic\nzzsecrethostzz\n' >"$LOOSE_LAYER/privacy-patterns.txt"
+chmod 644 "$LOOSE_LAYER/privacy-patterns.txt"
+
 # run_preflight <env assignments...> — every variable preflight reads, UNSET first.
 #
 # `env FOO=1 cmd` ADDS to the caller's environment; it does not replace it. So a case that asserts
@@ -67,14 +85,23 @@ ABSENT_TOKEN="$TMP/no-such.token"
 # leave that case reading the box again, and section 5 could not catch it, since those cases all go
 # through `expect()` → `run_preflight`. One list, one place to change.
 #
+# The seventh variable arrived one PR after that sentence was written: QUINCE_PRIVATE_LAYER
+# (quince#44). It is added here and nowhere else, which is exactly what the single list was for.
+#
 # Unquoted on purpose: this is a list of separate arguments, not one word.
 # shellcheck disable=SC2086
 PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
-	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE"
+	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
+	-u QUINCE_PRIVATE_LAYER"
 
+# Every case gets a SYNTHETIC private layer by default. preflight now refuses without one, so
+# otherwise every want-exit-0 case would be asserting "this box happens to have
+# /root/quince-local" — true here, false on CI, and the same read-the-box defect the isolation
+# above exists to prevent. Placed BEFORE "$@" so a case passing its own QUINCE_PRIVATE_LAYER wins:
+# measured on this platform, `env A=1 A=2` yields 2, rather than erroring or taking the first.
 run_preflight() {
 	# shellcheck disable=SC2086
-	env $PF_UNSET "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
+	env $PF_UNSET "QUINCE_PRIVATE_LAYER=$GOOD_LAYER" "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
 }
 
 # expect <name> <want-exit> <substring> -- <env assignments...>
@@ -167,6 +194,7 @@ mkdir -p "$emptybin"
 # PATH at a directory with no `claude`, which run_preflight deliberately does not allow.
 # shellcheck disable=SC2086
 out=$(env $PF_UNSET PATH="$emptybin" QUINCE_RUNNER_ROLE=arch \
+	"QUINCE_PRIVATE_LAYER=$GOOD_LAYER" \
 	"QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "$PREFLIGHT" 2>&1) && got=0 || got=$?
 if [ "$got" -eq 1 ] && printf '%s\n' "$out" | grep -qF "claude is not installed"; then
 	printf 'ok   an absent claude is refused, naming provision (exit %s)\n' "$got"
@@ -176,6 +204,56 @@ else
 	printf '%s\n' "$out" | sed 's/^/    | /'
 	fail=$((fail + 1))
 fi
+
+# =============================================================================================
+# 4b. THE PRIVATE LAYER — a box that cannot gate must not start (quince#44)
+# =============================================================================================
+# Ruled by the Operator: refuse, rather than come up and run a gate that silently cannot run. The
+# defect being closed is that a rebuilt box returns to the gate-that-cannot-gate state with nothing
+# announcing it, while sessions have learned to trust the file a rebuild removed.
+expect "an unreachable private layer refuses" 1 "cannot reach the private layer" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
+
+# The message must NAME THE FIX THAT EXISTS TODAY — hand-placement. When `provision` learns to
+# place the layer, correcting this belongs to that change, and this assertion is what will fail and
+# force it rather than letting the text rot into naming a fix nobody has built.
+expect "…and names the fix that exists today" 1 "Place the list at that path" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
+
+# …and must NOT claim to know WHY. A private repo 404s identically for "does not exist" and "not
+# granted", so a message that guessed would send the next reader to recreate a repo when the real
+# fix is a one-click grant. Asserted by the absence of both wrong words.
+out=$(run_preflight QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER") || true
+if printf '%s\n' "$out" | grep -qiE 'does not exist|no such repositor|lack permission|not authori[sz]ed|access denied'; then
+	printf 'FAIL the refusal must not guess WHY the layer is unreachable\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+else
+	printf 'ok   the refusal does not guess WHY the layer is unreachable (exit 1)\n'
+	pass=$((pass + 1))
+fi
+
+# An EMPTY list is worse than an absent one: it matches nothing and reports every sweep clean, so
+# it looks like it ran. privacy-check exits 2 on it (quince#41); preflight refuses to start a box
+# that would produce it.
+expect "an EMPTY pattern list refuses, and says why it is worse" 1 "looks like it ran" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$EMPTY_LAYER"
+
+# A usable layer passes and states the pattern COUNT, so a reader can tell a real layer from a
+# nearly-empty one — the same reason privacy-check and forge-watch print their counts.
+expect "a usable private layer passes, stating the count" 0 "private layer present, 1 patterns" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+
+# A loose mode is REPORTED, NOT ENFORCED — matching the apk-drift reporter, and for the same
+# reason: refusing to start over a permission bit turns a one-command fix into an outage. It must
+# still be said, because this is a list OF the sensitive strings.
+expect "a world-readable pattern list is reported, not refused" 0 "mode 644, expected 600" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$LOOSE_LAYER"
 
 # =============================================================================================
 # 5. THE SUITE MUST NOT READ THE BOX
@@ -198,7 +276,14 @@ expect "ambient base URL does not reach the endpoint case" 0 "unset or api.anthr
 expect "ambient auth token does not reach the credential case" 0 "no API-key or token credential" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
 
-unset QUINCE_RUNNER_ROLE ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+# The seventh variable needs the same guard as the other six, or the newest read is the only
+# unprotected one. Pointed at a layer that does not exist: if it leaked, the passing cases would
+# refuse.
+export QUINCE_PRIVATE_LAYER="$ABSENT_LAYER"
+expect "ambient private-layer path does not reach a passing case" 0 "private layer present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+
+unset QUINCE_RUNNER_ROLE ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN QUINCE_PRIVATE_LAYER
 
 # =============================================================================================
 printf '\npreflight-test: %d passed, %d failed\n' "$pass" "$fail"
