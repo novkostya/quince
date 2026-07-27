@@ -34,12 +34,26 @@
 # direct consequence of #134, and if the architect ever reviews as a user account again, this file
 # silently stops distinguishing anything.
 #
-# THE DEADLOCK, NAMED RATHER THAN DISCOVERED AT THE TOGGLE. The architect still AUTHORS canon as
-# @novkostya, and GitHub does not count an author's approval of their own pull request. So with
-# the toggle on, architect-authored canon becomes admin-merge-only. That is not a reason to leave
-# the file out — it is the true state of the identity model, currently invisible. It is a ruling
-# about which identity authors canon, it is the Operator's, and it is filed as quince#137 rather
-# than assumed.
+# THE ORDER THE TOGGLE GOES ON IN, which is a ruling and not a detail. Operator ruling on
+# quince#137, 2026-07-27:
+#
+#   1. the architect AUTHORS canon through the App, so the author is quince-review[bot];
+#   2. @novkostya then approves it as CODE OWNER — a different principal, so GitHub counts it;
+#   3. only THEN is "Require review from Code Owners" enabled.
+#
+# Flipping first blocks exactly the class this file exists to protect: GitHub does not count an
+# author's approval of their own PR, so while the architect authors canon as @novkostya the sole
+# code owner IS the author and the requirement is unsatisfiable.
+#
+# I FILED THAT AS AN UNAVOIDABLE DEADLOCK AND IT IS NOT ONE. The premise — that the architect can
+# only author as the Operator — is false. The App holds `contents: write` and `pull_requests:
+# write`, and quince-devlog#53 is authored by `app/quince-review`, filed while the question was
+# still open. What went wrong on quince-devlog#51 was a missing INSTRUCTION rather than a missing
+# capability: nothing in canon said which wrapper authors, so the habitual one won. That clause now
+# lives in `/architect` §1 and is what step 1 rests on.
+#
+# Recorded rather than quietly corrected, because a comment that overstates a constraint is how a
+# cheap fix gets priced out of reach.
 
 # Everything else: no owner. The ordinary model is unchanged — one approval, from the architect's
 # App, on an implementer-authored PR. Silence here is deliberate, not an omission.

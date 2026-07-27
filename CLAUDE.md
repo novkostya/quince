@@ -130,11 +130,21 @@ separating the two seats.
 
 **The file enforces nothing until *"Require review from Code Owners"* is enabled**, which is
 admin-only and therefore the Operator's — CODEOWNERS alone only auto-*requests* review. It is
-committed unwired on purpose, the same shape as an unpushable workflow (quince#113). **Enabling it
-deadlocks one class and that is unruled:** the architect still *authors* canon as `@novkostya`, and
-GitHub does not count an author's approval of their own PR, so architect-authored canon would become
-admin-merge-only. The deadlock is the identity model's true state made visible, not a new defect —
-but which identity authors canon is a ruling, and it is open — quince#137.
+committed unwired on purpose, the same shape as an unpushable workflow (quince#113).
+
+**The toggle is SEQUENCED, and the order is an Operator ruling** (quince#137, 2026-07-27): the
+architect **authors canon through the App** so the author is `quince-review[bot]` → `@novkostya`
+approves it as code owner, a different principal, so GitHub counts it → *then* the toggle goes on.
+Flipping first blocks exactly the class the file protects, because GitHub does not count an author's
+approval of their own PR and the sole code owner would *be* the author. **So `bin/gh-review` is the
+authoring path for canon, not only the verdict path** — the clause is in `/architect` §1, and
+quince-devlog#51 vs #53 is what a missing instruction rather than a missing capability looks like.
+
+**That exception is narrow and does not generalise.** Routing authorship through the App would
+collapse author and approver into one principal anywhere the App also approves — the thing
+`approver ≠ author` exists to prevent (quince#136). It does not collapse here, and only here,
+because the approver for canon is the **Operator**. It licenses nothing for any class the App also
+approves.
 
 **No per-verdict disclosure is required, and the reason is structural rather than trusting.** The
 signing key exists in one place — the arch box — so the sessions that can cast an App verdict are
