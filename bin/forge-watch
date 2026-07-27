@@ -313,6 +313,27 @@ step() {
 	_prev_iss=$(jq -c '.issues.items // []' "$_prev" 2>/dev/null || printf '[]')
 	[ -n "$_prev_iss" ] || _prev_iss='[]'
 
+	# The WATCHER RECORD is state in exactly the same sense, and it had no carry-forward (quince#103).
+	# step() writes the observation plus `{observed: true}`, so every write dropped `.watch` — and the
+	# watcher survived only because tick()'s watcher branch rewrites its own record immediately after.
+	# A HAND-RUN tick has no such branch, so it erased the record of a watcher it has no business
+	# touching.
+	#
+	# The comment on tick()'s write says a hand-run tick "can never make a dead watcher look alive".
+	# That was true and it is the direction that does not matter: the broken direction is the mirror —
+	# a hand tick made a LIVE watcher look dead, which is worse, because `watch_preflight`'s refusal
+	# reads this record. Erase it and the refusal does not fire, so the next arm puts a second watcher
+	# on one state file: quince#50's race, reached THROUGH the guard rather than around it. And the
+	# ordering ruled on quince#100 puts a foreground tick immediately before every arm, which is what
+	# turned a latent bug into the standard turn shape.
+	#
+	# It also laundered forensics, which is permanent where the race is transient: `reason=no_process`
+	# with a pid says a watcher died, `reason=no_watcher_record` says nothing was ever armed, and
+	# /architect §0 asks a session to report which. A hand tick silently converted the informative
+	# answer into the uninformative one.
+	_prev_watch=$(jq -c '.watch // null' "$_prev" 2>/dev/null || printf 'null')
+	[ -n "$_prev_watch" ] || _prev_watch=null
+
 	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
 
 	if [ "$_was_observed" != true ]; then
@@ -326,8 +347,10 @@ step() {
 		if [ "$(printf '%s' "$_now_prs" | jq 'map(select(.state != "MERGED")) | length == 0')" = true ]; then
 			printf 'event=queue-empty\n'
 		fi
-		printf '%s' "$_now" | jq -c --argjson decl "$_prev_decl" --argjson previtems "$_prev_iss" '
+		printf '%s' "$_now" | jq -c --argjson decl "$_prev_decl" --argjson previtems "$_prev_iss" \
+			--argjson watch "$_prev_watch" '
 			. + {observed: true}
+			| if $watch == null then . else .watch = $watch end
 			| if $decl == null then . else
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
@@ -536,7 +559,7 @@ step() {
 	# it. Overwriting knowledge with an absence is how a recompute flap becomes an event, and a
 	# transition re-announced every tick is the wallpaper this tool has already been fixed for once.
 	printf '%s' "$_now" | jq -c --argjson old "$_prev_prs" --argjson decl "$_prev_decl" \
-		--argjson previtems "$_prev_iss" '
+		--argjson previtems "$_prev_iss" --argjson watch "$_prev_watch" '
 		. + {observed: true, prs: [
 			.prs[] as $p
 			| if ($p.merge_state // "UNKNOWN") != "UNKNOWN" then $p
@@ -550,6 +573,7 @@ step() {
 		# the comment that landed during the outage — a ruling lost to a transient fetch error, on
 		# the channel this whole feature exists to make reliable. Absence is reported by
 		# `issue-fetch-failed`; it is never allowed to mean "nothing there".
+		| if $watch == null then . else .watch = $watch end
 		| if $decl == null then . else
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
@@ -815,6 +839,47 @@ compare_events() {
 	return 1
 }
 
+# compare_state — assert what the state file REMEMBERS, which no fixture kind could do before
+# (quince#103). Every shape here asserted `event=` lines only, so a defect that corrupts state while
+# emitting the right events was invisible to the whole suite — and quince#103 is exactly that defect:
+# step() dropped `.watch` on every write and not one of the 38 fixtures could see it, because the
+# events were all correct. A suite that can only watch the output of a state machine cannot test the
+# state.
+#
+# $1 fixture label, $2 the state file, $3 newline-separated jq predicates. Each must evaluate TRUE.
+# Empty predicate list is a no-op and prints nothing, so existing fixtures are untouched.
+#
+# `jq -e` is the assertion: it exits non-zero when the result is false or null. A predicate that is
+# malformed exits 3 and is reported as a FAILURE rather than skipped — a fixture whose assertion
+# cannot parse must not read as a pass, which is the vacuous-pass shape this file keeps removing.
+compare_state() {
+	_cs_label=$1
+	_cs_file=$2
+	_cs_preds=$3
+	[ -n "$_cs_preds" ] || return 0
+	_cs_fail=0
+	# Newline-separated, and IFS is set for the read loop only; a predicate may contain spaces.
+	printf '%s\n' "$_cs_preds" | while IFS= read -r _cs_p; do
+		[ -n "$_cs_p" ] || continue
+		if jq -e "$_cs_p" "$_cs_file" >/dev/null 2>&1; then
+			printf 'ok    %s state: %s\n' "$_cs_label" "$_cs_p"
+		else
+			printf 'FAIL  %s state: %s\n' "$_cs_label" "$_cs_p"
+			printf '  state was:\n%s\n' "$(jq -S '.' "$_cs_file" 2>/dev/null | sed 's/^/    /')"
+			printf 'x' >>"$_cs_file.statefail"
+		fi
+	done
+	# The loop above runs in a subshell (it is the right-hand side of a pipe), so its exit status
+	# cannot travel out — the marker file is how the verdict crosses that boundary. Stated because a
+	# `| while ...; done` whose `_cs_fail=1` silently fails to propagate is the classic form of this
+	# bug, and writing it that way first is how this comment exists.
+	if [ -f "$_cs_file.statefail" ]; then
+		rm -f "$_cs_file.statefail"
+		_cs_fail=1
+	fi
+	return "$_cs_fail"
+}
+
 loop_run() {
 	# The hang guard, in a function so the guarded and unguarded forms are one argv rather than two
 	# copies that can drift.
@@ -850,6 +915,8 @@ replay() {
 				_want=$(jq -r --argjson i "$_i" '.steps[$i].expect_events[]' "$_f" | sort)
 				compare_events "$(basename "$_f") [tick $_i: $(jq -r --argjson i "$_i" '.steps[$i].label // "-"' "$_f")]" \
 					"$_got" "$_want" || _fail=1
+				compare_state "$(basename "$_f") [tick $_i]" "$_tmp/state" \
+					"$(jq -r --argjson i "$_i" '.steps[$i].expect_state // [] | .[]' "$_f")" || _fail=1
 				_i=$((_i + 1))
 			done
 			rm -rf "$_tmp"
@@ -1327,6 +1394,13 @@ tick() {
 	# claiming it finished. `last_tick` records any tick; the watcher's own cadence is recorded
 	# separately, so a hand-run tick can never make a dead watcher look alive — which it would, if one
 	# field served both, and that field is precisely what a supervisor consults.
+	#
+	# BOTH directions now hold, and only one of them used to (quince#103). This comment asserted the
+	# safe direction and was true; the direction it did not mention was broken, because step() dropped
+	# `.watch` on every write and only the branch below rewrote it. So a hand-run tick could not make a
+	# dead watcher look alive, and DID make a live watcher look dead. step() carries `.watch` forward
+	# now, so the else branch below genuinely "writes only .last_tick" — until this fix that sentence
+	# described the intent while the record had already been thrown away upstream.
 	#
 	# No hostname is recorded, deliberately: the state file is per-box already, and a hostname is an
 	# Operator-private fact that would then live in a file somebody pastes into an issue.
