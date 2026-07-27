@@ -2,7 +2,8 @@
 
 > Status: **PARTLY BUILT.** `bin/forge-watch` exists — the pure `step()`, `tick`, `replay`, the
 > complete event model of §4b (quince#43), restart safety and `stop` (§4c, quince#49/#56), the
-> declared watch set (§4d, quince#51), and the terminating `watch` loop (§4e, quince#62). What
+> declared watch set (§4d, quince#51), the terminating `watch` loop (§4e, quince#62), and the
+> declared-blocking-issue channel that makes an issue-borne ruling reachable (§4h, quince#80). What
 > remains: **arming that a session cannot silently omit** — the other half of quince#62, since a verb
 > that terminates correctly does nothing for a session that never runs it — the runner supervision
 > unit, and story 6 (`stalled`). Takes
@@ -548,6 +549,81 @@ verb across three ticks with `updatedAt` **identical throughout**, and the loop 
 Against the classifier as it stood it runs to the idle bound instead: the sixteen-minute silence,
 reproduced in twelve seconds.
 
+### 4h. The channel that carries AUTHORITY was the one nothing watched (quince#80)
+
+This tool watched **pull requests**. In this project the channel that carries *authority* is an
+**issue**: an Operator ruling is a comment on one. So the escalation channel was unwatched by
+construction, and the measured case is exact — the ruling on quince#44 landed as an issue comment
+while the architect's blocked list was quince#70/#71/#72/#75/#78/#80, and the only reason it was
+ever seen was, in the architect's own words:
+
+> the only reason I caught the ruling was **a hand re-read I'd committed to when filing the issue**
+
+A human-remembers mitigation, performed by an agent, on the one channel that carries authority — and
+it failed twice before it worked, producing two false statements about the item it had been reporting
+as blocking all evening. **Ruled: watch both halves.**
+
+1. **Issues a session DECLARES it is blocked on** — explicit, and self-describing in exactly the way
+   the implementer's PR set already is. A session watches the PRs it opened; it now also watches the
+   issues it said it was waiting for. *(This section; the `--issue` flag.)*
+2. **Issues referenced by open PRs** — automatic, no declaration required. *(Follows separately.)*
+
+**Option 1 alone is insufficient and the same night proves it:** quince#44 *had* an open PR
+(quince#79), so the derived half would have caught it — but most of the blocked list has no PR at
+all, and the derived half misses every one. **Labelling rulings was rejected on principle:** it moves
+the remembering to whoever *writes* the ruling, which is the worst possible place for it, and it is
+the mitigation class this project has rejected repeatedly.
+
+**Where the declaration lives, and why not in `.claude/forge-set`.** The forge set is versioned
+because a *reviewer's* obligation cannot be derived from anything it did, so the set must be
+reviewable. A blocking declaration is the opposite: it is as self-describing as authorship, and it is
+true for an hour. Making "I am stuck on #71" a PR against a shared file would be absurd. So it lives
+in the session's own state file, and `--issue` replaces it, `--no-issues` clears it, and **passing
+neither keeps what is on disk** — a re-arm must never depend on remembering to restate something,
+which is the failure with four measured instances already (quince#43).
+
+**The two questions the ruling handed to the builder, decided rather than defaulted.**
+
+- **What happens to a declaration when a session retires?** The sketch guessed *"it dies with the
+  session and the successor re-declares"*. **Ruled the other way: it survives, and the staleness is
+  answered by DISPLAY rather than by expiry.** Dying with the session sounds tidier and is worse — it
+  forces a restatement on every re-arm, and forgetting to restate is *silent*, which is the exact
+  shape of the four forgotten re-arms. Surviving has one real cost, a successor inheriting a watch on
+  something nobody is waiting for, and that cost is paid by `status` printing the declared set **with
+  its age**. A visible stale declaration is a question a successor can answer; an invisible one is
+  not. This is the project's own preference for *make it visible* over *make it impossible*, and it is
+  the same trade as `queue-empty` being an event.
+- **Is an issue *close* an event worth waking for?** **Yes, for the declared set.** A closed blocker
+  is precisely the news a blocked session is waiting for. The argument against — *"it is also how
+  issues get tidied"* — does not reach an issue somebody has explicitly declared they are stuck on,
+  and if a declared blocker is closed as tidying, that is still the news. The derived half of the
+  ruling is different and is decided with it.
+
+**Two narrowings that are claims, so they are stated.**
+
+- **Declared issues are fetched ONE BY ONE**, not filtered out of a windowed list. A window would
+  drop a declared issue that had gone quiet enough to fall off the end and then report nothing about
+  it — a silent cap on the channel that carries rulings, which is a hard-rule violation. Cost: one
+  `gh` call per declared issue per tick, and **zero** calls when nothing is declared, which is why
+  every pre-existing loop fixture's `gh` call sequence is untouched.
+- **`issue-closed` carries no actor.** `gh issue view` does not report who closed an issue. Naming
+  the most recent commenter instead would be a bystander presented as an answer — the defect this
+  tool was already fixed for once (§4b, `actor=unattributed`).
+
+**The baseline is PER-ISSUE, and that is load-bearing rather than tidy.** An issue in the observation
+and absent from the previous one emits `issue-first-observation` and nothing else. A per-tick
+baseline — the shape the PR half uses — would blind the *whole* declared set every time one issue was
+added to it, and a declaration changes mid-watch **by design** where a queue does not.
+
+**A defect caught before it shipped, recorded because the fixture for it is the interesting one.** A
+failed `gh issue view` produces an observation with no entry for that issue. The first version wrote
+that observation over the stored items, throwing the baseline away — so the *next* successful tick
+emitted `issue-first-observation` and **swallowed the comment that landed during the outage**. A
+ruling lost to a transient fetch error, on the channel built to stop exactly that. Fixed by carrying
+forward the record of any issue missing from an observation; absence is reported by
+`issue-fetch-failed` and is never allowed to mean *nothing there*. It is corollary (a) — silence is
+not a result — reached from inside the tool that enforces it, for the third time.
+
 ## Design
 
 `bin/forge-watch` is a **pure state machine plus a thin fetch**: `step(previous_state, observation)
@@ -638,6 +714,22 @@ allowance faster for no benefit.
 27. That transition fires **once**, not every tick: an author whose own PR goes `CLEAN` cannot merge it,
     and a repeating signal would spin a watch that exits on detection.
 
+28. A **declared** blocking issue that gains a comment emits an event naming **which issue**, when,
+    and **who** — the escalation channel, and the reason the whole of §4h exists (quince#80).
+29. An issue in **neither** set produces nothing. The false-positive side, stated as its own story
+    because it is the half that goes unmeasured, and a channel that wakes on every issue in the
+    repository is one a session learns to ignore.
+30. A declared issue being **closed** wakes the session that declared it.
+31. Adding an issue to a declared set baselines **that issue alone**; the issues already declared
+    keep their history and are not re-announced.
+32. An issue that could not be **read** emits `issue-fetch-failed` naming it, does not wake on its
+    own, and **does not destroy the stored baseline** — so the comment that lands during a fetch
+    outage is reported on the next successful tick rather than swallowed by a re-baseline.
+33. `status` prints the declared set **with its age**, so a successor can see it is inheriting
+    somebody else's blocked list.
+34. Under `--all`, a bare `--issue <n>` is **refused**: issue numbers collide across repositories,
+    and both readings of a bare number are guesses. An `--issue` naming a repo outside the watch set
+    is refused too, because it would otherwise be a no-op nobody was told about.
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
@@ -645,15 +737,18 @@ allowance faster for no benefit.
   this work proved it by hand and pasted the output into the PR, which is honest only while somebody
   keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
-  and this is its answer. Measured at ~23 s for all 28 fixtures — and the count is **asserted, not
+  and this is its answer. Measured at ~23 s for all 33 fixtures — and the count is **asserted, not
   just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently
   shrunk is visible in the CI log rather than passing as though it were whole. A bare `fixtures
   pass` could not tell 28 from 18, and the fixtures likeliest to be dropped under time pressure are
   the loop ones, which are the only shape here that spends real seconds in sleeps.
   `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
-  9–17 and **20–21** (the `"kind": "loop"` fixtures, which drive the real `watch` verb against a stub
+  9–17, **28–33** (the issue channel of §4h — the two the ruling named as its fixture bar are
+  stories 28 and 29, and 31–32 need a `"kind": "sequence"` fixture because a pair's `before`
+  would already hold the carried-forward value under test) and **20–21** (the `"kind": "loop"`
+  fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
-  Story **22 is a CLI smoke recorded in the PR**: the refusals are argument-time behaviour, and a
+  Stories **22 and 34 are CLI smokes recorded in the PR**: the refusals are argument-time behaviour, and a
   fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**
   split: the decision half is `"kind": "owed"` fixtures, and the **hook half is proven by running a
   real headless session** (§4f) — it is a claim about the harness's behaviour, and no fixture of ours

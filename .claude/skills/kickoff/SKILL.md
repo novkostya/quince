@@ -154,6 +154,24 @@ opened — and run this as a **background** task, one per repo you have PRs in:
 bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60
 ```
 
+**And DECLARE WHAT YOU ARE BLOCKED ON, in the same command.** Your PR set is self-describing; your
+*blocked* set is not, and the channel that carries authority here is an **issue** — an Operator ruling
+is a comment on one. A watch that sees only PRs cannot see a ruling land (quince#80):
+
+```sh
+bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60 \
+  --issue 71 --issue 80          # the issues you said you were waiting for
+```
+
+`--issue` replaces the declared set, `--no-issues` clears it, and **passing neither keeps what is on
+disk** — so a re-arm does not have to restate it. Under `--all` an issue must be `owner/name#n`; a
+bare number is refused, because issue numbers collide across repositories. `status` prints the
+declared set **with its age**, which is how you tell an inherited declaration from your own: if you
+did not declare it, somebody who is no longer here did, and you either adopt it or clear it.
+
+**If you park something, declare its issue before you stop.** A park recorded on the forge that
+nothing is watching is a stop you cannot be woken out of.
+
 **The loop must exit when it finds something; a loop that cannot exit cannot wake you.** You are woken
 by a background task *completing*, so `while :; do tick; sleep 60; done` detects everything and delivers
 nothing — that shape ran for fifty minutes on the architect box with every liveness signal green and a

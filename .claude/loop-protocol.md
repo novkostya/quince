@@ -74,6 +74,27 @@ So:
    bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60   # implementer
    ```
 
+   **And the DECLARED BLOCKING SET, which is the other half of what a watch is for** (quince#80). A
+   session's PR set is self-describing; what it is *blocked on* is not, and in this project the
+   channel that carries **authority** is an issue — an Operator ruling is a comment on one. A watch
+   that sees only PRs cannot see a ruling land, and the measured case is exact: the quince#44 ruling
+   landed on an issue while the architect's blocked list was quince#70/#71/#72/#75/#78/#80, most with
+   no PR at all, and the only thing that caught it was a hand re-read the session had promised itself.
+
+   ```sh
+   bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60 \
+     --issue novkostya/quince#71 --issue novkostya/quince#80      # architect: owner/name#n required
+   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60 \
+     --issue 71                                                   # implementer: bare n, one repo
+   ```
+
+   `--issue` replaces the declared set, `--no-issues` clears it, and **passing neither keeps what is
+   on disk** — a re-arm must never depend on remembering to restate something, which is what the four
+   forgotten re-arms of quince#43 are worth. The declaration **outlives the session**, deliberately:
+   dying with it would force a restatement on every re-arm and forgetting would be silent. The cost —
+   a successor inheriting a watch on something nobody is waiting for — is paid by `status` printing
+   the set **with its age**, so a stale declaration is a question rather than an invisible watch.
+
    **The loop must exit when it finds something; a loop that cannot exit cannot wake you.** That is
    the whole of quince#62, and it is stated here because a reader who hand-rolls anyway needs the
    constraint: a session is woken by a background task *completing*, so `while :; do tick; sleep 60;

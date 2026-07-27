@@ -1,0 +1,28 @@
+{
+  "note": "THE FIXTURE BAR quince#80 set, half two — 'the false-positive side, which is the half that goes unmeasured'. An issue in NEITHER set produces nothing. Stated as a fixture because the failure it guards against is the one nobody notices: a channel that wakes a session for every issue in the repository is a channel a session learns to ignore, and an ignored channel is indistinguishable from an unwatched one. Here #99 is busy — a comment and a close in the same interval — and it is not declared, so the observation never carries it and the diff has nothing to say. The declared issue #71 is quiet, and its silence is also not an event.",
+  "before": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [71],
+      "declared_at": "2026-07-27T06:00:00Z",
+      "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] }
+      ]
+    }
+  },
+  "expect_events": []
+}

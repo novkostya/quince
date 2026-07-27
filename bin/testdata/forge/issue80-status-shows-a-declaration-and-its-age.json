@@ -1,0 +1,21 @@
+{
+  "kind": "watch",
+  "note": "quince#80's FIRST open question, decided and then made visible: 'What happens to a declaration when a session retires? Probably it dies with the session and the successor re-declares — but that should be decided rather than defaulted, since a stale declaration is a watch on something nobody is waiting for.' Ruled: it SURVIVES, because the alternative is worse. A declaration that died with the session would have to be restated on every re-arm, and forgetting to restate something is silent — this project has four measured forgotten re-arms (quince#43). So it lives in the state file, which outlives the session by design, and the staleness is answered by DISPLAY rather than by expiry. Here the declaration is nineteen hours old on a live watch: a successor reading this can see it is inheriting somebody else's blocked list and either re-declare or clear it. An invisible inherited watch is the failure; a visible stale one is a question with an answer.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-28T05:00:00Z",
+    "issues": {
+      "declared": [71, 80],
+      "declared_at": "2026-07-27T09:41:12Z",
+      "items": []
+    },
+    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-28T05:00:00Z",
+               "due": "2026-07-28T05:01:00Z" }
+  },
+  "now": "2026-07-28T05:00:30Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=live state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-28T05:00:00Z age=30s",
+    "note: nothing to do.",
+    "declared_issues=#71,#80 declared_at=2026-07-27T09:41:12Z age=69558s"
+  ]
+}

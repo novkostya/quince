@@ -1,0 +1,54 @@
+{
+  "kind": "sequence",
+  "note": "TWO properties that only three ticks through one state file can pin, and the second is a defect caught before it shipped. (1) The baseline is PER-ISSUE: adding #80 to a declared set mid-watch baselines #80 alone and leaves #71's history intact — a per-tick baseline would blind the whole set every time one issue was added, which is fatal for a declaration that changes by design. (2) An issue MISSING from an observation keeps its stored record. `gh issue view` failing produces an observation with no entry for that issue; the first version overwrote the stored items with it, so the next successful tick emitted `issue-first-observation` and SWALLOWED the comment that landed during the outage — a ruling lost to a transient fetch error, on the channel this feature exists to make reliable. A pair fixture cannot reach either property: its `before` would already contain the carried-forward value it was meant to test.",
+  "initial": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [71, 80],
+      "declared_at": "2026-07-27T09:00:00Z",
+      "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "label": "#80 is newly declared: it baselines ITSELF, and #71 is not re-baselined",
+      "observation": { "observed": true, "prs": [], "issues": { "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] },
+        { "number": 80, "state": "OPEN", "updatedAt": "2026-07-27T07:00:58Z",
+          "closed_at": null, "state_reason": "", "labels": ["bug"],
+          "activity": [ {"at":"2026-07-27T07:00:58Z","actor":"novkostya","kind":"comment"} ] } ] } },
+      "expect_events": [ "event=issue-first-observation issue=80 state=OPEN" ]
+    },
+    {
+      "label": "the read of #80 fails: it is absent from the observation, and its baseline must SURVIVE",
+      "observation": { "observed": true, "prs": [], "issues": { "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] } ] } },
+      "expect_events": []
+    },
+    {
+      "label": "the ruling lands on #80. It is a DIFF against the surviving baseline, not a first observation",
+      "observation": { "observed": true, "prs": [], "issues": { "items": [
+        { "number": 71, "state": "OPEN", "updatedAt": "2026-07-27T07:29:30Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T07:29:30Z","actor":"novkostya","kind":"comment"} ] },
+        { "number": 80, "state": "OPEN", "updatedAt": "2026-07-27T09:41:12Z",
+          "closed_at": null, "state_reason": "", "labels": ["bug"],
+          "activity": [
+            {"at":"2026-07-27T07:00:58Z","actor":"novkostya","kind":"comment"},
+            {"at":"2026-07-27T09:41:12Z","actor":"novkostya","kind":"comment"} ] } ] } },
+      "expect_events": [
+        "event=issue-updated issue=80 at=2026-07-27T09:41:12Z actor=novkostya kind=comment",
+        "event=issue-comment issue=80 at=2026-07-27T09:41:12Z actor=novkostya"
+      ]
+    }
+  ]
+}

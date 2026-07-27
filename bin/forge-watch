@@ -18,9 +18,11 @@ usage: forge-watch <verb>
 
   step   --state <file> --observation <file>   emit events for one observation (pure, no network)
   tick   [--repo owner/name | --all] [--state <file>] [--gh <cmd>] [--watcher-pid <n>]
-         [--interval <s>] [--set-file <f>]     fetch the queue, then step
+         [--interval <s>] [--set-file <f>] [--issue <n>|<owner/name#n>] [--no-issues]
+                                               fetch the queue, then step
   watch  [--repo owner/name | --all] [--state <file>] [--gh <cmd>] [--interval <s>]
          [--max-wait <s>] [--fail-after <n>] [--set-file <f>]
+         [--issue <n>|<owner/name#n>] [--no-issues]
                                                tick until there is something to say, THEN EXIT
   status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
                                                live | dead | absent — and which, and what to do
@@ -114,8 +116,54 @@ usage: forge-watch <verb>
 
   `owed` exit codes: 0 nothing owed · 8 a watch is owed and is not live.
 
+  --issue DECLARES what this session is blocked on, and it is the escalation channel (quince#80).
+  This tool watched PULL REQUESTS only, and the channel that carries AUTHORITY in this project is an
+  issue: an Operator ruling is a comment on one. So a ruling could land and reach nothing, and the
+  measured case is exactly that — the architect's blocked list was quince#70/#71/#72/#75/#78/#80, most
+  of which have no PR at all, and the only reason a ruling on it was ever seen was "a hand re-read I'd
+  committed to when filing the issue". That is a human-remembers mitigation at the head of the
+  escalation channel. Labelling rulings was rejected on the same grounds: it moves the remembering to
+  whoever WRITES the ruling, which is the worst place for it.
+
+  The declaration is SELF-DESCRIBING, exactly as the implementer's PR set already is: a session
+  watches the PRs it opened, and now also the issues it SAID it was waiting for. `--issue` replaces
+  the declared set, `--no-issues` clears it, and passing neither keeps what is on disk — so a re-arm
+  does not have to restate it, which is the one thing a re-arm must never depend on remembering.
+  Under --all an issue must be given as `owner/name#n`: a bare number would silently attach to every
+  repository in the set, and issue numbers collide across repositories exactly as PR numbers do.
+
+  Declared issues are fetched ONE BY ONE, not filtered out of a windowed list. A window would drop a
+  declared issue that had gone quiet enough to fall off the end and report nothing about it — a silent
+  cap on the one channel that carries rulings. The cost is one `gh` call per declared issue per tick,
+  and NO calls at all when nothing is declared.
+
+  What a declaration OUTLIVES, and what that costs: it lives in the state file, which outlives the
+  session by design, so a retiring session leaves its declaration behind. That is deliberate and the
+  alternative is worse — a declaration that died with the session would have to be restated on every
+  re-arm, and forgetting it is silent. So instead `status` PRINTS the declared set with its age, and a
+  successor either re-declares or clears it. A stale declaration is then a visible watch on something
+  nobody is waiting for, rather than an invisible one.
+
+  A CLOSE wakes a session that declared the issue: a closed blocker is precisely the news a blocked
+  session is waiting for. (Issue tidying is the argument against, and it does not apply to an issue
+  somebody has explicitly declared they are stuck on.)
+
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
-        merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing
+        merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
+        issue-first-observation · issue-updated · issue-comment · issue-closed · issue-reopened ·
+        issue-fetch-failed
+
+  The issue events mirror the PR ones and for the same reasons. `issue-updated` is the BACKSTOP —
+  any movement of an issue's updatedAt, with the actor that can account for it — so a label change, a
+  title edit or a body edit is reported as `actor=unattributed` rather than not at all. `issue-comment`
+  is the typed event that matters, because a ruling IS a comment. `issue-closed` carries no actor:
+  `gh issue view` does not report who closed an issue, and naming the most recent commenter instead
+  would be a bystander presented as an answer.
+
+  `issue-first-observation` is per-ISSUE, not per-tick, and that is what makes ADDING one issue to a
+  declared set safe: the new issue establishes its own baseline and wakes nobody, while the issues
+  already in the set keep their history. A per-tick baseline would have blinded the whole set every
+  time one was added.
 
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
@@ -181,6 +229,16 @@ step() {
 	_was_observed=$(jq -r '.observed // false' "$_prev" 2>/dev/null || echo false)
 	_now=$(jq -c '.' "$_obs")
 
+	# The DECLARATION is state, not observation: the caller says what it is blocked on, and the tick
+	# fetches those issues because the state told it to. So it is carried forward across every write
+	# here rather than arriving in the payload — an observation that carried its own declaration
+	# could quietly change what is watched, which is the failure mode `.claude/forge-set` exists to
+	# prevent one level up.
+	_prev_decl=$(jq -c 'if (.issues // null) == null then null else (.issues | del(.items)) end' "$_prev" 2>/dev/null || printf 'null')
+	[ -n "$_prev_decl" ] || _prev_decl=null
+	_prev_iss=$(jq -c '.issues.items // []' "$_prev" 2>/dev/null || printf '[]')
+	[ -n "$_prev_iss" ] || _prev_iss='[]'
+
 	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
 
 	if [ "$_was_observed" != true ]; then
@@ -194,7 +252,14 @@ step() {
 		if [ "$(printf '%s' "$_now_prs" | jq 'map(select(.state != "MERGED")) | length == 0')" = true ]; then
 			printf 'event=queue-empty\n'
 		fi
-		printf '%s' "$_now" | jq -c '. + {observed: true}' >"$_prev.new" && mv "$_prev.new" "$_prev"
+		printf '%s' "$_now" | jq -c --argjson decl "$_prev_decl" --argjson previtems "$_prev_iss" '
+			. + {observed: true}
+			| if $decl == null then . else
+				(.issues.items // []) as $ni
+				| ([$ni[].number]) as $seen
+			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
+			  end' \
+			>"$_prev.new" && mv "$_prev.new" "$_prev"
 		return 0
 	fi
 
@@ -309,6 +374,61 @@ step() {
 		| select((($o.checks // []) | map(select(.name == $c.name) | .conclusion) | first) != $c.conclusion)
 		| "event=checks pr=\($p.number) conclusion=\($c.conclusion) name=\($c.name)"'
 
+	# ---- the issue channel (quince#80) -------------------------------------------------------
+	# The DECLARED set: issues this session said it is blocked on. Same diff discipline as the PR
+	# half, and the reason it exists at all is that the channel carrying AUTHORITY here is an issue
+	# comment, which this tool could not see.
+	#
+	# The baseline is PER-ISSUE. An issue in the observation and absent from the previous one has no
+	# previous timestamp to have moved, so it emits its own baseline and nothing else — which is what
+	# lets a session ADD an issue to its declared set without blinding itself to the ones already
+	# there. A per-tick baseline (the PR half's shape) would do exactly that, because a declaration
+	# changes mid-watch by design and a queue does not.
+	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
+		(.issues.items // [])[] as $i
+		| ($old | map(select(.number == $i.number)) | first) as $o
+		| select($o == null)
+		| "event=issue-first-observation issue=\($i.number) state=\($i.state)"'
+
+	# issue-updated: THE BACKSTOP, identical in role to `updated` on the PR half. A label change, a
+	# title edit or a body edit moves updatedAt and appears in no activity list, so those land on
+	# `unattributed` — the tool saying it cannot tell, which is the true statement and not the same
+	# as naming the last bystander who commented.
+	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
+		(.issues.items // [])[] as $i
+		| ($old | map(select(.number == $i.number)) | first) as $o
+		| select($o != null)
+		| select($i.updatedAt != $o.updatedAt)
+		| ([($i.activity // [])[] | select(.at > $o.updatedAt)] | sort_by(.at) | last) as $a
+		| (if $a == null then "actor=unattributed" else "actor=\($a.actor) kind=\($a.kind)" end) as $who
+		| "event=issue-updated issue=\($i.number) at=\($i.updatedAt) \($who)"'
+
+	# issue-comment: the typed event this whole channel was built for. A ruling IS a comment, so the
+	# event names the issue, when, and WHO — a blocked session needs to know a ruling landed, not
+	# that something about an issue changed.
+	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
+		(.issues.items // [])[] as $i
+		| ($old | map(select(.number == $i.number)) | first) as $o
+		| select($o != null)
+		| [($i.activity // [])[] | select(.kind == "comment")] as $new
+		| [($o.activity // [])[] | select(.kind == "comment")] as $was
+		| select(($new | length) > ($was | length))
+		| ($new | sort_by(.at) | last) as $c
+		| "event=issue-comment issue=\($i.number) at=\($c.at) actor=\($c.actor)"'
+
+	# issue-closed / issue-reopened: a CLOSE wakes a session that declared the issue, because a
+	# closed blocker is exactly the news it is blocked waiting for. No actor: `gh issue view` does
+	# not report who closed an issue, and this tool has already been fixed once for naming a
+	# bystander in place of an answer.
+	printf '%s' "$_now" | jq -r --argjson old "$_prev_iss" '
+		(.issues.items // [])[] as $i
+		| ($old | map(select(.number == $i.number)) | first) as $o
+		| select($o != null)
+		| select($i.state != $o.state)
+		| if $i.state == "CLOSED" then
+			"event=issue-closed issue=\($i.number) at=\($i.closed_at // "unknown")\(if ($i.state_reason // "") == "" then "" else " reason=\($i.state_reason)" end)"
+		  else "event=issue-reopened issue=\($i.number)" end'
+
 	# queue-empty: emitted when the queue IS empty — on the first observation, or on the
 	# transition into empty. Not emitted every tick, which would be noise rather than signal.
 	_was_empty=$(printf '%s' "$_prev_prs" | jq 'map(select(.state != "MERGED")) | length == 0')
@@ -326,13 +446,27 @@ step() {
 	# base moving is what makes a PR BEHIND in the first place. Two merges into an open queue produce
 	# it. Overwriting knowledge with an absence is how a recompute flap becomes an event, and a
 	# transition re-announced every tick is the wallpaper this tool has already been fixed for once.
-	printf '%s' "$_now" | jq -c --argjson old "$_prev_prs" '
+	printf '%s' "$_now" | jq -c --argjson old "$_prev_prs" --argjson decl "$_prev_decl" \
+		--argjson previtems "$_prev_iss" '
 		. + {observed: true, prs: [
 			.prs[] as $p
 			| if ($p.merge_state // "UNKNOWN") != "UNKNOWN" then $p
 			  else (($old | map(select(.number == $p.number)) | first | .merge_state) // null) as $k
 			       | if $k == null then $p else $p + {merge_state: $k} end
-			  end ]}' >"$_prev.new" && mv "$_prev.new" "$_prev"
+			  end ]}
+		# An issue MISSING from this observation keeps its previous record, and the reason is a
+		# defect caught before it shipped: a failed `gh issue view` produces an observation with no
+		# entry for that issue, and overwriting the stored items with it would throw away the
+		# baseline. The next successful tick would then emit `issue-first-observation` and SWALLOW
+		# the comment that landed during the outage — a ruling lost to a transient fetch error, on
+		# the channel this whole feature exists to make reliable. Absence is reported by
+		# `issue-fetch-failed`; it is never allowed to mean "nothing there".
+		| if $decl == null then . else
+			(.issues.items // []) as $ni
+			| ([$ni[].number]) as $seen
+			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
+		  end' \
+		>"$_prev.new" && mv "$_prev.new" "$_prev"
 }
 
 # ---------------------------------------------------------------------------
@@ -497,6 +631,23 @@ watch_report() {
 		  | select($late > ($w2.interval_s // 60))
 		  | "event=tick-overdue due=\($w2.due) late=\($late | floor)s interval=\($w2.interval_s // 60)s" )
 		' "$_st" || die "could not read watch state: $_st"
+
+	# The declared blocking set, and its AGE — printed only when there is one, so a state file that
+	# never declared anything reports exactly what it used to.
+	#
+	# The age is the whole point (quince#80's first open question: what happens to a declaration when
+	# a session retires). The declaration lives in a state file that outlives the session, so a
+	# successor inherits it. Making it die with the session was the alternative and it is worse: it
+	# would have to be restated on every re-arm, and a re-arm that forgets is silent. So it survives
+	# and it is DISPLAYED — "watching #71, declared 6 hours ago" is a question a successor can answer;
+	# an invisible inherited watch is not.
+	jq -r --arg now "$_now" '
+		select(((.issues.declared // []) | length) > 0)
+		| ($now | fromdate) as $t
+		| "declared_issues=" + ((.issues.declared | map("#" + tostring)) | join(","))
+		  + (if (.issues.declared_at // null) == null then ""
+		     else " declared_at=\(.issues.declared_at) age=\(($t - (.issues.declared_at | fromdate)) | floor)s" end)
+		' "$_st" 2>/dev/null || true
 
 	# The exit code carries the class, so a caller that ignores stdout still cannot mistake dead for
 	# live: 0 live, 3 dead, 4 absent.
@@ -725,6 +876,139 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# The declared blocking set — what a session SAID it is waiting for (quince#80).
+#
+# `.claude/forge-set` is the reviewer's watch set and is versioned, because a reviewer's obligation
+# cannot be derived from anything it did. This is the opposite case: an issue a session declared it
+# is blocked on is as self-describing as the PRs it opened, so it belongs in the session's own state
+# rather than in a file everyone shares. Putting it in the versioned set would make "I am stuck on
+# #71" a PR against a shared file, which is absurd for something that is true for an hour.
+#
+# `replace` replaces, `clear` empties, `none` leaves what is on disk alone. That third case is the one
+# that matters: a re-arm restates neither the repo set nor the declaration, so the declaration cannot
+# be lost by forgetting to repeat it — and forgetting to repeat something is the failure mode with
+# four measured instances in this project already (quince#43's forgotten re-arms).
+declare_issues() {
+	_di_mode=$1
+	_di_specs=$2
+	_di_repo=$3
+	_di_state=$4
+	[ "$_di_mode" = none ] && return 0
+	[ -f "$_di_state" ] || printf '{"observed":false}\n' >"$_di_state"
+	_di_list=''
+	if [ "$_di_mode" = replace ]; then
+		for _di_s in $_di_specs; do
+			case "$_di_s" in
+			*/*'#'*)
+				_di_r=${_di_s%%#*}
+				_di_n=${_di_s##*#}
+				;;
+			*'#'*) die "--issue: $_di_s is not owner/name#number" ;;
+			*)
+				_di_r=$_di_repo
+				_di_n=$_di_s
+				;;
+			esac
+			case "$_di_n" in '' | *[!0-9]*) die "--issue takes a number or owner/name#number: $_di_s" ;; esac
+			[ "$_di_r" = "$_di_repo" ] || continue
+			_di_list="$_di_list $_di_n"
+		done
+	fi
+	# declared_at is recorded so `status` can print the AGE of a declaration. A declaration outlives
+	# the session that made it (the state file is deliberately long-lived), so the only defence
+	# against a successor inheriting a watch on something nobody is waiting for is that the staleness
+	# is visible. A timestamp is what makes it visible.
+	jq -c --arg at "$(now_iso)" --argjson d "$(printf '%s' "$_di_list" | tr ' ' '\n' | grep -v '^$' | jq -R 'tonumber' | jq -sc '.')" \
+		'.issues = ((.issues // {}) + {declared: $d, declared_at: (if ($d | length) == 0 then null else $at end)})' \
+		"$_di_state" >"$_di_state.new" && mv "$_di_state.new" "$_di_state"
+}
+
+# issue_specs_ok — refuse a bare issue number under --all, BEFORE anything is written.
+#
+# Under --all a bare `--issue 71` has no repository, and the only two things it could mean are "the
+# first repo in the set" and "every repo in the set". Both are guesses, and issue numbers collide
+# across repositories exactly as PR numbers do — novkostya/quince#71 and novkostya/quince-devlog#71
+# are unrelated and both exist. Picking either would produce a watch on an issue nobody declared,
+# reporting comments from a thread nobody is blocked on, which is worse than not watching at all.
+# So it refuses, in the same spirit as `.claude/forge-set` refusing to default.
+issue_specs_ok() {
+	_iso_all=$1
+	[ "$_iso_all" = yes ] || return 0
+	for _iso_s in $2; do
+		case "$_iso_s" in
+		*/*'#'*) : ;;
+		*) die "--issue $_iso_s is ambiguous under --all: issue numbers collide across repositories.
+    Give it as owner/name#number, e.g. --issue novkostya/quince#$_iso_s" ;;
+		esac
+	done
+}
+
+# declare_all — apply one declaration across the declared repo set. A spec naming a repository that
+# is not in the set is a NO-OP by construction (declare_issues filters on the repo), which would be
+# a silent miss — so it is checked here and refused, because "I declared #80 and heard nothing" must
+# not have a quiet explanation.
+declare_all() {
+	_da_mode=$1
+	_da_specs=$2
+	[ "$_da_mode" = none ] && return 0
+	_da_set=$(forge_set "$FORGE_SET_FILE")
+	for _da_s in $_da_specs; do
+		_da_r=${_da_s%%#*}
+		printf '%s\n' "$_da_set" | grep -qx "$_da_r" ||
+			die "--issue $_da_s names $_da_r, which is not in the watch set ($FORGE_SET_FILE).
+    Nothing would watch it, and the watch would say nothing about that."
+	done
+	for _da_r in $_da_set; do
+		_da_st=$(state_path_for "$_da_r")
+		mkdir -p "$(dirname "$_da_st")"
+		declare_issues "$_da_mode" "$_da_specs" "$_da_r" "$_da_st"
+	done
+}
+
+# fetch_issues — ONE `gh issue view` per declared issue, into the observation.
+#
+# Not `gh issue list` with a window: a declared issue that had gone quiet enough to fall off the end
+# of a window would then be reported on by silence, and this is the channel that carries rulings.
+# "No silent caps" is a hard rule and a windowed fetch here is exactly one. The cost is bounded by
+# the declaration, which a session writes deliberately and can see in `status`.
+#
+# A failure to read a declared issue is an EVENT, never an omission: `issue-fetch-failed` names the
+# issue and the reason, and returns non-zero so the tick counts as failing — three in a row and the
+# watch exits saying so, rather than watching an issue it cannot actually read.
+fetch_issues() {
+	_fi_state=$1
+	_fi_repo=$2
+	_fi_gh=$3
+	_fi_out=$4 # a file to append the shaped issue objects to, one JSON object per line
+	_fi_rc=0
+	_fi_decl=$(jq -r '.issues.declared // [] | .[]' "$_fi_state" 2>/dev/null || true)
+	[ -n "$_fi_decl" ] || return 0
+	_fi_raw=$(mktemp)
+	for _fi_n in $_fi_decl; do
+		if ! "$_fi_gh" issue view "$_fi_n" -R "$_fi_repo" \
+			--json number,state,updatedAt,closedAt,stateReason,labels,comments >"$_fi_raw" 2>"$_fi_raw.err"; then
+			_fi_why=$(head -1 "$_fi_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
+			printf 'event=issue-fetch-failed repo=%s issue=%s reason=%s\n' \
+				"$_fi_repo" "$_fi_n" "${_fi_why:-no_stderr_from_gh}"
+			_fi_rc=1
+			continue
+		fi
+		if ! jq -e 'type == "object" and has("number")' "$_fi_raw" >/dev/null 2>&1; then
+			printf 'event=issue-fetch-failed repo=%s issue=%s reason=payload_not_an_issue\n' "$_fi_repo" "$_fi_n"
+			_fi_rc=1
+			continue
+		fi
+		jq -c '{number, state, updatedAt,
+			closed_at: .closedAt, state_reason: (.stateReason // ""),
+			labels: [(.labels // [])[] | .name],
+			activity: [(.comments // [])[] | {at: .createdAt, actor: (.author.login // "unknown"), kind: "comment"}]}' \
+			"$_fi_raw" >>"$_fi_out"
+	done
+	rm -f "$_fi_raw" "$_fi_raw.err"
+	return "$_fi_rc"
+}
+
+# ---------------------------------------------------------------------------
 # tick — the thin half: fetch, hand the observation to step. Uses gh-bot so the token stays out of
 # argv and the call is allowlistable.
 # ---------------------------------------------------------------------------
@@ -814,6 +1098,22 @@ tick() {
 		die "could not shape the observation for $_repo"
 
 	[ -f "$_state" ] || printf '{"observed":false}\n' >"$_state"
+
+	# The declared issues, folded into the same observation so the PURE half sees one payload and
+	# the diff of both channels happens in the half the fixtures can drive. A failing issue fetch
+	# does not abort the tick — the PR events for this tick are still real and still owed to the
+	# session — but it does make the tick FAIL, so a run of them exits the watch rather than
+	# producing a watch that reports on a queue and silently reads nothing on the channel that
+	# carries rulings.
+	_iss=$(mktemp)
+	_irc=0
+	fetch_issues "$_state" "$_repo" "$_gh" "$_iss" || _irc=1
+	if [ -s "$_iss" ]; then
+		jq -c --slurpfile items "$_iss" '.issues = {items: $items}' "$_obs" >"$_obs.new" &&
+			mv "$_obs.new" "$_obs"
+	fi
+	rm -f "$_iss"
+
 	step "$_state" "$_obs"
 
 	# The heartbeat is written AFTER step(), so a tick that died mid-step does not leave a timestamp
@@ -938,6 +1238,13 @@ wake_worthy() {
 		NR == FNR { if ($0 ~ /^event=first-observation/) base[repo($0)] = 1; next }
 		/^event=first-observation/ { next }
 		/^event=fetch-failed/ { next }
+		# The issue channel baseline, per-issue. Same reason as first-observation: a newly declared
+		# issue establishes what it looks like, which is not a change from anything.
+		/^event=issue-first-observation/ { next }
+		# A failed issue read does not wake on its own, for the same reason a failed PR fetch does
+		# not: one is a missed read, a run of them is a watch that is not watching, and --fail-after
+		# is what tells the two apart. It is PRINTED either way.
+		/^event=issue-fetch-failed/ { next }
 		/^event=queue-empty/ { if (base[repo($0)]) next }
 		/^event=/ { print }
 	' "$1" "$1"
@@ -1197,6 +1504,7 @@ step)
 tick)
 	shift
 	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _wpid='' _iv=60 _all=no
+	_imode=none _ispecs=''
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -1227,12 +1535,23 @@ tick)
 			_iv=$2
 			shift 2
 			;;
+		--issue)
+			_imode=replace
+			_ispecs="$_ispecs $2"
+			shift 2
+			;;
+		--no-issues)
+			_imode=clear
+			shift
+			;;
 		*) die "unknown option: $1" ;;
 		esac
 	done
+	issue_specs_ok "$_all" "$_ispecs"
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
 		require_gh "$_ghcmd"
+		declare_all "$_imode" "$_ispecs"
 		tick_all "$_ghcmd" "$_wpid" "$_iv"
 		exit $?
 	fi
@@ -1247,16 +1566,27 @@ tick)
 	esac
 	case "$_iv" in *[!0-9]*) die "--interval must be seconds: $_iv" ;; esac
 	require_gh "$_ghcmd"
+	declare_issues "$_imode" "$_ispecs" "$_repo" "$_s"
 	tick "$_s" "$_repo" "$_ghcmd" "$_wpid" "$_iv"
 	;;
 watch)
 	shift
 	_s='' _repo=novkostya/quince _ghcmd="${FORGE_GH:-gh}" _iv=60 _all=no _max=1200 _fail=3
+	_imode=none _ispecs=''
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
 			_s=$2
 			shift 2
+			;;
+		--issue)
+			_imode=replace
+			_ispecs="$_ispecs $2"
+			shift 2
+			;;
+		--no-issues)
+			_imode=clear
+			shift
 			;;
 		--repo)
 			_repo=$2
@@ -1297,6 +1627,9 @@ watch)
 	[ "$_iv" -ge 1 ] || die "--interval must be at least 1 second (got $_iv)"
 	[ "$_fail" -ge 1 ] || die "--fail-after must be at least 1 (got $_fail)"
 	require_gh "$_ghcmd"
+	# Validated BEFORE the preflight, and before anything is written: a malformed --issue must not
+	# leave half a declaration behind on the repos that happened to be processed first.
+	issue_specs_ok "$_all" "$_ispecs"
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
 		# The set is read BEFORE the preflight so a malformed declaration fails here rather than
@@ -1304,10 +1637,12 @@ watch)
 		for _r in $(forge_set "$FORGE_SET_FILE"); do
 			watch_preflight "$(state_path_for "$_r")" "$_r"
 		done
+		declare_all "$_imode" "$_ispecs"
 	else
 		[ -n "$_s" ] || _s=$(state_path_for "$_repo")
 		mkdir -p "$(dirname "$_s")"
 		watch_preflight "$_s" "$_repo"
+		declare_issues "$_imode" "$_ispecs" "$_repo" "$_s"
 	fi
 	watch_loop "$_all" "$_repo" "$_s" "$_ghcmd" "$_iv" "$_max" "$_fail"
 	exit $?
