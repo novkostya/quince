@@ -120,11 +120,38 @@ fi
 # shellcheck disable=SC2016
 _layer_helper='!f() { echo username='"$LAYER_USER"'; echo "password=$(cat '"$LAYER_TOKEN"')"; }; f'
 
+# WIRE THE HELPER INTO THE CLONE, which is a separate act from using it to clone (quince#121).
+#
+# `git -c key=value <cmd>` applies to THAT INVOCATION ONLY. It is not written to `.git/config`, so
+# every clone below authenticated once and then carried NO credential helper at all. The result is a
+# private layer that is present, readable, and unable to advance: `git pull` says `fatal: could not
+# read Username for 'https://github.com' `, and nothing on the box can ever update it.
+#
+# Measured rather than reasoned, because the obvious reading of `-c` is that it configures the clone:
+#
+#   git -c credential.helper=H clone <url> dst
+#   git -C dst config --get credential.helper   → exit 1, no value
+#
+# This is why the architect box sat on a private layer four commits behind and reported a privacy
+# matcher proven only to COMPILE, while the box that performs merges. It was NOT arch-specific — the
+# runner's clone was equally unwired and only worked because a session hand-configured the helper to
+# push, without registering that it was patching this bug rather than doing setup.
+#
+# Written with `git config` at the repository level, so it lands in `.git/config` where a later
+# `git pull` by a human or an agent will find it. The token itself still never appears: the helper is
+# a shell snippet that reads the file at use time, exactly as elsewhere.
+layer_wire_helper() {
+	git -C "$LAYER_DIR" config credential.helper "$_layer_helper"
+}
+
 if [ ! -f "$LAYER_TOKEN" ]; then
 	say "NOT placing the private layer: no credential at $LAYER_TOKEN for role $ROLE."
 	say "     preflight will refuse to start this box until the layer is present. Place the"
 	say "     credential and re-run, or hand-place $LAYER_DIR/privacy-patterns.txt (0600)."
 elif [ -d "$LAYER_DIR/.git" ]; then
+	# Re-wired on every run, not only on first clone: this is what REPAIRS the boxes already in the
+	# field, which were provisioned before the helper was persisted and cannot fetch until it is.
+	layer_wire_helper
 	git -C "$LAYER_DIR" -c credential.helper="$_layer_helper" fetch -q origin main &&
 		git -C "$LAYER_DIR" reset -q --hard origin/main
 	say "private layer updated at $LAYER_DIR ($(git -C "$LAYER_DIR" rev-parse --short HEAD))"
@@ -137,14 +164,29 @@ elif [ -e "$LAYER_DIR" ]; then
 	else
 		mv "$LAYER_DIR" "$LAYER_DIR.superseded"
 		git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
+		layer_wire_helper
 		chmod 700 "$LAYER_DIR"
 		say "private layer cloned at $LAYER_DIR; the previous hand-placed copy is at $LAYER_DIR.superseded"
 		say "     (kept, not deleted — compare and remove it yourself)"
 	fi
 else
 	git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
+	layer_wire_helper
 	chmod 700 "$LAYER_DIR"
 	say "private layer cloned at $LAYER_DIR"
+fi
+
+# The layer is only useful if it can ADVANCE, so say which it is rather than leaving both to look the
+# same. quince#123 makes the same point about `preflight`'s "reach": presence is not freshness, and a
+# clone that cannot fetch is the failure that hides behind a directory that exists.
+if [ -d "$LAYER_DIR/.git" ]; then
+	if git -C "$LAYER_DIR" ls-remote -q origin HEAD >/dev/null 2>&1; then
+		say "private layer can FETCH (credential helper wired); it can receive future changes"
+	else
+		say "WARNING: private layer at $LAYER_DIR CANNOT FETCH — it is present but frozen."
+		say "     Every privacy sweep on this box will use whatever it holds now, and no future"
+		say "     pattern, canary or case-sensitive list will ever reach it (quince#121)."
+	fi
 fi
 
 # --- 5. the service --------------------------------------------------------------------------
