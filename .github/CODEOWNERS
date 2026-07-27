@@ -1,0 +1,64 @@
+# CODEOWNERS — which IDENTITY must approve a class of change.
+#
+# quince#47: branch protection can require *an* approval. It cannot require an approval from a
+# PARTICULAR identity, so "the Operator approves architect-authored canon" lived in CLAUDE.md as a
+# sentence and was enforced by nothing. This file is the structural half.
+#
+# ---------------------------------------------------------------------------------------------
+# THIS FILE ENFORCES NOTHING TODAY. Read that before trusting it.
+#
+# A CODEOWNERS file on its own only auto-REQUESTS review from the owner. Requiring the owner's
+# approval before merge is a separate branch-protection setting, "Require review from Code
+# Owners", which is admin-only — the bot identity gets 403/404 on the protection endpoint, so it
+# can neither read nor set it. The file is therefore INERT until the Operator flips that toggle,
+# and it is committed in that state deliberately: quince#113's shape, where a check that an agent
+# identity cannot wire is landed built-and-unwired with an issue against the wiring (quince#137),
+# rather than
+# worked around or escalated to a seat that cannot do it either.
+#
+# Do not read a green PR as evidence this file did something.
+# ---------------------------------------------------------------------------------------------
+#
+# WHY IT ONLY BECAME POSSIBLE ON 2026-07-27, and why naming @novkostya was worthless before then.
+#
+# The architect and the Operator shared the `novkostya` login (quince#47). Naming @novkostya as a
+# code owner would have bought exactly nothing: an architect approval and an Operator approval
+# were the same account, so a code-owner requirement could not tell them apart. quince#134 gave
+# the architect a separate reviewer identity — verdicts are now cast by `quince-review[bot]`, a
+# GitHub App.
+#
+# A GitHub App CANNOT BE A CODE OWNER. Code owners must be users or teams with write permission,
+# and an App installation is neither. That refusal is not an obstacle here; it is the mechanism.
+# It means an architect verdict structurally CANNOT satisfy a code-owner requirement, so on the
+# paths below only the human account can. The asymmetry that makes this file mean something is a
+# direct consequence of #134, and if the architect ever reviews as a user account again, this file
+# silently stops distinguishing anything.
+#
+# THE DEADLOCK, NAMED RATHER THAN DISCOVERED AT THE TOGGLE. The architect still AUTHORS canon as
+# @novkostya, and GitHub does not count an author's approval of their own pull request. So with
+# the toggle on, architect-authored canon becomes admin-merge-only. That is not a reason to leave
+# the file out — it is the true state of the identity model, currently invisible. It is a ruling
+# about which identity authors canon, it is the Operator's, and it is filed as quince#137 rather
+# than assumed.
+
+# Everything else: no owner. The ordinary model is unchanged — one approval, from the architect's
+# App, on an implementer-authored PR. Silence here is deliberate, not an omission.
+
+# Canon. The four documents CLAUDE.md names as canon, plus CLAUDE.md itself, which is the entry
+# point every agent reads first and therefore the highest-leverage file in the repository.
+/CLAUDE.md              @novkostya
+/docs/contracts.md      @novkostya
+/docs/quince.design.md  @novkostya
+/docs/quince.stack.md   @novkostya
+/docs/ui.design.md      @novkostya
+
+# The authority model must not be editable under the authority model's own weaker branch. Without
+# this line, a PR that removes every line above needs only an ordinary approval.
+/.github/CODEOWNERS     @novkostya
+
+# NOT owned, and each omission is a decision:
+#   /docs/specs/**      per-rung specs are the architect's to approve; they bind one rung, not the
+#                       project, and routing them to the Operator would make every rung wait on the
+#                       seat that is deliberately not in the loop.
+#   /.claude/skills/**  process, not canon. They change often and by the sessions that run them;
+#                       CLAUDE.md already outranks them where the two disagree about process.
