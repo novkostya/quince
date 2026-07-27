@@ -117,6 +117,13 @@ timestamp, assumed the latest activity was its own, and reported "nothing owed f
 three items. And `reviewDecision` still says `CHANGES_REQUESTED` after the author has fixed and pushed,
 because no new review has landed: it records the last verdict, it does not say whose move it is.
 
+**Never ask the bot to re-request a review — it cannot, on any repo (devlog#48).** `--add-reviewer`
+resolves the login through an org-scoped GraphQL field, and the bot token is `repo`-scoped by ruling.
+So *"re-request review when the points are in"* asks for an event the author is unable to emit: the
+call fails on their side, this side waits, and both parties are waiting correctly. **Ask for a comment
+and treat the comment as the signal** — it is a property of the token, not of the PR or the repository.
+`CLAUDE.md`'s identity table lists the other refusals of this kind; read it before designing around one.
+
 ## 4. Review — the protocol, including what is easy to get wrong
 
 Per PR, follow `/review-pr`. Four things belong here because each was learned the hard way:
