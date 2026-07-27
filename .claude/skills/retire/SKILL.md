@@ -30,13 +30,15 @@ first principles. Where a step looks fussy, it is the shape of something that we
 <gh> pr list --repo <owner/name> --state open --json number,title,author,reviewDecision,mergeStateStatus
 ```
 
-`<gh>` is **your seat's forge wrapper** — `bin/gh-bot` on the runner, `bin/gh-arch` on the
-architect box. `/retire` is the first skill *both* seats run, so it cannot name one: an architect
-host must never hold `~/.config/quince/quince-bot.token` — `/architect` §1 hard-stops if it finds
-one and `preflight` asserts its absence for `role arch` — so a hardcoded `bin/gh-bot` here is a
-command that cannot authenticate on half the boxes that reach this step (quince#133). This is the
-same per-seat substitution `forge-watch` takes as `--gh`, and it is the shape §6 below already
-uses for `stop`.
+`<gh>` is your seat's wrapper **for reading the forge** — `bin/gh-bot` on the runner, `bin/gh-arch`
+on the architect box. §1 only *reads* (a `pr list`), which is the one forge call both architect
+wrappers may make; **do not carry this substitution into §2, which posts** — on the architect box
+the posting wrapper is a different tool, named there. `/retire` is the first skill *both* seats run,
+so §1 cannot name one wrapper: an architect host must never hold
+`~/.config/quince/quince-bot.token` — `/architect` §1 hard-stops if it finds one and `preflight`
+asserts its absence for `role arch` — so a hardcoded `bin/gh-bot` here is a command that cannot
+authenticate on half the boxes that reach this step (quince#133). `forge-watch` takes the same
+per-seat *read* wrapper as `--gh`, and only the read case.
 
 Per repo in `.claude/forge-set`. Ask, against the API rather than from memory:
 
@@ -73,6 +75,13 @@ Nothing addressed to "the next architect". For each thing you hold:
 | a ruling you made | the **issue it rules**, in citable form — the URL and the self-declared role, never the login (quince#47) |
 | history worth keeping | the **devlog journal**, date-anchored, citing PR/issue numbers |
 | a branch built and unopened | a comment on the **issue it serves**, naming the branch — this is the item successors most often lose |
+
+**Post through your seat's *attributed-write* wrapper — `bin/gh-bot` on the runner, `bin/gh-review`
+on the architect box, never `bin/gh-arch`.** This is a *different* wrapper from §1's read: §1 asked
+only which tool reads the queue, and on the architect box that is `gh-arch`; every row above *posts*
+— a comment, an issue, a ruling — and commenting or ruling through `gh-arch` re-creates quince#47 on
+the box built to end it, invisibly, because the output looks identical (`/architect` §1). Reading
+answered one question; posting is the other.
 
 **Owed work is written, not bequeathed.** If the flush reveals a DoD tail — a journal entry, a
 click-list — write it and open it for review. An entry nobody wrote is debt handed to a successor;
