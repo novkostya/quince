@@ -37,14 +37,28 @@ Conflict resolution and review fixes create committed content that never passed 
 commit-time gate:
 
 ```sh
+# in quince
 bin/gh-bot pr checkout <n> --repo novkostya/quince
 git fetch origin main
 make privacy-check REF=origin/main...HEAD
+
+# in quince-devlog — no Makefile exists there. Run the product checkout's script FROM the devlog
+# clone; do NOT pass --patterns, which defaults to ./local and so finds this clone's own symlink.
+bin/gh-bot pr checkout <n> --repo novkostya/quince-devlog
+git fetch origin main
+/path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD
 ```
 
 This is the command the protocol used to describe without providing: it sweeps the diff and
 the commit messages together, and **exits non-zero rather than reporting clean when it could
 not sweep at all** (quince#41).
+
+**`make privacy-check` does not exist in `quince-devlog`** — this skill named only that form, so the
+gate was unreachable in half the declared forge set (quince#78). Use **your work clone's** copy of the
+script rather than the launchpad's: a stale privacy-check is exactly the one that exits `0` having
+checked nothing, and the launchpad has been measured stale (quince#33). `cd` to the repository being
+swept, not to the one holding the script — `--ref` resolves against the current directory's git repo.
+Full reasoning in `/report` §2.
 
 `0` clean · `1` a match — do not merge · **`2` DID NOT RUN**, which is not permission to
 merge. A `2` means this box has no usable pattern list, so the re-sweep is **owed** and the
