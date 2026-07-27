@@ -84,10 +84,28 @@ So:
 
    Run it in the **background**. In the foreground it blocks the session it exists to wake.
 
-   It exits 0 on events (they are on its stdout), **6** at the `--max-wait` idle bound (default 1200 s,
-   `event=watch-idle`), **7** after `--fail-after` failing ticks in a row. It refuses to arm beside a
-   `live` or `wedged` watch, so step 0's four answers are enforced where they matter. **Every exit is a
-   re-arm**: a watch that exited is a watch that is not watching.
+   Every exit `watch` can return, and which are re-arms. This document named the refusal in prose
+   while still asserting *"every exit is a re-arm"* — which is the same false instruction the skills
+   carried, reached by a different route, and following it on a refusal loops forever with no watch
+   running (quince#75):
+
+   | exit | means | what to do |
+   | --- | --- | --- |
+   | **0** | events found, on its stdout | handle them, then **re-arm** |
+   | **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** The refusal is quince#50's guard working: two watchers on one state file is a race that presents as missing events. `wedged` needs `forge-watch stop` first. |
+   | **6** | `--max-wait` idle bound, default 1200 s, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
+   | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
+
+   So step 0's four answers are enforced rather than recited: `live` and `wedged` refuse, `dead` and
+   `absent` proceed and the tool says which.
+
+   `status` exit codes: **0** live, **3** dead, **4** absent, **5** wedged.
+
+   An exit code of **2** is not the tool's at all — it is jq failing underneath and the script
+   aborting, so read the error rather than looking it up here.
+
+   A watch that exited is a watch that is not watching; a watch that *refused to start* is usually one
+   that was not needed.
 
    **6 and 7 are not crashes, and your harness will call them crashes.** A background task that exits
    non-zero is reported as *"failed with exit code 6"* — verified, not predicted — and 6 is the tool's

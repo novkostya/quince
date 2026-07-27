@@ -1,0 +1,151 @@
+#!/bin/sh
+# forge-watch-exits-test — every exit the tool can return must be named where sessions read.
+#
+# quince#75: `bin/forge-watch watch` exits 1 when it REFUSES to arm — "a watch is ALREADY LIVE …
+# refusing to arm a second one", which is quince#50's fix working. The skills enumerated the exits
+# as 0, 6 and 7 and said "every exit is a re-arm". Followed literally on exit 1 that is
+# refuse → re-arm → refuse → re-arm, unbounded, with NO watch running throughout. The architect hit
+# it and escaped by noticing, which is not a mechanism.
+#
+# Adding "1" to the list would have fixed the instance and left the class: the next exit the tool
+# learns, or the next document that copies an old enumeration, reproduces it. So this asserts the
+# relationship instead of the fact, in three directions:
+#
+#   1. DERIVED  — the designed exits are extracted from bin/forge-watch itself, from the two
+#      functions whose returns become process exits plus die(). A new code appears here without
+#      anybody updating this file.
+#   2. MEASURED — each is driven for real and its code observed, so the table cannot describe a
+#      tool that does not behave that way.
+#   3. DOCUMENTED — every derived code must be named in every document that enumerates exits.
+#      That is the check quince#75 needed: a doc which lists some of them fails.
+#
+# It deliberately does NOT check the prose is *correct* — no test can — only that no exit is
+# missing. "Every exit is a re-arm" was a false sentence about a complete-looking list; this stops
+# the list being incomplete, and a reviewer still has to read the sentence.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$HERE/.." && pwd)
+FW="$HERE/forge-watch"
+[ -x "$FW" ] || { printf 'forge-watch-exits-test: %s is not executable\n' "$FW" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+pass=0
+fail=0
+
+ok() {
+	printf 'ok   %s\n' "$1"
+	pass=$((pass + 1))
+}
+bad() {
+	printf 'FAIL %s\n' "$1"
+	[ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/    | /'
+	fail=$((fail + 1))
+}
+
+# The documents that enumerate exits. A document is listed here because sessions act on it; if a new
+# one starts enumerating exits it belongs on this list, and until it does this suite cannot see it.
+# That limit is real and is stated rather than hidden.
+DOCS="$ROOT/.claude/skills/architect/SKILL.md
+$ROOT/.claude/skills/kickoff/SKILL.md
+$ROOT/.claude/loop-protocol.md"
+
+# --- 1. DERIVED ------------------------------------------------------------------------------
+# watch_report's returns become `status`'s exit via `exit $?`; watch_loop's become `watch`'s the
+# same way; die() is every refusal and every usage error in the tool.
+derived=$(
+	{
+		awk '/^watch_report\(\)/,/^}/' "$FW" | grep -oE 'return [0-9]+'
+		awk '/^watch_loop\(\)/,/^}/' "$FW" | grep -oE 'return [0-9]+'
+		awk '/^die\(\)/,/^}/' "$FW" | grep -oE 'exit [0-9]+'
+	} | grep -oE '[0-9]+' | sort -un | tr '\n' ' '
+)
+derived=$(printf '%s' "$derived" | sed 's/[[:space:]]*$//')
+if [ -n "$derived" ]; then
+	ok "derived the designed exits from bin/forge-watch: $derived"
+else
+	bad "could not derive any exit codes from bin/forge-watch — the extraction broke, and a suite that derives nothing would pass everything"
+fi
+
+# --- 2. MEASURED -----------------------------------------------------------------------------
+# Driving the tool into each state, so the derived table cannot describe behaviour the tool does
+# not have. A pid that is certainly alive: this shell. A pid that is certainly not: one past the max.
+measure() { # <label> <want> <command...>
+	_ml=$1 _mw=$2
+	shift 2
+	"$@" >/dev/null 2>&1 && _mg=0 || _mg=$?
+	if [ "$_mg" -eq "$_mw" ]; then
+		ok "measured $_ml → exit $_mg"
+	else
+		bad "measured $_ml → exit $_mg, expected $_mw"
+	fi
+}
+
+now=$("$FW" --version >/dev/null 2>&1 || date -u +%Y-%m-%dT%H:%M:%SZ)
+live_state="$TMP/live.json"
+printf '{"watch":{"pid":%s,"last_watcher_tick":"%s","interval_s":60}}' "$$" "$now" >"$live_state"
+dead_state="$TMP/dead.json"
+printf '{"watch":{"pid":4194303,"last_watcher_tick":"%s","interval_s":60}}' "$now" >"$dead_state"
+wedged_state="$TMP/wedged.json"
+printf '{"watch":{"pid":%s,"last_watcher_tick":"2020-01-01T00:00:00Z","interval_s":60}}' "$$" >"$wedged_state"
+absent_state="$TMP/absent.json" # never created
+
+measure "status on a live watch"   0 "$FW" status --repo x/y --state "$live_state"
+measure "status on a dead watch"   3 "$FW" status --repo x/y --state "$dead_state"
+measure "status on an absent watch" 4 "$FW" status --repo x/y --state "$absent_state"
+measure "status on a wedged watch" 5 "$FW" status --repo x/y --state "$wedged_state"
+
+# The refusals — quince#75's subject. These are NOT re-arms: obeying "every exit is a re-arm" here
+# loops forever with no watch running.
+measure "watch REFUSING beside a live watch"   1 "$FW" watch --repo x/y --state "$live_state" --gh /bin/true
+measure "watch REFUSING beside a wedged watch" 1 "$FW" watch --repo x/y --state "$wedged_state" --gh /bin/true
+measure "an unknown option"                    1 "$FW" watch --no-such-flag
+
+# --- 3. DOCUMENTED ---------------------------------------------------------------------------
+# Every derived code must be named in every document that enumerates exits. Naming means the digit
+# appears; this cannot check that what is said about it is true, and does not pretend to.
+for _doc in $DOCS; do
+	_name=${_doc#"$ROOT"/}
+	if [ ! -f "$_doc" ]; then
+		bad "$_name does not exist — the doc list is stale, which is the drift this suite exists to catch"
+		continue
+	fi
+	_missing=''
+	for _code in $derived; do
+		# The digit must appear IN AN EXIT CONTEXT, not merely somewhere in the file. The first
+		# version matched the digit as a standalone token anywhere and PASSED on the very documents
+		# quince#75 was filed about — 0, 1, 3, 5, 6 and 7 all occur in ordinary prose here as issue
+		# numbers, counts and line references. A doc-consistency check that cannot fail on the broken
+		# docs is the vacuous pass this repository keeps removing, and it took writing it to see it.
+		#
+		# Three accepted forms, each arrived at by a wrong version first:
+		#
+		#   1. code within 48 chars after exit-vocabulary on one line. `.{0,48}` and NOT
+		#      `[^0-9]{0,48}` — "exits 0 live / 3 dead / 4 absent" means reaching `3` crosses `0`,
+		#      and excluding digits from the gap reported 3, 4 and 5 missing from a line naming all
+		#      four. Caught by reading WHICH codes it claimed were absent rather than trusting that
+		#      it had started failing.
+		#   2. a bolded code on a line with exit-vocabulary, for enumerations too long for (1).
+		#   3. a table row keyed by the code, `| **1** | …`, optionally indented — the tables put the
+		#      code in the first cell with "exit" only in the header, where (1) cannot see it.
+		#
+		# A code split across a line wrap from its exit-vocabulary matches none of these, and that is
+		# deliberate: it is the one shape where a reader skimming for "which exits are listed" can
+		# miss one, which is how this bug happened.
+		if ! grep -qiE "(exit|code)s?.{0,48}(^|[^0-9])${_code}([^0-9]|$)" "$_doc" &&
+			! grep -qiE "(exit|code)s?.*\*\*${_code}\*\*" "$_doc" &&
+			! grep -qE "^[[:space:]]*\|[[:space:]]*\*\*${_code}\*\*[[:space:]]*\|" "$_doc"; then
+			_missing="$_missing $_code"
+		fi
+	done
+	if [ -z "$_missing" ]; then
+		ok "$_name names every derived exit ($derived)"
+	else
+		bad "$_name does not name exit(s):$_missing" \
+			"quince#75: a document that enumerates SOME of the exits is how 'every exit is a re-arm' became advice to loop forever on a refusal."
+	fi
+done
+
+printf '\nforge-watch-exits-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1

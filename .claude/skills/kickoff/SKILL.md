@@ -157,12 +157,26 @@ bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60
 **The loop must exit when it finds something; a loop that cannot exit cannot wake you.** You are woken
 by a background task *completing*, so `while :; do tick; sleep 60; done` detects everything and delivers
 nothing — that shape ran for fifty minutes on the architect box with every liveness signal green and a
-deaf session behind it (quince#62). `watch` owns the loop and ends it: exit 0 with the events on stdout,
-6 at the `--max-wait` idle bound, 7 after repeated fetch failures. Do not run it in the foreground,
+deaf session behind it (quince#62). `watch` owns the loop and ends it. Do not run it in the foreground,
 where it blocks the session it exists to wake.
 
-**Every exit is a re-arm.** A watch that exited is a watch that is not watching, and four forgotten
-re-arms are already on the record (quince#43). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
+**Every exit `watch` can return, and which are re-arms.** This listed only 0, 6 and 7 and said every
+exit is a re-arm — false on the one it omitted, and following it there loops forever (quince#75):
+
+| exit | means | what to do |
+| --- | --- | --- |
+| **0** | events found, on stdout | handle them, then **re-arm** |
+| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** Re-arming is refuse → re-arm → refuse, unbounded, with no watch running throughout. |
+| **6** | `--max-wait` idle bound | nothing happened, which is a report and not a silence — **re-arm** |
+| **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
+
+`status` is a different question with its own exit codes: **0** live · **3** dead · **4** absent · **5** wedged.
+An exit of **2** is not the tool's — it is jq failing underneath and the script
+aborting, so read the error rather than looking it up here.
+
+**0, 6 and 7 are re-arms; 1 is a refusal and is not.** A watch that exited is a watch that is not
+watching, and four forgotten re-arms are already on the record (quince#43) — but a watch that
+*refused to start* is usually one that was not needed, and re-arming into a refusal loops (quince#75). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
 **do not treat it as the floor.** On the architect box it has delivered nothing across every arming
 measured (quince#62). On **this** box it has delivered **once, about an hour after it was due**, which
 is the only measurement there is here and is not a cadence you can plan against. The floor under you is
