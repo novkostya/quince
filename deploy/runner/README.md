@@ -79,3 +79,27 @@ The runner accumulates the claude.ai login, the bot token, the devct API token a
 every dev container. Compromise of this box is compromise of the Claude account **and** the
 container plane — stated in the spec's security section, along with the constraint that the
 root-capable path must only ever reach it as pr.6's forced-command wrapper.
+
+## The private layer is a start condition
+
+`preflight` **refuses to start** a box that cannot reach `/root/quince-local/privacy-patterns.txt`
+(quince#44, Operator ruling 2026-07-27). The privacy gate runs on every push from a session host,
+and a box that comes up unable to run it is the failure that issue was filed about: sessions had
+learned to trust a file that a rebuild silently removes, with nothing announcing the regression.
+
+Until `provision` places the layer, a rebuilt box needs it hand-placed:
+
+```sh
+# from a machine that has it — piped, never in argv, never printed
+ssh <box> 'mkdir -p /root/quince-local && chmod 700 /root/quince-local &&
+           cat > /root/quince-local/privacy-patterns.txt && chmod 600 /root/quince-local/privacy-patterns.txt' \
+  < privacy-patterns.txt
+```
+
+The refusal **does not say why** the layer is unreachable, deliberately: a private repository
+returns 404 for both "does not exist" and "you were not granted it", so a message that guessed would
+send the next reader off to recreate a repo when the real fix is a one-click collaborator grant.
+
+An **empty** list is refused as well, and it is the worse case: it matches nothing and reports every
+sweep clean, so it looks like the gate ran. A world-readable list is reported but not enforced —
+`chmod 600` it, but a permission bit will not stop the box booting.

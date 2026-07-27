@@ -85,11 +85,21 @@ The credential helper keeps the token out of argv, the remote URL, and `.git/con
 the token file is absent, stop: you cannot author as the bot — say so instead of pushing
 under another identity.
 
-On the Operator's machine only, so `make privacy-check` works in the fresh clone:
+Then link the private layer — **in every clone, on every box**, not just the Operator's. Without it
+`make privacy-check` exits `2` (DID NOT RUN) rather than pretending it swept:
 
 ```sh
-ln -s <path-to-the-private-layer>/local local   # the path is gitignored; git can never commit it
+ln -s /root/quince-local local   # the path is gitignored; git can never commit it
 ```
+
+This line used to say *"On the Operator's machine only"*. That was true when the Mac was where work
+happened; once work moved to the boxes it applied nowhere, so the gate was inert everywhere and
+every PR in that cycle hand-declared that its sweep had not really run (quince#44). The layer is now
+a property of a provisioned box — `preflight` **refuses to start** one that cannot reach it — so if
+you have a session at all, the layer is there.
+
+`quince-devlog` needs the same symlink. It now carries `/local` in its `.gitignore`; before that it
+did not, and a review caught the symlink one `git add` away from a public repo.
 
 ## 4. Verify where the gates will run
 

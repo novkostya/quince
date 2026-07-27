@@ -83,6 +83,50 @@ arch)
 	;;
 esac
 
+# --- the private layer, without which the privacy gate cannot gate ---------------------------
+# quince#44, ruled by the Operator on 2026-07-27: a box that cannot reach the private layer
+# REFUSES TO START, rather than coming up and running a gate that silently cannot run. The
+# consequence was accepted deliberately — a box rebuilt before `provision` learns to place the
+# layer will refuse, and the fix is hand-placement, which is a step a rebuild needs anyway. A box
+# that starts and cannot gate is the worse of the two failures, and it is the one quince#44 exists
+# to remove: sessions had learned to trust a file that a rebuild removes, with nothing announcing
+# the regression.
+#
+# TWO CONSTRAINTS ON THIS MESSAGE, both from that ruling.
+#
+# 1. It names the fix that EXISTS AT THE TIME. Today that is hand-placement; when `provision`
+#    learns to clone the layer, correcting this text belongs to THAT change and is not a
+#    follow-up, because a message naming a fix that does not yet exist is the defect class this
+#    unit is closing.
+#
+# 2. It does NOT claim to know WHY the layer is unreachable. A private repository returns 404 for
+#    both "does not exist" and "you were not granted it", so this may report that the box cannot
+#    reach the layer and may not report which. Guessing sends the next reader off to recreate a
+#    repo when the real fix is a one-click collaborator grant — which is exactly the wrong turn
+#    taken on quince#44 before the grant was found.
+PRIVATE_LAYER="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
+PATTERN_FILE="$PRIVATE_LAYER/privacy-patterns.txt"
+if [ ! -e "$PATTERN_FILE" ]; then
+	bad "this box cannot reach the private layer — no $PATTERN_FILE. The privacy gate runs on every push from here, and without the pattern list it cannot run at all. Place the list at that path (file 0600, directory 0700). Not saying WHY it is absent, because this cannot tell 'never placed' from 'placed and since lost'."
+elif [ ! -s "$PATTERN_FILE" ]; then
+	# `test -s`, not `test -e`. An empty list matches nothing and reports clean forever, which is
+	# the same vacuous pass in a costume — privacy-check exits 2 on it (quince#41), and preflight
+	# refuses to start a box that would produce it.
+	bad "the private layer at $PATTERN_FILE is EMPTY. An empty pattern list matches nothing and would report every sweep clean — worse than an absent one, because it looks like it ran."
+else
+	patterns=$(grep -cvE '^[[:space:]]*(#|$)' "$PATTERN_FILE" 2>/dev/null || echo 0)
+	ok "private layer present, $patterns patterns — the privacy gate can run on this box"
+	# REPORTED, NOT ENFORCED, matching the apk-drift reporter below and for the same reason: this
+	# is a list OF the sensitive strings, so a loose mode is worth saying loudly, but refusing to
+	# start over a permission bit turns a one-command fix into an outage. Said where somebody is
+	# already reading the output.
+	pmode=$(stat -c '%a' "$PATTERN_FILE" 2>/dev/null || stat -f '%Lp' "$PATTERN_FILE" 2>/dev/null || echo unknown)
+	case "$pmode" in
+	600 | 400) ;;
+	*) printf 'preflight: note — %s is mode %s, expected 600. It is a list OF the sensitive strings; chmod 600 it.\n' "$PATTERN_FILE" "$pmode" ;;
+	esac
+fi
+
 # --- the thing we are about to run ----------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
 	ok "claude present ($(claude --version 2>/dev/null || echo 'version unreadable'))"
