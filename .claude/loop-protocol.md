@@ -165,7 +165,7 @@ So:
    | exit | means | what to do |
    | --- | --- | --- |
    | **0** | events found, on its stdout | handle them, then **re-arm** |
-   | **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** The refusal is quince#50's guard working: two watchers on one state file is a race that presents as missing events. `wedged` needs `forge-watch stop` first. |
+   | **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **read `status`, then act on the answer** (quince#88): `live` → stop, no second watch is wanted · `wedged` → `forge-watch stop`, then arm · `dead` or `absent` → **arm again.** Bounded at **two arm attempts in one turn**; a third refusal means something other than this session is arming and dying, which is a report, not a loop. |
    | **6** | `--max-wait` idle bound, default 1200 s, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
    | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
@@ -179,6 +179,37 @@ So:
 
    A watch that exited is a watch that is not watching; a watch that *refused to start* is usually one
    that was not needed.
+
+   **Arm unconditionally. Never gate an arming behind a shell pre-check** (quince#88). The row above
+   used to read *"do not re-arm"*, on the reasoning that the refusal is quince#50's guard working. The
+   guard is working — but a refusal is true only at the instant it is produced, and the rule turned it
+   into a durable one. Measured across one architect session: **five** losses of the watch came from
+   *not* arming because something was live; **none** came from arming when nothing should have been.
+   The costs are not comparable — a wrong arm is one exit 1 and no lost watcher, a wrong stand-down is
+   being unwatched while two notifications both read as success.
+
+   The deciding property is not the tally, though. **`watch`'s own refusal is the only check here that
+   is atomic with the act it guards.** Every conditional written beside it is check-then-act across a
+   window in which the thing checked can die, so it subtracts rather than adds:
+
+   ```sh
+   bin/forge-watch status --all | grep -c 'watch=live'; exec bin/forge-watch watch --all …   # gates NOTHING: `;` sequences
+   if [ "$(… | grep -c 'watch=live')" -eq 0 ]; then exec … ; fi                              # composes correctly, STILL races
+   ```
+
+   The second form was measured failing: the check was right, and ten seconds later the watcher exited
+   on the session's own approval. Neither belongs in a session's hands. Note that this is a rule about
+   *gating*, not about *asking* — `/architect` §0 and `/kickoff` §0 still require you to read `status`
+   and **report which of the four answers you got**, which is an obligation the tool cannot discharge
+   on your behalf. What is retired is the pre-arm conditional, which nothing ever prescribed; it was
+   invented from §0's tone.
+
+   **The window is narrowed, not closed, and this file must not claim otherwise.** Between the `status`
+   read and the arm, a live watcher can still die on your own forge write. quince#102's arm-last
+   ordering shrinks it from one side and this rule shrinks it from the other; closing it needs a tool
+   change, and that change wants quince#95's `waiting`/`starting` liveness question answered first. The
+   `Stop` hook is the declared **backstop** for what remains — a backstop, which is not the same thing
+   as a resolution.
 
    **6 and 7 are not crashes, and your harness will call them crashes.** A background task that exits
    non-zero is reported as *"failed with exit code 6"* — verified, not predicted — and 6 is the tool's

@@ -214,7 +214,7 @@ exit is a re-arm — false on the one it omitted, and following it there loops f
 | exit | means | what to do |
 | --- | --- | --- |
 | **0** | events found, on stdout | handle them, then **re-arm** |
-| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** Re-arming is refuse → re-arm → refuse, unbounded, with no watch running throughout. |
+| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **read `status`, then act on the answer** (quince#88): `live` → stop · `wedged` → `forge-watch stop`, then arm · `dead`/`absent` → **arm again.** Bounded at **two arm attempts per turn** — a third refusal is a report, not a loop. |
 | **6** | `--max-wait` idle bound | nothing happened, which is a report and not a silence — **re-arm** |
 | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
@@ -222,9 +222,22 @@ exit is a re-arm — false on the one it omitted, and following it there loops f
 An exit of **2** is not the tool's — it is jq failing underneath and the script
 aborting, so read the error rather than looking it up here.
 
-**0, 6 and 7 are re-arms; 1 is a refusal and is not.** A watch that exited is a watch that is not
-watching, and four forgotten re-arms are already on the record (quince#43) — but a watch that
-*refused to start* is usually one that was not needed, and re-arming into a refusal loops (quince#75). Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
+**0, 6 and 7 are re-arms; 1 sends you to `status` before you decide.** A watch that exited is a watch
+that is not watching, and four forgotten re-arms are already on the record (quince#43). This paragraph
+used to end *"re-arming into a refusal loops (quince#75)"* and stop there — true of quince#75's
+**unconditional** loop, and it over-corrected into never re-arming at all: five losses of the watch in
+one session came from *not* arming because something was live, none from arming when nothing should
+have been (quince#88). The `status` read terminates on `live` and on `wedged`, which is exactly what
+quince#75's loop lacked, and the two-attempt bound is belt over braces.
+
+**Arm unconditionally — never gate an arming behind a shell pre-check.** `watch`'s refusal is atomic
+with the act it guards; a conditional beside it is check-then-act across a window in which the watcher
+can die. Both `status …; exec watch …` (which gates nothing, because `;` sequences rather than
+conditions) and the correctly-composed `if` form were measured failing. §0's duty is unchanged: read
+`status` and **say which of the four answers you got**. The window is narrowed, not closed — the `Stop`
+hook is the declared backstop, which is not a resolution.
+
+Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
 **do not treat it as the floor.** On the architect box it has delivered nothing across every arming
 measured (quince#62). On **this** box it has delivered **once, about an hour after it was due**, which
 is the only measurement there is here and is not a cadence you can plan against. The floor under you is

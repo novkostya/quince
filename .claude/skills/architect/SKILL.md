@@ -228,7 +228,7 @@ not a mechanism (quince#75).
 | exit | means | what to do |
 | --- | --- | --- |
 | **0** | events found, on stdout | handle them, then **re-arm** |
-| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **do not re-arm.** `live` needs no second watch; `wedged` needs `forge-watch stop` first. Re-arming loops forever. |
+| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **read `status`, then act on the answer** (quince#88): `live` → stop · `wedged` → `forge-watch stop`, then arm · `dead`/`absent` → **arm again.** Bounded at **two arm attempts per turn** — a third refusal is a report, not a loop. |
 | **6** | `--max-wait` idle bound, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
 | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 
@@ -236,8 +236,21 @@ not a mechanism (quince#75).
 · **5** wedged. An exit of **2** is not the tool's at all — it is an underlying tool (jq) failing and
 the script aborting, so read the error rather than looking it up here.
 
-**Re-arm on 0, 6 and 7. On 1, read what it refused and why**: a watch that exited is a watch that is
-not watching, but a watch that *refused to start* is usually one that was not needed.
+**Re-arm on 0, 6 and 7. On 1, read what it refused and why** — then, if `status` says `dead` or
+`absent`, arm again. A watch that exited is a watch that is not watching, and a refusal is true only
+at the instant it is produced: five losses of the watch in one session came from *not* arming because
+something was live, and none from arming when nothing should have been (quince#88).
+
+**Arm unconditionally — never gate an arming behind a shell pre-check.** `watch`'s own refusal is the
+only check here that is atomic with the act it guards; a conditional beside it is check-then-act across
+a window in which the watcher can die, and both the sequenced form (`status …; exec watch …`, which
+gates nothing because `;` does not condition) and the correctly-composed `if` form were measured
+failing. **This retires the pre-arm conditional, not §0**: §0 still requires you to read `status` and
+**report which of the four answers you got**, which the tool cannot do on your behalf.
+
+**The window is narrowed, not closed.** quince#102's arm-last ordering shrinks it from one side and
+this from the other; closing it is a tool change that wants quince#95 answered first. The `Stop` hook
+is the declared **backstop** for the remainder — a backstop, not a resolution.
 
 **Exits 6 and 7 will be reported to you as failures.** A background task that exits non-zero renders as
 *"failed with exit code 6"* — and 6 is `watch`'s designed idle heartbeat, the floor this section names.
