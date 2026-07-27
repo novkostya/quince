@@ -74,11 +74,21 @@ cannot_run() {
 }
 
 # --- the matcher, named rather than inherited ----------------------------------------------
-# A gate whose semantics come from whichever `grep` $PATH resolves first can pass on one box
-# and fail on another, and for THIS gate the bad direction is silent: a pattern that fails to
-# compile reports clean. Measured on the runner (2026-07-26): `grep` is ugrep 7.5.0, `/bin/grep`
-# is busybox. Three implementations are in play across the workflow. So: name the matcher,
-# print it with its version, and prove it compiles every pattern before trusting a clean answer.
+# A gate whose semantics come from whichever `grep` the environment resolves first can pass on
+# one box and fail on another, and for THIS gate the bad direction is silent: a pattern that
+# fails to compile reports clean. So: name the matcher, print it with its version, and prove it
+# compiles every pattern before trusting a clean answer.
+#
+# TWO implementations are in play, measured 2026-07-27: **busybox** on the runner and architect
+# boxes (`/bin/grep -> /bin/busybox`; there is no other grep installed on either), and **GNU
+# grep 3.11** in CI, which runs `make gates` on ubuntu-latest.
+#
+# An earlier version of this comment said THREE, citing ugrep 7.5.0 "in PATH" on both boxes.
+# That was wrong, and the way it was wrong is worth keeping: in an agent session `grep` is a
+# shell FUNCTION installed by the tooling, which routes through a binary that bundles ugrep —
+# so two sessions independently measured their own harness and reported it as a property of the
+# machines. ugrep is installed on neither. `type` before `--version`, whenever the claim is
+# about a box rather than about a session.
 GREP="${PRIVACY_GREP:-grep}"
 command -v "$GREP" >/dev/null 2>&1 || cannot_run "matcher '$GREP' not found (set PRIVACY_GREP)"
 GREP_PATH=$(command -v "$GREP")
