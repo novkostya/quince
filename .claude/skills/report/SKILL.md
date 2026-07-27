@@ -32,8 +32,33 @@ One command, and it covers the branch diff, the commit messages **and** the PR t
 about to post — write the body to a file first and hand it over:
 
 ```sh
+# in quince
 make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md
+
+# in quince-devlog — THERE IS NO MAKEFILE THERE. Run the product checkout's script FROM the
+# devlog clone, so that the pattern directory resolves to this clone's own `local` symlink:
+/path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD --text /tmp/pr-body.md
 ```
+
+**`make privacy-check` does not exist in `quince-devlog`.** All three skills named only that, so the
+gate was unreachable in half the declared forge set and was complied with in words for as long as
+nobody tried it (quince#78). No Makefile was added there, deliberately: it would exist to wrap one
+script, in a repository with no build, and be a second place for the invocation to drift from the tool.
+
+Two things the form above gets right, both learned by getting them wrong:
+
+- **Do not pass `--patterns`.** It defaults to `./local`, relative to the **current directory**, and
+  the devlog clone carries the same `local` symlink. Handing it a *file* (`local/privacy-patterns.txt`)
+  rather than the *directory* makes the gate exit **`2` — DID NOT RUN**, which is not a clean result.
+- **`cd` to the repository being swept, not to the one holding the script.** `--ref` is resolved
+  against the current directory's git repository; where the script lives is irrelevant to it.
+
+**Which copy of the script: your work clone's**, not the launchpad's. Both are defensible and they fail
+differently, so it is chosen rather than defaulted. A **stale** privacy-check is precisely the one that
+exits `0` having checked nothing — the defect quince#41 fixed — and the launchpad has been measured
+stale, at a commit predating a file entirely (quince#33). Your work clone's provenance is known: you
+cloned it this session. If you are working **only** in the devlog and have no quince clone, the
+launchpad's copy is the fallback — **and say which you used**, because the two are not interchangeable.
 
 Then re-read the PR text and journal entry against the same rule: no hostnames, LAN IPs,
 MACs, topology, hardware sizing, UDIDs/serials, personal paths, or lab-log excerpts.

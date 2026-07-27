@@ -85,8 +85,10 @@ The credential helper keeps the token out of argv, the remote URL, and `.git/con
 the token file is absent, stop: you cannot author as the bot — say so instead of pushing
 under another identity.
 
-Then link the private layer — **in every clone, on every box**, not just the Operator's. Without it
-`make privacy-check` exits `2` (DID NOT RUN) rather than pretending it swept:
+Then link the private layer — **in every clone, on every box**, not just the Operator's. Without it the
+privacy gate exits `2` (DID NOT RUN) rather than pretending it swept — `make privacy-check` in quince,
+and the product checkout's `deploy/privacy/privacy-check` in the devlog, which has no Makefile
+(quince#78; the form is in `/report` §2):
 
 ```sh
 ln -s /root/quince-local local   # the path is gitignored; git can never commit it
@@ -243,9 +245,15 @@ to changes-requested goes out rebased, and so does a branch that went `BEHIND` b
 merged — the ball came back to you without anyone handing it over.
 
 **A privacy sweep is a claim about a specific head, and it expires on your next push.** If the box you
-are on has no private layer, `make privacy-check` prints `skipped` and exits 0 having checked nothing:
-do **not** tick the box, declare the sweep owed and name the head. Then say when the head is final, so
-whoever runs the sweep is not racing you.
+are on has no private layer the gate exits **`2` — DID NOT RUN**, saying *"this is NOT a clean result.
+Nothing was swept."*: do **not** tick the box, declare the sweep owed and name the head. Then say when
+the head is final, so whoever runs the sweep is not racing you.
+
+*(This paragraph used to say the gate "prints `skipped` and exits 0 having checked nothing" — the
+behaviour quince#41 removed, and the direct opposite of what §3 of this same skill says. One skill
+asserting both the pre- and post-fix behaviour is devlog#54's drift, inside a single file. Measured on
+a layer-less clone before correcting it: exit **2**, and the first attempt to measure it read a
+`tail` pipeline's exit `0` instead of the script's — devlog#27's class, on the third occasion today.)*
 
 **Count the stalls.** When the host client drops, `Read`/`Write` fail after exactly ten minutes with
 `PreToolUse hook did not respond before its timeout` while `Bash` keeps working — one session lost ~84

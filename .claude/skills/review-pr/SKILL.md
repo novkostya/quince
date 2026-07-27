@@ -66,10 +66,22 @@ defect in a docs PR exactly as a failing test is in a code PR.
 ## 4. Process gates
 
 - CI: `gh pr checks <n> --repo novkostya/quince` — all required checks green.
-- Privacy: `make privacy-check REF=origin/main...HEAD TEXT=<pr-body>` — one command over the
-  diff, the commit messages and the PR text. **Exit `2` is DID NOT RUN, not clean**: treat it
-  as an owed sweep, never as a ticked box (quince#41). A clean run names the matcher and the
-  pattern count, so you can tell a real sweep from a vacuous one.
+- Privacy: one command over the diff, the commit messages and the PR text — **and the form differs
+  by repository, because `quince-devlog` has no Makefile** (quince#78):
+  ```sh
+  make privacy-check REF=origin/main...HEAD TEXT=<pr-body>                     # in quince
+  /path/to/your/quince/deploy/privacy/privacy-check \
+      --ref origin/main...HEAD --text <pr-body>                                # in quince-devlog
+  ```
+  Run it **from the repository being swept** — `--ref` resolves against the current directory's git
+  repo — and do **not** pass `--patterns`: it defaults to `./local`, which both clones carry, and
+  handing it a file instead of a directory produces a `2`. Prefer **your work clone's** copy of the
+  script over the launchpad's, since a stale one is exactly the one that exits `0` having checked
+  nothing (quince#41) and the launchpad has been measured stale (quince#33). Full reasoning in
+  `/report` §2. **Exit `2` is DID NOT RUN, not clean**: treat it as an owed sweep, never as a ticked
+  box (quince#41). A clean run names the matcher and the pattern count, so you can tell a real sweep
+  from a vacuous one. **And if a devlog PR's author reported `make privacy-check`, that sweep did not
+  happen** — the command does not exist there, so it is a finding rather than a tick.
 - DoD: CI green · privacy swept · review approved · deploy URL (or an honest
   not-applicable/pending line) · ≤5-line click list · journal entry written or handed over.
 - Canon: does the change contradict a doc it didn't update? Is there an unruled gap being
