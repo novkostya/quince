@@ -134,7 +134,29 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@# proof to whoever remembers would reproduce the defect one level up (quince#41, #64).
 	@# Synthetic fixtures only: no private layer needed, so it runs here, on CI, and anywhere.
 	@$(MAKE) --no-print-directory privacy-check-test
+	@$(MAKE) --no-print-directory forge-watch-test
 	@echo "gates-sh: clean"
+
+# The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
+# forge-watch work proved it by hand and pasted the output into the PR — honest while somebody
+# does it, and the exact shape this repository keeps filing issues about: a gate whose positive
+# answer depends on the author remembering. Three of the loop fixtures spend real seconds in
+# sleeps, which is the kind of cost that quietly stops being paid.
+#
+# HOST-SIDE, beside the containerised shellcheck rather than inside it: the `"kind": "loop"`
+# fixtures drive the real `watch` verb against a stub `gh`, so they need a subprocess and a
+# clock. That was the open question on quince#64 and this is the answer — the same placement
+# privacy-check-test already uses, and no network is involved either way.
+.PHONY: forge-watch-test
+forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~23s, host-side)
+	@# jq is asserted, not assumed. The fixtures ARE json; without jq `replay` would fail
+	@# somewhere further in, and a suite that cannot run must say so rather than produce a
+	@# confusing failure — the lesson of quince#41 applied to the gate that quince#64 adds.
+	@command -v jq >/dev/null 2>&1 || { \
+	  echo "forge-watch-test: jq is absent, and the fixtures are JSON — REFUSING rather than skipping."; \
+	  exit 1; \
+	}
+	@bin/forge-watch replay bin/testdata/forge/*.json
 
 .PHONY: gates-go
 gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
