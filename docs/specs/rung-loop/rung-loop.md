@@ -729,7 +729,15 @@ allowance faster for no benefit.
     somebody else's blocked list.
 34. Under `--all`, a bare `--issue <n>` is **refused**: issue numbers collide across repositories,
     and both readings of a bare number are guesses. An `--issue` naming a repo outside the watch set
-    is refused too, because it would otherwise be a no-op nobody was told about.
+    is refused too, because it would otherwise be a no-op nobody was told about. **And under a single
+    `--repo`, an `--issue` qualified with a different repository is refused** — the case that was
+    silent, found in review: the per-repo filter that is load-bearing under `--all` was the only
+    filter here, so the spec was dropped without a word, and one unmatched spec replaced an existing
+    declaration with an empty one, byte-identical to `--no-issues`. A refusal writes nothing, so a
+    partly-valid list cannot leave a partly-applied declaration behind.
+35. `issue-comment` carries `count=` — how many arrived since the last observation — while `at=` and
+    `actor=` describe the newest. A session woken by three rulings must not read the event as one.
+
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
@@ -737,18 +745,19 @@ allowance faster for no benefit.
   this work proved it by hand and pasted the output into the PR, which is honest only while somebody
   keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
-  and this is its answer. Measured at ~23 s for all 33 fixtures — and the count is **asserted, not
+  and this is its answer. Measured at ~23 s for all 34 fixtures — and the count is **asserted, not
   just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently
   shrunk is visible in the CI log rather than passing as though it were whole. A bare `fixtures
   pass` could not tell 28 from 18, and the fixtures likeliest to be dropped under time pressure are
   the loop ones, which are the only shape here that spends real seconds in sleeps.
   `forge-watch replay bin/testdata/forge/*.json` covers stories 1–4,
-  9–17, **28–33** (the issue channel of §4h — the two the ruling named as its fixture bar are
+  9–17, **28–33** and **35** (the issue channel of §4h — the two the ruling named as its fixture bar are
   stories 28 and 29, and 31–32 need a `"kind": "sequence"` fixture because a pair's `before`
   would already hold the carried-forward value under test) and **20–21** (the `"kind": "loop"`
   fixtures, which drive the real `watch` verb against a stub
   `gh` — no network, but a subprocess and a clock, so they are the one impure shape in the harness).
-  Stories **22 and 34 are CLI smokes recorded in the PR**: the refusals are argument-time behaviour, and a
+  Story **22 is a CLI smoke recorded in the PR** and story **34 is asserted by `forge-watch-exits-test`**:
+  the refusals are argument-time behaviour, and a
   fixture that seeded a live pid would be asserting the harness rather than the tool. Stories **23–25**
   split: the decision half is `"kind": "owed"` fixtures, and the **hook half is proven by running a
   real headless session** (§4f) — it is a claim about the harness's behaviour, and no fixture of ours

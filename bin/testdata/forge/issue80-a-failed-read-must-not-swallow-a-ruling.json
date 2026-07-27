@@ -47,7 +47,7 @@
             {"at":"2026-07-27T09:41:12Z","actor":"novkostya","kind":"comment"} ] } ] } },
       "expect_events": [
         "event=issue-updated issue=80 at=2026-07-27T09:41:12Z actor=novkostya kind=comment",
-        "event=issue-comment issue=80 at=2026-07-27T09:41:12Z actor=novkostya"
+        "event=issue-comment issue=80 count=1 at=2026-07-27T09:41:12Z actor=novkostya"
       ]
     }
   ]

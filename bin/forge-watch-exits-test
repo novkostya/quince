@@ -101,6 +101,12 @@ measure "status on a wedged watch" 5 "$FW" status --repo x/y --state "$wedged_st
 measure "watch REFUSING beside a live watch"   1 "$FW" watch --repo x/y --state "$live_state" --gh /bin/true
 measure "watch REFUSING beside a wedged watch" 1 "$FW" watch --repo x/y --state "$wedged_state" --gh /bin/true
 measure "an unknown option"                    1 "$FW" watch --no-such-flag
+# The --issue refusals. The second is a REGRESSION GUARD, not a tidiness: the single-repo path
+# originally had no check at all, so `--repo A --issue B#9` declared nothing and said nothing — and,
+# the worse half, one unmatched spec replaced an EXISTING declaration with an empty one, byte-identical
+# to `--no-issues`. Silent in exactly the way this feature exists to stop. Found in review of quince#87.
+measure "watch REFUSING a bare --issue under --all"        1 "$FW" watch --all --issue 9 --gh /bin/true
+measure "watch REFUSING a cross-repo --issue under --repo" 1 "$FW" watch --repo x/y --issue a/b#9 --gh /bin/true
 
 # --- 3. DOCUMENTED ---------------------------------------------------------------------------
 # Every derived code must be named in every document that enumerates exits. Naming means the digit
