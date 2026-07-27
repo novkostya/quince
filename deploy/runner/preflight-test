@@ -59,13 +59,22 @@ ABSENT_TOKEN="$TMP/no-such.token"
 # gate exists to refuse, and anyone working with Claude plausibly has it set, so `make gates` would
 # have failed on their shell rather than on their change.
 #
-# The list is EVERY variable preflight reads, not only the ones observed to break: the three
-# credentials, the base URL, the role, and the token-file override. **If preflight learns to read a
-# new variable, it must be added here**, or the same silent coupling returns.
+# EVERY variable preflight reads, not only the ones observed to break: the three credentials, the
+# base URL, the role, and the token-file override. If preflight learns to read a new variable it
+# must be added to THIS list — and to exactly one place, which is why the list is a variable rather
+# than two copies. It was two: `run_preflight` and the `emptybin` case below, which cannot use
+# `run_preflight` because it must override PATH. A seventh variable added to only one of them would
+# leave that case reading the box again, and section 5 could not catch it, since those cases all go
+# through `expect()` → `run_preflight`. One list, one place to change.
+#
+# Unquoted on purpose: this is a list of separate arguments, not one word.
+# shellcheck disable=SC2086
+PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE"
+
 run_preflight() {
-	env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
-		-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
-		"$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
+	# shellcheck disable=SC2086
+	env $PF_UNSET "$@" PATH="$STUB:$PATH" "$PREFLIGHT" 2>&1
 }
 
 # expect <name> <want-exit> <substring> -- <env assignments...>
@@ -154,12 +163,11 @@ expect "an unset role is ASSUMED implementer, and says so" 0 "ASSUMED" -- \
 # cover, since it is the stub's own subject.
 emptybin="$TMP/emptybin"
 mkdir -p "$emptybin"
-# Same unset list as run_preflight — this case cannot use it, because it must override PATH to a
-# directory with no `claude`, which run_preflight deliberately does not allow.
-out=$(env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
-	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
-	PATH="$emptybin" QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"$PREFLIGHT" 2>&1) && got=0 || got=$?
+# The SAME $PF_UNSET, not a copy of it — this case cannot use run_preflight because it must point
+# PATH at a directory with no `claude`, which run_preflight deliberately does not allow.
+# shellcheck disable=SC2086
+out=$(env $PF_UNSET PATH="$emptybin" QUINCE_RUNNER_ROLE=arch \
+	"QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "$PREFLIGHT" 2>&1) && got=0 || got=$?
 if [ "$got" -eq 1 ] && printf '%s\n' "$out" | grep -qF "claude is not installed"; then
 	printf 'ok   an absent claude is refused, naming provision (exit %s)\n' "$got"
 	pass=$((pass + 1))
