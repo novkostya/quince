@@ -27,8 +27,16 @@ first principles. Where a step looks fussy, it is the shape of something that we
 ## 1. Prove the boundary — and this is a LOOP, not a check
 
 ```sh
-bin/gh-bot pr list --repo <owner/name> --state open --json number,title,author,reviewDecision,mergeStateStatus
+<gh> pr list --repo <owner/name> --state open --json number,title,author,reviewDecision,mergeStateStatus
 ```
+
+`<gh>` is **your seat's forge wrapper** — `bin/gh-bot` on the runner, `bin/gh-arch` on the
+architect box. `/retire` is the first skill *both* seats run, so it cannot name one: an architect
+host must never hold `~/.config/quince/quince-bot.token` — `/architect` §1 hard-stops if it finds
+one and `preflight` asserts its absence for `role arch` — so a hardcoded `bin/gh-bot` here is a
+command that cannot authenticate on half the boxes that reach this step (quince#133). This is the
+same per-seat substitution `forge-watch` takes as `--gh`, and it is the shape §6 below already
+uses for `stop`.
 
 Per repo in `.claude/forge-set`. Ask, against the API rather than from memory:
 
