@@ -221,15 +221,51 @@ else
 		# it and an unwired clone still fails it. A false refusal here does not degrade a box, it
 		# stops it booting — the same reason `ls-remote` was rejected above, arrived at from the
 		# other direction, and caught only because the Operator's wiring differed from ours.
+		# ASK IT ONLY WHERE IT IS A QUESTION — the credential helper is an http(s) mechanism.
+		# The first shipped version demanded a helper for EVERY remote, and an SSH clone can fetch
+		# forever without one: SSH authenticates with a key, so there is nothing for a helper to do.
+		# That refusal does not degrade a box, it stops it booting — this check's own standard,
+		# turned on itself for the second time.
+		#
+		# TWO DISTINCT FAILURES REACHED ONE `bad`, and only one of them was maskable. Measured on
+		# git 2.54.0, `config --get-urlmatch credential.helper <remote>`:
+		#
+		#   https://host/p.git   → the helper, exit 0        ← the only shape a helper applies to
+		#   git@host:p.git       → fatal, exit 128, EMPTY    ← scp-style is not a URL
+		#   /srv/p.git           → fatal, exit 128, EMPTY    ← nor is a bare path
+		#   ssh://git@host/p.git → exit 1, EMPTY, NO ERROR   ← a valid URL; no helper can ever match
+		#   file:///srv/p.git    → exit 1, EMPTY, NO ERROR   ← likewise
+		#
+		# The first two were hidden by `2>/dev/null` swallowing the fatal. **The last two emit no
+		# error at all**, so they were never hidden — they are simply true answers to the wrong
+		# question. Un-masking the stderr would therefore have fixed half of this and left `ssh://`
+		# refusing silently, which is why the fix is to DISPATCH ON THE SCHEME rather than to stop
+		# discarding the error. The `2>/dev/null` goes anyway: on the http(s) branch a fatal is now
+		# unreachable, so keeping it could only ever hide something we have not thought of.
+		#
+		# AND THE TWO STATES STAY APART. "No helper is configured" and "a helper does not apply to
+		# this remote" are different facts, and collapsing them is how a boot-blocking check came to
+		# refuse a working machine. The non-http(s) arm says what it did NOT establish rather than
+		# claiming freshness it cannot see: an ssh key or a filesystem path is not a local fact this
+		# script can read, so the honest report is that the check does not cover the box, not that
+		# the box is fine.
 		if [ -d "$PRIVATE_LAYER/.git" ]; then
 			layer_remote=$(git -C "$PRIVATE_LAYER" remote get-url origin 2>/dev/null || true)
-			if [ -z "$layer_remote" ]; then
+			case "$layer_remote" in
+			"")
 				bad "the private layer at $PRIVATE_LAYER is a git clone with NO 'origin' remote, so it can never fetch: it is frozen at whatever it holds now (quince#121). Fix: run deploy/runner/provision, or re-clone the layer."
-			elif [ -n "$(git -C "$PRIVATE_LAYER" config --get-urlmatch credential.helper "$layer_remote" 2>/dev/null)" ]; then
-				ok "private layer can advance — a credential helper resolves for its remote"
-			else
+				;;
+			http://* | https://*)
+				if [ -n "$(git -C "$PRIVATE_LAYER" config --get-urlmatch credential.helper "$layer_remote")" ]; then
+					ok "private layer can advance — a credential helper resolves for its http(s) remote"
+				else
 				bad "the private layer at $PRIVATE_LAYER is a git clone with NO credential helper for its remote, so it can never fetch: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box. Present is not fresh (quince#121). Fix: run deploy/runner/provision, which persists the helper with \`git config\` instead of \`git -c\`, and re-run this. Refusing rather than warning because this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
-			fi
+				fi
+				;;
+			*)
+				ok "private layer remote is not http(s), so no credential helper applies and this check has nothing to assert about it — whether it can fetch depends on an ssh key or a filesystem path, neither of which is a local fact preflight can read (quince#121)"
+				;;
+			esac
 		fi
 	else
 		# One refusal for every unusable shape — absent, empty, comments-only, uncompilable —
