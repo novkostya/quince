@@ -184,6 +184,13 @@ Work happens on the boxes. The moment routine work moves back to the Mac the exe
 break-glass and becomes an ordinary hole — and the private-layer section below is this project's own
 record of what it costs when a document describes a different reality from the one that exists.
 
+**That boundary is a norm, and it is one deliberately, because no mechanism distinguishes recovery
+from work.** Both look like `novkostya`-authored activity on the forge, which is indistinguishable
+from the Operator's ordinary rulings and canon approvals — so the obvious tripwire does not separate
+the two cases, and none of the others examined did either. Stated rather than left implied, because
+this paragraph sits ten lines from a file arguing that a sentence nobody can falsify eventually
+stops being true, and an acknowledged norm ages better than an implied guarantee.
+
 ### Issues
 
 - product bugs and feature work → issues **here**, **sanitized at filing** (no LAN IPs,
