@@ -29,7 +29,8 @@ usage: forge-watch <verb>
   stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
                                                signal it — refuses rather than guessing
   owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
-                                               are there open PRs here with no live watch?
+                                               is a live watch owed here? (--author: open PRs you
+                                               authored · --all: the declared set, unconditionally)
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
 
   `watch` OWNS THE LOOP, and the reason it is a verb is the whole of quince#62: a session that
@@ -106,6 +107,26 @@ usage: forge-watch <verb>
   asked of the forge rather than of the declared set, because a PR in an undeclared repository still
   obligates whoever opened it. --all is the architect half: the declared set, since a reviewer's
   obligation cannot be derived from authorship. Neither is defaulted.
+
+  ONLY THE IMPLEMENTER HALF IS ABOUT THE QUEUE (quince#71). --author's set is what that login
+  AUTHORED, so an empty queue genuinely means nothing is owed. --all returns THE WHOLE DECLARED SET
+  UNCONDITIONALLY, with no queue query at all, because a reviewer's set is what ARRIVES: an empty
+  queue is not a finish, since the work is done when nothing further is coming and that is not
+  knowable from inside the session. The two answers therefore carry different REASONS — `declared`
+  versus `open PRs` — and that is not cosmetic: printing "open PRs" for a reviewer resting on an
+  empty queue would be a false justification bolted to a true verdict, which is harder to catch than
+  either error alone.
+
+  Measured on both sides before it was ruled. TWICE an architect overrode the gate, armed against its
+  "nothing owed", and a PR arrived within ~15 minutes (quince#69, quince#73). ONCE an architect
+  OBEYED it, stopped on an empty queue, and went dark — the gate silent throughout, because by its
+  own definition nothing was owed. Two overrides that were right and one obedience that was wrong is
+  a gate wrong in one direction only.
+
+  A consequence worth knowing: --all no longer touches the forge. Whether a live watch exists over a
+  declared set is answerable from local state, so the hook's reviewer path cannot be wedged by an
+  unreachable forge. The refusal that used to guard it — "a queue that could not be read is not a
+  queue that is empty" — was right for the question it answered, and the question changed.
 
   --hook speaks the Claude Code Stop-hook protocol (JSON in on stdin, JSON out on stdout) and is
   wired in .claude/settings.json. It BLOCKS ONCE with the exact command to run, and on the second
@@ -808,7 +829,7 @@ replay() {
 			# forge query and the process table are the impure halves and are not here — same split as
 			# step() and watch_report(), for the same reason.
 			jq -r '.table[] | "\(.[0]) \(.[1])"' "$_f" >"$_tmp/table"
-			_got=$(owed_decide "$_tmp/table") && _rc=0 || _rc=$?
+			_got=$(owed_decide "$_tmp/table" "$(jq -r '.mode // "author"' "$_f")") && _rc=0 || _rc=$?
 			_got=$(printf '%s\nexit=%s\n' "$_got" "$_rc" | grep -v '^$' | sort)
 			_want=$(jq -r '.expect[], "exit=\(.expect_exit)"' "$_f" | sort)
 			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
@@ -1513,18 +1534,29 @@ watch_loop() {
 # Exit codes: 0 nothing owed · 8 a watch is owed and is not live.
 # ---------------------------------------------------------------------------
 owed_decide() {
-	# $1: a file of "<repo> <class>" lines, class being `status`'s exit code. PURE — no forge, no
-	# process table, no clock — for the same reason step() and watch_report() are: the deciding half is
-	# the half that has been wrong, and it can only be fixtured if it does not fetch.
+	# $1: a file of "<repo> <class>" lines, class being `status`'s exit code. $2: the role's mode,
+	# `author` or `all`. PURE — no forge, no process table, no clock — for the same reason step() and
+	# watch_report() are: the deciding half is the half that has been wrong, and it can only be
+	# fixtured if it does not fetch.
+	#
+	# The two halves owe a watch for DIFFERENT REASONS, and after quince#71 the line says which.
+	# For the implementer the reason is that it has open PRs — a fact about the queue, which is why
+	# `--author` asks the forge. For the reviewer the reason is that the repository is in the declared
+	# set at all, and the queue is irrelevant: **an empty queue is not a legitimate finish**, because a
+	# reviewer's work is not done when the queue is empty but when nothing further is coming, and that
+	# is not knowable from inside. Printing "open PRs" for a reviewer whose queue is empty would be a
+	# false reason bolted to a true verdict, which is worse than either mistake alone.
 	_od=0
+	_od_mode=${2:-author}
+	if [ "$_od_mode" = all ]; then _od_why='declared'; else _od_why='open PRs'; fi
 	while read -r _od_repo _od_cls; do
 		[ -n "$_od_repo" ] || continue
 		case "$_od_cls" in
-		0) printf 'ok    %s — open PRs, and a live watch\n' "$_od_repo" ;;
-		3) printf 'OWED  %s — open PRs, watch=dead. Re-arm from that state; do NOT reseed it.\n' "$_od_repo" ;;
-		4) printf 'OWED  %s — open PRs, and no watch has ever been armed here.\n' "$_od_repo" ;;
-		5) printf 'OWED  %s — open PRs, watch=wedged. Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_repo" ;;
-		*) printf 'OWED  %s — open PRs, and the watch class could not be read (%s).\n' "$_od_repo" "$_od_cls" ;;
+		0) printf 'ok    %s — %s, and a live watch\n' "$_od_repo" "$_od_why" ;;
+		3) printf 'OWED  %s — %s, watch=dead. Re-arm from that state; do NOT reseed it.\n' "$_od_repo" "$_od_why" ;;
+		4) printf 'OWED  %s — %s, and no watch has ever been armed here.\n' "$_od_repo" "$_od_why" ;;
+		5) printf 'OWED  %s — %s, watch=wedged. Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_why" "$_od_repo" ;;
+		*) printf 'OWED  %s — %s, and the watch class could not be read (%s).\n' "$_od_repo" "$_od_why" "$_od_cls" ;;
 		esac
 		[ "$_od_cls" = 0 ] || _od=8
 	done <"$1"
@@ -1570,15 +1602,27 @@ owed_repos() {
 		fi
 		jq -r '.[].repository.nameWithOwner' "$_or_tmp" | sort -u
 	else
-		for _or_r in $(forge_set "$FORGE_SET_FILE"); do
-			if ! "$_or_gh" pr list -R "$_or_r" --state open --json number >"$_or_tmp" 2>"$_or_tmp.err"; then
-				_or_why=$(head -1 "$_or_tmp.err" 2>/dev/null | cut -c1-120)
-				rm -f "$_or_tmp" "$_or_tmp.err"
-				die "could not list open PRs in $_or_r: ${_or_why:-no_stderr_from_gh}. REFUSING to
-    answer: a queue that could not be read is not a queue that is empty."
-			fi
-			[ "$(jq 'length' "$_or_tmp")" -gt 0 ] && printf '%s\n' "$_or_r"
-		done
+		# THE WHOLE DECLARED SET, unconditionally — no queue query at all (quince#71).
+		#
+		# This used to list open PRs per repo and return only the non-empty ones, which made `owed
+		# --all` accurate about the PRESENT and wrong as a FINISH CONDITION. It was faithful to
+		# `/architect` §7, and §7 was the thing that was wrong: **an empty queue is not a legitimate
+		# finish for a reviewer.** An implementer's set is what it authored and cannot change without
+		# it; a reviewer's set is what ARRIVES, and nothing inside the session can know that nothing
+		# further is coming.
+		#
+		# It was measured on both sides before it was ruled. Twice an architect overrode the gate,
+		# armed against its "nothing owed", and a PR arrived within ~15 minutes (quince#69, quince#73).
+		# Once an architect OBEYED it, stopped on an empty queue, and went dark with no watch — the gate
+		# silent throughout, because by its own definition nothing was owed. Two overrides that were
+		# right and one obedience that was wrong is a gate that is wrong in one direction only.
+		#
+		# It also removes a forge call from the hook's path, and that is not merely a saving: the
+		# question "is a watch live on my declared set" is answerable entirely from local state, so
+		# `owed --all` can no longer be wedged by an unreachable forge. The refusal it used to need —
+		# "a queue that could not be read is not a queue that is empty" — is gone because the queue is
+		# no longer read. That refusal was right for the question it was answering; the question changed.
+		forge_set "$FORGE_SET_FILE"
 	fi
 	rm -f "$_or_tmp" "$_or_tmp.err"
 }
@@ -1988,7 +2032,7 @@ owed)
 			rm -f "$_hr" "$_hr.err" "$_hr.tab"
 			exit 0
 		fi
-		_hout=$(owed_decide "$_hr.tab") && _hrc=0 || _hrc=$?
+		_hout=$(owed_decide "$_hr.tab" "$_rolemode") && _hrc=0 || _hrc=$?
 		rm -f "$_hr" "$_hr.err" "$_hr.tab"
 		if [ "$_hrc" = 0 ]; then exit 0; fi
 		# The hints are built from the OWED rows themselves, so the message names the real
@@ -2028,11 +2072,11 @@ The loop must exit when it finds something; a loop that cannot exit cannot wake 
 	owed_repos "$_ghcmd" "$_mode" "$_author" >"$_or"
 	owed_classify <"$_or" >"$_or.tab"
 	if [ ! -s "$_or.tab" ]; then
-		printf 'forge-watch: nothing owed — no open PRs in scope, so no watch is owed for them.\n'
+		printf 'forge-watch: nothing owed — no open PRs authored by this session, so no watch is owed for them.\n    (This branch is the IMPLEMENTER half only. The reviewer half always owes a watch on its declared set,\n     queue or no queue — quince#71.)\n'
 		rm -f "$_or" "$_or.tab"
 		exit 0
 	fi
-	owed_decide "$_or.tab" && _orc=0 || _orc=$?
+	owed_decide "$_or.tab" "$_mode" && _orc=0 || _orc=$?
 	rm -f "$_or" "$_or.tab"
 	exit "$_orc"
 	;;
