@@ -1,0 +1,35 @@
+{
+  "note": "quince#80's SECOND open question, decided: 'Is an issue close an event worth waking for? A closed blocker is exactly the news a blocked session wants, so probably yes — but it is also how issues get tidied, so it may be noise.' Ruled yes FOR THE DECLARED SET, and the tidying argument is what makes the narrowing safe rather than arbitrary: nobody tidies an issue a session has explicitly said it is stuck on, and if they do, that is still the news. The event carries NO ACTOR. `gh issue view` does not report who closed an issue, and naming the most recent commenter instead would be a bystander presented as an answer — this tool has already been fixed once for exactly that (see updated-unattributable.json). `issue-updated` fires beside it as the backstop and DOES carry an actor, because the close moved updatedAt and a comment explains it; the two are consistent, not contradictory.",
+  "before": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [70, 75],
+      "declared_at": "2026-07-27T06:00:00Z",
+      "items": [
+        { "number": 70, "state": "OPEN", "updatedAt": "2026-07-27T07:29:31Z",
+          "closed_at": null, "state_reason": "", "labels": [], "activity": [] },
+        { "number": 75, "state": "OPEN", "updatedAt": "2026-07-27T07:40:00Z",
+          "closed_at": null, "state_reason": "", "labels": [], "activity": [] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "items": [
+        { "number": 70, "state": "OPEN", "updatedAt": "2026-07-27T07:29:31Z",
+          "closed_at": null, "state_reason": "", "labels": [], "activity": [] },
+        { "number": 75, "state": "CLOSED", "updatedAt": "2026-07-27T08:15:02Z",
+          "closed_at": "2026-07-27T08:15:02Z", "state_reason": "COMPLETED", "labels": [],
+          "activity": [ {"at":"2026-07-27T08:14:50Z","actor":"novkostya","kind":"comment"} ] }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-updated issue=75 at=2026-07-27T08:15:02Z actor=novkostya kind=comment",
+    "event=issue-comment issue=75 at=2026-07-27T08:14:50Z actor=novkostya",
+    "event=issue-closed issue=75 at=2026-07-27T08:15:02Z reason=COMPLETED"
+  ]
+}

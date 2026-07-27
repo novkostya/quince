@@ -164,6 +164,24 @@ git -C "$PWD" pull --ff-only          # the watch set is this checkout's copy
 bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 ```
 
+**The reviewer declares too, and its case is the one quince#80 was filed from.** The blocked list that
+went unwatched was an *architect's* — quince#70/#71/#72/#75/#78/#80, most with no PR at all — and the
+only reason a ruling on it was ever seen was a hand re-read the session had committed to when filing
+the issue. That is a human-remembers mitigation at the head of the escalation channel:
+
+```sh
+bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60 \
+  --issue novkostya/quince#71 --issue novkostya/quince#80
+```
+
+Under `--all` the repo is required — issue numbers collide across repositories, and a bare number is
+refused rather than guessed at. `--issue` replaces the set, `--no-issues` clears it, passing neither
+keeps what is on disk, and `status --all` prints the declared set with its **age** so an inherited
+declaration is visible rather than silently watched.
+
+**Anything you have filed and are waiting on a ruling for belongs in that list**, and so does anything
+you have parked. A ruling you cannot be woken by is a ruling that waits on you re-reading the issue.
+
 **The loop must exit when it finds something; a loop that cannot exit cannot wake you.** A session is
 woken by a background task *completing*, so the `while :; do tick; sleep 60; done` this section used to
 print detects everything and delivers nothing. Not hypothetical: the first architect session under this

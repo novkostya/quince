@@ -1,0 +1,34 @@
+{
+  "note": "THE FIXTURE BAR quince#80 set, half one: a declared-blocking issue gains a comment while the session holds a stale read of it, and an event must fire AND NAME THE ISSUE. This is the escalation channel. The measured case is the ruling on quince#44, which landed as a comment on an issue while the architect's blocked list was quince#70/#71/#72/#75/#78/#80 — most with no PR at all — and the only reason it was ever seen was 'a hand re-read I'd committed to when filing the issue'. A human-remembers mitigation at the head of the one channel that carries authority. Two events fire, not one, and that is deliberate: `issue-comment` is the typed event a blocked session acts on, and `issue-updated` is the unconditional backstop, exactly as `updated` is on the PR half. A backstop that trusts the classifier is not a backstop.",
+  "before": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [44],
+      "declared_at": "2026-07-27T06:00:00Z",
+      "items": [
+        { "number": 44, "state": "OPEN", "updatedAt": "2026-07-27T06:12:00Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-27T06:12:00Z","actor":"quince-bot","kind":"comment"} ] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "items": [
+        { "number": 44, "state": "OPEN", "updatedAt": "2026-07-27T07:03:41Z",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [
+            {"at":"2026-07-27T06:12:00Z","actor":"quince-bot","kind":"comment"},
+            {"at":"2026-07-27T07:03:41Z","actor":"novkostya","kind":"comment"}
+          ] }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-updated issue=44 at=2026-07-27T07:03:41Z actor=novkostya kind=comment",
+    "event=issue-comment issue=44 at=2026-07-27T07:03:41Z actor=novkostya"
+  ]
+}
