@@ -1,0 +1,89 @@
+{
+  "kind": "sequence",
+  "note": "quince#103: step() wrote the observation plus {observed: true} and carried forward only `.issues`, so EVERY write dropped `.watch`. The watcher survived because tick()'s watcher branch rewrites its own record immediately after step(); a HAND-RUN tick has no such branch, so it erased the record of a watcher it does not own. The comment on tick()'s write claimed a hand tick 'can never make a dead watcher look alive' — true, and the direction that does not matter. The broken mirror is worse: a live watcher read as dead, so `watch_preflight`'s live-refusal does not fire and the next arm puts a SECOND watcher on one state file — quince#50's race, reached through the guard rather than around it. quince#100's ruling then put a foreground tick immediately before every arm, turning a latent bug into the standard turn shape. Both step() write paths are covered here because the bug was in both: tick 0 takes the first-observation path (initial has no `observed`), tick 1 takes the main path. NOTE this fixture asserts STATE, not events — the events were correct throughout, which is why all 38 existing fixtures passed against the defect. That assertion did not exist before this fixture (see compare_state).",
+  "initial": {
+    "prs": [],
+    "watch": {
+      "pid": 4194303,
+      "pid_start": "998877",
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-27T13:00:00Z",
+      "due": "2026-07-27T13:01:00Z"
+    }
+  },
+  "steps": [
+    {
+      "label": "the FIRST-OBSERVATION write path must not eat the watcher record",
+      "observation": {
+        "prs": [
+          {
+            "number": 102,
+            "state": "OPEN",
+            "updatedAt": "2026-07-27T13:00:30Z",
+            "merge_state": "CLEAN",
+            "checks": [
+              {
+                "name": "gates",
+                "conclusion": "SUCCESS"
+              }
+            ],
+            "reviews": [],
+            "activity": []
+          }
+        ]
+      },
+      "expect_events": [
+        "event=first-observation count=1"
+      ],
+      "expect_state": [
+        ".watch != null",
+        ".watch.pid == 4194303",
+        ".watch.pid_start == \"998877\"",
+        ".watch.interval_s == 60",
+        ".watch.last_watcher_tick == \"2026-07-27T13:00:00Z\"",
+        ".watch.due == \"2026-07-27T13:01:00Z\""
+      ]
+    },
+    {
+      "label": "the MAIN write path must not eat it either — the record is unchanged after a real diff",
+      "observation": {
+        "prs": [
+          {
+            "number": 102,
+            "state": "OPEN",
+            "updatedAt": "2026-07-27T13:05:00Z",
+            "merge_state": "CLEAN",
+            "checks": [
+              {
+                "name": "gates",
+                "conclusion": "SUCCESS"
+              }
+            ],
+            "reviews": [
+              {
+                "state": "CHANGES_REQUESTED"
+              }
+            ],
+            "activity": [
+              {
+                "at": "2026-07-27T13:05:00Z",
+                "actor": "novkostya",
+                "kind": "review"
+              }
+            ]
+          }
+        ]
+      },
+      "expect_events": [
+        "event=updated pr=102 at=2026-07-27T13:05:00Z actor=novkostya kind=review",
+        "event=review pr=102 verdict=CHANGES_REQUESTED"
+      ],
+      "expect_state": [
+        ".watch != null",
+        ".watch.pid == 4194303",
+        ".watch.last_watcher_tick == \"2026-07-27T13:00:00Z\"",
+        ".watch.due == \"2026-07-27T13:01:00Z\""
+      ]
+    }
+  ]
+}
