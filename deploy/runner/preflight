@@ -179,6 +179,39 @@ else
 		600 | 400) ;;
 		*) printf 'preflight: note — %s is mode %s, expected 600. It is a list OF the sensitive strings; chmod 600 it.\n' "$PATTERN_FILE" "$pmode" ;;
 		esac
+
+		# --- PRESENT IS NOT FRESH: a layer that cannot ADVANCE (quince#121) --------------------
+		# "Reach" meant presence, and a clone can be present, readable, and unable to receive
+		# anything ever again. That is not hypothetical: `provision` wired its clones with `git -c`,
+		# which applies to one invocation and is never written to `.git/config`, so BOTH boxes ran
+		# unwired. The arch box sat four commits behind and swept with a matcher proven only to
+		# COMPILE — while being the box that performs merges, hence the last gate before public
+		# history. The runner looked healthy solely because a session had hand-configured the helper
+		# to push and had not registered that it was patching a bug.
+		#
+		# WHY THE WIRING AND NOT A LIVE FETCH. `git ls-remote` fails identically for "no credential"
+		# and "network is down", so refusing on it would take a box out over a flaky link — a false
+		# refusal in the one check that decides whether the box starts at all. The credential helper
+		# is a LOCAL, deterministic fact and it is precisely what quince#121 was: a box with a helper
+		# and no network is fine and will catch up; a box with no helper can never catch up.
+		#
+		# WHY REFUSE RATHER THAN REPORT, when the permission-bit note above deliberately does not.
+		# That one is cosmetic and a refusal would turn a one-command fix into an outage. This one is
+		# the difference between a privacy gate that is current and one that is frozen at whatever it
+		# held when the box was built — and it is silent, indefinite, and on the merge path. The
+		# architect's framing is the deciding one: with the root cause known, this assertion IS the
+		# regression test for it, and a regression test that only prints is not one.
+		#
+		# Only for a GIT clone. A hand-placed layer is a documented path (the refusal below names it)
+		# and has no remote to be wired to; refusing it here would forbid the fallback this file
+		# already prescribes.
+		if [ -d "$PRIVATE_LAYER/.git" ]; then
+			if [ -n "$(git -C "$PRIVATE_LAYER" config --get credential.helper 2>/dev/null)" ]; then
+				ok "private layer can advance — a credential helper is wired into the clone"
+			else
+				bad "the private layer at $PRIVATE_LAYER is a git clone with NO credential helper, so it can never fetch: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box. Present is not fresh (quince#121). Fix: run deploy/runner/provision, which now persists the helper with \`git config\` instead of \`git -c\`, and re-run this. Refusing rather than warning because this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
+			fi
+		fi
 	else
 		# One refusal for every unusable shape — absent, empty, comments-only, uncompilable —
 		# because they are one fact: this box cannot gate. The gate's own line is quoted as the
