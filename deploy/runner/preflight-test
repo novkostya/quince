@@ -61,6 +61,13 @@ EMPTY_LAYER="$TMP/layer-empty"
 mkdir -p "$EMPTY_LAYER"
 : >"$EMPTY_LAYER/privacy-patterns.txt"
 
+# Bytes present, ZERO usable patterns. The gap between "0 bytes" and "1 pattern", and the one
+# shape that most looks like a valid list — `test -s` cannot see through it, which is exactly how
+# preflight and privacy-check came to disagree about the same file.
+COMMENTS_LAYER="$TMP/layer-comments"
+mkdir -p "$COMMENTS_LAYER"
+printf '# only a comment\n\n# another\n' >"$COMMENTS_LAYER/privacy-patterns.txt"
+
 LOOSE_LAYER="$TMP/layer-loose"
 mkdir -p "$LOOSE_LAYER"
 printf '# synthetic\nzzsecrethostzz\n' >"$LOOSE_LAYER/privacy-patterns.txt"
@@ -92,7 +99,7 @@ chmod 644 "$LOOSE_LAYER/privacy-patterns.txt"
 # shellcheck disable=SC2086
 PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
 	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
-	-u QUINCE_PRIVATE_LAYER"
+	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK"
 
 # Every case gets a SYNTHETIC private layer by default. preflight now refuses without one, so
 # otherwise every want-exit-0 case would be asserting "this box happens to have
@@ -211,14 +218,14 @@ fi
 # Ruled by the Operator: refuse, rather than come up and run a gate that silently cannot run. The
 # defect being closed is that a rebuilt box returns to the gate-that-cannot-gate state with nothing
 # announcing it, while sessions have learned to trust the file a rebuild removed.
-expect "an unreachable private layer refuses" 1 "cannot reach the private layer" -- \
+expect "an unreachable private layer refuses" 1 "cannot run the privacy gate" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
 
 # The message must NAME THE FIX THAT EXISTS TODAY — hand-placement. When `provision` learns to
 # place the layer, correcting this belongs to that change, and this assertion is what will fail and
 # force it rather than letting the text rot into naming a fix nobody has built.
-expect "…and names the fix that exists today" 1 "Place the list at that path" -- \
+expect "…and names the fix that exists today" 1 "place a usable pattern list at" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$ABSENT_LAYER"
 
@@ -239,13 +246,32 @@ fi
 # An EMPTY list is worse than an absent one: it matches nothing and reports every sweep clean, so
 # it looks like it ran. privacy-check exits 2 on it (quince#41); preflight refuses to start a box
 # that would produce it.
-expect "an EMPTY pattern list refuses, and says why it is worse" 1 "looks like it ran" -- \
+expect "an EMPTY pattern list refuses, quoting the gate" 1 "is EMPTY" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$EMPTY_LAYER"
 
+# A COMMENTS-ONLY list has bytes and zero usable patterns. Against the first version of this
+# change it PASSED — the box started, asserting the gate could run, while privacy-check returned 2
+# on the identical file. preflight and the gate must agree about the same file by construction,
+# which is why the verdict is now the gate's own exit code rather than a second implementation.
+expect "a comments-only pattern list refuses" 1 "cannot run the privacy gate" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$COMMENTS_LAYER"
+
+# …and the refusal quotes what the GATE observed, so the two tools cannot drift into disagreeing
+# messages either.
+expect "…quoting the gate's own observation" 1 "no usable patterns" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$COMMENTS_LAYER"
+
+# A missing gate is not a pass either: preflight cannot establish that the box can gate without it.
+expect "a missing privacy-check refuses rather than assuming" 1 "privacy gate is missing" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	QUINCE_PRIVACY_CHECK=/nonexistent/privacy-check
+
 # A usable layer passes and states the pattern COUNT, so a reader can tell a real layer from a
 # nearly-empty one — the same reason privacy-check and forge-watch print their counts.
-expect "a usable private layer passes, stating the count" 0 "private layer present, 1 patterns" -- \
+expect "a usable private layer passes, stating the count" 0 "private layer present, 1 usable patterns" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
 
 # A loose mode is REPORTED, NOT ENFORCED — matching the apk-drift reporter, and for the same
