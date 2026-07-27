@@ -116,9 +116,10 @@ printf '# only a comment\n\n' >"$comment_dir/privacy-patterns.txt"
 expect "comments-only list refuses" 2 "no usable patterns" -- \
 	"$CHECK" --patterns "$comment_dir"
 
-# An unusable matcher must refuse rather than fall back to whatever $PATH offers. On the runner
-# `grep` is ugrep and `/bin/grep` is busybox; a gate that silently picks one is a gate whose
-# semantics depend on the box.
+# An unusable matcher must refuse rather than fall back to whatever the environment offers. The
+# gate really does run under two implementations — busybox on the boxes, GNU grep in CI — and a
+# gate that silently picks one is a gate whose semantics depend on where it ran. (This suite is
+# green under both: measured on busybox here and on GNU grep 3.11 in a Noble container.)
 good="$TMP/good"
 make_patterns "$good"
 expect "missing matcher refuses" 2 "not found" -- \
