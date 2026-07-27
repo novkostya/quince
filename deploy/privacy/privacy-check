@@ -1,0 +1,232 @@
+#!/bin/sh
+# privacy-check — sweep content for Operator-private strings, and FAIL when it cannot sweep.
+#
+# The defect this exists to remove (quince#41): the previous implementation printed
+# "no local/privacy-patterns.txt (contributor/CI box) — skipped" and exited 0. A checklist
+# cannot tell that apart from "clean", so the gate could tick itself on every box that was
+# unable to run it — which was every box where work actually happens (quince#44).
+#
+# Three exit codes, because "violation" and "could not look" are different facts and a
+# caller that conflates them is the bug:
+#
+#   0  swept, nothing matched          — a real clean, and the output says what was scanned
+#   1  swept, something matched        — a violation, with source, line number and pattern
+#   2  DID NOT SWEEP                   — no list, empty list, unusable matcher, bad arguments
+#
+# Scope modes, because a sweep of the staged diff proves nothing about a branch that is
+# already committed (quince#41 req 2 — after `git commit` the staged diff is empty, so the
+# gate reported success having examined nothing):
+#
+#   privacy-check                         the staged diff        (the commit-time gate)
+#   privacy-check --ref origin/main...HEAD the branch: diff AND every commit message
+#   privacy-check --text FILE             PR/issue text; FILE may be /dev/stdin
+#
+# --ref and --text compose; commit messages are public history and are swept by name here
+# rather than left to a second command someone has to remember.
+set -eu
+
+ME=$(basename "$0")
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME [--ref <range>] [--text <file>] [--patterns <dir>]
+
+  (no --ref)        scan the staged diff (git diff --cached)
+  --ref <range>     scan the whole branch: added lines of \`git diff <range>\` AND the
+                    commit messages of \`git log <range>\`
+  --text <file>     also scan <file> verbatim — PR body, journal entry. Use /dev/stdin
+                    to pipe it.
+  --patterns <dir>  where the lists live (default: \$PRIVACY_PATTERN_DIR, else ./local)
+
+exit: 0 clean · 1 violation · 2 DID NOT RUN
+EOF
+}
+
+# --- arguments ---------------------------------------------------------------------------
+REF=""
+TEXT=""
+PATTERN_DIR="${PRIVACY_PATTERN_DIR:-local}"
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--ref) REF="${2:?--ref needs a range}"; shift 2 ;;
+	--text) TEXT="${2:?--text needs a file}"; shift 2 ;;
+	--patterns) PATTERN_DIR="${2:?--patterns needs a directory}"; shift 2 ;;
+	-h | --help) usage; exit 0 ;;
+	*)
+		printf '%s: unknown argument %s\n' "$ME" "$1" >&2
+		usage
+		# Exit 2: an argument typo means the sweep did not happen. Anything else would let a
+		# misspelled flag read as a clean sweep, which is this file's entire subject.
+		exit 2
+		;;
+	esac
+done
+
+CI_LIST="$PATTERN_DIR/privacy-patterns.txt"     # matched case-INSENSITIVELY
+CS_LIST="$PATTERN_DIR/privacy-patterns-cs.txt"  # matched case-SENSITIVELY (optional)
+CANARY="$PATTERN_DIR/privacy-canary.txt"        # known-positive probes (optional)
+
+say() { printf '%s: %s\n' "$ME" "$*"; }
+cannot_run() {
+	printf '%s: DID NOT RUN — %s\n' "$ME" "$*" >&2
+	printf '%s: this is NOT a clean result. Nothing was swept.\n' "$ME" >&2
+	exit 2
+}
+
+# --- the matcher, named rather than inherited ----------------------------------------------
+# A gate whose semantics come from whichever `grep` $PATH resolves first can pass on one box
+# and fail on another, and for THIS gate the bad direction is silent: a pattern that fails to
+# compile reports clean. Measured on the runner (2026-07-26): `grep` is ugrep 7.5.0, `/bin/grep`
+# is busybox. Three implementations are in play across the workflow. So: name the matcher,
+# print it with its version, and prove it compiles every pattern before trusting a clean answer.
+GREP="${PRIVACY_GREP:-grep}"
+command -v "$GREP" >/dev/null 2>&1 || cannot_run "matcher '$GREP' not found (set PRIVACY_GREP)"
+GREP_PATH=$(command -v "$GREP")
+# Only believe --version when the matcher ACCEPTS it. busybox grep has no such flag and prints
+# "grep: unrecognized option: version" — the first draft of this line reported that error string
+# as if it were the version, which is a claim dressed as a fact in the file whose whole subject
+# is claims that cannot be checked. Found by running it on this box, not by reasoning about it.
+if GREP_VERSION=$("$GREP" --version 2>/dev/null | head -n 1) && [ -n "$GREP_VERSION" ]; then
+	:
+else
+	GREP_VERSION="version not reported by this implementation"
+fi
+
+# --- the lists must exist and be non-empty --------------------------------------------------
+# `test -s`, not `test -f`: an empty list matches nothing and would report clean forever. That
+# is the same vacuous pass in a costume.
+[ -e "$CI_LIST" ] || cannot_run "no pattern list at $CI_LIST — on a provisioned box the private layer is placed by deploy/runner/provision (quince#44)"
+[ -s "$CI_LIST" ] || cannot_run "pattern list $CI_LIST is EMPTY — an empty list matches nothing and would report clean forever"
+
+count_patterns() {
+	# `grep -c` exits 1 when the count is zero, so the `|| true` keeps the printed count and
+	# stops `set -e` from turning an empty list into an abort. Written the long way because the
+	# one-line `&& … || echo 0` form prints the count AND the fallback on a zero count.
+	if [ -s "$1" ]; then
+		"$GREP" -cvE '^[[:space:]]*(#|$)' "$1" 2>/dev/null || true
+	else
+		echo 0
+	fi
+}
+CI_COUNT=$(count_patterns "$CI_LIST")
+[ "$CI_COUNT" -gt 0 ] || cannot_run "pattern list $CI_LIST holds no usable patterns (only blanks/comments)"
+
+CS_COUNT=0
+if [ -s "$CS_LIST" ]; then
+	CS_COUNT=$(count_patterns "$CS_LIST")
+fi
+
+# --- prove the matcher can actually compile the lists ---------------------------------------
+# grep exits 2 on a bad pattern, 1 on no-match. Feeding it empty input separates "your regex
+# does not compile here" from "nothing matched", which is the divergence that would otherwise
+# surface as a permanent, silent clean.
+compiles() { printf '' | "$GREP" -qEf "$1" 2>/dev/null || [ $? -eq 1 ]; }
+compiles "$CI_LIST" || cannot_run "matcher $GREP_PATH cannot compile the patterns in $CI_LIST ($GREP_VERSION)"
+if [ "$CS_COUNT" -gt 0 ]; then
+	compiles "$CS_LIST" || cannot_run "matcher $GREP_PATH cannot compile the patterns in $CS_LIST ($GREP_VERSION)"
+fi
+
+say "matcher $GREP_PATH ($GREP_VERSION)"
+if [ "$CS_COUNT" -gt 0 ]; then
+	say "lists $CI_COUNT case-insensitive + $CS_COUNT case-sensitive"
+else
+	# A degraded mode, surfaced rather than swallowed (CLAUDE.md: no silent caps or fallbacks).
+	# While every pattern runs under -i, any pattern relying on case discrimination is not
+	# merely noisy but meaningless: the device-name heuristic matched ordinary product prose
+	# in two consecutive sweeps (quince#41 req 3).
+	say "lists $CI_COUNT case-insensitive; NO case-sensitive list at $CS_LIST"
+	say "      → every pattern runs under -i, so any case-discriminating pattern is inert (quince#41 req 3)"
+fi
+
+# --- the matcher is verified against known-positive input, when the Operator supplies it ------
+# Everything above proves the patterns COMPILE. Only a known-positive probe proves they MATCH.
+if [ -s "$CANARY" ]; then
+	while IFS= read -r probe; do
+		case "$probe" in '' | \#*) continue ;; esac
+		if printf '%s\n' "$probe" | "$GREP" -qiEf "$CI_LIST" 2>/dev/null; then continue; fi
+		if [ "$CS_COUNT" -gt 0 ] && printf '%s\n' "$probe" | "$GREP" -qEf "$CS_LIST" 2>/dev/null; then continue; fi
+		cannot_run "canary probe from $CANARY matched NOTHING — the matcher compiles the lists but does not match what they are meant to catch"
+	done <"$CANARY"
+	say "canary ok — the matcher matches known-positive input"
+else
+	say "no canary at $CANARY — matcher proven to COMPILE the lists, not to match anything"
+fi
+
+# --- gather what we are sweeping ------------------------------------------------------------
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+SOURCES=""
+add_source() { # <label> <file>
+	[ -s "$2" ] || return 0
+	SOURCES="$SOURCES $1:$2"
+}
+
+if [ -n "$REF" ]; then
+	git rev-parse "$REF" >/dev/null 2>&1 ||
+		git rev-list "$REF" >/dev/null 2>&1 ||
+		cannot_run "git cannot resolve the range '$REF'"
+	# Added lines only: a removed private string is a string leaving the tree, and the commit
+	# that ADDED it is what history keeps. `^\+\+\+` is the file header, not content.
+	git diff "$REF" -U0 | "$GREP" -E '^\+' | "$GREP" -vE '^\+\+\+ ' >"$WORK/diff" || true
+	add_source "branch-diff" "$WORK/diff"
+	# Commit messages are public forever and are covered by the same rule as the diff
+	# (CLAUDE.md: "...never enter committed files, commit messages, branch names...").
+	git log "$REF" --format='%s%n%b' >"$WORK/messages" 2>/dev/null || true
+	add_source "commit-message" "$WORK/messages"
+	# The branch name travels to the forge too, and costs one line to cover.
+	git rev-parse --abbrev-ref HEAD >"$WORK/branch" 2>/dev/null || true
+	add_source "branch-name" "$WORK/branch"
+	SCOPE="branch $REF (diff + commit messages + branch name)"
+else
+	git diff --cached -U0 | "$GREP" -E '^\+' | "$GREP" -vE '^\+\+\+ ' >"$WORK/staged" || true
+	add_source "staged-diff" "$WORK/staged"
+	SCOPE="staged diff"
+fi
+
+if [ -n "$TEXT" ]; then
+	[ -r "$TEXT" ] || cannot_run "--text $TEXT is not readable"
+	cat "$TEXT" >"$WORK/text"
+	add_source "text" "$WORK/text"
+	SCOPE="$SCOPE + text"
+fi
+
+say "scope $SCOPE"
+
+# --- sweep ------------------------------------------------------------------------------------
+HITS="$WORK/hits"
+: >"$HITS"
+# SC2086: $SOURCES is a deliberate word-split list. Every path in it is one we built under
+# $WORK (mktemp -d), so no element can contain whitespace.
+# shellcheck disable=SC2086
+for entry in $SOURCES; do
+	label=${entry%%:*}
+	file=${entry#*:}
+	"$GREP" -inEf "$CI_LIST" "$file" 2>/dev/null | sed "s|^|$label:|" >>"$HITS" || true
+	if [ "$CS_COUNT" -gt 0 ]; then
+		"$GREP" -nEf "$CS_LIST" "$file" 2>/dev/null | sed "s|^|$label:|" >>"$HITS" || true
+	fi
+done
+
+if [ -s "$HITS" ]; then
+	printf '%s: PRIVACY VIOLATION — content matches %s\n' "$ME" "$PATTERN_DIR" >&2
+	sed 's/^/    /' "$HITS" >&2
+	printf '%s: fix before this reaches history. Public history is forever (CLAUDE.md).\n' "$ME" >&2
+	exit 1
+fi
+
+# Name what was scanned. "clean" with nothing behind it is the claim this file was written to
+# make impossible: a reader must be able to tell a real sweep from a vacuous one.
+scanned=""
+# shellcheck disable=SC2086
+for entry in $SOURCES; do scanned="$scanned ${entry%%:*}"; done
+
+# An EMPTY scope is not a clean sweep, and must not borrow the word. The first draft printed
+# "clean — swept (nothing — the scope is empty)" and exited 0 on a branch with nothing staged:
+# a vacuous pass wearing the vocabulary of a real one, which is the exact defect this file was
+# written to remove. Exit 0 is still right — there was genuinely nothing to examine — but the
+# sentence has to say that, because "clean" is what a reader ticks a box against.
+if [ -z "$scanned" ]; then
+	say "NOTHING TO SWEEP — the scope is empty. This is not evidence that the branch is clean."
+	exit 0
+fi
+say "clean — swept$scanned against $((CI_COUNT + CS_COUNT)) patterns"

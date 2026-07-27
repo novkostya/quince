@@ -141,9 +141,13 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   Operator-private facts — hostnames, LAN IPs, MACs, network topology, hardware sizing,
   device UDIDs/serials, personal names and paths, lab-log excerpts — never enter
   committed files, **commit messages**, branch names, tags, PR/issue text, or fixtures.
-  Before every push run `make privacy-check` (it greps the *staged* diff and no-ops on
-  boxes without the private pattern list), and re-check the whole branch diff before a
-  merge. A leak that reaches history is an incident: rewrite plus a new pattern.
+  Before every push run `make privacy-check`; before a merge re-run it over the whole
+  branch — `make privacy-check REF=origin/main...HEAD TEXT=<pr-body>`, which covers the
+  diff, the commit messages and the PR text in one command. **Exit `0` clean · `1` a match
+  · `2` DID NOT RUN**, and a `2` is never a clean result: on a box with no usable pattern
+  list the gate refuses instead of exiting 0, so the sweep is *owed*, with the head named,
+  rather than silently ticked (quince#41). A leak that reaches history is an incident:
+  rewrite plus a new pattern.
 - **State honesty.** Nothing — job engine, API, UI, logs, PR text, journal entry — claims
   more than was proven. A backup is `succeeded` only after verify+commit; a failed
   adapter says so; an unrun gate is declared unrun, with its owner named.

@@ -37,13 +37,18 @@ Conflict resolution and review fixes create committed content that never passed 
 commit-time gate:
 
 ```sh
-gh pr checkout <n> --repo novkostya/quince
+bin/gh-bot pr checkout <n> --repo novkostya/quince
 git fetch origin main
-git diff origin/main...HEAD | grep '^+' | grep -inEf local/privacy-patterns.txt
-git log origin/main..HEAD --format='%s%n%b'
+make privacy-check REF=origin/main...HEAD
 ```
 
-Both must come back clean. (No pattern file on this box → read for it by hand.)
+This is the command the protocol used to describe without providing: it sweeps the diff and
+the commit messages together, and **exits non-zero rather than reporting clean when it could
+not sweep at all** (quince#41).
+
+`0` clean · `1` a match — do not merge · **`2` DID NOT RUN**, which is not permission to
+merge. A `2` means this box has no usable pattern list, so the re-sweep is **owed** and the
+merge waits on someone who can run it, naming the head they swept.
 
 ## 3. Merge
 
