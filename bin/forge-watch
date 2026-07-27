@@ -1230,9 +1230,20 @@ tick() {
 	# `issue-fetch-failed … reason=GraphQL:_Could_not_resolve_to_an_issue…`: the tool answering
 	# correctly about a question it should never have asked. `quince#87` is quince's, not ours, and a
 	# repo-qualified reference is precisely the one a per-repo fetch must NOT claim.
+	#
+	# The class is EXACTLY the word characters, and the first version added `/` and `-` to it — which
+	# is what the comment above already claimed it did not. Review caught the discrepancy and the fix
+	# went the way the comment was written, because the two extra characters bought nothing and cost
+	# something. Every qualified form is blocked by the ALPHANUMERIC immediately before the `#`
+	# (`quince#87`, `quince-devlog#87`, `novkostya/quince#5`, `v1.2#3`), so `/` and `-` guarded only
+	# `docs/#5` and `#12-#13` — and on the second they SILENTLY DROPPED the second reference, which is
+	# the no-silent-caps rule broken on the escalation channel by a character class. Measured both ways
+	# before changing it: `fixes #12-#13` went [12] → [12,13], every block above stayed blocked, and
+	# the one behaviour widened is `docs/#5`, which now yields 5. Stated rather than discovered later:
+	# that form is not repo-qualified, so claiming it is defensible, and it is the whole price.
 	_refs=$(jq -r '[.[] | select(.state == "OPEN")
 		| [(.closingIssuesReferences // [])[] | .number]
-		  + [(.title // "") | scan("(?:^|[^A-Za-z0-9_/-])#([0-9]+)") | .[0] | tonumber]]
+		  + [(.title // "") | scan("(?:^|[^A-Za-z0-9_])#([0-9]+)") | .[0] | tonumber]]
 		| flatten | unique | .[]' "$_raw" 2>/dev/null || true)
 
 	_iss=$(mktemp)
