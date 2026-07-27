@@ -132,10 +132,12 @@ _layer_helper='!f() { echo username='"$LAYER_USER"'; echo "password=$(cat '"$LAY
 #   git -c credential.helper=H clone <url> dst
 #   git -C dst config --get credential.helper   → exit 1, no value
 #
-# This is why the architect box sat on a private layer four commits behind and reported a privacy
-# matcher proven only to COMPILE, while the box that performs merges. It was NOT arch-specific — the
-# runner's clone was equally unwired and only worked because a session hand-configured the helper to
-# push, without registering that it was patching this bug rather than doing setup.
+# This is why the architect box sat on a private layer four commits behind — `git rev-list --count
+# e6eba87..dd2d1e1` in the layer repo, checkable by anyone who holds it — and swept with a matcher
+# proven only to COMPILE, while being the box that performs merges, and therefore the last gate any
+# change passes before public history. It was NOT arch-specific: the runner's clone was equally
+# unwired and only worked because a session hand-configured the helper in order to push, without
+# registering that it was patching this bug rather than doing setup.
 #
 # Written with `git config` at the repository level, so it lands in `.git/config` where a later
 # `git pull` by a human or an agent will find it. The token itself still never appears: the helper is
@@ -179,13 +181,28 @@ fi
 # The layer is only useful if it can ADVANCE, so say which it is rather than leaving both to look the
 # same. quince#123 makes the same point about `preflight`'s "reach": presence is not freshness, and a
 # clone that cannot fetch is the failure that hides behind a directory that exists.
+#
+# TWO CHECKS, IN THIS ORDER, AND THE ORDER IS THE POINT. `git ls-remote` fails identically for "no
+# credential" and "the network is down", so it cannot support a claim about a DURABLE state — and
+# "present but frozen" is exactly such a claim. An earlier version of this block made it from
+# `ls-remote` alone, which would have announced a correctly-wired box as frozen on a flaky link and
+# sent somebody to re-provision a machine that needed nothing.
+#
+# So the helper — LOCAL and deterministic — decides the durable verdict, and `ls-remote` is only
+# consulted once the wiring is known good, where a failure genuinely is transient and is reported as
+# unverified rather than as broken. Same reasoning as `preflight`'s check in the follow-up PR; the
+# two should not disagree about what evidence supports what claim.
 if [ -d "$LAYER_DIR/.git" ]; then
-	if git -C "$LAYER_DIR" ls-remote -q origin HEAD >/dev/null 2>&1; then
-		say "private layer can FETCH (credential helper wired); it can receive future changes"
-	else
-		say "WARNING: private layer at $LAYER_DIR CANNOT FETCH — it is present but frozen."
+	if [ -z "$(git -C "$LAYER_DIR" config --get credential.helper 2>/dev/null)" ]; then
+		say "WARNING: private layer at $LAYER_DIR has NO credential helper — it is present but frozen."
 		say "     Every privacy sweep on this box will use whatever it holds now, and no future"
 		say "     pattern, canary or case-sensitive list will ever reach it (quince#121)."
+	elif git -C "$LAYER_DIR" ls-remote -q origin HEAD >/dev/null 2>&1; then
+		say "private layer can FETCH (credential helper wired, remote answered)"
+	else
+		say "note: private layer is wired (credential helper present) but the remote did not answer"
+		say "     just now, so fetching is UNVERIFIED rather than known-broken. Transient network"
+		say "     failure and a bad credential look the same here; the wiring above is the durable fact."
 	fi
 fi
 
