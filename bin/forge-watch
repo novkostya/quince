@@ -204,11 +204,21 @@ events: first-observation · queue-empty · updated · opened · review · check
   `updatedAt` has moved, or after it. Anything that reads two of them and infers an order is reading
   a race (quince#72).
 
-  Measured on BOTH boxes, same method, same sample size, 2026-07-27 — and the numbers DISAGREE BY
-  A FACTOR OF FOUR, which is the strongest part of the evidence:
+  Measured on BOTH boxes, same method, 2026-07-27 — and the numbers DISAGREE BY A FACTOR OF FOUR,
+  which is the strongest part of the evidence:
 
-      runner box      12 deliveries — 11 in one tick,  1 split      (~8% split)
-      architect box   12 deliveries —  8 in one tick,  4 split      (~33% split)
+      runner box      12 deliveries — 11 in one tick,  1 split      (~8% split)   @ 12:00Z
+      architect box   13 deliveries —  9 in one tick,  4 split      (~31% split)  @ 12:08Z
+
+  THE ARCHITECT FIGURE MOVED WHILE THIS PARAGRAPH WAS BEING REVIEWED — 8-of-12 at 12:00Z, 9-of-13
+  eight minutes later — because reviewing this change was itself a review delivery, and it landed
+  same-tick. **A number that drifts while you are reading it is a better argument than the 4× spread
+  is.** Both are timestamped rather than dated, because `2026-07-27` is a day and this moved inside
+  one.
+
+  A BIAS PRESENT IN BOTH, and in neither's favour: these count deliveries a watcher was ALIVE TO
+  OBSERVE. Both boxes had unwatched windows today, so both denominators are of observed acts, not of
+  acts.
 
   Both figures are here because either one alone is a lie by omission. The first version of this
   paragraph carried the runner's 11-of-12 as though it were THE rate and gave the other box a
