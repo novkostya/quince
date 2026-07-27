@@ -746,6 +746,15 @@ watch_report() {
 			| (($w.starting_bound_s // $iv)) as $sb
 			| (if $lw == null then null else ($t - ($lw | fromdate)) end) as $age
 			| (if $am == null then null else ($t - ($am | fromdate)) end) as $since_arm
+			# ORDER IS LOAD-BEARING, and these two arms must never swap. stale_heartbeat fires on
+			# $age == null — the NULL arm, which needs no elapsed time at all — and a freshly-armed
+			# watcher has last_watcher_tick null by construction, because that is the fact that
+			# DEFINES starting. So the record watch_arm writes on purpose sits squarely inside wedged
+			# unless starting is evaluated FIRST. Measured against the pre-change tool, this exact
+			# record classified wedged reason=stale_heartbeat, with a note saying to run
+			# forge-watch stop — i.e. every freshly-armed watcher would instruct its session to kill
+			# it: the worst face of quince#95 shipped as the fix for quince#95, prevented only by this
+			# ordering. Pinned by watch-starting-is-neither-dead-nor-wedged.json.
 			| (if $alive == "no" then "no_process"
 			   elif ($lw == null and $am != null and $since_arm <= $sb) then "starting"
 			   elif ($lw == null and $am != null) then "never_ticked"

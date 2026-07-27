@@ -97,7 +97,7 @@ checked as the event half is — and a restart path with no fixture is a promise
 | `rearm-emits-what-accrued.json` | re-arming from that state emits the two PRs that opened during the 44-minute gap — not `queue-empty`, not silence |
 | `watch-live-nothing-to-do.json` | live pid, fresh heartbeat → `live`, and it *says* so; a healthy answer that is silence cannot be seen to have run |
 | `watch-wedged-stale-heartbeat.json` | live pid, ticks stopped → `wedged`. A pid check alone calls this healthy |
-| `watch-starting-is-not-dead.json` | armed, first tick unfinished → `starting` (exit 9), not `dead`. The hook reads the exit code, and `dead` told it to arm a second watcher |
+| `watch-starting-is-neither-dead-nor-wedged.json` | armed, first tick unfinished → `starting` (exit 9). Measured: the pre-change tool called this exact state `wedged` and said "run `forge-watch stop`" — the NULL-age arm needs no elapsed time, so ordering is the whole safety |
 | `watch-starting-is-bounded.json` | the same record past its bound → `dead reason=never_ticked`. An unbounded `starting` would be a state that cannot fail |
 | `watch-hand-tick-is-not-a-watcher.json` | a hand-run tick must not be able to make a dead watcher look alive |
 

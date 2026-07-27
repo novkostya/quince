@@ -1,0 +1,15 @@
+{
+  "kind": "watch",
+  "note": "The window this class exists for (quince#95): a watcher armed, its pid on the record, and its first tick NOT finished. It must classify `starting` and NOT the two arms that surround it, and the second of those is the dangerous one. MEASURED against the pre-change tool, this exact state classified `wedged reason=stale_heartbeat` with the note 'Run `forge-watch stop`' — because `wedged` is `alive AND (age > STALE_TICKS*interval OR last_watcher_tick == null)`, and the NULL arm needs no elapsed time at all. So `watch_arm` writing {pid, armed_at, last_watcher_tick: null} lands squarely in it unless `starting` is evaluated FIRST. That ordering is the whole safety of this change: get it wrong and a freshly-armed watcher tells every session to stop it, which is this issue's worst face shipped as its fix. Renamed from watch-starting-is-not-dead.json, which named the arm that was never the hazard. Its mirrors: watch-starting-is-bounded.json for the far side of the bound, and owed-a-starting-watch-owes-nothing.json for the consumer.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-26T10:00:00Z",
+    "watch": { "pid": 4242, "interval_s": 60, "armed_at": "2026-07-26T10:00:00Z",
+               "starting_bound_s": 60, "last_watcher_tick": null, "due": null }
+  },
+  "now": "2026-07-26T10:00:11Z",
+  "pid_alive": "yes",
+  "expect": [
+    "watch=starting state=STATE pid=4242 interval=60s last_watcher_tick=never armed_at=2026-07-26T10:00:00Z since_arm=11s bound=60s",
+    "note: armed and has NOT completed its first tick yet. This is not dead and nothing is owed — do not arm a second one. It becomes dead if it has not ticked within 60s of arming (quince#95)."
+  ]
+}
