@@ -1,0 +1,184 @@
+#!/bin/sh
+# forge-watch-stop-test — the `stop` verb and `stop --all` (quince#118).
+#
+# The fixture-replay suite (`forge-watch replay`) drives `step`/`watch_report` from static JSON and
+# cannot cover `stop`: stop signals a LIVE pid and its whole product is the verify-then-signal
+# against a running process. So this spawns real short-lived processes, records them in synthetic
+# state files under a temp FORGE_STATE_DIR, and asserts:
+#   - stop --all stops every watcher in the declared set, and exits 0;
+#   - it REFUSES AS A WHOLE if any single pid cannot be proven ours — and does NOT signal that pid,
+#     while still stopping the ones it can (a partial stop is the dangerous outcome, quince#50);
+#   - --all is mutually exclusive with --repo and with --state;
+#   - a repo in the set with no watcher is "nothing to stop", not a refusal;
+#   - the single-repo behaviour is unchanged: it stops, it treats a missing state as an ERROR, and
+#     an already-gone pid is a clean exit-0 "nothing to stop".
+#
+# Synthetic throughout: nonsense repo names, this suite's own sleeps, a temp state dir. Nothing
+# reads the real watch set or the box, so it is a gate and not a ritual.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+FW="$HERE/forge-watch"
+[ -x "$FW" ] || {
+	printf 'forge-watch-stop-test: %s is not executable\n' "$FW" >&2
+	exit 2
+}
+# jq is asserted, not assumed — the state files ARE json, and the verb reads the pid with jq. Same
+# refuse-don't-skip stance as forge-watch-test.
+command -v jq >/dev/null 2>&1 || {
+	printf 'forge-watch-stop-test: DID NOT RUN — jq is absent and the state files are JSON. Refusing rather than skipping.\n' >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+PIDS=''
+cleanup() {
+	for _p in $PIDS; do kill "$_p" 2>/dev/null || true; done
+	rm -rf "$TMP"
+}
+trap cleanup EXIT INT TERM
+
+SD="$TMP/state"
+mkdir -p "$SD"
+FS="$TMP/forge-set"
+
+pass=0
+fail=0
+
+# The proc-start computation preflight's proc_start uses: strip through the last ") " (the comm
+# field can contain spaces and parens), then field 20 of the remainder is field 22 of /proc/pid/stat.
+pid_start() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'; }
+
+# spawn a real, killable process and remember it for cleanup. Sets $SPAWNED — NOT via command
+# substitution, which would background the sleep in a subshell and lose the pid from $PIDS.
+spawn() {
+	sleep 300 &
+	SPAWNED=$!
+	PIDS="$PIDS $SPAWNED"
+}
+
+# write_state <repo> <pid> [pid_start_override]
+write_state() {
+	_ws_start=${3:-$(pid_start "$2")}
+	printf '{"watch":{"pid":%s,"pid_start":"%s"}}\n' "$2" "$_ws_start" \
+		>"$SD/$(printf '%s' "$1" | tr '/' '-').state.json"
+}
+
+alive() { kill -0 "$1" 2>/dev/null; }
+ok() {
+	printf 'ok   %s\n' "$1"
+	pass=$((pass + 1))
+}
+no() {
+	printf 'FAIL %s\n' "$1"
+	printf '%s\n' "$2" | sed 's/^/    | /'
+	fail=$((fail + 1))
+}
+
+# ---------------------------------------------------------------------------------------------
+# stop --all stops every watcher in the declared set
+# ---------------------------------------------------------------------------------------------
+printf 'zz/one\nzz/two\n' >"$FS"
+spawn
+P1=$SPAWNED
+spawn
+P2=$SPAWNED
+write_state zz/one "$P1"
+write_state zz/two "$P2"
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! alive "$P1" && ! alive "$P2"; then
+	ok "stop --all stops every watcher in the declared set (exit 0)"
+else
+	no "stop --all should stop both and exit 0" "rc=$rc
+$out"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# REFUSE AS A WHOLE when one pid cannot be proven ours — and do not signal that pid
+# ---------------------------------------------------------------------------------------------
+spawn
+P3=$SPAWNED
+spawn
+P4=$SPAWNED
+write_state zz/one "$P3"
+write_state zz/two "$P4" 999999999 # a start time that cannot match: reads as RECYCLED
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && ! alive "$P3" && alive "$P4" && printf '%s' "$out" | grep -q 'refuses as a whole'; then
+	ok "stop --all refuses as a whole on a recycled pid, stops the provable one, and does NOT signal the other"
+else
+	no "stop --all should refuse (non-zero), stop P3, and leave the unprovable P4 unsignalled" \
+		"rc=$rc P3alive=$(alive "$P3" && echo yes || echo no) P4alive=$(alive "$P4" && echo yes || echo no)
+$out"
+fi
+kill "$P4" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------------------------
+# --all is mutually exclusive with --repo and with --state (a partial target is a footgun)
+# ---------------------------------------------------------------------------------------------
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all --repo zz/one 2>&1) && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'mutually exclusive'; then
+	ok "stop --all --repo is refused as mutually exclusive"
+else
+	no "stop --all --repo should refuse" "rc=$rc
+$out"
+fi
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all --state /x 2>&1) && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'does not take --state'; then
+	ok "stop --all --state is refused"
+else
+	no "stop --all --state should refuse" "rc=$rc
+$out"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# a declared repo with no watcher is nothing-to-stop, not a refusal; --set-file selects the set
+# ---------------------------------------------------------------------------------------------
+rm -f "$SD"/*.state.json
+printf 'zz/one\nzz/two\nzz/three\n' >"$FS"
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE=/nonexistent-on-purpose "$FW" stop --all --set-file "$FS" 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | grep -c 'nothing to stop')" -eq 3 ]; then
+	ok "stop --all over a set with no live watchers is nothing-to-stop (exit 0), and --set-file selected the set"
+else
+	no "stop --all with no watchers should exit 0 and report each repo, honouring --set-file" "rc=$rc
+$out"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# single-repo behaviour is unchanged
+# ---------------------------------------------------------------------------------------------
+printf 'zz/one\n' >"$FS"
+spawn
+P5=$SPAWNED
+write_state zz/one "$P5"
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! alive "$P5" && printf '%s' "$out" | grep -q 'stopped watcher'; then
+	ok "single-repo stop still verifies and signals (exit 0)"
+else
+	no "single-repo stop should stop P5 and exit 0" "rc=$rc
+$out"
+fi
+
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/never 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'no watch state'; then
+	ok "single-repo stop on a missing state is an ERROR (exit 1), preserved"
+else
+	no "single-repo stop on a missing state should die (exit 1)" "rc=$rc
+$out"
+fi
+
+spawn
+P6=$SPAWNED
+write_state zz/one "$P6"
+kill "$P6" 2>/dev/null || true
+# reap so pid_alive sees it gone; a zombie still answers kill -0, so wait for it
+wait "$P6" 2>/dev/null || true
+out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'already gone'; then
+	ok "an already-gone pid is a clean nothing-to-stop (exit 0)"
+else
+	no "an already-gone pid should exit 0 saying so" "rc=$rc
+$out"
+fi
+
+printf 'forge-watch-stop-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

@@ -120,7 +120,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/runner/preflight-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
-                   bin/forge-watch-exits-test \
+                   bin/forge-watch-exits-test bin/forge-watch-stop-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -150,6 +150,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-test
 	@$(MAKE) --no-print-directory preflight-test
 	@$(MAKE) --no-print-directory forge-watch-exits-test
+	@$(MAKE) --no-print-directory forge-watch-stop-test
 	@$(MAKE) --no-print-directory pr-title-refs-test
 	@echo "gates-sh: clean"
 
@@ -186,6 +187,10 @@ forge-watch-test: ## forge-watch's fixture suite — the rung-loop spec's G1 (~2
 .PHONY: forge-watch-exits-test
 forge-watch-exits-test: ## Every exit forge-watch can return is named in the skills (quince#75)
 	@bin/forge-watch-exits-test
+
+.PHONY: forge-watch-stop-test
+forge-watch-stop-test: ## `stop` / `stop --all` against live pids — what replay cannot cover (quince#118)
+	@bin/forge-watch-stop-test
 
 # quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
 # title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two

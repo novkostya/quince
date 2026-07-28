@@ -170,7 +170,8 @@ flushed to the forge is the one case where an unwatched queue is correct. Say wh
 ## 6. Stop the watchers deliberately — LAST, and not before
 
 ```sh
-bin/forge-watch stop --repo <owner/name>     # one per repo: `stop` has no --all (quince#118)
+bin/forge-watch stop --all                   # every watcher in the declared set (quince#118)
+# or, to stop just one:  bin/forge-watch stop --repo <owner/name>
 ```
 
 **Not earlier.** A live watcher is what makes §1's loop work: in the retirements on quince#55 it is
@@ -186,7 +187,9 @@ is an observation about a harness, not a property anyone has established**, and 
 not rest on it.
 
 `stop` verifies the recorded pid is still ours before signalling and refuses if it cannot prove it
-(quince#49) — so it is safe in the one case a bare `kill` is not. **Then record that you stopped
+(quince#49) — so it is safe in the one case a bare `kill` is not. Under `--all` it verifies each pid
+the same way and refuses **as a whole** if any one cannot be proven, naming the repo, so a partial
+stop cannot leave a watcher live while reporting success. **Then record that you stopped
 them on purpose**, because §3's ambiguity means the state itself cannot say so: deliberately
 stopped, exited on an event, and crashed all read `dead` / `no_process`.
 
