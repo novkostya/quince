@@ -131,19 +131,19 @@ repo is not a message bus, and no human is an RPC layer.
 **What each identity cannot do — and, marked `CAN`, what one can that nobody granted it.** These
 have been discovered one at a time, by hitting them, each costing a session the time to work out
 that the failure was structural rather than local (devlog#48). Consult this before designing
-around a refusal. The table runs in one direction with two exceptions, both marked; read the
+around a refusal. The table runs in one direction with **three** exceptions, all marked; read the
 `CAN` rows as blast radius rather than as convenience.
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **`CAN` re-run a workflow run** — and the architect and the App cannot; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
 | **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
 
-**Re-running CI is the one row that runs the other way, and `workflows:` is not `actions:`.**
-Every other entry above describes something the implementer lacks and a more privileged seat
-holds; here **`quince-bot` can re-run a workflow and the architect and the App cannot** (measured,
+**Re-running CI is a `CAN`, and `workflows:` is not `actions:`.** Most entries above describe
+something the implementer lacks and a more privileged seat holds; here **`quince-bot` can re-run a
+workflow and the architect and the App cannot** (measured,
 quince#141 — `run_attempt` increments, the failed attempt preserved). So on a red check the ask is
 *"re-run it"*, addressed to the implementer, rather than a push or an escalation. Two permissions
 sit within a few lines of each other in this table and look like opposite claims about one word:
@@ -152,8 +152,8 @@ workflow *runs*** (this one). They are different grants, and neither implies the
 trap worth naming: **`gh run rerun` exits `0` and prints its refusal** — read the output, not the
 exit code.
 
-**The second `CAN` is the implementer's, and it is recorded as a hazard rather than a
-convenience: `quince-bot` can DELETE any discussion in `quince-devlog`.** Measured 2026-07-28,
+**The newest `CAN` is a hazard rather than a convenience, and it is the only one of the three
+that is: `quince-bot` can DELETE any discussion in `quince-devlog`.** Measured 2026-07-28,
 both identities, create *and* delete, each probe removing its own artifact (devlog#30). **Nobody
 granted this.** It arrived with the classic `repo` scope the token already held, the moment
 Discussions was enabled on the repository — a permission decision nobody made, produced by a
