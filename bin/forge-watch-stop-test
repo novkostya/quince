@@ -15,6 +15,22 @@
 #
 # Synthetic throughout: nonsense repo names, this suite's own sleeps, a temp state dir. Nothing
 # reads the real watch set or the box, so it is a gate and not a ritual.
+#
+# THREE OF THE EIGHT NEED PROCFS, AND SAY SO RATHER THAN FAILING. `stop` proves a pid is ours with
+# pid + start time before signalling it, and the start time comes from /proc/<pid>/stat. On a host
+# without procfs `proc_start` is empty, `stop` correctly REFUSES to signal an unverifiable pid, and
+# the three assertions that expect a successful signal cannot be run at all.
+#
+# Until 2026-07-29 they did not say so — they FAILED. Measured: 8/0 on Linux, 5/3 on macOS, and
+# identical on origin/main, so a developer running the suite on a Mac saw three failures
+# indistinguishable from a real defect in `stop`. CI is Linux, so it was green forever.
+#
+# That is quince#41's class pointed the other way: a gate whose INABILITY to run is reported as a
+# finding. The repo already has the right stance in `forge-watch-roundtrip-test` and
+# `forge-watch-composition-test`, which skip the procfs-dependent assertions and count them. This
+# suite keeps its refuse-don't-skip stance for `jq` — absent jq means the suite cannot judge
+# ANYTHING — and adopts skip-and-say-so for the three that a host genuinely cannot exercise. The
+# distinction is between "I cannot run" and "I cannot run THIS PART".
 set -eu
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -44,6 +60,12 @@ FS="$TMP/forge-set"
 
 pass=0
 fail=0
+skipped=0
+
+# Does this host have the one thing `stop`'s proof depends on? Probed on THIS process, which is
+# certainly alive, so a `no` means the interface is absent rather than the pid being gone.
+HAVE_PROCFS=no
+[ -r "/proc/$$/stat" ] && HAVE_PROCFS=yes
 
 # The proc-start computation preflight's proc_start uses: strip through the last ") " (the comm
 # field can contain spaces and parens), then field 20 of the remainder is field 22 of /proc/pid/stat.
@@ -74,43 +96,58 @@ no() {
 	printf '%s\n' "$2" | sed 's/^/    | /'
 	fail=$((fail + 1))
 }
+skip() {
+	printf 'skip %s\n' "$1"
+	skipped=$((skipped + 1))
+}
 
 # ---------------------------------------------------------------------------------------------
 # stop --all stops every watcher in the declared set
 # ---------------------------------------------------------------------------------------------
 printf 'zz/one\nzz/two\n' >"$FS"
-spawn
-P1=$SPAWNED
-spawn
-P2=$SPAWNED
-write_state zz/one "$P1"
-write_state zz/two "$P2"
-out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
-if [ "$rc" -eq 0 ] && ! alive "$P1" && ! alive "$P2"; then
-	ok "stop --all stops every watcher in the declared set (exit 0)"
+if [ "$HAVE_PROCFS" = no ]; then
+	skip "stop --all stops every watcher — needs /proc to prove a pid before signalling it"
 else
-	no "stop --all should stop both and exit 0" "rc=$rc
+	spawn
+	P1=$SPAWNED
+	spawn
+	P2=$SPAWNED
+	write_state zz/one "$P1"
+	write_state zz/two "$P2"
+	out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -eq 0 ] && ! alive "$P1" && ! alive "$P2"; then
+		ok "stop --all stops every watcher in the declared set (exit 0)"
+	else
+		no "stop --all should stop both and exit 0" "rc=$rc
 $out"
+	fi
 fi
 
 # ---------------------------------------------------------------------------------------------
 # REFUSE AS A WHOLE when one pid cannot be proven ours — and do not signal that pid
 # ---------------------------------------------------------------------------------------------
-spawn
-P3=$SPAWNED
-spawn
-P4=$SPAWNED
-write_state zz/one "$P3"
-write_state zz/two "$P4" 999999999 # a start time that cannot match: reads as RECYCLED
-out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
-if [ "$rc" -ne 0 ] && ! alive "$P3" && alive "$P4" && printf '%s' "$out" | grep -q 'refuses as a whole'; then
-	ok "stop --all refuses as a whole on a recycled pid, stops the provable one, and does NOT signal the other"
+if [ "$HAVE_PROCFS" = no ]; then
+	# Unrunnable for a subtler reason than the others: without procfs NEITHER pid is provable, so the
+	# refusal fires for both and there is no provable-one left to assert got stopped. The asymmetry
+	# this case exists to prove cannot be constructed at all.
+	skip "stop --all refuses as a whole on a recycled pid — needs /proc to make ONE of two pids provable"
 else
-	no "stop --all should refuse (non-zero), stop P3, and leave the unprovable P4 unsignalled" \
-		"rc=$rc P3alive=$(alive "$P3" && echo yes || echo no) P4alive=$(alive "$P4" && echo yes || echo no)
+	spawn
+	P3=$SPAWNED
+	spawn
+	P4=$SPAWNED
+	write_state zz/one "$P3"
+	write_state zz/two "$P4" 999999999 # a start time that cannot match: reads as RECYCLED
+	out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --all 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -ne 0 ] && ! alive "$P3" && alive "$P4" && printf '%s' "$out" | grep -q 'refuses as a whole'; then
+		ok "stop --all refuses as a whole on a recycled pid, stops the provable one, and does NOT signal the other"
+	else
+		no "stop --all should refuse (non-zero), stop P3, and leave the unprovable P4 unsignalled" \
+			"rc=$rc P3alive=$(alive "$P3" && echo yes || echo no) P4alive=$(alive "$P4" && echo yes || echo no)
 $out"
+	fi
+	kill "$P4" 2>/dev/null || true
 fi
-kill "$P4" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------------------------
 # --all is mutually exclusive with --repo and with --state (a partial target is a footgun)
@@ -147,15 +184,19 @@ fi
 # single-repo behaviour is unchanged
 # ---------------------------------------------------------------------------------------------
 printf 'zz/one\n' >"$FS"
-spawn
-P5=$SPAWNED
-write_state zz/one "$P5"
-out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
-if [ "$rc" -eq 0 ] && ! alive "$P5" && printf '%s' "$out" | grep -q 'stopped watcher'; then
-	ok "single-repo stop still verifies and signals (exit 0)"
+if [ "$HAVE_PROCFS" = no ]; then
+	skip "single-repo stop verifies and signals — needs /proc for the same reason"
 else
-	no "single-repo stop should stop P5 and exit 0" "rc=$rc
+	spawn
+	P5=$SPAWNED
+	write_state zz/one "$P5"
+	out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -eq 0 ] && ! alive "$P5" && printf '%s' "$out" | grep -q 'stopped watcher'; then
+		ok "single-repo stop still verifies and signals (exit 0)"
+	else
+		no "single-repo stop should stop P5 and exit 0" "rc=$rc
 $out"
+	fi
 fi
 
 out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/never 2>&1) && rc=0 || rc=$?
@@ -180,5 +221,10 @@ else
 $out"
 fi
 
-printf 'forge-watch-stop-test: %s passed, %s failed\n' "$pass" "$fail"
+if [ "$HAVE_PROCFS" = no ]; then
+	printf '\nforge-watch-stop-test: no /proc on this host, so the three verify-then-signal assertions\n'
+	printf '  could not run. The stop verb refuses to signal a pid it cannot prove is ours, which is\n'
+	printf '  the designed behaviour — not a failure, and not a pass either. Run on Linux for them.\n'
+fi
+printf '\nforge-watch-stop-test: %s passed, %s failed, %s skipped\n' "$pass" "$fail" "$skipped"
 [ "$fail" -eq 0 ]
