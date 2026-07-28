@@ -1,0 +1,140 @@
+#!/bin/sh
+# forge-watch-ownership-test — another RUNNER's event must not wake mine, and a branch nobody
+# claims must still wake everybody (quince#111 face 3).
+#
+# WHY A SUITE AND NOT A FIXTURE. The replay fixtures drive the PURE half: they hand `step` an
+# observation and compare events. Ownership is decided one layer out, between the printing of events
+# and the deciding on them, from state the tick has just written — so a fixture that hands the
+# classifier a crafted file would pin the classification and miss the wiring, which is exactly how
+# quince#168 shipped a class that could never fire. This runs the real `watch` verb against a stub
+# forge and asserts on what it DID.
+#
+# THE THIRD PR IS THE POINT, and it exists because the first version of this filter was wrong. That
+# version suppressed everything that was not MINE, which silently reclassifies every branch predating
+# the naming rule. Measured in review: `canon/codeowners-is-live` would have stopped waking the
+# architect, so the Operator's code-owner approval on quince#171 — the one verdict that PR could not
+# merge without — would have landed in a printed log with nobody awake to read it. The rule is now
+# "suppress what ANOTHER DECLARED RUNNER owns", and `303` on an unclaimed branch pins it.
+#
+# THE PROPERTY, so a reader can check the assertions against it: the filter decides what WAKES,
+# never what is SEEN. Every event is printed either way; only the exit is filtered.
+#
+# Synthetic and hermetic: a stub `gh` returning a fixed queue, no network, no credential.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=ownership-test-session
+REPO=novkostya/quince
+
+# A stub forge whose answer changes between ticks. `$WORK/turn` is the clock: 1 baseline, 2 moves
+# the OTHER declared runner's PR, 3 moves the UNCLAIMED branch, 4 moves mine.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+case "$*" in
+*"issue view"*) printf '{}\n'; exit 0 ;;
+esac
+base=2026-07-28T10:00:00Z
+mine=$base; theirs=$base; nobody=$base
+case "$turn" in
+2) theirs=2026-07-28T11:00:00Z ;;
+3) theirs=2026-07-28T11:00:00Z; nobody=2026-07-28T12:00:00Z ;;
+4) theirs=2026-07-28T11:00:00Z; nobody=2026-07-28T12:00:00Z; mine=2026-07-28T13:00:00Z ;;
+esac
+row() {
+cat <<ROW
+ {"number":$1,"state":"OPEN","updatedAt":"$2","title":"t","headRefName":"$3",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}
+ROW
+}
+printf '['
+row 101 "$mine"   "r1/my-work"
+printf ','
+row 202 "$theirs" "r2/their-work"
+printf ','
+row 303 "$nobody" "canon/nobody-claims-this"
+printf ']\n'
+STUB
+chmod +x "$WORK/gh"
+export STUB_WORK="$WORK"
+
+./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf '  FAIL could not declare a runner name\n'
+	exit 1
+}
+# A SECOND declared runner on this box. Without it `r2/their-work` is a branch nobody claims and
+# must wake — which is the rule, and would make the suppression assertion below pass for the wrong
+# reason. Writing the registry entry directly is the only way to have two runners in one process.
+printf 'r2\n' >"$XDG_STATE_HOME/quince/runners/another-session"
+
+STATE=$(./bin/forge-watch runner path)/novkostya-quince.state.json
+
+run_watch() {
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+
+run_watch 1 3
+if grep -q 'watch-idle' "$WORK/out"; then
+	ok "the baseline tick does not wake"
+else
+	bad "expected watch-idle on the baseline tick"
+	sed -n '1,4p' "$WORK/out"
+fi
+
+if [ "$(jq -r '[(.prs // [])[] | select(.branch != null)] | length' "$STATE" 2>/dev/null || printf 0)" -ge 3 ]; then
+	ok "the observation records headRefName for all three PRs"
+else
+	bad "no branch on the observation — the filter would pass everything unexamined"
+fi
+
+# (2) another DECLARED runner's PR — printed, not woken.
+run_watch 2 4
+if grep -q 'event=updated pr=202' "$WORK/out"; then
+	ok "another runner's event is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected pr=202's event to be printed"
+fi
+if grep -q 'watch-idle' "$WORK/out"; then
+	ok "another declared runner's event does NOT wake this watch"
+else
+	bad "woke on pr=202, which belongs to declared runner r2"
+	sed -n '1,6p' "$WORK/out"
+fi
+
+# (3) THE REGRESSION THE REVIEWER FOUND: a branch no declared runner owns must wake.
+run_watch 3 6
+if grep -q 'EXITING on the event' "$WORK/out" && grep -q 'event=updated pr=303' "$WORK/out"; then
+	ok "an UNCLAIMED branch still wakes — unknown ownership wakes (quince#171's near miss)"
+else
+	bad "did not wake on pr=303 (canon/…), which no declared runner owns"
+	sed -n '1,6p' "$WORK/out"
+fi
+
+# (4) my own PR.
+run_watch 4 6
+if grep -q 'EXITING on the event' "$WORK/out" && grep -q 'event=updated pr=101' "$WORK/out"; then
+	ok "my own event DOES wake this watch"
+else
+	bad "expected to wake on pr=101, which is r1/my-work"
+	sed -n '1,6p' "$WORK/out"
+fi
+
+printf '\nforge-watch-ownership-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

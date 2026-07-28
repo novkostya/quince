@@ -1796,6 +1796,122 @@ require_gh() {
 # The skills still arm the fallback; this is not a replacement for it, and neither is treated as
 # cover for the other.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# OWNERSHIP FILTERING — wake on MY events, print everybody's (quince#111 face 3).
+#
+# THE PROBLEM. `watch` exits on any event, by design — "the whole point of it is that IT ENDS". With
+# one runner that is invisible, because every event in the repository is yours. With N runners they
+# compose badly: runner A's watch terminates whenever runner B's PR gets a review, a push, a merge or
+# a mergeability flip. Each termination costs a re-arm, and each re-arm carries quince#95's arming
+# window — N² churn PLUS an unwatched gap per churn, in the mechanism whose entire job is not having
+# unwatched gaps.
+#
+# THE LINE THIS TOOL ALREADY DRAWS, and this is an instance of it rather than a new rule: **the
+# filter decides what WAKES, never what is SEEN.** `watch_loop` prints every event before anything is
+# decided, and that ordering is deliberate — a watcher that hid another runner's events would be the
+# silence this tool exists to make impossible. So this runs between the printing and the deciding.
+#
+# A PRE-PASS RATHER THAN A CLAUSE INSIDE wake_worthy, for one reason worth stating: wake_worthy does
+# a two-pass over its own input to pair `queue-empty` with `first-observation` by repo. Threading a
+# third file through that would put an ownership lookup inside a baseline computation, and neither is
+# improved by knowing about the other. Only PR-scoped lines are touched here, so the pairing sees
+# exactly the lines it always saw.
+#
+# UNKNOWN OWNERSHIP WAKES. A PR whose branch is not on the record — a first observation, a state file
+# written before quince#111, a fetch that failed — is not filtered. Waking spuriously costs a re-arm;
+# sleeping through a real event is the failure this whole file exists to prevent, and the two are not
+# symmetric. Same conservatism as `owner_alive`'s third value, for the same reason.
+#
+# AND SO DOES A BRANCH NOBODY CLAIMS, which is the same rule and the first version broke it. That
+# version suppressed everything that was not MINE, which silently reclassifies every branch predating
+# the naming rule: measured in review, `canon/codeowners-is-live` would have stopped waking the
+# architect, so the Operator's code-owner approval on quince#171 — the one verdict that PR could not
+# merge without — would have landed in a printed log with nobody awake to read it.
+#
+# The rule is now **suppress what ANOTHER DECLARED RUNNER owns**, not "suppress what is not mine". A
+# branch matching no declared name has unknown ownership, and unknown wakes — which is what the
+# paragraph above already said, and what the first implementation contradicted one function later.
+#
+# This is implementable because quince#111 ruled N sessions on ONE box, so every runner's name is in
+# the one registry this reads. A runner on another box is absent from it and its branches will wake
+# me: over-waking, which is the safe direction, and the only direction available without a forge
+# round-trip per tick.
+ownership_map() {
+	# repo <TAB> pr <TAB> branch, for every PR any watched state file knows about.
+	_om_all=$1
+	_om_repo=$2
+	if [ "$_om_all" = yes ]; then
+		for _om_r in $(forge_set "$FORGE_SET_FILE"); do
+			_om_s=$(state_path_for "$_om_r")
+			[ -f "$_om_s" ] || continue
+			jq -r --arg r "$_om_r" '(.prs // [])[] | select(.branch != null)
+				| "\($r)\t\(.number)\t\(.branch)"' "$_om_s" 2>/dev/null || true
+		done
+	else
+		_om_s=$3
+		[ -f "$_om_s" ] || return 0
+		jq -r --arg r "$_om_repo" '(.prs // [])[] | select(.branch != null)
+			| "\($r)\t\(.number)\t\(.branch)"' "$_om_s" 2>/dev/null || true
+	fi
+}
+
+other_runner_names() {
+	# Every name declared on this box EXCEPT this session's. quince#111 ruled N sessions on one box,
+	# so this registry is the whole population that matters; a runner elsewhere is simply absent and
+	# its branches will wake me, which is the safe direction.
+	#
+	# Stale entries from dead sessions are KEPT deliberately. A name outlives the session that
+	# declared it — that is the whole point of face 4 — so a slot whose session died still owns its
+	# branches, and a restarting session re-declares the same name. Pruning here would hand a dead
+	# runner's PRs to whoever is awake.
+	_orn_me=$1
+	_orn_d=$(runner_registry)
+	[ -d "$_orn_d" ] || return 0
+	for _orn_f in "$_orn_d"/*; do
+		[ -f "$_orn_f" ] || continue
+		_orn_n=$(head -n 1 "$_orn_f" 2>/dev/null || true)
+		[ -n "$_orn_n" ] || continue
+		[ "$_orn_n" != "$_orn_me" ] || continue
+		printf '%s\n' "$_orn_n"
+	done | sort -u
+}
+
+wake_filter() {
+	_wf_evt=$1
+	_wf_map=$2
+	_wf_others=$3
+	_wf_defrepo=$4
+	# Nothing known about any branch, or no OTHER runner exists to own one: unchanged behaviour.
+	# The second condition is the common case on a one-runner box and it makes this a no-op there,
+	# which is what a box that has not migrated should get.
+	if [ ! -s "$_wf_map" ] || [ ! -s "$_wf_others" ]; then
+		cat "$_wf_evt"
+		return 0
+	fi
+	awk -v defrepo="$_wf_defrepo" '
+		FILENAME == others { theirs[$0 "/"] = 1; next }
+		FILENAME == mapf   { own[$1 SUBSEP $2] = $3; next }
+		{
+			pr = ""; repo = ""
+			n = split($0, a, " ")
+			for (i = 1; i <= n; i++) {
+				if (a[i] ~ /^pr=/)   pr   = substr(a[i], 4)
+				if (a[i] ~ /^repo=/) repo = substr(a[i], 6)
+			}
+			# Not PR-scoped — issue events, tick-overdue, watch-idle, fetch-failed, the queue
+			# sentinels. Declared issues are already this runners own, because the declaration
+			# lives in this runners state file. Untouched.
+			if (pr == "") { print; next }
+			if (repo == "") repo = defrepo
+			b = own[repo SUBSEP pr]
+			if (b == "") { print; next }              # branch unknown -> wake
+			for (t in theirs)
+				if (index(b, t) == 1) next        # ANOTHER declared runner owns it -> silent
+			print                                     # mine, or nobody s -> wake
+		}
+	' others="$_wf_others" mapf="$_wf_map" "$_wf_others" "$_wf_map" "$_wf_evt"
+}
+
 wake_worthy() {
 	# $1 is a file holding ONE tick's output, $2 is "first" for the first tick of this watch; prints
 	# the lines that justify waking a session.
@@ -2018,6 +2134,15 @@ watch_loop() {
 	_wfails=0
 	_wticks=0
 	_wevt=$(mktemp)
+	_wmap=$(mktemp)
+	_wmine=$(mktemp)
+	_wothers=$(mktemp)
+	# Resolved ONCE, here, rather than per tick: neither this session's name nor the population of
+	# declared runners can meaningfully change under a running watcher, and re-reading them every
+	# interval would let a mid-run registry edit silently change what wakes. Empty `_wothers` — the
+	# one-runner case — turns the filter into a no-op.
+	_wowner=$(runner_name)
+	other_runner_names "$_wowner" >"$_wothers" 2>/dev/null || : >"$_wothers"
 	while :; do
 		if [ "$_wall" = yes ]; then
 			tick_all "$_wgh" "$$" "$_wiv" >"$_wevt" && _wrc=0 || _wrc=$?
@@ -2030,10 +2155,16 @@ watch_loop() {
 		# tool exists to make impossible.
 		cat "$_wevt"
 		if [ "$_wticks" -eq 1 ]; then _wfirst=first; else _wfirst=later; fi
-		_wwake=$(wake_worthy "$_wevt" "$_wfirst")
+		# Ownership is resolved AFTER the tick and BEFORE the decision, from the state the tick just
+		# wrote — so a PR opened during this very tick is already on the record when its event is
+		# judged. Rebuilt each time rather than hoisted: the queue changes under a long watch, and a
+		# map computed once would answer about the queue as it was when the watcher armed.
+		ownership_map "$_wall" "$_wrepo" "$_wstate" >"$_wmap" 2>/dev/null || : >"$_wmap"
+		wake_filter "$_wevt" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
+		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		if [ -n "$_wwake" ]; then
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
-			rm -f "$_wevt"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
 			return 0
 		fi
 		if [ "$_wrc" != 0 ]; then
@@ -2041,7 +2172,7 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
-				rm -f "$_wevt"
+				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
 				return 7
 			fi
 		else
@@ -2051,7 +2182,7 @@ watch_loop() {
 		if [ "$_welapsed" -ge "$_wmax" ]; then
 			printf 'event=watch-idle elapsed=%ss ticks=%s\n' "$_welapsed" "$_wticks"
 			printf 'forge-watch: watch EXITING on the idle bound — nothing happened, which is a report and not a silence. ARM AGAIN.\n'
-			rm -f "$_wevt"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
 			return 6
 		fi
 		sleep "$_wiv"
@@ -2462,7 +2593,35 @@ status)
 			_ro=$(owner_alive "$_rs")
 		fi
 		printf 'forge-watch: repo=%s\n' "$_rr"
-		watch_report "$_rs" "$_now" "$_ra" "$_ro"
+		watch_report "$_rs" "$_now" "$_ra" "$_ro" || _rrc=$?
+		# WHAT THIS WATCH WILL NOT WAKE ON, reported where a session already looks (quince#111
+		# face 3). The filter is silent by design and silence is the one thing this tool refuses to
+		# leave unexplained: a session that meets an unexpected quiet should be able to see the
+		# reason here rather than deduce it. Printed only when there IS another runner and it DOES
+		# own something on the record, so a one-runner box reports exactly what it used to.
+		_rn=$(runner_name)
+		if [ -n "$_rn" ] && [ -f "$_rs" ]; then
+			_rot=$(mktemp)
+			other_runner_names "$_rn" >"$_rot" 2>/dev/null || : >"$_rot"
+			if [ -s "$_rot" ]; then
+				# BOTH captures are load-bearing, and each was missing in turn. Without `. as $pr`
+				# the PR is unreachable inside any() and jq errors "Cannot index string with
+				# string" — silently, into a `|| printf 0` that reports "nothing suppressed"
+				# forever. Without `. as $p` the prefix is unreachable too, and `startswith(.)`
+				# compares the branch to ITSELF: always true, so it counted every PR as somebody
+				# else's. The first failed loudly enough to catch; the second returned a plausible
+				# number and was caught only by checking it against a fixture with a known answer.
+				_rcnt=$(jq -r --rawfile others "$_rot" '
+					($others | split("\n") | map(select(length > 0) | . + "/")) as $t
+					| [(.prs // [])[] | select(.branch != null) | . as $pr
+					   | select(any($t[]; . as $p | ($pr.branch | startswith($p))))] | length' \
+					"$_rs" 2>/dev/null || printf 0)
+				[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another declared runner (%s) — their events are printed but do NOT wake this watch.\n' \
+					"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')"
+			fi
+			rm -f "$_rot"
+		fi
+		return "${_rrc:-0}"
 	}
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
