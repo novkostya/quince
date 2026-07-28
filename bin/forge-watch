@@ -26,8 +26,10 @@ usage: forge-watch <verb>
                                                tick until there is something to say, THEN EXIT
   status [--repo owner/name | --all] [--state <file>] [--now <iso>] [--set-file <f>]
                                                live | starting | dead | absent | wedged — which, and what to do
-  stop   [--repo owner/name] [--state <file>]  verify the recorded pid is still OUR watcher, then
-                                               signal it — refuses rather than guessing
+  stop   [--repo owner/name | --all] [--state <file>] [--set-file <f>]
+                                               verify the recorded pid is still OUR watcher, then
+                                               signal it — refuses rather than guessing (--all: every
+                                               watcher in the declared set; refuses as a whole if any does)
   owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
                                                is a live watch owed here? (--author: open PRs you
                                                authored · --all: the declared set, unconditionally)
@@ -1504,6 +1506,50 @@ tick_all() {
 	return "$_arc"
 }
 
+# stop_one — the verify-then-signal for ONE repo's watcher, shared by `stop` and `stop --all` so the
+# quince#50 per-pid check has exactly one implementation (the same reason tick_all was extracted).
+# $1 state file, $2 repo label. The state file is assumed to EXIST and to record a pid — the caller
+# checks that, because a bare `stop` treats "no state / no pid" as an error while `--all` treats it
+# as "nothing to stop here". Prints one line. Returns:
+#   0  stopped, or the pid was already gone — no live watcher of ours remains
+#   1  REFUSAL: a running pid that could not be proven ours (recycled, or no/unreadable start time),
+#      or a verified pid whose signal failed. A watcher may still be live, so the caller must not
+#      report success. `kill` returning 0 proves a process died, not that the RIGHT one did.
+stop_one() {
+	_so_s=$1 _so_repo=$2
+	_so_pid=$(jq -r '.watch.pid // empty' "$_so_s" 2>/dev/null || true)
+	_so_was=$(jq -r '.watch.pid_start // empty' "$_so_s" 2>/dev/null || true)
+	if [ "$(pid_alive "$_so_pid")" = no ]; then
+		printf 'forge-watch: pid %s is already gone — nothing to stop (repo=%s). Re-arm from the state.\n' "$_so_pid" "$_so_repo"
+		return 0
+	fi
+	if [ -z "$_so_was" ]; then
+		printf 'forge-watch: pid %s is running (repo=%s), but this state records no start time for it
+    (armed by an older version, or procfs was unreadable at arm time). REFUSING to signal: a pid
+    without a recorded start time cannot be shown to be our watcher rather than whatever reused its
+    number. Identify it by hand before killing anything.\n' "$_so_pid" "$_so_repo" >&2
+		return 1
+	fi
+	_so_now=$(proc_start "$_so_pid")
+	if [ -z "$_so_now" ]; then
+		printf 'forge-watch: cannot read the start time of pid %s (repo=%s; no procfs, or not
+    permitted). REFUSING to signal an unverified pid.\n' "$_so_pid" "$_so_repo" >&2
+		return 1
+	fi
+	if [ "$_so_now" != "$_so_was" ]; then
+		printf 'forge-watch: pid %s HAS BEEN RECYCLED (repo=%s) — recorded start %s, actual %s. That
+    pid now belongs to something else. REFUSING to signal it; the watcher itself is gone, so treat
+    this as DEAD and re-arm from the state.\n' "$_so_pid" "$_so_repo" "$_so_was" "$_so_now" >&2
+		return 1
+	fi
+	if kill "$_so_pid" 2>/dev/null; then
+		printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched)\n' "$_so_pid" "$_so_repo" "$_so_was"
+		return 0
+	fi
+	printf 'forge-watch: pid %s verified as our watcher (repo=%s), but the signal failed\n' "$_so_pid" "$_so_repo" >&2
+	return 1
+}
+
 require_gh() {
 	# The identity is the caller's choice, never the tool's: the reviewer loop runs on the architect
 	# box, which by construction holds no bot token, so a hard-coded gh-bot could not run on the box
@@ -2206,8 +2252,11 @@ stop)
 	# of however long a session takes to read a sentence and act, seconds to minutes, and the review
 	# that produced this fix demonstrated a session using exactly that window to kill init. Here it is
 	# microseconds between two syscalls, in one place, behind a refusal. Unbounded to syscall-scale.
+	#
+	# The verify-then-signal itself lives in stop_one (above), so a single `stop` and `stop --all`
+	# run the same per-pid check — a second copy for the fan-out is the drift this file catalogues.
 	shift
-	_s='' _repo=novkostya/quince
+	_s='' _repo='' _all=no
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--state)
@@ -2218,36 +2267,55 @@ stop)
 			_repo=$2
 			shift 2
 			;;
+		--all)
+			_all=yes
+			shift
+			;;
+		--set-file)
+			FORGE_SET_FILE=$2
+			shift 2
+			;;
 		*) die "unknown option: $1" ;;
 		esac
 	done
-	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
-	[ -f "$_s" ] || die "no watch state at $_s — nothing recorded to stop"
-	_pid=$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)
-	[ -n "$_pid" ] || die "no watcher pid recorded in $_s — nothing to stop"
-	_was=$(jq -r '.watch.pid_start // empty' "$_s" 2>/dev/null || true)
-	if [ "$(pid_alive "$_pid")" = no ]; then
-		printf 'forge-watch: pid %s is already gone — nothing to stop. Re-arm from the state.\n' "$_pid"
+
+	if [ "$_all" = yes ]; then
+		# stop --all — the wedged remedy across a multi-repo set (quince#118). /architect §0 tells a
+		# session that finds `wedged` to run `stop`, and under --all a watcher can be wedged on ANY
+		# declared repo; a per-repo stop leaves the others live and the session then arms beside one,
+		# which is quince#50's race reached through the remedy rather than around the guard. The
+		# fan-out reads .claude/forge-set — the same file every other --all verb reads — so the set is
+		# declared and versioned, not hand-maintained.
+		[ -z "$_repo" ] || die "--all and --repo are mutually exclusive: --all stops every watcher in the declared set."
+		[ -z "$_s" ] || die "--all does not take --state: it derives one state file per repo in the set."
+		_set=$(forge_set "$FORGE_SET_FILE")
+		_refused=0
+		for _r in $_set; do
+			_rs=$(state_path_for "$_r")
+			if [ ! -f "$_rs" ]; then
+				printf 'forge-watch: no watch state for repo=%s — nothing to stop.\n' "$_r"
+				continue
+			fi
+			if [ -z "$(jq -r '.watch.pid // empty' "$_rs" 2>/dev/null || true)" ]; then
+				printf 'forge-watch: no watcher pid recorded for repo=%s — nothing to stop.\n' "$_r"
+				continue
+			fi
+			stop_one "$_rs" "$_r" || _refused=$((_refused + 1))
+		done
+		# REFUSE AS A WHOLE if any single stop refused. A partial stop is the dangerous outcome — the
+		# session goes on to arm beside whatever is still live — so the aggregate verdict has to leave
+		# the loop, not just the per-repo lines. The refusals themselves are already printed above.
+		[ "$_refused" -eq 0 ] || die "$_refused watcher(s) in the set could not be stopped (see the per-repo lines above). A partial stop leaves a watcher live, so this refuses as a whole — resolve the named repos, then re-run."
 		exit 0
 	fi
-	if [ -z "$_was" ]; then
-		die "pid $_pid is running, but this state records no start time for it (armed by an older
-    version, or procfs was unreadable at arm time). REFUSING to signal: a pid without a recorded
-    start time cannot be shown to be our watcher rather than whatever reused its number. Identify
-    it by hand before killing anything."
-	fi
-	_now_start=$(proc_start "$_pid")
-	if [ -z "$_now_start" ]; then
-		die "cannot read the start time of pid $_pid (no procfs, or not permitted). REFUSING to
-    signal an unverified pid."
-	fi
-	if [ "$_now_start" != "$_was" ]; then
-		die "pid $_pid HAS BEEN RECYCLED — recorded start $_was, actual $_now_start. That pid now
-    belongs to something else. REFUSING to signal it; the watcher itself is gone, so treat this
-    as \`dead\` and re-arm from the state."
-	fi
-	kill "$_pid" 2>/dev/null || die "pid $_pid verified as our watcher, but the signal failed"
-	printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched)\n' "$_pid" "$_repo" "$_was"
+
+	# Single repo. Here "no state" and "no pid recorded" are ERRORS — you named a specific watch that
+	# is not there — where under --all the same conditions are simply nothing-to-stop for that repo.
+	[ -n "$_repo" ] || _repo=novkostya/quince
+	[ -n "$_s" ] || _s=$(state_path_for "$_repo")
+	[ -f "$_s" ] || die "no watch state at $_s — nothing recorded to stop"
+	[ -n "$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)" ] || die "no watcher pid recorded in $_s — nothing to stop"
+	if stop_one "$_s" "$_repo"; then exit 0; else exit 1; fi
 	;;
 owed)
 	shift
