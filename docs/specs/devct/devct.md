@@ -1,10 +1,26 @@
 # devct — disposable dev containers, generated from a public script
 
-> Status: **SPEC — amended after architect review
-> ([#10](https://github.com/novkostya/quince/pull/10)), awaiting re-review.** No code exists.
+> Status: **BUILT AND IN USE.** `deploy/devct/` is 1,469 lines across `devct`, `devct-template` and
+> `lib.sh`, and all six verbs are implemented. **`quince-runner` and `quince-arch` were both created
+> with it** — `/etc/quince-devct-stamp` on each reads `alpine=3.24 versions=8c32bf735761
+> built=2026-07-25T20:24:50Z`, written by `devct-template`.
+>
+> **This line read "No code exists" until 2026-07-29**, long after the code did. Together with an
+> equally stale header in `deploy/devct/devct` and the 2026-07-28 ruling that retired the
+> *disposable* dev container, it nearly authorised deleting the only reproducible rebuild path
+> either box has. Corrected here rather than quietly, because the failure was not one wrong line —
+> it was three sources agreeing, all of them written before the same change.
+>
+> **What the ruling retired** is the disposable per-unit-of-work container (`create <n>`'s numbered
+> series, routine `destroy`, `deploy`) — not `devct-template`, `onboard`, `doctor`, `list`, or
+> `create --name <host> --role <implementer|arch>`, which are how the two persistent boxes exist.
+> Sections below that describe per-unit-of-work containers as the intended workflow are **history**;
+> they are kept because the mechanism they specify is the mechanism still running.
+>
 > Tracked as `pr.2` in the devlog's revamp sequence; the deliverable is feature-named (`devct`)
 > because it outlives the sequence label. Reviewed before any code per `CLAUDE.md` ("a rung starts
-> from a spec") and the program doc's spec-first loop.
+> from a spec") and the program doc's spec-first loop; the amendment below was folded in
+> ([#10](https://github.com/novkostya/quince/pull/10)) before that code was written.
 >
 > **Amendment (blocking review finding, folded in): the template build is TOKEN-FIRST, with
 > supervised root demoted to a named fallback.** The first draft had it inverted — it assumed image

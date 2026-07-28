@@ -42,7 +42,14 @@ depend() {
 start_pre() {
 	# The environment is asserted before every start, not once at install: a variable added later
 	# by a well-meaning edit is exactly how the billing trap would arrive.
-	QUINCE_RUNNER_ROLE="${runner_role}" /root/quince/deploy/runner/preflight || return 1
+	# From ${runner_dir}, not a literal. This line read `/root/quince/deploy/runner/preflight` while
+	# `runner_dir` two dozen lines up was already configurable and already honoured by `directory=`
+	# — so the service would have started `claude` in one tree and asserted its environment from
+	# another. Latent today because nothing overrides the default; it bites the moment the working
+	# directory moves, which is exactly what devlog#45's repo split does. Same defect as quince#32,
+	# where a literal service name made `rc-service quince-arch status` answer about a different
+	# service: a fact configurable in one place and hardcoded in another.
+	QUINCE_RUNNER_ROLE="${runner_role}" "${runner_dir}/deploy/runner/preflight" || return 1
 
 	# A restart registers a NEW Remote Control session rather than resuming the old one. Say so,
 	# because a log that implies continuity across a restart would be claiming something untrue.

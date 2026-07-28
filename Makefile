@@ -6,7 +6,11 @@
 # All version + image pins live in versions.env (the single source of truth).
 #
 # Requirements on the box: `make` + a container runtime (nerdctl or docker) with buildkit.
-# Program canon: docs/program/quince.program.md "Where work runs" + "Gate ladder".
+# Program canon: `program/quince.program.md` in novkostya/quince-devlog — "Where work runs" +
+# "Gate ladder". The repo is named because this citation read `docs/program/quince.program.md` for
+# long enough that a session went looking for it here; there is no `docs/program/` in this
+# repository and there never was. A cross-repo citation written as a local path is the same defect
+# the whole devlog#45 move inventory is about, sitting in the header of the file that opens the repo.
 
 include versions.env
 
