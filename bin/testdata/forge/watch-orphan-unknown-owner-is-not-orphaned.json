@@ -1,0 +1,17 @@
+{
+  "kind": "watch",
+  "note": "The conservative direction, and the reason `owner_alive` returns three values rather than two. An owner that cannot be VERIFIED gone must not classify `orphaned`: the remedy `orphaned` prints is 'run forge-watch stop', so a false positive sends a session to kill a watch that is fine — quince#95's defect wearing quince#111's clothes. `unknown` is what every unprovable path yields: a state file written before owner_pid existed, a procfs that cannot answer (BusyBox has no `ps -p`, see proc_start), or a recorded pid with no recorded start time. This fixture pins the FIRST of those, which is also the migration case — every state file on disk when this shipped had no owner recorded, and all of them must keep classifying exactly as they did. Same record as watch-orphaned-owner-is-gone.json minus the owner fields; it classifies `live`, and that is correct rather than a gap.",
+  "state": {
+    "observed": true, "prs": [], "last_tick": "2026-07-27T13:26:00Z",
+    "watch": { "pid": 4242, "pid_start": "900",
+               "interval_s": 60, "armed_at": "2026-07-27T13:20:00Z",
+               "starting_bound_s": 60, "last_watcher_tick": "2026-07-27T13:26:00Z", "due": null }
+  },
+  "now": "2026-07-27T13:26:30Z",
+  "pid_alive": "yes",
+  "owner_alive": "unknown",
+  "expect": [
+    "watch=live state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-27T13:26:00Z age=30s",
+    "note: nothing to do."
+  ]
+}

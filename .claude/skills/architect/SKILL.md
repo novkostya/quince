@@ -20,13 +20,19 @@ this session's process restarting; the loop is rebuilt from it, never assumed. A
 the five answers you got**:
 
 ```sh
-bin/forge-watch status --all      # declared set; exits 0 live / 9 starting / 3 dead / 4 absent / 5 wedged
+bin/forge-watch status --all      # declared set; exits 0 live / 9 starting / 3 dead / 4 absent / 5 wedged / 10 orphaned
 ```
 
 `bin/forge-watch watch` (§6) runs this same check before arming and **refuses** on `live`, on
 `starting` and on `wedged`, so none of the three answers that must not lead to a second watcher
 depends on this section being read. Ask anyway: the tool can refuse to arm, but it cannot report on
 your behalf that a watch was found dead.
+
+**`orphaned` (exit 10) is the one to act on rather than reason about** (quince#111): the watcher is
+running and the session that armed it is gone, so it can wake nobody. `stop` it, then re-arm from
+that state — do not reseed. It appears after a session is killed mid-watch, because the watcher is a
+child of the session and a single-pid kill reparents it rather than ending it. An owner that cannot
+be *verified* gone never yields this class.
 
 **`starting` (exit 9) is the one this seat will meet most** (quince#95). It means armed, first tick
 not finished — nothing owed, nothing wrong, do not arm a second one. The window is one `gh pr list`
@@ -325,7 +331,7 @@ not a mechanism (quince#75).
 | exit | means | what to do |
 | --- | --- | --- |
 | **0** | events found, on stdout | handle them, then **re-arm** |
-| **1** | **REFUSED** — already `live`, or `wedged`, or a bad argument | **read `status`, then act on the answer** (quince#88): `live` → **leave it running**, no second watch is wanted — do *not* run `forge-watch stop` · `wedged` → `forge-watch stop`, then arm · `dead`/`absent` → **arm again.** Bounded at **two arm attempts per turn** — a third refusal is a report, not a loop. |
+| **1** | **REFUSED** — already `live`, or `starting`, `wedged`, `orphaned`, or a bad argument | **read `status`, then act on the answer** (quince#88): `live` → **leave it running**, no second watch is wanted — do *not* run `forge-watch stop` · `starting` → **wait**, nothing is wrong and nothing is owed · `wedged` → `forge-watch stop`, then arm · **`orphaned` → `forge-watch stop`, then arm anyway** (quince#111) — the watcher is running but its session is gone, so leaving it running ends your turn unwatched · `dead`/`absent` → **arm again.** Bounded at **two arm attempts per turn** — a third refusal is a report, not a loop. |
 | **6** | `--max-wait` idle bound, `event=watch-idle` | nothing happened, which is a report and not a silence — **re-arm** |
 | **7** | `--fail-after` failing ticks in a row | fix the cause the events name, then **re-arm** |
 

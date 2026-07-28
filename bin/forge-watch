@@ -48,8 +48,9 @@ usage: forge-watch <verb>
 
   `watch` exit codes: 0 an event (the wake — the events are on stdout) · 6 the --max-wait bound
   with nothing seen (`event=watch-idle`) · 7 --fail-after consecutive failing ticks. It refuses to
-  arm beside a `live` watch, a `starting` one, and a `wedged` one (run `stop` first) — the five
-  answers of `status` are enforced here rather than left to a paragraph someone remembers. A refusal
+  arm beside a `live` watch, a `starting` one, a `wedged` one or an `orphaned` one (`stop` first for
+  the last two) — the six answers of `status` are enforced here rather than left to a paragraph
+  someone remembers. A refusal
   exits 1, as every refusal in this tool does; `dead` and `absent` proceed and say which they were.
 
   Every tick's output is printed whether or not it wakes anybody; the filter decides what WAKES,
@@ -754,6 +755,12 @@ watch_report() {
 	_st=$1
 	_now=$2
 	_alive=$3 # yes or no — the caller does the impure poking at the process table
+	# yes | no | unknown — is the SESSION that armed this watcher still alive (quince#111 face 1).
+	# OPTIONAL, and defaulting to `unknown` is the load-bearing part: `unknown` can never produce
+	# `orphaned`, so the four callers that do not care are unchanged and cannot start emitting a
+	# class they were never written to read. Only `status` and `owed` — faces 1 and 2, the two that
+	# lied — pass it.
+	_owner=${4:-unknown}
 
 	if [ ! -f "$_st" ]; then
 		printf 'watch=absent state=%s\n' "$_st"
@@ -761,7 +768,7 @@ watch_report() {
 		return 4
 	fi
 
-	jq -r --arg now "$_now" --arg alive "$_alive" --arg st "$_st" \
+	jq -r --arg now "$_now" --arg alive "$_alive" --arg st "$_st" --arg owner "$_owner" \
 		--argjson stale "$STALE_TICKS" '
 		($now | fromdate) as $t
 		| (.watch // null) as $w
@@ -784,13 +791,22 @@ watch_report() {
 			# forge-watch stop — i.e. every freshly-armed watcher would instruct its session to kill
 			# it: the worst face of quince#95 shipped as the fix for quince#95, prevented only by this
 			# ordering. Pinned by watch-starting-is-neither-dead-nor-wedged.json.
+			# `orphaned` sits SECOND, and both neighbours are deliberate. After no_process, because a
+			# watcher that is not running is dead whoever owned it. Before starting, because a
+			# watcher whose session died two seconds after arming is orphaned, not starting — and
+			# `starting` is the one class that tells a session "do not arm a second one", which is
+			# exactly the wrong instruction when the first one can wake nobody.
 			| (if $alive == "no" then "no_process"
+			   elif $owner == "no" then "orphaned"
 			   elif ($lw == null and $am != null and $since_arm <= $sb) then "starting"
 			   elif ($lw == null and $am != null) then "never_ticked"
 			   elif ($age == null or $age > ($iv * $stale)) then "stale_heartbeat"
 			   else null end) as $why
 			| "state=\($st) pid=\($w.pid) interval=\($iv)s last_watcher_tick=\($lw // "never")\(if $age == null then "" else " age=\($age | floor)s" end)" as $facts
-			| if $why == "starting" then
+			| if $why == "orphaned" then
+				"watch=orphaned \($facts) owner_pid=\($w.owner_pid)",
+				"note: this watcher is RUNNING and the session that armed it is GONE, so it can wake nobody. It is not live and it is not dead — `live` would tell you nothing is owed, `dead` would tell you to re-arm from a state a running process is still writing. Run `forge-watch stop` to end it, THEN re-arm from this state; do not reseed it."
+			  elif $why == "starting" then
 				"watch=starting \($facts) armed_at=\($am) since_arm=\($since_arm | floor)s bound=\($sb)s",
 				"note: armed and has NOT completed its first tick yet. This is not dead and nothing is owed — do not arm a second one. It becomes dead if it has not ticked within \($sb)s of arming (quince#95)."
 			  elif $why == "never_ticked" then
@@ -837,10 +853,16 @@ watch_report() {
 
 	# The exit code carries the class, so a caller that ignores stdout still cannot mistake dead for
 	# live: 0 live, 3 dead, 4 absent, 5 wedged, 9 starting.
-	_cls=$(jq -r --arg now "$_now" --arg alive "$_alive" --argjson stale "$STALE_TICKS" '
+	# THE CLASS IS COMPUTED TWICE — once above for the human line, once here for the exit code — and
+	# the two must agree. That duplication predates this change and is not refactored here, but it is
+	# the reason `orphaned` is added to BOTH passes in the same commit: a class that prints one way
+	# and exits another is precisely the split quince#95's ruling was about, where fixing the line and
+	# leaving the code was called out as a fix invisible to the consumer that needed it.
+	_cls=$(jq -r --arg now "$_now" --arg alive "$_alive" --arg owner "$_owner" --argjson stale "$STALE_TICKS" '
 		($now | fromdate) as $t | (.watch // null) as $w
 		| if $w == null or ($w.pid // null) == null then "dead"
 		  elif $alive == "no" then "dead"
+		  elif $owner == "no" then "orphaned"
 		  elif (($w.last_watcher_tick // null) == null and ($w.armed_at // null) != null
 		        and ($t - ($w.armed_at | fromdate))
 		            <= ($w.starting_bound_s // $w.interval_s // 60)) then "starting"
@@ -858,7 +880,46 @@ watch_report() {
 	starting) return 9 ;;
 	dead) return 3 ;;
 	wedged) return 5 ;;
+	# 10 is the next free code: 0/1/3/4/5/6/7/9 are taken by watch_report, watch_loop and die(), 8 is
+	# `owed`'s, 2 is what an underlying jq failure aborts with. `orphaned` gets its OWN code for the
+	# same reason `starting` did — the Stop hook reads the code, not the line.
+	orphaned) return 10 ;;
 	esac
+}
+
+# owner_alive — is the session that armed this watcher still there (quince#111 face 1).
+#
+# Impure, like pid_alive, and kept out of watch_report for the same reason. Returns THREE values,
+# and `unknown` is the important one: it is what an unverifiable owner yields, and `unknown` never
+# produces `orphaned`. A false orphan would send a session to stop a watch that is fine — quince#95's
+# defect wearing quince#111's clothes — so every path that cannot prove the owner is gone declines.
+#
+# Proof requires BOTH the pid and its start time, because a pid alone is not an identity: an owner
+# pid recycled by an unrelated process would otherwise read as `yes` and hide a real orphan. Absent
+# procfs (BusyBox `ps -p` is not available, see proc_start) the answer is `unknown`, which is the
+# conservative direction — it degrades to today's behaviour rather than to a wrong verdict.
+owner_alive() {
+	_oa_pid=$(jq -r '.watch.owner_pid // empty' "$1" 2>/dev/null || true)
+	_oa_was=$(jq -r '.watch.owner_pid_start // empty' "$1" 2>/dev/null || true)
+	# A state file written before this field existed has no owner recorded. Not an error and not an
+	# orphan — those watches predate the mechanism and must keep classifying exactly as they did.
+	if [ -z "$_oa_pid" ] || [ -z "$_oa_was" ]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	if [ "$(pid_alive "$_oa_pid")" = no ]; then
+		printf 'no\n'
+		return 0
+	fi
+	_oa_now=$(proc_start "$_oa_pid")
+	if [ -z "$_oa_now" ]; then
+		printf 'unknown\n'
+	elif [ "$_oa_now" = "$_oa_was" ]; then
+		printf 'yes\n'
+	else
+		# The pid exists but is not the process that armed us — recycled. The owner is gone.
+		printf 'no\n'
+	fi
 }
 
 # pid_alive — the impure probe, and deliberately only that: does this pid exist. It does NOT try to
@@ -1109,7 +1170,8 @@ EOF
 			if [ "$(jq -r 'has("state")' "$_f")" = true ]; then
 				jq -c '.state' "$_f" >"$_tmp/state"
 			fi
-			_got=$(watch_report "$_tmp/state" "$(jq -r '.now' "$_f")" "$(jq -r '.pid_alive // "yes"' "$_f")" || true)
+			_got=$(watch_report "$_tmp/state" "$(jq -r '.now' "$_f")" "$(jq -r '.pid_alive // "yes"' "$_f")" \
+				"$(jq -r '.owner_alive // "unknown"' "$_f")" || true)
 			# The state path is a mktemp path here and a real one in production, so the fixtures write
 			# `state=STATE` and the harness normalises. The path is still asserted to be REPORTED —
 			# a report that omitted which file it read would be the weaker claim.
@@ -1664,20 +1726,31 @@ wake_worthy() {
 }
 
 watch_preflight() {
-	# The five answers of `status`, enforced instead of recited. `live`, `starting` and `wedged` REFUSE — the
-	# first because two watchers on one state file is a race that presents as missing events
-	# (quince#50), the second because "wedged" means a process is still running by definition, so
+	# The six answers of `status`, enforced instead of recited. `live`, `starting`, `wedged` and
+	# `orphaned` REFUSE — the first because two watchers on one state file is a race that presents as
+	# missing events (quince#50), the second and fourth because a process IS running by definition, so
 	# arming beside it is starting the second watcher rather than replacing the first. `dead` and
 	# `absent` proceed, and the tool SAYS WHICH: re-arming from a dead state must not reseed it, and
 	# the session is expected to report that it found one.
+	#
+	# THIS IS THE THIRD CONSUMER OF LIVENESS, and it was missed when `orphaned` was added. Caught in
+	# review: with the owner not passed, `_owner` defaulted to `unknown`, `unknown` can never yield
+	# `orphaned` by design, and the guard classified a running orphan as `live` — printing
+	# `note: nothing to do.` and refusing the arm. That is quince#111's four-minute lie reproduced
+	# inside the change that fixes it, in the one path that decides whether a session gets a working
+	# watch. `/architect` §6 rules "arm unconditionally — `watch`'s own refusal is the only check
+	# atomic with the act it guards", so this refusal is authoritative and a wrong one ends a turn
+	# with the session believing it is watched.
 	_ps=$1
 	_pr=$2
 	_pa=no
+	_po=unknown
 	if [ -f "$_ps" ]; then
 		_pp=$(jq -r '.watch.pid // empty' "$_ps" 2>/dev/null || true)
 		[ -n "$_pp" ] && _pa=$(pid_alive "$_pp")
+		_po=$(owner_alive "$_ps")
 	fi
-	_prep=$(watch_report "$_ps" "$(now_iso)" "$_pa") && _pcls=0 || _pcls=$?
+	_prep=$(watch_report "$_ps" "$(now_iso)" "$_pa" "$_po") && _pcls=0 || _pcls=$?
 	printf 'forge-watch: %s\n' "$_pr"
 	# The classification, without watch_report's `event=` lines: the first tick re-emits `tick-overdue`
 	# a moment later from the same state, and printing it twice would make one missed tick look like
@@ -1697,6 +1770,15 @@ watch_preflight() {
 	9) die "a watch for $_pr is STARTING — armed, and its first tick has not finished yet. Refusing to
     arm a second one beside it. Nothing is wrong and nothing is owed: wait for the tick, or run
     \`forge-watch status --repo $_pr\` to watch it become live." ;;
+	# `orphaned` needs its OWN arm for the reason `starting` does, and the consequence of omitting it
+	# is worse. Passing the owner without adding this arm makes the class fall through the `esac` and
+	# arm a second watcher BESIDE the running orphan — quince#50's race reached through the guard
+	# rather than around it. It is also the arm that makes `orphaned`'s own note true: that note tells
+	# the session to stop and then re-arm, and this is what it meets when it tries.
+	10) die "the watch for $_pr is ORPHANED — a watcher is running and the session that armed it is
+    gone, so it can wake nobody. Refusing to arm a second one beside it. Run
+    \`forge-watch stop --repo $_pr\` (it verifies the pid is still ours and refuses if it was
+    recycled), then arm again from this state — do not reseed it." ;;
 	3) printf 'forge-watch: re-arming from a DEAD watch — not reseeded, so the next tick emits what accrued while nothing was watching.\n' ;;
 	4) printf 'forge-watch: cold start — the first tick establishes the baseline and does not wake anybody.\n' ;;
 	esac
@@ -1783,11 +1865,25 @@ watch_arm() {
 	# The first tick of this generation overwrites both with its own. The bound this generation runs
 	# under is unaffected, because it is stored explicitly as `starting_bound_s` rather than re-derived
 	# from whichever interval happens to be on the record.
+	# WHOSE watch this is, recorded at arm time (quince#111 face 1). The watcher is started by the
+	# session as a background task, so its parent is that session's shell; when the session dies the
+	# watcher is REPARENTED and keeps ticking, which is the state the deliberate-SIGKILL experiment
+	# produced and which nothing could name — `status` said `live` for four minutes about a watcher
+	# that could wake nobody, and `owed` would have told a replacement session it had no obligation.
+	#
+	# pid + start time, the same pairing proc_start's own note argues for: a pid alone is not an
+	# identity, and a recycled owner pid necessarily started after the one recorded here. Where
+	# procfs cannot answer, the start is null and the orphan check DECLINES to fire rather than
+	# guessing — a false `orphaned` would send a session to kill a watch that is fine, which is
+	# quince#95's defect wearing this issue's clothes.
+	_aowner=$PPID
 	jq -c --arg ts "$_ats" --argjson pid "$$" --argjson iv "$_aiv" --argjson bd "$_abound" \
-		--arg start "$(proc_start "$$")" '
+		--arg start "$(proc_start "$$")" \
+		--argjson opid "$_aowner" --arg ostart "$(proc_start "$_aowner")" '
 		((.watch // {}) | .due // null) as $prev_due
 		| ((.watch // {}) | .interval_s // null) as $prev_iv
 		| .watch = {pid: $pid, pid_start: (if $start == "" then null else $start end),
+		            owner_pid: $opid, owner_pid_start: (if $ostart == "" then null else $ostart end),
 		            interval_s: (if $prev_due == null then $iv else ($prev_iv // $iv) end),
 		            armed_at: $ts, starting_bound_s: $bd,
 		            last_watcher_tick: null, due: $prev_due}' \
@@ -1920,11 +2016,16 @@ owed_classify() {
 		[ -n "$_oc_repo" ] || continue
 		_oc_st=$(state_path_for "$_oc_repo")
 		_oc_alive=no
+		_oc_owner=unknown
 		if [ -f "$_oc_st" ]; then
 			_oc_pid=$(jq -r '.watch.pid // empty' "$_oc_st" 2>/dev/null || true)
 			[ -n "$_oc_pid" ] && _oc_alive=$(pid_alive "$_oc_pid")
+			# Face 2 (quince#111): without this, the hook is satisfied by a watcher belonging to a
+			# session that is gone. The SIGKILL experiment missed that outcome by two minutes of
+			# luck — the orphan exited before a replacement session started and asked.
+			_oc_owner=$(owner_alive "$_oc_st")
 		fi
-		watch_report "$_oc_st" "$(now_iso)" "$_oc_alive" >/dev/null 2>&1 && _oc_cls=0 || _oc_cls=$?
+		watch_report "$_oc_st" "$(now_iso)" "$_oc_alive" "$_oc_owner" >/dev/null 2>&1 && _oc_cls=0 || _oc_cls=$?
 		printf '%s %s\n' "$_oc_repo" "$_oc_cls"
 	done
 }
@@ -2226,12 +2327,14 @@ status)
 		_rs=$1
 		_rr=$2
 		_ra=no
+		_ro=unknown
 		if [ -f "$_rs" ]; then
 			_rp=$(jq -r '.watch.pid // empty' "$_rs" 2>/dev/null || true)
 			[ -n "$_rp" ] && _ra=$(pid_alive "$_rp")
+			_ro=$(owner_alive "$_rs")
 		fi
 		printf 'forge-watch: repo=%s\n' "$_rr"
-		watch_report "$_rs" "$_now" "$_ra"
+		watch_report "$_rs" "$_now" "$_ra" "$_ro"
 	}
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"

@@ -99,6 +99,8 @@ checked as the event half is — and a restart path with no fixture is a promise
 | `watch-wedged-stale-heartbeat.json` | live pid, ticks stopped → `wedged`. A pid check alone calls this healthy |
 | `watch-starting-is-neither-dead-nor-wedged.json` | armed, first tick unfinished → `starting` (exit 9). Measured: the pre-change tool called this exact state `wedged` and said "run `forge-watch stop`" — the NULL-age arm needs no elapsed time, so ordering is the whole safety |
 | `watch-starting-is-bounded.json` | the same record past its bound → `dead reason=never_ticked`. An unbounded `starting` would be a state that cannot fail |
+| `watch-orphaned-owner-is-gone.json` | live pid, owner session gone → `orphaned` (exit 10). The state the deliberate-SIGKILL experiment produced and nothing could name: `status` said `live` for four minutes about a watch that could wake nobody. Evaluated BEFORE `starting`, because a session that dies seconds after arming leaves an orphan, and `starting` is the class that says "do not arm a second one" |
+| `watch-orphan-unknown-owner-is-not-orphaned.json` | the same record with no owner on it → `live`. The conservative direction and the migration case: `orphaned`'s remedy is "stop it", so an unverifiable owner must never yield it, and every state file written before the field existed classifies exactly as it did |
 | `watch-hand-tick-is-not-a-watcher.json` | a hand-run tick must not be able to make a dead watcher look alive |
 
 **One design correction earned during this round, and worth recording because it is the same shape

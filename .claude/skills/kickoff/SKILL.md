@@ -13,11 +13,17 @@ the plan is a checkpoint, not the deliverable.
 ## 0. A watch may already exist, and it may already be dead
 
 If this session is resuming work — a `/kickoff <pr>` woken by an event, or a session whose process
-restarted — ask before arming anything, and **say which of the five answers you got**:
+restarted — ask before arming anything, and **say which of the six answers you got**:
 
 ```sh
-bin/forge-watch status --repo novkostya/quince   # 0 live · 9 starting · 3 dead · 4 absent · 5 wedged
+bin/forge-watch status --repo novkostya/quince   # 0 live · 9 starting · 3 dead · 4 absent · 5 wedged · 10 orphaned
 ```
+
+**`orphaned` (exit 10) → a watcher is running and the session that armed it is GONE** (quince#111),
+so it can wake nobody. This is the answer a restarted process is most likely to get, because the
+watcher is a child of the session and a single-pid kill reparents it rather than ending it. `stop`
+it first, THEN re-arm from that state without reseeding — the running process is still writing to
+it. Never treat this as `live`: `live` would tell you nothing is owed while nothing can wake you.
 
 `live` → nothing to do, and do not arm a second watcher. **`starting` → a watch was armed and its
 first tick has not landed yet: nothing is owed and nothing is wrong. Wait.** **`dead` → re-arm from
