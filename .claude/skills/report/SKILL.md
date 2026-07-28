@@ -90,7 +90,7 @@ answer could not be distinguished from a gate that never ran.
 **Deploy by default. Don't ask, don't wait to be asked:**
 
 ```sh
-deploy/devct/devct deploy --ref <this branch>     # add --create if no container is running
+make demo                                        # builds THIS branch and serves it, on this box
 ```
 
 It builds the production image on a dev container, serves it in `--demo` mode, and prints

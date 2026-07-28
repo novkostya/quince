@@ -26,6 +26,21 @@ token that provisions it, with `/report` doing it by default.
 clean); real-device QA; any product code (frozen); anything under `.github/workflows/`; the runner
 host (pr.5).
 
+**What a staging deploy would COST, measured 2026-07-28 so the next reader does not rediscover it.**
+Operator ruling that day: staging stays out of scope *for now*, and it is on the table later. The two
+things it needs do not exist:
+
+- **`quince-staging` runs no sshd** — port 22 answers `Connection refused`.
+- **The runner holds no private ssh key**, only `authorized_keys`. It cannot reach anything today,
+  and that is the cleanest that axis has ever been.
+
+So a push-from-the-runner design costs a **new private key on a box `pr.6` constraint 2 exists to
+keep credentials off** — *"the runner accumulates login + bot token + devct token + ssh key"* — plus
+standing sshd up on the host that runs the soak. A **pull** design costs less: the registry already
+exists (`oci-registry`), the runner already builds images, and staging pulling needs a registry
+credential rather than a shell on the soak host. Neither is built; the trade is recorded so the
+choice is made rather than defaulted into.
+
 **Expected contract changes: NONE.** `--demo` mode already exists and is exercised by
 `make gates-ui-e2e`.
 

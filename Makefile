@@ -74,6 +74,19 @@ E2E_LOG     := /tmp/quince-e2e-app$(NS).log
 # tag explicitly and never a local one.
 APP_TAG     ?= $(IMAGE_TAG)$(NS)
 
+# The demo the DoD asks every PR for. Named per runner like everything else that runs, and its port
+# is ALLOCATED rather than fixed, because two runners serving demos on one box is the ordinary case
+# once parallel rungs exist (quince#45, quince#111).
+DEMO_APP    := quince-demo$(NS)
+DEMO_PORT   ?= 0
+# The CONVENTION NAME a PR is allowed to carry. `CLAUDE.md` forbids an address in PR text and
+# requires a conventional name instead, and the first version of `demo` printed `$(shell hostname)`
+# — which is the box's identity, not a convention. On this runner that happens to look conventional
+# and the gate passed; on a differently-named host the tool would have emitted exactly the string
+# the skill forbids, into a session instructed to paste it. Naming it here closes that by
+# construction rather than by discipline. Override when serving from somewhere else.
+DEMO_HOST   ?= quince-runner
+
 VERSION ?= 0.0.0-dev
 
 # Build-args threaded into every image build so the Dockerfile and the gates agree.
@@ -391,6 +404,69 @@ gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
 	exit $$status
+
+# ---------------------------------------------------------------------------
+# demo — build this branch and serve it, on THIS box.
+#
+# WHY IT EXISTS. `/qa` and `/report` told a session to run `deploy/devct/devct deploy`, and on the
+# runner that exits 1: devct needs devct.conf, a Proxmox API token and a pinned CA under
+# ~/.config/quince, and `provision`/`preflight` never place any of them. So the DoD's
+# deploy-by-default leg silently required the Operator's workstation, discovered at report time —
+# the most expensive moment — and contradicted the unfreeze bar of a session that runs on a naked
+# /kickoff.
+#
+# quince-devlog#45 removed the reason for the round trip: the runner IS the work host, so there is
+# no container to select and no hypervisor to ask. Building and serving here needs no Proxmox
+# credential at all, which makes pr.6's credential-concentration boundary smaller rather than
+# larger.
+#
+# THE PORT IS TRIED, NOT PROBED. nerdctl 2.2.1 does not support `-p 0:` — measured: it exits 1
+# rather than allocating — so something has to choose. Probing for a free port and then binding it
+# is a race with whoever takes it in between; letting the RUNTIME fail to bind and trying the next
+# port makes the allocator and the binder the same actor, so there is no window. It reports the port
+# it got, because a demo URL nobody can derive is the same as no demo.
+.PHONY: demo
+demo: image ## Build this branch and serve it in --demo mode on this box; prints a fetched URL
+	@set -e; \
+	$(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
+	port=$${DEMO_PORT}; [ "$$port" -ne 0 ] 2>/dev/null || port=8080; \
+	started=no; \
+	for try in 1 2 3 4 5 6 7 8 9 10; do \
+	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8080 \
+	       -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	       $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null 2>&1; then started=yes; break; fi; \
+	  $(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
+	  port=$$((port + 1)); \
+	done; \
+	if [ "$$started" != yes ]; then \
+	  echo "demo: could not bind a port in 10 tries from $${DEMO_PORT:-8080} — say so as 'deploy: unavailable', never as silence"; \
+	  exit 1; \
+	fi; \
+	ok=no; \
+	for i in $$(seq 1 60); do \
+	  if curl -fsS "http://127.0.0.1:$$port/api/health" 2>/dev/null | grep -q '"status"'; then ok=yes; break; fi; \
+	  sleep 1; \
+	done; \
+	if [ "$$ok" != yes ]; then \
+	  echo "demo: the container started but /api/health never answered on $$port — logs:"; \
+	  $(RUNTIME) logs $(DEMO_APP) 2>&1 | tail -20; \
+	  exit 1; \
+	fi; \
+	echo ""; \
+	echo "demo: answering on 127.0.0.1:$$port — FETCHED, not composed."; \
+	echo ""; \
+	echo "  paste this into the PR:  http://$(DEMO_HOST):$$port/"; \
+	echo ""; \
+	echo "  Two lines, not one, because they are different claims. The first is what this box"; \
+	echo "  verified: the service answered /api/health on the loopback port. The second is a"; \
+	echo "  CONVENTION NAME for a reader on the LAN — this tool cannot verify that it resolves for"; \
+	echo "  anybody else, and saying so is cheaper than a URL that was 'verified' and does not open."; \
+	echo ""; \
+	echo "  stop it with: $(RUNTIME) rm -f $(DEMO_APP)"
+
+.PHONY: demo-stop
+demo-stop: ## Remove this runner's demo container
+	@$(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; echo "demo: $(DEMO_APP) removed"
 
 .PHONY: push
 push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
