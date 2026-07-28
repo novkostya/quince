@@ -216,7 +216,7 @@ So:
    The second form was measured failing: the check was right, and ten seconds later the watcher exited
    on the session's own approval. Neither belongs in a session's hands. Note that this is a rule about
    *gating*, not about *asking* — `/architect` §0 and `/kickoff` §0 still require you to read `status`
-   and **report which of the five answers you got**, which is an obligation the tool cannot discharge
+   and **report which of the six answers you got**, which is an obligation the tool cannot discharge
    on your behalf. What is retired is the pre-arm conditional, which nothing ever prescribed; it was
    invented from §0's tone.
 

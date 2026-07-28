@@ -50,12 +50,16 @@ usage: forge-watch <verb>
   Run it as a BACKGROUND task, never in the foreground: in the foreground it blocks the session it
   is supposed to wake.
 
-  `watch` exit codes: 0 an event (the wake — the events are on stdout) · 6 the --max-wait bound
-  with nothing seen (`event=watch-idle`) · 7 --fail-after consecutive failing ticks. It refuses to
-  arm beside a `live` watch, a `starting` one, a `wedged` one or an `orphaned` one (`stop` first for
-  the last two) — the six answers of `status` are enforced here rather than left to a paragraph
-  someone remembers. A refusal
-  exits 1, as every refusal in this tool does; `dead` and `absent` proceed and say which they were.
+  `watch` exit codes — ONE PER LINE, and that is not formatting. A code wrapped onto a line that
+  does not itself say "exit" is the one shape a reader skimming for "which exits are listed" misses,
+  and the shape this enumeration used to be written in (quince#75, and again in 2026-07-29's sweep):
+    exit 0   an event — the wake; the events are on stdout
+    exit 6   the --max-wait bound with nothing seen (`event=watch-idle`)
+    exit 7   --fail-after consecutive failing ticks
+    exit 1   a refusal, as every refusal in this tool is
+  It refuses to arm beside a `live` watch, a `starting` one, a `wedged` one or an `orphaned` one
+  (`stop` first for the last two) — the six answers of `status` are enforced here rather than left
+  to a paragraph someone remembers. `dead` and `absent` proceed and say which they were.
 
   Every tick's output is printed whether or not it wakes anybody; the filter decides what WAKES,
   never what is SEEN. Two kinds of line do not wake:
@@ -86,10 +90,16 @@ usage: forge-watch <verb>
   session scratchpad is the wrong home for it: the failure this state exists to survive is the
   session process restarting, which is exactly when a scratchpad-scoped file is not there.
 
-  `status` exit codes: 0 live · 3 dead (nothing running — re-arm from the state, do NOT reseed) ·
-  4 absent (cold start) · 5 wedged (a process is still running and has stopped ticking — `stop` it,
-  then re-arm) · 9 starting (armed, first tick not finished — nothing is owed and nothing is wrong;
-  do NOT arm a second one). FIVE cases, never fewer: collapsing dead into absent turns a restarted
+  `status` exit codes, one per line for the reason given above:
+    exit 0   live      a watcher is running and ticking. Nothing to do.
+    exit 3   dead      nothing is running. Re-arm FROM THE STATE; do NOT reseed it.
+    exit 4   absent    cold start — no state at all.
+    exit 5   wedged    a process is running and has stopped ticking. `stop` it, then re-arm.
+    exit 9   starting  armed, first tick not finished. Nothing is owed and nothing is wrong;
+                       do NOT arm a second one.
+    exit 10  orphaned  running, and the session that armed it is GONE, so it can wake nobody.
+                       `stop` it, THEN re-arm from its state (quince#111).
+  SIX cases, never fewer: collapsing dead into absent turns a restarted
   watch into a fresh one that has "seen nothing changed" since a beginning it invented, collapsing
   wedged into dead tells the reader to start a second watcher beside a live one, and collapsing
   STARTING into dead is how a freshly-armed watch got reported as owed — which sent the `owed` Stop
@@ -798,7 +808,11 @@ tag_repo() {
 #            becomes a fresh one that has "seen nothing changed" since a beginning it invented.
 #   live   — state and a watcher. Nothing to do.
 #
-# FIVE cases now, and the fifth is `starting` — armed, first tick not yet finished. Added by Operator
+# SIX cases now. The fifth is `starting` — armed, first tick not yet finished — and the sixth is
+# `orphaned` (quince#111), a watcher that is running while the session that armed it is gone. Both
+# were added for the reason the rest of this list exists, and the count in this comment said FIVE
+# for a day after `orphaned` shipped: a number is the one part of a comment that goes stale without
+# reading wrong. Added by Operator
 # ruling on quince#95, for the same reason `wedged` was added below: the classes that get collapsed
 # are the ones whose REMEDIES are opposite. `dead` says "arm one"; `starting` says "wait, and do not
 # arm a second one". Collapsed, the `owed` Stop hook read `dead` on a watch that had just been armed

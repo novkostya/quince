@@ -258,7 +258,7 @@ quince#75's loop lacked, and the two-attempt bound is belt over braces.
 with the act it guards; a conditional beside it is check-then-act across a window in which the watcher
 can die. Both `status …; exec watch …` (which gates nothing, because `;` sequences rather than
 conditions) and the correctly-composed `if` form were measured failing. §0's duty is unchanged: read
-`status` and **say which of the five answers you got**. The window is narrowed, not closed — the `Stop`
+`status` and **say which of the six answers you got**. The window is narrowed, not closed — the `Stop`
 hook is the declared backstop, which is not a resolution.
 
 Arm the `ScheduleWakeup` fallback too, at ≥1200 s — but
