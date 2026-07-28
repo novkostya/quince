@@ -33,6 +33,10 @@ usage: forge-watch <verb>
   owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
                                                is a live watch owed here? (--author: open PRs you
                                                authored · --all: the declared set, unconditionally)
+  runner set <name> | get | path            declare WHOSE this session's work is (quince#111), or
+                                               report it. The name owns branches `<name>/…`, gives
+                                               this session its own state directory, and scopes the
+                                               scratch reaper. Declared ONCE per session, at kickoff.
   replay <fixture.json>...                     drive step/watch_report from fixtures; non-zero on mismatch
 
   `watch` OWNS THE LOOP, and the reason it is a verb is the whole of quince#62: a session that
@@ -633,8 +637,103 @@ HOME_DIR=${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2
     passwd entry. Set FORGE_STATE_DIR (and QUINCE_BOT_TOKEN_FILE / QUINCE_ARCH_TOKEN_FILE)
     explicitly, or run somewhere a home directory resolves."
 
+# ---------------------------------------------------------------------------
+# RUNNER IDENTITY — whose watch is this (quince#111 faces 3-4).
+#
+# THE PROBLEM. `--author @me` resolves to the authenticated token's login, and every runner on a
+# box uses the same token, so `@me` is `quince-bot` for all of them: session A's Stop hook demands a
+# watch for session B's work and A cannot tell which PR is its own. Operator ruling: **ownership is
+# carried by the BRANCH, not the login.** A runner declares a name and owns the PRs whose
+# `headRefName` carries it.
+#
+# TWO IDS, TWO LIFETIMES, and conflating them is the trap.
+#
+#   session id   $CLAUDE_CODE_SESSION_ID here, `session_id` on the Stop hook's stdin.
+#                DIES ON RESTART, and that is correct — it is what quince#111 face 1 detects.
+#   runner name  declared once, recorded against the session id. SURVIVES a restart, because a
+#                session that restarts must still own the branches it opened.
+#
+# An earlier draft of this reported that no per-session identifier existed. That was wrong: it read
+# the remote-control docs (which describe the SERVER's flags) and the SERVER process's environment,
+# neither of which is what a session's own subprocess sees. Measured properly,
+# `CLAUDE_CODE_SESSION_ID` is right there. Recorded because a negative from an incomplete probe is
+# this project's most-repeated defect and it nearly cost the design.
+#
+# NO DEFAULT NAME, deliberately. A shared fallback like `default` would put two runners back on one
+# state file, which is quince#50 — the exact failure this issue exists to end. An implicit default
+# would be the same defect one layer up, so the verbs that need a name REFUSE without one.
+state_base() {
+	printf '%s' "${XDG_STATE_HOME:-$HOME_DIR/.local/state}/quince"
+}
+
+# The registry lives OUTSIDE the per-runner directory, because it is what tells you which per-runner
+# directory to use. Putting it inside would need the answer to find the question.
+runner_registry() {
+	printf '%s/runners' "$(state_base)"
+}
+
+session_id() {
+	printf '%s' "${QUINCE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+}
+
+# runner_name — the declared name for THIS session, or empty. Never guesses.
+#
+# $1, when given, is a session id supplied by a caller that knows one the environment does not — the
+# Stop hook, which receives `session_id` on stdin and does NOT inherit the session's environment in
+# any documented way. That the two are the same string is the one link in this design not measured
+# before it shipped, which is why every lookup miss REFUSES with the remedy rather than falling back:
+# if they differ, the first real hook run says so in one line instead of silently using another
+# runner's state directory.
+runner_name() {
+	_rn_sid=${1:-$(session_id)}
+	[ -n "$_rn_sid" ] || return 0
+	_rn_f="$(runner_registry)/$_rn_sid"
+	[ -f "$_rn_f" ] || return 0
+	head -n 1 "$_rn_f" 2>/dev/null || true
+}
+
+# require_runner — the name, or a refusal that says how to get one.
+require_runner() {
+	_rr=$(runner_name "${1:-}")
+	if [ -z "$_rr" ]; then
+		die "this session has no runner name, so which watch is MINE cannot be answered (quince#111).
+    Declare one first:  forge-watch runner set <name>
+    The name owns the branches \`<name>/…\` and gives this session its own state directory.
+    There is deliberately no default: two runners sharing one state file is quince#50."
+	fi
+	printf '%s' "$_rr"
+}
+
 state_dir() {
-	printf '%s' "${FORGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME_DIR/.local/state}/quince/forge-watch}"
+	# FORGE_STATE_DIR still wins, for the fixtures and for anyone pinning a path. Otherwise the
+	# directory is PER RUNNER, which is the other half of one declaration (quince#111): the same fact
+	# that decides which branches are mine decides which state file is mine, so the two cannot drift.
+	if [ -n "${FORGE_STATE_DIR:-}" ]; then
+		printf '%s' "$FORGE_STATE_DIR"
+		return 0
+	fi
+	_sd_n=$(runner_name)
+	if [ -n "$_sd_n" ]; then
+		printf '%s/forge-watch/%s' "$(state_base)" "$_sd_n"
+	else
+		# No name declared: the pre-quince#111 path. Reads of existing state keep working, which is
+		# what makes `status` usable on a box mid-migration.
+		#
+		# WHO LANDS HERE, exactly — an earlier version of this comment claimed a uniform guard across
+		# `watch` and `owed` and only `watch` had one, so a bare `owed` answered from this path as
+		# though authoritative. Three behaviours, each with its own reason:
+		#
+		#   watch        REFUSES — it holds a state file open for its whole run, so two unnamed
+		#                runners collide (quince#50). Only when the path is DERIVED; an explicit
+		#                --state has already said which file it means.
+		#   owed         REFUSES — it makes a CLAIM, and once any session declares a name this path
+		#                stops being written and answers from a graveyard.
+		#   owed --hook  FAILS OPEN with a systemMessage — a hook that died would wedge every stop in
+		#                the repository. The exception is about hooks, not about `owed`.
+		#   status       LANDS HERE, deliberately. It REPORTS state rather than claiming anything,
+		#                and a report from the old path is still a true report of the old path.
+		printf '%s/forge-watch' "$(state_base)"
+	fi
 }
 
 state_path_for() {
@@ -1418,7 +1517,7 @@ tick() {
 	_raw=$(mktemp)
 	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
 		--search "sort:updated-desc" \
-		--json number,state,updatedAt,title,closingIssuesReferences,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
+		--json number,state,updatedAt,title,headRefName,closingIssuesReferences,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
 		# A `reason=` with nothing after it reads as "there was no reason" rather than "the tool could
 		# not tell" — a wrapper that fails silently produces exactly that, and it was doing so.
 		_why=$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
@@ -1455,6 +1554,10 @@ tick() {
 	# `unknown` — distinct from `unattributed`, which means no act explains the update at all.
 	_obs=$(mktemp)
 	jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
+		# quince#111: the branch is what carries OWNERSHIP. Recorded on the observation rather than
+		# derived later, because `wake_worthy` runs against events long after the payload is gone,
+		# and a filter that cannot see the fact it filters on falls back to waking on everything.
+		branch: (.headRefName // null),
 		merge_state: (.mergeStateStatus // "UNKNOWN"),
 		checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
 		reviews: [(.reviews // [])[] | {state}],
@@ -2283,6 +2386,19 @@ watch)
 	# Validated BEFORE the preflight, and before anything is written: a malformed --issue must not
 	# leave half a declaration behind on the repos that happened to be processed first.
 	issue_specs_ok "$_all" "$_ispecs" "$_repo"
+	# A RUNNER NAME IS REQUIRED ONLY WHEN THE PATH IS BEING DERIVED (quince#111). `watch` holds a
+	# state file open for its whole run, and two unnamed runners derive the SAME path — quince#50,
+	# the race that presents as missing events. But the requirement is about the DERIVATION, not the
+	# verb: a caller that names the file itself, with `--state` or `FORGE_STATE_DIR`, has already
+	# said which one it means and a name would add nothing.
+	#
+	# Scoping it this way is not a convenience. The first version required it unconditionally and
+	# broke the fixture suite and the roundtrip suite, both of which pin an explicit path — a
+	# requirement that fires where there is nothing to collide with is noise, and noise in a refusal
+	# is how a real refusal stops being read.
+	if [ -z "${FORGE_STATE_DIR:-}" ] && [ -z "$_s" ]; then
+		require_runner >/dev/null
+	fi
 	if [ "$_all" = yes ]; then
 		[ -z "$_s" ] || die "--all derives one state file per repo; --state names a single one"
 		# The set is read BEFORE the preflight so a malformed declaration fails here rather than
@@ -2504,6 +2620,27 @@ owed)
 		# file shellcheck never sees.
 		_payload=$(cat)
 		_active=$(printf '%s' "$_payload" | jq -r '.stop_hook_active // false' 2>/dev/null || printf 'false')
+		# WHOSE stop is this (quince#111). A hook does not inherit the session's environment in any
+		# documented way, so `$CLAUDE_CODE_SESSION_ID` may be absent here — but the protocol puts
+		# `session_id` on stdin. Exporting it makes every downstream resolution, including
+		# `state_dir`, answer for the session that is stopping rather than for whatever the process
+		# environment happened to carry.
+		#
+		# THAT THESE TWO IDS ARE THE SAME STRING IS THE ONE LINK IN THIS DESIGN NOT MEASURED BEFORE
+		# IT SHIPPED. It is not assumed anywhere: a lookup miss REFUSES with the remedy, so if they
+		# differ the first real hook run says so in one line instead of silently reading another
+		# runner's state directory. The refusal is the test.
+		_hsid=$(printf '%s' "$_payload" | jq -r '.session_id // empty' 2>/dev/null || true)
+		[ -z "$_hsid" ] || QUINCE_SESSION_ID=$_hsid
+		export QUINCE_SESSION_ID
+		if [ -z "$(runner_name)" ]; then
+			# FAIL OPEN, LOUDLY — the same shape as the no-credential arm below, and for the same
+			# reason. A hook that DIED here would block every stop in a session that simply had not
+			# declared yet, and the remedy would arrive as a stack trace rather than an instruction.
+			# It says what it could not check, and how to make it checkable.
+			jq -n '{systemMessage: "forge-watch owed: this session has no runner name, so WHOSE watch is owed could not be determined and was NOT checked (quince#111). Nothing is being claimed about it. Declare one and the check starts working: forge-watch runner set <name>"}'
+			exit 0
+		fi
 		if [ "$_role" = none ]; then
 			# FAIL OPEN, LOUDLY. A hook that blocked because it could not check would wedge every
 			# session in the repository on a box with no forge credential; a hook that returned silence
@@ -2572,6 +2709,25 @@ The loop must exit when it finds something; a loop that cannot exit cannot wake 
 		exit 0
 	fi
 
+	# A NAME IS REQUIRED HERE TOO, and refusing is the right shape rather than the hook's fail-open.
+	# Caught in review: the comment on state_dir() claimed this guard existed and only `watch` had it,
+	# so a bare `owed` answered from the shared path AS THOUGH AUTHORITATIVE — the one thing the
+	# hook's message exists to avoid saying.
+	#
+	# WHY REFUSE, WHEN --hook FAILS OPEN. The fail-open above is a property of HOOKS, not of `owed`:
+	# a hook that blocked because it could not check would wedge every stop in the repository, and
+	# that reason is stated where it applies. A hand-run `owed` has a caller reading its output and
+	# nothing to wedge, so the refusal that names the remedy is strictly more useful.
+	#
+	# AND THE FALLBACK IS NOT THE STATUS QUO, which is the argument that nearly kept it. Once ANY
+	# session declares a name, the unnamed path stops being written and becomes a graveyard: an
+	# undeclared `owed` would read state nobody maintains and report `dead` -> OWED forever. That is a
+	# new stale-answer path created by this change, not the old behaviour preserved.
+	#
+	# `status` deliberately still falls back: it REPORTS state, `owed` makes a CLAIM, and the tool's
+	# own rule is that "I could not look" and "nothing is owed" are different sentences.
+	require_runner >/dev/null
+
 	[ -n "$_mode" ] || die "owed needs --author <login|@me> (the implementer half: the PRs you opened)
     or --all (the architect half: the declared set). It is not defaulted, because the two halves owe
     watches over different sets and guessing which you are would answer a question you did not ask."
@@ -2589,6 +2745,44 @@ The loop must exit when it finds something; a loop that cannot exit cannot wake 
 	owed_decide "$_or.tab" "$_mode" && _orc=0 || _orc=$?
 	rm -f "$_or" "$_or.tab"
 	exit "$_orc"
+	;;
+runner)
+	shift
+	case "${1:-}" in
+	set)
+		[ $# -ge 2 ] || die "runner set needs a name: forge-watch runner set <name>"
+		_rs_name=$2
+		# A name becomes a directory component and a branch prefix, so it is constrained to what is
+		# safe in both. Refusing here is cheaper than a state path with a slash in it or a branch
+		# nobody can push, and a name that fails silently would put this session's state somewhere
+		# nobody looks — which is the class of failure this whole issue is about.
+		case "$_rs_name" in
+		'' | *[!A-Za-z0-9._-]* | .* | -*)
+			die "runner name must be [A-Za-z0-9._-], not starting with '.' or '-': got \"$_rs_name\".
+    It becomes a directory component AND a branch prefix, so it has to be safe in both." ;;
+		esac
+		_rs_sid=$(session_id)
+		[ -n "$_rs_sid" ] || die "no session id in the environment (\$CLAUDE_CODE_SESSION_ID), so this
+    name could not be tied to anything. Set QUINCE_SESSION_ID explicitly if you are outside a
+    Claude Code session — a name recorded against nothing would be claimed by the next caller."
+		mkdir -p "$(runner_registry)"
+		printf '%s\n' "$_rs_name" >"$(runner_registry)/$_rs_sid"
+		# The state directory is CREATED here rather than lazily, so `status` on a freshly named
+		# session reports `absent` from the right place instead of erroring on a missing parent.
+		mkdir -p "$(state_dir)"
+		printf 'forge-watch: runner=%s state=%s\n' "$_rs_name" "$(state_dir)"
+		printf 'forge-watch: this session owns branches %s/… — anything else belongs to another runner.\n' "$_rs_name"
+		;;
+	get)
+		_rg=$(runner_name)
+		[ -n "$_rg" ] || die "this session has no runner name. Declare one: forge-watch runner set <name>"
+		printf '%s\n' "$_rg"
+		;;
+	path)
+		printf '%s\n' "$(state_dir)"
+		;;
+	*) usage >&2 && die "runner takes: set <name> | get | path" ;;
+	esac
 	;;
 replay)
 	shift
