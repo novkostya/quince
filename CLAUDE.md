@@ -83,8 +83,16 @@ repo is not a message bus, and no human is an RPC layer.
    `2026-07-27T21:53:23Z`, then #138, #142 and devlog#54, #57 — reads `mergedBy:
    app/quince-review`. Bounded at that timestamp on purpose: everything merged **earlier** that
    day, quince#134 included, was merged by `novkostya`.
-   **On a refused merge: retry once; if it is refused again, merge through `bin/gh-arch` and
-   say so on the PR.** The fallback exists because the harness classifier refuses the merge
+   **This ladder is the ARCHITECT's, and only the architect can climb it.** Both wrappers are
+   architect-seat tools and both refuse on the implementer box — `gh-arch` because a bot token is
+   present (devlog#7: the box that authors must not hold the identity that approves), and
+   `gh-review` because it carries the same assertion. **An implementer session that meets those
+   refusals is seeing the boundary work, not a broken box, and must stop rather than repair it** —
+   installing the missing tool or placing a key would put the reviewer credential on the authoring
+   host and dissolve `approver ≠ author` entirely, which §5 states and this clause must not appear
+   to override (devlog#61).
+   **Architect, on a refused merge: retry once; if it is refused again, merge through `bin/gh-arch`
+   and say so on the PR.** The fallback exists because the harness classifier refuses the merge
    verb *intermittently* and leaves no trace on the forge, so the next session to meet it
    would otherwise conclude the App cannot merge and escalate — which is the pattern named
    under "a refusal is not a reason to escalate to another seat". `gh-arch` rather than an
