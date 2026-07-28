@@ -55,7 +55,7 @@ start_pre() {
 # logged in". So status answers the question a reader is actually asking: is a session up?
 status() {
 	if ! service_started; then
-		einfo "quince-runner: stopped"
+		einfo "${name}: stopped"
 		return 3
 	fi
 	# Classify on the NEWEST lifecycle line in the session log, not on whether a bad string appears
@@ -81,7 +81,7 @@ status() {
 		_newest=$(grep -nE "$_up|$_login|$_fail" "$output_log" 2>/dev/null | tail -n 1)
 		case "${_newest#*:}" in
 		*"$_login"*)
-			ewarn "quince-runner: supervisor is up, but the newest session-log state is NO SESSION — not logged in."
+			ewarn "${name}: supervisor is up, but the newest session-log state is NO SESSION — not logged in."
 			ewarn "  the ceremony is owed: claude auth login (a token cannot do Remote Control)"
 			return 1
 			;;
@@ -89,11 +89,11 @@ status() {
 		# A failure line only when it is the newest state AND no up-marker sits on it — a line cannot be
 		# both, but the guard states the rule rather than relying on the strings staying disjoint.
 		if printf '%s\n' "$_newest" | grep -qE "$_fail" && ! printf '%s\n' "$_newest" | grep -qE "$_up"; then
-			ewarn "quince-runner: supervisor is up, but the newest session-log state is a failure:"
+			ewarn "${name}: supervisor is up, but the newest session-log state is a failure:"
 			printf '%s\n' "$_newest" | sed 's/^[0-9]*:/    /'
 			return 1
 		fi
 	fi
-	einfo "quince-runner: supervisor up; the session log's newest state is healthy (no failure since)"
+	einfo "${name}: supervisor up; the session log's newest state is healthy (no failure since)"
 	return 0
 }
