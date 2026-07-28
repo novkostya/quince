@@ -122,7 +122,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
-                   bin/gh-review bin/home-resolution-test \
+                   bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -156,6 +156,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-fixtures-doc-test
 	@$(MAKE) --no-print-directory quince-runner-status-test
 	@$(MAKE) --no-print-directory pr-title-refs-test
+	@$(MAKE) --no-print-directory forge-watch-roundtrip-test
 	@$(MAKE) --no-print-directory home-resolution-test
 	@echo "gates-sh: clean"
 
@@ -205,15 +206,25 @@ forge-watch-fixtures-doc-test: ## The fixtures' README indexes every fixture, bo
 quince-runner-status-test: ## rc-service status classifies on the newest session-log state (quince#101)
 	@deploy/runner/quince-runner-status-test
 
+.PHONY: forge-watch-roundtrip-test
+forge-watch-roundtrip-test: ## What one writer records must survive the OTHER writers (quince#168)
+	@bin/forge-watch-roundtrip-test
+
+# `home-resolution-test` HAD NO `.PHONY` OF ITS OWN until now, and that is a defect quince#158
+# introduced: it inserted this target between the quince#94 comment block below and the
+# `.PHONY: pr-title-refs-test` line that belonged to it, orphaning both. It worked only because no
+# file named `home-resolution-test` exists in the repo root — the day one did, make would call the
+# target up to date and silently skip the gate. Two renames later nobody had looked, which is the
+# whole argument for fixing it on sight rather than filing it.
+.PHONY: home-resolution-test
+home-resolution-test: ## Entrypoints deriving paths from $$HOME must not require it SET — the service path
+	@bin/home-resolution-test
+
 # quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
 # title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two
 # quince PRs into derived issues of the devlog, costing two failing `gh` calls PER TICK on the
 # reviewer's box until somebody noticed. Synthetic (stub `gh`, no network), so it runs in gates-sh
 # beside the other failure-path suites and needs neither a token nor the private layer.
-.PHONY: pr-title-refs-test
-home-resolution-test: ## Entrypoints deriving paths from $$HOME must not require it SET — the service path
-	@bin/home-resolution-test
-
 .PHONY: pr-title-refs-test
 pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-RUN (quince#94)
 	@bin/pr-title-refs-test

@@ -1,0 +1,120 @@
+#!/bin/sh
+# forge-watch-roundtrip-test — what a writer records must survive the OTHER writers.
+#
+# WHY THIS EXISTS, and why the fixture suite could not have caught it. quince#168: `watch_arm`
+# recorded `owner_pid` / `owner_pid_start`, and the tick writer replaced the whole `.watch` object
+# with a smaller field set, so they were gone one tick after arming. `owner_alive()` then returned
+# `unknown` forever and `orphaned` could never fire — and an orphan is BY DEFINITION a watcher that
+# is still ticking, so the class was alive only in the window where it could not be needed.
+#
+# Both the author's fixtures and the reviewer's reproduction hand-authored a state file with the
+# owner already on it and asked the classifier what it said. **A synthetic state that bypasses the
+# writer cannot tell you the writer is wrong**, and neither could: they pinned the classification
+# and the defect was upstream of it. `armed_at` and `starting_bound_s` were destroyed by the same
+# line and got away with it only because `starting` is pre-first-tick by definition.
+#
+# So this suite runs the REAL verbs in the real order — arm, tick, classify — and never crafts a
+# state file. Where a check cannot be run it SAYS SO and counts a skip; a skip that reads as a pass
+# is the defect class this project files most.
+#
+# Synthetic in the only way that matters: a stub `gh` that returns an empty PR list. No network, no
+# credential, no forge.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+skip=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+skipped() {
+	printf '  SKIP %s\n' "$*"
+	skip=$((skip + 1))
+}
+
+WORK=$(mktemp -d)
+WATCHER=''
+OWNER=''
+cleanup() {
+	[ -z "$WATCHER" ] || kill "$WATCHER" 2>/dev/null || true
+	[ -z "$OWNER" ] || kill "$OWNER" 2>/dev/null || true
+	rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+printf '#!/bin/sh\nprintf "[]\\n"\n' >"$WORK/gh"
+chmod +x "$WORK/gh"
+STATE=$WORK/state.json
+REPO=novkostya/quince
+
+# The watcher must be a CHILD OF A PROCESS WE CAN KILL, because that is the scenario: quince#111's
+# experiment killed the session and the watcher reparented and kept ticking. So an intermediate
+# shell owns it, and killing that shell is what makes the watcher an orphan — the real mechanism,
+# not a crafted owner_pid.
+sh -c "bin/forge-watch watch --state '$STATE' --repo '$REPO' --gh '$WORK/gh' \
+	--interval 5 --max-wait 90 >'$WORK/watch.log' 2>&1 &
+	printf '%s\n' \$! >'$WORK/watcher.pid'
+	sleep 90" &
+OWNER=$!
+
+# Wait for the FIRST TICK to land, which is the event this suite is about: `last_watcher_tick` goes
+# non-null exactly once the tick writer has run. Bounded, and a timeout is a failure rather than a
+# silent pass.
+i=0
+while [ "$i" -lt 60 ]; do
+	if [ -f "$STATE" ] && [ "$(jq -r '.watch.last_watcher_tick // "null"' "$STATE" 2>/dev/null || printf null)" != null ]; then
+		break
+	fi
+	i=$((i + 1))
+	sleep 1
+done
+[ -f "$WORK/watcher.pid" ] && WATCHER=$(cat "$WORK/watcher.pid")
+
+if [ "$i" -ge 60 ]; then
+	bad "the watcher never completed a first tick in 60s — nothing below could be checked"
+	printf '       %s\n' "$(tail -n 3 "$WORK/watch.log" 2>/dev/null || printf 'no log')"
+else
+	# (1) THE quince#168 REGRESSION. Recorded by `watch_arm`, and the tick writer must not drop it.
+	_op=$(jq -r '.watch.owner_pid // "null"' "$STATE")
+	_am=$(jq -r '.watch.armed_at // "null"' "$STATE")
+	if [ "$_op" = null ]; then
+		bad "owner_pid did NOT survive the first tick — orphaned can never fire (quince#168)"
+	else
+		ok "owner_pid survives the first tick (quince#168)"
+	fi
+	# armed_at was destroyed by the same line and survived only because `starting` is pre-first-tick.
+	# Checked separately so a future writer cannot quietly reintroduce half the defect.
+	if [ "$_am" = null ]; then
+		bad "armed_at did NOT survive the first tick — the same line, the other field"
+	else
+		ok "armed_at survives the first tick"
+	fi
+
+	# (2) END TO END: kill the OWNER, leave the watcher running, and ask `status`. This is the only
+	# check here that needs procfs — owner_alive proves identity with pid + start time, and where
+	# proc_start cannot answer it returns `unknown` BY DESIGN, which can never yield `orphaned`.
+	if [ -r "/proc/$$/stat" ]; then
+		kill "$OWNER" 2>/dev/null || true
+		OWNER=''
+		sleep 2
+		bin/forge-watch status --state "$STATE" --repo "$REPO" >"$WORK/status.out" 2>&1 || true
+		if grep -q '^watch=orphaned' "$WORK/status.out"; then
+			ok "a live watcher whose owner was killed classifies orphaned"
+		else
+			bad "owner killed, watcher alive — expected orphaned"
+			printf '       %s\n' "$(sed -n 2p "$WORK/status.out")"
+		fi
+	else
+		skipped "orphaned end-to-end needs procfs (proc_start returns empty here, so owner_alive is
+       \`unknown\` by design and the class cannot fire) — run this suite on the runner"
+	fi
+fi
+
+printf '\nforge-watch-roundtrip-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
+[ "$fail" -eq 0 ]
