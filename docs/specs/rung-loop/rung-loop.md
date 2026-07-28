@@ -748,6 +748,11 @@ allowance faster for no benefit.
 15. A watcher process that is alive but no longer ticking reads `wedged` — not `live`, and not `dead`
     either, because the remedy differs.
 16. A hand-run tick cannot make a dead watcher look alive.
+16b. A hand-run tick cannot make a *live* watcher look dead either: `step()` carries the watcher
+    record forward, so `watch`'s refusal to arm beside a live watch still fires after a hand tick. The
+    two directions are one property with one safety argument, and 16 alone — the half that could not
+    fail — is the framing that produced the second-direction gap (quince#103, shipped by #104, stated
+    here by quince#106).
 17. A tick that was due and did not happen emits `tick-overdue`, with how late it was.
 17b. `stop` signals the recorded pid only when its process start time still matches; a recycled pid,
     an unrecorded start time or an unreadable procfs each produce a refusal naming which, never a kill.
