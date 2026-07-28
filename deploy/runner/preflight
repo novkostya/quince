@@ -162,13 +162,22 @@ _here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 PRIVACY_CHECK="${QUINCE_PRIVACY_CHECK:-$_here/../privacy/privacy-check}"
 if [ ! -x "$PRIVACY_CHECK" ]; then
 	bad "the privacy gate is missing at $PRIVACY_CHECK — this checkout is incomplete, so preflight cannot establish whether the box can gate. Pull the launchpad."
+elif ! _perr=$(mktemp 2>/dev/null); then
+	# NO INSECURE FALLBACK, and this is a refusal branch beside the missing-gate one above for the
+	# same reason. preflight runs as ROOT (quince-runner.initd start_pre), and on exit 1 the gate
+	# writes its MATCHED Operator-private lines to $_perr. A predictable /tmp name opened by root
+	# with a plain `>` — no O_EXCL, no O_NOFOLLOW — is a world-readable, symlink-followable temp file
+	# (CWE-377) with a root write primitive attached. So a box that cannot make a private temp file
+	# cannot capture the gate safely and must not start: the same refuse-don't-degrade answer :156
+	# gives everywhere else, rather than a quieter path around it. mktemp is in coreutils and
+	# busybox, so its absence is real news, not a case to paper over.
+	bad "mktemp is unavailable, so the privacy gate's stderr cannot be captured to a PRIVATE temp file — and preflight will not fall back to a predictable /tmp path as root, which on a match would leak the gate's Operator-private lines somewhere guessable and world-readable (CWE-377). Install mktemp (coreutils or busybox). Refusing to degrade."
 else
-	# Capture the gate's two streams SEPARATELY. stdout is its progress report, including the
-	# pattern-count line; stderr carries the reason on exit 2 AND the matched lines on exit 1
-	# (deploy/privacy/privacy-check:268), which are Operator-private and must never be printed on a
-	# non-2 path — so they cannot be merged into one capture. A temp file holds stderr; stdout is
-	# captured directly. mktemp with a pid-named fallback so `set -e` cannot abort start_pre here.
-	_perr=$(mktemp 2>/dev/null || echo "/tmp/quince-preflight.$$.err")
+	# Capture the gate's two streams SEPARATELY into $_perr (made safely above) and $layer_out.
+	# stdout is the gate's progress report, including the pattern-count line; stderr carries the
+	# reason on exit 2 AND the matched lines on exit 1 (deploy/privacy/privacy-check:268), which are
+	# Operator-private and must never be printed on a non-2 path — so they cannot be merged into one
+	# capture.
 	layer_out=$("$PRIVACY_CHECK" --patterns "$PRIVATE_LAYER" 2>"$_perr") && layer_rc=0 || layer_rc=$?
 	layer_why=$(cat "$_perr" 2>/dev/null); rm -f "$_perr"
 	if [ "$layer_rc" -ne 2 ]; then
