@@ -1,0 +1,128 @@
+#!/bin/sh
+# wrapper-boundary-test — a BOUNDARY refusal must outrank an ENVIRONMENT refusal (quince#157).
+#
+# WHY THIS EXISTS. `bin/gh-review` and `bin/gh-arch` both refuse to run on a box that holds the
+# implementer's bot token: one box that can author and approve dissolves `approver ≠ author`, which
+# is the property the whole two-seat design is built on. Both also refuse when their dependencies
+# are missing. Until 2026-07-29 the dependency check came FIRST, and on the implementer host — a bot
+# token present, no `openssl` — the message that actually spoke was:
+#
+#     gh-review: openssl is not installed
+#
+# THE PROBLEM IS NOT THAT THE MESSAGE IS LESS USEFUL. It invites the WRONG REPAIR. A session told a
+# package is missing installs it, meets the App-key check next, places a key to satisfy that, and
+# has now put the reviewer credential on the authoring host — defeating `approver ≠ author` by doing
+# exactly what the error told it to do. The environment refusal is an instruction to change the
+# environment; the boundary refusal is an instruction to stop.
+#
+# So the rule this suite pins is one sentence: **an environment can be fixed and a boundary must
+# not be, so the boundary speaks first.**
+#
+# WHAT IT DRIVES, and why a reading of the source would not do. Ordering is the property, and
+# ordering is invisible to any check that inspects the two blocks separately — both are present and
+# both are correct in isolation, which is exactly why this shipped. The only way to see it is to
+# construct the state where both refusals are live and observe WHICH ONE SPEAKS. That needs a PATH
+# with the tools removed and a bot token in place, which is what the stub below builds.
+#
+# THE NEGATIVE CONTROL IS HALF THE SUITE. A wrapper that had its dependency check deleted would pass
+# every assertion about the boundary winning. So the same stub PATH is driven WITHOUT a bot token,
+# and the dependency refusal must then speak — proving the reorder moved the check rather than
+# removing it.
+#
+# Synthetic and hermetic: a temp HOME, a temp token file, a stub PATH. Never reads or writes the
+# real ~/.config/quince, and never runs `gh`.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# A PATH holding only the shell utilities the wrappers need before their own checks — deliberately
+# WITHOUT gh, openssl, curl or jq, so the dependency refusal is live. `env` and `sh` come from the
+# real PATH via absolute invocation, so nothing here depends on what the host has installed.
+STUB="$WORK/bin"
+mkdir -p "$STUB"
+for t in cat printf awk id sed grep; do
+	if p=$(command -v "$t" 2>/dev/null); then ln -sf "$p" "$STUB/$t"; fi
+done
+
+TOKEN="$WORK/bot.token"
+
+run() {
+	# $1 wrapper, rest: argv. Runs with the stub PATH and a token file location we control.
+	_w=$1
+	shift
+	PATH="$STUB" QUINCE_BOT_TOKEN_FILE="$TOKEN" HOME="$WORK" \
+		"$PWD/$_w" "$@" 2>&1 || true
+}
+
+# --- 1. BOUNDARY WINS: a bot token present AND the dependencies absent ------------------------
+printf 'a bot token\n' >"$TOKEN"
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"BOT TOKEN is present"*)
+		ok "$w: the boundary refusal speaks first, with the dependencies also missing"
+		;;
+	*"is not installed"*)
+		bad "$w: an ENVIRONMENT refusal outranked the boundary — the wrong repair is the one it invites"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*)
+		# Never score an unrecognised outcome green: that is how a check stops being one.
+		bad "$w: inconclusive — neither refusal recognised in the output"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 2. NEGATIVE CONTROL: no bot token, dependencies still absent ------------------------------
+# Without this, deleting the dependency check entirely would pass part 1.
+rm -f "$TOKEN"
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"is not installed"*)
+		ok "$w: with no bot token, the dependency refusal still speaks — the check was moved, not removed"
+		;;
+	*"BOT TOKEN is present"*)
+		bad "$w: claimed a bot token that is not there"
+		;;
+	*)
+		bad "$w: no dependency refusal — the check may have been removed rather than reordered"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 3. The boundary is the FIRST thing either wrapper does with a token present ---------------
+# Part 1 proves it beats the dependency check. This proves it also beats the usage/arity path, which
+# is the other refusal that could plausibly be reached first — `gh-review` exits 2 on no arguments,
+# and a box that is holding the wrong identity should be told THAT rather than how to call the tool.
+printf 'a bot token\n' >"$TOKEN"
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w")
+	case "$out" in
+	*"BOT TOKEN is present"*)
+		ok "$w: the boundary refusal outranks the usage message too"
+		;;
+	*)
+		bad "$w: with no arguments and a bot token present, the boundary did not speak"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

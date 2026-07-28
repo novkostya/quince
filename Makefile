@@ -189,7 +189,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
                    bin/scratch-reap bin/scratch-reap-test \
-                   bin/pr-title-refs bin/pr-title-refs-test
+                   bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
@@ -227,6 +227,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-composition-test
 	@$(MAKE) --no-print-directory scratch-reap-test
 	@$(MAKE) --no-print-directory home-resolution-test
+	@$(MAKE) --no-print-directory wrapper-boundary-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -306,6 +307,14 @@ scratch-reap-test: ## The reaper's REFUSALS — the half that loses work if it i
 .PHONY: home-resolution-test
 home-resolution-test: ## Entrypoints deriving paths from $$HOME must not require it SET — the service path
 	@bin/home-resolution-test
+
+# quince#157. Ordering is the property, and ordering is invisible to any check that reads the two
+# refusals separately — both are present and both are correct in isolation, which is exactly why the
+# wrong one shipped as the first to speak. The only way to see it is to make both live and observe
+# which one wins.
+.PHONY: wrapper-boundary-test
+wrapper-boundary-test: ## A boundary refusal must outrank an environment one in the gh wrappers (quince#157)
+	@bin/wrapper-boundary-test
 
 # quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
 # title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two
