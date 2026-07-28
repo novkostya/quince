@@ -82,7 +82,17 @@ mis-scoped — say so early rather than reviewing it anyway.
 
 ## 2. Run it — reading produces opinions, running produces findings
 
+**Where you check out is not a detail.** `gh pr checkout` needs a clone to already be in, and this
+skill used to say nothing about which — so sessions improvised into `/tmp`, where **58 review
+clones accumulated in a single day, 161.9 MB, invisible to `bin/scratch-reap`** because they were
+outside every root it knows. The reviewer's seat is the heavier user: it clones per PR reviewed,
+sometimes twice when a head moves. Use the same root the implementer does, so the reaper covers
+both seats (quince#45):
+
 ```sh
+SCRATCH="$HOME/scratch/$(bin/forge-watch runner get)"
+mkdir -p "$SCRATCH" && cd "$SCRATCH"
+git clone -q https://github.com/novkostya/quince.git "pr-<n>" && cd "pr-<n>"
 gh pr checkout <n> --repo novkostya/quince
 make gates                      # + make image / make gates-ui-e2e when the diff earns them
 ```

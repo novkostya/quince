@@ -1,0 +1,106 @@
+#!/bin/sh
+# scratch-reap-test — the reaper's REFUSALS, which are the half that matters.
+#
+# A reaper that deletes correctly and refuses incorrectly loses work; a reaper that refuses
+# correctly and deletes nothing merely wastes disk. So every case here except one is a KEEP, and the
+# single delete case exists to prove the refusals are not vacuous — a reaper that never deletes
+# passes every safety test ever written.
+#
+# Synthetic and hermetic: a local bare repo stands in for the forge, so there is no network, no
+# credential, and the "branch gone from origin" condition is exercised for real rather than mocked.
+set -eu
+
+cd "$(dirname "$0")/.."
+REAP=$PWD/bin/scratch-reap
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+
+# A bare repo playing the forge, with a `main` everything is measured against.
+git init -q --bare "$WORK/origin.git"
+# The bare repo's HEAD must be `main` BEFORE anything clones it. Git's default initial branch is
+# version- and config-dependent — `master` on the runner, `main` on the author's machine — so
+# without this every clone comes up with "remote HEAD refers to nonexistent ref" and no checkout,
+# and the suite passes only where the author happened to run it. `symbolic-ref` rather than
+# `init -b main`, which needs git 2.28+.
+git -C "$WORK/origin.git" symbolic-ref HEAD refs/heads/main
+git clone -q "$WORK/origin.git" "$WORK/seed" 2>/dev/null
+printf 'x\n' >"$WORK/seed/f"
+git -C "$WORK/seed" add f
+git -C "$WORK/seed" commit -qm init
+git -C "$WORK/seed" branch -M main
+git -C "$WORK/seed" push -q origin main
+
+ROOT=$WORK/scratch
+mkdir -p "$ROOT"
+
+clone_at() {
+	git clone -q "$WORK/origin.git" "$ROOT/$1"
+	git -C "$ROOT/$1" checkout -qb "$2" 2>/dev/null || true
+}
+
+# (1) MERGED AND DELETED — the only case that should be reaped.
+clone_at finished r1/done
+git -C "$ROOT/finished" reset -q --hard origin/main
+
+# (2) UNCOMMITTED CHANGES — work that exists nowhere else.
+clone_at dirty r1/dirty
+printf 'scratch\n' >>"$ROOT/dirty/f"
+
+# (3) COMMITS NOT IN main — pushed or not, they are not in the trunk.
+clone_at ahead r1/ahead
+printf 'new\n' >>"$ROOT/ahead/f"
+git -C "$ROOT/ahead" commit -qam "work"
+
+# (4) BRANCH STILL ON ORIGIN — somebody may be reviewing it.
+clone_at open r1/open
+git -C "$ROOT/open" reset -q --hard origin/main
+git -C "$ROOT/open" push -q origin r1/open
+
+# (5) NOT A CLONE AT ALL.
+mkdir -p "$ROOT/notaclone"
+printf 'notes\n' >"$ROOT/notaclone/notes.md"
+
+out=$WORK/out
+"$REAP" --root "$ROOT" >"$out" 2>&1 || true
+
+# if/else rather than `A && B || C`: `ok` ends in an arithmetic assignment, and the day one of
+# those evaluates to 0 the `||` fires and the suite reports a failure it did not have (SC2015).
+assert_line() {
+	if grep -q "$1" "$out"; then ok "$2"; else bad "$3"; fi
+}
+assert_line 'would reap finished' "a merged-and-deleted clone is reaped" "did not offer to reap the finished clone"
+assert_line 'KEEP   dirty' "uncommitted changes are KEPT" "would have deleted uncommitted work"
+assert_line 'KEEP   ahead' "commits not in main are KEPT" "would have deleted unmerged commits"
+assert_line 'KEEP   open' "a branch still on origin is KEPT" "would have deleted a live branch"
+assert_line 'skip   notaclone' "a non-clone is skipped and counted separately" "mishandled a non-clone"
+
+# Report-only must not touch anything.
+if [ -d "$ROOT/finished" ]; then
+	ok "report-only deleted nothing"
+else
+	bad "report-only DELETED — the default must be inert"
+fi
+
+# And --prune must actually act, or every refusal above is vacuous.
+"$REAP" --root "$ROOT" --prune >"$out.p" 2>&1 || true
+if [ ! -d "$ROOT/finished" ] && [ -d "$ROOT/dirty" ] && [ -d "$ROOT/ahead" ] && [ -d "$ROOT/open" ]; then
+	ok "--prune removes exactly the finished clone and nothing else"
+else
+	bad "--prune removed the wrong set"
+	cat "$out.p"
+fi
+
+printf '\nscratch-reap-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
