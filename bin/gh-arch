@@ -23,6 +23,25 @@ _home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/
 
 TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 
+# IDENTITY BEFORE DEPENDENCIES (quince#157). The architect box must not hold the bot identity
+# (devlog#7). If a bot token is present here, the box can author and approve — so refuse rather than
+# run, and say which file to remove. This is the same assertion `preflight` makes at service start;
+# making it again here means a hand-run command cannot quietly cross the boundary that the service
+# refuses to cross.
+#
+# It runs FIRST, ahead of the `gh` check, for the reason set out at length in bin/gh-review: an
+# environment refusal invites a repair, and a session repairing its way past this one ends up
+# holding both identities on one box. A boundary refusal must outrank an environment refusal because
+# the environment is meant to be fixed and the boundary is not. gh-review was the instance filed;
+# this wrapper had the same ordering and is corrected in the same commit rather than left to be
+# rediscovered from the other side of the boundary.
+if [ -f "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" ]; then
+	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" >&2
+	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
+	printf 'gh-arch: author and approve its own work. Remove it, or run gh-bot on the implementer box.\n' >&2
+	exit 1
+fi
+
 if ! command -v gh >/dev/null 2>&1; then
 	printf 'gh-arch: gh is not installed\n' >&2
 	exit 1
@@ -32,17 +51,6 @@ if [ $# -eq 0 ]; then
 	printf 'usage: gh-arch <gh arguments...>\n' >&2
 	printf '  runs gh with the architect credential from %s\n' "$TOKEN_FILE" >&2
 	exit 2
-fi
-
-# The architect box must not hold the bot identity (devlog#7). If a bot token is present here, the
-# box can author and approve — so refuse rather than run, and say which file to remove. This is the
-# same assertion `preflight` makes at service start; making it again here means a hand-run command
-# cannot quietly cross the boundary that the service refuses to cross.
-if [ -f "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" ]; then
-	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" >&2
-	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
-	printf 'gh-arch: author and approve its own work. Remove it, or run gh-bot on the implementer box.\n' >&2
-	exit 1
 fi
 
 if [ ! -f "$TOKEN_FILE" ]; then

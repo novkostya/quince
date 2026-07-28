@@ -48,6 +48,28 @@ die() {
 	exit 1
 }
 
+# IDENTITY BEFORE DEPENDENCIES, and the order is the whole point (quince#157).
+#
+# The reviewer box must not hold the implementer identity (devlog#7). Asserted here as well as in
+# preflight, so a hand-run command cannot quietly cross a boundary the service refuses to cross.
+#
+# This block used to sit BELOW the dependency loop, and on the implementer host — which has a bot
+# token and no `openssl` — the first refusal to fire was "openssl is not installed". That message is
+# not merely less useful; it invites the WRONG REPAIR. A session told a package is missing installs
+# it, meets the key check next, places an App key to satisfy it, and has now put the reviewer
+# credential on the authoring host. `approver ≠ author` would then be defeated by a session doing
+# exactly what the error told it to do.
+#
+# A boundary refusal must outrank an environment refusal, because the environment can be fixed and
+# the boundary must not be. It needs nothing from the dependency loop — `$_home` is already
+# resolved and `[ -f ]` is a shell builtin — so ordering it first costs nothing.
+BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
+if [ -f "$BOT_TOKEN" ]; then
+	die "a BOT TOKEN is present at $BOT_TOKEN." \
+		"This machine can approve; holding the implementer identity too would let one box author" \
+		"and approve its own work. Remove it, or run gh-bot on the implementer box."
+fi
+
 if [ $# -eq 0 ]; then
 	printf 'usage: gh-review <gh arguments...>\n' >&2
 	printf '  runs gh as the quince-review App, minting a fresh installation token per call\n' >&2
@@ -60,15 +82,6 @@ for tool in gh openssl curl jq; do
 		"this wrapper needs gh, openssl, curl and jq. On Alpine: apk add openssl curl jq." \
 		"openssl in particular is NOT in a minimal Alpine image and RS256 signing cannot proceed without it."
 done
-
-# The reviewer box must not hold the implementer identity (devlog#7). Asserted here as well as in
-# preflight, so a hand-run command cannot quietly cross a boundary the service refuses to cross.
-BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
-if [ -f "$BOT_TOKEN" ]; then
-	die "a BOT TOKEN is present at $BOT_TOKEN." \
-		"This machine can approve; holding the implementer identity too would let one box author" \
-		"and approve its own work. Remove it, or run gh-bot on the implementer box."
-fi
 
 [ -f "$KEY_FILE" ] || die "no App private key at $KEY_FILE" \
 	"Refusing to fall back to the ambient gh credentials: doing so would cast a verdict as whoever" \
