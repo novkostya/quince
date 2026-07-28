@@ -45,8 +45,13 @@ NS          := $(if $(RUNNER),-$(RUNNER),)
 # indistinguishable from an accident.
 #
 # Stated as a design property rather than a measurement: it rests on what those tools document about
-# their own caches, not on two runners having been observed sharing one. quince#175 is where that
-# gets exercised.
+# their own caches, not on two runners having been observed sharing one. This line used to promise
+# that quince#175 exercised it, and quince#175's suite does NOT — that suite runs two live watchers
+# over a stub forge and proves the WATCH layer composes (state files, registry, wake filter, orphan).
+# It starts no container and writes none of these volumes. Two concurrent `make gates` runs is a
+# different measurement, minutes long and needing a runtime, and it is still owed. Corrected rather
+# than left standing, because a pointer to a proof that does not cover the claim is worse than no
+# pointer: the next reader stops looking.
 GO_BUILD_VOL := quince-go-build
 GO_MOD_VOL   := quince-go-mod
 PNPM_VOL     := quince-pnpm-store
@@ -178,7 +183,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
                    bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
-                   bin/forge-watch-ownership-test bin/scratch-reap bin/scratch-reap-test \
+                   bin/forge-watch-ownership-test bin/forge-watch-composition-test \
+                   bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -214,6 +220,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory pr-title-refs-test
 	@$(MAKE) --no-print-directory forge-watch-roundtrip-test
 	@$(MAKE) --no-print-directory forge-watch-ownership-test
+	@$(MAKE) --no-print-directory forge-watch-composition-test
 	@$(MAKE) --no-print-directory scratch-reap-test
 	@$(MAKE) --no-print-directory home-resolution-test
 	@echo "gates-sh: clean"
@@ -271,6 +278,16 @@ forge-watch-roundtrip-test: ## What one writer records must survive the OTHER wr
 .PHONY: forge-watch-ownership-test
 forge-watch-ownership-test: ## Another runner's event must not wake mine (quince#111 face 3)
 	@bin/forge-watch-ownership-test
+
+# quince#111's four faces, TOGETHER, which no other suite does — every one of them drives a single
+# runner against state describing another. Gated rather than hand-run for the reason quince#64 gives
+# about the loop fixtures: a proof whose positive answer depends on the author remembering is the
+# defect class this repository keeps filing issues about, and this one is the acceptance test for a
+# prerequisite. ~10s, host-side, and it needs procfs for its last phase — on a host without /proc
+# the orphan assertions SKIP and say so rather than passing silently.
+.PHONY: forge-watch-composition-test
+forge-watch-composition-test: ## Two runners, two live watchers, at once — quince#111's acceptance (quince#175)
+	@bin/forge-watch-composition-test
 
 .PHONY: scratch-reap-test
 scratch-reap-test: ## The reaper's REFUSALS — the half that loses work if it is wrong (quince#45)
