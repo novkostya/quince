@@ -93,13 +93,22 @@ answer could not be distinguished from a gate that never ran.
 make demo                                        # builds THIS branch and serves it, on this box
 ```
 
-It builds the production image on a dev container, serves it in `--demo` mode, and prints
-three lines. **Exactly one of them goes in the PR:**
+It builds the production image **on this box**, serves it in `--demo` mode, waits for
+`/api/health` to actually answer, and prints what it verified. **One line goes in the PR:**
 
-- **the convention URL** (`http://quince-dev-N:8080/`) — this is the one to paste;
-- the address — **never**; it is Operator-private and the tool labels it session-only;
-- the `ssh -L` line — paste it *below* the URL as the address-free path for a reader who
-  has the alias but not the LAN.
+- **the convention URL** — `http://quince-runner:<port>/`, which the tool prints ready to
+  paste. The port is ALLOCATED, not fixed: `demo` tries `8080` and increments until one
+  binds, because two runners serving demos on one box is the ordinary case (quince#45), so
+  do not write `8080` from memory — paste the line the tool printed.
+- the loopback address it fetched (`127.0.0.1:<port>`) — **never** in PR text. It is what
+  this box verified, not something a reader can open.
+
+**This paragraph described `devct deploy` until 2026-07-29 and every sentence in it was
+wrong.** It said the build happened *on a dev container*, gave the URL as
+`http://quince-dev-N:8080/`, and told you to paste an `ssh -L` line — while `/qa` §2, added
+in the same PR that replaced the tool, already recorded that **there is no `ssh -L` line any
+more**. Two halves of one change, and only one of them was finished: the skill that
+PRODUCES the PR text kept instructing sessions to paste output that no tool emits.
 
 Then click it yourself and write ≤5 imperative lines a reviewer can follow. Demo mode
 asks for an admin password first — that is line 1 of most click lists.
