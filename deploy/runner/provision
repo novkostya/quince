@@ -206,15 +206,30 @@ elif [ -e "$LAYER_DIR" ]; then
 		mv "$LAYER_DIR" "$LAYER_DIR.superseded"
 		git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
 		layer_wire_helper
-		chmod 700 "$LAYER_DIR"
 		say "private layer cloned at $LAYER_DIR; the previous hand-placed copy is at $LAYER_DIR.superseded"
 		say "     (kept, not deleted — compare and remove it yourself)"
 	fi
 else
 	git -c credential.helper="$_layer_helper" clone -q "$LAYER_URL" "$LAYER_DIR"
 	layer_wire_helper
-	chmod 700 "$LAYER_DIR"
 	say "private layer cloned at $LAYER_DIR"
+fi
+
+# Lock the layer down on EVERY placement path — both clones AND the field-repair fetch above, which
+# leaves whatever perms the box was cloned with. `git clone` writes files at the inherited umask
+# (0644 by default) and never corrects them, so provision set `chmod 700` on the directory and left
+# the files inside it world-readable — the note `preflight` prints on every start, on a healthy box,
+# since the layer was first cloned (quince#131). The directory being 0700 already stops traversal, so
+# this is defence-in-depth, not a live exposure — but these ARE the sensitive strings, plus the lab
+# topology and the review transcripts, so 0600 each, matched to preflight's own fix text ("file 0600,
+# directory 0700"). Unconditional, so it also REPAIRS a box cloned before this landed. `.git` internals
+# are left alone (the glob skips dotfiles, and `-f` skips the `.git` directory).
+if [ -d "$LAYER_DIR" ]; then
+	chmod 700 "$LAYER_DIR"
+	for _lf in "$LAYER_DIR"/*; do
+		[ -f "$_lf" ] || continue
+		chmod 600 "$_lf"
+	done
 fi
 
 # The layer is only useful if it can ADVANCE, so say which it is rather than leaving both to look the
@@ -279,7 +294,10 @@ cat <<'EOF'
                                # Control, so this interactive step is the only path.
     cd /root/quince && claude  # once, to accept workspace trust
     /config                    # enable "Push when Claude decides" and "Push when actions required"
-
-  then:  rc-service quince-runner start
-
 EOF
+# The service name is role-derived (quince-runner | quince-arch), so the instruction must name the
+# one this box actually installed, not the literal. On an arch box the old text told the Operator to
+# start `quince-runner`, a unit that does not exist here — and once the stray implementer service was
+# removed from the arch box, that instruction failed outright (quince#131). $SERVICE_NAME is exactly
+# what §5 installed to /etc/init.d and wrote into conf.d, so it cannot disagree.
+printf '\n  then:  rc-service %s start\n\n' "$SERVICE_NAME"
