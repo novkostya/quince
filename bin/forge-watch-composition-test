@@ -31,21 +31,53 @@
 # watch until it re-arms. The `go` file below makes both declarations land first rather than racing
 # them, which is what a kickoff does too.
 #
+# WHAT THAT DELIBERATELY DOES NOT COVER, and it costs one wake: the case where A is ALREADY WATCHING
+# when B joins. Measured in review — A declares and arms alone, B declares afterwards, only `rb/work`
+# moves, and A exits `rc=0` on `event=updated pr=202`, a PR it should have ignored. A's `theirs` set
+# was resolved before `rb` existed. It is bounded and self-healing: A re-arms, sees `rb`, and
+# suppresses correctly from then on — so the cost is ONE spurious wake per runner joining, not the
+# N² churn quince#111 ended.
+#
+# Left as it is, because the alternative is worse: re-reading the registry every tick lets a mid-run
+# edit silently change what wakes a running watcher. But the call site's stated PREMISE was wrong —
+# it said the population of declared runners "cannot meaningfully change under a running watcher",
+# and a second session starting is exactly that change. Sound conclusion, unsound premise, which is
+# how this project's most-filed defect arrives. The comment there now says what actually happens;
+# this note exists so the behaviour is findable from the suite that does not exercise it.
+#
 # COSTS ~10 s of wall clock and needs a live process tree, so it sits host-side in `gates-sh` beside
 # forge-watch-stop-test and the roundtrip suite. Synthetic and hermetic: a stub `gh`, no network, no
 # credential, its own XDG_STATE_HOME.
 #
-# TEETH, measured on quince-runner by breaking one thing at a time rather than asserted:
+# TEETH, by breaking one thing at a time — three runs of each break, comparing the failure SET and
+# not just the count, because two of these are stable and one is not:
 #
-#   `wake_filter` returns its input unfiltered      22/0 -> 12 passed, 5 failed
-#   `state_dir` ignores the runner name (pre-#111)  22/0 ->  5 passed, 12 failed
-#   `owner_pid` not recorded at arm time            22/0 -> 19 passed, 3 failed
+#   `wake_filter` returns its input unfiltered      12 passed / 5 failed — IDENTICAL set, 3/3 runs
+#   `owner_pid` not recorded at arm time            19 passed / 3 failed — IDENTICAL set, 3/3 runs
+#   `state_dir` ignores the runner name (pre-#111)  ALWAYS fails; split AND total vary per run
 #
-# Some of those failures CASCADE — once a phase desynchronises the later ones fail for derived
-# reasons — and they are counted rather than pruned, because a broken build failing more loudly than
-# its minimum is the direction that costs nothing. The independent ones are the two cross-wake
-# assertions for the filter, the state-separation trio for the directory, and the orphan pair for
-# the owner pid.
+# THE THIRD ROW USED TO CARRY A POINT VALUE (5/12) AND THAT WAS WRONG TO RECORD, caught in review by
+# somebody reproducing it. The reason is structural rather than bad luck: neutering `wake_filter` or
+# blanking `owner_pid` changes a DECISION — deterministic in, deterministic out, same counts every
+# time. Breaking `state_dir` DESYNCHRONISES TWO LIVE PROCESSES, so how far the run gets before the
+# phases lose each other is whatever the box was doing that second. Measured here: 5/12, 10/7, 10/7,
+# and 7 vs 13 distinct failures across four runs; measured in review on another host: 8/9, 10/7,
+# 15/7. Neither reproduces the other, and neither reproduces itself.
+#
+# So it is reported as a SET, which is stable where the count is not:
+#
+#   ALWAYS (4/4 runs) — the separation itself, plus everything downstream of A's own identity:
+#     two sessions did not get separate state files · no two distinct watcher pids · owner_pid is
+#     not the arming session · A did not wake on its own PR · A's log does not show it exiting ·
+#     A never printed B's event · A's watcher died with its session
+#   VARIES — every assertion about B, and both phase-3/4 re-arms.
+#
+# **A count is a property of one run of a concurrent system; a failure set is a property of the
+# break.** Recording the first as though it were the second is what a heading reading "measured"
+# invites a reader to reproduce, and they would not have.
+#
+# (One practical note for anyone repeating this: the FAIL lines embed run-specific pids and mktemp
+# paths, so comparing runs needs those stripped first. Comparing them raw says nothing repeats.)
 set -eu
 
 cd "$(dirname "$0")/.."

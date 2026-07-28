@@ -2137,10 +2137,21 @@ watch_loop() {
 	_wmap=$(mktemp)
 	_wmine=$(mktemp)
 	_wothers=$(mktemp)
-	# Resolved ONCE, here, rather than per tick: neither this session's name nor the population of
-	# declared runners can meaningfully change under a running watcher, and re-reading them every
-	# interval would let a mid-run registry edit silently change what wakes. Empty `_wothers` — the
-	# one-runner case — turns the filter into a no-op.
+	# Resolved ONCE, here, rather than per tick, because re-reading every interval would let a
+	# mid-run registry edit silently change what wakes a watcher that is already running.
+	#
+	# THE POPULATION *DOES* CHANGE UNDER A RUNNING WATCHER, and an earlier version of this comment
+	# claimed it could not — "neither this session's name nor the population of declared runners can
+	# meaningfully change under a running watcher". A second session starting IS that change, and it
+	# is the ordinary case this whole issue exists to enable. Measured (quince#180 review): A arms
+	# alone, B declares afterwards, B's PR moves, and A exits on it — A's `theirs` set was resolved
+	# before `rb` existed.
+	#
+	# The behaviour is kept and the claim is not. It is bounded and self-healing — A re-arms, sees
+	# `rb`, suppresses from then on — so a runner joining costs ONE spurious wake, never the N² churn
+	# quince#111 ended. A true statement of a real cost beats a false statement of no cost.
+	#
+	# Empty `_wothers` — the one-runner case — turns the filter into a no-op.
 	_wowner=$(runner_name)
 	other_runner_names "$_wowner" >"$_wothers" 2>/dev/null || : >"$_wothers"
 	while :; do
