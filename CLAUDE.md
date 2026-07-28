@@ -191,17 +191,76 @@ before that, naming `@novkostya` distinguished nothing, because the architect ap
 `@novkostya`. If the architect ever reviews as a user account again, that file silently stops
 separating the two seats.
 
-**The file enforces nothing until *"Require review from Code Owners"* is enabled**, which is
-admin-only and therefore the Operator's — CODEOWNERS alone only auto-*requests* review. It is
-committed unwired on purpose, the same shape as an unpushable workflow (quince#113).
+**The file is LIVE, and this paragraph used to say the opposite.** *"Require review from Code
+Owners"* was enabled on 2026-07-27, the last step of the sequence set out below. Measured
+2026-07-28:
 
-**The toggle is SEQUENCED, and the order is an Operator ruling** (quince#137, 2026-07-27): the
-architect **authors canon through the App** so the author is `quince-review[bot]` → `@novkostya`
+```
+require_code_owner_reviews      true
+required_approving_review_count 1
+enforce_admins                  true
+```
+
+**Of the two AGENT identities, only the App can read that endpoint** — the architect PAT gets `403`
+and the bot `404`. The **Operator reads it fine**: it is an admin endpoint and the Operator is the
+admin. The distinction is load-bearing rather than pedantic, because the next paragraph tells you to
+go and read it, and a reader who takes the agent-seat limit for a universal one concludes they
+cannot.
+
+So an approval on an owned path **must** come from `@novkostya`. Neither an architect verdict nor
+the App's can satisfy it, by the rule directly above: an App cannot be a code owner.
+
+**What stood here before was *"the file enforces nothing until the toggle is enabled … committed
+unwired on purpose"*, and it was believed after it went false.** An architect session reasoned from
+it that an App approval *would* satisfy protection, and escalated a routing question to the Operator
+as an unruled gap — when the answer was one `GET` away and had been for a day. A document describing
+a narrower reality than the one that exists is this project's most-filed defect, and the routing
+question it produced is what it costs. **Read the endpoint rather than this paragraph**:
+branch-protection changes leave no trace in git, so a committed claim about protection is a claim
+about the past.
+
+**The sequence was an Operator ruling** (quince#137, 2026-07-27) and all three steps are now done:
+the architect **authors canon through the App** so the author is `quince-review[bot]` → `@novkostya`
 approves it as code owner, a different principal, so GitHub counts it → *then* the toggle goes on.
-Flipping first blocks exactly the class the file protects, because GitHub does not count an author's
-approval of their own PR and the sole code owner would *be* the author. **So `bin/gh-review` is the
-authoring path for canon, not only the verdict path** — the clause is in `/architect` §1, and
-quince-devlog#51 vs #53 is what a missing instruction rather than a missing capability looks like.
+Flipping first would have blocked exactly the class the file protects, because GitHub does not count
+an author's approval of their own PR and the sole code owner would *be* the author. **So
+`bin/gh-review` is the authoring path for canon, not only the verdict path** — the clause is in
+`/architect` §1, and quince-devlog#51 vs #53 is what a missing instruction rather than a missing
+capability looks like.
+
+**Some citations in this file currently resolve to nothing, and that is a property of the forge
+rather than a typo.** `quince-bot` was suspended on 2026-07-28; GitHub hides everything a suspended
+account authored, so every issue and PR it opened returns `Not Found` to **every** identity —
+`novkostya` and the App alike — until the appeal is decided. quince#137 and the incident above are
+both in that set. **The rulings they carry are written out here in full for exactly that reason**:
+where a citation has become a dead end it is provenance, not the load-bearing copy. If a reference
+in this file leads nowhere, check whether its author is suspended before concluding the reference
+was wrong.
+
+**Break-glass canon repair from the Mac.** The Mac authors as `novkostya`, which is the one author a
+code-owner requirement on `@novkostya` cannot clear — so a `novkostya`-authored PR touching an owned
+path cannot merge from any seat: GitHub refuses the self-approval, an App cannot be a code owner, and
+`enforce_admins: true` closes the bypass. Prefer the App: if the arch box is up, author canon through
+`bin/gh-review` and none of this applies. This is for when it is not. Operator ruling, 2026-07-28
+(quince#137); a second code owner was the alternative and was rejected, because it would satisfy the
+requirement on *every* canon PR forever and dissolve the asymmetry that makes the file mean anything.
+
+1. **Author and open normally.** The PR reads `BLOCKED` / `REVIEW_REQUIRED`. That is correct, not a fault.
+2. **Get a real verdict first** — the architect reviews and approves as the App. It does not satisfy
+   the code-owner requirement and is not meant to; it is the independent read, and skipping it turns
+   a lockout escape into an unreviewed merge.
+3. **The Operator lowers the requirement, by hand:**
+   ```sh
+   gh api -X PATCH repos/novkostya/quince/branches/main/protection/required_pull_request_reviews \
+     -F require_code_owner_reviews=false
+   ```
+4. **Merge.**
+5. **Raise it again and READ IT BACK** — the `GET` must return `true`. A re-enable that is assumed
+   rather than verified is how a temporary window becomes permanent.
+6. **Record both timestamps on the PR.** Nothing else does.
+
+**Untested end to end.** Step 5's read is verified; step 3's `PATCH` is its documented counterpart
+and nothing here has run it. First use should correct this paragraph rather than trust it.
 
 **That exception is narrow and does not generalise.** Routing authorship through the App would
 collapse author and approver into one principal anywhere the App also approves — the thing
