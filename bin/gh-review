@@ -29,7 +29,7 @@ set -eu
 #
 # Resolve from the passwd database rather than assuming a path: the same invocation then works
 # from a shell, from a service and from cron, and a box whose root home is not /root still works.
-_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}"
 [ -n "$_home" ] || {
 	printf 'gh-review: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
 	printf 'gh-review: set QUINCE_REVIEW_KEY_FILE and QUINCE_REVIEW_APP_ID_FILE explicitly.\n' >&2

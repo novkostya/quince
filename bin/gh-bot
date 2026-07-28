@@ -20,7 +20,7 @@ set -eu
 # broken script rather than as a missing environment, and it is invisible from a shell because
 # ssh and login both set HOME. Resolve it from the passwd database instead of assuming, so the
 # same invocation works from a shell, a service and cron.
-_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}"
 [ -n "$_home" ] || {
 	printf 'gh-bot: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
 	printf 'gh-bot: set QUINCE_BOT_TOKEN_FILE to the credential path explicitly.\n' >&2

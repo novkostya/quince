@@ -605,8 +605,35 @@ step() {
 # So: a path that outlives the process. Session scratchpads are for artefacts nobody needs tomorrow;
 # watch state is the exact opposite of that.
 # ---------------------------------------------------------------------------
+# HOME IS NOT GUARANTEED, and the paragraph above is why this matters more here than elsewhere.
+# OpenRC gives a service no HOME, and under `set -u` the $HOME *inside* an otherwise-guarded
+# `${VAR:-…}` default is unguarded. quince#158 fixed exactly this in bin/gh-*, which DIED on it.
+# This file did something worse: the expansion error goes to stderr and the script CONTINUES with
+# an empty prefix, so `state_dir` returned "/" and status reported
+#
+#     watch=absent state=/novkostya-quince.state.json
+#
+# — a confident wrong answer about whether a watch exists, from the tool whose whole job is that
+# unwatched gaps are noticed. Ten lines above this one: "A check that cannot fail is not a check."
+#
+# Resolved once, at load, from the passwd database rather than assumed, so the same invocation
+# works from a shell, a service and cron. Resolved HERE rather than inside state_dir() on purpose:
+# a refusal inside `$(state_dir)` would exit the command substitution's subshell and leave the
+# caller running with an empty string, which is the failure this is fixing.
+#
+# `2>/dev/null || true` on the substitution is quince#164 and is not decoration. Under `set -e` an
+# assignment takes its status from its command substitution, so when /etc/passwd is UNREADABLE OR
+# ABSENT — the normal case on a host resolving users through a directory service — awk exits
+# non-zero and the script dies on THIS line with awk's own error. The refusal below never runs, and
+# a message written to explain a failure is not a message anyone will see. The documented case
+# (file readable, uid simply absent from it) always worked: awk exits 0 with no output.
+HOME_DIR=${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}
+[ -n "$HOME_DIR" ] || die "cannot locate a home directory — HOME is unset and uid $(id -u) has no
+    passwd entry. Set FORGE_STATE_DIR (and QUINCE_BOT_TOKEN_FILE / QUINCE_ARCH_TOKEN_FILE)
+    explicitly, or run somewhere a home directory resolves."
+
 state_dir() {
-	printf '%s' "${FORGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/quince/forge-watch}"
+	printf '%s' "${FORGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME_DIR/.local/state}/quince/forge-watch}"
 }
 
 state_path_for() {
@@ -1954,9 +1981,9 @@ owed_role() {
 	# Which half of the loop is this box? Decided by the credential it holds, which is how the two
 	# boxes already tell themselves apart (deploy/runner/preflight asserts the other's is absent), and
 	# printed rather than assumed — a check that silently picks a role can silently pick the wrong one.
-	if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" ]; then
+	if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
 		printf 'implementer %s/bin/gh-bot author\n' "$(repo_root)"
-	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME/.config/quince/quince-arch.token}" ]; then
+	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
 		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
 	else
 		printf 'none - -\n'
