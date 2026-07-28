@@ -172,7 +172,16 @@ So:
    So step 0's answers are enforced rather than recited: `live`, `starting` and `wedged` refuse, `dead` and
    `absent` proceed and the tool says which.
 
-   `status` exit codes: **0** live, **9** starting, **3** dead, **4** absent, **5** wedged.
+   `status` exit codes: **0** live, **9** starting, **3** dead, **4** absent, **5** wedged,
+   **10** orphaned.
+
+   **`orphaned` (exit 10) means the watcher is RUNNING and the session that armed it is gone**
+   (quince#111). It is neither live nor dead, and both of those answers are actively harmful here:
+   `live` tells you nothing is owed while nothing can wake you, and `dead` tells you to re-arm from a
+   state a running process is still writing. The remedy is `forge-watch stop` **first**, then re-arm
+   from that state without reseeding it. You will meet this after a session is killed mid-watch —
+   the watcher is a child of the session, so a single-pid kill reparents it and it keeps ticking. A
+   watch whose owner cannot be *verified* gone never reports `orphaned`; it stays whatever it was.
 
    **`starting` (exit 9) is armed-but-not-yet-ticked, and it is NOT owed** (quince#95). A watch reads
    this from the moment it is armed until its first tick lands — measured at 4 s with nothing declared
