@@ -128,16 +128,18 @@ repo is not a message bus, and no human is an RPC layer.
 - The architect reviews/approves/merges as the repo owner; the Operator is admin of last
   resort and the approver for architect-authored docs.
 
-**What each identity cannot do.** These have been discovered one at a time, by hitting them,
-each costing a session the time to work out that the failure was structural rather than local
-(devlog#48). Consult this before designing around a refusal.
+**What each identity cannot do — and, marked `CAN`, what one can that nobody granted it.** These
+have been discovered one at a time, by hitting them, each costing a session the time to work out
+that the failure was structural rather than local (devlog#48). Consult this before designing
+around a refusal. The table runs in one direction with two exceptions, both marked; read the
+`CAN` rows as blast radius rather than as convenience.
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
-| **Operator** | — an SSH push consults no OAuth scope, so this identity can always push a workflow; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
+| **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
 
 **Re-running CI is the one row that runs the other way, and `workflows:` is not `actions:`.**
 Every other entry above describes something the implementer lacks and a more privileged seat
@@ -149,6 +151,29 @@ sit within a few lines of each other in this table and look like opposite claims
 workflow *runs*** (this one). They are different grants, and neither implies the other. One more
 trap worth naming: **`gh run rerun` exits `0` and prints its refusal** — read the output, not the
 exit code.
+
+**The second `CAN` is the implementer's, and it is recorded as a hazard rather than a
+convenience: `quince-bot` can DELETE any discussion in `quince-devlog`.** Measured 2026-07-28,
+both identities, create *and* delete, each probe removing its own artifact (devlog#30). **Nobody
+granted this.** It arrived with the classic `repo` scope the token already held, the moment
+Discussions was enabled on the repository — a permission decision nobody made, produced by a
+container choice.
+
+That matters because **devlog#30 moves the journal into Discussions.** Today the journal is
+`progress.md`: branch protection, a required approval, linear history, and every edit visible in
+a diff forever. Afterwards it is a set of discussions the implementer can remove with one API
+call — and **nothing on the forge records that a discussion was deleted.** The Operator has
+accepted that risk and the decision stands; what is not acceptable is it going unwritten, which
+is why this paragraph exists. The permission is real **today**; what the migration changes is
+what is at stake behind it, not the grant.
+
+**One more reason this row is worth its space: it is the first token-scope question in this
+project that came back *yes*.** The previous four were refusals — `read:org` twice (devlog#23,
+devlog#48), `workflow` (quince#113), `actions` (quince#141) — and the habit they built is
+*assume the narrow token cannot*. Here that habit would have been wrong in both directions at
+once: it would have cost a credential-widening request nobody needed, and it would have hidden a
+capability nobody wanted. **Probe, do not infer** — the same lesson quince#141 taught from the
+opposite side.
 
 **The reviewer's approval satisfies branch protection on its own** — Operator ruling, 2026-07-27
 (quince#130). One approving review is required and an App's counts, which is the point of it
