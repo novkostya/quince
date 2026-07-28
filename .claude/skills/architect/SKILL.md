@@ -196,8 +196,21 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   PR is yours, say who must approve instead. A PR the bot typed from *your* proposals is
   architect-authored in the sense that matters, and canon is the one place where the literal reading is
   not good enough: route it to the Operator.
-- **Cite a ruling by comment URL and self-declared role, never by login.** You and the Operator post as
-  the same identity (quince#47), so an unlinked "the Operator ruled X" is not a citation; it is a claim
+
+  **Substance cuts both ways, and the second direction is the one that misfired.** A
+  `novkostya`-authored PR is not yours by default. That login covers the Operator, you through
+  `gh-arch`, and the Mac acting as the break-glass seat — three seats, one author field, no way to
+  tell them apart from the forge. On [quince#158](https://github.com/novkostya/quince/pull/158), a
+  Mac-authored repair of the gh wrappers, this bullet and `/review-pr` §0 together charged a full
+  authorship investigation on a PR no seat of yours had written — reboot timing, `/etc/init.d`, the
+  staged wrappers, quince#134 and #136 on attribution, and finally the PR's own prose. **You reached
+  the right answer and approved.** The point is that the rule made you buy it, from evidence the
+  forge does not carry. Ask whether **you** produced the change, not whether the account is one you
+  can also post from — verdicts have had their own principal since quince#134, so the login on the
+  author field is not evidence about who wrote it.
+- **Cite a ruling by comment URL and self-declared role, never by login.** Unchanged, and the reason
+  has grown rather than gone away: you cast as `quince-review[bot]` now, but `novkostya` still covers
+  three seats (quince#47), so an unlinked "the Operator ruled X" is not a citation; it is a claim
   about a record the reader must go and fail to verify.
 
 Verdicts are real GitHub reviews (`gh pr review --approve` / `--request-changes`), and the body

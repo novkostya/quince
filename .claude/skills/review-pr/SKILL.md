@@ -21,10 +21,53 @@ reviewed as a set — each PR gets its own run.
 gh pr view <n> --repo novkostya/quince --json author,files,title,body,labels,reviewDecision
 ```
 
-If the author is the identity you are acting as, **stop**: say who must approve instead
-(architect-authored docs/canon → the Operator; bot-authored code → the architect). Also
-stop if the branch touches `.github/workflows/**` and was pushed by the bot — that push
+**The identity that matters is the one that CASTS, and since quince#134 that is
+`quince-review[bot]`.** You also hold `gh-arch` and read through it, but reading is not a verdict,
+so the login you read with has no bearing on this rule. The question is only ever *did the App
+write this?* — almost never, so the answer is almost always no and you proceed.
+
+**`novkostya` on the author field is not a reason to stop.** That login covers three seats: the
+Operator, the architect through `gh-arch`, and the Operator's Mac acting as the break-glass seat
+(CLAUDE.md, "the Operator's Mac is the deliberate break-glass host"). The forge cannot tell them
+apart, and neither can you — so do not infer authorship from it. This paragraph replaces one that
+read *"if the author is the identity you are acting as, stop"*, which was correct while the
+architect's only identity was `gh-arch` = `novkostya`.
+
+**Read what it actually cost, because the failure mode is not the obvious one.** On
+[quince#158][158] — a Mac-authored repair of the gh wrappers — the rule did not block the review.
+It **taxed** it: the reviewer met `novkostya`, reported it as "both the architect and the Operator
+seat", and then spent an unbounded investigation (reboot timing, `/etc/init.d`, quince#134 and
+#136 on attribution) before settling the question from the PR's *prose* — a sentence only a
+non-architect could have written. It reached the right answer and approved. **A rule that blocks
+gets noticed and fixed; a rule that reliably charges an inference the forge cannot settle does
+not.** It had charged two sessions before anyone wrote this paragraph.
+
+| author | who approves |
+| --- | --- |
+| `quince-bot` — code | you, as the App |
+| `novkostya` — code, no owned path | you, as the App |
+| `quince-review[bot]` — canon | the Operator, as code owner |
+| `novkostya` — **any owned path** | nobody can — see below |
+
+**The one refusal that is real is structural, and it is not about you.** Read the author and the
+file list together:
+
+```sh
+gh pr view <n> --repo novkostya/quince --json author,files \
+  -q '.author.login, (.files[].path)'
+```
+
+If the author is `novkostya` **and** any path is owned in `.github/CODEOWNERS`, the PR cannot merge
+and your approval will not change that: GitHub refuses a self-approval outright, an App cannot be a
+code owner, and `enforce_admins: true` closes the bypass. Say so and stop — not because approver =
+author, but because the merge is unreachable from every seat you hold. The escape is an Operator
+act (CLAUDE.md, canon repair from the Mac); name it and hand it over rather than approving into a
+block.
+
+Also stop if the branch touches `.github/workflows/**` and was pushed by the bot — that push
 should not have been possible; flag it.
+
+[158]: https://github.com/novkostya/quince/pull/158
 
 ## 1. Read the claim
 
