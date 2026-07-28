@@ -192,6 +192,38 @@ minutes. Teeth, measured: against the classifier as it stood, the pure fixture e
 and the loop fixture runs to its idle bound and exits 6 — the sixteen-minute silence, reproduced in
 twelve seconds.
 
+## The seventh round: the issue channel — the authority a blocked session waits on (quince#80)
+
+Rulings land on **issues**, not PRs — a blocked session's unblock arrives as a comment on the issue it
+is stuck on, and most of those issues have no PR at all. So the event half learned to watch a declared
+set of issues and, half two, any issue an open PR references without being asked. These fixtures pin
+both the true-positive channel and the silence that keeps it worth reading; three of them are
+`"kind": "sequence"` because the property lives in what the state remembers across a failed read.
+
+| Fixture | What it pins |
+| --- | --- |
+| `issue80-a-ruling-lands-on-a-declared-issue.json` | half one: a declared-blocking issue gains a comment while the session holds a stale read — an event fires **and names the issue**. `issue-comment` is the typed event a blocked session acts on; `issue-updated` fires beside it as the backstop and carries an actor |
+| `issue80-an-undeclared-issue-is-silent.json` | half two, the false-positive side: an issue in **neither** set produces nothing — a channel that woke for every issue in the repo is one a session learns to ignore, which is indistinguishable from unwatched |
+| `issue80-a-referenced-issue-needs-no-declaration.json` | an issue an open PR references is watched **automatically** (`via=referenced`), so a session need not remember to declare the issue its own PR is for |
+| `issue80-a-closed-blocker-is-the-news.json` | an issue **close** wakes for the declared set — a closed blocker is exactly the news a blocked session wants — and carries **no actor**, because `gh issue view` does not report who closed it (naming the last commenter would be a bystander, the defect `updated-unattributable` already caught) |
+| `issue80-status-shows-a-declaration-and-its-age.json` | a declaration **survives** a session — it lives in the state file, which outlives the session — and its **age is displayed**, so a successor can see it is inheriting someone else's blocked list rather than re-deriving one silently |
+| `issue80-a-failed-read-must-not-swallow-a-ruling.json` | sequence: the baseline is **per-issue** (adding one issue mid-watch does not re-baseline the set), and an issue **missing from a failed observation keeps its stored record** — so a ruling that lands during a `gh issue view` outage is not swallowed by the next tick |
+| `issue80-three-rulings-are-not-one.json` | `count=N` when several comments land in one interval — a re-arm after an outage diffs the whole gap at once — so a woken session knows whether it is reading one ruling or three, while `at=`/`actor=` still point at the newest |
+| `issue80-a-cross-repo-title-ref-is-not-ours.json` | regression guard for a defect the tool found in **itself**: a repo-qualified `quince#87` in a devlog PR title must not be fetched against the devlog. It carries no issue payloads, so any errant fetch surfaces as an `issue-fetch-failed` line the expectation does not contain |
+
+**Fixtures folded in from adjacent work.** Not a round of their own — each rode in with a nearby change
+and belongs beside it, listed here so the map is complete, and (since quince#107) kept complete by a
+gate rather than by memory:
+
+| Fixture | What it pins | From |
+| --- | --- | --- |
+| `owed-an-empty-reviewer-queue-still-owes-a-watch.json` | an empty queue is **not** a legitimate finish for the reviewer — `owed --all` reports a watch owed with reason `declared`, measured against two overrides that were right and one obedience that went dark | quince#71 |
+| `owed-a-reviewer-at-rest-is-armed-not-stopped.json` | the reviewer's correct rest is **watch armed and idle**, and the satisfied answer must say so with the right reason — not "queue empty, therefore stopped" | quince#71 |
+| `watch-a-hand-tick-must-not-erase-the-watcher.json` | the **mirror** of the hand-tick property: `step()` must carry `.watch` forward, or a hand tick erases a live watcher's record and the next arm puts a **second** watcher on one file (quince#50's race). Asserts **state**, not events, which is why all prior fixtures passed against the defect | quince#103 |
+| `first-observation.json` | the sentinel discharging: `never observed` must not read as `observed empty` — the first tick reports itself and invents no changes | baseline |
+| `first-observation-nonempty.json` | a first tick against a **non-empty** queue reports itself and the count, and must **not** replay the standing queue as opened/merged/review events — found live emitting sixty events for work finished hours earlier | baseline |
+| `hint-the-architect-is-not-handed-repo.json` | the `owed` arm-hint hands an architect the `--all` form (its repos collapse to one line), never the implementer's per-repo `--repo` — a hint is copied verbatim, and the `--repo` form would arm a watch smaller than the declared set (quince-devlog#3) | quince#66 |
+
 **The half that no fixture here can cover is the hook itself**, because it is a claim about the
 *harness* rather than about this code: that a `Stop` hook in project settings runs, that exit 2 blocks
 the stop, and that `stop_hook_active` bounds the block to once. That was verified by running real

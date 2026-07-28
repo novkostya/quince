@@ -1,0 +1,53 @@
+#!/bin/sh
+# forge-watch-fixtures-doc-test — the fixtures' README must index every fixture, both directions.
+#
+# bin/testdata/forge/README.md is the narrative map of what the fixture suite covers: a reader asking
+# "is this behaviour tested?" consults it, finds no row, and concludes it is not. So an UN-indexed
+# fixture is worse than an undocumented one — its absence reads as absence of coverage, and twelve
+# fixtures that were in fact tested had drifted out of the map with nothing detecting it (quince#107).
+# `forge-watch-test` runs every *.json on disk and passes regardless of the README, so the prose beside
+# the fixtures had no gate at all. This is that gate, the same move as forge-watch-exits-test: a
+# document that must not drift from the code beside it gets a check that fails when it does.
+#
+# Both directions, because each catches a different rot:
+#   - a fixture on disk with no mention   → new coverage that never reached the map (the drift filed);
+#   - a *.json named in the README with no file → a rename or a typo left a dangling reference.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+DIR="$HERE/testdata/forge"
+README="$DIR/README.md"
+[ -f "$README" ] || {
+	printf 'forge-watch-fixtures-doc-test: no README at %s\n' "$README" >&2
+	exit 2
+}
+
+fail=0
+
+# Direction 1: every fixture on disk is named in the README.
+for f in "$DIR"/*.json; do
+	b=$(basename "$f")
+	if ! grep -qF "$b" "$README"; then
+		printf 'FAIL fixture not indexed in README: %s\n' "$b"
+		fail=1
+	fi
+done
+
+# Direction 2: every *.json the README names exists on disk. grep the referenced basenames out of the
+# prose and check each — a dangling reference is a rename the map did not follow. Captured into a
+# variable rather than piped into a `while`, so the failure flag is set in THIS shell, not a subshell.
+refs=$(grep -oE '[A-Za-z0-9._-]+\.json' "$README" | sort -u)
+for ref in $refs; do
+	if [ ! -f "$DIR/$ref" ]; then
+		printf 'FAIL README references a missing fixture: %s\n' "$ref"
+		fail=1
+	fi
+done
+
+count=$(find "$DIR" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')
+if [ "$fail" -eq 0 ]; then
+	printf 'forge-watch-fixtures-doc-test: ok — all %s fixtures are indexed in README.md, and every reference resolves\n' "$count"
+else
+	printf 'forge-watch-fixtures-doc-test: FAILED — the README index has drifted from the fixtures on disk\n' >&2
+fi
+[ "$fail" -eq 0 ]
