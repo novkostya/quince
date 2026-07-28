@@ -123,5 +123,51 @@ SERVICE_STARTED=3
 check "a stopped service returns 3" 3 "stopped" </dev/null
 SERVICE_STARTED=0
 
+# 9. THE LABEL FOLLOWS RC_SVCNAME (quince#32, review of #155). This one file is installed as BOTH
+#    /etc/init.d/quince-runner and /etc/init.d/quince-arch, and `name` is derived at :18 for exactly
+#    that reason — so a literal `quince-runner:` in a status line makes the arch box report under a
+#    unit it does not run, and (since quince#153 removed the stray one) does not have. Measured on
+#    that box before this landed. Asserted over EVERY branch of status(), not just the healthy one,
+#    because the literal came back three times in one rewrite and any single-branch check would have
+#    missed two of them.
+#
+#    The whole chain is exercised — RC_SVCNAME -> name -> the printed label — by re-sourcing the init
+#    script in a subshell with RC_SVCNAME set. The stubs and SERVICE_STARTED are inherited;
+#    output_log must be re-set AFTER the source, because sourcing resets it to the real /var/log path.
+label_case() {
+	_lname=$1
+	_lrc=$2
+	printf '%s' "$3" >"$LOG"
+	out=$(
+		RC_SVCNAME=zz-synthetic-svc
+		export RC_SVCNAME
+		# shellcheck source=/dev/null
+		. "$INITD"
+		# read by the sourced status(); shellcheck cannot see that use across the skipped source.
+		# shellcheck disable=SC2034
+		output_log="$LOG"
+		status 2>&1
+	) && rc=0 || rc=$?
+	if [ "$rc" -eq "$_lrc" ] && printf '%s' "$out" | grep -q 'zz-synthetic-svc:' &&
+		! printf '%s' "$out" | grep -q 'quince-runner:'; then
+		printf 'ok   the %s line labels itself from RC_SVCNAME, not a literal\n' "$_lname"
+		pass=$((pass + 1))
+	else
+		printf 'FAIL the %s line must label itself "zz-synthetic-svc:" and never "quince-runner:"\n' "$_lname"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+	fi
+}
+
+label_case "healthy" 0 "[09:00:00] Ready · zz/synthetic · main
+"
+label_case "failure" 1 "[09:00:00] Session failed: Process exited with error zzz
+"
+label_case "not-logged-in" 1 "[09:00:00] You must be logged in to use Remote Control
+"
+SERVICE_STARTED=3
+label_case "stopped" 3 ""
+SERVICE_STARTED=0
+
 printf 'quince-runner-status-test: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
