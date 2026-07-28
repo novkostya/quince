@@ -47,9 +47,19 @@ bad() {
 # The documents that enumerate exits. A document is listed here because sessions act on it; if a new
 # one starts enumerating exits it belongs on this list, and until it does this suite cannot see it.
 # That limit is real and is stated rather than hidden.
+#
+# THE TOOL'S OWN `--help` IS ONE OF THEM, and it was the one this list did not have. Measured
+# 2026-07-29: `usage()` enumerated five `status` exits and said "FIVE cases, never fewer" — while
+# `watch_report` had returned a sixth, `orphaned` (10), since quince#111. Every file on the list
+# above named 10 correctly and this suite passed, because the enumeration a user actually reads was
+# not on the list. A gate over the derived documents that skips the ONE document generated from the
+# code is the narrowest possible blind spot, and it sat exactly where the answer was wrong.
+USAGE_TXT="$TMP/usage.txt"
+"$FW" --help >"$USAGE_TXT" 2>&1 || true
 DOCS="$ROOT/.claude/skills/architect/SKILL.md
 $ROOT/.claude/skills/kickoff/SKILL.md
-$ROOT/.claude/loop-protocol.md"
+$ROOT/.claude/loop-protocol.md
+$USAGE_TXT"
 
 # --- 1. DERIVED ------------------------------------------------------------------------------
 # watch_report's returns become `status`'s exit via `exit $?`; watch_loop's become `watch`'s the
@@ -96,6 +106,27 @@ measure "status on a dead watch"   3 "$FW" status --repo x/y --state "$dead_stat
 measure "status on an absent watch" 4 "$FW" status --repo x/y --state "$absent_state"
 measure "status on a wedged watch" 5 "$FW" status --repo x/y --state "$wedged_state"
 
+# `starting` and `orphaned` were DERIVED and DOCUMENTED here but never MEASURED — four of the six
+# `status` answers were driven and two were taken on trust, which is the asymmetry that let the
+# usage text describe five answers while the tool returned six. Both are cheap to drive.
+#
+# starting: armed, first tick not finished. `last_watcher_tick` null is the fact that DEFINES it,
+# and it must sit inside `starting_bound_s` of `armed_at` or it degrades to dead/never_ticked.
+starting_state="$TMP/starting.json"
+printf '{"watch":{"pid":%s,"last_watcher_tick":null,"armed_at":"%s","starting_bound_s":600,"interval_s":60}}' \
+	"$$" "$now" >"$starting_state"
+measure "status on a starting watch" 9 "$FW" status --repo x/y --state "$starting_state"
+
+# orphaned: the watcher runs, the session that armed it does not. Reached through `pid_alive(owner)
+# == no`, which needs no procfs — the start-time comparison is only for the harder case of a pid
+# that EXISTS and might be a different process. So this measurement runs everywhere, unlike the
+# composition suite's orphan phase, and that is worth having: it means the class is driven on hosts
+# where the integration test can only skip it.
+orphan_state="$TMP/orphan.json"
+printf '{"watch":{"pid":%s,"last_watcher_tick":"%s","interval_s":60,"owner_pid":4194303,"owner_pid_start":"1"}}' \
+	"$$" "$now" >"$orphan_state"
+measure "status on an orphaned watch" 10 "$FW" status --repo x/y --state "$orphan_state"
+
 # The refusals — quince#75's subject. These are NOT re-arms: obeying "every exit is a re-arm" here
 # loops forever with no watch running.
 measure "watch REFUSING beside a live watch"   1 "$FW" watch --repo x/y --state "$live_state" --gh /bin/true
@@ -112,7 +143,9 @@ measure "watch REFUSING a cross-repo --issue under --repo" 1 "$FW" watch --repo 
 # Every derived code must be named in every document that enumerates exits. Naming means the digit
 # appears; this cannot check that what is said about it is true, and does not pretend to.
 for _doc in $DOCS; do
-	_name=${_doc#"$ROOT"/}
+	# The generated one is labelled by what a reader would run, not by its mktemp path — a failure
+	# naming /var/folders/… tells nobody which document to go and fix.
+	if [ "$_doc" = "$USAGE_TXT" ]; then _name='bin/forge-watch --help'; else _name=${_doc#"$ROOT"/}; fi
 	if [ ! -f "$_doc" ]; then
 		bad "$_name does not exist — the doc list is stale, which is the drift this suite exists to catch"
 		continue

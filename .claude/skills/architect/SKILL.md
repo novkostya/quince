@@ -17,7 +17,7 @@ Ends with a report and an armed loop. It writes no code.
 
 **Before the identity check, before anything.** A watch's state lives on disk precisely so it survives
 this session's process restarting; the loop is rebuilt from it, never assumed. Ask, and **say which of
-the five answers you got**:
+the six answers you got**:
 
 ```sh
 bin/forge-watch status --all      # declared set; exits 0 live / 9 starting / 3 dead / 4 absent / 5 wedged / 10 orphaned
@@ -356,7 +356,7 @@ only check here that is atomic with the act it guards; a conditional beside it i
 a window in which the watcher can die, and both the sequenced form (`status …; exec watch …`, which
 gates nothing because `;` does not condition) and the correctly-composed `if` form were measured
 failing. **This retires the pre-arm conditional, not §0**: §0 still requires you to read `status` and
-**report which of the five answers you got**, which the tool cannot do on your behalf.
+**report which of the six answers you got**, which the tool cannot do on your behalf.
 
 **The window is narrowed, and the part of it that mattered is now CLOSED.** quince#102's arm-last
 ordering shrank it from one side and the rule above from the other; quince#95's `starting` class shut
