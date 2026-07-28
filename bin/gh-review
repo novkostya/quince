@@ -16,8 +16,28 @@
 # `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
 set -eu
 
-KEY_FILE="${QUINCE_REVIEW_KEY_FILE:-$HOME/.config/quince/quince-review.pem}"
-APP_ID_FILE="${QUINCE_REVIEW_APP_ID_FILE:-$HOME/.config/quince/quince-review.app-id}"
+# HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. This is the wrapper that found it:
+# `preflight`'s reviewer-mint assertion invokes this script, `preflight` runs from OpenRC, and
+# OpenRC gives a service no HOME — so `${VAR:-$HOME/...}` died on the UNGUARDED $HOME inside the
+# default, even though the outer expansion is guarded. It surfaced at boot as
+#
+#     bin/gh-review: line 19: HOME: parameter not set
+#
+# which reads as a broken script rather than a missing environment, and it took the arch box down
+# after a reboot. Invisible from a shell, because ssh and login both set HOME — so every
+# interactive test of this wrapper passed while the service could not start.
+#
+# Resolve from the passwd database rather than assuming a path: the same invocation then works
+# from a shell, from a service and from cron, and a box whose root home is not /root still works.
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+[ -n "$_home" ] || {
+	printf 'gh-review: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
+	printf 'gh-review: set QUINCE_REVIEW_KEY_FILE and QUINCE_REVIEW_APP_ID_FILE explicitly.\n' >&2
+	exit 1
+}
+
+KEY_FILE="${QUINCE_REVIEW_KEY_FILE:-$_home/.config/quince/quince-review.pem}"
+APP_ID_FILE="${QUINCE_REVIEW_APP_ID_FILE:-$_home/.config/quince/quince-review.app-id}"
 API="${QUINCE_GITHUB_API:-https://api.github.com}"
 AH="Accept: application/vnd.github+json"
 
@@ -43,7 +63,7 @@ done
 
 # The reviewer box must not hold the implementer identity (devlog#7). Asserted here as well as in
 # preflight, so a hand-run command cannot quietly cross a boundary the service refuses to cross.
-BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}"
+BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
 if [ -f "$BOT_TOKEN" ]; then
 	die "a BOT TOKEN is present at $BOT_TOKEN." \
 		"This machine can approve; holding the implementer identity too would let one box author" \
