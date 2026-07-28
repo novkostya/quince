@@ -14,7 +14,20 @@
 # already carries it — read from a file at point of use, never in argv, never in a remote URL.
 set -eu
 
-TOKEN_FILE="${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}"
+# HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. OpenRC gives a service no HOME,
+# so `${VAR:-$HOME/...}` — safe-looking, because the outer expansion is guarded — dies on the
+# UNGUARDED $HOME inside the default. It surfaces as `HOME: parameter not set`, which reads as a
+# broken script rather than as a missing environment, and it is invisible from a shell because
+# ssh and login both set HOME. Resolve it from the passwd database instead of assuming, so the
+# same invocation works from a shell, a service and cron.
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+[ -n "$_home" ] || {
+	printf 'gh-bot: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
+	printf 'gh-bot: set QUINCE_BOT_TOKEN_FILE to the credential path explicitly.\n' >&2
+	exit 1
+}
+
+TOKEN_FILE="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
 
 if ! command -v gh >/dev/null 2>&1; then
 	printf 'gh-bot: gh is not installed\n' >&2

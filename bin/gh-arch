@@ -11,7 +11,17 @@
 # two boxes.
 set -eu
 
-TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$HOME/.config/quince/quince-arch.token}"
+# HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL — see bin/gh-review for the full
+# note. OpenRC gives a service no HOME, so an unguarded $HOME inside an otherwise-guarded default
+# kills the wrapper with `HOME: parameter not set`. Invisible from a shell, because ssh sets HOME.
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+[ -n "$_home" ] || {
+	printf 'gh-arch: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
+	printf 'gh-arch: set QUINCE_ARCH_TOKEN_FILE to the credential path explicitly.\n' >&2
+	exit 1
+}
+
+TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 
 if ! command -v gh >/dev/null 2>&1; then
 	printf 'gh-arch: gh is not installed\n' >&2
@@ -28,8 +38,8 @@ fi
 # box can author and approve — so refuse rather than run, and say which file to remove. This is the
 # same assertion `preflight` makes at service start; making it again here means a hand-run command
 # cannot quietly cross the boundary that the service refuses to cross.
-if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" ]; then
-	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$HOME/.config/quince/quince-bot.token}" >&2
+if [ -f "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" ]; then
+	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" >&2
 	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
 	printf 'gh-arch: author and approve its own work. Remove it, or run gh-bot on the implementer box.\n' >&2
 	exit 1
