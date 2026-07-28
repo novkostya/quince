@@ -14,7 +14,7 @@ set -eu
 # HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL — see bin/gh-review for the full
 # note. OpenRC gives a service no HOME, so an unguarded $HOME inside an otherwise-guarded default
 # kills the wrapper with `HOME: parameter not set`. Invisible from a shell, because ssh sets HOME.
-_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd)}"
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}"
 [ -n "$_home" ] || {
 	printf 'gh-arch: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
 	printf 'gh-arch: set QUINCE_ARCH_TOKEN_FILE to the credential path explicitly.\n' >&2

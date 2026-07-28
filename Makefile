@@ -122,7 +122,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
-                   bin/gh-review bin/gh-wrappers-test \
+                   bin/gh-review bin/home-resolution-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -156,7 +156,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-fixtures-doc-test
 	@$(MAKE) --no-print-directory quince-runner-status-test
 	@$(MAKE) --no-print-directory pr-title-refs-test
-	@$(MAKE) --no-print-directory gh-wrappers-test
+	@$(MAKE) --no-print-directory home-resolution-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -211,8 +211,8 @@ quince-runner-status-test: ## rc-service status classifies on the newest session
 # reviewer's box until somebody noticed. Synthetic (stub `gh`, no network), so it runs in gates-sh
 # beside the other failure-path suites and needs neither a token nor the private layer.
 .PHONY: pr-title-refs-test
-gh-wrappers-test: ## The gh wrappers must not require $$HOME — the service path, not the shell path
-	@bin/gh-wrappers-test
+home-resolution-test: ## Entrypoints deriving paths from $$HOME must not require it SET — the service path
+	@bin/home-resolution-test
 
 .PHONY: pr-title-refs-test
 pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-RUN (quince#94)

@@ -1,0 +1,128 @@
+#!/bin/sh
+# home-resolution-test — entrypoints that derive a path from $HOME must not require it to be SET.
+#
+# WHY THIS EXISTS. `bin/gh-*` all defaulted their credential path to `${VAR:-$HOME/...}`. The outer
+# expansion is guarded, so it reads as safe; the `$HOME` *inside* the default is not, and under
+# `set -eu` an unset HOME is fatal. OpenRC gives a service no HOME, so when
+# `deploy/runner/preflight` grew an assertion that invokes `bin/gh-review`, the arch box stopped
+# starting after a reboot with:
+#
+#     bin/gh-review: line 19: HOME: parameter not set
+#
+# which reads as a broken script rather than as a missing environment. It had been latent in
+# `gh-bot` since that file was written and was invisible to every test anyone ran, because ssh
+# and login both set HOME. **The interactive path and the service path differ, and only the
+# service path was broken.** This test pins the service path.
+#
+# RENAMED FROM gh-wrappers-test, because `bin/forge-watch` carried the same defect and FAILED
+# WORSE: it does not die. It prints the expansion error to stderr and CONTINUES with an empty
+# prefix, so `state_dir` resolved to "/" and `status` reported `watch=absent` — a confident wrong
+# answer about whether a watch exists, from the tool whose entire job is that unwatched gaps get
+# noticed. A file called "gh-wrappers-test" covering something that is not a gh wrapper is the kind
+# of name that stops the next person adding the fifth entry, so the name moved with the scope.
+#
+# TWO ASSERTIONS, AND THE SECOND IS THE LOAD-BEARING ONE.
+#
+# 1. Unset HOME must not produce a shell error. Necessary, and NOT sufficient: an entrypoint that
+#    refuses cleanly also satisfies it, so on a host where the running uid has no /etc/passwd
+#    entry — macOS, which resolves users through Directory Services — this passes without ever
+#    exercising the path a service takes.
+#
+# 2. With HOME SET, every derived path must come from it. That is deterministic on any host, and it
+#    is what proves the entrypoint reads the environment rather than a hardcoded path.
+#
+#    An earlier version of (2) asserted the opposite — that a supplied override should make HOME
+#    irrelevant — and it failed against the corrected wrappers, correctly. They require a resolvable
+#    home on purpose: `gh-review` derives the BOT-TOKEN path from it too, and an empty home would
+#    make that path `/.config/quince/quince-bot.token`, which cannot exist, so devlog#7's "this box
+#    must not hold the implementer identity" assertion would pass by never being able to fail.
+#    Refusing early is the safer trade, and the test was wrong, not the code. Recorded because the
+#    first draft of this file shipped a check that could never fire, inside the regression test for
+#    exactly that defect class.
+#
+# Synthetic and hermetic: no credential, no network, no `gh` required.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+fake=/tmp/quince-home-resolution-test
+
+# One row per entrypoint: `path:args`. The args are whatever makes it print a derived path without
+# doing any work — the gh wrappers print theirs in usage, `forge-watch status` prints `state=` and
+# touches no network. Fed by here-document rather than a pipeline ON PURPOSE: a `while` loop on the
+# right of a pipe runs in a subshell, and the pass/fail counters would be discarded at the end of it.
+# Keep this list in step with SH_ENTRYPOINTS in the Makefile.
+while IFS=: read -r w args; do
+	[ -n "$w" ] || continue
+
+	# (1) unset HOME must not be a shell error.
+	# shellcheck disable=SC2086 # $args is a deliberate word-split argument list
+	out=$(sh -c 'unset HOME; exec "$@" 2>&1' _ "$w" $args </dev/null || true)
+	case "$out" in
+	*"HOME: parameter not set"* | *"HOME: unbound variable"*)
+		bad "$w dies on unset HOME — a service cannot run it"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*) ok "$w survives unset HOME" ;;
+	esac
+
+	# (2) HOME set: every derived path must come from it, not from a hardcoded root.
+	# shellcheck disable=SC2086
+	out=$(sh -c 'HOME=$1; export HOME; shift; exec "$@" 2>&1' _ "$fake" "$w" $args </dev/null || true)
+	case "$out" in
+	*"$fake/"*)
+		ok "$w derives its paths from HOME"
+		;;
+	*"cannot locate a home directory"*)
+		bad "$w refused despite HOME being set"
+		;;
+	*)
+		# Do not score an unrecognised outcome green — that is how a check stops being one.
+		bad "$w: inconclusive, no HOME-derived path in its output"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+
+	# (3) quince#164 — the REFUSAL ITSELF must be reachable. Under `set -e` an assignment takes its
+	# status from its command substitution, so a passwd lookup that FAILS (file unreadable or
+	# absent, the normal case behind a directory service) killed the script on the assignment line
+	# and the refusal below it never ran. A message written to explain a failure that nobody can
+	# reach is the same defect as a check that cannot fail, one layer down.
+	#
+	# Driven by a stub `awk` that exits non-zero, because the passwd path is not a seam and adding
+	# one purely for this test would put production surface behind a test's convenience. Safe for
+	# these invocations: none of them reaches another awk before resolving HOME.
+	stub=$(mktemp -d)
+	printf '#!/bin/sh\nexit 1\n' >"$stub/awk"
+	chmod +x "$stub/awk"
+	# shellcheck disable=SC2086
+	out=$(PATH="$stub:$PATH" sh -c 'unset HOME; exec "$@" 2>&1' _ "$w" $args </dev/null || true)
+	rm -rf "$stub"
+	case "$out" in
+	*"cannot locate a home directory"*)
+		ok "$w refuses reachably when the passwd lookup fails"
+		;;
+	*)
+		bad "$w: passwd lookup failed and the refusal never ran (quince#164)"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done <<'TARGETS'
+bin/gh-bot:
+bin/gh-arch:
+bin/gh-review:
+bin/forge-watch:status --repo novkostya/quince
+TARGETS
+
+printf '\nhome-resolution-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
