@@ -58,16 +58,42 @@ status() {
 		einfo "quince-runner: stopped"
 		return 3
 	fi
-	if [ -f "$output_log" ] && tail -n 20 "$output_log" 2>/dev/null | grep -qi 'must be logged in'; then
-		ewarn "quince-runner: supervisor is up, but NO SESSION — not logged in."
-		ewarn "  the ceremony is owed: claude auth login (a token cannot do Remote Control)"
-		return 1
+	# Classify on the NEWEST lifecycle line in the session log, not on whether a bad string appears
+	# anywhere in a fixed window (quince#101). The log is a state machine: a session starts, it may
+	# end — `Session failed: Process exited with error …` is the NORMAL terminal event of every unit —
+	# the supervisor reconnects, and it settles on the idle banner (`Ready …`, `Capacity: …`). The old
+	# check had two defects. It decided on the last 20 lines and SHOWED the last 3, so the evidence
+	# under the claim need not be the line that triggered it; and any `error|failed` in the window read
+	# as a live failure, so a RECOVERED error — which every retirement leaves — kept a fit, idle box
+	# reporting `failed` (exit 1) until twenty more lines scrolled past, on the one occasion the box is
+	# most likely to be inspected. Deciding on the single newest lifecycle line fixes both: that line
+	# IS the verdict AND the evidence, and a failure FOLLOWED BY a `Ready` is a recovery, not news.
+	#
+	# The markers are the session's own lifecycle, not arbitrary error text — an `error` in ordinary
+	# task output must not read as a dead session, which was the over-broad `error|failed` match. Every
+	# string here is one this box actually prints (quince#101's transcript). The `must be logged in`
+	# state is folded into the same newest-wins pass, because it carried the identical window bug: a box
+	# logged in AFTER an earlier `must be logged in` would otherwise still read as no-session.
+	if [ -f "$output_log" ]; then
+		_up='Ready|Capacity:|to show QR code|claude\.ai/code'
+		_login='must be logged in'
+		_fail='Session failed|Process exited with error'
+		_newest=$(grep -nE "$_up|$_login|$_fail" "$output_log" 2>/dev/null | tail -n 1)
+		case "${_newest#*:}" in
+		*"$_login"*)
+			ewarn "quince-runner: supervisor is up, but the newest session-log state is NO SESSION — not logged in."
+			ewarn "  the ceremony is owed: claude auth login (a token cannot do Remote Control)"
+			return 1
+			;;
+		esac
+		# A failure line only when it is the newest state AND no up-marker sits on it — a line cannot be
+		# both, but the guard states the rule rather than relying on the strings staying disjoint.
+		if printf '%s\n' "$_newest" | grep -qE "$_fail" && ! printf '%s\n' "$_newest" | grep -qE "$_up"; then
+			ewarn "quince-runner: supervisor is up, but the newest session-log state is a failure:"
+			printf '%s\n' "$_newest" | sed 's/^[0-9]*:/    /'
+			return 1
+		fi
 	fi
-	if [ -f "$output_log" ] && tail -n 20 "$output_log" 2>/dev/null | grep -qiE 'error|failed'; then
-		ewarn "quince-runner: supervisor is up, but the session log ends in an error:"
-		tail -n 3 "$output_log" | sed 's/^/    /'
-		return 1
-	fi
-	einfo "quince-runner: supervisor up; no session error in the recent log"
+	einfo "quince-runner: supervisor up; the session log's newest state is healthy (no failure since)"
 	return 0
 }

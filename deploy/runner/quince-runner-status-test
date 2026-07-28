@@ -1,0 +1,127 @@
+#!/bin/sh
+# quince-runner-status-test — status()'s newest-wins session-log classification (quince#101).
+#
+# `status()` answers the question a reader actually asks — "is a session up?" — from the supervised
+# session's log. It is an OpenRC service function, so it calls service_started/einfo/ewarn (all
+# stubbed here) and reads $output_log. We source the init script (its top level only assigns vars and
+# defines functions; `.` ignores the shebang) to get the REAL status(), then drive it against
+# synthetic logs and assert both the exit code and the evidence it prints.
+#
+# The acceptance quince#101 sets, stated as the first two cases: an idle, fit box IMMEDIATELY AFTER A
+# RETIREMENT returns 0, and a box that genuinely has a dead session returns 1 — where the old
+# window-grep returned 1 for both, because a retirement's `Session failed` sat in the 20-line window
+# while the log had already recovered to the idle banner.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+INITD="$HERE/quince-runner.initd"
+[ -f "$INITD" ] || {
+	printf 'quince-runner-status-test: no init script at %s\n' "$INITD" >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+pass=0
+fail=0
+
+# OpenRC stubs. einfo/ewarn print so a case can inspect the evidence; status()'s own `printf | sed`
+# evidence lands on stdout too. service_started's answer is a variable the harness sets per case.
+einfo() { printf 'einfo: %s\n' "$*"; }
+ewarn() { printf 'ewarn: %s\n' "$*"; }
+SERVICE_STARTED=0
+service_started() { return "$SERVICE_STARTED"; }
+
+# Source the init script for the real status(). shellcheck cannot follow a runtime path.
+# shellcheck source=/dev/null
+. "$INITD"
+
+LOG="$TMP/session.log"
+# read by status() (sourced above); shellcheck cannot see that use across the skipped source.
+# shellcheck disable=SC2034
+output_log="$LOG" # override the real /var/log path the source just set
+
+# check <name> <expected_rc> <evidence-substring|""> — log content on stdin
+check() {
+	_name=$1
+	_exp=$2
+	_needle=$3
+	cat >"$LOG"
+	out=$(status 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -eq "$_exp" ] && { [ -z "$_needle" ] || printf '%s' "$out" | grep -qF "$_needle"; }; then
+		printf 'ok   %s (exit %s)\n' "$_name" "$rc"
+		pass=$((pass + 1))
+	else
+		printf 'FAIL %s\n  wanted exit %s' "$_name" "$_exp"
+		[ -n "$_needle" ] && printf ' + evidence containing "%s"' "$_needle"
+		printf ', got exit %s:\n' "$rc"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+	fi
+}
+
+SERVICE_STARTED=0
+
+# 1. THE ACCEPTANCE, first half: a retirement leaves `Session failed` behind, the supervisor
+#    reconnects, and the log settles on the idle banner. A fit box must read 0.
+check "an idle fit box immediately after a retirement returns 0" 0 "" <<'EOF'
+[01:00:00] Session failed: Process exited with error abc123
+[01:00:11] Ready · novkostya/quince · main
+[01:00:11] Capacity: 0/32
+   Code anywhere with the Claude mobile app or https://claude.ai/code?environment=zz-synthetic
+   space to show QR code · w to toggle spawn mode
+EOF
+
+# 2. THE ACCEPTANCE, second half: a session that genuinely ended in failure, with nothing newer,
+#    returns 1 — and the evidence shown is that line.
+check "a session whose newest state is a failure returns 1, showing that line" 1 "Session failed" <<'EOF'
+[02:00:00] Ready · novkostya/quince · main
+[02:00:05] Capacity: 0/32
+[02:05:00] Session failed: Process exited with error deadbeef
+EOF
+
+# 3. The evidence is the LINE THAT DECIDED, not a fixed 3-line tail. Here the failure is the newest
+#    lifecycle marker but is followed by three non-marker lines; the old code claimed "error" from
+#    the 20-line window and printed those three trailing lines as its evidence.
+check "the evidence shown is the failing line, not a later tail" 1 "Process exited with error cafe" <<'EOF'
+[03:00:00] Ready · novkostya/quince · main
+[03:05:00] Session failed: Process exited with error cafe
+   (trailing noise 1, not a lifecycle marker)
+   (trailing noise 2)
+   (trailing noise 3)
+EOF
+
+# 4. `must be logged in` is folded into the same newest-wins pass — its OWN newest state.
+check "no session — newest state is not-logged-in — returns 1" 1 "not logged in" <<'EOF'
+[04:00:00] starting Remote Control
+[04:00:01] You must be logged in to use Remote Control
+EOF
+
+# 5. ...and it too is newest-wins: a box logged in AFTER an earlier not-logged-in reads 0. The old
+#    window-grep returned 1 here, the identical bug one check up.
+check "a box logged in after an earlier not-logged-in returns 0" 0 "" <<'EOF'
+[05:00:00] You must be logged in to use Remote Control
+[05:01:00] Ready · novkostya/quince · main
+[05:01:00] Capacity: 0/32
+EOF
+
+# 6. A plainly healthy log with no failure ever.
+check "a healthy idle log returns 0" 0 "" <<'EOF'
+[06:00:00] Ready · novkostya/quince · main
+[06:00:00] Capacity: 0/32
+EOF
+
+# 7. No lifecycle markers at all → nothing says failed, so healthy (matches the old default), and an
+#    'error' in ordinary task output does NOT read as a dead session — the over-broad match removed.
+check "a log with no lifecycle markers (incl. an 'error' in task output) returns 0" 0 "" <<'EOF'
+[07:00:00] running: go test ./...
+[07:00:03] FAIL: an error in a test the live session is working on
+EOF
+
+# 8. Stopped supervisor → 3, unchanged.
+SERVICE_STARTED=3
+check "a stopped service returns 3" 3 "stopped" </dev/null
+SERVICE_STARTED=0
+
+printf 'quince-runner-status-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
