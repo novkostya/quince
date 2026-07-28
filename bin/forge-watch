@@ -1554,12 +1554,24 @@ tick() {
 		# pid_start is recorded beside the pid so that a later `stop` can prove the pid still belongs to
 		# this process rather than to whatever the kernel recycled it onto. Recorded even when procfs
 		# cannot answer (empty), because "we never knew" and "it changed" are different refusals.
+		# `+=` AND NOT `=`, and quince#168 is what `=` cost. Two writers touch `.watch` with
+		# DIFFERENT field sets: `watch_arm` records what a watch IS — owner, armed_at,
+		# starting_bound_s — and this one records what a tick DID. Replacing the object here
+		# destroyed everything the other writer owns, so `owner_pid` survived exactly one interval
+		# and `orphaned` became a class that could only fire before the first tick. An orphan is BY
+		# DEFINITION a watcher that is still ticking, so it was alive only in the window where it
+		# could not be needed. `armed_at` and `starting_bound_s` were destroyed identically and got
+		# away with it, because `starting` is pre-first-tick by definition — a second latent instance
+		# of the same line.
+		#
+		# A merge is also the right default for whatever the next field is: a writer that names only
+		# what it owns cannot silently delete what it does not.
 		jq -c --arg ts "$_ts" --argjson pid "$_wpid" --argjson iv "$_interval" \
 			--arg start "$(proc_start "$_wpid")" '
 			.last_tick = $ts
-			| .watch = {pid: $pid, pid_start: (if $start == "" then null else $start end),
-			            interval_s: $iv, last_watcher_tick: $ts,
-			            due: (($ts | fromdate) + $iv | todate)}' "$_state" >"$_state.new" &&
+			| .watch += {pid: $pid, pid_start: (if $start == "" then null else $start end),
+			             interval_s: $iv, last_watcher_tick: $ts,
+			             due: (($ts | fromdate) + $iv | todate)}' "$_state" >"$_state.new" &&
 			mv "$_state.new" "$_state"
 	else
 		jq -c --arg ts "$_ts" '.last_tick = $ts' "$_state" >"$_state.new" && mv "$_state.new" "$_state"
