@@ -15,22 +15,64 @@ RUNTIME     ?= $(shell command -v nerdctl 2>/dev/null || command -v docker 2>/de
 IMAGE_NAME  ?= quince
 IMAGE_TAG   ?= local
 
+# PER-RUNNER NAMESPACE (quince#45). Every identifier below that names a *running thing* is suffixed
+# with this runner's name, because the gate targets use FIXED names and two sessions on one box
+# destroy each other: B's opening `rm -f quince-e2e-app` kills A's app container mid-test, B's
+# closing `network rm` tears down the network A is still using, and both write the same
+# node_modules volume and the same log. Every symptom presents as a flake, which is the bug class
+# these gates exist to eliminate.
+#
+# The name comes from quince#111's runner declaration — one fact deciding branch ownership, state
+# directory and now container names, so the three cannot drift. Empty when nothing is declared,
+# which is every CI run and every un-migrated box, and then every name below is exactly what it
+# was. `|| true` because `runner get` refuses rather than defaulting, and a missing name here is
+# not an error — it is the one-runner case.
+RUNNER      := $(shell bin/forge-watch runner get 2>/dev/null || true)
+NS          := $(if $(RUNNER),-$(RUNNER),)
+
 # Named cache volumes — persistent across runs, safe to lose (live on the disposable
 # runtime storage). They are what keep containerized gates fast.
+#
+# NOT NAMESPACED PER RUNNER (quince#45), and the reason is not "they are caches" — E2E_MODULES is
+# cache-shaped too and IS namespaced. It is that all four are safe for CONCURRENT WRITERS by
+# construction: Go's build and module caches lock, and the pnpm and uv stores are content-addressed,
+# so two runners writing the same entry write the same bytes. A materialised `node_modules` tree is
+# none of those things — it is one checkout's dependency state, and a second writer corrupts it.
+#
+# THAT PAIR IS THE POINT: `PNPM_VOL` is shared and `E2E_MODULES` is not, and both are node
+# dependency storage. The asymmetry is deliberate and it is exactly what a later maintainer would
+# "make consistent" in whichever direction they guessed. An undocumented decision is
+# indistinguishable from an accident.
+#
+# Stated as a design property rather than a measurement: it rests on what those tools document about
+# their own caches, not on two runners having been observed sharing one. quince#175 is where that
+# gets exercised.
 GO_BUILD_VOL := quince-go-build
 GO_MOD_VOL   := quince-go-mod
 PNPM_VOL     := quince-pnpm-store
 UV_VOL       := quince-uv-cache
 
 # Locally-built toolchain images (== Dockerfile build stages).
+# NOT namespaced, deliberately, and this is the distinction quince#45's inventory does not draw:
+# IMAGE_TAG does double duty. These three are CACHES — built once from the Dockerfile stages and
+# reused by every gate — and sharing them between runners is the whole reason gates are fast.
+# Suffixing them would make each runner rebuild its own toolchain for no isolation: nothing writes
+# them during a gate, so there is nothing to collide.
 TC_GO   := quince-toolchain-go:$(IMAGE_TAG)
 TC_NODE := quince-toolchain-node:$(IMAGE_TAG)
 TC_UV   := quince-toolchain-uv:$(IMAGE_TAG)
 
 # e2e (Playwright) plumbing: a demo app container + a runner container on a shared network.
-E2E_NET     := quince-e2e-net
-E2E_APP     := quince-e2e-app
-E2E_MODULES := quince-e2e-node-modules
+E2E_NET     := quince-e2e-net$(NS)
+E2E_APP     := quince-e2e-app$(NS)
+E2E_MODULES := quince-e2e-node-modules$(NS)
+E2E_LOG     := /tmp/quince-e2e-app$(NS).log
+
+# The PRODUCT image, separate from IMAGE_TAG for the reason above: `make image` rebuilds one fixed
+# tag, so a second session retags the image the first is testing. This one is per-runner; the
+# toolchain tag stays shared. `make push IMAGE_TAG=v1.2.3` is unaffected — push names a release
+# tag explicitly and never a local one.
+APP_TAG     ?= $(IMAGE_TAG)$(NS)
 
 VERSION ?= 0.0.0-dev
 
@@ -325,7 +367,7 @@ gates-ui: tc-node ## UI: typecheck + lint + vitest + build
 # ---------------------------------------------------------------------------
 .PHONY: image
 image: preflight ## Build the production container (proves go:embed of the built UI)
-	$(RUNTIME) build $(BUILD_ARGS) --target runtime -t $(IMAGE_NAME):$(IMAGE_TAG) -f deploy/Dockerfile .
+	$(RUNTIME) build $(BUILD_ARGS) --target runtime -t $(IMAGE_NAME):$(APP_TAG) -f deploy/Dockerfile .
 
 .PHONY: gates-ui-e2e
 gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two containers)
@@ -334,13 +376,13 @@ gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
 	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
 	  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
-	  $(IMAGE_NAME):$(IMAGE_TAG) serve --demo >/dev/null; \
+	  $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null; \
 	status=0; \
 	$(RUN) --network $(E2E_NET) -w /src/ui \
 	  -v quince-pnpm-store:/pnpm-store -v $(E2E_MODULES):/src/ui/node_modules \
 	  -e BASE_URL=http://$(E2E_APP):8080 -e CI=1 -e PNPM_VERSION=$(PNPM_VERSION) \
 	  $(PLAYWRIGHT_IMAGE) sh /src/deploy/e2e-run.sh || status=$$?; \
-	$(RUNTIME) logs $(E2E_APP) > /tmp/quince-e2e-app.log 2>&1 || true; \
+	$(RUNTIME) logs $(E2E_APP) > $(E2E_LOG) 2>&1 || true; \
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
 	exit $$status
@@ -348,7 +390,12 @@ gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two
 .PHONY: push
 push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 	@test -n "$(REGISTRY)" || { echo "ERROR: set REGISTRY=host[:port]/repo (env only)"; exit 1; }
-	$(RUNTIME) tag  $(IMAGE_NAME):$(IMAGE_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@# SOURCE is the per-runner APP_TAG, DESTINATION is the release IMAGE_TAG. `image` builds
+	@# locally under this runner's tag, so pushing IMAGE_TAG->IMAGE_TAG would look for an image
+	@# that does not exist on a box where a runner is declared. Retagging across the two is what
+	@# keeps "build locally, push a release name" working in both cases: with no runner declared
+	@# the two are identical and this is exactly what it always was.
+	$(RUNTIME) tag  $(IMAGE_NAME):$(APP_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 	$(RUNTIME) push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 # ---------------------------------------------------------------------------
