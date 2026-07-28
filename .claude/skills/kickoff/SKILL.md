@@ -88,10 +88,17 @@ block per the gap protocol and report; do not build past it.
 ## 3. Fresh clone + branch, as the bot
 
 One clone per unit of work, from GitHub, in a scratch directory — never a long-lived
-checkout, never a worktree, never an rsync from a workstation:
+checkout, never a worktree, never an rsync from a workstation.
+
+**The scratch root is `$HOME/scratch/<runner>`**, and naming it is not tidiness: `<scratch>` was a
+placeholder for months, so there was no place to point a reaper at and 33 clones accumulated in two
+days. `bin/scratch-reap` reaps that root and only that root, so one runner never touches another's
+trees (quince#45, quince#111).
 
 ```sh
-git clone https://github.com/novkostya/quince.git <scratch>/quince && cd <scratch>/quince
+SCRATCH="$HOME/scratch/$(bin/forge-watch runner get)"
+mkdir -p "$SCRATCH"
+git clone https://github.com/novkostya/quince.git "$SCRATCH"/quince && cd "$SCRATCH"/quince
 git config user.name  "quince bot"
 git config user.email "quince-bot@users.noreply.github.com"
 git config credential.helper '!f() { echo username=quince-bot; echo "password=$(cat $HOME/.config/quince/quince-bot.token)"; }; f'

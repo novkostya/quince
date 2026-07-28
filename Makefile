@@ -165,7 +165,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
                    bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
-                   bin/forge-watch-ownership-test \
+                   bin/forge-watch-ownership-test bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -201,6 +201,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory pr-title-refs-test
 	@$(MAKE) --no-print-directory forge-watch-roundtrip-test
 	@$(MAKE) --no-print-directory forge-watch-ownership-test
+	@$(MAKE) --no-print-directory scratch-reap-test
 	@$(MAKE) --no-print-directory home-resolution-test
 	@echo "gates-sh: clean"
 
@@ -257,6 +258,10 @@ forge-watch-roundtrip-test: ## What one writer records must survive the OTHER wr
 .PHONY: forge-watch-ownership-test
 forge-watch-ownership-test: ## Another runner's event must not wake mine (quince#111 face 3)
 	@bin/forge-watch-ownership-test
+
+.PHONY: scratch-reap-test
+scratch-reap-test: ## The reaper's REFUSALS — the half that loses work if it is wrong (quince#45)
+	@bin/scratch-reap-test
 
 # `home-resolution-test` HAD NO `.PHONY` OF ITS OWN until now, and that is a defect quince#158
 # introduced: it inserted this target between the quince#94 comment block below and the

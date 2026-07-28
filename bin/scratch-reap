@@ -1,0 +1,155 @@
+#!/bin/sh
+# scratch-reap — delete the per-unit clones that are provably finished, and NOTHING else.
+#
+# WHY THIS EXISTS. Canon says "fresh clone per unit of work … into a scratch dir" and nothing ever
+# removes one. Measured on the runner: 33 clones in two days, 503 MB, none pruned — and the reason
+# nobody wrote a reaper is visible in the same sentence. `<scratch>` is a placeholder. There was no
+# named place to reap, so there was nothing to point a reaper at.
+#
+# THE SAFETY RULE IS THE WHOLE DESIGN, and it is quince-devlog#45's non-negotiable one layer down:
+# **a container must never hold work that exists nowhere else.** A clone is deleted only when all
+# three hold, and any one of them failing leaves it alone:
+#
+#   1. the working tree is CLEAN            — nothing uncommitted
+#   2. every commit is reachable from origin/main — so the work exists in the repository, not just here
+#   3. its branch is GONE from origin        — so nobody is still reviewing it
+#
+# (2) is deliberately not "is it pushed". A merged branch is deleted, so its upstream ref no longer
+# resolves and an "unpushed?" check against `@{u}` would either error or report everything as
+# unpushed. Reachability from `origin/main` answers the question that actually matters — does this
+# work exist anywhere but here — and it answers it the same way for a merged branch and a rebased
+# one.
+#
+# IT REPORTS WHAT IT SKIPPED AND WHY. A reaper that silently declines is the same defect class as a
+# check that cannot fail: the disk stays full and nobody knows which clone is holding it, so the
+# next person deletes by hand and by eye, which is how work gets lost.
+#
+# REPORT-ONLY BY DEFAULT. `--prune` is what deletes. Refusing to act without being asked is cheap
+# here and the failure mode on the other side is unrecoverable.
+set -eu
+
+usage() {
+	cat <<'EOF'
+usage: scratch-reap [--prune] [--root <dir>] [--quiet]
+
+  Delete per-unit clones that are provably finished. Report-only unless --prune.
+
+  --root <dir>  where the clones live. Defaults to $HOME/scratch/<runner> when a runner name is
+                declared (forge-watch runner set), else $HOME/scratch — so one runner never reaps
+                another's trees.
+  --prune       actually delete. Without it, nothing is removed and every decision is printed.
+  --quiet       print only what would be, or was, deleted.
+
+  A clone is deleted only when ALL of: clean tree · every commit reachable from origin/main ·
+  branch gone from origin. Anything else is kept, with the reason.
+
+  exit 0 nothing to do or done · 1 usage/refusal
+EOF
+}
+
+PRUNE=no
+QUIET=no
+ROOT=''
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--prune) PRUNE=yes; shift ;;
+	--quiet) QUIET=yes; shift ;;
+	--root) [ $# -ge 2 ] || { usage >&2; exit 1; }; ROOT=$2; shift 2 ;;
+	-h | --help) usage; exit 0 ;;
+	*) usage >&2; printf '\nscratch-reap: unknown option: %s\n' "$1" >&2; exit 1 ;;
+	esac
+done
+
+if [ -z "$ROOT" ]; then
+	_home=${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}
+	[ -n "$_home" ] || {
+		printf 'scratch-reap: cannot locate a home directory — pass --root explicitly.\n' >&2
+		exit 1
+	}
+	# Scoped to THIS runner when one is declared (quince#111). Without it a reaper on a shared box
+	# would walk into another session's trees, and the three conditions are about whether work is
+	# safe to delete — not about whose it is.
+	_rn=$("$(dirname "$0")/forge-watch" runner get 2>/dev/null || true)
+	if [ -n "$_rn" ]; then
+		ROOT="$_home/scratch/$_rn"
+	else
+		ROOT="$_home/scratch"
+	fi
+fi
+
+say() { [ "$QUIET" = yes ] || printf '%s\n' "$*"; }
+
+if [ ! -d "$ROOT" ]; then
+	say "scratch-reap: no scratch root at $ROOT — nothing to do."
+	exit 0
+fi
+
+say "scratch-reap: root=$ROOT mode=$([ "$PRUNE" = yes ] && printf prune || printf report-only)"
+
+reaped=0
+kept=0
+skipped=0
+
+for d in "$ROOT"/*; do
+	[ -e "$d" ] || continue
+	name=$(basename "$d")
+	if [ ! -d "$d/.git" ]; then
+		# Not a clone. Left alone and COUNTED, because a root full of stray files is a different
+		# problem from a root full of finished clones and the two should not be reported as one.
+		skipped=$((skipped + 1))
+		say "  skip   $name — not a git clone"
+		continue
+	fi
+
+	# The remote is asked once per clone. That is a network call apiece and it is the price of not
+	# guessing: "the branch is gone" is a fact about the forge and cannot be read locally.
+	if ! git -C "$d" fetch --quiet --prune origin 2>/dev/null; then
+		kept=$((kept + 1))
+		say "  KEEP   $name — could not reach origin, so whether its branch is gone is UNKNOWN"
+		continue
+	fi
+
+	branch=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
+	if [ -z "$branch" ] || [ "$branch" = HEAD ]; then
+		kept=$((kept + 1))
+		say "  KEEP   $name — detached or unreadable HEAD; not something to judge automatically"
+		continue
+	fi
+
+	if [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then
+		kept=$((kept + 1))
+		say "  KEEP   $name — uncommitted changes on $branch"
+		continue
+	fi
+
+	ahead=$(git -C "$d" rev-list --count origin/main.."$branch" 2>/dev/null || printf 1)
+	case "$ahead" in '' | *[!0-9]*) ahead=1 ;; esac
+	if [ "$ahead" -ne 0 ]; then
+		kept=$((kept + 1))
+		say "  KEEP   $name — $ahead commit(s) on $branch not reachable from origin/main"
+		continue
+	fi
+
+	if git -C "$d" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+		kept=$((kept + 1))
+		say "  KEEP   $name — $branch still exists on origin; somebody may be reviewing it"
+		continue
+	fi
+
+	if [ "$PRUNE" = yes ]; then
+		rm -rf "$d"
+		reaped=$((reaped + 1))
+		printf '  REAPED %s — %s is gone from origin and every commit is in main\n' "$name" "$branch"
+	else
+		reaped=$((reaped + 1))
+		printf '  would reap %s — %s is gone from origin and every commit is in main\n' "$name" "$branch"
+	fi
+done
+
+say ''
+if [ "$PRUNE" = yes ]; then
+	printf 'scratch-reap: %s reaped, %s kept, %s not clones\n' "$reaped" "$kept" "$skipped"
+else
+	printf 'scratch-reap: %s would be reaped, %s kept, %s not clones — pass --prune to act\n' \
+		"$reaped" "$kept" "$skipped"
+fi

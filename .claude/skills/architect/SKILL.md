@@ -183,6 +183,13 @@ and treat the comment as the signal** — it is a property of the token, not of 
 
 ## 4. Review — the protocol, including what is easy to get wrong
 
+**Check out into `$HOME/scratch/$(bin/forge-watch runner get)/`, never `/tmp`.** This seat clones
+more than the implementer does — once per PR reviewed, twice when a head moves — and until this
+line existed it cloned wherever the session chose. Measured on the arch box: **58 review clones in
+one day, 161.9 MB**, all in `/tmp` and all outside every root `bin/scratch-reap` knows, so none of
+them could ever be reaped (quince#45). `/review-pr` §2 carries the commands.
+
+
 Per PR, follow `/review-pr`. Four things belong here because each was learned the hard way:
 
 - **Run the head under review, never `main`.** Check the branch out first. Testing a guard using
