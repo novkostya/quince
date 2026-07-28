@@ -121,6 +121,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
+                   deploy/runner/quince-runner-status-test \
                    bin/pr-title-refs bin/pr-title-refs-test
 
 .PHONY: gates-sh
@@ -152,6 +153,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory forge-watch-exits-test
 	@$(MAKE) --no-print-directory forge-watch-stop-test
 	@$(MAKE) --no-print-directory forge-watch-fixtures-doc-test
+	@$(MAKE) --no-print-directory quince-runner-status-test
 	@$(MAKE) --no-print-directory pr-title-refs-test
 	@echo "gates-sh: clean"
 
@@ -196,6 +198,10 @@ forge-watch-stop-test: ## `stop` / `stop --all` against live pids — what repla
 .PHONY: forge-watch-fixtures-doc-test
 forge-watch-fixtures-doc-test: ## The fixtures' README indexes every fixture, both directions (quince#107)
 	@bin/forge-watch-fixtures-doc-test
+
+.PHONY: quince-runner-status-test
+quince-runner-status-test: ## rc-service status classifies on the newest session-log state (quince#101)
+	@deploy/runner/quince-runner-status-test
 
 # quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
 # title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two
