@@ -5,17 +5,34 @@
 # sentence and was enforced by nothing. This file is the structural half.
 #
 # ---------------------------------------------------------------------------------------------
-# THIS FILE ENFORCES NOTHING TODAY. Read that before trusting it.
+# THIS FILE IS LIVE. It was inert until 2026-07-27 and this header said so.
 #
-# A CODEOWNERS file on its own only auto-REQUESTS review from the owner. Requiring the owner's
-# approval before merge is a separate branch-protection setting, "Require review from Code
-# Owners", which is admin-only — the bot identity gets 403/404 on the protection endpoint, so it
-# can neither read nor set it. The file is therefore INERT until the Operator flips that toggle,
-# and it is committed in that state deliberately: quince#113's shape, where a check that an agent
-# identity cannot wire is landed built-and-unwired with an issue against the wiring (quince#137),
-# rather than worked around or escalated to a seat that cannot do it either.
+# "Require review from Code Owners" was enabled on 2026-07-27, the last step of the sequence
+# CLAUDE.md sets out. Measured 2026-07-28:
 #
-# Do not read a green PR as evidence this file did something.
+#     require_code_owner_reviews      true
+#     required_approving_review_count 1
+#     enforce_admins                  true
+#
+# Of the two AGENT identities only the App can read that endpoint — the architect PAT gets 403 and
+# the bot 404. The OPERATOR reads it fine: it is an admin endpoint and the Operator is the admin.
+# Worth the extra clause, because this header ends by telling you to go and read the endpoint, and
+# a reader who takes the agent-seat limit for a universal one concludes they cannot.
+#
+# So on the paths below an approval MUST come from @novkostya. An architect verdict cannot satisfy
+# it and neither can the App's, by the rule stated further down: an App cannot be a code owner.
+#
+# WHAT THIS HEADER USED TO SAY, AND WHY THE REPLACEMENT IS RECORDED RATHER THAN SILENT. It read
+# "THIS FILE ENFORCES NOTHING TODAY … Do not read a green PR as evidence this file did something."
+# True when written, false from the moment the toggle flipped, and believed in between: an
+# architect session reasoned from it that an App approval would satisfy protection. Both halves
+# were wrong. A file describing a narrower reality than the one that exists is this project's
+# most-filed defect class, and it arrived here in the file that is the structural half of the
+# authority model.
+#
+# The instruction that replaces it: DO NOT TRUST THIS COMMENT EITHER — read the endpoint. Branch
+# protection changes leave no trace in the repository's history, so a committed claim about it is
+# a claim about the past. The GET is in CLAUDE.md beside the break-glass procedure.
 # ---------------------------------------------------------------------------------------------
 #
 # WHY IT ONLY BECAME POSSIBLE ON 2026-07-27, and why naming @novkostya was worthless before then.
