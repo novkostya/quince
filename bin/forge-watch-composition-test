@@ -1,0 +1,455 @@
+#!/bin/sh
+# forge-watch-composition-test — TWO RUNNERS, TWO LIVE WATCHERS, AT THE SAME TIME (quince#175).
+#
+# WHY THIS EXISTS. quince#111 landed four parts and every suite that proves them drives ONE runner
+# against state DESCRIBING another: the ownership suite declares `r1`, puts `r2`'s PR in the queue,
+# and never starts `r2`'s watcher; face 4's isolation check overrode `QUINCE_SESSION_ID` inside a
+# single shell. So the property the whole issue exists for — two runners on one box that do not
+# interfere — had been closed by construction and never once executed. quince#111 calls itself "the
+# one that decides whether the idea works at all", which makes the first concurrent run the first
+# test of the thing the work was for. Better here than during real work.
+#
+# WHAT STANDS IN FOR A SESSION — and therefore what is NOT proven here. A session is a plain shell
+# that declares a name, arms a watch as a background child, and stays alive. That is faithful to the
+# two facts the mechanism actually reads — `$PPID` at arm time, and a watcher that outlives its
+# parent — and it is NOT a stand-in for the Stop hook, which receives `session_id` on stdin from a
+# real Claude session and is the one link in this design never measured end to end. That path stays
+# open on quince#175 on purpose: a shell cannot exercise it, and a suite that implied otherwise
+# would be worse than the acknowledged gap.
+#
+# WHAT CONCURRENCY BUYS THAT THE UNIT SUITES CANNOT. Four things, all named on quince#175:
+#   1. two state files written by two live writers at once (quince#50 was a CONCURRENCY bug, closed
+#      by construction and never by observation);
+#   2. the registry under simultaneous `runner set` calls;
+#   3. `other_runner_names` reading a runner that is genuinely LIVE rather than an entry a test
+#      placed — same list, different provenance;
+#   4. the N² churn the filter exists to prevent, which with one watcher cannot be measured at all
+#      because there is no second watcher to fail to terminate.
+#
+# ORDERING IS PART OF THE CONTRACT, not test scaffolding. `watch_loop` resolves the other declared
+# runners ONCE, at start, deliberately — so a name declared AFTER a watch armed is invisible to that
+# watch until it re-arms. The `go` file below makes both declarations land first rather than racing
+# them, which is what a kickoff does too.
+#
+# COSTS ~10 s of wall clock and needs a live process tree, so it sits host-side in `gates-sh` beside
+# forge-watch-stop-test and the roundtrip suite. Synthetic and hermetic: a stub `gh`, no network, no
+# credential, its own XDG_STATE_HOME.
+#
+# TEETH, measured on quince-runner by breaking one thing at a time rather than asserted:
+#
+#   `wake_filter` returns its input unfiltered      22/0 -> 12 passed, 5 failed
+#   `state_dir` ignores the runner name (pre-#111)  22/0 ->  5 passed, 12 failed
+#   `owner_pid` not recorded at arm time            22/0 -> 19 passed, 3 failed
+#
+# Some of those failures CASCADE — once a phase desynchronises the later ones fail for derived
+# reasons — and they are counted rather than pruned, because a broken build failing more loudly than
+# its minimum is the direction that costs nothing. The independent ones are the two cross-wake
+# assertions for the filter, the state-separation trio for the directory, and the orphan pair for
+# the owner pid.
+set -eu
+
+cd "$(dirname "$0")/.."
+FW=$PWD/bin/forge-watch
+REPO=novkostya/quince
+MAXWAIT=180
+export FW REPO MAXWAIT
+
+pass=0
+fail=0
+skipped=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+skip() {
+	printf '  skip %s\n' "$*"
+	skipped=$((skipped + 1))
+}
+
+command -v jq >/dev/null 2>&1 || {
+	printf 'forge-watch-composition-test: DID NOT RUN — jq is absent and the state is JSON.\n' >&2
+	exit 1
+}
+
+WORK=$(mktemp -d)
+LOG=$WORK/log
+mkdir -p "$LOG"
+export LOG
+
+# Every pid this suite starts is written to a *.pid file, so cleanup does not have to remember which
+# ones it made. An orphaned watcher is the POINT of the last phase, which means the one process that
+# will still be running at the end is the one nothing else would reap.
+cleanup() {
+	for _c in "$LOG"/*.pid; do
+		[ -f "$_c" ] || continue
+		kill "$(cat "$_c")" 2>/dev/null || true
+	done
+	rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+# ---------------------------------------------------------------------------
+# Phase 0 — THE REGISTRY UNDER CONCURRENT WRITES.
+#
+# Its own state base, so eight throwaway names cannot appear as "other declared runners" to the two
+# watchers below and change what they suppress. Eight `runner set` calls started without waiting
+# between them: almost certainly fine, never once seen, and named on quince#175 for that reason.
+# ---------------------------------------------------------------------------
+# The environment goes on each command rather than into a `( … )` group, so the state base this
+# phase uses is visible on the line that uses it — and so the main XDG_STATE_HOME below is set once,
+# in one place, instead of being shadowed and restored.
+printf 'phase 0 — the registry under concurrent writes\n'
+i=1
+while [ "$i" -le 8 ]; do
+	XDG_STATE_HOME=$WORK/regstate QUINCE_SESSION_ID=concurrent-$i "$FW" runner set "c$i" >/dev/null 2>&1 &
+	i=$((i + 1))
+done
+wait
+regdir=$WORK/regstate/quince/runners
+regbad=0
+i=1
+while [ "$i" -le 8 ]; do
+	if [ "$(cat "$regdir/concurrent-$i" 2>/dev/null || printf '')" != "c$i" ]; then
+		regbad=$((regbad + 1))
+	fi
+	i=$((i + 1))
+done
+if [ "$regbad" -eq 0 ] && [ "$(find "$regdir" -type f | wc -l | tr -d ' ')" = 8 ]; then
+	ok "8 simultaneous \`runner set\` calls leave 8 correct registry entries"
+else
+	bad "the registry lost or corrupted entries under concurrent writes ($regbad wrong)"
+fi
+
+# ---------------------------------------------------------------------------
+# The stub forge. `$WORK/turn` is the clock: 1 baseline, 2 moves A's PR, 3 moves B's.
+# ---------------------------------------------------------------------------
+export XDG_STATE_HOME="$WORK/state"
+export STUB_WORK="$WORK"
+GH=$WORK/gh
+export GH
+
+cat >"$GH" <<'STUB'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+case "$*" in
+*"issue view"*) printf '{}\n'; exit 0 ;;
+esac
+a=2026-07-28T10:00:00Z
+b=2026-07-28T10:00:00Z
+case "$turn" in
+2) a=2026-07-28T11:00:00Z ;;
+3) a=2026-07-28T11:00:00Z; b=2026-07-28T12:00:00Z ;;
+esac
+row() {
+cat <<ROW
+ {"number":$1,"state":"OPEN","updatedAt":"$2","title":"t","headRefName":"$3",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}
+ROW
+}
+printf '['
+row 101 "$a" "ra/work"
+printf ','
+row 202 "$b" "rb/work"
+printf ']\n'
+STUB
+chmod +x "$GH"
+printf '1\n' >"$WORK/turn"
+
+# ---------------------------------------------------------------------------
+# The owner — one "session". It declares a name ONCE and then arms watch after watch, which is what
+# a session does across a rung; it must STAY ALIVE, because the fact under test in the last phase is
+# that the watcher's owner is a different process that can die without it.
+# ---------------------------------------------------------------------------
+cat >"$WORK/owner" <<'OWNER'
+#!/bin/sh
+set -u
+name=$1
+sid=$2
+rounds=$3
+export QUINCE_SESSION_ID=$sid
+if ! "$FW" runner set "$name" >"$LOG/$name.declaring" 2>&1; then
+	printf 'declare-failed\n' >>"$LOG/$name.declaring"
+fi
+mv "$LOG/$name.declaring" "$LOG/$name.declared"
+# Both names on the registry BEFORE either watch arms — see the header: the other-runner set is
+# resolved once, at watch start, on purpose.
+while [ ! -f "$LOG/go" ]; do sleep 1; done
+i=1
+while [ "$i" -le "$rounds" ]; do
+	"$FW" watch --repo "$REPO" --gh "$GH" --no-issues --interval 1 --max-wait "$MAXWAIT" \
+		>"$LOG/$name.$i.log" 2>&1 &
+	w=$!
+	printf '%s\n' "$w" >"$LOG/$name.$i.pid"
+	wait "$w"
+	rc=$?
+	printf '%s %s\n' "$i" "$rc" >>"$LOG/$name.exits"
+	i=$((i + 1))
+done
+while :; do sleep 1; done
+OWNER
+chmod +x "$WORK/owner"
+
+# ---------------------------------------------------------------------------
+# Waiting. Polled with a bound rather than slept blind: a fixed sleep either wastes the difference
+# or fails on a slow box, and a suite that flakes under load is a suite people re-run until green.
+# `if` rather than `&&`, throughout — under `set -e` a failing `[` as the left half of `&&` aborts
+# the whole run instead of taking the other branch.
+# ---------------------------------------------------------------------------
+wait_file() {
+	_wf_i=0
+	while [ "$_wf_i" -lt "$2" ]; do
+		if [ -f "$1" ]; then return 0; fi
+		sleep 1
+		_wf_i=$((_wf_i + 1))
+	done
+	return 1
+}
+
+wait_line() {
+	_wl_i=0
+	while [ "$_wl_i" -lt "$3" ]; do
+		if [ -f "$1" ] && grep -q "$2" "$1"; then return 0; fi
+		sleep 1
+		_wl_i=$((_wl_i + 1))
+	done
+	return 1
+}
+
+status_rc() {
+	# $1 session id, $2 where to put the report. Prints the exit code.
+	if QUINCE_SESSION_ID=$1 "$FW" status --repo "$REPO" >"$2" 2>&1; then
+		printf 0
+	else
+		printf '%s' "$?"
+	fi
+}
+
+wait_status() {
+	_ws_i=0
+	while [ "$_ws_i" -lt "$3" ]; do
+		if [ "$(status_rc "$1" "$WORK/st.$1")" = "$2" ]; then return 0; fi
+		sleep 1
+		_ws_i=$((_ws_i + 1))
+	done
+	return 1
+}
+
+state_of() { printf '%s/novkostya-quince.state.json' "$(QUINCE_SESSION_ID=$1 "$FW" runner path)"; }
+
+# The one line of a `status` report that says what it decided. A failure message quoting the report's
+# FIRST line quotes `repo=…`, which names the question and not the answer — measured while breaking
+# this suite on purpose, where three failures all read "forge-watch: repo=novkostya/quince".
+verdict() { grep '^watch=' "$1" 2>/dev/null | head -n 1 || true; }
+
+# ---------------------------------------------------------------------------
+# Phase 1 — TWO SESSIONS, TWO STATE DIRECTORIES, TWO LIVE WATCHERS.
+# ---------------------------------------------------------------------------
+printf '\nphase 1 — two watchers alive at the same time\n'
+"$WORK/owner" ra sid-ra 2 >"$LOG/ra.owner.log" 2>&1 &
+printf '%s\n' "$!" >"$LOG/ra.owner.pid"
+"$WORK/owner" rb sid-rb 2 >"$LOG/rb.owner.log" 2>&1 &
+printf '%s\n' "$!" >"$LOG/rb.owner.pid"
+
+if wait_file "$LOG/ra.declared" 20 && wait_file "$LOG/rb.declared" 20; then
+	: >"$LOG/go"
+else
+	printf '  FAIL both sessions could not declare a name; nothing below can run\n'
+	cat "$LOG"/*.declared "$LOG"/*.owner.log 2>/dev/null || true
+	exit 1
+fi
+
+if wait_status sid-ra 0 30 && wait_status sid-rb 0 30; then
+	ok "two watchers armed by two sessions are BOTH live at the same time"
+else
+	bad "the two watchers did not both reach live"
+	cat "$WORK/st.sid-ra" "$WORK/st.sid-rb" 2>/dev/null || true
+	cat "$LOG"/ra.1.log "$LOG"/rb.1.log 2>/dev/null || true
+fi
+
+DA=$(QUINCE_SESSION_ID=sid-ra "$FW" runner path)
+DB=$(QUINCE_SESSION_ID=sid-rb "$FW" runner path)
+SA=$(state_of sid-ra)
+SB=$(state_of sid-rb)
+if [ "$DA" != "$DB" ] && [ -f "$SA" ] && [ -f "$SB" ]; then
+	ok "each session writes its OWN state file — quince#50 observed, not assumed"
+else
+	bad "the two sessions did not get separate state files (A=$DA B=$DB)"
+fi
+
+PA=$(jq -r '.watch.pid // empty' "$SA" 2>/dev/null || printf '')
+PB=$(jq -r '.watch.pid // empty' "$SB" 2>/dev/null || printf '')
+if [ -n "$PA" ] && [ -n "$PB" ] && [ "$PA" != "$PB" ] &&
+	kill -0 "$PA" 2>/dev/null && kill -0 "$PB" 2>/dev/null; then
+	ok "two distinct watcher pids, both running"
+else
+	bad "expected two distinct live watcher pids (A=$PA B=$PB)"
+fi
+
+# The recorded owner must be the SESSION, not the watcher and not its parent's parent. Everything in
+# phase 4 rests on this one field being the shell that armed the watch, and `$PPID`-through-a-
+# background-job is exactly the kind of wiring that is obvious until a shell disagrees.
+OA=$(cat "$LOG/ra.owner.pid")
+OB=$(cat "$LOG/rb.owner.pid")
+RA=$(jq -r '.watch.owner_pid // empty' "$SA" 2>/dev/null || printf '')
+RB=$(jq -r '.watch.owner_pid // empty' "$SB" 2>/dev/null || printf '')
+if [ "$RA" = "$OA" ] && [ "$RB" = "$OB" ]; then
+	ok "each watcher recorded ITS OWN session as owner ($OA, $OB)"
+else
+	bad "owner_pid is not the arming session (recorded $RA/$RB, sessions $OA/$OB)"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 2 — A's PR MOVES. A wakes; B sees it and does not.
+# ---------------------------------------------------------------------------
+printf '\nphase 2 — A moves: A wakes, B must not\n'
+printf '2\n' >"$WORK/turn"
+
+if wait_line "$LOG/ra.exits" '^1 0$' 30; then
+	ok "A woke on its own PR (exit 0)"
+else
+	bad "A did not wake on ra/work moving"
+	cat "$LOG/ra.1.log" 2>/dev/null || true
+fi
+if grep -q 'event=updated pr=101' "$LOG/ra.1.log" 2>/dev/null &&
+	grep -q 'EXITING on the event' "$LOG/ra.1.log" 2>/dev/null; then
+	ok "A's log names the event it woke on"
+else
+	bad "A's log does not show it exiting on pr=101"
+fi
+
+# THE ASSERTION THIS WHOLE SUITE IS FOR. Not "B did not exit" — that is satisfied by a B which never
+# saw anything, including a B whose fetch was broken. B must have SEEN the event and declined it.
+if wait_line "$LOG/rb.1.log" 'event=updated pr=101' 30; then
+	ok "B PRINTED A's event — the filter decides waking, never seeing"
+else
+	bad "B never printed pr=101, so 'B did not wake' proves nothing"
+	cat "$LOG/rb.1.log" 2>/dev/null || true
+fi
+if grep -q 'EXITING on the event' "$LOG/rb.1.log" 2>/dev/null; then
+	bad "B WOKE on A's event — the N² churn quince#111 exists to end"
+	grep 'EXITING' "$LOG/rb.1.log" || true
+else
+	ok "B did NOT wake on another runner's event"
+fi
+if [ -f "$LOG/rb.exits" ]; then
+	bad "B's watch ended during A's event (exits: $(tr "\n" " " <"$LOG/rb.exits"))"
+else
+	ok "B's watch is still the same process — it never ended"
+fi
+if [ "$(status_rc sid-rb "$WORK/st.b2")" = 0 ]; then
+	ok "B still reports live while A is handling its wake"
+else
+	bad "B is not live after A woke: $(verdict "$WORK/st.b2")"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 3 — THE MIRROR. A has re-armed; now B's PR moves.
+# ---------------------------------------------------------------------------
+printf '\nphase 3 — the mirror: B moves, A must not wake\n'
+if wait_file "$LOG/ra.2.pid" 30 && wait_status sid-ra 0 30; then
+	ok "A re-armed after its wake and is live again beside B"
+else
+	bad "A did not come back up after handling its event"
+	cat "$LOG/ra.2.log" 2>/dev/null || true
+fi
+printf '3\n' >"$WORK/turn"
+
+if wait_line "$LOG/rb.exits" '^1 0$' 30; then
+	ok "B woke on its own PR (exit 0)"
+else
+	bad "B did not wake on rb/work moving"
+	cat "$LOG/rb.1.log" 2>/dev/null || true
+fi
+if wait_line "$LOG/ra.2.log" 'event=updated pr=202' 30; then
+	ok "A PRINTED B's event"
+else
+	bad "A never printed pr=202"
+	cat "$LOG/ra.2.log" 2>/dev/null || true
+fi
+if grep -q 'EXITING on the event' "$LOG/ra.2.log" 2>/dev/null; then
+	bad "A WOKE on B's event — the filter is one-directional"
+else
+	ok "A did NOT wake on B's event — the suppression holds both ways"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 4 — A's SESSION DIES AND ITS WATCHER DOES NOT. `orphaned` for A, nothing for B.
+#
+# Needs procfs: `owner_alive` proves identity with pid AND start time, and where the start time
+# cannot be read it answers `unknown` and DECLINES to fire (a false orphan sends a session to kill a
+# watch that is fine). So on a host without /proc this phase cannot fail and must not pretend to
+# pass — it is skipped and counted, which is the same rule the reaper follows about silent caps.
+# ---------------------------------------------------------------------------
+printf '\nphase 4 — A'"'"'s session dies, its watcher lives on\n'
+if wait_file "$LOG/rb.2.pid" 30 && wait_status sid-rb 0 30; then
+	ok "B re-armed after its wake — both runners live going into the kill"
+else
+	bad "B did not come back up after handling its event"
+	cat "$LOG/rb.2.log" 2>/dev/null || true
+fi
+
+WA=$(cat "$LOG/ra.2.pid")
+kill "$OA" 2>/dev/null || true
+_i=0
+while [ "$_i" -lt 15 ]; do
+	if ! kill -0 "$OA" 2>/dev/null; then break; fi
+	sleep 1
+	_i=$((_i + 1))
+done
+if kill -0 "$OA" 2>/dev/null; then
+	bad "could not end A's session process $OA; phase 4 cannot run"
+elif ! kill -0 "$WA" 2>/dev/null; then
+	bad "A's watcher died with its session — nothing to classify (the reparenting assumption is wrong)"
+else
+	ok "A's session is gone and its watcher $WA is still running"
+
+	if [ -r "/proc/$$/stat" ]; then
+		if wait_status sid-ra 10 20; then
+			ok "A classifies as ORPHANED (exit 10) — running, and able to wake nobody"
+		else
+			bad "A did not classify orphaned: $(verdict "$WORK/st.sid-ra")"
+		fi
+		if grep -q 'watch=orphaned' "$WORK/st.sid-ra" 2>/dev/null; then
+			ok "A's report says orphaned and names the owner pid"
+		else
+			bad "A's report does not read orphaned"
+		fi
+		# The distinction the class exists for: an orphan is not a corpse. It is still writing the
+		# state file a replacement session would re-arm from, which is why `dead`'s advice — reseed
+		# nothing, re-arm from here — would be given about a file with a live writer.
+		T1=$(jq -r '.watch.last_watcher_tick // empty' "$SA" 2>/dev/null || printf '')
+		sleep 3
+		T2=$(jq -r '.watch.last_watcher_tick // empty' "$SA" 2>/dev/null || printf '')
+		if [ -n "$T1" ] && [ -n "$T2" ] && [ "$T1" != "$T2" ]; then
+			ok "the orphan is still TICKING — not dead, which is the whole distinction"
+		else
+			bad "the orphaned watcher stopped ticking ($T1 -> $T2); it would be plain dead"
+		fi
+	else
+		skip "orphan classification — no /proc, so owner_alive answers 'unknown' by design"
+		skip "the orphan's report — same reason"
+		skip "the orphan is still ticking — same reason"
+	fi
+
+	# B is the control. One runner's session dying must be invisible to the other, and "invisible"
+	# means its watcher, its pid on record and its classification are all untouched.
+	if [ "$(status_rc sid-rb "$WORK/st.b4")" = 0 ]; then
+		ok "B is UNAFFECTED — still live after A's session died"
+	else
+		bad "B changed class when A's session died: $(verdict "$WORK/st.b4")"
+	fi
+	PB2=$(jq -r '.watch.pid // empty' "$SB" 2>/dev/null || printf '')
+	if [ -n "$PB2" ] && kill -0 "$PB2" 2>/dev/null; then
+		ok "B's watcher $PB2 is still running and still the one on record"
+	else
+		bad "B's recorded watcher is gone (pid $PB2)"
+	fi
+fi
+
+printf '\nforge-watch-composition-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+[ "$fail" -eq 0 ]
