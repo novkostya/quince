@@ -1,9 +1,30 @@
 #!/bin/sh
-# devct — disposable dev containers on Proxmox, driven by a scoped API token.
+# devct — Proxmox containers from a template, driven by a scoped API token.
 #
-# Verbs implemented here: doctor.
-# Verbs specified but NOT yet built: onboard, create, list, destroy — they say so when called,
-# rather than pretending. See docs/specs/devct/devct.md.
+# ALL SIX VERBS ARE BUILT: doctor, onboard, create, list, destroy, deploy. This header said
+# otherwise until 2026-07-29 — "Verbs implemented here: doctor. Verbs specified but NOT yet built:
+# onboard, create, list, destroy" — which was true when written and false for a long time after.
+#
+# THAT STALE LINE NEARLY COST THE BOXES. Read together with `docs/specs/devct/devct.md`'s equally
+# stale "No code exists" and an Operator ruling that retired the *disposable dev container*, it
+# formed three independent-looking sources agreeing this directory was dead, and a session came
+# within one command of deleting it. All three were written before the same change, which makes them
+# one source, not three.
+#
+# WHAT IS ACTUALLY HERE, and the distinction the ruling turns on:
+#
+#   THE PERSISTENT-BOX PATH — LOAD-BEARING. `quince-runner` and `quince-arch` were built with it and
+#   say so: `/etc/quince-devct-stamp` on both reads `alpine=3.24 versions=8c32bf735761
+#   built=2026-07-25T20:24:50Z`, written by `devct-template`. This directory is their only
+#   reproducible rebuild path. `devct-template`, `onboard`, `doctor`, `list`, and
+#   `create --name <host> --role <implementer|arch>` are that path.
+#
+#   THE DISPOSABLE SERIES — RETIRED by the 2026-07-28 ruling ("no dev containers; the runner is the
+#   work host", devlog#45). That is `create <n>`'s numbered `quince-dev-<n>` aliases, `destroy` as a
+#   routine step, and `deploy`. Kept rather than cut: removing them is surgery on a working tool and
+#   needs its own ruling, not a cleanup.
+#
+# The ruling retired a WORKFLOW, not this toolkit. Do not read "no dev containers" as "delete devct".
 set -eu
 
 DEVCT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
