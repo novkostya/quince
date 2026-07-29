@@ -68,12 +68,25 @@ repo is not a message bus, and no human is an RPC layer.
    approves and merges code PRs; the **Operator** approves architect-authored docs/canon
    PRs.
 
-   **The seat that merges rebases. It never asks for a rebase.** `strict: true` means every
-   merge to `main` puts every other open PR `BEHIND`, so a stale branch is the steady state
-   with more than one PR in flight, not an exception worth a message. The merging seat holds
-   `contents: write` and can `pr update-branch --rebase` itself; asking instead turns a
-   two-second action into a round trip across the forge — approve, request, notice, rebase,
-   wait for CI, notice again, merge — and every crossing is one a session can miss. On
+   **The seat that merges rebases a `BEHIND` branch. It asks only for a `DIRTY` one**, and the
+   forge draws that line for you:
+
+   - **`BEHIND`** — mechanical, tree-preserving, no decision in it. **The merging seat does it**,
+     with `gh pr update-branch --rebase`. Asking is a wasted round trip.
+   - **`DIRTY`** — a conflict, which is an *edit*: someone must choose which lines survive.
+     **The author does it.** A merging seat that resolves a conflict in a file it did not write
+     and then approves its own resolution has broken `approver ≠ author` by following this rule,
+     which is why `never` would be wrong here.
+
+   **`--rebase` is mandatory, not stylistic.** `update-branch` defaults to updating with a *merge
+   commit*, and `required_linear_history: true` on this repo means protection then rejects the
+   result. A session told not to ask anyone, reaching for the obvious command, gets the wrong one.
+
+   `strict: true` means every merge to `main` puts every other open PR `BEHIND`, so a stale branch
+   is the steady state with more than one PR in flight, not an exception worth a message. The
+   merging seat holds `contents: write` and can do it itself; asking instead turns a two-second
+   action into a round trip across the forge — approve, request, notice, rebase, wait for CI,
+   notice again, merge — and every crossing is one a session can miss. On
    2026-07-29 two approved, green, correct PRs sat for hours behind exactly that: the request
    was made, as a footnote at the bottom of a long approval, and neither seat treated it as
    work. A merge queue would collapse this automatically and is **unavailable** — it is an
@@ -136,8 +149,14 @@ repo is not a message bus, and no human is an RPC layer.
   architect's**. Measured (quince#113): a `PUT` under `.github/workflows/**` returns `403
   Resource not accessible by personal access token`, while an ordinary contents write to the
   same branch succeeds. **No PAT seat can push a workflow** — neither the implementer's nor the
-  architect's. The Operator always can (an SSH push consults no OAuth scope), and since
-  2026-07-27 so can `quince-review[bot]`, which holds `workflows: write`. This sentence read
+  architect's. The Operator always can (an SSH push consults no OAuth scope). `quince-review[bot]`
+  **declares `workflows: write`** — measured 2026-07-29 by asking `GET /app` with a JWT signed from
+  the reviewer key, which returns the App's permission set; note that `bin/gh-review` cannot make
+  that call, because it mints *installation* tokens and the endpoint wants a JWT. That is the
+  **declared grant**; whether a write under `.github/workflows/**` actually succeeds as the App is
+  **(unmeasured)** — the only definitive test is performing one, and nobody has. Distinguished
+  because every other capability in the seat table below carries a measurement, and resolving a
+  contradiction toward an unsourced claim is not the same as knowing. This sentence read
   "only the Operator can push a workflow" until 2026-07-29, contradicting the seat table thirty
   lines below it that had already recorded the App's grant — canon disagreeing with itself, in the
   paragraph a session consults before deciding it is blocked. Put the file verbatim in
