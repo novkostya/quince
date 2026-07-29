@@ -205,13 +205,28 @@ gates: $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only
 # The lists are explicit and grow as scripts land — a glob would silently start linting (or
 # silently stop linting) files nobody decided on.
 #
+# EXPLICIT IS NOT THE SAME AS COMPLETE, and for a year it was being read as though it were
+# (quince#200). Nothing related these lists to what was on disk, so a file missing from them was
+# not *skipped with a warning* — it was INVISIBLE, and `gates` reported success having never opened
+# it. `bin/sh-lint-coverage` is the assertion that closes that: every shell file in the tree is in
+# SH_ENTRYPOINTS, in SH_LIBS, or in that script's written-down exclusion list. The lists stay
+# hand-maintained, which is the deliberate half; what changes is that forgetting one is now a
+# failure rather than a silence.
+#
 # Two lists, because shellcheck lints one file at a time: linting a sourced library standalone
 # reports every variable it assigns for its caller as unused (SC2034). So the LINT list holds
 # entry points only and `-x` follows their `source` statements, which is also the analysis that
 # can actually see cross-file usage. `-P SCRIPTDIR` resolves the `source=` directive next to the
 # script, since the real path is computed at runtime. gh-bot sources nothing, but it is an entry
 # point too, so it belongs on the same list.
+#
+# SH_LIBS is that second list, named at last. It was implicit in DEVCT_SCRIPTS — which exists for
+# the `curl -k` grep and happens to contain the one library — so "the two-list split" described a
+# structure only one of whose lists had a name. The coverage gate needs to distinguish "sourced,
+# linted through its entry points" from "nobody lints this", and it cannot do that against a list
+# that means something else.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
+SH_LIBS         := deploy/devct/lib.sh
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
                    deploy/runner/preflight-test deploy/runner/provision-guard-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
@@ -222,10 +237,15 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
                    bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test \
-                   bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder
+                   bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
+                   bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh
 
 .PHONY: gates-sh
-gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
+gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
+	@# FIRST, because it decides whether the shellcheck below is a statement about the repository
+	@# or only about a list somebody remembered to update (quince#200). Host-side: it reads
+	@# `git ls-files` and needs no container.
+	@bin/sh-lint-coverage $(SH_ENTRYPOINTS) $(SH_LIBS)
 	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
 	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
@@ -263,6 +283,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory home-resolution-test
 	@$(MAKE) --no-print-directory wrapper-boundary-test
 	@$(MAKE) --no-print-directory gate-scope-test
+	@$(MAKE) --no-print-directory sh-lint-coverage-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -356,6 +377,15 @@ gate-scope-test: ## The gate map is total and the skipping is never silent (quin
 .PHONY: wrapper-boundary-test
 wrapper-boundary-test: ## A boundary refusal must outrank an environment one in the gh wrappers (quince#157)
 	@bin/wrapper-boundary-test
+
+# quince#200's other half. `sh-lint-coverage` is the gate; this proves the gate. A coverage check
+# with no tests would be the same defect it exists to close, one level up — it would report `clean`
+# about a repository it had failed to scan, and nothing would tell that apart from a repository
+# that is genuinely covered. Synthetic: every case builds a throwaway git repo in a temp dir, so it
+# never reads the real tree and cannot pass or fail for reasons unrelated to the code under test.
+.PHONY: sh-lint-coverage-test
+sh-lint-coverage-test: ## The lint-coverage gate's own refusals — a shell file in no list (quince#200)
+	@bin/sh-lint-coverage-test
 
 # quince#94's lint half. `forge-watch` derives its watch set from PR TITLES, so a bare `#N` in a
 # title is claimed by the repo the PR is in — and a devlog title reading `(#102, #104)` made two
