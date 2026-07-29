@@ -33,7 +33,7 @@ usage: forge-watch <verb>
   owed   [--author <login|@me> | --all] [--gh <cmd>] [--set-file <f>] [--hook]
                                                is a live watch owed here? (--author: open PRs you
                                                authored · --all: the declared set, unconditionally)
-  runner set <name> | get | path            declare WHOSE this session's work is (quince#111), or
+  runner set <name> | get | path | clear <name>   declare WHOSE this session's work is (quince#111), or
                                                report it. The name owns branches `<name>/…`, gives
                                                this session its own state directory, and scopes the
                                                scratch reaper. Declared ONCE per session, at kickoff.
@@ -3114,14 +3114,58 @@ runner)
 		#
 		# Re-declaring your OWN name is fine and stays quiet — a session that re-runs kickoff, or
 		# resumes, must not be refused by its own earlier declaration.
+		# AND THE HOLDER MUST BE ALIVE, which the first version did not ask (quince#211). It refused on
+		# the PRESENCE of a registry entry, and an entry is written once and never removed — so a name
+		# outlived its session and was then held by nobody, permanently, with no verb to release it.
+		# Every restarted session burned a name; on a box that restarts sessions, the pool empties.
+		#
+		# Presence standing in for liveness is this project's third instance of one shape —
+		# `preflight`'s "reach" was presence not freshness (quince#121), and `status` said `live`
+		# about a watcher whose session was gone (quince#111, which is why `orphaned` exists). The
+		# machinery to ask the real question is in this same file.
+		#
+		# A session is alive if some process still carries its id in its environment. `/proc` is the
+		# only place that can be asked, so a box without it CANNOT TELL — and then this refuses, and
+		# says so, rather than reclaiming a name that might be in use. Wrong in the safe direction,
+		# with `runner clear` as the stated way out.
+		_rs_alive() {
+			[ -d /proc ] || return 2
+			for _rsa_e in /proc/[0-9]*/environ; do
+				[ -r "$_rsa_e" ] || continue
+				if tr '\0' '\n' <"$_rsa_e" 2>/dev/null |
+					grep -qx -e "CLAUDE_CODE_SESSION_ID=$1" -e "QUINCE_SESSION_ID=$1"; then
+					return 0
+				fi
+			done
+			return 1
+		}
 		for _rs_f in "$(runner_registry)"/*; do
 			[ -f "$_rs_f" ] || continue
-			[ "$(basename "$_rs_f")" = "$_rs_sid" ] && continue
+			_rs_other=$(basename "$_rs_f")
+			[ "$_rs_other" = "$_rs_sid" ] && continue
 			[ "$(cat "$_rs_f" 2>/dev/null)" = "$_rs_name" ] || continue
-			die "runner name \"$_rs_name\" is already held by another session on this box.
+			_rs_alive "$_rs_other" && _rs_live=0 || _rs_live=$?
+			case "$_rs_live" in
+			0)
+				die "runner name \"$_rs_name\" is held by another LIVE session on this box.
     Two sessions under one name share a state directory, a scratch root, and the container
     namespace the Makefile derives from it — which is exactly the collision this name prevents.
     Pick another (r2, r3, …). \`forge-watch runner get\` in that session reports its own."
+				;;
+			1)
+				# The holder is gone. Reclaim, and SAY SO — silently inheriting another session's
+				# state directory is a surprise, even when it is the wanted one.
+				rm -f "$_rs_f"
+				printf 'forge-watch: reclaimed "%s" from a session that is gone (%s) — its state directory is reused, not reset.\n' \
+					"$_rs_name" "$_rs_other"
+				;;
+			*)
+				die "runner name \"$_rs_name\" is held by session $_rs_other, and this box has no /proc,
+    so whether that session is still alive cannot be determined. Refusing rather than guessing:
+    reclaiming a name still in use is the collision this check exists to prevent.
+    Pick another name, or release it deliberately with \`forge-watch runner clear $_rs_name\`."
+				;;
+			esac
 		done
 		printf '%s\n' "$_rs_name" >"$(runner_registry)/$_rs_sid"
 		# The state directory is CREATED here rather than lazily, so `status` on a freshly named
@@ -3138,7 +3182,25 @@ runner)
 	path)
 		printf '%s\n' "$(state_dir)"
 		;;
-	*) usage >&2 && die "runner takes: set <name> | get | path" ;;
+	clear)
+		# THE DELIBERATE RELEASE, and the escape the no-/proc case names. `set` reclaims a name whose
+		# holder is provably gone; this one exists for when it is NOT provable — a box without
+		# `/proc`, or a session the Operator knows is finished. It removes the CLAIM only: the state
+		# directory stays, because a runner's observations are the thing a successor wants to inherit
+		# and deleting them would turn a release into a reset.
+		_rc_name=${2:-}
+		[ -n "$_rc_name" ] || die "runner clear takes a name: forge-watch runner clear <name>"
+		_rc_n=0
+		for _rc_f in "$(runner_registry)"/*; do
+			[ -f "$_rc_f" ] || continue
+			[ "$(cat "$_rc_f" 2>/dev/null)" = "$_rc_name" ] || continue
+			rm -f "$_rc_f" && _rc_n=$((_rc_n + 1))
+		done
+		[ "$_rc_n" -gt 0 ] || die "no session holds \"$_rc_name\" — nothing to clear."
+		printf 'forge-watch: released "%s" (%s claim(s)). Its state directory is untouched: %s/forge-watch/%s\n' \
+			"$_rc_name" "$_rc_n" "$(state_base)" "$_rc_name"
+		;;
+	*) usage >&2 && die "runner takes: set <name> | get | path | clear <name>" ;;
 	esac
 	;;
 replay)
