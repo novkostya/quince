@@ -48,6 +48,23 @@ printf 'not-a-real-token\n' >"$LOOSE_TOKEN"
 chmod 644 "$LOOSE_TOKEN"
 ABSENT_TOKEN="$TMP/no-such.token"
 
+# EVERY CREDENTIAL PATH IS PINNED INTO $TMP, FOR THE WHOLE SUITE, and this is a correctness fix
+# rather than tidiness. `preflight` resolves each credential from an environment variable with a
+# DEFAULT UNDER /root/.config/quince. `PF_UNSET` unsets those variables — which for a path does not
+# mean "absent", it means "fall back to the real one". So any case that did not pass an explicit
+# path was reading the live credential store of the box running the suite.
+#
+# It was invisible only by luck: it shows up as a failure exactly when the real file EXISTS, so the
+# suite was green on a box that happened to lack the credential and would have failed on one that
+# had it. Found 2026-07-29 when the arch arm learned to refuse an App key and the box under test
+# had one — a real file, reached through a variable the suite believed it had neutralised.
+#
+# Exported rather than added to PF_UNSET: unsetting is what caused the fallback. Individual cases
+# override these per invocation, which is how the fixtures already work.
+export QUINCE_BOT_TOKEN_FILE="$ABSENT_TOKEN"
+export QUINCE_CODER_KEY_FILE="$ABSENT_TOKEN"
+export QUINCE_REVIEW_KEY_FILE="$ABSENT_TOKEN"
+
 # Synthetic private layers (quince#44). Never the Operator's — these hold obvious nonsense, so a
 # fixture can neither read the real list nor accidentally match real content.
 GOOD_LAYER="$TMP/layer-ok"
@@ -191,8 +208,12 @@ chmod 644 "$LOOSE_LAYER/privacy-patterns.txt"
 # Unquoted on purpose: this is a list of separate arguments, not one word.
 # shellcheck disable=SC2086
 PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
-	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE -u QUINCE_BOT_TOKEN_FILE \
+	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE \
 	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK -u PRIVACY_FLOOR_FILE"
+# QUINCE_BOT_TOKEN_FILE is NOT unset here any more, deliberately. Unsetting a PATH does not mean
+# "absent" — it means "fall back to the real one under /root/.config/quince". The suite-wide export
+# above pins it to a nonexistent file inside $TMP, which is what "absent" was always meant to say,
+# and every case that cares still overrides it per invocation.
 
 # Every case gets a SYNTHETIC private layer by default. preflight now refuses without one, so
 # otherwise every want-exit-0 case would be asserting "this box happens to have
@@ -267,10 +288,15 @@ expect "a world-readable bot token is refused, naming the mode" 1 "expected 600"
 
 # The arch box must NOT hold the implementer identity: one box that can author AND approve turns
 # `approver ≠ author` from a property into a coincidence about which credential a session picks up.
-expect "arch WITH a bot token is refused" 1 "BOT TOKEN is present" -- \
-	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
-expect "arch without a bot token passes" 0 "the implementer identity is absent" -- \
-	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN"
+# BOTH FORMS, because the implementer identity moved to an App key and this arm used to refuse only
+# a bot token — so the assertion "the implementer identity is absent" was being made by checking for
+# a credential that no longer carries it. An arch box could hold `quince-coder.pem` and pass.
+expect "arch WITH a bot token is refused" 1 "IMPLEMENTER CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN" "QUINCE_CODER_KEY_FILE=$ABSENT_TOKEN"
+expect "arch WITH a coder App key is refused" 1 "IMPLEMENTER CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "QUINCE_CODER_KEY_FILE=$GOOD_TOKEN"
+expect "arch with NEITHER implementer credential passes" 0 "no implementer credential present" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "QUINCE_CODER_KEY_FILE=$ABSENT_TOKEN"
 
 # An unknown role refuses rather than guessing which identity rules apply — guessing would pick
 # one of two opposite assertions.

@@ -61,7 +61,7 @@ implementer)
 	# THE IMPLEMENTER IDENTITY IS AN APP KEY NOW, NOT A BOT TOKEN (quince-devlog decisions/0014).
 	# `quince-bot` was suspended on 2026-07-28; a box holding only that credential cannot author
 	# anything. This check demanded it anyway, so the first correctly-provisioned box built after
-	# the ruling could not start — measured, not predicted, while standing up the Dubai seats.
+	# the ruling could not start — measured, not predicted, while standing up a second site.
 	#
 	# BOTH ARE ACCEPTED, App key first, because the transition is real: existing boxes hold a bot
 	# token and 0014's condition 1 requires that record be left in place. Neither present is the
