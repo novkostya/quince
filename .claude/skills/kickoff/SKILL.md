@@ -110,7 +110,7 @@ mkdir -p "$SCRATCH"
 git clone https://github.com/novkostya/quince.git "$SCRATCH"/quince && cd "$SCRATCH"/quince
 git config user.name  "quince-coder[bot]"
 git config user.email "310563582+quince-coder[bot]@users.noreply.github.com"
-git config credential.helper '!f() { echo username=x-access-token; echo "password=$(gh-coder auth token)"; }; f'
+git config credential.https://github.com.helper "$PWD/bin/git-coder --credential-helper"
 git checkout -b <qn.N|pr.N>/<short-title>
 ```
 
@@ -121,8 +121,18 @@ it by colliding with another session's clone, not by being told.
 **The identity is the App, not the bot.** This block named `quince-bot` and its token until
 2026-07-29; that account was suspended on 2026-07-28, so it instructed every new session to
 configure a credential that cannot authenticate and an author that no longer resolves. See
-`quince-devlog` `decisions/0014`. The helper keeps the token out of argv, the remote URL and
-`.git/config`, and mints a fresh installation token per call.
+`quince-devlog` `decisions/0014`.
+
+**The helper points at `bin/git-coder`, and is not hand-rolled here.** An earlier version of this
+block inlined `password=$(gh-coder auth token)` — which is character for character the defect
+quince#198 fixed hours earlier: a failing substitution still emits a syntactically valid
+credential with an EMPTY password, so git reports `authentication failed` while the real reason,
+a boundary refusal naming the offending file, is stranded on stderr. The helper exits 0.
+
+In a skill that is worse than in a wrapper: it is re-created in every fresh clone, in a
+.git/config nobody re-reads, on the one path where the hidden failure is a BOUNDARY refusal.
+`bin/git-coder` already handles it — non-zero on refusal, silent on stdout, and scoped to
+github.com so the token is never offered to another host.
 
 If `gh-coder` cannot mint, stop: you cannot author — say so rather than pushing under whatever
 identity happens to be configured, which on the Operator's own machine means pushing as the
