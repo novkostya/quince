@@ -1,0 +1,140 @@
+#!/bin/sh
+# sh-lint-coverage-test — the coverage gate's own failure paths.
+#
+# WHY THIS SUITE EXISTS AT ALL. `sh-lint-coverage` is a gate whose entire product is a REFUSAL, and
+# quince#200 is the story of a gate that passed green while reading nothing. A coverage gate with no
+# tests is the same shape one level up: it would report `clean` about a repository it had failed to
+# scan, and nothing would distinguish that from a repository that is genuinely covered. So every
+# case below asserts the exit code AND a substring, because the code alone cannot separate "refused
+# because a file is unlinted" from "refused because the arguments were wrong".
+#
+# EVERY CASE IS SYNTHETIC. Each builds a throwaway git repository in a temp dir and runs the gate
+# against it, so nothing here depends on the state of the real tree — which matters, because the
+# real tree is exactly what the gate is normally asserting about, and a suite that read it would
+# pass or fail for reasons unrelated to the code under test.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Overridable so the NEGATIVE CONTROL is reproducible by a reviewer rather than a thing the author
+# did once by hand and reported — the same hook, for the same reason, as pr-title-refs-test.
+COV="${SH_LINT_COVERAGE_BIN:-$HERE/sh-lint-coverage}"
+[ -x "$COV" ] || { printf 'sh-lint-coverage-test: %s is not executable\n' "$COV" >&2; exit 2; }
+
+command -v git >/dev/null 2>&1 || {
+	printf 'sh-lint-coverage-test: DID NOT RUN — git is absent and the gate enumerates tracked files.\n' >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	if ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+# mkrepo <dir> — a throwaway repository. `git ls-files` is the gate's universe, so files must be
+# ADDED, not merely created: an untracked scratch script is deliberately not this gate's business
+# and the `untracked` case below is what pins that.
+mkrepo() {
+	mkdir -p "$1"
+	(
+		cd "$1"
+		git init -q .
+		git config user.email t@t
+		git config user.name t
+	)
+}
+add() { # <repo> <path> <first-line>
+	mkdir -p "$(dirname "$1/$2")"
+	printf '%s\necho hi\n' "$3" >"$1/$2"
+	(cd "$1" && git add -f "$2")
+}
+run_in() { # <repo> <covered...>
+	_r=$1
+	shift
+	(cd "$_r" && "$COV" "$@")
+}
+
+# --- exit 1: an unaccounted file is the whole point ---------------------------------------------
+R="$TMP/r1"
+mkrepo "$R"
+add "$R" listed.sh '#!/bin/sh'
+add "$R" forgotten.sh '#!/bin/sh'
+expect "a shebang-bearing script in no list is a finding" 1 "forgotten.sh" -- \
+	run_in "$R" listed.sh
+expect "it names how many, not just that something is wrong" 1 "1 of 2 shell file(s)" -- \
+	run_in "$R" listed.sh
+expect "it says what to do about it" 1 "SH_ENTRYPOINTS" -- \
+	run_in "$R" listed.sh
+
+# THE CASE THAT MOTIVATED THE ISSUE: a file added to the tree and not to the list. Both the
+# wrappers of quince#198 and deploy/e2e-run.sh arrived exactly this way.
+expect "clean once the forgotten file is registered" 0 "clean" -- \
+	run_in "$R" listed.sh forgotten.sh
+expect "the clean line says how many it actually read" 0 "all 2 shell file(s)" -- \
+	run_in "$R" listed.sh forgotten.sh
+
+# --- a SOURCED LIBRARY has no shebang, and must still be seen -----------------------------------
+# Detecting only shebangs would let a new library be added unlinted — the same defect one shape
+# over, and the reason `# shellcheck shell=` is a second signal rather than a nicety.
+R2="$TMP/r2"
+mkrepo "$R2"
+add "$R2" lib.sh '# shellcheck shell=sh'
+expect "a sourced library with no shebang is still a shell file" 1 "lib.sh" -- \
+	run_in "$R2" ./nothing
+expect "and is accounted for when SH_LIBS names it" 0 "clean" -- \
+	run_in "$R2" lib.sh
+
+# --- what is NOT a shell file, so the gate is not a wall of noise --------------------------------
+R3="$TMP/r3"
+mkrepo "$R3"
+add "$R3" real.sh '#!/bin/sh'
+add "$R3" script.py '#!/usr/bin/env python3'
+add "$R3" notes.md '# just a heading'
+add "$R3" runner.rb '#!/usr/bin/env ruby'
+expect "a python script is not a shell file" 0 "all 1 shell file(s)" -- \
+	run_in "$R3" real.sh
+# A markdown heading starts with '#' and a shebang starts with '#!' — a sloppier matcher would
+# claim every markdown file in the repository, and this repository is mostly markdown.
+expect "a markdown heading is not a shebang" 0 "clean" -- \
+	run_in "$R3" real.sh
+
+# --- an UNTRACKED script is deliberately out of scope --------------------------------------------
+R4="$TMP/r4"
+mkrepo "$R4"
+add "$R4" tracked.sh '#!/bin/sh'
+printf '#!/bin/sh\necho hi\n' >"$R4/untracked.sh"
+expect "an untracked scratch script is not this gate's business" 0 "all 1 shell file(s)" -- \
+	run_in "$R4" tracked.sh
+
+# --- exit 2: DID NOT RUN, never a quiet pass -----------------------------------------------------
+# The failure mode this repository keeps filing is a gate that cannot run and says `clean`. These
+# assert the other choice, by name.
+expect "refuses with no covered paths rather than declaring everything unlinted" 2 "DID NOT RUN" -- \
+	"$COV"
+outside_git() { (cd "$TMP" && "$COV" some/path); }
+expect "refuses outside a git repository rather than sweeping nothing" 2 "DID NOT RUN" -- \
+	outside_git
+
+# --- summary --------------------------------------------------------------------------------------
+printf '\nsh-lint-coverage-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1

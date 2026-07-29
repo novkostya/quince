@@ -1,0 +1,143 @@
+#!/bin/sh
+# sh-lint-coverage — every shell script in this repository is accounted for by the lint lists.
+#
+# THE DEFECT (quince#200). `gates-sh` lints `SH_ENTRYPOINTS`, a hand-maintained list, and nothing
+# related that list to what is on disk. So a new shell script was not *skipped with a warning*, it
+# was INVISIBLE, and `gates` reported success having never opened it. Measured on `main`: 26 files
+# listed, 27 on disk, `deploy/e2e-run.sh` never once shellchecked despite being `#!/bin/sh` and
+# invoked from the Makefile. Twice more the same night, both caught by the author rather than the
+# gate — quince#197's new suite, and quince#198's `bin/gh-coder` and `bin/git-coder`, which are the
+# IDENTITY-BOUNDARY WRAPPERS. `gates` passed green on #198 while shellcheck had never opened either,
+# and the reviewer cited that green as evidence the wrappers were sound. It was not evidence of that.
+#
+# That is quince#41's equivalence in a third place: a gate reporting `clean` about something it never
+# read is indistinguishable from one that read it and found nothing.
+#
+# WHY ASSERT THE LIST RATHER THAN DERIVE IT. quince#200 offers both and rules neither; the architect
+# who filed it leaned to asserting, and so does this. The Makefile's own note at `SH_ENTRYPOINTS`
+# records that the two-list split is CONSIDERED — shellcheck lints an entry point and a sourced
+# library differently, so linting a library standalone reports every variable it sets for its caller
+# as unused. A derivation would have to re-derive that distinction anyway, and would lose the
+# explicitness that makes the split reviewable. Asserting keeps the structure and closes the drift.
+#
+# WHAT "ACCOUNTED FOR" MEANS: every shell file on disk is in exactly one of three places —
+#
+#   SH_ENTRYPOINTS   linted directly by shellcheck, with -x following its `source` statements
+#   SH_LIBS          sourced, never executed; linted THROUGH its entry points rather than standalone
+#   the EXCLUSIONS below, each with a written reason
+#
+# The exclusion list is the point of the design. Under the old arrangement an unlinted file was
+# silently unlinted; here it costs somebody a line of justification in this file, in a diff a
+# reviewer sees. An exclusion nobody can justify is a file that should be linted.
+#
+# Three exit codes, the same contract the other gates in this repository use (quince#41):
+#
+#   0  every shell file on disk is accounted for
+#   1  a shell file is in none of the three places — it is being linted by nothing
+#   2  DID NOT RUN — bad arguments, or the file list could not be established
+#
+# A 2 is NEVER clean. A coverage gate that fails open is absent precisely when the tree is in an
+# unusual state, which is when a file is most likely to have been added without being registered.
+set -eu
+
+ME=$(basename "$0")
+
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME <covered-path>...
+
+  Every argument is a path the lint lists already cover (SH_ENTRYPOINTS + SH_LIBS).
+  Reads the repository's tracked files and refuses if any shell script is covered by neither
+  those paths nor an exclusion recorded in this script.
+
+exit: 0 clean · 1 an unaccounted shell file · 2 DID NOT RUN
+EOF
+}
+
+case "${1-}" in
+-h | --help) usage; exit 0 ;;
+esac
+[ $# -gt 0 ] || die2 "no covered paths given. Refusing rather than declaring every script unlinted, which would be a wall of false findings."
+
+# --- the exclusions, each with its reason -------------------------------------------------------
+# A path listed here is deliberately NOT shellchecked. Add one only with a reason that survives a
+# reviewer asking "why not just lint it?".
+#
+# EMPTY ON PURPOSE, TODAY. Nothing in this repository currently needs to be excluded, and that is
+# worth stating rather than leaving as an absence: the first entry should have to argue for itself
+# against a file that says the set has been empty and workable.
+EXCLUDED=''
+
+# --- what counts as a shell file ----------------------------------------------------------------
+# Two ways a file declares itself shell, and both are needed:
+#   1. a `sh`-family shebang — an executable entry point;
+#   2. `# shellcheck shell=sh` on the first line — a SOURCED LIBRARY, which has no shebang precisely
+#      because it is never executed. deploy/devct/lib.sh is one. Detecting only shebangs would let a
+#      new library be added unlinted, which is the same defect one shape over.
+#
+# quince#200 names this limit in its own "what I did NOT prove": a script invoked as `sh foo` with no
+# shebang and no directive is invisible to this scan too. That is a real residual gap, and it is
+# narrower than the one being closed — such a file is also invisible to every reader — so it is
+# recorded here rather than papered over.
+is_shell_file() {
+	_first=$(head -1 "$1" 2>/dev/null || true)
+	case "$_first" in
+	'# shellcheck shell='*) return 0 ;;
+	'#!'*) : ;;
+	*) return 1 ;;
+	esac
+	# Resolve the shebang to an interpreter NAME rather than pattern-matching the whole line. The
+	# first version of this did the latter and produced a thicket of quoted globs that shellcheck
+	# flagged (SC2026) — on this very script, through this very gate, which is at least the gate
+	# working. Splitting on whitespace and dropping flags and the `env` trampoline handles
+	# `#!/bin/sh`, `#!/bin/sh -e` and `#!/usr/bin/env bash` with one rule instead of five patterns.
+	_int=''
+	for _w in $(printf '%s' "$_first" | sed 's|^#!||'); do
+		case "$_w" in
+		-*) continue ;;      # a flag: `#!/bin/sh -e`
+		env | */env) continue ;; # the trampoline: `#!/usr/bin/env bash`
+		esac
+		_int=$_w
+	done
+	case "${_int##*/}" in
+	sh | bash | dash | ash | ksh | zsh) return 0 ;;
+	esac
+	return 1
+}
+
+# --- the universe ------------------------------------------------------------------------------
+# git ls-files, so the answer is about what is COMMITTED rather than what happens to be in the
+# working tree. An untracked scratch script is not this gate's business; a committed one is.
+command -v git >/dev/null 2>&1 || die2 "git is required to enumerate tracked files"
+TRACKED=$(git ls-files 2>/dev/null) || die2 "git ls-files failed — is this a repository?"
+[ -n "$TRACKED" ] || die2 "git ls-files returned nothing. Refusing rather than reporting a clean sweep of an empty set."
+
+COVERED=$(printf '%s\n' "$@" | sort -u)
+
+missing=0
+checked=0
+for f in $TRACKED; do
+	[ -f "$f" ] || continue
+	is_shell_file "$f" || continue
+	checked=$((checked + 1))
+	if printf '%s\n' "$COVERED" | grep -qxF "$f"; then continue; fi
+	if printf '%s\n' "$EXCLUDED" | grep -qxF "$f"; then continue; fi
+	if [ "$missing" -eq 0 ]; then
+		printf '%s: UNLINTED SHELL FILE(S) — on disk, in no lint list, and excluded by nothing:\n' "$ME" >&2
+	fi
+	printf '        %s\n' "$f" >&2
+	missing=$((missing + 1))
+done
+
+if [ "$missing" -gt 0 ]; then
+	printf '        → add it to SH_ENTRYPOINTS (executed) or SH_LIBS (sourced) in the Makefile,\n' >&2
+	printf '          or to EXCLUDED in %s with a reason. A gate that reports clean about a file\n' "$0" >&2
+	printf '          it never opened is quince#41; this is that, for shellcheck (quince#200).\n' >&2
+	printf '%s: %s of %s shell file(s) are linted by nothing\n' "$ME" "$missing" "$checked" >&2
+	exit 1
+fi
+
+printf '%s: clean — all %s shell file(s) on disk are covered by the lint lists\n' "$ME" "$checked"
+exit 0
