@@ -172,6 +172,21 @@ supervisor)
 	# IS that credential. What this seat buys is ATTRIBUTION — no session on it can commit or push
 	# as anybody, so work cannot leave here under an identity nobody chose. That is the failure it
 	# exists to prevent (quince-devlog#118), and it is not the same as containment.
+	# A CREDENTIAL IS NOT A SET OF PATHNAMES. The first version of this checked four files and passed
+	# a box with `GH_TOKEN=ghp_…` in its environment — a fully working forge credential, since that
+	# variable is exactly how `bin/gh-coder` and `bin/gh-review` hand a token to `gh`. A session
+	# there could push and open PRs, on a seat whose stated property is that it cannot.
+	#
+	# That is this file's own lesson from quince#203, arriving one PR later: *a rule that names one
+	# mechanism goes quietly false the moment the mechanism changes.* Named files were the mechanism
+	# I happened to be thinking about. The environment is the other one, and the loop at the top of
+	# this file already implements it — it enumerates ANTHROPIC credentials because that is the trap
+	# it was written for.
+	#
+	# Still not exhaustive, and said so rather than implied: a git credential helper configured in a
+	# clone carries a credential too, which is why the arch arm below reports on the private layer's.
+	# This seat has no private layer and no clone it commits from, so that surface is absent here —
+	# but "absent by construction" is the claim, not "checked".
 	_sv_found=""
 	for _sv_f in \
 		"${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}" \
@@ -179,6 +194,10 @@ supervisor)
 		"${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}" \
 		"${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"; do
 		[ -f "$_sv_f" ] && _sv_found="${_sv_found:+$_sv_found and }$_sv_f"
+	done
+	for _sv_v in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+		eval "_sv_val=\${$_sv_v:-}"
+		[ -n "$_sv_val" ] && _sv_found="${_sv_found:+$_sv_found and }\$$_sv_v (in the environment)"
 	done
 	if [ -n "$_sv_found" ]; then
 		bad "a FORGE CREDENTIAL is present at $_sv_found on a box whose role is 'supervisor'. This seat holds none, deliberately: it is the seat that cannot author and cannot approve, and a credential here makes that false. Remove it — or run this box as the seat that owns that credential, but not both."
