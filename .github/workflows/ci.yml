@@ -15,11 +15,19 @@ name: ci
 # `origin/main` does not exist and the range cannot resolve. gate-scope fails safe there —
 # it runs every gate and says why — so getting this wrong costs the saving, never coverage.
 #
-# THE ONE CONDITIONAL, and it is a VALUE rather than a decision: on `push` to main there is no
-# base to diff against — `origin/main...HEAD` is empty and would skip everything on the very
-# run that proves main is green. So SCOPE is set only for pull requests, and main always runs
-# the full ladder. Same justification as pr-title.yml's `${{ github.repository }}`: forge-set,
-# constrained, not contributor-controlled.
+# THE ONE CONDITIONAL, and it is a VALUE rather than a decision. Three events reach this
+# workflow and only one of them has a base to diff against:
+#
+#   pull_request   SCOPE=origin/main...HEAD — the PR's own diff; gates it cannot affect decline
+#   push (main)    SCOPE='' — there is no base, and an empty range read as "nothing changed"
+#                  would skip every gate on the run that proves main is green
+#   merge_group    SCOPE='' — same reason and a stronger one: this is the run that decides
+#                  whether a queued batch enters main, so it runs the FULL ladder on the
+#                  merged result while the PRs that fed it stayed scoped and fast
+#
+# `github.event_name` is only ever compared to 'pull_request', so both SCOPE='' cases fall out
+# of the `||` without naming themselves — which is why they are named here. Same justification
+# as pr-title.yml's `${{ github.repository }}`: forge-set, constrained, not contributor-controlled.
 
 on:
   push:
