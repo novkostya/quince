@@ -1,0 +1,205 @@
+#!/bin/sh
+# gate-scope-test — the SKIPPING must never be silent, and the map must never go stale.
+#
+# gate-scope exists to make CI faster by not running gates a change cannot affect. Every defect it
+# can have is the same one: a gate that should have run and did not. So this suite spends almost all
+# of its assertions on the refusals and on the map, and only two on the saving.
+#
+# THE MAP IS THE PART THAT ROTS. Coverage is a hand-written fact about which directory belongs to
+# which gate, and the day somebody adds a top-level `server/` it belongs to no product gate and is
+# checked by `gates-sh` alone — silently, with a green tick. So the totality assertion below fails
+# on any tracked top-level path that is neither claimed by a product gate nor explicitly listed as
+# process-only. Adding a directory then requires a decision instead of producing a gap.
+#
+# `gates-sh` covers `.` — everything — which is why totality cannot be asserted against the union of
+# all gates: that is trivially true and would be a check that cannot fail. It is asserted against the
+# PRODUCT gates plus a declared process list.
+set -eu
+
+cd "$(dirname "$0")/.."
+GS=$PWD/bin/gate-scope
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+
+# --- a synthetic repo with this repo's shape, so the range tests are hermetic ------------------
+R="$WORK/repo"
+mkdir -p "$R"
+git init -q "$R"
+git -C "$R" symbolic-ref HEAD refs/heads/main
+mkdir -p "$R/core" "$R/ui" "$R/vault" "$R/bin" "$R/docs" "$R/deploy"
+for f in core/a.go ui/a.ts vault/a.py bin/a docs/a.md deploy/Dockerfile versions.env Makefile; do
+	printf 'x\n' >"$R/$f"
+done
+cp "$GS" "$R/bin/gate-scope"
+git -C "$R" add -A
+git -C "$R" commit -qm base
+
+# `set +e` inside the subshell, deliberately. These helpers exist to CAPTURE a non-zero exit, and
+# under `set -e` the subshell dies at the failing command before `echo $?` ever runs — so the helper
+# returns an empty string and every comparison against it fails for a reason that has nothing to do
+# with the tool. Met three times writing this file; it is the same shape as quince#164.
+scoped() { (set +e; cd "$R" && ./bin/gate-scope --list "$1" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'); }
+needed() { (set +e; cd "$R"; ./bin/gate-scope --needed "$1" "$2" >/dev/null 2>&1; echo $?); }
+
+# --- 1. THE DEFAULT IS EVERYTHING -------------------------------------------------------------
+# No range is the offline case, the fresh-clone case, and the did-not-opt-in case. It must never be
+# read as "nothing changed".
+if [ "$(scoped '')" = "gates-go gates-vault gates-ui gates-sh" ]; then
+	ok "no range runs every gate — the offline default"
+else
+	bad "no range did not run every gate: $(scoped '')"
+fi
+
+# --- 2. AN UNRESOLVABLE RANGE RUNS EVERYTHING, AND SAYS SO ------------------------------------
+# The shape to expect in CI first: actions/checkout fetches one ref at depth 1, so origin/main does
+# not exist without fetch-depth: 0. Answering "nothing changed" there would skip every gate on every
+# PR, green.
+# `|| true` because the tool exits 2 here BY DESIGN, and under `set -e` an assignment takes its
+# status from the substitution — the same defect quince#164 fixed in the wrappers, which is worth
+# meeting once in a test that is about refusals.
+out=$( (cd "$R" && ./bin/gate-scope --list 'no-such-ref...HEAD' 2>&1) || true )
+case "$out" in
+*"cannot resolve the range"*gates-go*gates-sh*)
+	ok "an unresolvable range runs every gate AND says why"
+	;;
+*)
+	bad "an unresolvable range did not fail safe"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 3. THE SAVING (two assertions, and they are the only two) ---------------------------------
+git -C "$R" checkout -qb docs-only
+printf 'more\n' >>"$R/docs/a.md"
+git -C "$R" commit -qam docs
+if [ "$(scoped 'main...HEAD')" = "gates-sh" ]; then
+	ok "a docs-only change needs gates-sh and nothing else"
+else
+	bad "a docs-only change asked for: $(scoped 'main...HEAD')"
+fi
+if [ "$(needed image 'main...HEAD')" = 3 ] && [ "$(needed e2e 'main...HEAD')" = 3 ]; then
+	ok "image and e2e both decline a docs-only change"
+else
+	bad "image/e2e did not decline a docs-only change"
+fi
+
+# --- 4. POSITIVE CONTROLS — every gate is reachable --------------------------------------------
+# Without these, a gate-scope that answered "gates-sh" to everything would pass part 3.
+git -C "$R" checkout -q main
+for pair in 'core/a.go:gates-go' 'ui/a.ts:gates-ui' 'vault/a.py:gates-vault'; do
+	f=${pair%:*}
+	g=${pair#*:}
+	git -C "$R" checkout -q -B "t-$g" main
+	printf 'more\n' >>"$R/$f"
+	git -C "$R" commit -qam "touch $f"
+	if [ "$(needed "$g" 'main...HEAD')" = 0 ] && [ "$(needed image 'main...HEAD')" = 0 ]; then
+		ok "a change under $f requires $g (and image)"
+	else
+		bad "a change under $f did not require $g"
+	fi
+	git -C "$R" checkout -q main
+done
+
+# --- 5. THE SHARED INPUTS REACH EVERY GATE -----------------------------------------------------
+# versions.env pins every toolchain image, so a change to it can break a gate whose own tree is
+# untouched. If this ever stops being true the saving is bought with a real hole.
+for f in versions.env deploy/Dockerfile Makefile; do
+	git -C "$R" checkout -q -B "t-shared" main
+	printf 'more\n' >>"$R/$f"
+	git -C "$R" commit -qam "touch $f"
+	if [ "$(scoped 'main...HEAD')" = "gates-go gates-vault gates-ui gates-sh" ]; then
+		ok "$f requires every gate"
+	else
+		bad "$f did not require every gate: $(scoped 'main...HEAD')"
+	fi
+	git -C "$R" checkout -q main
+done
+
+# --- 6. gates-sh IS UNCONDITIONAL --------------------------------------------------------------
+git -C "$R" checkout -q -B t-sh main
+printf 'more\n' >>"$R/core/a.go"
+git -C "$R" commit -qam core
+if [ "$(needed gates-sh 'main...HEAD')" = 0 ] && [ "$(needed gates-sh '')" = 0 ]; then
+	ok "gates-sh is required by everything, including a change that misses it entirely"
+else
+	bad "gates-sh became conditional — it runs the suites that read the documents a docs PR edits"
+fi
+git -C "$R" checkout -q main
+
+# --- 7. SKIP ONLY ON 3 -------------------------------------------------------------------------
+# A caller that treats "non-zero" as skip inverts the safety rule, so the tool must not use any
+# other non-zero code to mean "needed".
+rc=$( (set +e; cd "$R"; ./bin/gate-scope --needed no-such-gate 'main...HEAD' >/dev/null 2>&1; echo $?) )
+if [ "$rc" = 2 ]; then
+	ok "an unknown gate exits 2 (could-not-determine), never 3"
+else
+	bad "an unknown gate exited $rc — 3 would tell a caller to skip it"
+fi
+
+# --- 8. THE MAP IS TOTAL, against THIS repository ----------------------------------------------
+# The drift guard. Every tracked top-level path must be claimed by a PRODUCT gate or declared
+# process-only here. A new top-level directory then fails this suite instead of being silently
+# covered by gates-sh alone.
+#
+# This list is a DECISION, not a description: each entry is a path whose changes genuinely need no
+# Go/UI/vault gate. Adding to it should be as deliberate as adding a gate.
+# CLAUDE.md is canon and .claude/ is the process tree: a change to either cannot break a Go
+# build, a vitest run or a mypy pass. bin/ and docs/ likewise. Each of these was checked
+# against the full tracked list rather than added to make the suite green — CLAUDE.md was in fact
+# added BECAUSE this assertion failed on it the first time it ran, which is the guard working.
+PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md'
+product_covered='core ui vault deploy versions.env Makefile'
+uncovered=''
+for top in $(git ls-files | awk -F/ '{print $1}' | sort -u); do
+	found=no
+	for p in $product_covered $PROCESS_ONLY; do
+		[ "$top" = "$p" ] && found=yes && break
+	done
+	[ "$found" = yes ] || uncovered="$uncovered $top"
+done
+if [ -z "$uncovered" ]; then
+	ok "every tracked top-level path is claimed by a product gate or declared process-only"
+else
+	bad "unclaimed top-level path(s) —$uncovered — would be covered by gates-sh alone, silently"
+fi
+
+# --- 9. THE MAKEFILE HONOURS IT, and refuses an empty ladder -----------------------------------
+# Parts 1-8 pin the script. This pins the WIRING, which is where a correct script still produces a
+# ladder that runs nothing.
+if make -n gates 2>/dev/null | grep -q 'toolchain-go'; then
+	ok "make gates with no SCOPE still builds the full ladder"
+else
+	bad "make gates with no SCOPE no longer runs the product gates"
+fi
+if make -n image SCOPE='HEAD...HEAD' 2>/dev/null | grep -q 'SKIPPED'; then
+	ok "make image honours SCOPE and announces the skip rather than doing it quietly"
+else
+	bad "make image did not skip on an empty range"
+fi
+# An empty ladder must be a hard failure, not a quiet pass. Driven by a stub gate-scope that prints
+# nothing — the shape a missing or broken script produces.
+stub=$WORK/stub
+mkdir -p "$stub/bin"
+printf '#!/bin/sh\nexit 0\n' >"$stub/bin/gate-scope"
+chmod +x "$stub/bin/gate-scope"
+cp Makefile versions.env "$stub/" 2>/dev/null || true
+if (cd "$stub" && make -n gates 2>&1 | grep -q 'refusing to run an empty ladder'); then
+	ok "an empty gate list is a hard failure, not a vacuous clean run"
+else
+	bad "an empty gate list did not stop the build — gates would depend on nothing and pass"
+fi
+
+printf '\ngate-scope-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
