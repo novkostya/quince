@@ -1,0 +1,268 @@
+#!/bin/sh
+# provision-guard-test — provision's identity guard, driven in every state (quince#234).
+#
+# WHY THIS IS ITS OWN DRIVER. `bin/wrapper-boundary-test` is the natural neighbour and the wrong
+# home: `provision` is not a wrapper. It takes a `--role`, it mutates a machine, and its guard is
+# about which SEAT a box belongs to rather than which identity a command runs as. The assertions
+# below need a role argument and a dry run; the wrapper suite needs neither.
+#
+# WHAT IT PINS, and it is a table rather than a property. `provision`'s guard compared the bot token
+# against the architect token and refused in exactly one of three states. Measured on 2026-07-29,
+# that made it a NO-OP ON BOTH REAL BOXES:
+#
+#   implementer   holds quince-coder.pem                        -> both tokens absent, no branch
+#   architect     holds quince-arch.token + quince-review.pem   -> own present, other absent, no branch
+#
+# Not a latent rot risk — the live condition of the entire fleet, because `decisions/0014` moved the
+# implementer identity to an App key and the guard was still comparing the pair that predated it.
+# Every row below would have passed against that version, which is the point of a table: the defect
+# was not that a check was wrong, it was that the check did not APPLY to any box that existed.
+#
+# THE NON-REFUSING ROWS ARE THE HALF THAT NEEDED NEW CODE. Everything in `provision` after the guard
+# mutates the box — `apk add` is the second step — so a suite could observe the refusals and could
+# not observe a pass without provisioning the machine it was running on. Testing only the refusals is
+# half a check (quince#103), and it is the half that would have missed this entirely, since the bug
+# WAS a pass. `--check-credentials` exists for that reason and is asserted here to stop before
+# mutating.
+#
+# Synthetic and hermetic: a temp credential directory via the four path overrides, never the real
+# ~/.config/quince, and `--check-credentials` so nothing is installed.
+set -eu
+
+cd "$(dirname "$0")/../.."
+# Overridable so the FAILING STATE stays reproducible. The capability guard below means the suite
+# now refuses against a `provision` with no dry run, so "revert it and watch the suite fail" — the
+# demonstration that makes a test trustworthy — is no longer available by reverting. Point this at a
+# copy carrying the dry run and the OLD guard logic instead, which drives the same failure without
+# the danger that produced the guard. The grep applies to whatever this names, so an override cannot
+# be used to skip the safety check.
+PROVISION="${QUINCE_PROVISION:-$PWD/deploy/runner/provision}"
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+# --- REFUSE TO RUN AGAINST A provision THAT CANNOT BE DRY-RUN --------------------------------
+# THIS SUITE PROVISIONED ITS OWN HOST ONCE, and the guard below is why it cannot again.
+#
+# The old argument parser was `[ "$1" = --role ] && { …; shift 2; }` and then ignored everything
+# left over. So `--check-credentials` was not rejected by it — it was SILENTLY DROPPED, and every
+# invocation in this file ran the real thing. Driving the suite against `main`'s `provision` to prove
+# it fails first — the discipline that is supposed to make a test trustworthy — is precisely what
+# executed `apk add` on a live runner. The assertion in part 5 caught it, and caught it AFTER.
+#
+# That is not a hypothetical rediscovered by a bisect: reverting this file's counterpart, or checking
+# out any commit before it, restores exactly that parser. And on a box holding a bot token the damage
+# would not have stopped at packages — `layer_wire_helper` overwrites `credential.helper`
+# unconditionally, so a run would have replaced a working helper with one authenticating as a
+# SUSPENDED account (quince#236). This host escaped only because `provision`'s layer section is
+# already inert on it, which is quince#236's own finding arriving as luck.
+#
+# So capability is PROVED BEFORE ANYTHING IS EXECUTED, by reading the script rather than running it.
+# A missing flag is a hard refusal, never a fallback to the real invocation: "I could not test this"
+# and "I tested it" must not be the same observable (quince#41).
+if ! grep -q -- '--check-credentials' "$PROVISION"; then
+	printf 'provision-guard-test: %s does not support --check-credentials.\n' "$PROVISION" >&2
+	printf 'provision-guard-test: REFUSING to run. Without the dry run every case below executes the\n' >&2
+	printf '    real provisioning path — apk add, service install, credential-helper rewrite — on\n' >&2
+	printf '    whatever box this is. That has happened once (quince#234).\n' >&2
+	printf 'provision-guard-test: DID NOT RUN — this is not a clean result. Nothing was checked.\n' >&2
+	exit 2
+fi
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+BOT="$WORK/quince-bot.token"
+CODER="$WORK/quince-coder.pem"
+ARCH="$WORK/quince-arch.token"
+REVIEW="$WORK/quince-review.pem"
+
+run() {
+	# $1 role, rest: extra argv. EVERY credential path is overridden, not only the one a row is
+	# about: a guard that consulted a real path under the invoking user's home would make this
+	# suite's result depend on which box it ran on — and the two boxes hold different credentials,
+	# so it would pass on one seat and fail on the other. That failure reads as a finding.
+	_r=$1
+	shift
+	QUINCE_BOT_TOKEN_FILE="$BOT" \
+		QUINCE_CODER_KEY_FILE="$CODER" \
+		QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		sh "$PROVISION" --role "$_r" --check-credentials "$@" 2>&1 || true
+}
+
+rc_of() {
+	_r=$1
+	shift
+	QUINCE_BOT_TOKEN_FILE="$BOT" \
+		QUINCE_CODER_KEY_FILE="$CODER" \
+		QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		sh "$PROVISION" --role "$_r" --check-credentials "$@" >/dev/null 2>&1
+	printf '%s' "$?"
+}
+
+clear_creds() { rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW"; }
+place() { printf 'a credential\n' >"$1"; }
+
+# --- 1. THE OTHER SEAT'S APP KEY IS THE OTHER SEAT (quince#234 problem 2) ----------------------
+# The row the old guard could not see at all, in both directions. An App key is a credential; the
+# guard knew only tokens, so each of these provisioned clean.
+clear_creds
+place "$CODER"
+out=$(run arch)
+case "$out" in
+*"HOLDS the"*"implementer credential"*)
+	ok "role arch: an implementer APP KEY is the implementer seat — refused"
+	;;
+*)
+	bad "role arch: a coder key present and no refusal — the guard is blind to App keys"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+clear_creds
+place "$REVIEW"
+out=$(run implementer)
+case "$out" in
+*"HOLDS the"*"arch credential"*)
+	ok "role implementer: a REVIEWER APP KEY is the arch seat — refused"
+	;;
+*)
+	bad "role implementer: a reviewer key present and no refusal"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 2. BOTH SEATS PRESENT — the state that used to pass (quince#234 problem 1) ----------------
+# This is the author-and-approve box. The old guard read "own present" as "fine" and continued.
+clear_creds
+place "$CODER"
+place "$REVIEW"
+out=$(run implementer)
+case "$out" in
+*"BOTH SEATS"*)
+	ok "both seats present: refused, and named as both-seats rather than as a wrong --role"
+	;;
+*"HOLDS the"*)
+	bad "both seats present: reported as a wrong --role — the remedy is rm, and re-running loops"
+	;;
+*)
+	bad "both seats present: NOT refused — this is the author-and-approve box"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# The message must send the reader to `rm`, not to a re-run. Two refusals with one remedy between
+# them is how someone re-runs four times and concludes the guard is broken.
+case "$out" in
+*"REMOVE the credential"*)
+	ok "both seats present: the message names removal, not a re-run"
+	;;
+*)
+	bad "both seats present: the message does not tell the reader to remove anything"
+	;;
+esac
+
+# --- 3. THE WRONG-ROLE ROW STILL BEHAVES — the check was widened, not replaced ----------------
+# The negative control for part 1: if the both-present branch had swallowed this case, every refusal
+# would say "BOTH SEATS" and the wrong-role message would be dead code nobody noticed.
+clear_creds
+place "$ARCH"
+out=$(run implementer)
+case "$out" in
+*"near-certainly a missing or wrong --role"*)
+	ok "own absent, other present: still the wrong-role refusal, with its own remedy"
+	;;
+*"BOTH SEATS"*)
+	bad "own absent, other present: reported as both-seats — the box holds one seat, not two"
+	;;
+*)
+	bad "own absent, other present: the wrong-role refusal did not speak"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 4. THE LEGITIMATE STATES MUST STILL PASS -------------------------------------------------
+# The half that needed `--check-credentials` to be observable at all, and the half that matters
+# most: the bug being fixed WAS a pass, so a suite that only proves refusals cannot see its return.
+# A guard that refuses everything would satisfy parts 1-3 completely.
+clear_creds
+rc=$(rc_of implementer)
+if [ "$rc" = 0 ]; then
+	ok "no credentials at all: passes — a first provision is legitimate"
+else
+	bad "no credentials at all: exited $rc, refusing a box awaiting its first credential"
+fi
+
+clear_creds
+place "$CODER"
+rc=$(rc_of implementer)
+if [ "$rc" = 0 ]; then
+	ok "role implementer with only its own App key: passes"
+else
+	bad "role implementer holding exactly its own credential: exited $rc"
+fi
+
+clear_creds
+place "$ARCH"
+place "$REVIEW"
+rc=$(rc_of arch)
+if [ "$rc" = 0 ]; then
+	ok "role arch with the arch token AND the reviewer key: passes — one seat, two credentials"
+else
+	bad "role arch holding exactly its own seat's pair: exited $rc"
+fi
+
+# The legacy pairing is one seat too. `decisions/0014` keeps the suspended bot token in place while
+# the App key becomes live, so a box holding both implementer credentials is normal, not a breach.
+clear_creds
+place "$BOT"
+place "$CODER"
+rc=$(rc_of implementer)
+if [ "$rc" = 0 ]; then
+	ok "role implementer with the bot token AND the coder key: passes — both are the same seat"
+else
+	bad "role implementer holding the legacy and live credentials of ONE seat: exited $rc"
+fi
+
+# --- 5. --check-credentials MUST NOT TOUCH THE BOX --------------------------------------------
+# The flag's whole justification is that part 4 can run at all. If it fell through to `apk add`, this
+# suite would provision whatever machine ran it — so the claim is asserted rather than assumed.
+clear_creds
+out=$(run implementer)
+case "$out" in
+*"credential check only"*)
+	ok "--check-credentials announces itself and stops before the first mutation"
+	;;
+*)
+	bad "--check-credentials did not stop at the guard — this suite may be provisioning its host"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 6. NAMES, NEVER CONTENTS ------------------------------------------------------------------
+# A guard that echoed a credential in order to report a credential problem would be its own
+# incident. The fixtures carry a known string; it must not appear in any refusal.
+clear_creds
+printf 'SECRETVALUE\n' >"$CODER"
+printf 'SECRETVALUE\n' >"$REVIEW"
+out=$(run implementer)
+case "$out" in
+*SECRETVALUE*)
+	bad "a refusal printed the CONTENTS of a credential file"
+	;;
+*)
+	ok "refusals name the credential path and never its contents"
+	;;
+esac
+
+printf '\nprovision-guard-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
