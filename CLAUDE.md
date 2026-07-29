@@ -397,7 +397,7 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   device UDIDs/serials, personal names and paths, lab-log excerpts — never enter
   committed files, **commit messages**, branch names, tags, PR/issue text, or fixtures.
   Before every push run `make privacy-check`; before a merge re-run it over the whole
-  branch — `make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md`, which covers the
+  branch — `make privacy-check REF=origin/main...HEAD TEXT="$BODY"` where `BODY` is per-runner under `$HOME/scratch/<runner>/` and NEVER a fixed `/tmp` path (two runners on one box overwrite each other there, and the sweep then covers the wrong text — quince-devlog#123), which covers the
   diff, the commit messages and the PR text in one command. **`TEXT=` takes a PATH to a file
   holding the body, never the body itself** — pass the prose and it word-splits, so the gate
   refuses naming the first word of your own PR as an unreadable filename (quince#105).

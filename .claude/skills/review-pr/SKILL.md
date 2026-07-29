@@ -122,9 +122,12 @@ defect in a docs PR exactly as a failing test is in a code PR.
 - Privacy: one command over the diff, the commit messages and the PR text — **and the form differs
   by repository, because `quince-devlog` has no Makefile** (quince#78):
   ```sh
-  make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md               # in quince
+  # PER-RUNNER, never a fixed /tmp path: one host runs several seats, and a shared body file means
+  # the sweep can cover another session's text while its own goes unswept (quince-devlog#123).
+  BODY="$HOME/scratch/$(bin/forge-watch runner get)/pr-body.md"
+  make privacy-check REF=origin/main...HEAD TEXT="$BODY"                      # in quince
   /path/to/your/quince/deploy/privacy/privacy-check \
-      --ref origin/main...HEAD --text /tmp/pr-body.md                          # in quince-devlog
+      --ref origin/main...HEAD --text "$BODY"                                 # in quince-devlog
   ```
   **`TEXT=` / `--text` take a PATH to a file holding the body, never the body itself.** Write the
   body out first. Passing the prose word-splits it and the gate refuses with a `2` naming the first

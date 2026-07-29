@@ -32,13 +32,30 @@ One command, and it covers the branch diff, the commit messages **and** the PR t
 about to post — write the body to a file first and hand it over:
 
 ```sh
+# THE BODY PATH IS PER-RUNNER. Never a fixed path under /tmp — see below.
+BODY="$HOME/scratch/$(bin/forge-watch runner get)/pr-body.md"
+
 # in quince
-make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md
+make privacy-check REF=origin/main...HEAD TEXT="$BODY"
 
 # in quince-devlog — THERE IS NO MAKEFILE THERE. Run the product checkout's script FROM the
 # devlog clone, so that the pattern directory resolves to this clone's own `local` symlink:
-/path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD --text /tmp/pr-body.md
+/path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD --text "$BODY"
 ```
+
+**`/tmp/pr-body.md` was canon until 2026-07-29, and it is a collision.** One host runs several
+implementers (quince#111), so a fixed path under `/tmp` is a **shared mutable file**. Measured that
+day: `r1` went to write its body and found `r2`'s in-flight body for another PR already there,
+minutes old. One write would have replaced it.
+
+**The data loss is the smaller half.** The bigger one is that `TEXT=` would then have swept *the
+wrong session's* text — reporting `clean` over a body the other session believed was covered, while
+its actual body went unswept. A gate that answers about something it never saw is the failure this
+project files more than any other, and here it arrives through a filename.
+
+`$HOME/scratch/<runner>/` is the right home because it is already per-runner and already reaped by
+`bin/scratch-reap`. **Not `mktemp`**: the path has to survive between the write and the sweep and the
+`--body-file`, which are separate invocations, so it must be predictable as well as unique.
 
 **`make privacy-check` does not exist in `quince-devlog`.** All three skills named only that, so the
 gate was unreachable in half the declared forge set and was complied with in words for as long as
