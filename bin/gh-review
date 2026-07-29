@@ -63,6 +63,23 @@ die() {
 # A boundary refusal must outrank an environment refusal, because the environment can be fixed and
 # the boundary must not be. It needs nothing from the dependency loop — `$_home` is already
 # resolved and `[ -f ]` is a shell builtin — so ordering it first costs nothing.
+# BOTH FORMS OF THE IMPLEMENTER IDENTITY, and the App key is checked FIRST because it is the live
+# one. This wrapper refused a bot token and nothing else, so once the implementer identity moved to
+# an App key (`decisions/0014`) the assertion "the implementer identity is absent" was being made by
+# checking for a credential that no longer carries it — and a box holding `quince-coder.pem` could
+# author with gh-coder and approve with this wrapper while nothing anywhere refused. That is the
+# whole of what the two-seat design exists to produce, defeated by a file the guard did not know to
+# look for. quince#203 fixed it in `preflight`'s arch arm; quince#204 is the remainder, and the more
+# load-bearing half: `preflight` gates whether the box STARTS, this gates every verdict it casts.
+CODER_KEY="${QUINCE_CODER_KEY_FILE:-$_home/.config/quince/quince-coder.pem}"
+if [ -f "$CODER_KEY" ]; then
+	die "an IMPLEMENTER APP KEY is present at $CODER_KEY." \
+		"This machine can approve; holding the implementer identity too would let one box author" \
+		"and approve its own work. Remove it, or run gh-coder on the implementer box."
+fi
+# The bot token stays a refusal alongside it: `decisions/0014` condition 1 requires that credential
+# to be left in place wherever it lives, so a box can hold it AND the App key, and both are the
+# implementer identity. Refusing beside either is the only reading that stays true.
 BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
 if [ -f "$BOT_TOKEN" ]; then
 	die "a BOT TOKEN is present at $BOT_TOKEN." \

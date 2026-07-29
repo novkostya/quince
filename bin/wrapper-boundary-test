@@ -2,7 +2,7 @@
 # wrapper-boundary-test — a BOUNDARY refusal must outrank an ENVIRONMENT refusal (quince#157).
 #
 # WHY THIS EXISTS. `bin/gh-review` and `bin/gh-arch` both refuse to run on a box that holds the
-# implementer's bot token: one box that can author and approve dissolves `approver ≠ author`, which
+# implementer identity: one box that can author and approve dissolves `approver ≠ author`, which
 # is the property the whole two-seat design is built on. Both also refuse when their dependencies
 # are missing. Until 2026-07-29 the dependency check came FIRST, and on the implementer host — a bot
 # token present, no `openssl` — the message that actually spoke was:
@@ -28,6 +28,16 @@
 # every assertion about the boundary winning. So the same stub PATH is driven WITHOUT a bot token,
 # and the dependency refusal must then speak — proving the reorder moved the check rather than
 # removing it.
+#
+# THE IMPLEMENTER IDENTITY IS TWO FILES, AND THE SUITE ONCE KNEW ONLY ONE (quince#204). Every
+# assertion here named a BOT TOKEN, because that is what the implementer identity was when the suite
+# was written. `decisions/0014` moved it to an App key, and for a day both approving wrappers would
+# have reported the separation intact on a box holding `quince-coder.pem` — with a green suite
+# behind them, because the suite was asking about a credential that no longer carried the identity.
+# Parts 4-6 below drive the App key, so this file now covers BOTH forms of the thing it exists to
+# refuse. It is quince#103's rule in a second place: *checking one direction of a two-directional
+# property is not a check* — the coder side was complete (parts 7-10) while the approving side was
+# not, and a suite that thorough in one direction reads as thorough in both.
 #
 # Synthetic and hermetic: a temp HOME, a temp token file, a stub PATH. Never reads or writes the
 # real ~/.config/quince, and never runs `gh`.
@@ -65,18 +75,26 @@ done
 TOKEN="$WORK/bot.token"
 RKEY="$WORK/review.pem"
 ATOK="$WORK/arch.token"
+CKEY="$WORK/coder.pem"
 
 run() {
 	# $1 wrapper, rest: argv. Runs with the stub PATH and credential paths we control. EVERY
 	# credential location is overridden, not just the one a given case is about: a wrapper that
 	# consulted a real path under the invoking user's home would make this suite's result depend on
 	# the box it ran on, which is the property it exists to remove.
+	#
+	# QUINCE_CODER_KEY_FILE is in that list for the same reason and not as an afterthought: without
+	# it, the parts below would be probing whatever the invoking user's real ~/.config/quince holds —
+	# which on the implementer box is a live signing key, and on the arch box is nothing. A suite that
+	# passes on one seat and fails on the other is worse than no suite, because the failure reads as a
+	# finding.
 	_w=$1
 	shift
 	PATH="$STUB" HOME="$WORK" \
 		QUINCE_BOT_TOKEN_FILE="$TOKEN" \
 		QUINCE_REVIEW_KEY_FILE="$RKEY" \
 		QUINCE_ARCH_TOKEN_FILE="$ATOK" \
+		QUINCE_CODER_KEY_FILE="$CKEY" \
 		"$PWD/$_w" "$@" 2>&1 || true
 }
 
@@ -100,9 +118,11 @@ for w in bin/gh-review bin/gh-arch; do
 	esac
 done
 
-# --- 2. NEGATIVE CONTROL: no bot token, dependencies still absent ------------------------------
-# Without this, deleting the dependency check entirely would pass part 1.
-rm -f "$TOKEN"
+# --- 2. NEGATIVE CONTROL: no implementer credential, dependencies still absent -----------------
+# Without this, deleting the dependency check entirely would pass part 1. BOTH implementer
+# credentials are removed, not just the bot token — with the App key check now in these wrappers,
+# clearing only one would leave the boundary live and this control would prove nothing.
+rm -f "$TOKEN" "$CKEY"
 for w in bin/gh-review bin/gh-arch; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
@@ -137,12 +157,81 @@ for w in bin/gh-review bin/gh-arch; do
 	esac
 done
 
-# --- 4. gh-coder: THE SAME PROPERTY, ASSERTED FROM THE THIRD CORNER --------------------------
+# --- 4. THE OTHER FORM OF THE IMPLEMENTER IDENTITY: an App key (quince#204) --------------------
+# Parts 1-3 drive a BOT TOKEN, which is what the implementer identity was until `decisions/0014`
+# moved it to a GitHub App. The wrappers' assertion is "the implementer identity is absent"; the
+# bot-token check is one MECHANISM for it, and a rule that names one mechanism goes quietly false the
+# moment the mechanism changes. Concretely and true on `main` until this commit: an architect box
+# holding `quince-coder.pem` could author with gh-coder, approve with gh-review, and nothing anywhere
+# refused.
+#
+# Same construction as part 1 — the boundary must beat the live dependency refusal — because the
+# failure mode is identical and, on the box where it bites, so is the wrong repair.
+rm -f "$TOKEN" "$CKEY"
+printf 'an implementer app key\n' >"$CKEY"
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"IMPLEMENTER APP KEY is present"*)
+		ok "$w: refuses beside the implementer App key, ahead of the missing dependencies"
+		;;
+	*"is not installed"*)
+		bad "$w: an ENVIRONMENT refusal outranked the App-key boundary — the wrong repair is the one it invites"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*)
+		bad "$w: the App key is the implementer identity and this box can approve — nothing refused"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 5. The App-key boundary outranks the usage message too ------------------------------------
+# Part 3's assertion, for the second credential. `gh-review` exits 2 on no arguments, and a box
+# holding the wrong identity should be told THAT rather than how to call the tool.
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w")
+	case "$out" in
+	*"IMPLEMENTER APP KEY is present"*)
+		ok "$w: the App-key boundary refusal outranks the usage message too"
+		;;
+	*)
+		bad "$w: with no arguments and an App key present, the boundary did not speak"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 6. BOTH implementer credentials at once — the LIVE one is named ---------------------------
+# `decisions/0014` condition 1 keeps the suspended bot token in place wherever it lives, so a box
+# holding both is a state that exists rather than a contrived one. Both are the implementer identity,
+# so either alone is a refusal (parts 1 and 4) — what this pins is WHICH FILE THE MESSAGE NAMES.
+# Naming the legacy credential first would send a session to delete the suspended token, watch the
+# refusal persist, and conclude the guard is broken. Asserted because both wrappers now claim in a
+# comment that the App key is checked first, and an ordering claim nothing drives is a comment.
+printf 'a suspended bot token\n' >"$TOKEN"
+for w in bin/gh-review bin/gh-arch; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"IMPLEMENTER APP KEY is present"*)
+		ok "$w: with both present, the refusal names the LIVE credential"
+		;;
+	*"BOT TOKEN is present"*)
+		bad "$w: named the suspended bot token while a live App key sat beside it — removing it would not clear the refusal"
+		;;
+	*)
+		bad "$w: with both implementer credentials present, no boundary refusal spoke"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 7. gh-coder: THE SAME PROPERTY, ASSERTED FROM THE THIRD CORNER --------------------------
 # `gh-review` and `gh-arch` refuse when the IMPLEMENTER identity is present. `gh-coder` IS the
 # implementer, so the credentials it must refuse to sit beside are the APPROVING ones. Both
 # directions are driven, because a wrapper that refused only one of them would pass a test written
 # only for the other, and the box that would then hold two identities is the authoring box.
-rm -f "$TOKEN" "$RKEY" "$ATOK"
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY"
 printf 'a reviewer key\n' >"$RKEY"
 out=$(run bin/gh-coder pr view 1)
 case "$out" in
@@ -174,7 +263,7 @@ case "$out" in
 	;;
 esac
 
-# --- 5. THE DELIBERATE NON-REFUSAL, which is a rule too --------------------------------------
+# --- 8. THE DELIBERATE NON-REFUSAL, which is a rule too --------------------------------------
 # A suspended `quince-bot` token may sit beside the coder key, and `decisions/0014` REQUIRES that it
 # be left in place — condition 1 is that nothing is tidied away, because the intact record is what
 # makes the good-faith claim checkable. Both are the implementer identity, so together they cross no
@@ -198,7 +287,7 @@ case "$out" in
 	;;
 esac
 
-# --- 6. The boundary outranks the usage message for gh-coder too -----------------------------
+# --- 9. The boundary outranks the usage message for gh-coder too -----------------------------
 rm -f "$TOKEN"
 printf 'a reviewer key\n' >"$RKEY"
 out=$(run bin/gh-coder)
@@ -212,7 +301,7 @@ case "$out" in
 	;;
 esac
 
-# --- 7. git-coder's CREDENTIAL HELPER must fail loudly, not quietly offer an empty password ------
+# --- 10. git-coder's CREDENTIAL HELPER must fail loudly, not quietly offer an empty password -----
 # The defect this pins (quince#198 review): `password=$(gh-coder auth token)` with a FAILING
 # substitution still printed a syntactically valid credential with an empty password. git accepted
 # it, tried to authenticate, failed, and reported `authentication failed` — while the boundary
@@ -226,10 +315,11 @@ esac
 # DRIVEN DIRECTLY, WHICH IS WHY THE HELPER IS A FLAG. As an inline `!f() { … }` in a `git -c` value
 # it could only be exercised by making git authenticate against a real remote — so the one path that
 # had to be right was the one path no suite could reach. Offline, no network, no remote, no git.
-rm -f "$TOKEN" "$RKEY" "$ATOK"
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY"
 printf 'a reviewer key\n' >"$RKEY"
 helper_out=$(PATH="$STUB" HOME="$WORK" \
 	QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
+	QUINCE_CODER_KEY_FILE="$CKEY" \
 	"$PWD/bin/git-coder" --credential-helper get 2>/dev/null) && helper_rc=0 || helper_rc=$?
 
 if [ "$helper_rc" -ne 0 ]; then
@@ -252,6 +342,7 @@ rm -f "$RKEY"
 for op in store erase; do
 	_o=$(PATH="$STUB" HOME="$WORK" QUINCE_BOT_TOKEN_FILE="$TOKEN" \
 		QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
+		QUINCE_CODER_KEY_FILE="$CKEY" \
 		"$PWD/bin/git-coder" --credential-helper "$op" 2>/dev/null) && _rc=0 || _rc=$?
 	if [ "$_rc" -eq 0 ] && [ -z "$_o" ]; then
 		ok "bin/git-coder: --credential-helper $op is a silent no-op"

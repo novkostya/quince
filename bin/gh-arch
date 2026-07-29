@@ -23,8 +23,8 @@ _home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/
 
 TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 
-# IDENTITY BEFORE DEPENDENCIES (quince#157). The architect box must not hold the bot identity
-# (devlog#7). If a bot token is present here, the box can author and approve — so refuse rather than
+# IDENTITY BEFORE DEPENDENCIES (quince#157). The architect box must not hold the implementer
+# identity (devlog#7). If one is present here, the box can author and approve — so refuse rather than
 # run, and say which file to remove. This is the same assertion `preflight` makes at service start;
 # making it again here means a hand-run command cannot quietly cross the boundary that the service
 # refuses to cross.
@@ -35,6 +35,24 @@ TOKEN_FILE="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 # the environment is meant to be fixed and the boundary is not. gh-review was the instance filed;
 # this wrapper had the same ordering and is corrected in the same commit rather than left to be
 # rediscovered from the other side of the boundary.
+#
+# BOTH FORMS OF THE IMPLEMENTER IDENTITY, and the App key is checked FIRST because it is the live
+# one. This wrapper refused a bot token and nothing else, so once the implementer identity moved to
+# an App key (`decisions/0014`) the assertion "the implementer identity is absent" was being made by
+# checking for a credential that no longer carries it — and a box holding `quince-coder.pem` could
+# author with gh-coder and approve with gh-review while both wrappers reported the separation
+# intact. quince#203 fixed exactly this in `preflight`'s arch arm and said so; quince#204 is the
+# remainder. `preflight` gates whether the box STARTS, these gate every action it takes.
+CODER_KEY="${QUINCE_CODER_KEY_FILE:-$_home/.config/quince/quince-coder.pem}"
+if [ -f "$CODER_KEY" ]; then
+	printf 'gh-arch: an IMPLEMENTER APP KEY is present at %s.\n' "$CODER_KEY" >&2
+	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
+	printf 'gh-arch: author and approve its own work. Remove it, or run gh-coder on the implementer box.\n' >&2
+	exit 1
+fi
+# The bot token stays a refusal alongside it: `decisions/0014` condition 1 requires that credential
+# to be left in place wherever it lives, so a box can hold it AND the App key, and both are the
+# implementer identity. Refusing beside either is the only reading that stays true.
 if [ -f "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" ]; then
 	printf 'gh-arch: a BOT TOKEN is present at %s.\n' "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" >&2
 	printf 'gh-arch: this machine can approve; holding the implementer identity too would let one box\n' >&2
