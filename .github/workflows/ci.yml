@@ -4,6 +4,22 @@ name: ci
 # every gate runs inside the pinned toolchain containers the Makefile builds from
 # deploy/Dockerfile. Running from a fresh checkout is what independently proves the
 # fresh-clone property (qn.0 gate). Toolchain versions are pinned in versions.env.
+#
+# SCOPE is a GIT RANGE and nothing else. The Makefile is handed `origin/main...HEAD` and
+# decides, in bin/gate-scope, which gates a change can actually affect; absent SCOPE it runs
+# everything, which is what every local invocation still does. Nothing forge-shaped enters the
+# Makefile — a Forgejo workflow would pass the same string.
+#
+# `fetch-depth: 0` is REQUIRED, not tidiness. Measured on run 30423722740: the default
+# checkout is `--depth=1` fetching one ref, `+<sha>:refs/remotes/pull/N/merge`, so
+# `origin/main` does not exist and the range cannot resolve. gate-scope fails safe there —
+# it runs every gate and says why — so getting this wrong costs the saving, never coverage.
+#
+# THE ONE CONDITIONAL, and it is a VALUE rather than a decision: on `push` to main there is no
+# base to diff against — `origin/main...HEAD` is empty and would skip everything on the very
+# run that proves main is green. So SCOPE is set only for pull requests, and main always runs
+# the full ladder. Same justification as pr-title.yml's `${{ github.repository }}`: forge-set,
+# constrained, not contributor-controlled.
 
 on:
   push:
@@ -17,28 +33,37 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SCOPE: ${{ github.event_name == 'pull_request' && 'origin/main...HEAD' || '' }}
+
 jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Docker (with buildkit) is preinstalled on ubuntu-latest; the Makefile autodetects
       # it and runs each gate in its toolchain container. No language setup needed.
       - name: Gate ladder
-        run: make gates
+        run: make gates SCOPE="$SCOPE"
 
   image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Build production image (no push)
-        run: make image
+        run: make image SCOPE="$SCOPE"
 
   e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Builds the image, boots `quince serve --demo`, and runs the Playwright stories
       # (stories 1-2) in the official Playwright container against it.
       - name: Playwright e2e (demo mode)
-        run: make gates-ui-e2e
+        run: make gates-ui-e2e SCOPE="$SCOPE"
