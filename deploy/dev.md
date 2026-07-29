@@ -19,9 +19,14 @@ with byte-identical toolchains. All versions are pinned in one place: `versions.
 
 **Don't have a box to run gates on?** [`devct/`](devct/README.md) provisions one on any Proxmox
 host: it builds a template carrying a container runtime and a pre-warmed toolchain cache, then
-creates and destroys disposable containers from it — one per unit of work, reachable as
-`quince-dev-N`, arriving at a green gate ladder in about three minutes. It runs on a scoped API
-token; the only root it needs is one announced block when the template itself is (re)built.
+clones a persistent box from it — `devct create --name <host> --role <implementer|arch>` —
+arriving at a green gate ladder in about three minutes. It runs on a scoped API token; the only
+root it needs is one announced block when the template itself is (re)built.
+
+The numbered `quince-dev-N` series it can also create is **retired**: the Operator ruled on
+2026-07-28 that there are no per-unit-of-work dev containers and the session host *is* the work
+host, so gates run in a clone on that box rather than over ssh. The verbs still exist and the
+directory is load-bearing — see [`devct`](devct/devct)'s own header for which half is which.
 
 ## The gate ladder
 

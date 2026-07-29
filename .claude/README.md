@@ -52,7 +52,7 @@ it exists.
 entrypoints: the `make` gate targets, ordinary `git` and `gh` verbs, the container runtimes
 that every gate runs inside, and the documentation domains that the
 *version-pins-and-interface-facts-are-looked-up-live* rule sends you to. It also carries the
-**reference environment** — a Proxmox host and disposable dev containers — under convention
+**reference environment** — a Proxmox host and the containers it provisions — under convention
 names only. Those entries are inert on a machine where the names don't resolve, so nothing
 about this repo requires Proxmox: it is the setup that is documented and known to work, not
 a requirement.
@@ -69,23 +69,49 @@ cp .claude/settings.local.json.example .claude/settings.local.json
 
 The committed allowlist refers to hosts by convention, never by address:
 
-| Convention | Means | Bound by |
-| --- | --- | --- |
-| `quince-pve` | the hypervisor that hosts the dev containers (reference env: Proxmox VE) | an ssh `Host quince-pve` stanza in your `~/.ssh/config`, or your own alias in `settings.local.json` |
-| `quince-dev-N` | a disposable dev container: container runtime, no language toolchains, one per unit of work | `Host quince-dev-1`, `quince-dev-2`, … in `~/.ssh/config`; the allowlist matches `quince-dev-*` |
+| Convention | Means | Bound by | State |
+| --- | --- | --- | --- |
+| `quince-pve` | the hypervisor that hosts the containers (reference env: Proxmox VE) | an ssh `Host quince-pve` stanza in your `~/.ssh/config`, or your own alias in `settings.local.json` | live |
+| `quince-dev-N` | a disposable dev container, one per unit of work | `Host quince-dev-1`, `quince-dev-2`, … in `~/.ssh/config`; the allowlist matches `quince-dev-*` | **retired** — below |
 
-An ssh alias is the whole binding — `ssh quince-dev-1 'make -C /root/quince gates'` works
-and matches the allowlist, while the real address stays on your machine. **The tooling that
-creates these containers now exists**: `deploy/devct/` ([its README](../deploy/devct/README.md))
-builds the template and creates, lists and destroys the containers, and it *generates* the
-`quince-dev-N` aliases into `~/.ssh/quince-devct.conf` — so the convention this file describes is
-maintained by a program rather than by hand. One line in your own `~/.ssh/config` connects them:
+An ssh alias is the whole binding — `ssh quince-pve pct list` works and matches the allowlist
+while the real address stays on your machine. That is the property the table exists for, and it
+still holds for `quince-pve`. It no longer describes how work reaches a gate host.
+
+**The boxes that run sessions are not in that table, because nothing sshes to them.**
+`quince-runner` (implementer) and `quince-arch` (architect) are persistent hosts; a session runs
+*on* one, clones into `$HOME/scratch/<runner>/`, and runs `make gates` there. No alias, no
+allowlist entry, no remote invocation. `deploy/devct/` ([its README](../deploy/devct/README.md))
+is still what builds them — `devct-template`, `onboard`, `doctor`, `list`, and
+`create --name <host> --role <implementer|arch>` are that path, and `/etc/quince-devct-stamp` on
+both boxes records that it is what made them (quince#181).
+
+**`quince-dev-N` is the retired half of that same toolkit.** The Operator ruled on 2026-07-28
+that there are no dev containers and the runner is the work host, which retires `devct create <n>`'s
+numbered aliases, `destroy` as a routine step, and `deploy`. **Cite the ruling, not the issue:** it
+is a [comment on quince-devlog#45](https://github.com/novkostya/quince-devlog/issues/45#issuecomment-5101807117),
+and that issue's *body* is the spike that preceded it — which still lists "the implementer creates
+its own dev CT … one runner, one CT" under **Settled**. Anyone who checks the bare number lands on
+text that says the opposite of the decision.
+
+Two things follow, and they point in opposite directions on purpose:
+
+- **The verbs still exist, and `deploy/devct/` must not be deleted.** The ruling retired a
+  *workflow*, not the toolkit, and quince#181 records a session coming within one command of
+  deleting the directory on the strength of three stale sources that all predated the same change.
+  It is the only reproducible way to rebuild either box.
+- **The two `quince-dev-*` allowlist entries are left standing, inert rather than wrong.** Removing
+  them is part of re-pointing every `devct` reference in this repo, which is quince#205's second
+  half; doing it here would be a config change smuggled into a documentation fix.
+
+`devct create <n>` still generates `quince-dev-N` aliases into `~/.ssh/quince-devct.conf`, and
+`devct onboard` still prints the one line that includes them (it does not edit your ssh config):
 
 ```
 Include ~/.ssh/quince-devct.conf
 ```
 
-`devct onboard` prints that line; it does not edit your ssh config.
+Nothing in the current workflow needs either.
 
 ## Notes on individual entries
 
