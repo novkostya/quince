@@ -89,10 +89,14 @@ Include ~/.ssh/quince-devct.conf
 
 ## Notes on individual entries
 
-- **`make` targets are listed one by one**, plus `make gates *` / `make image *` for the
-  combined and variable forms (`make image push REGISTRY=…`, `make image IMAGE_TAG=…`). Pass
-  variables *after* the target: an allow rule doesn't match past a leading `VAR=value`
-  assignment, so `IMAGE_TAG=x make image` prompts while `make image IMAGE_TAG=x` doesn't.
+- **`make` targets are listed one by one**, plus `make gates *` / `make image *` /
+  `make privacy-check *` for the combined and variable forms (`make image push REGISTRY=…`,
+  `make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md`). Pass variables *after* the
+  target: an allow rule doesn't match past a leading `VAR=value` assignment, so
+  `IMAGE_TAG=x make image` prompts while `make image IMAGE_TAG=x` doesn't. **A bare entry does
+  not cover the variable form** — `Bash(make privacy-check)` matched only the argument-less
+  invocation while every form canon instructs carries `REF=`, which is quince#214 and is the
+  reason the `*` twin is not optional for any target a skill parameterises.
 - **`Bash(nerdctl *)` / `Bash(docker *)` are broad on purpose** — every gate runs inside a
   pinned toolchain container, so a narrower rule would prompt on every gate. Be aware that
   `docker run` and `docker exec` can run arbitrary code: this grant assumes the box is a
@@ -104,20 +108,36 @@ Include ~/.ssh/quince-devct.conf
 - **`Bash(ssh quince-pve pct *)`** is narrow deliberately. Host-side container lifecycle is
   moving to a scoped API token (pr.2), and root on the hypervisor is meant to be rare and
   supervised, not a standing convenience.
-- **`bin/gh-bot` is allowlisted, and `GH_TOKEN=… gh …` is not — deliberately.** An allow rule
-  never matches past a leading `VAR=value` assignment (same reason `make image IMAGE_TAG=x` is
-  written in that order above), so `Bash(gh pr *)` grants nothing to a session acting as the
-  bot: every PR, issue and body edit would prompt. The wrapper reads the token from its file,
-  clears any inherited `GITHUB_TOKEN`, and `exec`s `gh` — token in the process environment,
-  never in argv. Missing token file = a loud refusal, never a silent fall back to whoever is
-  signed in, because that would author implementer output under the wrong identity. Put it on
-  your `PATH` (`ln -s "$PWD/bin/gh-bot" ~/.local/bin/gh-bot`) so `gh-bot pr create …` works from
-  any directory; the two path-relative forms are allowlisted for sessions run from a repo root.
+- **The forge wrappers are allowlisted, and `GH_TOKEN=… gh …` is not — deliberately.** An allow
+  rule never matches past a leading `VAR=value` assignment (same reason `make image IMAGE_TAG=x` is
+  written in that order above), so `Bash(gh pr *)` grants nothing to a session acting as an
+  identity other than the logged-in one: every PR, issue and body edit would prompt. Each wrapper
+  instead resolves its own credential and `exec`s the real tool with the secret in the process
+  environment, never in argv. A missing credential is a loud refusal, never a silent fall back to
+  whoever is signed in, because that would author output under the wrong identity. Put the one your
+  seat uses on your `PATH` (`ln -s "$PWD/bin/gh-coder" ~/.local/bin/gh-coder`) so
+  `gh-coder pr create …` works from any directory; the path-relative forms are allowlisted too, for
+  sessions run from a repo root.
+  - `bin/gh-coder` + `bin/git-coder` — the **implementer**, a GitHub App. `git-coder` exists
+    because git has no idea what an App is: it is both a credential *helper* (what `/kickoff` §3
+    wires into a clone) and a `git` wrapper you can call directly, and either way the installation
+    token reaches git on a pipe rather than in a push URL.
+  - `bin/gh-arch` — the **architect**. `bin/gh-review` — the **reviewer** App, which is also how
+    canon is authored (`/architect` §1).
+  - `bin/gh-bot` — the **retired** implementer machine account, suspended 2026-07-28. Its entries
+    are inert: the token cannot authenticate. They stay because `quince-devlog` `decisions/0014`
+    condition 1 is that nothing is tidied away — the intact record is what makes the good-faith
+    claim checkable — and removing an allowlist line is close enough to tidying to be worth not
+    doing by reflex.
 - **`Bash(bin/forge-watch *)` is allowlisted because the loop cannot ask.** The watcher runs
   detached and ticks on an interval; a permission prompt per tick would stall the whole coroutine on
   a human tap, which is the one thing this loop exists to remove. It is also the cheapest grant in
   the file: `forge-watch` reads the forge through whichever `gh` wrapper the caller names, writes one
   JSON state file per repo under `$XDG_STATE_HOME`, and holds no credential of its own.
+  `bin/scratch-reap` is allowlisted for the mirror-image reason: canon tells every session to make
+  a fresh clone per unit of work and nothing removed them, so 33 accumulated in two days
+  (quince#45, quince#111). A reaper a session has to ask permission to run is a reaper that does
+  not run. It reaps `$HOME/scratch/<runner>` and only that root.
 - **`Read(~/.config/quince/**)` is denied.** That directory holds the bot token and other
   credentials; denying the Read tool keeps their contents out of a transcript. Piping a
   token into an environment variable (`GH_TOKEN=$(cat …)`) or into git's credential helper
