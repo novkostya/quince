@@ -1,0 +1,145 @@
+#!/bin/sh
+# gh-coder — run `gh` as the implementer identity: a GitHub App, not a person and not a bot account.
+#
+# THE FOURTH WRAPPER, and the second whose identity is not a user account. `bin/gh-bot` held the
+# implementer identity in a personal machine account until GitHub suspended it on 2026-07-28 with no
+# reason given and an unanswered appeal. `quince-devlog` `decisions/0014` rules that the identity
+# moves to a GitHub App owned by `novkostya` — never to a second personal account, because a second
+# account would be the one move that could fairly be read as evasion, while an App owned by the same
+# account conceals nothing and is the sanctioned mechanism. `quince-review` has run exactly this way
+# since quince#134.
+#
+# WHAT REPLACES WHAT. `gh-bot` is NOT deleted and must not be: condition 1 of that decision is that
+# nothing is tidied away, because leaving the record intact is what makes the good-faith claim
+# checkable rather than merely asserted. It stays, it fails with `Your account was suspended`, and
+# that is the honest state of it.
+#
+# Same allowlist reason as the other three: a permission rule never matches past a leading
+# `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
+set -eu
+
+# HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. Resolved from the passwd database
+# rather than assumed, so the same invocation works from a shell, from an OpenRC service (which gets
+# no HOME, and that is what took the arch box down after a reboot) and from cron.
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}"
+[ -n "$_home" ] || {
+	printf 'gh-coder: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
+	printf 'gh-coder: set QUINCE_CODER_KEY_FILE and QUINCE_CODER_APP_ID_FILE explicitly.\n' >&2
+	exit 1
+}
+
+KEY_FILE="${QUINCE_CODER_KEY_FILE:-$_home/.config/quince/quince-coder.pem}"
+APP_ID_FILE="${QUINCE_CODER_APP_ID_FILE:-$_home/.config/quince/quince-coder.app-id}"
+API="${QUINCE_GITHUB_API:-https://api.github.com}"
+AH="Accept: application/vnd.github+json"
+
+die() {
+	printf 'gh-coder: %s\n' "$1" >&2
+	shift
+	for line in "$@"; do printf 'gh-coder: %s\n' "$line" >&2; done
+	exit 1
+}
+
+# IDENTITY BEFORE DEPENDENCIES (quince#157), AND THE BOUNDARY RUNS THE OTHER WAY HERE.
+#
+# `gh-review` and `gh-arch` refuse when the IMPLEMENTER identity is present, because those seats can
+# approve and must not also author. This wrapper IS the authoring seat, so the credentials it must
+# refuse to sit beside are the APPROVING ones: the reviewer App key and the architect token. Same
+# property, `approver ≠ author`, asserted from the third corner.
+#
+# Ordered above the dependency loop for the reason quince#157 records: an environment refusal invites
+# a repair, and a session repairing its way past this one ends up holding both identities on one box.
+# A boundary refusal must outrank an environment refusal because the environment is meant to be fixed
+# and the boundary is not. It needs nothing from the loop — `$_home` is resolved and `[ -f ]` is a
+# builtin — so ordering it first costs nothing.
+REVIEW_KEY="${QUINCE_REVIEW_KEY_FILE:-$_home/.config/quince/quince-review.pem}"
+if [ -f "$REVIEW_KEY" ]; then
+	die "a REVIEWER APP KEY is present at $REVIEW_KEY." \
+		"This machine authors; holding the reviewer identity too would let one box write a change" \
+		"and approve it. Remove it, or run gh-review on the reviewer box."
+fi
+ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
+if [ -f "$ARCH_TOKEN" ]; then
+	die "an ARCHITECT CREDENTIAL is present at $ARCH_TOKEN." \
+		"That seat merges. A box that can author and merge is the whole of what the two-seat design" \
+		"exists to prevent. Remove it, or run gh-arch on the architect box."
+fi
+
+# NOT a refusal: a suspended `quince-bot` token may still sit beside this key, and decision 0014
+# requires that it be left in place. Both are the IMPLEMENTER identity, so holding them together
+# crosses no boundary — it is one seat with an old credential and a new one. Said explicitly because
+# the three checks above make "another token file is present" look like the thing that is banned,
+# and a future reader deleting the bot token to satisfy a rule that does not exist would destroy the
+# record that decision depends on.
+
+if [ $# -eq 0 ]; then
+	printf 'usage: gh-coder <gh arguments...>\n' >&2
+	printf '  runs gh as the quince-coder App, minting a fresh installation token per call\n' >&2
+	printf '  key %s\n  app id %s\n' "$KEY_FILE" "$APP_ID_FILE" >&2
+	exit 2
+fi
+
+for tool in gh openssl curl jq; do
+	command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed" \
+		"this wrapper needs gh, openssl, curl and jq. On Alpine: apk add openssl curl jq." \
+		"openssl in particular is NOT in a minimal Alpine image and RS256 signing cannot proceed without it."
+done
+
+[ -f "$KEY_FILE" ] || die "no App private key at $KEY_FILE" \
+	"Refusing to fall back to the ambient gh credentials: doing so would author as whoever is signed" \
+	"in, which on the Operator's own machine means authoring as the Operator — the exact confusion" \
+	"quince#47 records and quince-devlog#118 was caught committing." \
+	"Generate a key from the App's settings page and place it there, mode 600."
+[ -f "$APP_ID_FILE" ] || die "no App id at $APP_ID_FILE" \
+	"The id is not a secret — it is on the App's settings page — but it is environment-specific," \
+	"so it is configuration and not a constant in a public repository."
+
+APP_ID=$(cat "$APP_ID_FILE")
+
+# --- mint a JWT, then exchange it for an installation token ----------------------------------
+# NOT CACHED, deliberately, and for the same reasons as gh-review: an installation token lives one
+# hour, so a cache would be a second secret at rest with a lifetime this wrapper would have to
+# manage, plus an invalidation bug waiting to happen. Two HTTPS round-trips per call is the price.
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+now=$(date +%s)
+header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+# 60s of backdate absorbs clock skew between this box and GitHub; 9 minutes of life is well inside
+# the 10-minute maximum GitHub accepts for an App JWT.
+payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
+signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -binary -sign "$KEY_FILE" | b64url)
+jwt="$header.$payload.$signature"
+
+installations=$(curl -sS --fail-with-body -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations" 2>&1) || die "could not list installations" \
+	"$(printf '%s' "$installations" | head -n 3)" \
+	"Most likely: the key does not match app id $APP_ID, or the key has been revoked."
+
+count=$(printf '%s' "$installations" | jq -r 'if type=="array" then length else 0 end')
+case "$count" in
+0) die "app id $APP_ID has no installations" \
+	"The App exists but is installed nowhere, so it can reach no repository. Install it on the" \
+	"account and select the repositories in .claude/forge-set." ;;
+1) : ;;
+*) # Picking .[0] would work today and silently pick the wrong one later. A wrapper that guesses
+	# which identity it is acting as is the thing this file exists to prevent.
+	[ -n "${QUINCE_CODER_INSTALLATION_ID:-}" ] || die \
+		"app id $APP_ID has $count installations; refusing to guess which one to act as." \
+		"Set QUINCE_CODER_INSTALLATION_ID to the one this box should use." ;;
+esac
+
+install_id="${QUINCE_CODER_INSTALLATION_ID:-$(printf '%s' "$installations" | jq -r '.[0].id')}"
+
+token=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations/$install_id/access_tokens" 2>&1) || die \
+	"could not mint an installation token for installation $install_id" \
+	"$(printf '%s' "$token" | head -n 3)"
+
+GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
+[ -n "$GH_TOKEN" ] || die "installation $install_id returned no token" \
+	"Refusing to continue: an empty token would fall through to the ambient credentials."
+
+unset GITHUB_TOKEN
+export GH_TOKEN
+
+exec gh "$@"

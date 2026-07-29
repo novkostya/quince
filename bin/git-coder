@@ -1,0 +1,49 @@
+#!/bin/sh
+# git-coder — run `git` with the quince-coder App as the remote credential.
+#
+# WHY A FOURTH WRAPPER AND NOT A FLAG ON gh-coder. `gh-coder` wraps `gh`; pushing a branch is `git`,
+# and git has no idea what a GitHub App is. Something has to hand git a username and a password, and
+# the App's password is an installation token that lives one hour and must be minted per use.
+#
+# THE TOKEN NEVER REACHES argv, WHICH IS THE WHOLE DESIGN CONSTRAINT. `git push
+# https://x-access-token:$TOKEN@github.com/...` is the form every tutorial shows and it is banned
+# here: argv is world-readable in /proc on a shared box, it lands in shell history, and it is the
+# single most common way a short-lived credential becomes a long-lived one. A credential helper is
+# the mechanism git provides for exactly this — the helper writes `password=` on its STDOUT and git
+# reads it on a pipe, so the value exists only in that pipe and in the two processes' memory.
+#
+# NOT CACHED, matching gh-coder: the token is minted per invocation, so there is no second secret at
+# rest and no invalidation bug to write. The cost is gh-coder's two HTTPS round-trips per git call.
+#
+# SCOPED TO github.com, deliberately. A blanket `credential.helper` would offer this App's token to
+# any host git happens to talk to, which is how a credential leaks to a mirror or a typo'd remote.
+set -eu
+
+ME=git-coder
+_dir=$(dirname "$0")
+
+command -v git >/dev/null 2>&1 || {
+	printf '%s: git is not installed\n' "$ME" >&2
+	exit 1
+}
+[ -x "$_dir/gh-coder" ] || {
+	printf '%s: cannot find gh-coder beside me at %s/gh-coder\n' "$ME" "$_dir" >&2
+	printf '%s: this wrapper is only a credential shim — gh-coder is what mints the token.\n' "$ME" >&2
+	exit 1
+}
+
+if [ $# -eq 0 ]; then
+	printf 'usage: git-coder <git arguments...>\n' >&2
+	printf '  runs git with the quince-coder App as the credential for github.com\n' >&2
+	printf '  the token is minted per call by gh-coder and never appears in argv\n' >&2
+	exit 2
+fi
+
+# The helper is a shell function git invokes with `get`. It answers on stdout and exits. `$GHC` is
+# resolved to an absolute path first, because git runs the helper with an unspecified cwd — a
+# relative path here works from the repository root and fails from anywhere else, which is the kind
+# of bug that only shows up on the one invocation nobody tested.
+GHC=$(cd "$_dir" && pwd)/gh-coder
+export GHC
+
+exec git -c "credential.https://github.com.helper=!f() { [ \"\$1\" = get ] || exit 0; printf 'username=x-access-token\npassword=%s\n' \"\$(\$GHC auth token)\"; }; f" "$@"
