@@ -196,21 +196,49 @@ around a refusal. The table runs in one direction with **three** exceptions, all
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **`CAN` re-run a workflow run** — and the architect and the App cannot; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
 | **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
 
-**Re-running CI is a `CAN`, and `workflows:` is not `actions:`.** Most entries above describe
-something the implementer lacks and a more privileged seat holds; here **`quince-bot` can re-run a
-workflow and the architect and the App cannot** (measured,
-quince#141 — `run_attempt` increments, the failed attempt preserved). So on a red check the ask is
-*"re-run it"*, addressed to the implementer, rather than a push or an escalation. Two permissions
-sit within a few lines of each other in this table and look like opposite claims about one word:
-**`workflows: write` pushes workflow *files*** (the Operator row), **`actions: write` operates
-workflow *runs*** (this one). They are different grants, and neither implies the other. One more
-trap worth naming: **`gh run rerun` exits `0` and prints its refusal** — read the output, not the
-exit code.
+**NO AGENT SEAT CAN RE-RUN A WORKFLOW RUN, and `workflows:` is not `actions:`.** All three refuse.
+Measured 2026-07-29, both remaining agent identities, within minutes of each other:
+
+```
+bin/gh-coder  run rerun 30467245714 --failed   → Resource not accessible by integration   (exit 1)
+bin/gh-review run rerun 30467245714 --failed   → Resource not accessible by integration   (exit 1)
+```
+
+**This paragraph used to say the opposite, and it was the last `CAN` standing.** `quince-bot` really
+could re-run — a classic `repo`-scoped PAT carries `actions`, and quince#141 measured `run_attempt`
+incrementing with the failed attempt preserved. That capability was a property of **the token type**,
+not of the seat, so it did not survive `decisions/0014` moving the implementer identity to a GitHub
+App: an installation has `actions: write` only if granted, and this one was not. The account is
+suspended besides. Two permissions still sit a few lines apart in this table and still look like
+opposite claims about one word: **`workflows: write` pushes workflow *files*** (the Operator row),
+**`actions: write` operates workflow *runs***. Different grants, neither implying the other.
+
+**So "ask the implementer to re-run it" is an instruction nobody can follow**, and it is the shape
+this project keeps paying for — a document naming a mechanism that has since moved. It survived
+because the capability was recorded against a *seat* when it belonged to a *credential*; when the
+credential changed, nothing pointed here.
+
+**What to do instead, and it is better than a re-run was:** `gh pr update-branch --rebase` clears
+`BEHIND` **and** re-triggers the workflow on the new head. One command, both problems, available to
+the architect and the App — measured on quince#216, 2026-07-29, where it produced a fresh `gates`
+run without anybody re-running anything. It is the merging seat's to run, so a red check on a
+landable PR is now the **reviewer's** action rather than an ask addressed to the author. Note it
+moves the head: re-read the range-diff before letting an approval stand, because GitHub does **not**
+necessarily dismiss the approval (it did not on quince#216 — verified pure by identical patch
+hashes, not assumed).
+
+Only the **Operator** can genuinely re-run a run in place. Escalate only if the rebase is wrong for
+the PR — a rebase you did not want is a worse outcome than a wait.
+
+**The old trap here said `gh run rerun` exits `0` while printing its refusal. It exits `1`** from
+both wrappers above. Do not swap one memorised exit code for another: read the output. That the
+recorded code was wrong *and* the recorded capability was wrong, in the same three lines, is the
+argument for reading rather than remembering.
 
 **The newest `CAN` is a hazard rather than a convenience, and it is the only one of the three
 that is: `quince-bot` can DELETE any discussion in `quince-devlog`.** Measured 2026-07-28,
