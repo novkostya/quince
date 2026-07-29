@@ -178,15 +178,26 @@ fi
 # --- 9. THE MAKEFILE HONOURS IT, and refuses an empty ladder -----------------------------------
 # Parts 1-8 pin the script. This pins the WIRING, which is where a correct script still produces a
 # ladder that runs nothing.
-# `env -u SCOPE`, and this line is the one CI taught us. SCOPE reaches make through the ENVIRONMENT
-# as readily as through the command line — `SCOPE ?=` treats an exported value as already set — and
-# ci.yml sets it for the whole job. So inside CI there is no such thing as "no SCOPE", and this
-# assertion tested a condition that could not hold there: it passed on two developer machines and
-# failed on the first real run, which is the only place the feature is actually used.
+# `SCOPE=` ON THE COMMAND LINE, which is the only channel that beats all the others. SCOPE reaches
+# make THREE ways and this assertion has now been wrong about two of them:
 #
-# The unset is the fix, not a workaround: the assertion is ABOUT the no-SCOPE default, so it has to
-# construct that state rather than assume it.
-if env -u SCOPE make -n gates 2>/dev/null | grep -q 'toolchain-go'; then
+#   environment      ci.yml's `env:` block — `SCOPE ?=` treats an exported value as already set
+#   command line     `make gates SCOPE=…`, which is how ci.yml actually invokes it
+#   MAKEFLAGS        a command-line override PROPAGATES TO SUB-MAKES through MAKEFLAGS, so the
+#                    nested `make` this assertion runs inherits it even with the variable unset
+#
+# quince#193 fixed the first with `env -u SCOPE` and that is not enough: measured under a real
+# `make gates SCOPE=…`, MAKEFLAGS carried the override past the unset and this assertion failed
+# again. Stripping channels is a losing game — each fix covers the channel that was noticed.
+#
+# An explicit empty value on the command line CONSTRUCTS the no-SCOPE state instead, and outranks
+# environment and MAKEFLAGS both. That is the same lesson as last time, finally applied properly:
+# an assertion about a default has to build the default.
+#
+# The FEATURE is unaffected and the propagation is correct for it — `make gates SCOPE=X` should
+# scope the whole ladder, sub-makes included. It is only wrong for a test asserting the unscoped
+# case.
+if make -n gates SCOPE= 2>/dev/null | grep -q 'toolchain-go'; then
 	ok "make gates with no SCOPE still builds the full ladder"
 else
 	bad "make gates with no SCOPE no longer runs the product gates"
@@ -197,9 +208,17 @@ fi
 # developer could surprise themselves. Opt-in either way; never silent, because the skip announces
 # itself.
 if SCOPE='HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
-	ok "an EXPORTED SCOPE reaches make too — the env and the command line are equivalent"
+	ok "an EXPORTED SCOPE reaches make — that is what makes ci.yml's env: block work"
 else
 	bad "an exported SCOPE was ignored; ci.yml's env: block would silently do nothing"
+fi
+# The third channel, pinned because it is the one that bit twice: a command-line override reaches
+# NESTED makes through MAKEFLAGS. `gates-sh` invokes every suite as a sub-make, so this is the path
+# every gate actually runs under in CI.
+if MAKEFLAGS='SCOPE=HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
+	ok "SCOPE propagates to sub-makes via MAKEFLAGS — the channel env -u cannot close"
+else
+	bad "MAKEFLAGS did not carry SCOPE; the ladder would scope inconsistently between make levels"
 fi
 if make -n image SCOPE='HEAD...HEAD' 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "make image honours SCOPE and announces the skip rather than doing it quietly"
