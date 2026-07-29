@@ -238,7 +238,12 @@ So:
    session that reads its own heartbeat as a malfunction will either raise a false alarm or start
    distrusting the mechanism, and both are worse than the stall this replaced.
 
-2. **`ScheduleWakeup` stays as a fallback heartbeat, ≥1200 s — and it is NOT cover.** Its record
+2. **`ScheduleWakeup` requires `/loop` dynamic mode, and a session not started that way cannot arm
+   it at all.** Say the second channel is absent rather than reporting a fallback that was never
+   armed — an architect session hit exactly that on 2026-07-29. The watcher's own `--max-wait` is
+   the floor this protocol already relies on and is unaffected; redundancy is lost, not the loop.
+
+   **Where it is available, it stays a fallback heartbeat, ≥1200 s — and it is NOT cover.** Its record
    **differs by box, which is the whole reason to write the box down**: on the architect box it has
    delivered nothing across every arming measured, and on the runner it has delivered **once, roughly
    an hour after it was due** (quince#62 carries the dated measurements; do not copy the numbers here,
