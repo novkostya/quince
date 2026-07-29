@@ -93,6 +93,12 @@ both seats (quince#45):
 SCRATCH="$HOME/scratch/$(bin/forge-watch runner get)"
 mkdir -p "$SCRATCH" && cd "$SCRATCH"
 git clone -q https://github.com/novkostya/quince.git "pr-<n>" && cd "pr-<n>"
+# The private layer, WITHOUT WHICH THE PRIVACY SWEEP CANNOT RUN. `local/` is gitignored and lives
+# in the private repo, so a fresh clone never carries it and `privacy-check` exits 2 — DID NOT RUN.
+# That is the merge-blocking gate on the reviewer's own seat (quince#240). The path is the
+# provisioned location; `provision` and `preflight` both read the same variable, so an overridden
+# layer is honoured here too rather than being hardcoded away.
+ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local
 gh pr checkout <n> --repo novkostya/quince
 make gates                      # + make image / make gates-ui-e2e when the diff earns them
 ```
@@ -135,8 +141,18 @@ defect in a docs PR exactly as a failing test is in a code PR.
   wrong argument type (quince#105).
 
   Run it **from the repository being swept** — `--ref` resolves against the current directory's git
-  repo — and do **not** pass `--patterns`: it defaults to `./local`, which both clones carry, and
-  handing it a file instead of a directory produces a `2`. Prefer **your work clone's** copy of the
+  repo — and do **not** pass `--patterns`: it defaults to `./local`, **which a clone carries only
+  because somebody linked it there**, and handing it a file instead of a directory produces a `2`.
+  §2 does that for the quince clone; **a `quince-devlog` clone needs the same line**, and this skill
+  gives no clone block for one:
+
+  ```sh
+  ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local   # in the devlog clone too
+  ```
+
+  This clause used to read *"which both clones carry"*, flatly. That sentence is what stopped a
+  reader noticing §2 had no symlink line at all: it asserted the postcondition of a step that was
+  missing, so the gap read as satisfied (quince#240). Prefer **your work clone's** copy of the
   script over the launchpad's, since a stale one is exactly the one that exits `0` having checked
   nothing (quince#41) and the launchpad has been measured stale (quince#33). Full reasoning in
   `/report` §2. **Exit `2` is DID NOT RUN, not clean**: treat it as an owed sweep, never as a ticked

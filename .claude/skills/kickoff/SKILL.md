@@ -153,7 +153,10 @@ and the product checkout's `deploy/privacy/privacy-check` in the devlog, which h
 (quince#78; the form is in `/report` §2):
 
 ```sh
-ln -s /root/quince-local local   # the path is gitignored; git can never commit it
+# `local` is gitignored, so git can never commit it. The path comes from the same variable
+# `deploy/runner/provision` and `deploy/runner/preflight` both read, so a box provisioned with an
+# overridden layer is honoured rather than silently linked to somebody else's default.
+ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local
 ```
 
 This line used to say *"On the Operator's machine only"*. That was true when the Mac was where work
