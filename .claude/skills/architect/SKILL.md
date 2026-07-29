@@ -59,15 +59,36 @@ Collapsing `dead` into `absent` is how a restarted watch silently becomes a fres
 nothing changed" since a beginning it invented; collapsing `wedged` into `dead` is how you are told to
 start a second watcher beside a live one. Full reasoning: [`../../loop-protocol.md`](../../loop-protocol.md).
 
-## 1. Assert the identity boundary — and stop if it is wrong
+## 1. Declare the runner, THEN assert the identity boundary
+
+**Declare first, before anything reads or writes state.** `§4`'s checkout root and `§6`'s watch both
+derive from the runner name, and this skill never told you to set one — the same gap `/kickoff` had
+until quince#208. Undeclared, `forge-watch` cannot tell which watch is its own and refuses to arm.
+
+```sh
+bin/forge-watch runner set <name>     # ONCE, FIRST. Short, stable, yours: arch1, arch2, …
+```
+
+**The order is not cosmetic.** Declaring *after* seeding relocates the state directory — from the
+undeclared top-level path to `…/forge-watch/<name>` — which **orphans any observation already
+seeded** there, leaving the watch to diff against nothing. Measured on the architect box on
+2026-07-29, by a session that seeded, armed, was refused, declared, and found its seed stranded.
+A taken name is refused, so two sessions on one box cannot silently share a state directory.
 
 `approver ≠ author` is the authority model. It is structural only if the machine you are on holds
 one credential and not the other:
 
 ```sh
-[ -f ~/.config/quince/quince-bot.token ] && echo "BOT TOKEN PRESENT — stop"   # must NOT exist here
-bin/gh-review api /installation/repositories -q '.total_count'                # must answer with a count
+[ -f ~/.config/quince/quince-bot.token ]  && echo "BOT TOKEN PRESENT — stop"   # must NOT exist here
+[ -f ~/.config/quince/quince-coder.pem ]  && echo "CODER KEY PRESENT — stop"   # nor this
+bin/gh-review api /installation/repositories -q '.total_count'                 # must answer with a count
 ```
+
+**Both credentials, because the implementer identity moved.** This check named the bot token alone
+until 2026-07-29 — so once authoring moved to an App key (`decisions/0014`), "the implementer
+identity is absent" was being asserted by looking for a credential that no longer carries it. A box
+holding `quince-coder.pem` would have passed. `preflight` enforces both at start (quince#203); the
+wrappers do not yet (quince#204), so this check is the one that runs in between.
 
 **Verdicts are cast with `bin/gh-review`, which is a GitHub App and not a person.** That is
 quince#47's fix and the reason it is structural rather than a convention: a review from
@@ -137,7 +158,7 @@ also approves**, which is every other class in this repository.
 - **It refuses on multiple installations** → stop and set `QUINCE_REVIEW_INSTALLATION_ID`. The
   wrapper will not guess which identity it is acting as, and neither should you.
 - Verdicts and merges in later steps run through **`bin/gh-review`**, not bare `gh`, for the same
-  reason the implementer side uses `bin/gh-bot` (an allow rule never matches past a leading
+  reason the implementer side uses `bin/gh-coder` (an allow rule never matches past a leading
   `VAR=value`, so `GH_TOKEN=$(cat …) gh …` is unallowlistable by construction).
 
 The mirror image on the implementer side is `deploy/runner/preflight`; this is the same assertion

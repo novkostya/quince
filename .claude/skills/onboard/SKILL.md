@@ -76,7 +76,7 @@ Check, and report the result rather than assuming it:
 | `make help` prints "Runtime detected: …" | no container runtime → **no gate can run here**. Don't install anything: this box is a driver, gates belong on a container host (`deploy/dev.md`). |
 | `git --version`, `gh auth status` | can't push or open PRs from here |
 | `make privacy-check` exits 0 or 2 | **`2` means the gate cannot sweep on this box** and every sweep you owe is owed, not done — sanitize by hand against `CLAUDE.md` and say so with the head named. It no longer exits 0 in that state (quince#41). A provisioned box should have the private layer already (quince#44) |
-| `~/.config/quince/quince-bot.token` exists | absent → you cannot act as `quince-bot`; work from a fork or ask for the credential, never invent one |
+| `~/.config/quince/quince-coder.pem` exists | absent → you cannot author; ask for the credential, never invent one. `quince-bot.token` is the retired predecessor (decisions/0014) and its account is suspended |
 
 ## 6. Report — and stop
 
