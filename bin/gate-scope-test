@@ -223,7 +223,10 @@ fi
 # Run from a shell the bug is invisible, because MAKEFLAGS is empty there and the prefix wins. That
 # is why it survived review and why it has to be constructed rather than assumed — the third time
 # this repository has been bitten by an assertion that reads a state instead of building one.
-if MAKEFLAGS= SCOPE='HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
+# `MAKEFLAGS=''` and not a bare `MAKEFLAGS=`: shellcheck reads the bare form followed by another
+# assignment as SC1007, an accidental assignment with a stray space, and it is right to — the two
+# forms are indistinguishable by eye and only one of them is ever meant.
+if MAKEFLAGS='' SCOPE='HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "an EXPORTED SCOPE reaches make — that is what makes ci.yml's env: block work"
 else
 	bad "an exported SCOPE was ignored; ci.yml's env: block would silently do nothing"
