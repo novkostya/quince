@@ -1240,6 +1240,14 @@ replay() {
 				jq -c --argjson i "$_pi" '.issue_payloads[$i]' "$_f" >"$_tmp/payload.issue.$_pi"
 				_pi=$((_pi + 1))
 			done
+			# THE FIXTURES RECORD FACTS ABOUT PRs, NOT A WIRE FORMAT, and this is what keeps that true.
+			# The queue fetch moved from `gh pr list --json` to `gh api graphql` for cost, so the stub
+			# now has to answer in the GraphQL envelope — and re-recording six fixtures to chase a wire
+			# shape would have thrown away the recorded behaviour they exist to pin. The conversion
+			# lives in ONE file, shared with the three suites that build their own stub, because four
+			# copies of it would rot independently: bin/testdata/forge/gh-array-to-graphql.jq.
+			_inv="$(dirname "$0")/testdata/forge/gh-array-to-graphql.jq"
+			[ -f "$_inv" ] || die "missing $_inv — the loop stub cannot answer the queue fetch without it"
 			cat >"$_tmp/gh" <<EOF
 #!/bin/sh
 # stub gh for a loop fixture: the Nth call OF EACH KIND answers with the Nth recorded payload of that
@@ -1248,6 +1256,7 @@ replay() {
 # makes two kinds of call and a single queue would feed one kind's payload to the other.
 case "\$1" in
 issue) k=issue; n=$_ni ;;
+api)   k=pr; n=$_np; wire=graphql ;;
 *) k=pr; n=$_np ;;
 esac
 [ "\$n" -gt 0 ] || { printf 'stub: no %s payloads in this fixture\n' "\$k" >&2; exit 1; }
@@ -1256,7 +1265,11 @@ c=\$((c + 1))
 printf '%s\n' "\$c" >"$_tmp/calls.\$k"
 i=\$((c - 1))
 [ "\$i" -lt "\$n" ] || i=\$((n - 1))
-cat "$_tmp/payload.\$k.\$i"
+if [ "\${wire:-}" = graphql ]; then
+	jq -f "$_inv" "$_tmp/payload.\$k.\$i"
+else
+	cat "$_tmp/payload.\$k.\$i"
+fi
 EOF
 			chmod +x "$_tmp/gh"
 			command -v timeout >/dev/null 2>&1 ||
@@ -1496,6 +1509,74 @@ fetch_issues() {
 # ---------------------------------------------------------------------------
 FETCH_LIMIT=${FORGE_LIMIT:-20}
 
+# How many commits per PR the queue fetch asks for. See the note at the fetch: attribution reads at
+# most ONE, so any bound is lossless; 5 is headroom and costs the same as 1.
+FETCH_COMMITS=${FORGE_COMMITS:-5}
+
+# The queue query. Ordering matches `--search "sort:updated-desc"` exactly — verified against the
+# live forge, same 25 numbers in the same order, same `.[-1]` for the truncation guard to read.
+FETCH_QUERY='
+query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
+  repository(owner:$owner, name:$name) {
+    pullRequests(first:$n, orderBy:{field:UPDATED_AT, direction:DESC}) {
+      nodes {
+        number state updatedAt title headRefName mergedAt mergeStateStatus
+        mergedBy { __typename login }
+        closingIssuesReferences(first:20) { nodes { number } }
+        comments(last:40) { nodes { createdAt author { login } } }
+        reviews(last:40)  { nodes { state submittedAt author { login } } }
+        commits(last:$ncom) { nodes { commit {
+          committedDate
+          authors(first:1) { nodes { user { login } } }
+        } } }
+        rollup: commits(last:1) { nodes { commit { statusCheckRollup {
+          contexts(first:50) { nodes {
+            __typename
+            ... on CheckRun { name conclusion }
+            ... on StatusContext { context state }
+          } }
+        } } } }
+      }
+    }
+  }
+}'
+
+# GraphQL shape -> the array shape the rest of this file already consumes, so the shaping below,
+# the truncation guard and every fixture are untouched by this change.
+#
+# `mergedBy` IS PREFIXED AND COMMENT AUTHORS ARE NOT, and that asymmetry is `gh`'s, replicated here
+# rather than tidied: `gh` renders a Bot as `app/quince-review` for `mergedBy` and as bare
+# `quince-review` for comment and review authors. Measured, because it is not guessable. It is also
+# not cosmetic — `wake_worthy` filters on actor names, so normalising both the same way silently
+# reclassifies every App act. The equivalence suite caught it twice, once in each direction; reading
+# the code caught it neither time.
+#
+# AND AN UNRESOLVED COMMIT AUTHOR IS `""`, NOT `null`, WHICH IS BUG-FOR-BUG DELIBERATE. `gh` emits
+# `login: ""` for a commit author with no GitHub account; GraphQL gives `user: null`. The shaping
+# reads `.login // "unknown"`, and in jq an empty string is TRUTHY — so the incumbent path emits
+# `actor=` where its own comment (:1568) promises `unknown`. Mapping to `null` here would fix that,
+# and fixing it here would be wrong: this change is a COST change and must have no behavioural
+# delta, or the equivalence it claims is not the thing being proven. The empty-actor defect is real
+# and predates this change; it is OWED as its own issue, not yet filed — the implementer identity is
+# suspended and this session has no seat that can write to the forge.
+FETCH_NORMALISE='
+def merged_by: if . == null then null
+               elif .__typename == "Bot" then {login: ("app/" + .login)}
+               else {login: .login} end;
+def author:    if . == null then null else {login: .login} end;
+[ .data.repository.pullRequests.nodes[] | {
+    number, state, updatedAt, title, headRefName, mergedAt, mergeStateStatus,
+    mergedBy: (.mergedBy | merged_by),
+    closingIssuesReferences: [ .closingIssuesReferences.nodes[] | {number} ],
+    comments: [ .comments.nodes[] | {createdAt,   author: (.author | author)} ],
+    reviews:  [ .reviews.nodes[]  | {state, submittedAt, author: (.author | author)} ],
+    commits:  [ .commits.nodes[]  | {committedDate: .commit.committedDate,
+                                     authors: [ .commit.authors.nodes[] | {login: (.user.login // "")} ]} ],
+    statusCheckRollup: [ (.rollup.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
+                         | if .__typename == "CheckRun" then {name, conclusion}
+                           else {name: .context, conclusion: .state} end ]
+  } ]'
+
 tick() {
 	_state=$1
 	_repo=$2
@@ -1523,22 +1604,54 @@ tick() {
 	# work and merges, and spending the whole budget on history means recent activity can fall out
 	# of view while the window looks full.
 	#
-	# The field list is wider than the events strictly need, and the cost was measured rather than
-	# guessed: 92 KB → 229 KB per tick for a 20-PR window on this repo (2026-07-26). `comments` and
-	# `commits` carry bodies and messages that are thrown away by the shaping below — `gh pr list`
-	# cannot select subfields — and they are fetched anyway because they are the only way to answer
-	# WHO moved a PR. FORGE_LIMIT is the knob if that ever stops being a good trade.
+	# WHY THIS IS A HAND-WRITTEN QUERY AND NOT `gh pr list --json`. Cost, measured 2026-07-29 as
+	# `graphql.used` deltas on the live forge — and the cost is in GraphQL POINTS, not the REST bucket
+	# the earlier note was watching:
+	#
+	#   pr list --limit 25 WITH commits   27 points   400 KB      pr list --limit 5  with commits  5
+	#   pr list --limit 25 minus commits   1 point    210 KB      pr list --limit 10 with commits 10
+	#   this query, commits(last:5)        3 points     29 KB      issue view (full field set)     1
+	#
+	# `commits` is priced per requested row and every other field is flat, so it was 26 of the 27.
+	# `gh pr list --json` cannot bound a nested connection — that is the constraint the previous note
+	# recorded correctly — so the only way to bound it is to stop going through `pr list`.
+	#
+	# AND THE FIELD WAS NEARLY ALL WASTE. Attribution (:407) keeps only acts strictly newer than the
+	# previous updatedAt and then takes `last` — ONE element, read for two strings. Bounding at 5 is
+	# provably lossless for that: the bound keeps the newest 5 by date, so the maximum over any cutoff
+	# is always inside it. 5 rather than 1 is headroom, and free at this price.
+	#
+	# Proven, not asserted: bin/forge-fetch-equivalence-test drives both fetches against the live
+	# forge and compares the SHAPED observation plus attribution across every cutoff that can change
+	# the answer. Raw payloads legitimately differ — `gh` returns bodies, ids and reaction groups the
+	# shaping discards — so comparing raw would fail while proving nothing.
 	_raw=$(mktemp)
-	if ! "$_gh" pr list -R "$_repo" --state all --limit "$FETCH_LIMIT" \
-		--search "sort:updated-desc" \
-		--json number,state,updatedAt,title,headRefName,closingIssuesReferences,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus >"$_raw" 2>"$_raw.err"; then
+	_gql=$(mktemp)
+	if ! "$_gh" api graphql \
+		-f query="$FETCH_QUERY" \
+		-F owner="${_repo%%/*}" -F name="${_repo##*/}" \
+		-F n="$FETCH_LIMIT" -F ncom="$FETCH_COMMITS" >"$_gql" 2>"$_raw.err"; then
 		# A `reason=` with nothing after it reads as "there was no reason" rather than "the tool could
 		# not tell" — a wrapper that fails silently produces exactly that, and it was doing so.
 		_why=$(head -1 "$_raw.err" 2>/dev/null | tr ' ' '_' | cut -c1-60)
 		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" "${_why:-no_stderr_from_gh}"
-		rm -f "$_raw" "$_raw.err"
+		rm -f "$_raw" "$_raw.err" "$_gql"
 		return 1
 	fi
+	# GraphQL answers 200 with an `errors` array for a query that resolved to nothing — a failed fetch
+	# wearing a success exit code, which is the shape this tool exists to refuse.
+	if jq -e 'has("errors")' "$_gql" >/dev/null 2>&1; then
+		_why=$(jq -r '.errors[0].message // "graphql_error"' "$_gql" 2>/dev/null | tr ' ' '_' | cut -c1-60)
+		printf 'event=fetch-failed repo=%s reason=%s\n' "$_repo" "${_why:-graphql_error}"
+		rm -f "$_raw" "$_raw.err" "$_gql"
+		return 1
+	fi
+	if ! jq "$FETCH_NORMALISE" "$_gql" >"$_raw" 2>/dev/null; then
+		printf 'event=fetch-failed repo=%s reason=could_not_normalise_payload\n' "$_repo"
+		rm -f "$_raw" "$_raw.err" "$_gql"
+		return 1
+	fi
+	rm -f "$_gql"
 	# A payload that does not parse, or is not an array, is a failed fetch wearing a success exit
 	# code. Assert the shape before treating it as an observation.
 	if ! jq -e 'type == "array"' "$_raw" >/dev/null 2>&1; then

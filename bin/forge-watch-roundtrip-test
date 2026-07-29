@@ -48,7 +48,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-printf '#!/bin/sh\nprintf "[]\\n"\n' >"$WORK/gh"
+# An EMPTY queue, in the shape the fetch now speaks. Spelled out rather than piped through the
+# shared converter: an empty array converts to exactly this, and a stub whose only job is to say
+# "nothing here" should not need a file on disk to say it.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+printf '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\n'
+STUB
 chmod +x "$WORK/gh"
 STATE=$WORK/state.json
 REPO=novkostya/quince
