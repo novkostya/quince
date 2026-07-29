@@ -186,5 +186,51 @@ for _doc in $DOCS; do
 	fi
 done
 
+# --- 4. HANDLED ------------------------------------------------------------------------------
+# Every class `watch_report` can return must have its OWN arm in `owed_decide`. Same shape as
+# section 3 — an enumeration that has to stay total — aimed at a CONSUMER IN CODE rather than at a
+# document, and it exists because section 3 structurally could not see this one (quince#195).
+#
+# `orphaned` got its own exit code in quince#167 so that it could be NAMED, and `owed`'s message
+# switch was never extended. It fell to the catch-all and told sessions "the watch class could not be
+# read (10)". The decision stayed right — `owed_decide` treats everything but live/starting as owed,
+# so the fail-safe held — which is precisely why nothing caught it: the exit code was correct and
+# only the sentence was wrong.
+#
+# quince#183 had landed hours earlier for this exact shape (a class added, an enumeration not
+# updated) and its fix put `bin/forge-watch --help` on the DOCS list above. That gate reads documents
+# for exit VOCABULARY; `owed_decide` enumerates the same classes as a shell `case` over class
+# numbers, with no such vocabulary anywhere near it, so it was invisible. Fixing the instance without
+# this section leaves the class open for a third time.
+#
+# It asserts an arm EXISTS, not that its text is right — the same limit section 3 states about prose,
+# and for the same reason. `owed-an-orphaned-watch-names-its-remedy.json` is what pins the wording.
+report_codes=$(
+	awk '/^watch_report\(\)/,/^}/' "$FW" | grep -oE 'return [0-9]+' | grep -oE '[0-9]+' | sort -un
+)
+# The message arms only. Anchored on a leading digit so the tally line inside the same function —
+# `case "$_od_cls" in 0 | 9) ;; *) _od=8 ;; esac`, which begins with `case` — cannot contribute arms
+# it does not have; and the catch-all `*)` is never mistaken for coverage of a named class.
+owed_arms=$(
+	awk '/^owed_decide\(\)/,/^}/' "$FW" | grep -oE '^[[:space:]]*[0-9]+\)' | grep -oE '[0-9]+' | sort -un
+)
+if [ -z "$report_codes" ] || [ -z "$owed_arms" ]; then
+	# A suite that derives nothing passes everything — the failure section 1 already guards against,
+	# restated here because this is a second, independent extraction.
+	bad "could not derive watch_report's classes or owed_decide's arms — the extraction broke" \
+		"classes: $(printf '%s' "$report_codes" | tr '\n' ' ') / arms: $(printf '%s' "$owed_arms" | tr '\n' ' ')"
+else
+	_unhandled=''
+	for _code in $report_codes; do
+		printf '%s\n' "$owed_arms" | grep -qx "$_code" || _unhandled="$_unhandled $_code"
+	done
+	if [ -z "$_unhandled" ]; then
+		ok "owed_decide has an explicit arm for every class watch_report returns ($(printf '%s' "$report_codes" | tr '\n' ' '))"
+	else
+		bad "owed_decide has NO arm for watch_report class(es):$_unhandled" \
+			"quince#195: an unhandled class falls to the catch-all and is reported as 'the watch class could not be read' — which describes a failure to determine state, when the state was determined perfectly. The verdict stays correct and only the remedy is lost, so nothing else fails."
+	fi
+fi
+
 printf '\nforge-watch-exits-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
