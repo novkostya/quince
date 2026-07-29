@@ -21,9 +21,14 @@
 #
 # An unresolved commit author is `login: ""` in `gh` and `user: null` in GraphQL. Mapped back to
 # null, so the forward normaliser's `// ""` reproduces the empty string `gh` would have emitted.
-# That empty string is a live defect — the shaping reads `.login // "unknown"` and an empty string is
-# TRUTHY in jq, so it yields `actor=` rather than `unknown` — but it is a PRE-EXISTING one, and this
-# conversion exists to preserve behaviour, not to change it.
+# KEEP IT THAT WAY: this file's contract is that a recorded payload reaches the shaping exactly as
+# `gh` would have delivered it, so a fixture asserting what happens to an unresolved author is
+# asserting something real. Emitting `null` here would make that fixture vacuous.
+#
+# The empty string used to be a live defect as well — the shaping read `.login // "unknown"` and an
+# empty string is TRUTHY in jq, so it yielded `actor=`. Fixed in the shaping (quince#199), where it
+# belonged; `bin/testdata/forge/unresolved-commit-author-is-unknown.json` is the fixture that rides
+# this path to prove it.
 {data: {repository: {pullRequests: {nodes: [ .[] | {
   number, state, updatedAt, title, headRefName, mergedAt, mergeStateStatus,
   mergedBy: (if .mergedBy == null then null

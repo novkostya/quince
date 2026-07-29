@@ -1,0 +1,43 @@
+{
+  "kind": "loop",
+  "note": "quince#199. An actor this tool cannot resolve must land on `unknown`, never on the empty string. THIS IS A LOOP FIXTURE ON PURPOSE: the defect lived in the SHAPING (`.login // \"unknown\"`, where jq's `//` falls through on null and false but not on \"\"), which is the impure half — a pure `before`/`after` pair would have to hand-write the already-shaped `actor` and could assert nothing about the bug. Driving the real verb against a stub carries the payload through gh-array-to-graphql.jq and FETCH_NORMALISE, which is the round trip that reproduces the empty string `gh` really emits. Field shapes are real: novkostya/quince-devlog#117 is a live PR whose commit author resolves to no GitHub account, and `gh pr list --json commits` renders its author as `login: \"\"`. All four actor kinds appear, because #199's acceptance asks that the other three fallbacks be audited and not assumed innocent — comment and review authors are the SAME expression, and a fix applied only to commits would leave this fixture red on the merge and comment rows.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 60,
+  "timeout_s": 60,
+  "payloads": [
+    [
+      {
+        "number": 117,
+        "state": "OPEN",
+        "updatedAt": "2026-07-29T09:00:00Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "comments": [],
+        "commits": [{ "committedDate": "2026-07-29T08:59:00Z", "authors": [{ "login": "" }] }],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ],
+    [
+      {
+        "number": 117,
+        "state": "OPEN",
+        "updatedAt": "2026-07-29T09:10:00Z",
+        "mergeStateStatus": "BLOCKED",
+        "statusCheckRollup": [{ "name": "gates", "conclusion": "SUCCESS" }],
+        "reviews": [],
+        "comments": [{ "createdAt": "2026-07-29T09:10:00Z", "author": { "login": "" } }],
+        "commits": [{ "committedDate": "2026-07-29T08:59:00Z", "authors": [{ "login": "" }] }],
+        "mergedAt": null,
+        "mergedBy": null
+      }
+    ]
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=updated pr=117 at=2026-07-29T09:10:00Z actor=unknown kind=comment"
+  ],
+  "expect_exit": 0
+}

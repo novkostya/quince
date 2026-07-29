@@ -1495,10 +1495,10 @@ fetch_issues() {
 			[ "$_fi_d" = no ] || _fi_rc=1
 			continue
 		fi
-		jq -c --arg via "$_fi_via" '{number, state, updatedAt, via: $via,
+		jq -c --arg via "$_fi_via" "$JQ_ACTOR"'{number, state, updatedAt, via: $via,
 			closed_at: .closedAt, state_reason: (.stateReason // ""),
 			labels: [(.labels // [])[] | .name],
-			activity: [(.comments // [])[] | {at: .createdAt, actor: (.author.login // "unknown"), kind: "comment"}]}' \
+			activity: [(.comments // [])[] | {at: .createdAt, actor: (.author.login | or_unknown), kind: "comment"}]}' \
 			"$_fi_raw" >>"$_fi_out"
 	done
 	rm -f "$_fi_raw" "$_fi_raw.err"
@@ -1514,6 +1514,26 @@ FETCH_LIMIT=${FORGE_LIMIT:-20}
 # How many commits per PR the queue fetch asks for. See the note at the fetch: attribution reads at
 # most ONE, so any bound is lossless; 5 is headroom and costs the same as 1.
 FETCH_COMMITS=${FORGE_COMMITS:-5}
+
+# `or_unknown` — an actor this tool could not resolve lands on `unknown`, in EVERY shaping
+# (quince#199).
+#
+# THE DEFECT IT REPLACES. Every site below read `.login // "unknown"`, and `//` in jq is the
+# ALTERNATIVE operator: it falls through on `null` and `false` only. `gh` renders a commit author
+# with no GitHub account as `login: ""`, an empty string is neither, so the fallback never fired and
+# the event read `actor=` — which says "there was no actor" where the tool means "I could not
+# resolve one". That is the same distinction this file already fixed once for `reason=` (:1536),
+# and it is the distinction between `unknown` and `unattributed` that the comment at the PR shaping
+# has promised all along.
+#
+# WHY ONE DEFINITION AND NOT FIVE PATCHED SITES. The five shapings differ in which renderer feeds
+# them, and `gh`'s renderers disagree about how they spell "nobody" — measured: `""` for a commit
+# author, `null` for a comment author whose account is gone. Handling BOTH here removes the
+# dependence on that spelling rather than enumerating it, so a renderer that changes its mind, or a
+# sixth call site added later, cannot reintroduce the defect one place at a time. quince#199's
+# acceptance asks for an audit of the other fallbacks precisely because fixing only the observed one
+# is the move that leaves the neighbours standing.
+JQ_ACTOR='def or_unknown: if . == null or . == "" then "unknown" else . end;'
 
 # The queue query. Ordering matches `--search "sort:updated-desc"` exactly — verified against the
 # live forge, same 25 numbers in the same order, same `.[-1]` for the truncation guard to read.
@@ -1562,12 +1582,16 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
 # the code caught it neither time.
 #
 # AND AN UNRESOLVED COMMIT AUTHOR IS `""`, NOT `null`, WHICH IS BUG-FOR-BUG DELIBERATE. `gh` emits
-# `login: ""` for a commit author with no GitHub account; GraphQL gives `user: null`. The shaping
-# reads `.login // "unknown"`, and in jq an empty string is TRUTHY — so the incumbent path emits
-# `actor=` where its own comment (:1568) promises `unknown`. Mapping to `null` here would fix that,
-# and fixing it here would be wrong: this change is a COST change and must have no behavioural
-# delta, or the equivalence it claims is not the thing being proven. The empty-actor defect is real
-# and predates this change. Filed as quince#199.
+# `login: ""` for a commit author with no GitHub account; GraphQL gives `user: null`. This
+# normaliser maps back to `""` so the two fetch paths agree, and it must KEEP doing so: the
+# equivalence suite compares the shaped observation of both, and a normaliser that "helpfully"
+# emitted `null` here would be proving an equivalence it had itself broken.
+#
+# It was ALSO the reason quince#199 existed, and that half is now fixed one layer up rather than
+# here. The shaping read `.login // "unknown"` and an empty string is TRUTHY in jq, so it emitted
+# `actor=`; it now pipes through `or_unknown`, which treats `null` and `""` alike. So this line
+# still reproduces what `gh` emits — that is its job — and nothing downstream depends on the empty
+# string meaning anything.
 FETCH_NORMALISE='
 def merged_by: if . == null then null
                elif .__typename == "Bot" then {login: ("app/" + .login)}
@@ -1704,8 +1728,11 @@ tick() {
 	# logic on the untestable side of the split, which is where the last four monitor bugs lived.
 	# A login that GitHub does not resolve (a commit author who is not a GitHub user) becomes
 	# `unknown` — distinct from `unattributed`, which means no act explains the update at all.
+	# That promise was aspirational until quince#199: `//` does not fall through on the empty string
+	# `gh` actually emits, so it read `actor=`. `or_unknown` is what makes it true; see its
+	# definition for why one helper rather than four corrected fallbacks.
 	_obs=$(mktemp)
-	jq -c '{observed: true, prs: [.[] | {number, state, updatedAt,
+	jq -c "$JQ_ACTOR"'{observed: true, prs: [.[] | {number, state, updatedAt,
 		# quince#111: the branch is what carries OWNERSHIP. Recorded on the observation rather than
 		# derived later, because `wake_worthy` runs against events long after the payload is gone,
 		# and a filter that cannot see the fact it filters on falls back to waking on everything.
@@ -1714,10 +1741,10 @@ tick() {
 		checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
 		reviews: [(.reviews // [])[] | {state}],
 		activity: (
-			  [(.comments // [])[] | {at: .createdAt,    actor: (.author.login // "unknown"), kind: "comment"}]
-			+ [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login // "unknown"), kind: "review"}]
-			+ [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login // "unknown"), kind: "commit"}]
-			+ (if .mergedAt then [{at: .mergedAt, actor: (.mergedBy.login // "unknown"), kind: "merge"}] else [] end)
+			  [(.comments // [])[] | {at: .createdAt,    actor: (.author.login | or_unknown), kind: "comment"}]
+			+ [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login | or_unknown), kind: "review"}]
+			+ [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login | or_unknown), kind: "commit"}]
+			+ (if .mergedAt then [{at: .mergedAt, actor: (.mergedBy.login | or_unknown), kind: "merge"}] else [] end)
 		)}]}' "$_raw" >"$_obs" ||
 		die "could not shape the observation for $_repo"
 
