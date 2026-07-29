@@ -79,16 +79,26 @@ A taken name is refused, so two sessions on one box cannot silently share a stat
 one credential and not the other:
 
 ```sh
-[ -f ~/.config/quince/quince-bot.token ]  && echo "BOT TOKEN PRESENT — stop"   # must NOT exist here
-[ -f ~/.config/quince/quince-coder.pem ]  && echo "CODER KEY PRESENT — stop"   # nor this
-bin/gh-review api /installation/repositories -q '.total_count'                 # must answer with a count
+QUINCE_RUNNER_ROLE=arch sh deploy/runner/preflight   # must end "environment is fit to start"
+bin/gh-review api /installation/repositories -q '.total_count'   # must answer with a count
 ```
 
-**Both credentials, because the implementer identity moved.** This check named the bot token alone
-until 2026-07-29 — so once authoring moved to an App key (`decisions/0014`), "the implementer
-identity is absent" was being asserted by looking for a credential that no longer carries it. A box
-holding `quince-coder.pem` would have passed. `preflight` enforces both at start (quince#203); the
-wrappers do not yet (quince#204), so this check is the one that runs in between.
+**Assert through `preflight`, not by listing the credential directory.** `.claude/settings.json`
+denies `Read(~/.config/quince/**)` — deliberately — so a session that reaches for `ls` or a file
+test there gets denied by the permission classifier and learns nothing. An architect session hit
+exactly that on 2026-07-29 and fell back to `preflight`, which is the better mechanism anyway:
+
+- it **asks the credential to mint** rather than checking that a file exists, and a key can be
+  present and unusable in ways a file test cannot see (quince#121);
+- it is the **same check the service runs at start**, so a hand-run answer and a boot-time answer
+  cannot disagree;
+- it needs no read access to the credential itself.
+
+**It checks both implementer credentials, because the identity moved.** The old form named the bot
+token alone — so once authoring became an App key (`decisions/0014`), *"the implementer identity is
+absent"* was being asserted by looking for a credential that no longer carries it, and a box holding
+`quince-coder.pem` would have passed. `preflight` covers both since quince#203; the `gh-*` wrappers
+do not yet (quince#204).
 
 **Verdicts are cast with `bin/gh-review`, which is a GitHub App and not a person.** That is
 quince#47's fix and the reason it is structural rather than a convention: a review from
@@ -392,8 +402,14 @@ not a resolution.
 Read the last line of its output, which says which exit it was and why, before treating it as a
 malfunction.
 
-**`ScheduleWakeup` stays as a fallback heartbeat at ≥1200 s, and it is not cover.** Arm it — no design
-should rest on one channel — but it has delivered **nothing** across every arming measured to date on
+**`ScheduleWakeup` is only available in `/loop` dynamic mode, and most sessions are not started that
+way.** A session that reaches for it outside that mode simply cannot arm it — so **say the second
+channel is absent** rather than reporting a fallback that was never armed. The watcher's own
+`--max-wait` is the floor this section already tells you to rely on, and it is unaffected; what is
+lost is redundancy, not the loop. Measured on the architect box, 2026-07-29, by a session that tried.
+
+**When it IS available it stays a fallback heartbeat at ≥1200 s, and it is not cover.** Arm it — no
+design should rest on one channel — but it has delivered **nothing** across every arming measured to date on
 this box, against every event the terminating watcher delivered in the same window (quince#62 carries
 the dated tally; it is deliberately not copied here, so this file does not acquire arithmetic that
 needs maintaining). **On the runner it has delivered once, about an hour late** — so the record differs
