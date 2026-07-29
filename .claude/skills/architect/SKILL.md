@@ -235,9 +235,32 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   registers, so GitHub can attach your approval to a commit you never read (stale-review dismissal
   covers pushes *after* an approval, not pushes racing one):
   ```sh
-  git range-diff <head-at-approval>~1..<head-at-approval> <head-now>~1..<head-now>
+  OLD=$(gh pr view <n> --repo novkostya/quince --json reviews \
+          -q '[.reviews[] | select(.state=="APPROVED")] | last | .commit.oid')   # FULL 40-char oid
+  NEW=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
+  git fetch origin "$OLD" "$NEW"                 # both, by full oid
+  git range-diff "$OLD~1..$OLD" "$NEW~1..$NEW"
   ```
   Identical → the approval stands. Different → re-review before it lands.
+
+  **Use the FULL 40-character oid and fetch it first, and that is the whole of quince#243.** After a
+  force-push the approved head is no longer any branch's tip, but the object is still on the forge
+  and **`git fetch origin <full-oid>` still gets it** — GitHub serves an arbitrary full object id.
+  What it will *not* serve is an abbreviation: `git fetch origin 410301f4` answers `fatal: couldn't
+  find remote ref`, which reads as *"that commit is gone"* when it means *"say it in full"*.
+  Measured on two force-pushed-away heads, 2026-07-29 — short form fails and full form succeeds on
+  both, and `range-diff` then works normally.
+
+  `reviews[].commit.oid` already hands you the full oid, so the failure only appears when a session
+  abbreviates it by hand while pasting. Do not.
+
+  **The fallback, when a head really is unreachable** — a deleted fork, or an object the forge has
+  since collected — is to compare patches through the API, which needs no local object at all:
+  ```sh
+  gh api repos/novkostya/quince/compare/"$OLD"..."$NEW"      # or …/commits/<oid> per side
+  ```
+  Prefer `range-diff`: it is rebase-aware and tells you *which* commit changed, where a patch
+  comparison only tells you *that* something did.
 - **Classify every red check; never wave one through.** Infrastructure (a job dying in setup, a
   registry timeout), a known flake with an issue, or a real failure. Say which. An unclassified red
   is an unread claim.
@@ -303,7 +326,8 @@ failure.
 
 **It moves the head, so re-read before letting your approval stand.** A rebase does **not** reliably
 dismiss the approval — on quince#216 it did not — so §4's stale-review rule applies with full force:
-`range-diff`, or compare the old and new patches directly, and confirm the rebase was a pure replay
+`range-diff` **against the full 40-character oid, fetched first** (§4 says why the abbreviation is
+what fails), or compare the old and new patches directly, and confirm the rebase was a pure replay
 before merging. Never ask for a *push* to clear a red check: that moves the head off the tree you
 reviewed for no gain the rebase does not already give you.
 
