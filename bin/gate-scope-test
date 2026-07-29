@@ -178,10 +178,28 @@ fi
 # --- 9. THE MAKEFILE HONOURS IT, and refuses an empty ladder -----------------------------------
 # Parts 1-8 pin the script. This pins the WIRING, which is where a correct script still produces a
 # ladder that runs nothing.
-if make -n gates 2>/dev/null | grep -q 'toolchain-go'; then
+# `env -u SCOPE`, and this line is the one CI taught us. SCOPE reaches make through the ENVIRONMENT
+# as readily as through the command line — `SCOPE ?=` treats an exported value as already set — and
+# ci.yml sets it for the whole job. So inside CI there is no such thing as "no SCOPE", and this
+# assertion tested a condition that could not hold there: it passed on two developer machines and
+# failed on the first real run, which is the only place the feature is actually used.
+#
+# The unset is the fix, not a workaround: the assertion is ABOUT the no-SCOPE default, so it has to
+# construct that state rather than assume it.
+if env -u SCOPE make -n gates 2>/dev/null | grep -q 'toolchain-go'; then
 	ok "make gates with no SCOPE still builds the full ladder"
 else
 	bad "make gates with no SCOPE no longer runs the product gates"
+fi
+
+# The property CI revealed, pinned so it is documented rather than rediscovered. An exported SCOPE
+# scopes the build — which is what makes ci.yml's `env:` block work, and is also the one way a
+# developer could surprise themselves. Opt-in either way; never silent, because the skip announces
+# itself.
+if SCOPE='HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
+	ok "an EXPORTED SCOPE reaches make too — the env and the command line are equivalent"
+else
+	bad "an exported SCOPE was ignored; ci.yml's env: block would silently do nothing"
 fi
 if make -n image SCOPE='HEAD...HEAD' 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "make image honours SCOPE and announces the skip rather than doing it quietly"
