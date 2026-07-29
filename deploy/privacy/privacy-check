@@ -18,11 +18,15 @@
 # gate reported success having examined nothing):
 #
 #   privacy-check                         the staged diff        (the commit-time gate)
-#   privacy-check --ref origin/main...HEAD the branch: diff AND every commit message
+#   privacy-check --ref origin/main...HEAD the branch: diff, commit messages AND identity
 #   privacy-check --text FILE             PR/issue text; FILE may be /dev/stdin
 #
 # --ref and --text compose; commit messages are public history and are swept by name here
 # rather than left to a second command someone has to remember.
+#
+# AUTHOR/COMMITTER IDENTITY IS SWEPT TOO, and it is called out here because "every commit
+# message" was the phrase that made it look covered for as long as it was not (quince#196).
+# A leak reached quince-devlog main in three commits under a clean verdict.
 set -eu
 
 ME=$(basename "$0")
@@ -32,8 +36,10 @@ usage() {
 usage: $ME [--ref <range>] [--text <file>] [--patterns <dir>]
 
   (no --ref)        scan the staged diff (git diff --cached)
-  --ref <range>     scan the whole branch: added lines of \`git diff <range>\` AND the
-                    commit messages of \`git log <range>\`
+  --ref <range>     scan the whole branch: added lines of \`git diff <range>\`, the commit
+                    subjects and bodies, the AUTHOR and COMMITTER name+email, and the
+                    branch name. The identity fields are named because "the commit
+                    messages" read as covering them and did not (quince#196).
   --text <file>     also scan <file> verbatim — PR body, journal entry. Use /dev/stdin
                     to pipe it.
   --patterns <dir>  where the lists live (default: \$PRIVACY_PATTERN_DIR, else ./local)
@@ -257,10 +263,32 @@ if [ -n "$REF" ]; then
 	# deliberately creates by rebasing. Measured: no-op for the two-dot form, so both work.
 	git log --right-only "$REF" --format='%s%n%b' >"$WORK/messages" 2>/dev/null || true
 	add_source "commit-message" "$WORK/messages"
+	# AUTHOR AND COMMITTER IDENTITY, which this gate reported `clean` about while never reading
+	# (quince#196). Not hypothetical: a real personal name on a real `.lan` hostname reached
+	# `quince-devlog` main in three commits under a clean verdict.
+	#
+	# It is the worst field to miss, because it is the most permanent. Identity travels with the
+	# commit forever, is rendered on every view of it, and survives every later edit of the file it
+	# touched — where a bad line in a diff can at least be corrected by a later commit.
+	#
+	# WHY IT LOOKED COVERED. `--help` said "the commit messages", which is TRUE, and a reader checks
+	# the box marked *commit metadata is swept* and moves on. `CLAUDE.md` enumerates "committed files,
+	# commit messages, branch names, tags, PR/issue text, or fixtures" — identity is not in that list
+	# either, so the canon and the gate agreed with each other and both missed the field.
+	#
+	# Its own label, not folded into commit-message: a hit here means re-authoring commits, which is a
+	# different and more expensive remedy than editing a message, and the report should say which.
+	git log --right-only "$REF" --format='%an <%ae>%n%cn <%ce>' >"$WORK/identity" 2>/dev/null || true
+	add_source "commit-identity" "$WORK/identity"
 	# The branch name travels to the forge too, and costs one line to cover.
 	git rev-parse --abbrev-ref HEAD >"$WORK/branch" 2>/dev/null || true
 	add_source "branch-name" "$WORK/branch"
-	SCOPE="branch $REF (diff + commit messages + branch name)"
+	# NAMED BY FIELD, not by category (quince#196's "third half"). `clean` reads as *the commit is
+	# clean*; it means *the swept subset is clean*. The banner already names the pattern lists it
+	# loaded, and naming the FIELDS too is what makes the next uncovered one visible as an absence
+	# rather than discoverable only by a leak — the property that made quince#121's stale clone
+	# findable at all.
+	SCOPE="branch $REF (diff:added + message:subject,body + author:name,email + committer:name,email + branch-name)"
 else
 	git diff --cached -U0 | "$GREP" -E '^\+' | "$GREP" -vE '^\+\+\+ ' >"$WORK/staged" || true
 	add_source "staged-diff" "$WORK/staged"

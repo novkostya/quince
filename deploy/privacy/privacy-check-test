@@ -190,6 +190,57 @@ make_repo "$msgrepo" "nothing private here" "wire up 203.0.113.42 for the demo"
 expect "commit message violation is caught" 1 "commit-message:" -- \
 	at "$msgrepo" "$CHECK" --patterns "$good" --ref main...HEAD
 
+# --- AUTHOR AND COMMITTER IDENTITY (quince#196) ------------------------------------------------
+# THE POSITIVE CONTROL quince#196 asks for, and the reason it belongs here rather than in the
+# private list: this asserts the MECHANISM — that the field reaches the matcher at all — using a
+# synthetic identity, so it holds whatever the real pattern list happens to contain. quince#196's
+# two defects are independent (the field was unread AND the list lacked the value), and fixing
+# either alone still lets a leak through. This gates the first one permanently.
+#
+# The identity is set per-commit via env rather than `git config`, so author and committer can be
+# made to differ — which is the whole point of the second case below.
+identrepo="$TMP/ident"
+make_repo "$identrepo" "nothing private here" "an ordinary subject"
+(
+	cd "$identrepo"
+	printf 'more\n' >>notes.md
+	git add -A
+	GIT_AUTHOR_NAME='zzsecrethostzz' GIT_AUTHOR_EMAIL='a@example.invalid' \
+		git commit -qm "an innocent subject"
+) || true
+expect "an AUTHOR identity violation is caught" 1 "commit-identity:" -- \
+	at "$identrepo" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# COMMITTER, not author — they differ on every rebase and every `--amend` by another hand, so a
+# sweep that read only `%an` would pass a branch whose committer carries the leak. Author here is
+# deliberately clean, so only the committer field can produce the hit.
+crepo="$TMP/committer"
+make_repo "$crepo" "nothing private here" "an ordinary subject"
+(
+	cd "$crepo"
+	printf 'more\n' >>notes.md
+	git add -A
+	GIT_COMMITTER_NAME='zzsecrethostzz' GIT_COMMITTER_EMAIL='c@example.invalid' \
+		git commit -qm "an innocent subject"
+) || true
+expect "a COMMITTER identity violation is caught, with a clean author" 1 "commit-identity:" -- \
+	at "$crepo" "$CHECK" --patterns "$good" --ref main...HEAD
+
+# THE CONTROL, and it needs its own repo. Without it the two cases above would pass just as well
+# against a gate that flagged every commit, and the suite would be measuring nothing. `make_repo`'s
+# default identity is `fixture <fixture@example.invalid>`, which matches no pattern.
+#
+# The first draft of this case reused $msgrepo and passed `--text /dev/null` to force a scope. Both
+# were wrong: $msgrepo carries a commit-message violation on purpose, and an empty explicitly-named
+# --text is now a refusal (quince#237) — so it exited 2 and the fix caught my own test. Recorded
+# because a control that fails for the wrong reason is worse than no control.
+cleanident="$TMP/clean-ident"
+make_repo "$cleanident" "nothing private here" "an ordinary subject"
+expect "an ordinary identity is clean — the control for both cases above" 0 "clean" -- \
+	at "$cleanident" "$CHECK" --patterns "$good" --ref main...HEAD
+expect "the scope line names the FIELDS it swept, not just the categories" 1 "author:name,email" -- \
+	at "$identrepo" "$CHECK" --patterns "$good" --ref main...HEAD
+
 # …but ONLY the branch's own commits. `git diff A...B` is merge-base→B while `git log A...B` is
 # the SYMMETRIC difference, so one $REF string read by two commands swept commits that are only
 # on the base — failing a branch over a message its author never wrote. Safe direction (a false
