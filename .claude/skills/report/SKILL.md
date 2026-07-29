@@ -156,17 +156,26 @@ the PR — leave that box empty and tick it once the checks come back.
 ## 5. Open or update the PR
 
 ```sh
-export GH_TOKEN=$(cat ~/.config/quince/quince-bot.token)
-gh pr create --repo novkostya/quince --base main --head <branch> \
+bin/gh-coder pr create --repo novkostya/quince --base main --head <branch> \
   --title "<qn.N|pr.N>: <claim>" --label <process|bug|enhancement> --body-file <file>
 ```
 
-Updating a body afterwards: `gh pr edit` fails on the bot's `repo`-scoped token (its
-GraphQL query asks for org fields). Use REST instead:
+**Never `export GH_TOKEN=$(cat …)`.** This block did exactly that until 2026-07-29, against
+`quince-bot.token` — an account suspended on 2026-07-28, so a session following it verbatim
+exported a dead credential and discovered it at the one moment it was ready to publish. The
+wrapper mints a fresh installation token per call and keeps it out of argv, which is also why an
+allowlist rule can match it: a rule never matches past a leading `VAR=value`.
+
+Updating a body afterwards: `gh pr edit` fails on a `repo`-scoped token (its GraphQL query asks
+for org fields). Use REST instead — and the App has the same limitation for the same reason:
 
 ```sh
-gh api -X PATCH repos/novkostya/quince/pulls/<n> -f body="$(cat <file>)"
+bin/gh-coder api -X PATCH repos/novkostya/quince/pulls/<n> -F body=@<file>
 ```
+
+`-F body=@<file>` rather than `-f body="$(cat <file>)"`: a body read through command substitution
+lands in argv, and a PR body is the one artifact most likely to contain something a privacy sweep
+has just cleared.
 
 Then watch the checks: `gh pr checks <n> --repo novkostya/quince`. Red checks are yours to
 fix before asking for review.

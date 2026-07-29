@@ -38,13 +38,13 @@ commit-time gate:
 
 ```sh
 # in quince
-bin/gh-bot pr checkout <n> --repo novkostya/quince
+bin/gh-coder pr checkout <n> --repo novkostya/quince
 git fetch origin main
 make privacy-check REF=origin/main...HEAD
 
 # in quince-devlog — no Makefile exists there. Run the product checkout's script FROM the devlog
 # clone; do NOT pass --patterns, which defaults to ./local and so finds this clone's own symlink.
-bin/gh-bot pr checkout <n> --repo novkostya/quince-devlog
+bin/gh-coder pr checkout <n> --repo novkostya/quince-devlog
 git fetch origin main
 /path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD
 ```

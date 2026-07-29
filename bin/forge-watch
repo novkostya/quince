@@ -3088,6 +3088,26 @@ runner)
     name could not be tied to anything. Set QUINCE_SESSION_ID explicitly if you are outside a
     Claude Code session — a name recorded against nothing would be claimed by the next caller."
 		mkdir -p "$(runner_registry)"
+		# A NAME ANOTHER SESSION HOLDS IS REFUSED, because taking it silently is the one failure this
+		# whole mechanism exists to prevent. Two sessions under one name share a state directory, a
+		# scratch root and — through the Makefile's NS — an e2e network, app container and product
+		# tag, which is quince#45's collision arriving by way of the fix for it.
+		#
+		# Found by driving it: two sessions both ran `runner set r1` and both got it, with no
+		# complaint. `/kickoff` suggests "r1, r2, …", so the FIRST thing two parallel implementers do
+		# is reach for the same name.
+		#
+		# Re-declaring your OWN name is fine and stays quiet — a session that re-runs kickoff, or
+		# resumes, must not be refused by its own earlier declaration.
+		for _rs_f in "$(runner_registry)"/*; do
+			[ -f "$_rs_f" ] || continue
+			[ "$(basename "$_rs_f")" = "$_rs_sid" ] && continue
+			[ "$(cat "$_rs_f" 2>/dev/null)" = "$_rs_name" ] || continue
+			die "runner name \"$_rs_name\" is already held by another session on this box.
+    Two sessions under one name share a state directory, a scratch root, and the container
+    namespace the Makefile derives from it — which is exactly the collision this name prevents.
+    Pick another (r2, r3, …). \`forge-watch runner get\` in that session reports its own."
+		done
 		printf '%s\n' "$_rs_name" >"$(runner_registry)/$_rs_sid"
 		# The state directory is CREATED here rather than lazily, so `status` on a freshly named
 		# session reports `absent` from the right place instead of erroring on a missing parent.
