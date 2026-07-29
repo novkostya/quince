@@ -20,14 +20,62 @@
 set -eu
 
 ME=git-coder
-_dir=$(dirname "$0")
+_dir=$(cd "$(dirname "$0")" && pwd)
+GHC="$_dir/gh-coder"
+
+# --- the credential helper ---------------------------------------------------------------------
+# git invokes this path with the operation as the last argument. It is a FLAG ON THIS SCRIPT rather
+# than an inline `!f() { … }` shell snippet for two reasons, and the second is the important one:
+#
+#   1. The inline form has to survive two levels of quoting inside a `git -c` value, which is how
+#      the first version came to swallow its own failure.
+#   2. It is UNREACHABLE BY A TEST. A `!`-snippet lives inside a config string and can only be
+#      exercised by making git actually authenticate against a real remote — so the one path where
+#      a boundary refusal has to survive was the one path no suite could drive. Exposed as a flag,
+#      `git-coder --credential-helper get` is a hermetic, offline assertion.
+#
+# EVERY FAILURE HERE MUST BE NON-ZERO AND SILENT ON STDOUT, which is what the first version got
+# wrong (quince#198 review). `password=$(gh-coder auth token)` with a failing substitution still
+# printed a SYNTACTICALLY VALID credential with an empty password: git accepted it, tried to
+# authenticate, failed, and reported `authentication failed` — while the real reason, a boundary
+# refusal naming the offending file, went to stderr and lost the race with git's own output. The
+# helper exited 0 while doing it.
+#
+# That is quince#41's equivalence in a new place: "I refused" and "I tried and failed" must not be
+# the same observable. It matters most exactly where it fires — a correctly provisioned box never
+# sees this, so the only box that does is the misconfigured one the boundary exists to catch.
+if [ "${1:-}" = --credential-helper ]; then
+	shift
+	# `store` and `erase` are no-ops: nothing is cached, so there is nothing to write or forget.
+	[ "${1:-}" = get ] || exit 0
+	[ -x "$GHC" ] || {
+		printf '%s: cannot find gh-coder at %s\n' "$ME" "$GHC" >&2
+		exit 1
+	}
+	# `|| exit 1` is the fix. Let gh-coder's refusal BE the failure, rather than being flattened
+	# into an empty string that then looks like a credential.
+	_t=$("$GHC" auth token) || exit 1
+	# An empty token is not a credential. Belt and braces: `gh-coder` already refuses to return one,
+	# but this helper is the last thing between a blank string and git treating it as a password.
+	[ -n "$_t" ] || {
+		printf '%s: gh-coder returned an empty token; refusing to offer it as a credential\n' "$ME" >&2
+		exit 1
+	}
+	# `printf` IS A SHELL BUILTIN, and that is what keeps this line honest (quince#198 review). The
+	# token is an argument to a builtin, so it stays in this process and never becomes a real
+	# process's argv — which is the whole reason the `https://x-access-token:$TOKEN@…` form is
+	# banned. Were printf to resolve to /usr/bin/printf, this line would commit the exact sin the
+	# header forbids, so it is stated rather than assumed.
+	printf 'username=x-access-token\npassword=%s\n' "$_t"
+	exit 0
+fi
 
 command -v git >/dev/null 2>&1 || {
 	printf '%s: git is not installed\n' "$ME" >&2
 	exit 1
 }
-[ -x "$_dir/gh-coder" ] || {
-	printf '%s: cannot find gh-coder beside me at %s/gh-coder\n' "$ME" "$_dir" >&2
+[ -x "$GHC" ] || {
+	printf '%s: cannot find gh-coder beside me at %s\n' "$ME" "$GHC" >&2
 	printf '%s: this wrapper is only a credential shim — gh-coder is what mints the token.\n' "$ME" >&2
 	exit 1
 }
@@ -39,11 +87,10 @@ if [ $# -eq 0 ]; then
 	exit 2
 fi
 
-# The helper is a shell function git invokes with `get`. It answers on stdout and exits. `$GHC` is
-# resolved to an absolute path first, because git runs the helper with an unspecified cwd — a
-# relative path here works from the repository root and fails from anywhere else, which is the kind
-# of bug that only shows up on the one invocation nobody tested.
-GHC=$(cd "$_dir" && pwd)/gh-coder
-export GHC
-
-exec git -c "credential.https://github.com.helper=!f() { [ \"\$1\" = get ] || exit 0; printf 'username=x-access-token\npassword=%s\n' \"\$(\$GHC auth token)\"; }; f" "$@"
+# An ABSOLUTE path, because git runs the helper with an unspecified cwd — a relative one works from
+# the repository root and fails from anywhere else, which is the kind of bug that shows up on the
+# one invocation nobody tested. `$0` is resolved at the top of this file for the same reason.
+#
+# No leading `!`, so git execs this script directly rather than through a shell, and appends the
+# operation (`get`, `store`, `erase`) as the final argument.
+exec git -c "credential.https://github.com.helper=$_dir/$ME --credential-helper" "$@"
