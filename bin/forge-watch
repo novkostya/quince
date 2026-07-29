@@ -1244,8 +1244,10 @@ replay() {
 			# The queue fetch moved from `gh pr list --json` to `gh api graphql` for cost, so the stub
 			# now has to answer in the GraphQL envelope — and re-recording six fixtures to chase a wire
 			# shape would have thrown away the recorded behaviour they exist to pin. The conversion
-			# lives in ONE file, shared with the three suites that build their own stub, because four
-			# copies of it would rot independently: bin/testdata/forge/gh-array-to-graphql.jq.
+			# lives in ONE file, shared with the two suites that build their own stub and need it,
+			# because three copies of it would rot independently:
+			# bin/testdata/forge/gh-array-to-graphql.jq. (`forge-watch-roundtrip-test` hand-writes
+			# the empty envelope instead, deliberately — see that file's header.)
 			_inv="$(dirname "$0")/testdata/forge/gh-array-to-graphql.jq"
 			[ -f "$_inv" ] || die "missing $_inv — the loop stub cannot answer the queue fetch without it"
 			cat >"$_tmp/gh" <<EOF
@@ -1565,8 +1567,7 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
 # `actor=` where its own comment (:1568) promises `unknown`. Mapping to `null` here would fix that,
 # and fixing it here would be wrong: this change is a COST change and must have no behavioural
 # delta, or the equivalence it claims is not the thing being proven. The empty-actor defect is real
-# and predates this change; it is OWED as its own issue, not yet filed — the implementer identity is
-# suspended and this session has no seat that can write to the forge.
+# and predates this change. Filed as quince#199.
 FETCH_NORMALISE='
 def merged_by: if . == null then null
                elif .__typename == "Bot" then {login: ("app/" + .login)}
@@ -1625,9 +1626,25 @@ tick() {
 	# recorded correctly — so the only way to bound it is to stop going through `pr list`.
 	#
 	# AND THE FIELD WAS NEARLY ALL WASTE. Attribution (:407) keeps only acts strictly newer than the
-	# previous updatedAt and then takes `last` — ONE element, read for two strings. Bounding at 5 is
-	# provably lossless for that: the bound keeps the newest 5 by date, so the maximum over any cutoff
-	# is always inside it. 5 rather than 1 is headroom, and free at this price.
+	# previous updatedAt and then takes `last` — ONE element, read for two strings. 5 rather than 1
+	# is headroom, and free at this price.
+	#
+	# HOW STRONG THE LOSSLESSNESS CLAIM ACTUALLY IS, stated precisely because the first version of
+	# this comment said "provably lossless" and that is more than the evidence carries.
+	# `commits(last:5)` keeps the last five by CONNECTION ORDER, not by `committedDate`, and the two
+	# coincide only while they agree. A merge bringing in older-dated history, a force-push, or any
+	# non-monotonic committer date separates them — and then the newest commit BY DATE can sit
+	# outside the newest five BY POSITION, and the maximum is no longer preserved.
+	#
+	# So: lossless while connection order and `committedDate` agree, which is every PR in either
+	# repository today — no PR in either has more than five commits, so the suffix assertion in
+	# bin/forge-fetch-equivalence-test currently holds over a set it never has to strain. Declared
+	# rather than discovered later.
+	#
+	# The blast radius if they ever diverge is bounded, and that is why 5 is still the right call:
+	# the `updated` event fires off `updatedAt` moving, NOT off the commit list, so the failure mode
+	# is a degraded or absent actor on an event that still fires. Never a missed wake. FORGE_COMMITS
+	# is the knob if that stops being true.
 	#
 	# Proven, not asserted: bin/forge-fetch-equivalence-test drives both fetches against the live
 	# forge and compares the SHAPED observation plus attribution across every cutoff that can change

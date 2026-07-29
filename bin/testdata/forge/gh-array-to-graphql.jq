@@ -6,10 +6,15 @@
 # recorded payload and every hand-written stub in this repository speaks the old array shape; without
 # this file each of them would have to be re-recorded to chase a wire format none of them is about.
 #
-# ONE DEFINITION, FOUR CONSUMERS — forge-watch's own `replay` loop stub, plus the ownership,
-# composition and roundtrip suites' stubs. A copy per consumer is this project's most-repeated
-# defect (a fact stated in one place and implemented in another), and four copies of a shape
-# conversion would rot independently and silently.
+# ONE DEFINITION, THREE CONSUMERS — forge-watch's own `replay` loop stub, plus the ownership and
+# composition suites' stubs. A copy per consumer is this project's most-repeated defect (a fact
+# stated in one place and implemented in another), and three copies of a shape conversion would rot
+# independently and silently.
+#
+# `forge-watch-roundtrip-test` is DELIBERATELY NOT a consumer, and saying so here is the point: it
+# hand-writes the empty envelope, because an empty array converts to exactly that and a stub whose
+# only job is to say "nothing here" should not need a file on disk to say it. An earlier version of
+# this header claimed four consumers and was wrong — caught in review of quince#197.
 #
 # `mergedBy` IS THE ONLY PREFIXED ACTOR, matching `gh`: it renders a Bot as `app/<login>` there and
 # as a bare login for comment and review authors. Undone here so the round trip is exact.
