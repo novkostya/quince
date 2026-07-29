@@ -68,6 +68,28 @@ repo is not a message bus, and no human is an RPC layer.
    approves and merges code PRs; the **Operator** approves architect-authored docs/canon
    PRs.
 
+   **Responsibility, never exclusivity.** The rule below says who must act so that nothing sits —
+   it does not say who *may*. **An author may always rebase its own PR, and should, the moment its
+   own work is what is blocked.** Measured: `gh-coder pr update-branch <n> --rebase` succeeds as the
+   authoring App and re-triggers CI. Written because the first version of this rule read as
+   exclusive, and a session obeying it literally at 03:00 waits for a seat that is not looking —
+   which is the round trip the rule exists to kill, arriving through the rule itself.
+
+   **A red check is not a reason to stop and ask.** The Operator's standard is that a story given
+   at night is deployed by morning, so every rung here is one a seat can take alone:
+
+   1. **Classify first.** Re-running is for infrastructure and flakes. A genuine failure wants a
+      fix, and reaching for a retry is how a real one gets papered over.
+   2. **Rebase onto fresh `main`.** It re-triggers CI *and* fixes the most common cause — a branch
+      open across several merges is failing against a base nobody tests. Productive, not hopeful.
+   3. **Close and reopen the PR** when the branch is already current. `reopened` is in the default
+      `pull_request` trigger set and the App holds `pull_requests: write`. Measured: runs went 3→5,
+      the PR returned `OPEN`, and the review verdict survived. Pure retry, no commit, no history.
+   4. **Report and keep going.** Say what you tried and what it did, and move to other work.
+      **Never `gh run rerun`** — no agent seat can (quince#141): the bot's old ability came from a
+      `repo`-scoped PAT carrying `actions`, which was a property of the credential, not of the seat.
+      And never an empty commit: it works and leaves a meaningless commit in the record forever.
+
    **The seat that merges rebases a `BEHIND` branch. It asks only for a `DIRTY` one**, and the
    forge draws that line for you:
 
