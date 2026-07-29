@@ -68,28 +68,6 @@ repo is not a message bus, and no human is an RPC layer.
    approves and merges code PRs; the **Operator** approves architect-authored docs/canon
    PRs.
 
-   **Responsibility, never exclusivity.** The rule below says who must act so that nothing sits —
-   it does not say who *may*. **An author may always rebase its own PR, and should, the moment its
-   own work is what is blocked.** Measured: `gh-coder pr update-branch <n> --rebase` succeeds as the
-   authoring App and re-triggers CI. Written because the first version of this rule read as
-   exclusive, and a session obeying it literally at 03:00 waits for a seat that is not looking —
-   which is the round trip the rule exists to kill, arriving through the rule itself.
-
-   **A red check is not a reason to stop and ask.** The Operator's standard is that a story given
-   at night is deployed by morning, so every rung here is one a seat can take alone:
-
-   1. **Classify first.** Re-running is for infrastructure and flakes. A genuine failure wants a
-      fix, and reaching for a retry is how a real one gets papered over.
-   2. **Rebase onto fresh `main`.** It re-triggers CI *and* fixes the most common cause — a branch
-      open across several merges is failing against a base nobody tests. Productive, not hopeful.
-   3. **Close and reopen the PR** when the branch is already current. `reopened` is in the default
-      `pull_request` trigger set and the App holds `pull_requests: write`. Measured: runs went 3→5,
-      the PR returned `OPEN`, and the review verdict survived. Pure retry, no commit, no history.
-   4. **Report and keep going.** Say what you tried and what it did, and move to other work.
-      **Never `gh run rerun`** — no agent seat can (quince#141): the bot's old ability came from a
-      `repo`-scoped PAT carrying `actions`, which was a property of the credential, not of the seat.
-      And never an empty commit: it works and leaves a meaningless commit in the record forever.
-
    **The seat that merges rebases a `BEHIND` branch. It asks only for a `DIRTY` one**, and the
    forge draws that line for you:
 
@@ -225,15 +203,24 @@ credential changed, nothing pointed here.
 
 **What to do instead, and it is better than a re-run was:** `gh pr update-branch --rebase` clears
 `BEHIND` **and** re-triggers the workflow on the new head. One command, both problems, available to
-the architect and the App — measured on quince#216, 2026-07-29, where it produced a fresh `gates`
-run without anybody re-running anything. It is the merging seat's to run, so a red check on a
-landable PR is now the **reviewer's** action rather than an ask addressed to the author. Note it
-moves the head: re-read the range-diff before letting an approval stand, because GitHub does **not**
-necessarily dismiss the approval (it did not on quince#216 — verified pure by identical patch
-hashes, not assumed).
+every seat — measured on quince#216, 2026-07-29, where it produced a fresh `gates` run without
+anybody re-running anything. **Who does it is responsibility and not exclusivity** — the merging
+seat must, so that nothing sits, and the author may and should when its own work is what is
+blocked. The full ladder is in §5 above, and rung 1 is the one that matters: **classify before
+retrying**, because a retry reached for first is how a genuine failure gets papered over.
 
-Only the **Operator** can genuinely re-run a run in place. Escalate only if the rebase is wrong for
-the PR — a rebase you did not want is a worse outcome than a wait.
+**It only helps a branch that is `BEHIND`.** On a branch already current the rebase is a no-op, and
+the retry is §5's rung 3 — close and reopen, which re-triggers CI with no commit and no history
+(`ci.yml` declares `pull_request:` with no `types:`, so the default set applies and it includes
+`reopened`).
+
+Note the rebase moves the head: re-read the range-diff before letting an approval stand, because
+GitHub does **not** necessarily dismiss the approval (it did not on quince#216 — verified pure by
+identical patch hashes, not assumed).
+
+Only the **Operator** can re-run a run *in place*, preserving its number and its failed attempt.
+Nothing above does that; they all produce a new run. Escalate only if neither a rebase nor a reopen
+is right for the PR.
 
 **The old trap here said `gh run rerun` exits `0` while printing its refusal. It exits `1`** from
 both wrappers above. Do not swap one memorised exit code for another: read the output. That the
