@@ -1,0 +1,13 @@
+{
+  "kind": "owed",
+  "note": "quince#195: `orphaned` fell through to the catch-all and was reported as \"the watch class could not be read (10)\". The decision was right — everything but live/starting is owed — but the explanation was a WRONG SENTENCE rather than a missing one: the class was determined perfectly, and a session told the tool could not read it investigates the tool instead of running the one command that fixes it. Paired with `wedged` deliberately, because the two share a REMEDY and not a diagnosis: wedged is running and has stopped ticking, orphaned is running and ticking fine while the session it would wake is gone. Both must be stopped before arming — a process is still writing to the state file either way — so the temptation is to fold 10 into 5, and this fixture is what refuses it.",
+  "table": [
+    ["novkostya/quince", 10],
+    ["novkostya/quince-devlog", 5]
+  ],
+  "expect": [
+    "OWED  novkostya/quince — open PRs, watch=orphaned (the session that armed it is gone, so it can wake nobody). Run \"forge-watch stop --repo novkostya/quince\" first, then arm.",
+    "OWED  novkostya/quince-devlog — open PRs, watch=wedged. Run \"forge-watch stop --repo novkostya/quince-devlog\" first, then arm."
+  ],
+  "expect_exit": 8
+}

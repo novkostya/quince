@@ -2411,6 +2411,21 @@ owed_decide() {
 		3) printf 'OWED  %s — %s, watch=dead. Re-arm from that state; do NOT reseed it.\n' "$_od_repo" "$_od_why" ;;
 		4) printf 'OWED  %s — %s, and no watch has ever been armed here.\n' "$_od_repo" "$_od_why" ;;
 		5) printf 'OWED  %s — %s, watch=wedged. Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_why" "$_od_repo" ;;
+		# `orphaned` shares `wedged`'s REMEDY and not its diagnosis, which is why it needs its own arm
+		# rather than being folded into that one (quince#195). A wedged watcher is running and has
+		# stopped ticking; an orphaned watcher is running and ticking *fine* — what died is the session
+		# it would wake. Both must be stopped before arming, because in both cases a process is still
+		# writing to the state file and arming beside it is quince#50's race.
+		#
+		# Falling to `*` was not a missing string, it was a WRONG SENTENCE: "the watch class could not
+		# be read" describes a failure to determine state, and the state here is determined perfectly.
+		# A session that believes the tool broke investigates the tool; the correct response is one
+		# command. That gap is the whole of this arm.
+		10) printf 'OWED  %s — %s, watch=orphaned (the session that armed it is gone, so it can wake nobody). Run "forge-watch stop --repo %s" first, then arm.\n' "$_od_repo" "$_od_why" "$_od_repo" ;;
+		# Reached only by a class `watch_report` does not currently return — a genuinely unread one.
+		# The totality assertion in forge-watch-exits-test is what keeps that true: every class
+		# `watch_report` CAN return has an explicit arm above, so this line cannot quietly become the
+		# handler for a real class again, which is exactly how quince#195 happened.
 		*) printf 'OWED  %s — %s, and the watch class could not be read (%s).\n' "$_od_repo" "$_od_why" "$_od_cls" ;;
 		esac
 		case "$_od_cls" in 0 | 9) ;; *) _od=8 ;; esac
