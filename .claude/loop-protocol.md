@@ -191,7 +191,11 @@ So:
    (quince#111). It is neither live nor dead, and both of those answers are actively harmful here:
    `live` tells you nothing is owed while nothing can wake you, and `dead` tells you to re-arm from a
    state a running process is still writing. The remedy is `forge-watch stop` **first**, then re-arm
-   from that state without reseeding it. You will meet this after a session is killed mid-watch —
+   from that state without reseeding it — **and if that `stop` refuses (exit 1), do NOT arm**
+   (quince#221). This is the path where that matters most: the watcher is still running *by
+   definition* here, so it is the state most likely to produce a `stop` that refuses or needs
+   SIGKILL, and arming beside it is quince#50's race reached through the guard. An unwatched turn
+   you have *reported* beats two watchers you have not. You will meet this after a session is killed mid-watch —
    the watcher is a child of the session, so a single-pid kill reparents it and it keeps ticking. A
    watch whose owner cannot be *verified* gone never reports `orphaned`; it stays whatever it was.
 
