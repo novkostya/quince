@@ -213,7 +213,7 @@ gates: $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only
 # point too, so it belongs on the same list.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
-                   deploy/runner/preflight-test \
+                   deploy/runner/preflight-test deploy/runner/provision-guard-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
@@ -250,6 +250,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory privacy-check-test
 	@$(MAKE) --no-print-directory forge-watch-test
 	@$(MAKE) --no-print-directory preflight-test
+	@$(MAKE) --no-print-directory provision-guard-test
 	@$(MAKE) --no-print-directory forge-watch-exits-test
 	@$(MAKE) --no-print-directory forge-watch-stop-test
 	@$(MAKE) --no-print-directory forge-watch-fixtures-doc-test
@@ -404,6 +405,10 @@ pr-title-check: ## Bare #N in a PR title must resolve there (REPO=owner/name + T
 .PHONY: preflight-test
 preflight-test: ## preflight's refusals — the runner spec's G1 (synthetic; no runner needed)
 	@deploy/runner/preflight-test
+
+.PHONY: provision-guard-test
+provision-guard-test: ## provision's identity guard in every credential state (quince#234; synthetic, dry-run)
+	@deploy/runner/provision-guard-test
 
 .PHONY: gates-go
 gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race

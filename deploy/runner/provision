@@ -11,8 +11,19 @@ set -eu
 # --role arch provisions the architect box: same path, inverted identity assertion. The role is
 # written into the service's conf so it survives restarts and reboots rather than living in the
 # shell that happened to run this script.
+#
+# `--check-credentials` runs the identity guard below and stops, without touching the box. It exists
+# because everything after that guard mutates — so its NON-refusing cases were unobservable to any
+# suite that could not afford to provision the machine it ran on (quince#234).
 ROLE=implementer
-[ "${1:-}" = --role ] && { ROLE="${2:?--role needs a value}"; shift 2; }
+CHECK_ONLY=no
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--role) ROLE="${2:?--role needs a value}"; shift 2 ;;
+	--check-credentials) CHECK_ONLY=yes; shift ;;
+	*) printf 'provision: unknown argument %s\n' "$1" >&2; exit 2 ;;
+	esac
+done
 case "$ROLE" in implementer|arch) ;; *) printf 'provision: unknown role %s\n' "$ROLE" >&2; exit 2 ;; esac
 SERVICE_NAME="quince-runner"
 [ "$ROLE" = arch ] && SERVICE_NAME="quince-arch"
@@ -35,20 +46,77 @@ SERVICE_NAME="quince-runner"
 # The missing flag was the trigger. The DEFECT is that this script warned and continued: a run that
 # cannot do the thing it exists to do must not proceed to configure the box for it.
 #
-# Only this one shape refuses, because only this one is unambiguous: the OTHER role's credential is
-# present and this role's is not. That is a wrong `--role`, not a box awaiting its first token.
-# Neither-token and this-token-present are both left alone — "no credentials yet" is a legitimate
-# first-provision state, and the layer section's note already covers it.
+# A SEAT IS A SET OF CREDENTIALS, NOT ONE TOKEN, AND ANY OF THE OTHER SEAT'S IS A REFUSAL
+# (quince#234). This guard compared exactly two files — the bot token against the architect token —
+# and refused in exactly one of the three states that should worry it. Both halves were wrong by the
+# time they were measured, and the measurement is what makes this worth the space:
+#
+#   box           holds                                   old guard's view              verdict
+#   implementer   quince-coder.pem                        both tokens absent -> no branch  BLIND
+#   architect     quince-arch.token + quince-review.pem   own present, other absent        BLIND
+#
+# So the guard had NO LIVE COVERAGE ON EITHER REAL BOX. Not a rot risk: the present condition of the
+# whole fleet, measured one seat each on 2026-07-29. Two things caused it, and they are separable:
+#
+#   1. IT KNEW ONLY TOKENS. `decisions/0014` moved the implementer identity to a GitHub App key and
+#      the reviewer identity is another; this compared a pair that predates both. Third instance in
+#      one day of a guard naming a credential set that has since moved (quince#203, quince#204).
+#   2. BOTH-PRESENT PASSED THROUGH. It fired only when this role's credential was absent AND the
+#      other's present — reading "own present" as "fine" even with the other seat's beside it, which
+#      is the exact author-and-approve box the two-box design exists to prevent.
+#
+# So the condition is now simply: ANY credential belonging to the other seat is a refusal. The two
+# cases keep DIFFERENT messages because they want different repairs — a wrong `--role` is fixed by
+# re-running with the right one, while a box holding both seats is fixed by removing a credential,
+# and telling someone to re-run when the remedy is `rm` sends them in a circle.
+#
+# WHY REFUSING ON BOTH-PRESENT IS SAFE, since it closes a state that used to pass. Architect ruling
+# on quince#234: there is no legitimate STEADY state in which one box holds two seats' credentials,
+# `preflight` already refuses to start a service on one, and a provision-time gate more permissive
+# than the startup gate is quince#204's inversion — the earliest gate being the narrowest. If the
+# Operator re-roles a box by hand and transiently holds both, the ruled order is remove-then-provision:
+# a refusal costs one `rm` and leaves a record, where a silent pass leaves neither. Ruled explicitly
+# as cheaply reversible — if real re-roling practice needs that window, this is a one-condition
+# change and the ruling should be overturned rather than worked around.
+#
+# `_role_token` keeps its name and meaning: it is the credential this role CLONES THE PRIVATE LAYER
+# with, further down, which is a narrower question than which credentials the seat may hold. That
+# split is deliberate — see quince#236, which is about that line and not this one.
 _bot_token="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
 _arch_token="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
+_coder_key="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
+_review_key="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
 if [ "$ROLE" = arch ]; then
-	_role_token="$_arch_token" _other_token="$_bot_token" _other_role=implementer
+	_role_token="$_arch_token" _other_role=implementer
+	_own_creds="$_arch_token $_review_key" _other_creds="$_bot_token $_coder_key"
 else
-	_role_token="$_bot_token" _other_token="$_arch_token" _other_role=arch
+	_role_token="$_bot_token" _other_role=arch
+	_own_creds="$_bot_token $_coder_key" _other_creds="$_arch_token $_review_key"
 fi
-if [ ! -f "$_role_token" ] && [ -f "$_other_token" ]; then
-	printf 'provision: role %s needs %s, which is absent — but this box HOLDS the %s credential.\n' \
-		"$ROLE" "$_role_token" "$_other_role" >&2
+# Names only, never contents — a guard that echoed a credential to report a credential problem would
+# be its own incident. `preflight`'s header makes the same point about the same class of check.
+_present() {
+	_p_found=""
+	for _p_f in $1; do
+		[ -f "$_p_f" ] && _p_found="${_p_found:+$_p_found and }$_p_f"
+	done
+	printf '%s' "$_p_found"
+}
+_have_own=$(_present "$_own_creds")
+_have_other=$(_present "$_other_creds")
+if [ -n "$_have_other" ] && [ -n "$_have_own" ]; then
+	printf 'provision: this box holds BOTH SEATS: %s (role %s) and %s (%s).\n' \
+		"$_have_own" "$ROLE" "$_have_other" "$_other_role" >&2
+	printf 'provision: refusing BEFORE touching anything. One box that can author and approve its own\n' >&2
+	printf '    work is the whole of what the two-box design exists to prevent, and no --role can\n' >&2
+	printf '    make it correct — so re-running is not the fix. REMOVE the credential that does not\n' >&2
+	printf '    belong to this seat: %s\n' "$_have_other" >&2
+	printf '    If you are re-roling this box by hand, remove the old seat first, then provision\n' >&2
+	printf '    (quince#234). preflight would refuse to start this box in any case.\n' >&2
+	exit 2
+elif [ -n "$_have_other" ]; then
+	printf 'provision: role %s needs a credential of its own, and this box has none — but it HOLDS the\n' "$ROLE" >&2
+	printf '    %s credential: %s\n' "$_other_role" "$_have_other" >&2
 	printf 'provision: refusing rather than provisioning this box as %s, and refusing BEFORE touching\n' "$ROLE" >&2
 	printf '    anything. That is near-certainly a missing or wrong --role: it is an ARGUMENT\n' >&2
 	printf '    (--role %s), and QUINCE_RUNNER_ROLE in the environment is NOT read as input.\n' "$_other_role" >&2
@@ -56,6 +124,18 @@ if [ ! -f "$_role_token" ] && [ -f "$_other_token" ]; then
 	printf '    Continuing would install a %s-role service on a %s box (quince#121).\n' \
 		"$ROLE" "$_other_role" >&2
 	exit 2
+fi
+
+# A DRY RUN EXISTS SO THIS GUARD CAN BE DRIVEN AT ALL. Everything below mutates the box — `apk add`
+# on the second step — so a suite that wanted to assert the NON-refusing cases had no way to observe
+# one without provisioning the machine it was running on. The refusals could be tested and the
+# passes could not, which is half a check (quince#103). `--check-credentials` runs exactly the block
+# above and stops; it is the last thing before the first mutation, so what it proves is what the
+# real invocation would do.
+if [ "$CHECK_ONLY" = yes ]; then
+	printf 'provision: credential check only — role %s, own %s, other %s\n' \
+		"$ROLE" "${_have_own:-none}" "${_have_other:-none}"
+	exit 0
 fi
 
 REPO_URL="${REPO_URL:-https://github.com/novkostya/quince.git}"
