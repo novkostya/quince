@@ -98,6 +98,36 @@ DEMO_HOST   ?= quince-runner
 
 VERSION ?= 0.0.0-dev
 
+# ---------------------------------------------------------------------------
+# SCOPE — an OPTIONAL git range that lets a gate decline work its change cannot affect.
+#
+# Measured 2026-07-29: `gates` 5m12, `image` 5m40, `e2e` 6m39, run in PARALLEL so a PR costs 6m39 of
+# wall clock — while product code has not changed in 91 commits. `gates-sh` alone is 61s.
+#
+# THE CONTRACT, and it is the whole of the Operator's constraint: **absent SCOPE, nothing changes.**
+# `make gates`, `make image`, `make gates-ui-e2e` run exactly what they always ran — offline, with no
+# remote, on any forge or none. Passing SCOPE is a caller explicitly asking to scope, the same
+# opt-in shape `make privacy-check REF=origin/main...HEAD` already has. A git range is the only
+# input; no CI variable and no forge concept reaches this file.
+#
+# The deciding lives in bin/gate-scope, not in a recipe, for the reason privacy-check exists as a
+# script: a recipe of continuations cannot be shellchecked and cannot be unit-tested, and for THIS
+# decision the untested path is the whole hazard — a ladder that quietly shrinks.
+SCOPE ?=
+
+# Parse-time, once. With no SCOPE, gate-scope returns every gate and exit 0, so all three lines below
+# are the same values the Makefile has always had.
+SCOPED_GATES  := $(shell bin/gate-scope --list "$(SCOPE)")
+IMAGE_NEEDED  := $(shell bin/gate-scope --needed image "$(SCOPE)" >/dev/null 2>&1; echo $$?)
+E2E_NEEDED    := $(shell bin/gate-scope --needed e2e   "$(SCOPE)" >/dev/null 2>&1; echo $$?)
+
+# An empty ladder is the vacuous pass this whole mechanism could produce, so it is a HARD FAILURE
+# rather than a quiet success. gate-scope never prints an empty list; if this fires, the script is
+# missing or unrunnable, and `gates` would otherwise depend on nothing and report clean.
+ifeq ($(strip $(SCOPED_GATES)),)
+$(error gate-scope returned no gates — refusing to run an empty ladder. Is bin/gate-scope present and executable?)
+endif
+
 # Build-args threaded into every image build so the Dockerfile and the gates agree.
 BUILD_ARGS := \
 	--build-arg GO_IMAGE=$(GO_IMAGE) \
@@ -168,7 +198,9 @@ tc-uv: preflight
 # Gate ladder.
 # ---------------------------------------------------------------------------
 .PHONY: gates
-gates: gates-go gates-vault gates-ui gates-sh ## Run the whole gate ladder
+# Prerequisites come from gate-scope so the SKIPPING is visible as a dependency list rather than
+# hidden inside a recipe: `make -n gates SCOPE=…` shows exactly what will run.
+gates: $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only what the range affects)
 
 # The lists are explicit and grow as scripts land — a glob would silently start linting (or
 # silently stop linting) files nobody decided on.
@@ -189,7 +221,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
                    bin/scratch-reap bin/scratch-reap-test \
-                   bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test
+                   bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test \
+                   bin/gate-scope bin/gate-scope-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
@@ -228,6 +261,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + the `curl -k` ban
 	@$(MAKE) --no-print-directory scratch-reap-test
 	@$(MAKE) --no-print-directory home-resolution-test
 	@$(MAKE) --no-print-directory wrapper-boundary-test
+	@$(MAKE) --no-print-directory gate-scope-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -312,6 +346,12 @@ home-resolution-test: ## Entrypoints deriving paths from $$HOME must not require
 # refusals separately — both are present and both are correct in isolation, which is exactly why the
 # wrong one shipped as the first to speak. The only way to see it is to make both live and observe
 # which one wins.
+# The map from paths to gates is a hand-written fact, and a stale one produces a gate that should
+# have run and did not — silently, green. Gated for that reason rather than for the script's logic.
+.PHONY: gate-scope-test
+gate-scope-test: ## The gate map is total and the skipping is never silent (quince#46 follow-on)
+	@bin/gate-scope-test
+
 .PHONY: wrapper-boundary-test
 wrapper-boundary-test: ## A boundary refusal must outrank an environment one in the gh wrappers (quince#157)
 	@bin/wrapper-boundary-test
@@ -415,10 +455,17 @@ gates-ui: tc-node ## UI: typecheck + lint + vitest + build
 # ---------------------------------------------------------------------------
 .PHONY: image
 image: preflight ## Build the production container (proves go:embed of the built UI)
+ifeq ($(IMAGE_NEEDED),3)
+	@echo "image: SKIPPED — nothing it builds from changed in $(SCOPE). gate-scope decided; pass no SCOPE to force it."
+else
 	$(RUNTIME) build $(BUILD_ARGS) --target runtime -t $(IMAGE_NAME):$(APP_TAG) -f deploy/Dockerfile .
+endif
 
 .PHONY: gates-ui-e2e
 gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two containers)
+ifeq ($(E2E_NEEDED),3)
+	@echo "gates-ui-e2e: SKIPPED — nothing the image is built from changed in $(SCOPE). Same coverage as image, so the two skip together and e2e never runs against an image that was not built."
+else
 	@set -e; \
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
@@ -434,6 +481,7 @@ gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
 	exit $$status
+endif
 
 # ---------------------------------------------------------------------------
 # demo — build this branch and serve it, on THIS box.

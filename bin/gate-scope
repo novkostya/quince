@@ -1,0 +1,171 @@
+#!/bin/sh
+# gate-scope — which gates does this change actually need? A git range in, gate names out.
+#
+# WHY THIS EXISTS. Measured 2026-07-29: `gates` 5m12, `image` 5m40, `e2e` 6m39, run in PARALLEL, so
+# every PR costs 6m39 of wall clock. And product code has not changed since 2026-07-26 — 91 commits
+# ago — so every one of those runs compiled Go, built the frontend and drove Playwright to prove
+# nothing about a change to `.claude/skills/`. `gates-sh` alone is 61s.
+#
+# WHAT IT IS NOT COUPLED TO. A git range, and nothing else. `origin/main...HEAD` resolves from a
+# local clone with no network, from a bare local remote, from any forge or none. No CI variable, no
+# forge concept, no environment sniffing reaches this file — the caller supplies a range or supplies
+# nothing. That constraint is the Operator's and it is the right one: `make gates-ui-e2e` has to keep
+# meaning one thing offline, forever, and it does — this tool is consulted only when a caller passes
+# a scope, and the existing targets are untouched.
+#
+# THE PRECEDENT it follows is `deploy/privacy/privacy-check --ref origin/main...HEAD`: an OPTIONAL
+# git range on a target that otherwise behaves exactly as it always did.
+#
+# ---------------------------------------------------------------------------------------------
+# THE SAFETY RULE, and it decides every ambiguous case: WHEN IN DOUBT, RUN THE GATE.
+#
+# A gate ladder that quietly shrinks is this project's most expensive failure shape — it is
+# quince-devlog#3 (a watch reporting both queues clear while covering one) and quince#41 (a gate
+# passing when it could not run), and both cost more than any amount of CI time. So:
+#
+#   - `--needed` says SKIP with exit 3 and NOTHING ELSE. Every other exit means run. A caller that
+#     treats "non-zero" as skip has inverted the rule; the Makefile checks for 3 exactly.
+#   - `--list` prints EVERY gate when it cannot determine the changed set, never an empty list, and
+#     says on stderr that it did so. An empty list would make `gates` depend on nothing and pass
+#     vacuously, which is the same defect one level up from the one this saves time on.
+#   - `gates-sh` is UNCONDITIONAL. It is 61s, it covers the process surface, and it runs the suites
+#     that check the documents a docs-only PR is editing. Making it conditional would buy ~30s and
+#     risk skipping the only gate that reads what changed.
+# ---------------------------------------------------------------------------------------------
+set -eu
+
+ME=gate-scope
+
+usage() {
+	cat <<'EOF'
+usage: gate-scope --list [<git-range>]
+       gate-scope --needed <gate> [<git-range>]
+
+  --list            print the `gates` sub-targets that this range requires, one per line.
+                    With no range: every gate. Never prints an empty list.
+  --needed <gate>   exit 0 if <gate> must run, 3 if the range provably does not touch it.
+                    ANY other exit means run — skip on 3 and only on 3.
+
+  <git-range>  anything `git diff --name-only` accepts, e.g. origin/main...HEAD. Omit it and
+               every gate is required, which is the offline/no-remote/no-forge default.
+
+  gates: gates-go · gates-vault · gates-ui · gates-sh · image · e2e
+
+  exit 0 needed · 3 not needed · 2 could not determine (the caller must run it anyway)
+EOF
+}
+
+die() {
+	printf '%s: %s\n' "$ME" "$1" >&2
+	shift
+	for _l in "$@"; do printf '%s: %s\n' "$ME" "$_l" >&2; done
+	exit 2
+}
+
+# The gate ladder, in `gates`' own order. `gates-sh` is here and is never filtered — see the header.
+ALL_GATES='gates-go gates-vault gates-ui gates-sh'
+
+# WHAT EACH GATE COVERS, derived from where the gate actually runs rather than invented: the
+# Makefile mounts /src/core for gates-go, /src/vault for gates-vault, /src/ui for gates-ui. The
+# shared entries are the inputs that change what the gate BUILDS WITH — `versions.env` pins every
+# toolchain image, `deploy/Dockerfile` is the stage those images come from, and the `Makefile` is
+# the recipe itself. A change to any of them can break a gate whose own tree is untouched, so they
+# belong to all of them.
+SHARED='versions.env deploy/Dockerfile Makefile'
+
+covers() {
+	case "$1" in
+	gates-go) printf 'core/ %s\n' "$SHARED" ;;
+	gates-vault) printf 'vault/ %s\n' "$SHARED" ;;
+	gates-ui) printf 'ui/ %s\n' "$SHARED" ;;
+	# `image` builds the product image from the whole product tree plus deploy/.
+	image) printf 'core/ ui/ vault/ deploy/ %s\n' "$SHARED" ;;
+	# `e2e` builds that same image and drives the UI against it, so its inputs are image's.
+	e2e) printf 'core/ ui/ vault/ deploy/ %s\n' "$SHARED" ;;
+	# Unconditional. Printed as `.` — every path is under it — so the answer is "always" rather
+	# than a list somebody might trim.
+	gates-sh) printf '.\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+changed_files() {
+	# Prints the changed paths for a range, or fails. Never guesses: a range that git cannot resolve
+	# is a REFUSAL, because the alternative is answering "nothing changed" about a question that was
+	# never asked.
+	git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository, so a range means nothing here"
+	git diff --name-only "$1" 2>/dev/null || return 1
+}
+
+# touches <gate> <file-list-file> — does any changed path fall under anything the gate covers?
+touches() {
+	_t_gate=$1
+	_t_files=$2
+	for _t_pat in $(covers "$_t_gate"); do
+		if [ "$_t_pat" = '.' ]; then return 0; fi
+		case "$_t_pat" in
+		*/)
+			# A directory prefix.
+			if grep -q "^$_t_pat" "$_t_files"; then return 0; fi
+			;;
+		*)
+			# An exact path.
+			if grep -qx "$_t_pat" "$_t_files"; then return 0; fi
+			;;
+		esac
+	done
+	return 1
+}
+
+MODE=''
+GATE=''
+RANGE=''
+case "${1:-}" in
+--list)
+	MODE=list
+	RANGE=${2:-}
+	;;
+--needed)
+	MODE=needed
+	[ $# -ge 2 ] || die "--needed takes a gate name" "gates: $ALL_GATES image e2e"
+	GATE=$2
+	RANGE=${3:-}
+	covers "$GATE" >/dev/null || die "unknown gate: $GATE" "gates: $ALL_GATES image e2e"
+	;;
+-h | --help | help | '') usage; exit 0 ;;
+*) usage >&2; die "unknown option: $1" ;;
+esac
+
+# NO RANGE IS NOT AN ERROR — it is the default, and the default is "run everything". This is the
+# offline case, the fresh-clone case, and the case where a caller simply did not opt in.
+if [ -z "$RANGE" ]; then
+	if [ "$MODE" = list ]; then
+		for _g in $ALL_GATES; do printf '%s\n' "$_g"; done
+		exit 0
+	fi
+	exit 0
+fi
+
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT INT TERM
+
+if ! changed_files "$RANGE" >"$TMP" 2>/dev/null; then
+	# The range did not resolve. In CI this is the shape to expect first: `actions/checkout` fetches
+	# ONE ref at depth 1 (measured — `+<sha>:refs/remotes/pull/N/merge`), so `origin/main` does not
+	# exist there without `fetch-depth: 0`. Say what is wrong and take the safe direction.
+	printf '%s: cannot resolve the range "%s" — running every gate.\n' "$ME" "$RANGE" >&2
+	printf '%s: on a CI checkout this usually means the base ref was never fetched (fetch-depth: 0).\n' "$ME" >&2
+	if [ "$MODE" = list ]; then
+		for _g in $ALL_GATES; do printf '%s\n' "$_g"; done
+	fi
+	exit 2
+fi
+
+if [ "$MODE" = needed ]; then
+	if touches "$GATE" "$TMP"; then exit 0; else exit 3; fi
+fi
+
+for _g in $ALL_GATES; do
+	if touches "$_g" "$TMP"; then printf '%s\n' "$_g"; fi
+done
+exit 0
