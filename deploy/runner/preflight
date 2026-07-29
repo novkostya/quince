@@ -161,8 +161,33 @@ arch)
 		bad "the reviewer key at $REVIEW_KEY cannot produce a usable token, so this box would fail at its first verdict rather than at start. The wrapper reported — $(printf '%s' "$review_why" | head -n 2 | tr '\n' ' ')"
 	fi
 	;;
+supervisor)
+	# THE THIRD SEAT, AND ITS RULE IS THE ABSENCE OF EVERY OTHER ONE. This is where the Operator and
+	# a session talk: it coordinates, measures and prepares, and it holds no forge credential at all.
+	# Holding none is what makes it structurally unable to author or approve, so it can never muddy
+	# `approver ≠ author` even by accident — and that is the whole of its security property.
+	#
+	# Said plainly because the box is NOT isolated and claiming otherwise would be worse than saying
+	# nothing: it holds ssh into both working seats, and root ssh to a box that holds a credential
+	# IS that credential. What this seat buys is ATTRIBUTION — no session on it can commit or push
+	# as anybody, so work cannot leave here under an identity nobody chose. That is the failure it
+	# exists to prevent (quince-devlog#118), and it is not the same as containment.
+	_sv_found=""
+	for _sv_f in \
+		"${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}" \
+		"${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}" \
+		"${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}" \
+		"${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"; do
+		[ -f "$_sv_f" ] && _sv_found="${_sv_found:+$_sv_found and }$_sv_f"
+	done
+	if [ -n "$_sv_found" ]; then
+		bad "a FORGE CREDENTIAL is present at $_sv_found on a box whose role is 'supervisor'. This seat holds none, deliberately: it is the seat that cannot author and cannot approve, and a credential here makes that false. Remove it — or run this box as the seat that owns that credential, but not both."
+	else
+		ok "role supervisor: no forge credential present — this seat can neither author nor approve, as required"
+	fi
+	;;
 *)
-	bad "unknown QUINCE_RUNNER_ROLE='$ROLE' — expected 'implementer' or 'arch'. Refusing rather than guessing which identity rules apply."
+	bad "unknown QUINCE_RUNNER_ROLE='$ROLE' — expected 'implementer', 'arch' or 'supervisor'. Refusing rather than guessing which identity rules apply."
 	;;
 esac
 
@@ -187,6 +212,16 @@ esac
 #    reach the layer and may not report which. Guessing sends the next reader off to recreate a
 #    repo when the real fix is a one-click collaborator grant — which is exactly the wrong turn
 #    taken on quince#44 before the grant was found.
+# THE SUPERVISOR SEAT RUNS NO PRIVACY GATE, so it needs no private layer. It commits nothing — it
+# holds no forge credential to commit with — and the sweep belongs to the seat that publishes, which
+# is the seat that can be held to it. Requiring the layer here would put a second copy of the
+# Operator's private material on a third box to satisfy a check that seat can never fail meaningfully.
+#
+# The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
+# re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
+# a choice rather than an oversight.
+if [ "$ROLE" != supervisor ]; then
+
 PRIVATE_LAYER="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
 PATTERN_FILE="$PRIVATE_LAYER/privacy-patterns.txt"
 
@@ -356,6 +391,10 @@ else
 		layer_why=$(printf '%s\n' "$layer_why" | head -n 1)
 		bad "this box cannot run the privacy gate on $PRIVATE_LAYER, so it must not start. The gate observed — ${layer_why:-no reason reported}. Fix: run deploy/runner/provision, which clones the private layer onto this box; or place a usable pattern list at $PATTERN_FILE by hand (file 0600, directory 0700). Not saying WHY beyond what the gate reported: this cannot tell 'never placed' from 'placed and since lost'."
 	fi
+fi
+
+else
+	ok "role supervisor: no private layer required — this seat runs no privacy gate, because it commits nothing and the sweep belongs to the seat that publishes"
 fi
 
 # --- the thing we are about to run ----------------------------------------------------------
