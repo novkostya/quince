@@ -58,24 +58,81 @@ else
 fi
 case "$ROLE" in
 implementer)
-	if [ ! -f "$TOKEN_FILE" ]; then
-		bad "no bot token at $TOKEN_FILE — the implementer runner is the machine that holds that identity; without it a session would author as whoever is logged in."
-	else
+	# THE IMPLEMENTER IDENTITY IS AN APP KEY NOW, NOT A BOT TOKEN (quince-devlog decisions/0014).
+	# `quince-bot` was suspended on 2026-07-28; a box holding only that credential cannot author
+	# anything. This check demanded it anyway, so the first correctly-provisioned box built after
+	# the ruling could not start — measured, not predicted, while standing up the Dubai seats.
+	#
+	# BOTH ARE ACCEPTED, App key first, because the transition is real: existing boxes hold a bot
+	# token and 0014's condition 1 requires that record be left in place. Neither present is the
+	# only refusal.
+	#
+	# AND PRESENCE IS NOT ENOUGH — the arch arm below already learned this (quince#121) and this
+	# arm had not. A key can be present and unusable in ways a stat cannot see: revoked, mismatched
+	# against the app id, unreadable, or on a box with no openssl to sign with. Every one of those
+	# reads as "credential installed" to a check that looks at the filesystem. So this asks the
+	# credential to MINT, which is the only question the box's start actually depends on.
+	CODER_KEY="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
+	# Prefer the repository's wrapper; fall back to PATH, and SAY WHICH, because bin/gh-coder is
+	# not on main yet and a silent fallback to a different copy is how two answers diverge.
+	CODER_WRAPPER=""
+	if [ -x "$(dirname "$0")/../../bin/gh-coder" ]; then
+		CODER_WRAPPER="$(dirname "$0")/../../bin/gh-coder"
+	elif command -v gh-coder >/dev/null 2>&1; then
+		CODER_WRAPPER="$(command -v gh-coder)"
+	fi
+	if [ -f "$CODER_KEY" ]; then
+		mode=$(stat -c '%a' "$CODER_KEY" 2>/dev/null || stat -f '%Lp' "$CODER_KEY" 2>/dev/null || echo unknown)
+		case "$mode" in
+		600 | 400) : ;;
+		*) bad "the App key at $CODER_KEY is mode $mode — expected 600. It is a signing key; anything wider means any process on this box can author as the implementer." ;;
+		esac
+		if [ -z "$CODER_WRAPPER" ]; then
+			bad "an App key is present at $CODER_KEY but no gh-coder wrapper was found, in bin/ or on PATH, so nothing on this box can mint a token from it."
+		elif ! command -v openssl >/dev/null 2>&1; then
+			bad "an App key is present at $CODER_KEY but openssl is not installed, so no token can be signed from it. A minimal Alpine image does not ship openssl. Fix: apk add openssl. Refusing rather than starting a box whose identity would fail at its first push."
+		elif coder_why=$("$CODER_WRAPPER" api /installation/repositories -q '.total_count' 2>&1); then
+			ok "role implementer: App identity can mint a token and reaches $coder_why repositories (via $CODER_WRAPPER)"
+		else
+			# Print the wrapper's own message rather than a second implementation of its reasoning
+			# — that divergence is quince#86.
+			bad "the App key at $CODER_KEY cannot produce a usable token, so this box would fail at its first push rather than at start. The wrapper reported — $(printf '%s' "$coder_why" | head -n 2 | tr '\n' ' ')"
+		fi
+	elif [ -f "$TOKEN_FILE" ]; then
 		mode=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || echo unknown)
 		case "$mode" in
-		600 | 400) ok "role implementer: bot token present, mode $mode" ;;
+		600 | 400)
+			# NOT `ok` alone: this box can start, and it is also holding a credential belonging to a
+			# suspended account. Saying so is the difference between a box that works and a box
+			# nobody has looked at since the suspension.
+			ok "role implementer: bot token present, mode $mode — LEGACY. quince-bot is suspended; place an App key at $CODER_KEY (decisions/0014)."
+			;;
 		*) bad "bot token at $TOKEN_FILE is mode $mode — expected 600." ;;
 		esac
+	else
+		bad "no implementer identity on this box: no App key at $CODER_KEY and no bot token at $TOKEN_FILE. Without one, a session would author as whoever is logged in. Place the App key (decisions/0014); the bot token is legacy and its account is suspended."
 	fi
 	;;
 arch)
 	# The architect box can approve. A bot token here would let one machine author AND approve,
 	# which is `approver ≠ author` degrading from a property into a convention about which
 	# credential a session happens to pick up.
-	if [ -f "$TOKEN_FILE" ]; then
-		bad "a BOT TOKEN is present at $TOKEN_FILE on a box whose role is 'arch'. This machine can approve; holding the implementer identity too would let one box author and approve its own work. Remove it — or run this box as role=implementer, but not both."
+	# BOTH FORMS OF THE IMPLEMENTER IDENTITY, and adding the second is the point of this change.
+	# This arm refused a bot token and nothing else — so once the implementer identity moved to an
+	# App key (decisions/0014), the assertion "the implementer identity is absent" was being made
+	# by checking for a credential that no longer carries it. The box could hold `quince-coder.pem`
+	# and this would have reported the separation intact.
+	#
+	# A rule that names one mechanism goes quietly false the moment the mechanism changes, and this
+	# one guards `approver ≠ author` — the property the whole two-seat design rests on.
+	_arch_impl_creds=""
+	[ -f "$TOKEN_FILE" ] && _arch_impl_creds="$TOKEN_FILE"
+	_arch_coder_key="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
+	[ -f "$_arch_coder_key" ] && _arch_impl_creds="${_arch_impl_creds:+$_arch_impl_creds and }$_arch_coder_key"
+	if [ -n "$_arch_impl_creds" ]; then
+		bad "an IMPLEMENTER CREDENTIAL is present at $_arch_impl_creds on a box whose role is 'arch'. This machine can approve; holding the authoring identity too would let one box author and approve its own work. Remove it — or run this box as role=implementer, but not both."
 	else
-		ok "role arch: no bot token present (the implementer identity is absent, as required)"
+		ok "role arch: no implementer credential present — neither a bot token nor an App key, as required"
 	fi
 
 	# --- the reviewer identity must be able to MINT, not merely to exist (quince#121) ---------
