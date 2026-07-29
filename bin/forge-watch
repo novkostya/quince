@@ -3142,19 +3142,38 @@ runner)
 		#
 		# So blindness is detected rather than assumed: not one readable environ means we did not
 		# search, not that nothing was found — and those are different answers.
+		# THE SCAN PROVES ITSELF BEFORE ITS NEGATIVE IS BELIEVED. A positive needs no proof — finding
+		# the id settles it. A NEGATIVE is only worth anything if the mechanism can see a session it
+		# is guaranteed to be able to see, and there is exactly one of those: our own.
+		#
+		# Without that, "not found" and "cannot look" are the same observation. If the variable is
+		# renamed, stops being exported, or a session's processes land outside this scan, every live
+		# session reads as PROVABLY GONE and its name is handed to the next caller — the collision
+		# reached through the check meant to prevent it.
+		#
+		# `_rsa_seen` alone does not cover that: measured on the review head, an id that is no longer
+		# published still leaves 18 readable environs, so the guard never fires and the answer is 1.
 		_rs_alive() {
 			[ -d /proc ] || return 2
 			_rsa_seen=0
+			_rsa_self=0
 			for _rsa_e in /proc/[0-9]*/environ; do
 				[ -r "$_rsa_e" ] || continue
 				_rsa_seen=$((_rsa_seen + 1))
-				if tr '\0' '\n' <"$_rsa_e" 2>/dev/null |
+				_rsa_env=$(tr '\0' '\n' <"$_rsa_e" 2>/dev/null || true)
+				if printf '%s\n' "$_rsa_env" |
 					grep -qx -e "CLAUDE_CODE_SESSION_ID=$1" -e "QUINCE_SESSION_ID=$1"; then
 					return 0
+				fi
+				if printf '%s\n' "$_rsa_env" |
+					grep -qx -e "CLAUDE_CODE_SESSION_ID=$_rs_sid" -e "QUINCE_SESSION_ID=$_rs_sid"; then
+					_rsa_self=1
 				fi
 			done
 			# This process has an environment, so zero readable ones cannot mean "nobody is alive".
 			[ "$_rsa_seen" -gt 0 ] || return 2
+			# And if the scan cannot find the session running it, it is blind — not empty.
+			[ "$_rsa_self" -eq 1 ] || return 2
 			return 1
 		}
 		for _rs_f in "$(runner_registry)"/*; do
