@@ -1889,6 +1889,49 @@ tick_all() {
 	return "$_arc"
 }
 
+# proc_state — the process state letter, /proc/<pid>/stat field 3, parsed after the LAST ')' for the
+# same reason proc_start parses field 22 that way: `comm` is parenthesised and may contain spaces and
+# parens itself.
+#
+# IT EXISTS FOR EXACTLY ONE QUESTION: has a signalled process actually exited? `kill -0` cannot
+# answer it. A terminated-but-unreaped ZOMBIE still answers `kill -0` YES, so a wait built on
+# liveness alone hangs on any watcher that happens to be a child of the stopping shell — which is the
+# ordinary case when a session arms and then stops its own watch. State `Z` means the process HAS
+# exited and is waiting to be reaped, which for our purposes is gone.
+proc_state() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $1}'; }
+
+# How long stop_one waits for a signalled watcher to go, in seconds. Small on purpose: the watcher is
+# a shell loop and the only thing it can be doing is sleeping between ticks or waiting on one `gh`
+# call, neither of which delays a SIGTERM by seconds. The bound is the point — a stop that can block
+# forever is worse than one that over-claims, because it hangs the session rather than the state file.
+STOP_WAIT_TERM=${FORGE_STOP_WAIT_TERM:-5}
+STOP_WAIT_KILL=${FORGE_STOP_WAIT_KILL:-3}
+
+# wait_gone <pid> <max-seconds> — poll until the pid has really exited, or the bound expires.
+# 0 gone · 1 still running at the bound.
+#
+# The first check happens BEFORE the first sleep, so the overwhelmingly common case — a watcher that
+# dies at once — costs no wall clock at all.
+#
+# The poll interval is detected rather than assumed. Every box this runs on has a `sleep` that takes
+# a fraction (busybox, GNU coreutils, macOS), but POSIX makes it implementation-defined, and a
+# `sleep 0.1` that errored would spin this loop at full tilt against an iteration count — burning the
+# whole bound in microseconds and reporting "still running" about a process that had already gone.
+# Detected inside the function so the probe costs nothing on the invocations that never stop anything.
+wait_gone() {
+	if [ -z "${_wg_poll:-}" ]; then
+		if sleep 0.1 2>/dev/null; then _wg_poll=0.1 _wg_per_s=10; else _wg_poll=1 _wg_per_s=1; fi
+	fi
+	_wg_i=0 _wg_max=$(($2 * _wg_per_s))
+	while :; do
+		[ "$(pid_alive "$1")" = no ] && return 0
+		[ "$(proc_state "$1")" = Z ] && return 0
+		[ "$_wg_i" -ge "$_wg_max" ] && return 1
+		sleep "$_wg_poll"
+		_wg_i=$((_wg_i + 1))
+	done
+}
+
 # stop_one — the verify-then-signal for ONE repo's watcher, shared by `stop` and `stop --all` so the
 # quince#50 per-pid check has exactly one implementation (the same reason tick_all was extracted).
 # $1 state file, $2 repo label. The state file is assumed to EXIST and to record a pid — the caller
@@ -1896,8 +1939,29 @@ tick_all() {
 # as "nothing to stop here". Prints one line. Returns:
 #   0  stopped, or the pid was already gone — no live watcher of ours remains
 #   1  REFUSAL: a running pid that could not be proven ours (recycled, or no/unreadable start time),
-#      or a verified pid whose signal failed. A watcher may still be live, so the caller must not
-#      report success. `kill` returning 0 proves a process died, not that the RIGHT one did.
+#      a verified pid whose signal failed, or one STILL RUNNING after SIGKILL and the bound. A
+#      watcher may still be live, so the caller must not report success. `kill` returning 0 proves a
+#      process died, not that the RIGHT one did.
+#
+# IT WAITS FOR EXIT RATHER THAN FOR THE SIGNAL (quince#221, ruled on quince#218). `kill` returning 0
+# means the signal was QUEUED, not that the target acted on it — a third case beyond the one the
+# clause above names, and the one that mattered: it did not prove a process died AT ALL. The exit 0
+# above promises "no live watcher of ours remains", and every skill prescribes `stop`, THEN arm. A
+# caller that trusted the old contract and armed immediately could arm beside a watcher still writing
+# to the state file, which is quince#50's race reached through the guard rather than around it — the
+# guard being `watch`'s refusal to arm beside a `live` watcher, which is exactly what is being raced.
+#
+# THREE OUTCOMES, NOT ONE, and the third is why this is a contract change rather than a `sleep`:
+#   - exited on SIGTERM        — the ordinary case, said plainly
+#   - REQUIRED SIGKILL         — reported, never silent. A watcher that ignores SIGTERM is itself a
+#                                finding, and quietly upgrading the signal would hide it. No silent
+#                                caps or fallbacks.
+#   - still running at the bound — a REFUSAL (exit 1), because a caller must not arm after it.
+#     `stopped watcher` covering this case alongside the other two is the whole defect.
+#
+# Not observed in the wild. The window is small and a shell loop under SIGTERM usually dies fast;
+# this is the contract being weaker than its callers, found by reading, and closed before something
+# makes the loop slower to exit.
 stop_one() {
 	_so_s=$1 _so_repo=$2
 	_so_pid=$(jq -r '.watch.pid // empty' "$_so_s" 2>/dev/null || true)
@@ -1925,11 +1989,42 @@ stop_one() {
     this as DEAD and re-arm from the state.\n' "$_so_pid" "$_so_repo" "$_so_was" "$_so_now" >&2
 		return 1
 	fi
-	if kill "$_so_pid" 2>/dev/null; then
-		printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched)\n' "$_so_pid" "$_so_repo" "$_so_was"
+	if ! kill "$_so_pid" 2>/dev/null; then
+		printf 'forge-watch: pid %s verified as our watcher (repo=%s), but the signal failed\n' "$_so_pid" "$_so_repo" >&2
+		return 1
+	fi
+	if wait_gone "$_so_pid" "$STOP_WAIT_TERM"; then
+		printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched, exited on SIGTERM)\n' "$_so_pid" "$_so_repo" "$_so_was"
 		return 0
 	fi
-	printf 'forge-watch: pid %s verified as our watcher (repo=%s), but the signal failed\n' "$_so_pid" "$_so_repo" >&2
+	# SIGTERM was not enough. Escalate — and say so on stderr BEFORE doing it, so a watcher that
+	# ignores SIGTERM leaves a trace even if the SIGKILL then succeeds and the caller only reads the
+	# success line.
+	printf 'forge-watch: pid %s (repo=%s) did not exit within %ss of SIGTERM — escalating to SIGKILL.
+    A watcher that ignores SIGTERM is a finding: it was mid-something it could not be interrupted
+    out of, or its trap is wrong. Worth knowing which before arming a replacement.\n' \
+		"$_so_pid" "$_so_repo" "$STOP_WAIT_TERM" >&2
+	if ! kill -9 "$_so_pid" 2>/dev/null; then
+		# It may simply have exited in the gap between the bound expiring and this call — in which
+		# case SIGTERM did work, late, and there is nothing to refuse. Bound 0: check, do not wait.
+		if wait_gone "$_so_pid" 0; then
+			printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched, exited on SIGTERM just after the %ss bound)\n' \
+				"$_so_pid" "$_so_repo" "$_so_was" "$STOP_WAIT_TERM"
+			return 0
+		fi
+		printf 'forge-watch: pid %s (repo=%s) survived SIGTERM and the SIGKILL could not be sent. REFUSING
+    to report it stopped.\n' "$_so_pid" "$_so_repo" >&2
+		return 1
+	fi
+	if wait_gone "$_so_pid" "$STOP_WAIT_KILL"; then
+		printf 'forge-watch: stopped watcher pid=%s repo=%s (start time %s matched, REQUIRED SIGKILL after %ss of SIGTERM)\n' \
+			"$_so_pid" "$_so_repo" "$_so_was" "$STOP_WAIT_TERM"
+		return 0
+	fi
+	printf 'forge-watch: pid %s (repo=%s) is STILL RUNNING %ss after SIGKILL. REFUSING to report it
+    stopped: DO NOT ARM A REPLACEMENT — two watchers on one state file is quince#50. A process that
+    survives SIGKILL is stuck in the kernel (uninterruptible I/O) or is not what this state thinks
+    it is; identify it by hand.\n' "$_so_pid" "$_so_repo" "$STOP_WAIT_KILL" >&2
 	return 1
 }
 

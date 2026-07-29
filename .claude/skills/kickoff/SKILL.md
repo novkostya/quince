@@ -33,6 +33,12 @@ stopped ticking: run `bin/forge-watch stop --repo <r>`**, then re-arm — never 
 the pid is only known to be *ours* while its heartbeat is fresh and `wedged` means it is not.
 `absent` → cold start.
 
+**`stop` can REFUSE, and then you do NOT arm** (quince#221). Exit 0 means no live watcher of ours
+remains — established by waiting for the process to exit, not by `kill` returning, which only means
+the signal was queued. Exit 1 means one may still be live, and arming beside it is quince#50. Read the
+success line too: `exited on SIGTERM` is ordinary, **`REQUIRED SIGKILL` is a finding** worth reporting
+rather than a detail.
+
 **`starting` exists because `dead` used to cover it, and the two want opposite remedies** (quince#95).
 A watch reads `starting` from arming until its first tick lands — ~4 s with nothing declared, 17–18 s
 against a 20-issue set, since a first tick is one `gh pr list` plus one `gh issue view` per declared

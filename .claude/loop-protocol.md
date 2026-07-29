@@ -24,7 +24,19 @@ Four answers, four different actions, and **say out loud which one you got**:
 | `watch=live` | 0 | nothing. Do not arm a second watcher — two watchers writing one state file is a race that presents as missing events. |
 | `watch=dead` | 3 | nothing is running. **Re-arm from that state, and do not reseed it.** The next tick diffs against the stored observation and emits everything that accrued while nothing was watching. Report that a watch was found dead, and why (`no_process`, `no_watcher_record`). |
 | `watch=absent` | 4 | cold start. Seed and tick; the first tick emits `first-observation`. |
-| `watch=wedged` | 5 | a watcher is still running and has stopped ticking. Run **`bin/forge-watch stop --repo <r>`**, then re-arm — **never a bare `kill`**. Nothing in the tool prevents two watchers on one state file (quince#50). |
+| `watch=wedged` | 5 | a watcher is still running and has stopped ticking. Run **`bin/forge-watch stop --repo <r>`**, then re-arm — **never a bare `kill`**. Nothing in the tool prevents two watchers on one state file (quince#50). **Check that `stop` exited 0 before arming** — see below. |
+
+**`stop` can REFUSE, and a refusal means DO NOT ARM** (quince#221). It exits 0 only when no live
+watcher of ours remains, and it now establishes that by waiting for the process to exit rather than by
+watching `kill` return — `kill` returning 0 means the signal was *queued*. Exit 1 is a refusal: an
+unprovable pid, a recycled one, or one still running after SIGKILL and the bound. Arming after a
+refusal is quince#50's race reached through the guard, because the guard that would catch a second
+watcher is `watch`'s refusal to arm beside a `live` one, and that is precisely what is being raced.
+
+Its success line says which of three things happened, and the middle one is worth reading rather than
+skimming: `exited on SIGTERM` is ordinary, **`REQUIRED SIGKILL` is a finding** — a watcher that ignores
+SIGTERM was mid-something uninterruptible or has a broken trap, and that is worth knowing before a
+replacement is armed into the same conditions.
 
 **Why `stop` and not `kill`.** The pid is only known to be *our* watcher while its heartbeat is fresh,
 and `wedged` is *defined* by that heartbeat being stale — so "the pid exists" and "the pid is ours" come

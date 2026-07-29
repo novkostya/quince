@@ -11,7 +11,9 @@
 #   - --all is mutually exclusive with --repo and with --state;
 #   - a repo in the set with no watcher is "nothing to stop", not a refusal;
 #   - the single-repo behaviour is unchanged: it stops, it treats a missing state as an ERROR, and
-#     an already-gone pid is a clean exit-0 "nothing to stop".
+#     an already-gone pid is a clean exit-0 "nothing to stop";
+#   - it returns only once the watcher has ACTUALLY EXITED, and names which of the three outcomes
+#     happened (quince#221). Those two cases deliberately do NOT use `gone` — see the note on them.
 #
 # Synthetic throughout: nonsense repo names, this suite's own sleeps, a temp state dir. Nothing
 # reads the real watch set or the box, so it is a gate and not a ritual.
@@ -98,9 +100,14 @@ proc_state() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $1}'; }
 # across two boxes. TWO things compound:
 #   1. `kill` returns when the signal is QUEUED, not when the target has acted on it.
 #   2. `alive` is `kill -0`, which a terminated-but-unreaped ZOMBIE child still answers "yes".
-# `stop_one` signals and returns without waiting for either — whether it SHOULD is quince#221 — so
-# closing the window is this file's job either way. The P6 case below already knew (2) ("a zombie
-# still answers kill -0, so wait for it"); the three assertions above it did not.
+# `stop_one` used to signal and return without waiting for either. quince#221 has since made it wait
+# for exit, so (1) is now closed on the tool's side as well — but this helper STAYS, and staying is
+# deliberate: it is what keeps these assertions independent of the contract they are checking. A
+# suite that relied on `stop_one` waiting could not tell a `stop` that waits from one that does not,
+# which is precisely the property the two quince#221 cases at the foot of this file exist to prove.
+# They therefore use `now_gone` — one check, no grace — and everything else keeps using this. The P6
+# case below already knew (2) ("a zombie still answers kill -0, so wait for it"); the three
+# assertions above it did not.
 #
 # WHY NOT A BARE `wait`, which is what P6 uses and is otherwise the obvious fix: P6 is killed by the
 # TEST, so it is certainly dying. Here the killer is the TOOL UNDER TEST. If it ever stopped
@@ -254,8 +261,76 @@ else
 $out"
 fi
 
+# ---------------------------------------------------------------------------------------------
+# quince#221: `stop` returns when the watcher is GONE, not when the signal was queued
+# ---------------------------------------------------------------------------------------------
+# THESE DO NOT USE `gone`, AND THAT IS THE WHOLE ASSERTION. `gone` polls for up to five seconds,
+# which is exactly the window this issue is about — every assertion above would pass against a
+# `stop` that returned instantly and left the watcher dying in its own time. So: check ONCE, with
+# no grace, the moment `stop` returns.
+#
+# `now_gone` accepts state Z for the reason documented on `gone`: the spawned watcher is a child of
+# THIS shell, so between exiting and being reaped it is a zombie, and a zombie still answers
+# `kill -0` yes. Z means it has exited, which is what the contract promises.
+now_gone() { alive "$1" || return 0; [ "$(proc_state "$1")" = Z ]; }
+
 if [ "$HAVE_PROCFS" = no ]; then
-	printf '\nforge-watch-stop-test: no /proc on this host, so the three verify-then-signal assertions\n'
+	skip "stop returns only once the watcher has exited — needs /proc to prove a pid before signalling"
+else
+	spawn
+	P7=$SPAWNED
+	write_state zz/one "$P7"
+	out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" "$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -eq 0 ] && now_gone "$P7" && printf '%s' "$out" | grep -q 'exited on SIGTERM'; then
+		ok "stop returns only once the watcher has ACTUALLY exited, and says how it went"
+	else
+		no "stop should not return until P7 is gone, and should say 'exited on SIGTERM'" \
+			"rc=$rc P7state=$(proc_state "$P7")
+$out"
+	fi
+	wait "$P7" 2>/dev/null || true
+fi
+
+# A watcher that IGNORES SIGTERM must be escalated to SIGKILL — and the escalation must be REPORTED,
+# never silent. `trap "" TERM` in a child shell constructs exactly that: the process stays alive
+# through SIGTERM and dies on SIGKILL. FORGE_STOP_WAIT_TERM=1 keeps the bound short enough to be a
+# test rather than a pause.
+if [ "$HAVE_PROCFS" = no ]; then
+	skip "a watcher that ignores SIGTERM is escalated and reported — needs /proc"
+else
+	sh -c 'trap "" TERM; sleep 30' &
+	P8=$!
+	PIDS="$PIDS $P8"
+	# Give the child shell a moment to install its trap; without this the race is real and the case
+	# would pass for the wrong reason (SIGTERM arriving before the trap is set kills it outright,
+	# and the assertion below would fail rather than flake — but it would be measuring nothing).
+	sleep 1
+	write_state zz/one "$P8"
+	out=$(FORGE_STATE_DIR="$SD" FORGE_SET_FILE="$FS" FORGE_STOP_WAIT_TERM=1 \
+		"$FW" stop --repo zz/one 2>&1) && rc=0 || rc=$?
+	if [ "$rc" -eq 0 ] && now_gone "$P8" &&
+		printf '%s' "$out" | grep -q 'REQUIRED SIGKILL' &&
+		printf '%s' "$out" | grep -q 'escalating to SIGKILL'; then
+		ok "a watcher that ignores SIGTERM is SIGKILLed, and both the escalation and the outcome are reported"
+	else
+		no "stop should escalate to SIGKILL, report it, and exit 0" \
+			"rc=$rc P8state=$(proc_state "$P8")
+$out"
+	fi
+	wait "$P8" 2>/dev/null || true
+fi
+
+# THE THIRD OUTCOME — still running after SIGKILL, which is a REFUSAL (exit 1) — IS DECLARED
+# UNTESTED, not quietly omitted. Constructing it means a process that survives SIGKILL, which in
+# userspace means wedging it in uninterruptible kernel I/O (state D). There is no portable, safe way
+# to do that from a test, and faking it by pointing the state at a pid that is not really stuck
+# would assert the mock rather than the tool. Named here so the gap is visible in the suite's own
+# output rather than inferred from its absence.
+printf 'note  the "still running after SIGKILL" refusal (exit 1) is UNTESTED — see the comment above:\n'
+printf '      it needs a process in uninterruptible I/O, which a test cannot construct safely.\n'
+
+if [ "$HAVE_PROCFS" = no ]; then
+	printf '\nforge-watch-stop-test: no /proc on this host, so the verify-then-signal assertions\n'
 	printf '  could not run. The stop verb refuses to signal a pid it cannot prove is ours, which is\n'
 	printf '  the designed behaviour — not a failure, and not a pass either. Run on Linux for them.\n'
 fi
