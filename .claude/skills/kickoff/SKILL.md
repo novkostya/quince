@@ -1,6 +1,6 @@
 ---
 name: kickoff
-description: Take one unit of quince work from issue to merged — resolve the target, read the state and canon it touches, take a fresh clone and branch as quince-bot, produce the PR-slicing plan, then open the PRs and work them through review until they land. Use at the beginning of an implementer session, and when an event wakes a session onto an existing PR.
+description: Take one unit of quince work from issue to merged — resolve the target, read the state and canon it touches, take a fresh clone and branch as the coder App, produce the PR-slicing plan, then open the PRs and work them through review until they land. Use at the beginning of an implementer session, and when an event wakes a session onto an existing PR.
 argument-hint: "[issue-number | qn.N | pr.N | free-text scope]"
 disable-model-invocation: true
 ---
@@ -53,13 +53,13 @@ found dead.
 
 ## 1. Resolve the target
 
-**Use `bin/gh-bot`, not bare `gh`.** It is *the* tool for every forge call on this side: an allow rule
+**Use `bin/gh-coder`, not bare `gh`.** It is *the* tool for every forge call on this side: an allow rule
 never matches past a leading `VAR=value`, so `GH_TOKEN=$(cat …) gh …` is unallowlistable by
 construction and prompts every time. Both implementer sessions in the first two-box run opened with
 bare `gh`, had it denied, and rediscovered the wrapper — so it is named here rather than left to be
 found.
 
-- A number → `bin/gh-bot issue view <n> --repo novkostya/quince --comments` (try the devlog repo
+- A number → `bin/gh-coder issue view <n> --repo novkostya/quince --comments` (try the devlog repo
   too if it isn't there; process work lives there). **Read the comments, not only the body** — a
   correction comment can invert a requirement, and building the uncorrected version reproduces the
   bug the issue was filed about.
@@ -78,14 +78,14 @@ this work's dashboard row + the open questions, and `program/quince.program.md`.
 - the canon docs the work touches: `docs/contracts.md` for any API surface,
   `docs/quince.design.md` for storage/job semantics, `docs/quince.stack.md` for a
   decision's history, `docs/ui.design.md` for frontend work;
-- prior art: `bin/gh-bot pr list --repo novkostya/quince --state merged --limit 20` and
+- prior art: `bin/gh-coder pr list --repo novkostya/quince --state merged --limit 20` and
   `git log --oneline -- <the tree you will touch>`;
 - the devlog `proposals.md` declined list, so you don't rebuild a refused idea.
 
 **Open question or unruled gap in your path? Stop there.** Write the `PROPOSED (gap): …`
 block per the gap protocol and report; do not build past it.
 
-## 3. Fresh clone + branch, as the bot
+## 3. Fresh clone + branch, as the coder App
 
 One clone per unit of work, from GitHub, in a scratch directory — never a long-lived
 checkout, never a worktree, never an rsync from a workstation.
@@ -95,19 +95,38 @@ placeholder for months, so there was no place to point a reaper at and 33 clones
 days. `bin/scratch-reap` reaps that root and only that root, so one runner never touches another's
 trees (quince#45, quince#111).
 
+**Declare the runner FIRST.** Nothing else in this repository ever called `runner set`, so
+`runner get` failed and this block computed `$HOME/scratch/` with an empty name component —
+every session cloning into one directory, sharing a watch state, owning no branches. It failed
+silently, as an empty string in a path, which is why `$HOME/scratch` did not exist on any box.
+One host is *meant* to run several implementers concurrently; the name is what keeps them apart.
+
 ```sh
-SCRATCH="$HOME/scratch/$(bin/forge-watch runner get)"
+bin/forge-watch runner set <name>        # ONCE per session. Short, stable, yours: r1, r2, …
+RUNNER=$(bin/forge-watch runner get) || { echo "no runner declared — stop"; exit 1; }
+[ -n "$RUNNER" ] || { echo "runner name is empty — stop"; exit 1; }
+SCRATCH="$HOME/scratch/$RUNNER"
 mkdir -p "$SCRATCH"
 git clone https://github.com/novkostya/quince.git "$SCRATCH"/quince && cd "$SCRATCH"/quince
-git config user.name  "quince bot"
-git config user.email "quince-bot@users.noreply.github.com"
-git config credential.helper '!f() { echo username=quince-bot; echo "password=$(cat $HOME/.config/quince/quince-bot.token)"; }; f'
+git config user.name  "quince-coder[bot]"
+git config user.email "310563582+quince-coder[bot]@users.noreply.github.com"
+git config credential.helper '!f() { echo username=x-access-token; echo "password=$(gh-coder auth token)"; }; f'
 git checkout -b <qn.N|pr.N>/<short-title>
 ```
 
-The credential helper keeps the token out of argv, the remote URL, and `.git/config`. If
-the token file is absent, stop: you cannot author as the bot — say so instead of pushing
-under another identity.
+**The guard is not ceremony.** `runner get` exits non-zero and prints nothing when undeclared, so
+without it the failure is an empty path segment rather than an error — and a session would discover
+it by colliding with another session's clone, not by being told.
+
+**The identity is the App, not the bot.** This block named `quince-bot` and its token until
+2026-07-29; that account was suspended on 2026-07-28, so it instructed every new session to
+configure a credential that cannot authenticate and an author that no longer resolves. See
+`quince-devlog` `decisions/0014`. The helper keeps the token out of argv, the remote URL and
+`.git/config`, and mints a fresh installation token per call.
+
+If `gh-coder` cannot mint, stop: you cannot author — say so rather than pushing under whatever
+identity happens to be configured, which on the Operator's own machine means pushing as the
+Operator (quince#47, and quince-devlog#118 is what it looks like when it happens).
 
 Then link the private layer — **in every clone, on every box**, not just the Operator's. Without it the
 privacy gate exits `2` (DID NOT RUN) rather than pretending it swept — `make privacy-check` in quince,
@@ -179,9 +198,9 @@ set, self-describing, and it needs no declared file because you know what you op
 ```sh
 # 1. do all the work first: every push, every comment
 # 2. consume the catch-up SYNCHRONOUSLY, where you can read it       (FOREGROUND — one pass, returns)
-bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"
+bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"
 # 3. arm, last, against a now-current observation                    (BACKGROUND task)
-bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60
+bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60
 ```
 
 **This section used to say "the moment your first PR is open, ARM THE WATCH" and never said when in the
@@ -213,7 +232,7 @@ until quince#103 landed, and the first half is the half that could not fail.
 is a comment on one. A watch that sees only PRs cannot see a ruling land (quince#80):
 
 ```sh
-bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60 \
+bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60 \
   --issue 71 --issue 80          # the issues you said you were waiting for
 ```
 
