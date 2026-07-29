@@ -51,6 +51,7 @@ backstop at all.
 | `behind-after-foreign-merge.json` | a PR made unmergeable by someone **else's** merge (illustrative, see below) | not yet observed to cost anything; quince#46 is the policy half |
 | `updated-unattributable.json` | `updatedAt` says WHEN and never WHO (illustrative) | a session assumed the latest activity was its own and reported nothing owed, with three items owed |
 | `mergeability-negative-space.json` | what mergeability must *not* report (illustrative) | — |
+| `unresolved-commit-author-is-unknown.json` | an actor the tool could not resolve read as `actor=` — "there was no actor" — where it meant `unknown` (quince#199) | nothing observed; found by the exhaustive fetch-equivalence comparison, and invisible to reading because the code said exactly what it meant to say |
 
 **Provenance for this round, to the same standard as the first.** `pr37-*` and `pr36-*` carry **real
 timestamps, logins and verdicts** from quince#36 and quince#37, read back off the forge on
