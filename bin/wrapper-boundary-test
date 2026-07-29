@@ -36,8 +36,16 @@
 # behind them, because the suite was asking about a credential that no longer carried the identity.
 # Parts 4-6 below drive the App key, so this file now covers BOTH forms of the thing it exists to
 # refuse. It is quince#103's rule in a second place: *checking one direction of a two-directional
-# property is not a check* — the coder side was complete (parts 7-10) while the approving side was
+# property is not a check* — the coder side was complete (parts 7-9) while the approving side was
 # not, and a suite that thorough in one direction reads as thorough in both.
+#
+# AND THE SAME LESSON A THIRD TIME, ONE WRAPPER OVER (quince#232). With four wrappers each asserting
+# the boundary correctly, `bin/gh-bot` asserted it NOT AT ALL — no stale check, no check. It is the
+# legacy implementer wrapper and its account is suspended, so the hole was not live; it is closed
+# anyway, because a boundary check is a claim about THE BOX and not about whether a credential
+# currently authenticates. Parts 10-12 drive it. The count that matters: this suite now covers all
+# five wrappers, and the omission it just closed was invisible precisely because the neighbours were
+# thorough.
 #
 # Synthetic and hermetic: a temp HOME, a temp token file, a stub PATH. Never reads or writes the
 # real ~/.config/quince, and never runs `gh`.
@@ -301,7 +309,89 @@ case "$out" in
 	;;
 esac
 
-# --- 10. git-coder's CREDENTIAL HELPER must fail loudly, not quietly offer an empty password -----
+# --- 10. gh-bot: THE FOURTH CORNER, which had no boundary check at all (quince#232) -----------
+# `gh-bot` is the legacy implementer wrapper. It authors, so — exactly like `gh-coder` — the
+# credentials it must refuse to sit beside are the APPROVING ones. It had NO check: not a stale one
+# naming the wrong credential (quince#204's defect), none at all. It was the only wrapper of the five
+# that could not refuse a second identity, and it survived every audit because the other four were
+# right and a suite thorough in one direction reads as thorough in all of them.
+#
+# THE REFUSAL IS DRIVEN THROUGH THE PATH OVERRIDES, NOT WITH A REAL CREDENTIAL, and that is a
+# limitation stated rather than hidden: `quince-bot` is suspended, so there is no live box on which
+# the bot-token direction could be proven end to end. What is proven here is that the guard fires,
+# in the right order, on a constructed state — which is the whole of what a hermetic suite can say.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY"
+printf 'a reviewer key\n' >"$RKEY"
+out=$(run bin/gh-bot pr view 1)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-bot: refuses beside the reviewer key, ahead of the missing dependencies"
+	;;
+*"is not installed"*)
+	bad "bin/gh-bot: an ENVIRONMENT refusal outranked the boundary — the wrong repair is the one it invites"
+	;;
+*)
+	bad "bin/gh-bot: inconclusive — no boundary refusal for a reviewer key on the authoring box"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+rm -f "$RKEY"
+printf 'an architect token\n' >"$ATOK"
+out=$(run bin/gh-bot pr view 1)
+case "$out" in
+*"ARCHITECT CREDENTIAL is present"*)
+	ok "bin/gh-bot: refuses beside the architect credential — author-and-merge is the same defect"
+	;;
+*"is not installed"*)
+	bad "bin/gh-bot: the dependency refusal outranked the architect boundary"
+	;;
+*)
+	bad "bin/gh-bot: inconclusive — no boundary refusal for an architect credential"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 11. gh-bot's boundary outranks the usage message too ------------------------------------
+# `gh-bot` exits 2 on no arguments. A box holding the wrong identity should be told THAT rather than
+# how to call the tool — part 9's assertion, for the fourth wrapper.
+rm -f "$ATOK"
+printf 'a reviewer key\n' >"$RKEY"
+out=$(run bin/gh-bot)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-bot: the boundary refusal outranks the usage message too"
+	;;
+*)
+	bad "bin/gh-bot: with no arguments and a reviewer key present, the boundary did not speak"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 12. gh-bot's DELIBERATE NON-REFUSAL: the coder key is the SAME seat ----------------------
+# The mirror of part 8. `quince-coder.pem` is the live implementer identity and `quince-bot.token`
+# is the legacy one; `decisions/0014` has them coexisting on the authoring box by design. Both are
+# the implementer seat, so together they cross no boundary and `gh-bot` must NOT refuse. Pinned
+# because parts 10 and 11 make "another credential file is present" look like the banned thing, and
+# a reader deleting the coder key to satisfy a rule that does not exist would break the live box.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY"
+printf 'an implementer app key\n' >"$CKEY"
+out=$(run bin/gh-bot pr view 1)
+case "$out" in
+*"is not installed"*)
+	ok "bin/gh-bot: a coder key beside it is NOT a boundary breach — the dependency refusal speaks"
+	;;
+*"is present"*)
+	bad "bin/gh-bot: refused because of a coder key — both are the implementer identity, and 0014 has them coexisting"
+	printf '       %s\n' "$out" | head -n 1
+	;;
+*)
+	bad "bin/gh-bot: inconclusive — expected the dependency refusal with only a coder key present"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 13. git-coder's CREDENTIAL HELPER must fail loudly, not quietly offer an empty password -----
 # The defect this pins (quince#198 review): `password=$(gh-coder auth token)` with a FAILING
 # substitution still printed a syntactically valid credential with an empty password. git accepted
 # it, tried to authenticate, failed, and reported `authentication failed` — while the boundary
