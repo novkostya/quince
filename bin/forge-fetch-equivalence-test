@@ -1,0 +1,201 @@
+#!/bin/sh
+# forge-fetch-equivalence-test — the queue fetch changed wire format; prove it did not change ANSWERS.
+#
+# WHY THIS EXISTS. `bin/forge-watch`'s queue fetch moved from `gh pr list --json` to a hand-written
+# `gh api graphql` query, because `commits` was 26 of the fetch's 27 GraphQL points and `gh pr list`
+# cannot bound a nested connection. A cost change is only worth making if the observation is
+# identical, and "identical" here is a claim about DERIVED VALUES, not about bytes on the wire.
+#
+# COMPARING RAW PAYLOADS WOULD FAIL WHILE PROVING NOTHING. `gh pr list --json comments` returns
+# bodies, ids, reaction groups, `authorAssociation` and `viewerDidAuthor` — every one of which the
+# shaping at forge-watch:1569 throws away. A raw diff is red on fields nothing reads. So this suite
+# compares the SHAPED OBSERVATION, which is exactly what step() consumes, and then the one derived
+# value the shaping exists to feed: the ATTRIBUTION at forge-watch:407.
+#
+# THE ATTRIBUTION CHECK IS EXHAUSTIVE, NOT A SAMPLE, and that is the point of it. Attribution is
+#     [activity | select(.at > T)] | sort_by(.at) | last
+# for a cutoff T that is whatever the previous tick recorded. A sample over one T proves nothing
+# about the next tick. So T ranges over EVERY timestamp present in the payload plus the empty-string
+# floor — every cutoff that can change the answer — and any disagreement at any T is a failure.
+#
+# WHAT IT CAUGHT, twice, in opposite directions, and neither was visible by reading the code:
+# `gh` renders a Bot actor as `app/quince-review` for `mergedBy` and as bare `quince-review` for
+# comment and review authors. Normalising both the same way — either way — silently reclassifies
+# every App act, and `wake_worthy` filters on actor names. A sampled test would have missed it on
+# most PRs; the exhaustive one failed on 83 cutoffs and then on 17.
+#
+# NETWORK IS REQUIRED, so a box without a usable wrapper SKIPS and says so. It must never pass by
+# omission — quince#41 is a gate that reported clean having checked nothing, and this suite is
+# exactly the shape that could repeat it.
+#
+# AND FOR THAT REASON IT IS DELIBERATELY NOT IN `gates-sh`. The ladder enumerates its suites by
+# hand, so nothing adds this one by accident — and nothing should. On a CI runner there is no
+# wrapper and no credential, so it would skip, exit 0, and paint the ladder green while proving
+# nothing about the equivalence it exists to prove. That is quince#162's open complaint (a gate
+# acquiring an undeclared host requirement) arriving from the other direction. This suite is run
+# DELIBERATELY, on a box that holds a reading credential, and its result is reported in the PR the
+# way anything only a real forge can prove is reported: named, with the box it ran on.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+skipped=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+skip() {
+	printf '  skip %s\n' "$*"
+	skipped=$((skipped + 1))
+}
+
+TOOL=bin/forge-watch
+REPOS=${FORGE_EQUIV_REPOS:-'novkostya/quince novkostya/quince-devlog'}
+LIMIT=${FORGE_EQUIV_LIMIT:-25}
+
+# THE CONSTANTS COME OUT OF THE TOOL, NEVER OUT OF A COPY. A second copy of the query in this file
+# would pass forever while the tool drifted — this project's most-repeated defect is a fact stated in
+# one place and implemented in another. Extraction is by shape, so a reformat breaks it LOUDLY.
+extract() {
+	# $1: variable name. Prints the body of a single-quoted multi-line assignment.
+	#
+	# The closing quote rides on the last CONTENT line — `}'` for the query, `} ]'` for the
+	# normaliser — not on a line of its own. An end pattern of /^'$/ therefore never matches and the
+	# range runs to end-of-file, handing GraphQL the rest of the script. That is exactly what the
+	# first version did, and the suite failed loudly on it rather than comparing garbage to garbage,
+	# which is the only reason it is worth extracting from the tool at all.
+	sed -n "/^$1='/,/'\$/p" "$TOOL" | sed "1s/^$1='//; \$s/'\$//"
+}
+QUERY=$(extract FETCH_QUERY || true)
+NORMALISE=$(extract FETCH_NORMALISE || true)
+NCOM=$(sed -n 's/^FETCH_COMMITS=${FORGE_COMMITS:-\([0-9]*\)}.*/\1/p' "$TOOL" | head -1)
+
+if [ -z "$QUERY" ] || [ -z "$NORMALISE" ] || [ -z "$NCOM" ]; then
+	bad "could not extract FETCH_QUERY / FETCH_NORMALISE / FETCH_COMMITS from $TOOL"
+	printf '       the assignments moved or were reformatted; this suite reads them by shape.\n'
+	printf '\nforge-fetch-equivalence-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+	exit 1
+fi
+
+# A wrapper that can actually reach the forge. Never gh-bot: it is the implementer identity and this
+# is a read-only comparison that any reading seat can make.
+GH=''
+for cand in ${QUINCE_GH:-} bin/gh-arch bin/gh-review; do
+	[ -n "$cand" ] || continue
+	[ -x "$cand" ] || continue
+	if "$cand" api rate_limit --jq .resources.graphql.used >/dev/null 2>&1; then GH=$cand; break; fi
+done
+if [ -z "$GH" ]; then
+	skip "no wrapper on this box can reach the forge — the comparison needs the live API"
+	skip "  (tried \$QUINCE_GH, bin/gh-arch, bin/gh-review; each must answer api rate_limit)"
+	skip "  this is NOT a pass: the equivalence is unproven here and is owed on a box with access"
+	printf '\nforge-fetch-equivalence-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+	exit 0
+fi
+
+SHAPE='{observed: true, prs: [.[] | {number, state, updatedAt,
+    branch: (.headRefName // null),
+    merge_state: (.mergeStateStatus // "UNKNOWN"),
+    checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
+    reviews: [(.reviews // [])[] | {state}],
+    activity: (
+          [(.comments // [])[] | {at: .createdAt,    actor: (.author.login // "unknown"), kind: "comment"}]
+        + [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login // "unknown"), kind: "review"}]
+        + [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login // "unknown"), kind: "commit"}]
+        + (if .mergedAt then [{at: .mergedAt, actor: (.mergedBy.login // "unknown"), kind: "merge"}] else [] end)
+    )}]}'
+
+W=$(mktemp -d)
+trap 'rm -rf "$W"' EXIT INT TERM
+
+for repo in $REPOS; do
+	printf '\n-- %s (limit=%s, commits=last:%s)\n' "$repo" "$LIMIT" "$NCOM"
+
+	if ! "$GH" api graphql -f query="$QUERY" \
+		-F owner="${repo%%/*}" -F name="${repo##*/}" \
+		-F n="$LIMIT" -F ncom="$NCOM" >"$W/gql.json" 2>"$W/gql.err"; then
+		bad "$repo: the GraphQL fetch failed — $(head -1 "$W/gql.err" | cut -c1-70)"
+		continue
+	fi
+	jq "$NORMALISE" "$W/gql.json" >"$W/new.json" 2>"$W/norm.err" || {
+		bad "$repo: FETCH_NORMALISE did not run — $(head -1 "$W/norm.err" | cut -c1-70)"
+		continue
+	}
+	if ! "$GH" pr list -R "$repo" --state all --limit "$LIMIT" --search "sort:updated-desc" \
+		--json number,state,updatedAt,title,headRefName,closingIssuesReferences,statusCheckRollup,reviews,comments,commits,mergedAt,mergedBy,mergeStateStatus \
+		>"$W/old.json" 2>"$W/old.err"; then
+		bad "$repo: the incumbent \`gh pr list\` fetch failed — $(head -1 "$W/old.err" | cut -c1-70)"
+		continue
+	fi
+
+	# A comparison of two empty lists is not evidence. Refuse to score anything green on no rows.
+	_n=$(jq length "$W/old.json")
+	if [ "$_n" -eq 0 ]; then
+		skip "$repo: the window came back empty — nothing to compare, and an empty match is not a pass"
+		continue
+	fi
+	ok "$repo: both fetches returned $_n rows"
+
+	# 1. ORDER. queue-truncated reads .[-1], so order is load-bearing, not cosmetic.
+	if [ "$(jq -c '[.[].number]' "$W/new.json")" = "$(jq -c '[.[].number]' "$W/old.json")" ]; then
+		ok "$repo: row order identical — the truncation guard reads the same .[-1]"
+	else
+		bad "$repo: ROW ORDER DIFFERS — queue-truncated inspects .[-1] and would read a different PR"
+	fi
+
+	# 2. The shaped observation, minus the activity list (which legitimately holds fewer commits).
+	jq -S "$SHAPE" "$W/new.json" | jq -S '.prs |= (map(del(.activity)) | sort_by(.number))' >"$W/s.new"
+	jq -S "$SHAPE" "$W/old.json" | jq -S '.prs |= (map(del(.activity)) | sort_by(.number))' >"$W/s.old"
+	if diff -q "$W/s.new" "$W/s.old" >/dev/null 2>&1; then
+		ok "$repo: shaped observation identical (checks, reviews, branch, merge_state, scalars)"
+	else
+		bad "$repo: SHAPED OBSERVATION DIFFERS — step() would see a different payload"
+		diff "$W/s.new" "$W/s.old" | head -12 | sed 's/^/       /'
+	fi
+
+	# 3. The bound is lossless: the kept commits are exactly the newest-N of the full set.
+	jq -S "$SHAPE" "$W/new.json" >"$W/f.new"
+	jq -S "$SHAPE" "$W/old.json" >"$W/f.old"
+	_suffix=$(jq -n --slurpfile a "$W/f.new" --slurpfile b "$W/f.old" --argjson n "$NCOM" '
+		def commits($p): [ $p.activity[] | select(.kind == "commit") ] | sort_by(.at);
+		($a[0].prs | sort_by(.number)) as $A | ($b[0].prs | sort_by(.number)) as $B |
+		[ range(0; $A|length) as $i
+		  | { pr: $B[$i].number,
+		      ok: ( (commits($B[$i]) | if length > $n then .[-$n:] else . end) == commits($A[$i]) ) }
+		  | select(.ok | not) ] | length')
+	if [ "$_suffix" -eq 0 ]; then
+		ok "$repo: the bounded commit list is exactly the newest-$NCOM of the full list, every PR"
+	else
+		bad "$repo: $_suffix PR(s) where the bound is NOT the newest-$NCOM suffix — the bound loses acts"
+	fi
+
+	# 4. ATTRIBUTION, exhaustive over every cutoff that can change the answer.
+	jq -n --slurpfile a "$W/f.new" --slurpfile b "$W/f.old" '
+		def attrib($acts; $T): [ $acts[] | select(.at > $T) ] | sort_by(.at) | last;
+		($a[0].prs | sort_by(.number)) as $A | ($b[0].prs | sort_by(.number)) as $B |
+		[ range(0; $A|length) as $i
+		  | ( [ $B[$i].activity[].at ] + [""] | unique )[] as $T
+		  | { pr: $B[$i].number, T: $T,
+		      new: attrib($A[$i].activity; $T), old: attrib($B[$i].activity; $T) }
+		  | select(.new != .old) ] as $bad |
+		{ cutoffs: ([ range(0; $B|length) as $i | ($B[$i].activity|length) + 1 ] | add),
+		  disagreements: ($bad|length), sample: $bad[0:2] }' >"$W/attr.json"
+	_cut=$(jq -r '.cutoffs' "$W/attr.json")
+	_dis=$(jq -r '.disagreements' "$W/attr.json")
+	if [ "$_cut" -eq 0 ]; then
+		bad "$repo: zero cutoffs tested — the attribution check ran over nothing"
+	elif [ "$_dis" -eq 0 ]; then
+		ok "$repo: attribution identical across all $_cut cutoffs — every actor, every kind"
+	else
+		bad "$repo: attribution DIFFERS at $_dis of $_cut cutoffs"
+		jq -r '.sample[] | "       pr=\(.pr) T=\(.T)\n         new: \(.new)\n         old: \(.old)"' "$W/attr.json"
+	fi
+done
+
+printf '\nforge-fetch-equivalence-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+[ "$fail" -eq 0 ]
