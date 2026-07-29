@@ -73,6 +73,11 @@ extract() {
 }
 QUERY=$(extract FETCH_QUERY || true)
 NORMALISE=$(extract FETCH_NORMALISE || true)
+# Single quotes are the point: this is a REGEX matching the literal text `${FORGE_COMMITS:-5}` in
+# the tool's source. Expanding it would substitute this shell's (unset) FORGE_COMMITS and match
+# nothing, and the guard below would then report the extraction as broken — a false failure that
+# reads exactly like a real one.
+# shellcheck disable=SC2016
 NCOM=$(sed -n 's/^FETCH_COMMITS=${FORGE_COMMITS:-\([0-9]*\)}.*/\1/p' "$TOOL" | head -1)
 
 if [ -z "$QUERY" ] || [ -z "$NORMALISE" ] || [ -z "$NCOM" ]; then

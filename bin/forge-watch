@@ -1515,6 +1515,14 @@ FETCH_COMMITS=${FORGE_COMMITS:-5}
 
 # The queue query. Ordering matches `--search "sort:updated-desc"` exactly — verified against the
 # live forge, same 25 numbers in the same order, same `.[-1]` for the truncation guard to read.
+#
+# SINGLE QUOTES ARE LOAD-BEARING and shellcheck is wrong here, which is why the suppression is
+# narrow and explained rather than blanket. `$owner`, `$name`, `$n` and `$ncom` are GRAPHQL
+# variables — they must reach GitHub as literal dollar-sign names, declared in the query header and
+# bound by the `-F` flags at the call site. Letting the shell expand them would send an empty query
+# with the variables silently blanked, which GitHub answers 200 with an `errors` array: a failed
+# fetch wearing a success exit code, which is the one shape this tool exists to refuse.
+# shellcheck disable=SC2016
 FETCH_QUERY='
 query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
   repository(owner:$owner, name:$name) {
