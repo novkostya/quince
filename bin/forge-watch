@@ -3128,15 +3128,33 @@ runner)
 		# only place that can be asked, so a box without it CANNOT TELL — and then this refuses, and
 		# says so, rather than reclaiming a name that might be in use. Wrong in the safe direction,
 		# with `runner clear` as the stated way out.
+		# 0 alive · 1 provably gone · 2 CANNOT TELL — and the third is load-bearing, because "gone"
+		# RECLAIMS a name and "cannot tell" refuses. Anything that makes this function blind must
+		# land on 2 and never on 1.
+		#
+		# The first version had exactly one route to 2 — no /proc — so a box where the environments
+		# were unreadable, or where a session id stopped appearing in them, would have reported EVERY
+		# session gone and reclaimed names out from under live ones. That is the collision this check
+		# exists to prevent, reached by the check itself. My own risk note in quince#225 claimed the
+		# opposite: that such a failure "degrades to refusing, which is safe". It degraded to
+		# reclaiming. Stated here because the note was wrong in the dangerous direction and a reader
+		# assessing this function deserves the correction beside the code rather than in a thread.
+		#
+		# So blindness is detected rather than assumed: not one readable environ means we did not
+		# search, not that nothing was found — and those are different answers.
 		_rs_alive() {
 			[ -d /proc ] || return 2
+			_rsa_seen=0
 			for _rsa_e in /proc/[0-9]*/environ; do
 				[ -r "$_rsa_e" ] || continue
+				_rsa_seen=$((_rsa_seen + 1))
 				if tr '\0' '\n' <"$_rsa_e" 2>/dev/null |
 					grep -qx -e "CLAUDE_CODE_SESSION_ID=$1" -e "QUINCE_SESSION_ID=$1"; then
 					return 0
 				fi
 			done
+			# This process has an environment, so zero readable ones cannot mean "nobody is alive".
+			[ "$_rsa_seen" -gt 0 ] || return 2
 			return 1
 		}
 		for _rs_f in "$(runner_registry)"/*; do
