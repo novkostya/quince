@@ -29,6 +29,46 @@ _home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/
 
 TOKEN_FILE="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
 
+# IDENTITY BEFORE DEPENDENCIES (quince#157), FROM THE FOURTH CORNER (quince#232).
+#
+# This wrapper had NO boundary check at all — not a stale one, none. It was the only forge wrapper
+# that could not refuse a second identity, and the omission survived every audit that came before it
+# because the other four were correct and a suite thorough in one direction reads as thorough in all
+# of them. `gh-bot` authors, so the credentials it must refuse to sit beside are the APPROVING ones:
+# the same pair `gh-coder` refuses, for the same reason, since both are the implementer seat.
+#
+# THE HOLE WAS NOT LIVE AND THAT IS NOT WHY IT IS FIXED. `quince-bot` was suspended on 2026-07-28, so
+# every call here now fails at GitHub regardless of what else the box holds. But a boundary check is
+# a claim about THE BOX, not about whether a credential currently authenticates — and "the credential
+# happens to be dead" is the reasoning that produced quince#203 and quince#204, each a guard naming a
+# mechanism that had changed underneath it. If the appeal is ever decided in the account's favour the
+# hole opens with no code change and nothing pointing at it. Ruled by the architect on quince#232:
+# add the checks, rather than documenting the hole (which does nothing if the account returns) or
+# refusing unconditionally (which would destroy the very artifact `decisions/0014` condition 1 wants
+# — a wrapper that is still runnable and still fails honestly is live, checkable evidence; a comment
+# asserting it is not).
+REVIEW_KEY="${QUINCE_REVIEW_KEY_FILE:-$_home/.config/quince/quince-review.pem}"
+if [ -f "$REVIEW_KEY" ]; then
+	printf 'gh-bot: a REVIEWER APP KEY is present at %s.\n' "$REVIEW_KEY" >&2
+	printf 'gh-bot: This machine authors; holding the reviewer identity too would let one box write a\n' >&2
+	printf 'gh-bot: change and approve it. Remove it, or run gh-review on the reviewer box.\n' >&2
+	exit 1
+fi
+ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
+if [ -f "$ARCH_TOKEN" ]; then
+	printf 'gh-bot: an ARCHITECT CREDENTIAL is present at %s.\n' "$ARCH_TOKEN" >&2
+	printf 'gh-bot: That seat merges. A box that can author and merge is the whole of what the two-seat\n' >&2
+	printf 'gh-bot: design exists to prevent. Remove it, or run gh-arch on the architect box.\n' >&2
+	exit 1
+fi
+
+# NOT a refusal: `quince-coder.pem` may sit beside this token, and `decisions/0014` requires this
+# credential to be left in place while the App key becomes the live one. Both are the IMPLEMENTER
+# identity, so holding them together crosses no boundary — it is one seat with an old credential and
+# a new one. Said explicitly because the two checks above make "another credential file is present"
+# look like the banned thing, and a reader deleting the coder key to satisfy a rule that does not
+# exist would break the box that is doing the work. `bin/gh-coder` carries the mirror of this note.
+
 if ! command -v gh >/dev/null 2>&1; then
 	printf 'gh-bot: gh is not installed\n' >&2
 	exit 1
