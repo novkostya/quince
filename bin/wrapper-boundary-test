@@ -58,12 +58,20 @@ for t in cat printf awk id sed grep; do
 done
 
 TOKEN="$WORK/bot.token"
+RKEY="$WORK/review.pem"
+ATOK="$WORK/arch.token"
 
 run() {
-	# $1 wrapper, rest: argv. Runs with the stub PATH and a token file location we control.
+	# $1 wrapper, rest: argv. Runs with the stub PATH and credential paths we control. EVERY
+	# credential location is overridden, not just the one a given case is about: a wrapper that
+	# consulted a real path under the invoking user's home would make this suite's result depend on
+	# the box it ran on, which is the property it exists to remove.
 	_w=$1
 	shift
-	PATH="$STUB" QUINCE_BOT_TOKEN_FILE="$TOKEN" HOME="$WORK" \
+	PATH="$STUB" HOME="$WORK" \
+		QUINCE_BOT_TOKEN_FILE="$TOKEN" \
+		QUINCE_REVIEW_KEY_FILE="$RKEY" \
+		QUINCE_ARCH_TOKEN_FILE="$ATOK" \
 		"$PWD/$_w" "$@" 2>&1 || true
 }
 
@@ -123,6 +131,81 @@ for w in bin/gh-review bin/gh-arch; do
 		;;
 	esac
 done
+
+# --- 4. gh-coder: THE SAME PROPERTY, ASSERTED FROM THE THIRD CORNER --------------------------
+# `gh-review` and `gh-arch` refuse when the IMPLEMENTER identity is present. `gh-coder` IS the
+# implementer, so the credentials it must refuse to sit beside are the APPROVING ones. Both
+# directions are driven, because a wrapper that refused only one of them would pass a test written
+# only for the other, and the box that would then hold two identities is the authoring box.
+rm -f "$TOKEN" "$RKEY" "$ATOK"
+printf 'a reviewer key\n' >"$RKEY"
+out=$(run bin/gh-coder pr view 1)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-coder: refuses beside the reviewer key, ahead of the missing dependencies"
+	;;
+*"is not installed"*)
+	bad "bin/gh-coder: an ENVIRONMENT refusal outranked the boundary — the wrong repair is the one it invites"
+	;;
+*)
+	bad "bin/gh-coder: inconclusive — no boundary refusal for a reviewer key on the authoring box"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+rm -f "$RKEY"
+printf 'an architect token\n' >"$ATOK"
+out=$(run bin/gh-coder pr view 1)
+case "$out" in
+*"ARCHITECT CREDENTIAL is present"*)
+	ok "bin/gh-coder: refuses beside the architect credential — author-and-merge is the same defect"
+	;;
+*"is not installed"*)
+	bad "bin/gh-coder: the dependency refusal outranked the architect boundary"
+	;;
+*)
+	bad "bin/gh-coder: inconclusive — no boundary refusal for an architect credential"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 5. THE DELIBERATE NON-REFUSAL, which is a rule too --------------------------------------
+# A suspended `quince-bot` token may sit beside the coder key, and `decisions/0014` REQUIRES that it
+# be left in place — condition 1 is that nothing is tidied away, because the intact record is what
+# makes the good-faith claim checkable. Both are the implementer identity, so together they cross no
+# boundary. Pinned as an assertion because the three refusals above make "another credential file is
+# present" look like the banned thing, and a reader deleting the bot token to satisfy a rule that
+# does not exist would destroy the record the decision rests on.
+rm -f "$RKEY" "$ATOK"
+printf 'a suspended bot token\n' >"$TOKEN"
+out=$(run bin/gh-coder pr view 1)
+case "$out" in
+*"is not installed"*)
+	ok "bin/gh-coder: a bot token beside it is NOT a boundary breach — the dependency refusal speaks"
+	;;
+*"is present"*)
+	bad "bin/gh-coder: refused because of a bot token — both are the implementer identity, and 0014 requires it be kept"
+	printf '       %s\n' "$out" | head -n 1
+	;;
+*)
+	bad "bin/gh-coder: inconclusive — expected the dependency refusal with only a bot token present"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 6. The boundary outranks the usage message for gh-coder too -----------------------------
+rm -f "$TOKEN"
+printf 'a reviewer key\n' >"$RKEY"
+out=$(run bin/gh-coder)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-coder: the boundary refusal outranks the usage message too"
+	;;
+*)
+	bad "bin/gh-coder: with no arguments and a reviewer key present, the boundary did not speak"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
 
 printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
