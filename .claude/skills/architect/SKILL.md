@@ -52,7 +52,10 @@ interval and degrades to `dead reason=never_ticked` past it.
   file, and nothing in the tool prevents that (quince#50). **Do not `kill` the pid yourself:** it is
   only known to be *our* watcher while its heartbeat is fresh, and `wedged` is defined by that
   heartbeat being stale — so on a recycled pid a bare kill signals a bystander. `stop` verifies the
-  process start time before signalling and refuses when it cannot prove the identity.
+  process start time before signalling and refuses when it cannot prove the identity. **Check that it
+  exited 0 before you arm** — exit 1 is a refusal and means a watcher may still be live (quince#221).
+  Its success line names which of three things happened; `exited on SIGTERM` is ordinary, **`REQUIRED
+  SIGKILL` is a finding**, worth reporting rather than skimming.
 - **`watch=absent`** → cold start; seed and tick.
 
 Collapsing `dead` into `absent` is how a restarted watch silently becomes a fresh one that has "seen
