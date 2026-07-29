@@ -287,8 +287,14 @@ a property of `quince-bot`'s classic PAT, not of the seat, and the App it became
 action it cannot perform" failure, and this file was the thing telling you to.
 
 **Use `gh pr update-branch --rebase` instead.** It re-triggers the workflow on the new head *and*
-clears `BEHIND`, it is yours to run, and it beats a re-run because it also revalidates against
-current `main`. Measured on quince#216.
+clears `BEHIND`, and it beats a re-run because it also revalidates against current `main`. Measured
+on quince#216. Yours to run as the merging seat — but responsibility, not exclusivity: an author may
+rebase its own PR too, and `CLAUDE.md` §5 says so.
+
+**On a branch that is already current the rebase is a no-op.** Then it is `CLAUDE.md` §5's rung 3 —
+close and reopen, which re-triggers CI with no commit and no history. And rung 1 comes first,
+always: **classify the red before retrying**, or the mechanism meant for flakes papers over a real
+failure.
 
 **It moves the head, so re-read before letting your approval stand.** A rebase does **not** reliably
 dismiss the approval — on quince#216 it did not — so §4's stale-review rule applies with full force:
