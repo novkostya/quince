@@ -123,7 +123,7 @@ Nothing in the current workflow needs either.
 
 - **`make` targets are listed one by one**, plus `make gates *` / `make image *` /
   `make privacy-check *` for the combined and variable forms (`make image push REGISTRY=…`,
-  `make privacy-check REF=origin/main...HEAD TEXT=/tmp/pr-body.md`). Pass variables *after* the
+  `make privacy-check REF=origin/main...HEAD TEXT="$BODY"`). Pass variables *after* the
   target: an allow rule doesn't match past a leading `VAR=value` assignment, so
   `IMAGE_TAG=x make image` prompts while `make image IMAGE_TAG=x` doesn't. **A bare entry does
   not cover the variable form** — `Bash(make privacy-check)` matched only the argument-less
