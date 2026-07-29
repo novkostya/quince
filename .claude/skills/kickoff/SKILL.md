@@ -23,7 +23,10 @@ bin/forge-watch status --repo novkostya/quince   # 0 live · 9 starting · 3 dea
 so it can wake nobody. This is the answer a restarted process is most likely to get, because the
 watcher is a child of the session and a single-pid kill reparents it rather than ending it. `stop`
 it first, THEN re-arm from that state without reseeding — the running process is still writing to
-it. Never treat this as `live`: `live` would tell you nothing is owed while nothing can wake you.
+it. **If `stop` refuses (exit 1), do NOT arm** (quince#221): on this path the watcher is still
+running *by definition*, so a second one beside it is quince#50's race — and an unwatched turn you
+have *reported* beats two watchers you have not. Say which happened. Never treat this as `live`:
+`live` would tell you nothing is owed while nothing can wake you.
 
 `live` → nothing to do, and do not arm a second watcher. **`starting` → a watch was armed and its
 first tick has not landed yet: nothing is owed and nothing is wrong. Wait.** **`dead` → re-arm from
