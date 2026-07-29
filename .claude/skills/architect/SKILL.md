@@ -279,10 +279,22 @@ executes it — so the attribution costs a timestamp rather than an authority. T
 `gh-arch` may act where §1 otherwise forbids it, and it is narrow: merging only, never approving,
 requesting changes, or commenting.
 
-**You cannot re-run a red check, and neither can the App** (quince#141): `run rerun` is refused for
-both, and it **exits `0` while printing the refusal**, so read its output rather than its exit code.
-`quince-bot` can. Ask the implementer to re-run — a mechanism they can emit — rather than asking for
-a push, which would dismiss your approval and move the head off the tree you reviewed.
+**Nobody can re-run a red check — not you, not the App, and not the implementer** (quince#141).
+`run rerun` is refused for every agent seat, worded for an integration and exiting **`1`**, not the
+`0` this line claimed for a year. The implementer's `CAN` died with `decisions/0014`: re-running was
+a property of `quince-bot`'s classic PAT, not of the seat, and the App it became has no
+`actions: write`. **Do not ask the author to re-run it** — that is the "never ask an identity for an
+action it cannot perform" failure, and this file was the thing telling you to.
+
+**Use `gh pr update-branch --rebase` instead.** It re-triggers the workflow on the new head *and*
+clears `BEHIND`, it is yours to run, and it beats a re-run because it also revalidates against
+current `main`. Measured on quince#216.
+
+**It moves the head, so re-read before letting your approval stand.** A rebase does **not** reliably
+dismiss the approval — on quince#216 it did not — so §4's stale-review rule applies with full force:
+`range-diff`, or compare the old and new patches directly, and confirm the rebase was a pure replay
+before merging. Never ask for a *push* to clear a red check: that moves the head off the tree you
+reviewed for no gain the rebase does not already give you.
 
 ## 6. Arm the loop — the MECHANISM, not only the properties
 
