@@ -82,9 +82,14 @@ still holds for `quince-pve`. It no longer describes how work reaches a gate hos
 `quince-runner` (implementer) and `quince-arch` (architect) are persistent hosts; a session runs
 *on* one, clones into `$HOME/scratch/<runner>/`, and runs `make gates` there. No alias, no
 allowlist entry, no remote invocation. `deploy/devct/` ([its README](../deploy/devct/README.md))
-is still what builds them — `devct-template`, `onboard`, `doctor`, `list`, and
-`create --name <host> --role <implementer|arch>` are that path, and `/etc/quince-devct-stamp` on
-both boxes records that it is what made them (quince#181).
+is the toolkit for building them — `devct-template`, `onboard`, `doctor`, `list`, and
+`create --name <host> --role <implementer|arch>` are that path.
+
+**How the boxes you are on were actually built is not settled, and this paragraph is not going to
+pretend otherwise.** `devct`'s header offered `/etc/quince-devct-stamp` as the proof; that file is
+**absent on both boxes**, measured 2026-07-29 (the header now says so, with what was and was not
+established). quince#205 records that the current fleet was provisioned from an Operator-local
+template factory that is not in this repo, and owns resolving it.
 
 **`quince-dev-N` is the retired half of that same toolkit.** The Operator ruled on 2026-07-28
 that there are no dev containers and the runner is the work host, which retires `devct create <n>`'s
@@ -99,7 +104,8 @@ Two things follow, and they point in opposite directions on purpose:
 - **The verbs still exist, and `deploy/devct/` must not be deleted.** The ruling retired a
   *workflow*, not the toolkit, and quince#181 records a session coming within one command of
   deleting the directory on the strength of three stale sources that all predated the same change.
-  It is the only reproducible way to rebuild either box.
+  It is this repo's only committed provisioning path; what supersedes it is quince#205's to decide,
+  not a cleanup's.
 - **The two `quince-dev-*` allowlist entries are left standing, inert rather than wrong.** Removing
   them is part of re-pointing every `devct` reference in this repo, which is quince#205's second
   half; doing it here would be a config change smuggled into a documentation fix.

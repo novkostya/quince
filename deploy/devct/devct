@@ -13,11 +13,30 @@
 #
 # WHAT IS ACTUALLY HERE, and the distinction the ruling turns on:
 #
-#   THE PERSISTENT-BOX PATH — LOAD-BEARING. `quince-runner` and `quince-arch` were built with it and
-#   say so: `/etc/quince-devct-stamp` on both reads `alpine=3.24 versions=8c32bf735761
-#   built=2026-07-25T20:24:50Z`, written by `devct-template`. This directory is their only
-#   reproducible rebuild path. `devct-template`, `onboard`, `doctor`, `list`, and
-#   `create --name <host> --role <implementer|arch>` are that path.
+#   THE PERSISTENT-BOX PATH — LOAD-BEARING. `devct-template`, `onboard`, `doctor`, `list`, and
+#   `create --name <host> --role <implementer|arch>` are the path that provisions `quince-runner`
+#   and `quince-arch`, and it is this repo's only committed one.
+#
+#   THE PROOF THIS HEADER OFFERED IS GONE, and saying so is the point of this paragraph. It read:
+#   "`quince-runner` and `quince-arch` were built with it and SAY SO: `/etc/quince-devct-stamp` on
+#   both reads `alpine=3.24 versions=8c32bf735761 built=2026-07-25T20:24:50Z`, written by
+#   `devct-template`" (which does write it). MEASURED 2026-07-29, one seat on each box: the
+#   file is ABSENT on the arch box and ABSENT on the runner — no `/etc/*stamp*` of any name, either
+#   place.
+#
+#   WHAT THAT DOES AND DOES NOT ESTABLISH. `/etc/alpine-release` on the runner reads 3.24.1, which
+#   matches what the stamp claimed, so the lineage is consistent with this template — it is the
+#   ARTIFACT that is missing, not demonstrably the provenance. The likeliest reading is the
+#   second-site rebuild quince#205 records, which provisioned the current fleet from an
+#   Operator-local `make-nerdctl-template.sh` that is in no repo and writes no stamp. NOBODY HAS
+#   CONFIRMED THAT, and this comment must not read as though somebody had. The absence is measured;
+#   the cause is a hypothesis with an issue number.
+#
+#   THE CONSEQUENCE, since `list` reports template freshness by reading this file over ssh: on
+#   these two boxes it has nothing to read, so freshness there is UNKNOWN rather than current.
+#
+#   NONE OF THAT ARGUES FOR DELETING THIS DIRECTORY, and the reason never depended on the stamp:
+#   nothing else committed here can build a box. What supersedes it is quince#205's to decide.
 #
 #   THE DISPOSABLE SERIES — RETIRED by the 2026-07-28 ruling ("no dev containers; the runner is the
 #   work host", devlog#45). That is `create <n>`'s numbered `quince-dev-<n>` aliases, `destroy` as a
