@@ -393,7 +393,7 @@ pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-
 # it, and it is stronger than either of us realised. `gates-sh` greps for a reintroduced
 # `$(TITLE)` so the rule has teeth rather than living in this comment.
 .PHONY: pr-title-check
-pr-title-check: ## Bare #N in a PR title must resolve in that repo (0 clean · 1 match · 2 DID NOT RUN)
+pr-title-check: ## Bare #N in a PR title must resolve there (REPO=owner/name + TITLE_ENV=<NAME> or PR=<n>); 0 clean · 1 match · 2 DID NOT RUN
 	@bin/pr-title-refs --repo "$(REPO)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",))
 
 # The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and

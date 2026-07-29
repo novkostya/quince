@@ -121,6 +121,49 @@ expect "refuses when the forge answers 403 — not a 404, so not a finding" 2 "w
 expect "refuses when the title of a --pr cannot be read" 2 "could not read the title" -- \
 	run boom --repo o/n --pr 42
 
+# --- a MALFORMED ARM is a usage error, in every shell (quince#224) ----------------------------
+# Each arm used to capture its value with `${2:?…}`, which makes the SHELL exit rather than
+# reaching die2. WHY THESE CASES ASSERT A SUBSTRING AND NOT ONLY A CODE: under busybox ash —
+# /bin/sh on the box this suite usually runs on — that expansion exits 2 all by itself, so an
+# exit-code-only assertion PASSES AGAINST THE BUG. It is the `DID NOT RUN` wording that
+# separates "this script refused" from "the shell died on the way", and the bash block below
+# is what separates it by exit code as well.
+#
+# All four arms, not the two quince#224 names: --pr and --gh carried the identical expansion,
+# which is the neighbours-left-standing shape (quince#183, quince#195) the issue itself cites.
+expect "refuses --repo with no value, through die2 and not the shell" 2 "DID NOT RUN — --repo needs owner/name" -- \
+	"$CHECK" --gh "$STUB" --repo
+expect "refuses an EMPTY --repo the same way" 2 "DID NOT RUN — --repo needs owner/name" -- \
+	"$CHECK" --gh "$STUB" --repo "" --title x
+expect "refuses --title with no value" 2 "DID NOT RUN — --title needs a string" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title
+expect "refuses --pr with no value" 2 "DID NOT RUN — --pr needs a number" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --pr
+expect "refuses an EMPTY --pr rather than reading it as absent" 2 "DID NOT RUN — --pr needs a number" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --pr ""
+expect "refuses --gh with no value" 2 "DID NOT RUN — --gh needs a path" -- \
+	"$CHECK" --gh "$STUB" --repo o/n --title x --gh
+# The control for the two EMPTY cases above: `--title ""` is a LEGITIMATE value and must NOT be
+# refused — it has to reach the resolver, where an empty title has no bare refs and is clean.
+# Without this, the arms could be "fixed" by rejecting empty everywhere and the suite would not
+# notice that a real input had been taken away.
+expect "an EMPTY --title is a value, not a usage error" 0 "no bare #N" -- \
+	run ok --repo o/n --title ""
+
+# THE EXIT CODE, UNDER THE SHELL THAT MADE IT DANGEROUS. Measured on bash 5.3.9: the old
+# expansion left a script-invoked run with exit 1 — an ALLOCATED code here, meaning "a bare
+# reference does not resolve". So the defect did not merely leave by a fourth door, it
+# impersonated a real finding. (quince#224 reports 127; that is the `bash -c` form, not the
+# `bash <file>` form a script actually runs under. Both are wrong, only one is quiet.)
+if command -v bash >/dev/null 2>&1; then
+	expect "under bash, a usage error is still 2 — never 1, which would read as a finding" 2 "DID NOT RUN" -- \
+		bash "$CHECK" --gh "$STUB" --repo
+	expect "under bash, an empty --repo is still 2" 2 "DID NOT RUN" -- \
+		bash "$CHECK" --gh "$STUB" --repo "" --title x
+else
+	printf 'SKIP  the bash exit-code cases — no bash here, so this run cannot see quince#224\n'
+fi
+
 # --- exit 1: a real finding ------------------------------------------------------------------
 expect "reports a real 404 as a finding, not as a refusal" 1 "does not resolve" -- \
 	run all-404 --repo o/n --title 'x (#1)'

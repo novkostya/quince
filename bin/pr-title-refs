@@ -49,20 +49,41 @@ die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
 # --- arguments ---------------------------------------------------------------------------
 REPO="" TITLE="" PR="" HAVE_TITLE=no
 GH="${GH_CLI:-gh}"
+# NO ARM MAY USE `${2:?…}` OR `${2?…}`, and this is the contract rather than a style note.
+# Those make the SHELL exit, with a status that is not this script's 2 — so a usage error
+# leaves by a door the three codes above do not describe. Measured on this box, bash 5.3.9
+# and busybox ash, on the SAME expansion:
+#
+#   bash <file> / #!<shebang>   exit 1     <- how this script actually runs
+#   bash -c '…'                 exit 127
+#   busybox ash, either form    exit 2     <- right by coincidence, not by construction
+#
+# The first line is the dangerous one: **1 is an allocated code here** and means "a bare
+# reference does not resolve". So on a box where /bin/sh is bash, a malformed argument does
+# not merely leave by a fourth door — it impersonates a real finding, and `make` reports a
+# title defect that was never looked for. The 127 is the harmless case: obviously bogus,
+# and the only one anybody had measured (quince#224 filed it as the whole story; it is the
+# `bash -c` row, and the row above it is why this matters).
+#
+# Every arm therefore validates by hand and leaves through die2.
 while [ $# -gt 0 ]; do
 	case "$1" in
-	--repo) REPO="${2:?--repo needs owner/name}"; shift 2 ;;
-	--title) TITLE="${2?--title needs a string}"; HAVE_TITLE=yes; shift 2 ;;
+	--repo)
+		if [ $# -lt 2 ] || [ -z "${2-}" ]; then die2 "--repo needs owner/name"; fi
+		REPO=$2; shift 2 ;;
+	# `--title ""` is LEGITIMATE — an empty title is a value worth checking, and checking it
+	# is how the empty-title refusal below gets reached. So this arm asserts presence only,
+	# where the others also assert non-emptiness. That asymmetry is why the four are written
+	# out rather than collapsed into one helper.
+	--title)
+		if [ $# -lt 2 ]; then die2 "--title needs a string"; fi
+		TITLE=$2; HAVE_TITLE=yes; shift 2 ;;
 	# A PR title is ATTACKER-CONTROLLED on a public repository. Interpolating one into a
 	# `make` recipe — `--title "$(TITLE)"` — hands it to a shell after make has expanded it,
 	# so a title containing a quote and a semicolon is command execution on the runner. Reading
 	# it from the environment means the value never crosses a parser: not make's, not the
 	# shell's. CI passes --title-env and never --title.
 	--title-env)
-		# `${2-}` and not `${2:?…}`: the latter makes the SHELL exit on an empty value, with a
-		# status that is not this script's 2 — a usage error would leave as exit 1, which means
-		# "a reference does not resolve". The three codes are the contract; nothing may leave by
-		# a fourth door.
 		_tv="${2-}"
 		case "$_tv" in
 		*[!A-Za-z0-9_]* | "" | [0-9]*) die2 "--title-env takes a variable NAME, got '$_tv'" ;;
@@ -70,8 +91,12 @@ while [ $# -gt 0 ]; do
 		eval "TITLE=\${$_tv-__PR_TITLE_REFS_UNSET__}"
 		[ "$TITLE" != "__PR_TITLE_REFS_UNSET__" ] || die2 "\$$_tv is not set — refusing rather than checking an empty title, which would pass"
 		HAVE_TITLE=yes; shift 2 ;;
-	--pr) PR="${2:?--pr needs a number}"; shift 2 ;;
-	--gh) GH="${2:?--gh needs a path}"; shift 2 ;;
+	--pr)
+		if [ $# -lt 2 ] || [ -z "${2-}" ]; then die2 "--pr needs a number"; fi
+		PR=$2; shift 2 ;;
+	--gh)
+		if [ $# -lt 2 ] || [ -z "${2-}" ]; then die2 "--gh needs a path"; fi
+		GH=$2; shift 2 ;;
 	-h | --help) usage; exit 0 ;;
 	*) printf '%s: unknown option: %s\n' "$ME" "$1" >&2; usage; exit 2 ;;
 	esac
