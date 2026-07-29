@@ -2533,10 +2533,33 @@ owed_role() {
 	# Which half of the loop is this box? Decided by the credential it holds, which is how the two
 	# boxes already tell themselves apart (deploy/runner/preflight asserts the other's is absent), and
 	# printed rather than assumed — a check that silently picks a role can silently pick the wrong one.
-	if [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
-		printf 'implementer %s/bin/gh-bot author\n' "$(repo_root)"
+	#
+	# THE APP KEY IS FIRST BECAUSE IT IS THE LIVE IMPLEMENTER CREDENTIAL (quince#238). This function
+	# knew only the two credentials that have since been retired, so on the implementer box every arm
+	# missed and it returned `none` — and the `Stop` hook's `none` branch FAILS OPEN, loudly and by
+	# design. The result: the guard against ending a session with an open PR and no watch was dead on
+	# the one seat that opens pull requests. Measured over two sessions, 17 firings and 7, in sessions
+	# that between them opened several PRs and made over a hundred successful `gh-coder` calls.
+	#
+	# IT FAILED IN A SHAPE THAT READS AS NORMAL, which is why nobody caught it from inside: on a box
+	# that genuinely holds no credential, "whether a watch is owed was NOT checked" is exactly the
+	# expected output. One session reasoned in its retirement record about what the hook *would* do,
+	# over a hook that had already surrendered.
+	#
+	# The architect arm survived only because the legacy PAT happens to still be on that box. That is
+	# luck, not coverage, and it is worth knowing when the arch box is next cleaned up.
+	if [ -f "${QUINCE_CODER_KEY_FILE:-$HOME_DIR/.config/quince/quince-coder.pem}" ]; then
+		printf 'implementer %s/bin/gh-coder author\n' "$(repo_root)"
 	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
 		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
+	elif [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
+		# LAST, AND IT NAMES gh-coder RATHER THAN gh-bot. `quince-bot` was suspended on 2026-07-28, so
+		# the old arm handed back a wrapper that cannot authenticate — a remedy the reader would run
+		# and watch fail, which is worse than no remedy because it looks like the hook is broken. The
+		# arm is kept rather than deleted so a box still holding the token gets a role instead of
+		# `none`, and it points at the tool that actually works. If both credentials are present the
+		# first arm wins, which is the right precedence: they are one seat, old credential and new.
+		printf 'implementer %s/bin/gh-coder author\n' "$(repo_root)"
 	else
 		printf 'none - -\n'
 	fi

@@ -26,7 +26,13 @@ set -eu
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH='' cd -- "$HERE/.." && pwd)
-FW="$HERE/forge-watch"
+# Overridable so the NEGATIVE CONTROL is reproducible by a reviewer rather than a thing the author
+# did once by hand and reported — the same hook, for the same reason, as PR_TITLE_REFS_BIN. Point it
+# at an older copy of the tool and the source-analysis sections below must FAIL; `$HERE` stays this
+# suite's own directory, so the document paths and the wrapper-existence check still resolve against
+# the real tree. Copying the SUITE to a temp dir instead breaks those and produces failures that look
+# like findings — measured while building quince#238's control.
+FW="${FORGE_WATCH_BIN:-$HERE/forge-watch}"
 [ -x "$FW" ] || { printf 'forge-watch-exits-test: %s is not executable\n' "$FW" >&2; exit 2; }
 
 TMP=$(mktemp -d)
@@ -229,6 +235,62 @@ else
 	else
 		bad "owed_decide has NO arm for watch_report class(es):$_unhandled" \
 			"quince#195: an unhandled class falls to the catch-all and is reported as 'the watch class could not be read' — which describes a failure to determine state, when the state was determined perfectly. The verdict stays correct and only the remedy is lost, so nothing else fails."
+	fi
+fi
+
+# ---------------------------------------------------------------------------------------------
+# owed_role must know the LIVE credentials, not the retired ones (quince#238)
+# ---------------------------------------------------------------------------------------------
+# The third instance of this file's theme, and the most expensive: an enumeration that has to stay
+# total, aimed at a set that CHANGES UNDERNEATH IT. `owed_role` decides which seat a box is by which
+# credential file it holds. `decisions/0014` moved the implementer identity to the `quince-coder`
+# App and `quince-bot` was suspended, and `owed_role` was never told — so on the implementer box
+# every arm missed, the role resolved to `none`, and the `Stop` hook's `none` branch FAILS OPEN by
+# design. The guard against ending a session with an open PR and no watch was dead on the one seat
+# that opens pull requests, across 24 measured firings.
+#
+# It is a static check for the same reason the two sections above are: driving `owed_role` for real
+# means holding a credential and reaching the forge, so a suite that tried would skip on CI and pass
+# by omission — quince#41's shape, in the gate meant to catch a gate that had stopped checking.
+#
+# WHY THESE TWO ASSERTIONS AND NOT "every wrapper appears here". `gh-review` is the reviewer and is
+# not a watch role at all, and `gh-bot` is deliberately retained as an unmodified record
+# (`decisions/0014` condition 1) while no longer being anything a session should be told to run. A
+# blanket rule would demand both and be wrong about both.
+role_body=$(awk '/^owed_role\(\)/,/^}/' "$FW")
+if [ -z "$role_body" ]; then
+	bad "could not extract owed_role's body — the extraction broke" \
+		"Without it the two assertions below are vacuous, which is the failure mode they exist to catch."
+else
+	# 1. THE REGRESSION. The live implementer credential must be one of the things it branches on.
+	if printf '%s' "$role_body" | grep -q 'QUINCE_CODER_KEY_FILE'; then
+		ok "owed_role branches on the LIVE implementer credential (quince-coder App key)"
+	else
+		bad "owed_role does not mention QUINCE_CODER_KEY_FILE — the implementer box will resolve to role=none" \
+			"quince#238: role=none makes the Stop hook fail open on the seat that opens PRs, and it does so in a shape that reads as normal — on a box with genuinely no credential, 'whether a watch is owed was NOT checked' is the expected output."
+	fi
+
+	# 2. NO ARM MAY HAND BACK A WRAPPER FOR A RETIRED IDENTITY. The remedy this function prints is a
+	# command the reader runs; naming `gh-bot` hands them one that cannot authenticate, which looks
+	# like a broken hook rather than a dead account — strictly worse than printing no remedy.
+	if printf '%s' "$role_body" | grep -q 'bin/gh-bot'; then
+		bad "owed_role hands back bin/gh-bot, whose account is suspended" \
+			"quince#238: a role's third field is a command the session is told to run. Pointing it at a suspended identity means the remedy fails when followed, and the reader debugs the watch instead of the credential."
+	else
+		ok "no owed_role arm hands back a wrapper for a retired identity"
+	fi
+
+	# 3. Every wrapper it DOES name must actually be there. Cheap, and it is the assertion that keeps
+	# the two above from being satisfied by a typo.
+	_missing=''
+	for _w in $(printf '%s' "$role_body" | grep -oE '%s/bin/[a-z-]+' | sed 's|%s/||' | sort -u); do
+		[ -x "$HERE/../$_w" ] || _missing="$_missing $_w"
+	done
+	if [ -z "$_missing" ]; then
+		ok "every wrapper owed_role names exists and is executable"
+	else
+		bad "owed_role names wrapper(s) that are not executable here:$_missing" \
+			"The role's third field is handed to the session as a command to run."
 	fi
 fi
 
