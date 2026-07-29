@@ -53,7 +53,12 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 # real PATH via absolute invocation, so nothing here depends on what the host has installed.
 STUB="$WORK/bin"
 mkdir -p "$STUB"
-for t in cat printf awk id sed grep; do
+# `dirname` IS LOAD-BEARING and its absence made a whole section of this suite vacuous. `git-coder`
+# resolves its own directory on its second line, so without `dirname` it died there, exited 1,
+# printed nothing — and the assertions about the credential helper refusing correctly passed on
+# that, having never reached the helper. Breaking the guard AND removing `set -e` changed nothing,
+# which is how it was caught: a test that cannot be made to fail is not testing.
+for t in cat printf awk id sed grep dirname; do
 	if p=$(command -v "$t" 2>/dev/null); then ln -sf "$p" "$STUB/$t"; fi
 done
 
@@ -206,6 +211,54 @@ case "$out" in
 	printf '       %s\n' "$out" | head -n 2
 	;;
 esac
+
+# --- 7. git-coder's CREDENTIAL HELPER must fail loudly, not quietly offer an empty password ------
+# The defect this pins (quince#198 review): `password=$(gh-coder auth token)` with a FAILING
+# substitution still printed a syntactically valid credential with an empty password. git accepted
+# it, tried to authenticate, failed, and reported `authentication failed` — while the boundary
+# refusal naming the offending file went to stderr and lost the race with git's own output. The
+# helper exited 0 while doing it.
+#
+# "I refused" and "I tried and failed" must not be the same observable (quince#41). And this is the
+# path where it matters most: a correctly provisioned box never reaches it, so the only box that
+# does is the misconfigured one the boundary exists to catch.
+#
+# DRIVEN DIRECTLY, WHICH IS WHY THE HELPER IS A FLAG. As an inline `!f() { … }` in a `git -c` value
+# it could only be exercised by making git authenticate against a real remote — so the one path that
+# had to be right was the one path no suite could reach. Offline, no network, no remote, no git.
+rm -f "$TOKEN" "$RKEY" "$ATOK"
+printf 'a reviewer key\n' >"$RKEY"
+helper_out=$(PATH="$STUB" HOME="$WORK" \
+	QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
+	"$PWD/bin/git-coder" --credential-helper get 2>/dev/null) && helper_rc=0 || helper_rc=$?
+
+if [ "$helper_rc" -ne 0 ]; then
+	ok "bin/git-coder: the helper FAILS when the boundary refuses, rather than exiting 0"
+else
+	bad "bin/git-coder: the helper exited 0 while gh-coder refused — git will report the wrong error"
+fi
+case "$helper_out" in
+*password=*)
+	bad "bin/git-coder: the helper emitted a password line despite the refusal — git would try it and fail obscurely"
+	;;
+*)
+	ok "bin/git-coder: no credential is emitted on refusal, so git cannot mistake it for one"
+	;;
+esac
+
+# The negative control: a non-`get` operation is a no-op and must stay silent and successful, or
+# every `git push` would break on the store/erase round trip rather than on anything real.
+rm -f "$RKEY"
+for op in store erase; do
+	_o=$(PATH="$STUB" HOME="$WORK" QUINCE_BOT_TOKEN_FILE="$TOKEN" \
+		QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
+		"$PWD/bin/git-coder" --credential-helper "$op" 2>/dev/null) && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ] && [ -z "$_o" ]; then
+		ok "bin/git-coder: --credential-helper $op is a silent no-op"
+	else
+		bad "bin/git-coder: --credential-helper $op returned rc=$_rc and output '$_o'"
+	fi
+done
 
 printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
