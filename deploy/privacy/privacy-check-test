@@ -14,7 +14,10 @@
 set -eu
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-CHECK="$HERE/privacy-check"
+# Overridable so the NEGATIVE CONTROL is reproducible by a reviewer rather than a thing the author
+# did once by hand and reported — the same hook, for the same reason, as PR_TITLE_REFS_BIN. Point it
+# at an older copy of the gate and the assertions that pin a fix must FAIL.
+CHECK="${PRIVACY_CHECK_BIN:-$HERE/privacy-check}"
 [ -x "$CHECK" ] || { printf 'privacy-check-test: %s is not executable\n' "$CHECK" >&2; exit 2; }
 
 TMP=$(mktemp -d)
@@ -140,6 +143,27 @@ expect "unknown argument refuses" 2 "DID NOT RUN" -- \
 # A --text file that cannot be read is a sweep that did not happen.
 expect "unreadable --text refuses" 2 "not readable" -- \
 	"$CHECK" --patterns "$good" --text "$TMP/does-not-exist"
+
+# AND NEITHER IS AN EMPTY ONE (quince#237). The readability guard above was the only one, and an
+# empty file is perfectly readable: `add_source` dropped it silently, the scope line still announced
+# `+ text`, and the gate printed `clean` and exited 0. That is the invocation CLAUDE.md prescribes
+# before every merge reporting a clean sweep of a PR body it never read — and the way a body file
+# becomes empty is a FAILED FETCH, so the gate degraded exactly when something upstream had already
+# gone wrong.
+#
+# TWO ASSERTIONS, because the exit code alone would pass against a refusal for any other reason, and
+# it is the WORD "EMPTY" that separates "I refused to sweep nothing" from "I could not find the file".
+: >"$TMP/empty-body.md"
+expect "an EMPTY --text refuses rather than sweeping nothing" 2 "DID NOT RUN" -- \
+	"$CHECK" --patterns "$good" --text "$TMP/empty-body.md"
+expect "…and says the file was EMPTY, naming the path the caller passed" 2 "is EMPTY" -- \
+	"$CHECK" --patterns "$good" --text "$TMP/empty-body.md"
+# The control for both: a --text with content must still sweep, and must appear in the SWEPT line.
+# Without this the refusal could be satisfied by rejecting every --text, and the suite would not
+# notice that the flag had stopped working entirely.
+printf 'an ordinary body with nothing private in it\n' >"$TMP/full-body.md"
+expect "a NON-empty --text is swept, and the swept line names it" 0 "text" -- \
+	"$CHECK" --patterns "$good" --text "$TMP/full-body.md"
 
 # =============================================================================================
 # 2. THE GATE CAN RUN AND SOMETHING MATCHES  →  exit 1

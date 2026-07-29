@@ -205,9 +205,37 @@ fi
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 SOURCES=""
-add_source() { # <label> <file>
-	[ -s "$2" ] || return 0
-	SOURCES="$SOURCES $1:$2"
+# add_source <label> <file> [required]
+#
+# A source that is empty because there was nothing to collect is an omission; a source the CALLER
+# NAMED and which turned out to be empty is a refusal (quince#237). Marking the difference at the
+# call site is what closes the class, rather than special-casing `--text` here: any future
+# explicitly-requested source gets the right behaviour by passing one word.
+#
+# THE DEFECT THIS REPLACES. `--text FILE` on an empty FILE was dropped silently, while the scope
+# line still announced `+ text` and the gate printed `clean` and exited 0 — so the invocation
+# `CLAUDE.md` prescribes before every merge could report a clean sweep of a PR body it never read.
+# Twenty lines below, this file already states the principle it was breaking: "An EMPTY scope is not
+# a clean sweep, and must not borrow the word." That guard was written for the whole scope being
+# empty and was never extended to one requested source going missing.
+#
+# AND THE WAY A BODY FILE BECOMES EMPTY IS A FAILED FETCH — so the gate degraded precisely when
+# something upstream had already gone wrong. The instance that found this was `bin/gh-arch` invoked
+# by relative path from a clone that has no `bin/`, writing zero bytes, followed by a sweep that
+# reported clean.
+# The third argument is the path the CALLER named. Passing it means "this source was asked for by
+# name"; omitting it means "collect it if there is any". The origin is carried rather than a bare
+# `required` flag so the refusal can name the file the caller actually passed, not the temp copy of
+# it under $WORK — a refusal that names a path nobody typed is a refusal nobody can act on.
+add_source() { # <label> <file> [caller-named-origin]
+	if [ -s "$2" ]; then
+		SOURCES="$SOURCES $1:$2"
+		return 0
+	fi
+	[ -n "${3:-}" ] || return 0
+	cannot_run "--$1 named $3, and it is EMPTY — there was nothing to sweep.
+    Refusing rather than reporting a clean sweep of text nobody read. An empty file here is
+    usually a FAILED FETCH upstream: check the command that produced it."
 }
 
 if [ -n "$REF" ]; then
@@ -240,9 +268,15 @@ else
 fi
 
 if [ -n "$TEXT" ]; then
+	# Readability was the ONLY guard here, and an empty file is perfectly readable (quince#237).
 	[ -r "$TEXT" ] || cannot_run "--text $TEXT is not readable"
 	cat "$TEXT" >"$WORK/text"
-	add_source "text" "$WORK/text"
+	# `$TEXT` third: the caller named this source, so an empty one is a refusal rather than a drop.
+	# add_source cannot_run's out of here when that happens, so the announcement below is only ever
+	# reached by a source that really entered the sweep — which is the half that made the old
+	# behaviour a lie rather than merely a gap. `SCOPE="$SCOPE + text"` was unconditional, so the
+	# scope line said `+ text` and the swept line did not, and nothing compared the two.
+	add_source "text" "$WORK/text" "$TEXT"
 	SCOPE="$SCOPE + text"
 fi
 
