@@ -66,7 +66,21 @@ repo is not a message bus, and no human is an RPC layer.
    PR template; state explicitly what you did NOT prove.
 5. **Approver ≠ author, always.** Implementer sessions author; the **architect** reviews,
    approves and merges code PRs; the **Operator** approves architect-authored docs/canon
-   PRs. Nobody pushes to `main`: protection requires a PR, one approval, the `gates` /
+   PRs.
+
+   **The seat that merges rebases. It never asks for a rebase.** `strict: true` means every
+   merge to `main` puts every other open PR `BEHIND`, so a stale branch is the steady state
+   with more than one PR in flight, not an exception worth a message. The merging seat holds
+   `contents: write` and can `pr update-branch --rebase` itself; asking instead turns a
+   two-second action into a round trip across the forge — approve, request, notice, rebase,
+   wait for CI, notice again, merge — and every crossing is one a session can miss. On
+   2026-07-29 two approved, green, correct PRs sat for hours behind exactly that: the request
+   was made, as a footnote at the bottom of a long approval, and neither seat treated it as
+   work. A merge queue would collapse this automatically and is **unavailable** — it is an
+   org-only feature and this repository is owned by a user account (measured, `owner_type:
+   User`), which is why the rule has to be carried by a seat instead.
+
+   Nobody pushes to `main`: protection requires a PR, one approval, the `gates` /
    `image` / `e2e` checks, linear history, no force pushes, admins included. (The
    Operator may flip protection off in an emergency; doing so obligates a note in the
    decisions log.) **That sentence describes `novkostya/quince`.** `novkostya/quince-devlog`
@@ -121,7 +135,12 @@ repo is not a message bus, and no human is an RPC layer.
 - The token is scoped to this repo and has **no `workflow` scope** — and **neither does the
   architect's**. Measured (quince#113): a `PUT` under `.github/workflows/**` returns `403
   Resource not accessible by personal access token`, while an ordinary contents write to the
-  same branch succeeds. **Only the Operator can push a workflow.** Put the file verbatim in
+  same branch succeeds. **No PAT seat can push a workflow** — neither the implementer's nor the
+  architect's. The Operator always can (an SSH push consults no OAuth scope), and since
+  2026-07-27 so can `quince-review[bot]`, which holds `workflows: write`. This sentence read
+  "only the Operator can push a workflow" until 2026-07-29, contradicting the seat table thirty
+  lines below it that had already recorded the App's grant — canon disagreeing with itself, in the
+  paragraph a session consults before deciding it is blocked. Put the file verbatim in
   the PR thread, say plainly in the PR that the check is built and **unwired**, and open an
   issue for the wiring — rather than working around it, or escalating to a seat that cannot
   do it either.
