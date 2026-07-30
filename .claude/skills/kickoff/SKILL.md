@@ -110,8 +110,14 @@ every session cloning into one directory, sharing a watch state, owning no branc
 silently, as an empty string in a path, which is why `$HOME/scratch` did not exist on any box.
 One host is *meant* to run several implementers concurrently; the name is what keeps them apart.
 
+**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265). That
+list is what lets a watch on the OTHER box attribute your branches: the branch namespace is global,
+the local registry is not, so a seat missing from the file wakes every watch on every box for every
+event it produces. The refusal names the file and lists the known seats. **Adding a seat is a PR** —
+that is the intended cost, and it is why the list cannot silently go stale.
+
 ```sh
-bin/forge-watch runner set <name>        # ONCE per session. Short, stable, yours: r1, r2, …
+bin/forge-watch runner set <name>        # ONCE per session. Must be listed in .claude/seats.
 RUNNER=$(bin/forge-watch runner get) || { echo "no runner declared — stop"; exit 1; }
 [ -n "$RUNNER" ] || { echo "runner name is empty — stop"; exit 1; }
 SCRATCH="$HOME/scratch/$RUNNER"

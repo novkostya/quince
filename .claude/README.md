@@ -8,6 +8,7 @@
 | `settings.local.json.example` | what a binding file looks like | yes |
 | `loop-protocol.md` | the coroutine loop, both halves — normative for `/architect` and `/kickoff` | yes |
 | `forge-set` | the repositories the loop watches, one `owner/name` per line | yes |
+| `seats` | the seat names branches may be attributed to, one per line — **authoritative**: `forge-watch runner set` refuses a name absent from it (quince#265) | yes |
 
 Permission rules **merge** across settings files rather than overriding, and precedence for
 conflicts is deny → ask → allow, so the committed file can stay generic while your machine

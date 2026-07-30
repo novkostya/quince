@@ -766,6 +766,27 @@ state_path_for() {
 # ---------------------------------------------------------------------------
 FORGE_SET_FILE=${FORGE_SET_FILE:-.claude/forge-set}
 
+# The KNOWN SEAT NAMES — every branch prefix that may be attributed to a runner (quince#265).
+#
+# `wake_filter` decides ownership by prefix-matching the branch against declared runner names, and it
+# read only the LOCAL registry. The branch namespace is GLOBAL, so the architect's correctly-prefixed
+# `arch1/…` branch was unattributable on the implementer box and woke every watch there. Measured, and
+# the arch box is worse rather than symmetric: it declares one runner, `other_runner_names` returns
+# empty, and this file's own comment already described the consequence — "the one-runner case turns
+# the filter into a no-op". It had never suppressed anything on that seat.
+#
+# ADDITIVE, never a replacement (ruled): the local registry still decides, and this adds the seats
+# that live on other boxes.
+FORGE_SEATS_FILE=${FORGE_SEATS_FILE:-.claude/seats}
+
+seat_names() {
+	# Names from the committed list. Comments and blanks stripped, the same shape `forge-set` is read
+	# with. Absent file is not an error — a clone without it behaves exactly as before this change,
+	# which is the fail-open direction and the one this issue keeps choosing.
+	[ -f "$FORGE_SEATS_FILE" ] || return 0
+	sed 's/#.*//' "$FORGE_SEATS_FILE" 2>/dev/null | tr -d ' \t' | grep -v '^$' | sort -u
+}
+
 forge_set() {
 	_f=$1
 	[ -f "$_f" ] || die "no forge set at $_f — declare the repositories to watch, one owner/name per line.
@@ -2169,16 +2190,79 @@ other_runner_names() {
 	# declared it — that is the whole point of face 4 — so a slot whose session died still owns its
 	# branches, and a restarting session re-declares the same name. Pruning here would hand a dead
 	# runner's PRs to whoever is awake.
+	# AND THE COMMITTED SEAT LIST, because the branch namespace is global while this registry is local
+	# (quince#265). A seat on the OTHER box is not "simply absent" in a harmless way — its branches are
+	# correctly prefixed and still unattributable here, so they wake every watch. Additive: the
+	# registry is unchanged and the list only adds names.
 	_orn_me=$1
-	_orn_d=$(runner_registry)
-	[ -d "$_orn_d" ] || return 0
-	for _orn_f in "$_orn_d"/*; do
-		[ -f "$_orn_f" ] || continue
-		_orn_n=$(head -n 1 "$_orn_f" 2>/dev/null || true)
-		[ -n "$_orn_n" ] || continue
-		[ "$_orn_n" != "$_orn_me" ] || continue
-		printf '%s\n' "$_orn_n"
-	done | sort -u
+	{
+		_orn_d=$(runner_registry)
+		if [ -d "$_orn_d" ]; then
+			for _orn_f in "$_orn_d"/*; do
+				[ -f "$_orn_f" ] || continue
+				_orn_n=$(head -n 1 "$_orn_f" 2>/dev/null || true)
+				[ -n "$_orn_n" ] || continue
+				printf '%s\n' "$_orn_n"
+			done
+		fi
+		seat_names
+	} | grep -vxF "$_orn_me" | sort -u
+}
+
+# The same population, split by SOURCE, so a report can say which one attributed a branch
+# (quince#265 constraint 3). A wrong entry in a committed file is invisible otherwise — and this whole
+# issue exists because an attribution failure was invisible.
+other_runner_names_from() { # <me> <local|seats>
+	_ornf_me=$1
+	case "$2" in
+	local)
+		_ornf_d=$(runner_registry)
+		[ -d "$_ornf_d" ] || return 0
+		for _ornf_f in "$_ornf_d"/*; do
+			[ -f "$_ornf_f" ] || continue
+			_ornf_n=$(head -n 1 "$_ornf_f" 2>/dev/null || true)
+			[ -n "$_ornf_n" ] || continue
+			printf '%s\n' "$_ornf_n"
+		done | grep -vxF "$_ornf_me" | sort -u
+		;;
+	seats)
+		# Only names the local registry does NOT already carry, so the two reported sets are disjoint
+		# and their counts add up to the total rather than double-counting a seat declared in both.
+		#
+		# A TEMP FILE, not `grep -f <(…)`: process substitution is a bashism and this is `#!/bin/sh`,
+		# which on every box here is BusyBox `ash`. It would have failed as a syntax error at parse
+		# time — loudly, but only on the boxes, and `deploy/dev.md` exists because that class keeps
+		# being written by sessions that have GNU habits (quince#246).
+		_ornf_t=$(mktemp) || return 0
+		other_runner_names_from "$_ornf_me" local >"$_ornf_t"
+		# NOT `[ -s f ] && grep -vxF -f f || cat`. When the filter removes EVERY name grep exits 1,
+		# so the `||` arm fires and `cat` reads a stdin `grep` has already drained — right answer,
+		# reached by accident, and one refactor away from being wrong. SC2015 caught it.
+		if [ -s "$_ornf_t" ]; then
+			seat_names | grep -vxF "$_ornf_me" | grep -vxF -f "$_ornf_t" || :
+		else
+			seat_names | grep -vxF "$_ornf_me" || :
+		fi
+		rm -f "$_ornf_t"
+		;;
+	esac
+}
+
+# How many PRs on a state record `wake_filter` would attribute to one of the names in <names-file>.
+# Extracted from `status` (quince#265) so the per-source notes cannot drift apart from each other —
+# two copies of this jq, differing by a character, would report two different truths about one record.
+suppressed_count() { # <state-file> <names-file>
+	# BOTH captures are load-bearing, and each was missing in turn. Without `. as $pr` the PR is
+	# unreachable inside any() and jq errors "Cannot index string with string" — silently, into a
+	# `|| printf 0` that reports "nothing suppressed" forever. Without `. as $p` the prefix is
+	# unreachable too, and `startswith(.)` compares the branch to ITSELF: always true, so it counted
+	# every PR as somebody else's. The first failed loudly enough to catch; the second returned a
+	# plausible number and was caught only by checking it against a fixture with a known answer.
+	jq -r --rawfile others "$2" '
+		($others | split("\n") | map(select(length > 0) | . + "/")) as $t
+		| [(.prs // [])[] | select(.branch != null) | . as $pr
+		   | select(any($t[]; . as $p | ($pr.branch | startswith($p))))] | length' \
+		"$1" 2>/dev/null || printf 0
 }
 
 wake_filter() {
@@ -2953,26 +3037,33 @@ status)
 		# leave unexplained: a session that meets an unexpected quiet should be able to see the
 		# reason here rather than deduce it. Printed only when there IS another runner and it DOES
 		# own something on the record, so a one-runner box reports exactly what it used to.
+		# SAY WHICH SOURCE ATTRIBUTED IT (quince#265 constraint 3). Two sources now answer "whose branch
+		# is this": the LOCAL registry, which knows sessions on this box, and the COMMITTED list, which
+		# knows seats that may live on the other one. They fail differently and their remedies do not
+		# overlap — a stale registry entry is a dead session this box can clear itself (quince#211),
+		# while a wrong or missing committed name is a PR against `.claude/seats`. One merged note would
+		# name a seat without saying which of those two to reach for, which is the reporting defect
+		# quince#230 filed one layer down: a number with no route to the cause.
 		_rn=$(runner_name)
 		if [ -n "$_rn" ] && [ -f "$_rs" ]; then
+			for _rsrc in local seats; do
+				_rot=$(mktemp)
+				other_runner_names_from "$_rn" "$_rsrc" >"$_rot" 2>/dev/null || : >"$_rot"
+				if [ -s "$_rot" ]; then
+					case $_rsrc in
+					local) _rwhere='local registry' ;;
+					seats) _rwhere="committed list, $FORGE_SEATS_FILE" ;;
+					esac
+					_rcnt=$(suppressed_count "$_rs" "$_rot")
+					[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another declared runner (%s) — attributed via the %s. Their events are printed but do NOT wake this watch.\n' \
+						"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')" "$_rwhere"
+				fi
+				rm -f "$_rot"
+			done
+			# The unattributable report below asks a different question — which branches match NOBODY —
+			# so it wants the UNION and rebuilds the full list rather than reusing either arm above.
 			_rot=$(mktemp)
 			other_runner_names "$_rn" >"$_rot" 2>/dev/null || : >"$_rot"
-			if [ -s "$_rot" ]; then
-				# BOTH captures are load-bearing, and each was missing in turn. Without `. as $pr`
-				# the PR is unreachable inside any() and jq errors "Cannot index string with
-				# string" — silently, into a `|| printf 0` that reports "nothing suppressed"
-				# forever. Without `. as $p` the prefix is unreachable too, and `startswith(.)`
-				# compares the branch to ITSELF: always true, so it counted every PR as somebody
-				# else's. The first failed loudly enough to catch; the second returned a plausible
-				# number and was caught only by checking it against a fixture with a known answer.
-				_rcnt=$(jq -r --rawfile others "$_rot" '
-					($others | split("\n") | map(select(length > 0) | . + "/")) as $t
-					| [(.prs // [])[] | select(.branch != null) | . as $pr
-					   | select(any($t[]; . as $p | ($pr.branch | startswith($p))))] | length' \
-					"$_rs" 2>/dev/null || printf 0)
-				[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another declared runner (%s) — their events are printed but do NOT wake this watch.\n' \
-					"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')"
-			fi
 			# AND THE BRANCHES THAT BELONG TO NOBODY (quince#230). `wake_filter` decides ownership by
 			# PREFIX-MATCHING the branch against declared runner names, so a branch carrying none of
 			# them cannot be attributed to any session — and that failure is SILENT because it fails
@@ -3299,6 +3390,23 @@ runner)
 			die "runner name must be [A-Za-z0-9._-], not starting with '.' or '-': got \"$_rs_name\".
     It becomes a directory component AND a branch prefix, so it has to be safe in both." ;;
 		esac
+		# A NAME ABSENT FROM THE COMMITTED SEAT LIST IS REFUSED (quince#265). The list is what lets
+		# `wake_filter` attribute a branch belonging to a seat on ANOTHER box, and a committed list
+		# nobody is forced to update is the drift quince#200 and quince#256 both exist to close. So it
+		# is authoritative rather than advisory: a new seat cannot declare itself until it appears
+		# there, and the drift becomes a refusal here — one PR wide, with the remedy in the message.
+		#
+		# ONLY WHEN THE LIST EXISTS. A clone without it behaves exactly as before, which keeps this
+		# additive and means a stranger's checkout is not blocked by a file they have no reason to have.
+		# And it refuses the DECLARATION only: constraint 1 of the ruling is that an already-declared
+		# session must not break if the list is briefly behind for its own name.
+		if [ -f "$FORGE_SEATS_FILE" ] && ! seat_names | grep -qxF "$_rs_name"; then
+			die "\"$_rs_name\" is not in $FORGE_SEATS_FILE, so no other box could attribute its branches.
+    Known seats: $(seat_names | tr '\n' ' ' | sed 's/ $//')
+    Add it there in a PR and re-run this. The list is authoritative on purpose (quince#265): it is
+    what stops a seat's events waking every watch on every other box, and a list nobody must update
+    goes stale silently."
+		fi
 		_rs_sid=$(session_id)
 		[ -n "$_rs_sid" ] || die "no session id in the environment (\$CLAUDE_CODE_SESSION_ID), so this
     name could not be tied to anything. Set QUINCE_SESSION_ID explicitly if you are outside a

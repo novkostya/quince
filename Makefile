@@ -255,7 +255,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test \
-                   sh-lint-coverage-test allowlist-coverage-test
+                   sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -300,6 +300,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    deploy/runner/quince-runner-status-test \
                    bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
+                   bin/forge-watch-seats-test \
                    bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
@@ -411,6 +412,10 @@ forge-watch-roundtrip-test: ## What one writer records must survive the OTHER wr
 .PHONY: forge-watch-ownership-test
 forge-watch-ownership-test: ## Another runner's event must not wake mine (quince#111 face 3)
 	@bin/forge-watch-ownership-test
+
+.PHONY: forge-watch-seats-test
+forge-watch-seats-test: ## A seat declared on the OTHER box is attributable here (quince#265)
+	@bin/forge-watch-seats-test
 
 # quince#111's four faces, TOGETHER, which no other suite does — every one of them drives a single
 # runner against state describing another. Gated rather than hand-run for the reason quince#64 gives
