@@ -438,7 +438,32 @@ step() {
 		| select($o != null)
 		| select($p.updatedAt != $o.updatedAt)
 		| ([($p.activity // [])[] | select(.at > $o.updatedAt)] | sort_by(.at) | last) as $a
-		| (if $a == null then "actor=unattributed"
+		| (if $a == null then
+		        # UNATTRIBUTED, AND SOMETIMES WE KNOW MORE THAN THAT (quince#83). `/architect` §6 tells
+		        # a reader that `actor=unattributed` means GO AND LOOK, and names an author ticking a
+		        # checklist box as the commonest cause. On this box it is not: `--delete-branch` fires
+		        # one of these on EVERY merge — measured across ten merges in one evening, the
+		        # branch-deletion case every time and the checklist case never. So the instruction
+		        # sends a reader hunting an author action that did not occur, once per merge.
+		        #
+		        # A PR ALREADY MERGED AT THE PREVIOUS OBSERVATION CANNOT BE AWAITING ANYBODY, which is
+		        # the entire content of the investigation the reader was being sent on. Saying so costs
+		        # nothing: `state` is already in both observations.
+		        #
+		        # WHY NOT `kind=branch-deleted`, which the issue leaned toward and which I measured as
+		        # available: GraphQL `headRef` goes null exactly when the branch is deleted, and it is
+		        # a node field, so it is nearly free. But `gh pr list --json` has NO field for it —
+		        # only `headRefName` and `headRefOid`, neither of which changes — so adding it would
+		        # make the two fetch paths INEQUIVALENT, and `forge-fetch-equivalence-test` exists to
+		        # prove they are not. A real cost against a narrower gain, and it is the `committer`
+		        # trap of quince#242 seen from the other side: there the field existed on both paths
+		        # and the round trip dropped it; here it exists on one path only.
+		        #
+		        # So this reports what BOTH paths can see. It does NOT claim the branch was deleted — a
+		        # label change or a base change on a merged PR lands here too, and every one of them
+		        # shares the property that matters: nothing is pending.
+		        (if ($o.state // "") == "MERGED" then "actor=unattributed after=merge"
+		         else "actor=unattributed" end)
 		   else "actor=\($a.actor) kind=\($a.kind)"
 		        # `committer=` ONLY WHERE IT EXISTS, which is `kind=commit` and nothing else (quince#242
 		        # step 3). Measured on this box: 29 of 29 commit entries carry one, and comment, review

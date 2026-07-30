@@ -559,6 +559,16 @@ Then, on the events:
 - **`event=updated … actor=unattributed` means go and look**, not nothing happened. Its commonest cause
   here is an author ticking a checklist box, which moves `updatedAt` through a channel that appears in
   no activity list.
+  **UNLESS IT CARRIES `after=merge`, in which case nothing is pending and there is nothing to look at**
+  (quince#83). The PR was already MERGED at the previous observation, so no author is waiting on you and
+  no verdict is owed. `--delete-branch` produces one of these on **every** merge — the deletion moves
+  `updatedAt` a second or two after the merge and appears in no activity list either — and *"the
+  commonest cause is a checklist box"* was measured false on this box: across ten merges in one evening
+  the branch-deletion case fired every time and the checklist case never. So this bullet was sending a
+  reader to investigate a post-merge non-event once per merge, and the sentence above stays true only
+  for the case it is now narrowed to.
+  It does **not** claim the branch was deleted: a label or a base change on a merged PR lands here too,
+  and all of them share the only property that matters to a reader deciding whether to act.
 - **`event=mergeability status=BEHIND` after your own merge is your doing**: under strict up-to-date
   protection, landing one PR invalidates every other open one, and the invalidated PR's own `updatedAt`
   does not move because nothing happened to it. Say so on those PRs rather than waiting for their

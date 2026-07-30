@@ -1,0 +1,65 @@
+{
+  "note": "quince#83. `--delete-branch` moves `updatedAt` a second or two AFTER the merge, and the deletion appears in no activity list — so the backstop emits `actor=unattributed`, and `/architect` §6 tells the reader that means GO AND LOOK, naming an author ticking a checklist box as the commonest cause. On this box it is not: across ten merges in one evening the branch-deletion case fired every time and the checklist case never, so the instruction cost one investigation of a post-merge non-event per merge. THE DISCRIMINATOR IS FREE: a PR already MERGED at the PREVIOUS observation cannot be awaiting anybody, which is the entire content of the investigation. PR 701 is that case. PR 702 IS THE CONTROL AND IT IS NOT OPTIONAL — an unattributed update on an OPEN PR is the case §6 was written for, it still means go and look, and without it this fixture would pass against a build that stamped `after=merge` on every unattributed event and destroyed the distinction it exists to draw. NOT `kind=branch-deleted`: GraphQL `headRef` goes null exactly when the branch is deleted and was measured available, but `gh pr list --json` has no field for it, so it would make the two fetch paths inequivalent — the `committer` trap of quince#242 from the other side, where the field exists on one path only. So the event reports what BOTH paths can see and does not claim a cause it cannot prove: a label or base change on a merged PR lands here too, and shares the property that matters.",
+  "before": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 701,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T06:53:45Z",
+        "branch": "r4/already-landed",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T06:53:45Z", "actor": "app/quince-review", "kind": "merge"}
+        ]
+      },
+      {
+        "number": 702,
+        "state": "OPEN",
+        "updatedAt": "2026-07-30T06:50:00Z",
+        "branch": "r4/still-open",
+        "author": "quince-coder",
+        "merge_state": "CLEAN",
+        "checks": [],
+        "reviews": [],
+        "activity": []
+      }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 701,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T06:53:47Z",
+        "branch": "r4/already-landed",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T06:53:45Z", "actor": "app/quince-review", "kind": "merge"}
+        ]
+      },
+      {
+        "number": 702,
+        "state": "OPEN",
+        "updatedAt": "2026-07-30T06:55:00Z",
+        "branch": "r4/still-open",
+        "author": "quince-coder",
+        "merge_state": "CLEAN",
+        "checks": [],
+        "reviews": [],
+        "activity": []
+      }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=701 at=2026-07-30T06:53:47Z actor=unattributed after=merge",
+    "event=updated pr=702 at=2026-07-30T06:55:00Z actor=unattributed"
+  ]
+}
