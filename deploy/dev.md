@@ -84,6 +84,14 @@ error go away; write the `jq` form.
 > argument the original issue actually made, not on the invented one. Recorded rather than quietly
 > rewritten, because a section whose whole subject is *"verify the trap on the box before writing it
 > down"* asserted a fact about the image without opening the Dockerfile, and got it past a review.
+>
+> **AND THIS CORRECTION IS ITSELF TIME-SCOPED, deliberately.** It describes the tree at this commit:
+> `vault/pyproject.toml` requires Python ≥3.12 and `deploy/Dockerfile` installs `python3` for it.
+> `CLAUDE.md` says *"swappable vault sidecar (Python **today**…)"* — the word is load-bearing. If the
+> sidecar is replaced by a Go implementation, `python3`, the `toolchain-uv` stage, `uv` and
+> `gates-vault` all become removable, and **this paragraph becomes wrong in the other direction.**
+> Tracked separately rather than predicted here. Writing an undated claim about the image is the
+> mistake this box is standing in.
 
 **And do not "fix" a box towards GNU.** `deploy/Dockerfile`'s runtime stage is `FROM
 ${ALPINE_IMAGE}`, so **BusyBox is the production truth** and the boxes match the shipped image.
