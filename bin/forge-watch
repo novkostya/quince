@@ -880,6 +880,16 @@ state_path_for() {
 # THE NUMBER, NEVER A JUDGEMENT. No threshold, no "this looks high" — 63 arms is alarming in a quiet
 # hour and unremarkable in the hour twenty PRs landed, and the reader has that context where the tool
 # does not.
+#
+# THE INVARIANT IS `arms >= wakes`: one arm runs one loop, which ends in exactly one exit — a wake, an
+# idle bound, or a failure bound. Stated so a violation reads as a bug rather than as noise.
+#
+# It IS violated once, harmlessly, on any state file that spans the build introducing the
+# carry-forward: before it, `step` erased both counters on the next tick, so the two began surviving
+# at different moments and a file can carry a wake counted against an arm that was thrown away.
+# Observed on this box as `arms=1 wakes=2` immediately after the fix. Self-correcting from the next
+# arm, and unreachable on a state file created after it — which is why the suite, which starts fresh,
+# cannot show it and this comment has to.
 loop_state_files() { # <all> <repo> <state>
 	if [ "$1" = yes ]; then
 		for _lsf_r in $(forge_set "$FORGE_SET_FILE"); do

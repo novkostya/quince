@@ -449,12 +449,12 @@ forge-watch-seats-test: ## A seat declared on the OTHER box is attributable here
 	@bin/forge-watch-seats-test
 
 .PHONY: forge-watch-stderr-test
+forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (quince#279)
+	@bin/forge-watch-stderr-test
+
 .PHONY: forge-watch-counters-test
 forge-watch-counters-test: ## The loop counts its own cycles, and the count survives (quince#282)
 	@bin/forge-watch-counters-test
-
-forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (quince#279)
-	@bin/forge-watch-stderr-test
 
 # quince#111's four faces, TOGETHER, which no other suite does — every one of them drives a single
 # runner against state describing another. Gated rather than hand-run for the reason quince#64 gives
