@@ -471,6 +471,17 @@ back to sleep. A due-but-missed tick arrives as `event=tick-overdue` and is repo
 does not suppress them (roughly a third of them, measured; quince#62). The event carries `actor=`: read
 it, rather than reading a self-wake as phantom activity.
 
+**With one exception, and on this seat it is the common one: `kind=commit` names the commit's AUTHOR,
+never whoever moved the PR** (quince#222). A rebase replays the original authorship, so
+`gh pr update-branch --rebase` — which *you* run, as the merging seat — produces an event reading
+`actor=quince-coder[bot] kind=commit`. The identity is real, specific, and **not the actor**; the
+trigger is not recoverable from a commit at all. Measured twice on quince#255, from both seats: the
+architect ran the rebase and both watches named the App that did not act.
+Read `kind=` before trusting `actor=`. For `comment`, `review` and `merge` the actor *is* the one who
+acted; for `commit` it is the author of the work, which on a rebase is a different question from who
+moved the head. **The failure this prevents is concluding your own approval is stale** — that an
+implementer pushed under you — when the head moved because you rebased it yourself.
+
 **Ending a turn with an unwatched queue is blocked once.** A `Stop` hook runs `bin/forge-watch owed
 --all` — open PRs in the declared set with no live watch — and hands you the arming command; end the
 turn again and it stops blocking and tells the Operator instead. It is aimed at the failure that the

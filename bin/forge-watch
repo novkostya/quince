@@ -1576,10 +1576,24 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
 #
 # `mergedBy` IS PREFIXED AND COMMENT AUTHORS ARE NOT, and that asymmetry is `gh`'s, replicated here
 # rather than tidied: `gh` renders a Bot as `app/quince-review` for `mergedBy` and as bare
-# `quince-review` for comment and review authors. Measured, because it is not guessable. It is also
-# not cosmetic — `wake_worthy` filters on actor names, so normalising both the same way silently
-# reclassifies every App act. The equivalence suite caught it twice, once in each direction; reading
-# the code caught it neither time.
+# `quince-review` for comment and review authors. Measured, because it is not guessable. The
+# equivalence suite caught it twice, once in each direction; reading the code caught it neither time.
+#
+# WHY IT MATTERS IS THE EQUIVALENCE, NOT A FILTER — and this comment used to say otherwise. It read
+# "`wake_worthy` filters on actor names, so normalising both the same way silently reclassifies every
+# App act." **`wake_worthy` does not filter on actor names.** Measured 2026-07-30 by reading every
+# use: `actor` is PRINTED at :409, :526 and :550 and SHAPED at :1501 and :1744-1747, and it reaches no
+# decision anywhere. `wake_worthy` filters on event KINDS; `wake_filter` filters on BRANCH ownership
+# (quince#111). Neither reads an actor name.
+#
+# So the reason to keep the asymmetry is that the two fetch paths must produce the IDENTICAL shaped
+# observation, which is precisely what the equivalence suite compares — a normaliser that tidied the
+# prefix would break the equivalence it exists to preserve. That argument is sound and survives; only
+# the mechanism cited for it was wrong.
+#
+# Corrected rather than quietly deleted, because the false version made a reporting field sound
+# load-bearing, and that is exactly what decides how urgent quince#222's misattribution is: `actor`
+# being informational is why a wrong actor is a REPORTING defect and not a wrong wake.
 #
 # AND AN UNRESOLVED COMMIT AUTHOR IS `""`, NOT `null`, WHICH IS BUG-FOR-BUG DELIBERATE. `gh` emits
 # `login: ""` for a commit author with no GitHub account; GraphQL gives `user: null`. This
