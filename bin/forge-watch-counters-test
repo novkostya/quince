@@ -106,18 +106,31 @@ fi
 # AND IT SAYS WHAT IT DOES NOT COUNT (constraint 4). A figure whose basis is unstated is the defect
 # one layer up from the one it fixes.
 #
-# THE BLIND SPOT MOVED WHEN quince#242 LANDED, and this assertion is what forced the wording to move
-# with it. It pinned "not WHOSE wakes" — true while the suppression arms did not exist, false the hour
-# they merged — so the suite failed, correctly, on prose that had quietly become a claim pointing at a
-# closed issue for an answer it no longer holds. The blind spot NOW is that a suppression which
-# PREVENTED a wake and one that merely quieted a tick that woke anyway are equally invisible.
+# THE BLIND SPOT MOVED TWICE, and this assertion is what forced the wording to move with it both
+# times. It first pinned "not WHOSE wakes" — true while the suppression arms did not exist, false the
+# hour they merged, so the suite failed on prose that had become a claim pointing at a closed issue.
+# It then pinned "prevented … not counted", which lasted until the counter existed.
 #
-# Pinned on `PREVENTED` rather than on the whole sentence: the claim is that the line names its gap,
-# not that it names it in one phrasing.
-if grep -q 'PREVENTED a wake are not counted' "$WORK/st"; then
-	ok "the report names its CURRENT blind spot — prevented wakes (constraint 4)"
+# The blind spot is now GONE rather than renamed: `prevented` is reported, so constraint 4 is
+# satisfied by the line DEFINING its own metric instead of apologising for a missing one. That is
+# what this pins — a bare number called `prevented` would be a new ambiguity, since the obvious
+# reading is "events suppressed" and the figure is ticks.
+#
+# Pinned on the definition clause rather than the whole sentence: the claim is that the line states
+# its own basis, not that it states it in one phrasing.
+if grep -q 'prevented = ticks where self-caused suppression was the difference' "$WORK/st"; then
+	ok "the report DEFINES its own metric rather than naming a missing one (constraint 4)"
 else
-	bad "the report does not say what it fails to count, or still names quince#242's retired blind spot"
+	bad "the loop line reports a bare 'prevented' with no basis, or still names a retired blind spot"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+# AND A ZERO IS PRINTED AS A RESULT. Nothing has been suppressed in this suite, so `0 prevented` is
+# the true answer and must appear — a counter that stayed silent until it turned positive would be
+# unfalsifiable, which is the shape it exists to stop the loop reporting about itself.
+if grep -q '^loop: .*, 0 prevented ' "$WORK/st"; then
+	ok "a zero prevented count is reported, not withheld until it is flattering"
+else
+	bad "the prevented figure is hidden at zero — the number cannot be falsified"
 	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
 fi
 

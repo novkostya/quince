@@ -133,6 +133,27 @@ else
 	bad "no note — a suppression nobody can see is indistinguishable from a missed event"
 fi
 
+# (1b) AND THE TICK IS COUNTED AS A PREVENTED WAKE (quince#242's closing ruling, quince#296).
+#
+# THIS IS THE ONE SCENARIO IN THE WHOLE SUITE WHERE SUPPRESSION CHANGED THE DECISION, which is what
+# `prevented` counts — not events suppressed. The distinction is the entire reason the counter exists:
+# a tick carrying my own comment AND somebody else's review wakes either way, and reporting its
+# suppression as a prevented wake would be the "suppressed=1 beside a watch that woke anyway" this
+# subsystem keeps being warned about. Here the self-caused event was the tick's ONLY wake-worthy
+# line, so removing the arms would have woken the session, and the counterfactual says so.
+if grep -q 'would have WOKEN without self-caused suppression' "$WORK/out"; then
+	ok "the prevented wake is REPORTED on the tick that earned it"
+else
+	bad "suppression changed the decision and nothing said so — the measurement quince#242 owes is silent"
+	sed -n '1,10p' "$WORK/out"
+fi
+if [ "$(jq -r '.prevented // 0' "$STATE" 2>/dev/null || printf 0)" -ge 1 ]; then
+	ok "…and the counter on disk records it, so the figure survives the tick that produced it"
+else
+	bad "the note fired but .prevented did not increment — quince#103's defect one field over"
+	jq -c '{arms, wakes, prevented}' "$STATE" 2>/dev/null | sed 's/^/    | /'
+fi
+
 # (2) IMPLEMENTER, the ARCHITECT's act on its branch: this is the event the seat exists to receive.
 baseline
 run_watch 3 6
