@@ -57,10 +57,10 @@
     "event=updated pr=402 at=2026-07-30T07:00:00Z actor=quince-coder kind=comment",
     "event=updated pr=403 at=2026-07-30T09:40:00Z actor=novkostya kind=comment",
     "event=updated pr=404 at=2026-07-30T09:40:00Z actor=quince-review kind=review",
-    "event=review pr=401 verdict=CHANGES_REQUESTED",
-    "event=review pr=402 verdict=CHANGES_REQUESTED",
-    "event=review pr=403 verdict=CHANGES_REQUESTED",
-    "event=review pr=404 verdict=APPROVED",
+    "event=review pr=401 count=1 verdict=CHANGES_REQUESTED",
+    "event=review pr=402 count=1 verdict=CHANGES_REQUESTED",
+    "event=review pr=403 count=1 verdict=CHANGES_REQUESTED",
+    "event=review pr=404 count=2 verdict=APPROVED",
     "event=review-answered pr=401 blocked_at=2026-07-30T09:21:36Z by=quince-review via=commit",
     "event=review-answered pr=402 blocked_at=2026-07-30T06:53:53Z by=quince-review via=comment"
   ]

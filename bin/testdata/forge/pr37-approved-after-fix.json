@@ -21,7 +21,7 @@
   },
   "expect_events": [
     "event=updated pr=37 at=2026-07-26T13:53:06Z actor=novkostya kind=review",
-    "event=review pr=37 verdict=APPROVED",
+    "event=review pr=37 count=1 verdict=APPROVED",
     "event=mergeability pr=37 status=CLEAN"
   ]
 }
