@@ -1007,12 +1007,34 @@ loop_totals() { # <all> <repo> <state>
 $(loop_state_files "$1" "$2" "$3")
 EOF
 	[ "$_lt_a" -gt 0 ] || return 0
-	# WHAT IT DOES NOT COUNT, said in the line itself and not only in a doc (quince#242 constraint 4).
-	# Until the self-caused arm exists, these are WAKES, not *whose* wakes — and on this project a
-	# large share of them are the seat's own acts. A figure whose basis is unstated is the defect one
-	# layer up from the one this measures.
-	printf 'loop: %s arm(s), %s wake(s) for this runner since counting began — wakes, not WHOSE wakes (quince#242 unbuilt).\n' \
-		"$_lt_a" "$_lt_w"
+	# THE SCOPE IS PART OF THE FIGURE (quince#296). This line said "for this runner" in BOTH cases: a
+	# `--repo` report reads ONE state file, an `--all` report SUMS every file in the forge set, and the
+	# wording was byte-identical. The architect read `2/2` from an `--all` exit and `2/1` from a
+	# `--repo` status forty minutes apart, concluded a counter had gone BACKWARDS — impossible by
+	# design, since nothing resets them — and spent a cycle hunting a regression that did not exist.
+	# Both numbers were correct.
+	#
+	# It is the worst-shaped ambiguity available: the sum and the slice are both small integers that
+	# look like the same quantity, so the reader gets a PLAUSIBLE wrong number rather than an obviously
+	# broken one. And it was DECLARED — quince#289's own "what I did NOT prove" said the line does not
+	# say which question it answers and "arguably it should". This is that `arguably` converted into a
+	# `did`, by the seat that read the declaration and approved it anyway.
+	if [ "$1" = yes ]; then
+		_lt_n=$(loop_state_files "$1" "$2" "$3" | grep -c . || printf 0)
+		_lt_scope="across $_lt_n repo(s) in the forge set"
+	else
+		_lt_scope="for ${2:-this repo}"
+	fi
+	# WHAT IT DOES NOT COUNT, said in the line itself and not only in a doc (quince#289 constraint 4).
+	#
+	# THIS PARENTHETICAL READ "wakes, not WHOSE wakes (quince#242 unbuilt)" AND WENT FALSE THE HOUR
+	# quince#242 LANDED. Both suppression arms exist now, so a self-caused act no longer reaches this
+	# counter — but the figure still cannot say whether they helped, because a suppression that
+	# PREVENTED a wake and one that merely quieted a tick which woke anyway are equally invisible here.
+	# That is the honest remaining gap, and naming the right one matters: the old text would send a
+	# reader to a closed issue for an answer it no longer holds.
+	printf 'loop: %s arm(s), %s wake(s) %s since counting began — wakes only; suppressed events that PREVENTED a wake are not counted (quince#296).\n' \
+		"$_lt_a" "$_lt_w" "$_lt_scope"
 }
 
 # ---------------------------------------------------------------------------
