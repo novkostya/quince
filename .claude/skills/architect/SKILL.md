@@ -227,6 +227,24 @@ code is.
 Also list open issues in every declared repo when starting cold: an issue with a ruling attached is work
 the architect owes, not backlog.
 
+**A NEWLY FILED ISSUE NOW WAKES THE WATCH, so do NOT bulk-declare open issues** (quince#273). Until it
+did, an issue that was neither declared nor referenced by an open PR entered no watch at all — and
+since the gap protocol makes *filing an issue* how a blocked session requests a ruling, the ruling
+channel was the one channel with no wake. quince#265 landed on this seat's own quince#230 ruling and
+reached it only because the Operator asked by hand.
+
+**`--issue` is for what you are PARKED on, not for everything open.** quince#273's original Part 1 said
+to re-declare the set from open issues at cycle start; that advice is superseded by its own Part 2,
+because `issue-new` now covers arrival and declaring the backlog buys nothing while costing a great
+deal. Measured on this seat (quince#282): a 45-issue declared set makes one foreground tick **40 s**
+against an interval of 60–90 s, versus 17–18 s for 20 — a tick is one `gh issue view` per declared
+issue. Parked-only is five, not forty-five.
+
+**The ceiling, stated so it is not mistaken for a guarantee.** `issue-new` fires for an issue numbered
+above the highest this watch has seen, and it establishes that mark **silently** on a cold start. So the
+first tick after arming learns rather than reports, and an issue filed *before* you armed is not new to
+the forge — it is backlog, and the cold-start listing above is still what finds it.
+
 **Reading `updatedAt` is not reading whose turn it is.** Fetch the actor too — a session that read a bare
 timestamp, assumed the latest activity was its own, and reported "nothing owed from me" was wrong about
 three items. And `reviewDecision` still says `CHANGES_REQUESTED` after the author has fixed and pushed,
