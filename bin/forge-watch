@@ -386,7 +386,7 @@ step() {
 	# the new state, and an observation has no `.arms` — so without this the counter was incremented
 	# by `watch_arm` and erased by the very next tick. Found by measuring a live arm and reading back
 	# `arms=unset`, not by reading the code: the increment was correct and its persistence was not.
-	_prev_counts=$(jq -c '{arms: (.arms // 0), wakes: (.wakes // 0)}' "$_prev" 2>/dev/null || printf 'null')
+	_prev_counts=$(jq -c '{arms: (.arms // 0), wakes: (.wakes // 0), prevented: (.prevented // 0)}' "$_prev" 2>/dev/null || printf 'null')
 	[ -n "$_prev_counts" ] || _prev_counts=null
 
 	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
@@ -406,7 +406,7 @@ step() {
 			--argjson watch "$_prev_watch" --argjson counts "$_prev_counts" '
 			. + {observed: true}
 			| if $watch == null then . else .watch = $watch end
-			| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes) end
+			| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented) end
 			| if $decl == null then . else
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
@@ -788,7 +788,7 @@ step() {
 		# the channel this whole feature exists to make reliable. Absence is reported by
 		# `issue-fetch-failed`; it is never allowed to mean "nothing there".
 		| if $watch == null then . else .watch = $watch end
-		| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes) end
+		| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented) end
 		| if $decl == null then . else
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
@@ -994,15 +994,40 @@ bump_wakes() { # <all> <repo> <state>
 	done
 }
 
+# THE THIRD THING, and the reason quince#242 could not be closed on its own merge: a tick where
+# suppression was the difference between EXITING and CONTINUING.
+#
+# ACTS ARE NOT EVENTS AND EVENTS ARE NOT WAKES. The suppression notes count events withheld from the
+# decision; this counts the decision CHANGING. A tick carrying my own comment AND somebody else's
+# review wakes either way, and its suppression saved nothing — reporting that as a prevented wake is
+# exactly the "suppressed=1 beside a watch that woke anyway" this subsystem keeps being warned about.
+#
+# It is a COUNTERFACTUAL, computed rather than inferred: the same events are re-judged with the two
+# self-caused arms skipped, and this moves only when that judgement WOULD have woken while the real
+# one did not. Ownership filtering is applied on BOTH sides, because it is a different mechanism and
+# holding it constant is what isolates this one.
+bump_prevented() { # <all> <repo> <state>
+	loop_state_files "$1" "$2" "$3" | while IFS= read -r _bp_f; do
+		[ -f "$_bp_f" ] || continue
+		if jq -c '.prevented = ((.prevented // 0) + 1)' "$_bp_f" >"$_bp_f.new" 2>/dev/null; then
+			mv "$_bp_f.new" "$_bp_f"
+		else
+			rm -f "$_bp_f.new"
+		fi
+	done
+}
+
 # Summed across the watched repos, because an `--all` watch is ONE loop over several state files and
 # a per-repo figure would understate the cycle count by however many repos are declared.
 loop_totals() { # <all> <repo> <state>
 	_lt_a=0
 	_lt_w=0
+	_lt_p=0
 	while IFS= read -r _lt_f; do
 		[ -f "$_lt_f" ] || continue
 		_lt_a=$((_lt_a + $(jq -r '.arms // 0' "$_lt_f" 2>/dev/null || printf 0)))
 		_lt_w=$((_lt_w + $(jq -r '.wakes // 0' "$_lt_f" 2>/dev/null || printf 0)))
+		_lt_p=$((_lt_p + $(jq -r '.prevented // 0' "$_lt_f" 2>/dev/null || printf 0)))
 	done <<EOF
 $(loop_state_files "$1" "$2" "$3")
 EOF
@@ -1027,14 +1052,22 @@ EOF
 	fi
 	# WHAT IT DOES NOT COUNT, said in the line itself and not only in a doc (quince#289 constraint 4).
 	#
-	# THIS PARENTHETICAL READ "wakes, not WHOSE wakes (quince#242 unbuilt)" AND WENT FALSE THE HOUR
-	# quince#242 LANDED. Both suppression arms exist now, so a self-caused act no longer reaches this
-	# counter — but the figure still cannot say whether they helped, because a suppression that
-	# PREVENTED a wake and one that merely quieted a tick which woke anyway are equally invisible here.
-	# That is the honest remaining gap, and naming the right one matters: the old text would send a
-	# reader to a closed issue for an answer it no longer holds.
-	printf 'loop: %s arm(s), %s wake(s) %s since counting began — wakes only; suppressed events that PREVENTED a wake are not counted (quince#296).\n' \
-		"$_lt_a" "$_lt_w" "$_lt_scope"
+	# THE CAVEAT BECAME THE MEASUREMENT (quince#242's closing ruling). It read "wakes, not WHOSE wakes
+	# (quince#242 unbuilt)" and went false the hour that issue landed — a line on every status and
+	# every watch exit telling every reader a built thing was unbuilt. This project's most-filed
+	# defect, committed by the change that fixed the thing it describes.
+	#
+	# The honest replacement is not a different caveat, it is the number the caveat stood in for.
+	# `prevented` counts TICKS WHERE SUPPRESSION CHANGED THE DECISION — not events suppressed, which
+	# the per-tick notes already report and which overstate, because acts are not events and events
+	# are not wakes.
+	#
+	# A ZERO IS A RESULT AND IS PRINTED AS ONE. `prevented=0` beside non-zero suppression notes is the
+	# finding that the arms are quieting ticks which would have woken anyway; withholding it until it
+	# turned positive would make the figure unfalsifiable — the exact shape this counter exists to
+	# stop the loop reporting about itself.
+	printf 'loop: %s arm(s), %s wake(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing.\n' \
+		"$_lt_a" "$_lt_w" "$_lt_p" "$_lt_scope"
 }
 
 # ---------------------------------------------------------------------------
@@ -3118,6 +3151,7 @@ watch_loop() {
 	_wsupc=$(mktemp)
 	_wact=$(mktemp)
 	_wactc=$(mktemp)
+	_wcf=$(mktemp)
 	# Resolved ONCE, here, rather than per tick, because re-reading every interval would let a
 	# mid-run registry edit silently change what wakes a watcher that is already running.
 	#
@@ -3220,6 +3254,24 @@ watch_loop() {
 		fi
 		wake_filter "$_wact" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
+		# THE COUNTERFACTUAL (quince#296, closing quince#242). Computed ONLY when suppression happened
+		# and the tick is not waking — the one case where the answer can be yes, so the ordinary quiet
+		# tick and the ordinary waking tick both cost nothing extra.
+		#
+		# `$_wevt` rather than `$_wself`: re-judging from the raw events skips BOTH arms, which is what
+		# "would this tick have woken without self-caused suppression" means. Ownership filtering is
+		# re-applied so the only difference between the two judgements is the thing being measured.
+		_wsupn=$(cat "$_wsupc" 2>/dev/null || printf 0)
+		_wactn=$(cat "$_wactc" 2>/dev/null || printf 0)
+		# `[ a ] || [ b ]` rather than `[ a -o b ]`: the `-o` form is deprecated, shellcheck flags it
+		# (SC2166), and it parses surprisingly when either side is empty.
+		if [ -z "$_wwake" ] && { [ "$_wsupn" != 0 ] || [ "$_wactn" != 0 ]; }; then
+			wake_filter "$_wevt" "$_wmap" "$_wothers" "$_wrepo" >"$_wcf"
+			if [ -n "$(wake_worthy "$_wcf" "$_wfirst")" ]; then
+				bump_prevented "$_wall" "$_wrepo" "$_wstate"
+				printf 'note: this tick would have WOKEN without self-caused suppression — counted as a prevented wake (quince#242). The suppressed events are printed above.\n'
+			fi
+		fi
 		if [ -n "$_wwake" ]; then
 			# LOOP SELF-ACCOUNTING (quince#282 item 4): count the wake, then REPORT the cumulative
 			# figures. `status` reports liveness; nothing reported that this seat had armed 63 times
@@ -3229,7 +3281,7 @@ watch_loop() {
 			bump_wakes "$_wall" "$_wrepo" "$_wstate"
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
 			return 0
 		fi
 		if [ "$_wrc" != 0 ]; then
@@ -3237,7 +3289,7 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
-				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
+				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
 				return 7
 			fi
 		else
@@ -3252,7 +3304,7 @@ watch_loop() {
 			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
 			# counted as a wake: nothing woke.
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
 			return 6
 		fi
 		sleep "$_wiv"
