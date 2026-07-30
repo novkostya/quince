@@ -1,0 +1,35 @@
+{
+  "note": "quince#290: `review-answered` fired on EVERY TICK while the condition held, not on the transition — so a blocked PR the author had answered woke the reviewer every interval until a new verdict landed. Measured on quince#289 within minutes of quince#288 merging: two consecutive hand-run ticks, no forge activity between them, both emitted and both woke the watch. The cause is that the predicate was computed from the CURRENT observation alone, where every other typed event in step() takes $old and emits on a difference — and quince#288's own body claimed it behaved `like mergeability`, which diffs stored state and fires only on a transition. An asserted similarity in place of a read of the neighbouring code. THIS FIXTURE IS THE ASSERTION THAT WOULD HAVE CAUGHT IT: both observations carry the same already-answered PR, so the condition is true in each and the transition never happens. It must be SILENT. Its partner issue282-a-blocked-pr-the-author-answered.json proves the event still fires when the condition BECOMES true; neither alone distinguishes a transition from a standing condition, and the pre-fix code passed that one. Note the `updated` line is still expected: the backstop reports that the PR moved, which is correct and is not a repeat — only the typed event must be once-per-transition.",
+  "before": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 501, "state": "OPEN", "updatedAt": "2026-07-30T10:35:00Z", "branch": "r4/already-answered",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T10:32:35Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T10:34:00Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" }
+        ]
+      }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 501, "state": "OPEN", "updatedAt": "2026-07-30T10:38:00Z", "branch": "r4/already-answered",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T10:32:35Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T10:34:00Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" },
+          { "at": "2026-07-30T10:37:00Z", "actor": "quince-coder", "kind": "comment" }
+        ]
+      }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=501 at=2026-07-30T10:38:00Z actor=quince-coder kind=comment"
+  ]
+}

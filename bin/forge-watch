@@ -533,21 +533,55 @@ step() {
 	# exists to preserve. So the commit arm compares committer to the COMMIT actor (both commit-side,
 	# both suffixed) and the comment arm compares to the PR author (both bare). Comparing a commit
 	# actor to the PR author would be false for every App-authored PR, which is all of them here.
-	printf '%s' "$_now_prs" | jq -r '
+	# IT IS A TRANSITION, NOT A STANDING CONDITION (quince#290). The first version computed the
+	# predicate from the CURRENT observation alone, so "the author has answered" stayed true until a
+	# new verdict landed — and an event emitted on every tick is a wake every interval, indefinitely.
+	# Measured on quince#289 within minutes of the feature merging: two consecutive ticks, no forge
+	# activity between them, both emitted and both woke the watch.
+	#
+	# That is noise amplification in the feature built to reduce missed signals, landing on the seat
+	# quince#282 measured as already over-woken — and worse than the silence it replaced in one
+	# specific way: silence gets noticed once, where a wake a minute trains the reader to stop looking.
+	#
+	# Every other typed event here takes `$old` and emits on a DIFFERENCE. This one did not, and the
+	# PR that shipped it claimed it behaved "like `mergeability`" — which diffs the stored state and
+	# fires only on a transition. An asserted similarity instead of a read of the neighbouring code.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		# The predicate, applied to either observation. Defined once so the two answers cannot drift:
+		# computing "answered" one way for now and another for before is how a transition test starts
+		# reporting on a difference between two definitions rather than between two ticks.
+		def answered:
+			# The PR author is captured HERE, at the top, because inside the selects below `.` is an
+			# ACTIVITY entry and `.author` would silently be null — matching no comment, ever. The
+			# pre-quince#290 version referred to `$p.author` from an enclosing scope, which a `def`
+			# does not have.
+			(.author // "") as $auth
+			| (.activity // []) as $a
+			| ([$a[] | select(.kind == "review" and .state == "CHANGES_REQUESTED")] | sort_by(.at) | last) as $cr
+			| if $cr == null then null
+			  # A later verdict of any kind supersedes the block — the reviewer has spoken again, so
+			  # this is no longer a PR waiting to be re-read.
+			  elif ([$a[] | select(.kind == "review" and .at > $cr.at)] | length) > 0 then null
+			  else
+			    ([$a[] | select(.at > $cr.at and .kind == "commit" and .committer != "" and .committer == .actor)]
+			     | sort_by(.at) | last) as $push
+			    | ([$a[] | select(.at > $cr.at and .kind == "comment" and .actor == $auth)]
+			       | sort_by(.at) | last) as $said
+			    | if $push == null and $said == null then null
+			      else {blocked_at: $cr.at, by: $cr.actor,
+			            via: (if $push != null then "commit" else "comment" end)}
+			      end
+			  end;
 		.[] as $p
-		| ($p.activity // []) as $a
-		| ([$a[] | select(.kind == "review" and .state == "CHANGES_REQUESTED")] | sort_by(.at) | last) as $cr
-		| select($cr != null)
-		# A later verdict of any kind supersedes the block — the reviewer has spoken again, so this is
-		# no longer a PR waiting to be re-read.
-		| select([$a[] | select(.kind == "review" and .at > $cr.at)] | length == 0)
-		| ([$a[] | select(.at > $cr.at and .kind == "commit" and .committer != "" and .committer == .actor)]
-		   | sort_by(.at) | last) as $push
-		| ([$a[] | select(.at > $cr.at and .kind == "comment" and .actor == ($p.author // ""))]
-		   | sort_by(.at) | last) as $said
-		| select($push != null or $said != null)
-		| (if $push != null then "commit" else "comment" end) as $via
-		| "event=review-answered pr=\($p.number) blocked_at=\($cr.at) by=\($cr.actor) via=\($via)"'
+		| ($p | answered) as $now
+		| select($now != null)
+		# WAS IT ALREADY TRUE? A PR absent from the previous observation has nothing to have changed
+		# from, and emitting there would make every newly-observed blocked-and-answered PR fire on the
+		# tick that first saw it — the `first-observation` discipline, one event over.
+		| ($old | map(select(.number == $p.number)) | first) as $o
+		| select($o != null)
+		| select(($o | answered) == null)
+		| "event=review-answered pr=\($p.number) blocked_at=\($now.blocked_at) by=\($now.by) via=\($now.via)"'
 
 	# checks: a FAILURE that was not there before, named. Two deliberate narrowings, both from what
 	# the fixtures encode:
