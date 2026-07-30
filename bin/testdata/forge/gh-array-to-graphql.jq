@@ -49,7 +49,24 @@
   commits:  {nodes: [ (.commits // [])[] | {commit: {
               committedDate: .committedDate,
               authors: {nodes: [ (.authors // [])[] |
-                         {user: (if (.login // "") == "" then null else {login: .login} end)} ]}}} ]},
+                         {user: (if (.login // "") == "" then null else {login: .login} end)} ]},
+              # `committer` WAS DROPPED HERE WHILE THE FORWARD PATH READS IT (quince#242 step 3). The
+              # shaping takes `.commit.committer.user.login // ""`, so every payload arriving through
+              # this file got `committer: ""` — silently, because the empty string is exactly what an
+              # unresolvable committer produces. The field was invisible to every fixture, every stub,
+              # and to `forge-fetch-equivalence-test`, whose whole subject is that this conversion is
+              # exact.
+              #
+              # It matters twice over: `review-answered` uses `committer == actor` to tell an author's
+              # answer from a merging seat's rebase, and the actor arm uses the same discriminator to
+              # tell my own push from somebody else moving my branch. Neither was reachable from a
+              # recorded payload.
+              #
+              # Mapped to null rather than an empty object for the same bug-for-bug reason as
+              # `authors` above: the forward `// ""` reproduces what `gh` emits, so a payload
+              # recording an unresolvable committer keeps meaning that.
+              committer: (if (.committer // "") == "" then null
+                          else {user: {login: .committer}} end)}} ]},
   rollup: {nodes: [ {commit: {statusCheckRollup: {contexts: {nodes:
             [ (.statusCheckRollup // [])[] |
               {__typename: "CheckRun", name,

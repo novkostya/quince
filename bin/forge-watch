@@ -438,7 +438,27 @@ step() {
 		| select($o != null)
 		| select($p.updatedAt != $o.updatedAt)
 		| ([($p.activity // [])[] | select(.at > $o.updatedAt)] | sort_by(.at) | last) as $a
-		| (if $a == null then "actor=unattributed" else "actor=\($a.actor) kind=\($a.kind)" end) as $who
+		| (if $a == null then "actor=unattributed"
+		   else "actor=\($a.actor) kind=\($a.kind)"
+		        # `committer=` ONLY WHERE IT EXISTS, which is `kind=commit` and nothing else (quince#242
+		        # step 3). Measured on this box: 29 of 29 commit entries carry one, and comment, review
+		        # and merge entries carry NONE — the field is absent rather than empty, so its presence
+		        # is itself the signal that the actor came from a commit.
+		        #
+		        # IT IS THE ONLY THING THAT SEPARATES A PUSH FROM A REBASE, which is why the backstop
+		        # has to carry it. A rebase replays the original authorship, so `actor` names the branch
+		        # AUTHOR while GitHub stamps whoever ran `update-branch` as the COMMITTER:
+		        #
+		        #   actor=quince-coder[bot]  committer=quince-coder[bot]   a push BY the author
+		        #   actor=quince-coder[bot]  committer=quince-review[bot]  a rebase BY the architect
+		        #
+		        # Both forms measured on real data. This does not change WHICH act is reported and is
+		        # not a new source of truth — same shape as `count=`, and the enabling half of the
+		        # actor arm below. quince#222 is untouched: `actor` remains what it always was, and the
+		        # guard reads a field whose meaning is unambiguous either way rather than depending on
+		        # that misattribution being wrong.
+		      + (if ($a.committer // "") == "" then "" else " committer=\($a.committer)" end)
+		   end) as $who
 		| "event=updated pr=\($p.number) at=\($p.updatedAt) \($who)"'
 
 	# mergeability: a transition into a state whose LANDABILITY changed — in either direction. The
@@ -1870,9 +1890,15 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
 # WHY IT MATTERS IS THE EQUIVALENCE, NOT A FILTER — and this comment used to say otherwise. It read
 # "`wake_worthy` filters on actor names, so normalising both the same way silently reclassifies every
 # App act." **`wake_worthy` does not filter on actor names.** Measured 2026-07-30 by reading every
-# use: `actor` is PRINTED at :409, :526 and :550 and SHAPED at :1501 and :1744-1747, and it reaches no
-# decision anywhere. `wake_worthy` filters on event KINDS; `wake_filter` filters on BRANCH ownership
-# (quince#111). Neither reads an actor name.
+# use. `wake_worthy` filters on event KINDS; `wake_filter` filters on BRANCH ownership (quince#111).
+# Neither reads an actor name.
+#
+# **`actor_filter` DOES, as of quince#242 step 3, and the clause that stood here — "it reaches no
+# decision anywhere" — is now false.** It was true when measured; corrected rather than deleted,
+# because what it was used to justify still matters. An `actor` that reaches a decision means a
+# WRONG `actor` is a wrong wake, which is exactly the promotion quince#222 predicted for itself in
+# its own last line. The equivalence argument below is unaffected and is still the reason to keep
+# the asymmetry: `actor_filter` normalises inside its own comparison and never rewrites the field.
 #
 # So the reason to keep the asymmetry is that the two fetch paths must produce the IDENTICAL shaped
 # observation, which is precisely what the equivalence suite compares — a normaliser that tidied the
@@ -2707,6 +2733,127 @@ selfcaused_filter() { # <events-file> <default-repo> <suppressed-count-out>
 	fi
 }
 
+# --- SELF-CAUSED SUPPRESSION, THE ACTOR ARM (quince#242, step 3) --------------------------------
+#
+# The other half of the pair. `event=updated` already carries `actor=` and `kind=`, so it needs no
+# ledger: the line says who caused it. The ledger arm above handles the two events that cannot say.
+#
+# TOGETHER they cancel one act; SEPARATELY neither does, because an act emits both lines. That is
+# why the two arms are not one function — the lines can arrive a tick apart, and pairing them would
+# need state across ticks, which `:284` ruled against. Each line is attributed where it lands.
+#
+# THE IDENTITY HAS THREE SPELLINGS, measured against a live state file rather than remembered:
+#
+#   app/quince-review     mergedBy, in gh's rendering
+#   quince-review         a review or comment author
+#   quince-coder[bot]     a COMMIT COMMITTER
+#
+# So `actor == "quince-coder"` — the obvious comparison — matches reviews and comments and misses
+# every push, which is the implementer's commonest self-caused update. The arm would have shipped,
+# passed review and suppressed almost nothing. Normalisation happens INSIDE the comparison only; the
+# emitted `actor=` is untouched, because the two fetch paths must keep producing identical shaped
+# observations and `forge-fetch-equivalence-test` exists to prove it.
+#
+# THIS MAKES `actor` REACH A DECISION, which it never did before, so a WRONG `actor` is now a wrong
+# WAKE — the promotion quince#222 predicted for itself in its own last line. A rebase replays the
+# original authorship, so `gh pr update-branch --rebase` from the arch box on my branch emits
+# `actor=quince-coder[bot] kind=commit` (quince#216 is the recorded instance), and an arm reading
+# `actor` alone would suppress it. `CLAUDE.md` §5 makes that rebase the merging seat's standing duty
+# and `strict: true` makes it routine, so it is the commonest thing done to my branches.
+#
+# HENCE THE COMMITTER TEST, AND NOT `kind != commit`. The first version of this arm excluded commits
+# wholesale — safe, and it cost the arm most of its value on the seat that pushes. The discriminator
+# was already in the observation: GitHub stamps whoever ran `update-branch` as the COMMITTER while
+# the author stays the branch author, so `committer == actor` is exactly "this seat's own push" and
+# `committer != actor` is exactly "somebody else moved my branch". Measured before building, on this
+# box's live state file, both forms present.
+#
+# SO quince#222 IS NOT A DEPENDENCY. The guard does not need that misattribution to be wrong and does
+# not wait for it to be fixed; it reads a field whose meaning is unambiguous either way.
+#
+# THE ARCHITECT ARM NEEDS NO SUCH CLAUSE, and the reason is worth keeping at the line: a rebase
+# attributes to the branch's author, i.e. the coder, so the arch seat never sees its own login there.
+# The misattribution points in the safe direction on that seat.
+#
+# THE HOLE THAT REMAINS, named rather than left to be found: `quince-coder` is shared across r1-r4,
+# so ANOTHER RUNNER COMMENTING ON MY PR is indistinguishable from me commenting on it, and is
+# suppressed. Bounded — it needs a runner acting on a branch it does not own, which is against the
+# premise the ownership filter is built on — and accepted rather than closed.
+self_login() { # <role> -> the login this seat acts as, normalised, or nothing
+	case "$1" in
+	architect) printf 'quince-review\n' ;;
+	implementer) printf 'quince-coder\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+actor_filter() { # <events-file> <map-file> <role> <runner> <default-repo> <suppressed-count-out>
+	_af_evt=$1
+	_af_map=$2
+	_af_role=$3
+	_af_runner=$4
+	_af_defrepo=$5
+	_af_out=$6
+	printf '0\n' >"$_af_out"
+	# An unidentifiable role suppresses NOTHING, and quince#292 is why: the same box, the same
+	# `owed_role`, and a cleanup that made the role unreadable turned a filter into deafness. Failing
+	# open here costs a wake; failing closed costs the event.
+	if ! _af_me=$(self_login "$_af_role"); then
+		cat "$_af_evt"
+		return 0
+	fi
+	# The implementer arm needs the branch, because `quince-coder` is shared across r1-r4. With no
+	# map there is no branch, so there is nothing this seat can positively account for.
+	if [ "$_af_role" = implementer ] && [ ! -s "$_af_map" ]; then
+		cat "$_af_evt"
+		return 0
+	fi
+	awk -v me="$_af_me" -v role="$_af_role" -v runner="$_af_runner" \
+		-v defrepo="$_af_defrepo" -v cnt="$_af_out" '
+		function norm(a,   s) {
+			s = a
+			sub(/^app\//, "", s)
+			sub(/\[bot\]$/, "", s)
+			return s
+		}
+		FILENAME == mapf { own[$1 SUBSEP $2] = $3; next }
+		{
+			if ($0 !~ /(^| )event=updated( |$)/) { print; next }
+			pr = ""; repo = ""; actor = ""; kind = ""; cmtr = ""
+			n = split($0, a, " ")
+			for (i = 1; i <= n; i++) {
+				if (a[i] ~ /^pr=/)        pr    = substr(a[i], 4)
+				if (a[i] ~ /^repo=/)      repo  = substr(a[i], 6)
+				if (a[i] ~ /^actor=/)     actor = substr(a[i], 7)
+				if (a[i] ~ /^kind=/)      kind  = substr(a[i], 6)
+				if (a[i] ~ /^committer=/) cmtr  = substr(a[i], 11)
+			}
+			# `actor=unattributed` is the tool saying it cannot tell. It is not a name and must never
+			# be treated as one: unknown wakes, the same rule the ownership filter follows.
+			if (pr == "" || actor == "" || actor == "unattributed") { print; next }
+			if (norm(actor) != me) { print; next }
+			if (role == "implementer") {
+				# THE REBASE TEST. `committer=` is present only on a commit-derived actor, and there
+				# it is the seat that actually ran the push or the `update-branch` — so a rebase of
+				# my branch by another seat has MY login in `actor` and THEIRS in `committer`, and
+				# must wake me. `CLAUDE.md` §5 makes that rebase a standing duty for the merging seat and
+				# `strict: true` makes it routine, so this is the commonest thing done to my
+				# branches rather than an edge case.
+				#
+				# Absent `committer=` means the actor came from a comment, a review or a merge,
+				# where the actor IS the acting seat and there is nothing to disambiguate.
+				if (cmtr != "" && norm(cmtr) != me) { print; next }
+				if (repo == "") repo = defrepo
+				b = own[repo SUBSEP pr]
+				if (b == "") { print; next }                    # branch unknown -> wake
+				if (index(b, runner "/") != 1) { print; next }   # not my branch -> wake
+			}
+			sup++
+		}
+		END { print sup + 0 > cnt }
+	' mapf="$_af_map" "$_af_map" "$_af_evt"
+}
+
 wake_worthy() {
 	# $1 is a file holding ONE tick's output, $2 is "first" for the first tick of this watch; prints
 	# the lines that justify waking a session.
@@ -2947,6 +3094,8 @@ watch_loop() {
 	_wothers=$(mktemp)
 	_wself=$(mktemp)
 	_wsupc=$(mktemp)
+	_wact=$(mktemp)
+	_wactc=$(mktemp)
 	# Resolved ONCE, here, rather than per tick, because re-reading every interval would let a
 	# mid-run registry edit silently change what wakes a watcher that is already running.
 	#
@@ -3039,7 +3188,15 @@ watch_loop() {
 			printf 'note: %s self-caused event(s) suppressed from the wake decision — acts this runner performed, matched against its own ledger (quince#242). Printed above regardless.\n' \
 				"$(cat "$_wsupc")"
 		fi
-		wake_filter "$_wself" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
+		# THE ACTOR ARM, on the OTHER line of the same act. Runs on the ledger arm's output so the
+		# two counts do not double-report one event, and before the ownership filter for the reason
+		# given there.
+		actor_filter "$_wself" "$_wmap" "$_wrole" "$_wowner" "$_wrepo" "$_wactc" >"$_wact"
+		if [ "$(cat "$_wactc" 2>/dev/null || printf 0)" != 0 ]; then
+			printf 'note: %s event(s) suppressed as caused by this seat — attributed by the actor= on the event itself (quince#242). Printed above regardless.\n' \
+				"$(cat "$_wactc")"
+		fi
+		wake_filter "$_wact" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		if [ -n "$_wwake" ]; then
 			# LOOP SELF-ACCOUNTING (quince#282 item 4): count the wake, then REPORT the cumulative
@@ -3050,7 +3207,7 @@ watch_loop() {
 			bump_wakes "$_wall" "$_wrepo" "$_wstate"
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
 			return 0
 		fi
 		if [ "$_wrc" != 0 ]; then
@@ -3058,7 +3215,7 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
-				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
+				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
 				return 7
 			fi
 		else
@@ -3073,7 +3230,7 @@ watch_loop() {
 			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
 			# counted as a wake: nothing woke.
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc"
 			return 6
 		fi
 		sleep "$_wiv"
