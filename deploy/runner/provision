@@ -79,18 +79,21 @@ SERVICE_NAME="quince-runner"
 # as cheaply reversible — if real re-roling practice needs that window, this is a one-condition
 # change and the ruling should be overturned rather than worked around.
 #
-# `_role_token` keeps its name and meaning: it is the credential this role CLONES THE PRIVATE LAYER
-# with, further down, which is a narrower question than which credentials the seat may hold. That
-# split is deliberate — see quince#236, which is about that line and not this one.
+# `_role_token` IS GONE (quince#236). It existed to answer one question — which credential this role
+# CLONES THE PRIVATE LAYER with — and that question no longer has a file for an answer: the layer's
+# credential is now selected by asking which wrapper can ACT, further down. quince#249's review
+# flagged the name as misleading and this change removes the mapping that made it so, rather than
+# renaming it. What remains here is only which credentials a seat MAY HOLD, which is a different
+# question and the one this block was always really about.
 _bot_token="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
 _arch_token="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
 _coder_key="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
 _review_key="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
 if [ "$ROLE" = arch ]; then
-	_role_token="$_arch_token" _other_role=implementer
+	_other_role=implementer
 	_own_creds="$_arch_token $_review_key" _other_creds="$_bot_token $_coder_key"
 else
-	_role_token="$_bot_token" _other_role=arch
+	_other_role=arch
 	_own_creds="$_bot_token $_coder_key" _other_creds="$_arch_token $_review_key"
 fi
 # Names only, never contents — a guard that echoed a credential to report a credential problem would
@@ -132,14 +135,162 @@ fi
 # passes could not, which is half a check (quince#103). `--check-credentials` runs exactly the block
 # above and stops; it is the last thing before the first mutation, so what it proves is what the
 # real invocation would do.
-if [ "$CHECK_ONLY" = yes ]; then
-	printf 'provision: credential check only — role %s, own %s, other %s\n' \
-		"$ROLE" "${_have_own:-none}" "${_have_other:-none}"
-	exit 0
-fi
+#
+# `say` and `die` are defined HERE, above their first use. The layer-identity guard below refuses
+# before this box is touched, and a `die` defined further down — where it used to be — is a
+# `command not found` on exactly the path that must refuse cleanly: it exits 127 with no message,
+# which is the shape quince#224 spent a PR on. Refusals go to stderr and exit 2, matching the role
+# guard above, which predates these helpers and writes the same shape inline because it runs first.
+say() { printf '==> %s\n' "$*"; }
+die() {
+	printf 'provision: %s\n' "$*" >&2
+	exit 2
+}
 
 REPO_URL="${REPO_URL:-https://github.com/novkostya/quince.git}"
 RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
+
+# --- WHICH IDENTITY THE PRIVATE LAYER WILL USE — decided HERE, before anything is touched --------
+#
+# The decision is pure: it selects a wrapper and builds a helper string, and mutates nothing. It sits
+# above the `--check-credentials` exit for the two reasons this file already argues for the role
+# guard at the top — a refusal that arrives after the script has begun mutating the box is a refusal
+# that has already changed it, and a guard whose non-refusing cases run only on a real provision is a
+# guard no suite can observe (quince#234, and now quince#236).
+#
+# The PLACEMENT of the layer stays far below, where it belongs. Only the credential question is
+# answered early.
+#
+# SELECT ON CAPABILITY, NEVER ON PRESENCE — the rule quince#255 established for `/onboard`, for the
+# same measured reason: all four wrappers are COMMITTED, so every box carries every one of them and
+# an `-x` test cannot tell two seats apart. Asking which one can ACT does, because each fails closed
+# when it is not this box's seat.
+# `/usr/local/bin` first — that is where the box installs them, and the helper string is evaluated by
+# GIT long after this script exits, so it must name a path that PERSISTS rather than one that happens
+# to exist in whatever checkout provisioned the box. Overridable so the refusal below is reachable by
+# a suite: on a real box `/usr/local/bin/gh-coder` exists AND works, so without this seam the
+# no-usable-credential path could never be exercised anywhere it matters.
+LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
+layer_wrapper() {
+	for _lw_n in gh-coder gh-arch; do
+		for _lw_d in $LAYER_WRAPPER_DIRS; do
+			_lw_p="$_lw_d/$_lw_n"
+			[ -x "$_lw_p" ] || continue
+			"$_lw_p" api /rate_limit >/dev/null 2>&1 && {
+				printf '%s\n' "$_lw_p"
+				return 0
+			}
+		done
+	done
+	return 1
+}
+LAYER_WRAPPER=$(layer_wrapper || true)
+# `x-access-token` for an App installation token, the login for a PAT. Keyed on WHICH WRAPPER can
+# act rather than on the role, so the username cannot disagree with the credential actually used.
+case ${LAYER_WRAPPER##*/} in
+gh-coder) LAYER_USER=x-access-token ;;
+*) LAYER_USER=novkostya ;;
+esac
+
+# NO USABLE CREDENTIAL IS A REFUSAL, NOT A NOTE (quince#236, ruling item 2). The old
+# `say`-and-carry-on was right when it meant "this box has no token yet". It came to also cover
+# "this box's identity MOVED and I cannot see it", and those want opposite outcomes — which is
+# exactly how this defect survived a day while the layer quietly depended on an unrecorded
+# hand-repair. Same posture as the rest of the subsystem: `preflight` refuses rather than degrades,
+# and the role guard above refuses rather than passing (quince#249).
+#
+# BOOTSTRAPPING MUST STILL WORK — the ruling's constraint, and why this is two states rather than
+# one. They are cleanly distinguishable:
+#   no own credential FILES at all  → a genuine first provision. Not a refusal; the layer is skipped
+#                                     further down with a message naming what to place.
+#   some credential present, but no wrapper can act → the identity moved, the credential is broken,
+#                                     or the forge is unreachable. REFUSE: continuing leaves a box
+#                                     whose layer silently never advances.
+if [ -z "$LAYER_WRAPPER" ] && [ -n "$_have_own" ]; then
+	die "a $ROLE credential is present but NO wrapper could authenticate with it, so the private
+    layer could not be placed or kept current. Refusing before touching this box.
+      credential(s) present: $_have_own
+      wrappers tried:        gh-coder, gh-arch — in /usr/local/bin, then $RUNNER_DIR/bin
+    Causes, in the order worth checking: the credential is invalid or unreadable; the identity moved
+    and this box still holds the old one; the forge is unreachable from here.
+    This is a REFUSAL rather than a note because 'no credential yet' and 'the identity moved' want
+    opposite outcomes, and one message covering both is how quince#236 survived a day — with the
+    layer silently depending on an undocumented hand-repair. A stale layer makes the privacy gate
+    report \`clean\` against a matcher missing patterns (quince#220)."
+fi
+
+LAYER_DIR="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
+
+# The token reaches git through a credential helper — never argv, never the remote URL, never
+# .git/config. The same discipline as every other credential here; the ruling permits the helper to
+# invoke a WRAPPER rather than read a file precisely because the file is what rotted.
+#
+# IT FAILS CLOSED, mirrored from `bin/git-coder` rather than invented (quince#198): a bare
+# `password=$(wrapper auth token)` with a failing substitution still emits a SYNTACTICALLY VALID
+# credential with an EMPTY password, so git reports `authentication failed` while the real reason — a
+# boundary refusal — is stranded on stderr. The token is captured FIRST and `username` is not printed
+# until it is known good, so a refusal emits no credential at all rather than a blank one.
+#
+# SC2016 is correct that `$t` and `$(…)` do not expand here, and that is the point: they must be
+# evaluated by GIT when it runs the helper, not by this shell when it builds the string. Expanding
+# now would put the token into a variable, and from there into `git config` and `.git/config` — the
+# one thing the helper exists to prevent.
+# shellcheck disable=SC2016
+_layer_helper='!f() { t=$('"$LAYER_WRAPPER"' auth token) || exit 1; [ -n "$t" ] || exit 1; echo username='"$LAYER_USER"'; echo "password=$t"; }; f'
+
+# SHAPE, NEVER VALUE. The existing helper is never printed: a hand-written one could carry an inline
+# token, and echoing a credential to report a credential problem would be its own incident — the same
+# rule `_present` above follows for filenames. Probed by asking WHAT IT MENTIONS.
+layer_helper_shape() { # <helper-string>
+	_lhs=$1
+	case $_lhs in *'!f('*) _lhs_out="inline shell function" ;; *) _lhs_out="not an inline function" ;; esac
+	case $_lhs in *gh-coder*) _lhs_out="$_lhs_out; mentions gh-coder" ;; esac
+	case $_lhs in *gh-arch*) _lhs_out="$_lhs_out; mentions gh-arch" ;; esac
+	case $_lhs in *quince-bot*) _lhs_out="$_lhs_out; mentions quince-bot (RETIRED identity)" ;; esac
+	case $_lhs in *quince-arch.token*) _lhs_out="$_lhs_out; mentions quince-arch.token" ;; esac
+	case $_lhs in *x-access-token*) _lhs_out="$_lhs_out; uses x-access-token" ;; esac
+	printf '%s' "$_lhs_out"
+}
+
+# REFUSE TO OVERWRITE A HELPER THIS RUN DID NOT WRITE (quince#236, ruling item 3) — and refuse HERE,
+# before the box is touched, for the reason the role guard at the top gives.
+#
+# It used to overwrite unconditionally, which is a no-op on the arch box BY COINCIDENCE: the string it
+# would write there happens to equal the one already present. The consequence it guards is concrete —
+# had a bot token been placed on an implementer box to satisfy the old guard, a routine re-provision
+# would have replaced a working `gh-coder` helper with one authenticating as a SUSPENDED account, and
+# the layer would have stopped fetching, while `preflight` still reported the layer present and
+# resolvable, because a helper naming a dead account resolves perfectly well.
+#
+# THE COST IS ACKNOWLEDGED: this file is documented as idempotent and self-healing (`:193`,
+# `README.md:41`), so a refusal trades convergence for safety. The ruling accepts that trade and
+# requires the refusal to be ACTIONABLE — hence the shape of what is present, of what would be
+# written, and the one command that clears it. A refusal a session cannot act on turns the documented
+# repair path into the dead end this issue opened with.
+if [ -n "$LAYER_WRAPPER" ] && [ -d "$LAYER_DIR/.git" ]; then
+	_lwh_have=$(git -C "$LAYER_DIR" config --get credential.helper 2>/dev/null || true)
+	if [ -n "$_lwh_have" ] && [ "$_lwh_have" != "$_layer_helper" ]; then
+		die "REFUSING to overwrite the private layer's credential helper at $LAYER_DIR.
+    It carries a helper this run did not write, and replacing it could leave the layer unable to
+    fetch — silently, because a helper naming a dead identity still RESOLVES.
+      present:     $(layer_helper_shape "$_lwh_have")
+      would write: $(layer_helper_shape "$_layer_helper")
+    If the present one is wrong, clear it and re-run:
+      git -C $LAYER_DIR config --unset credential.helper
+    If it is right, nothing here needs doing and you can leave it. Refusing rather than overwriting
+    is quince#236 ruling item 3; this file is otherwise idempotent and that trade is deliberate."
+	fi
+fi
+
+if [ "$CHECK_ONLY" = yes ]; then
+	printf 'provision: credential check only — role %s, own %s, other %s\n' \
+		"$ROLE" "${_have_own:-none}" "${_have_other:-none}"
+	# The layer identity is reported here too, because it is a credential question and this flag is
+	# how a suite observes credential questions without provisioning the box it runs on.
+	printf 'provision: private-layer identity — wrapper %s, username %s\n' \
+		"${LAYER_WRAPPER:-none}" "${LAYER_WRAPPER:+$LAYER_USER}"
+	exit 0
+fi
 # Verified at pin time from the Claude Code setup docs (2026-07-26). The apk repository is signed;
 # this is the published checksum of the signing key, and provisioning refuses a key that does not
 # match rather than trusting whatever it downloaded.
@@ -147,7 +298,6 @@ CLAUDE_APK_KEY_URL="https://downloads.claude.ai/keys/claude-code.rsa.pub"
 CLAUDE_APK_KEY_SHA="395759c1f7449ef4cdef305a42e820f3c766d6090d142634ebdb049f113168b6"
 CLAUDE_APK_REPO="https://downloads.claude.ai/claude-code/apk/stable"
 
-say() { printf '==> %s\n' "$*"; }
 
 # --- 1. base packages ------------------------------------------------------------------------
 # ripgrep is a runtime dependency on musl, and the built-in one is disabled below per the docs.
@@ -218,26 +368,15 @@ fi
 # external review transcripts — not the 107-byte pattern list. `pr.6`'s credential-concentration
 # boundary owes a line saying so.
 #
-# THE CREDENTIAL IS ROLE-DEPENDENT, and the ruling did not say so because it could not: the arch
+# THE CREDENTIAL IS IDENTITY-DEPENDENT, and the ruling did not say so because it could not: the arch
 # box must NOT hold the bot token — `preflight` refuses to start if it does, and that inversion is
 # the whole separation mechanism (devlog#7). So each box clones with its OWN identity; cloning as
 # the bot on the arch box would mean placing the one credential that box must never hold.
-LAYER_DIR="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
+#
+# This said ROLE-dependent until quince#236, and the difference is the defect: a role mapped to a
+# FILE, and the implementer's file stopped existing when the identity became an App key. Which
+# identity is now decided far above, by asking which wrapper can ACT — see `layer_wrapper`.
 LAYER_URL="${LAYER_URL:-https://github.com/novkostya/quince-local.git}"
-# The role/box mismatch was already refused at argument-parse time, above, before anything on this
-# box was touched. Here we only need the credential this role actually uses.
-LAYER_TOKEN="$_role_token"
-LAYER_USER=quince-bot
-[ "$ROLE" = arch ] && LAYER_USER=novkostya
-
-# The token reaches git through a credential helper — never argv, never the remote URL, never
-# .git/config. The same discipline as every other credential in this project.
-# SC2016 is correct that `$(cat …)` does not expand here, and that is the point: it must be
-# evaluated by GIT when it runs the helper, not by this shell when it builds the string. Expanding
-# it now would put the token into a variable, and from there into `git config` and `.git/config` —
-# which is the one thing the helper exists to prevent.
-# shellcheck disable=SC2016
-_layer_helper='!f() { echo username='"$LAYER_USER"'; echo "password=$(cat '"$LAYER_TOKEN"')"; }; f'
 
 # WIRE THE HELPER INTO THE CLONE, which is a separate act from using it to clone (quince#121).
 #
@@ -261,14 +400,22 @@ _layer_helper='!f() { echo username='"$LAYER_USER"'; echo "password=$(cat '"$LAY
 # Written with `git config` at the repository level, so it lands in `.git/config` where a later
 # `git pull` by a human or an agent will find it. The token itself still never appears: the helper is
 # a shell snippet that reads the file at use time, exactly as elsewhere.
+# The MISMATCH REFUSAL that used to live here now runs far above, before this box is touched — see
+# `layer_helper_shape` and the guard beside it. This function is what remains: a plain writer, run on
+# every provision so it REPAIRS boxes provisioned before the helper was persisted.
 layer_wire_helper() {
 	git -C "$LAYER_DIR" config credential.helper "$_layer_helper"
 }
 
-if [ ! -f "$LAYER_TOKEN" ]; then
-	say "NOT placing the private layer: no credential at $LAYER_TOKEN for role $ROLE."
-	say "     preflight will refuse to start this box until the layer is present. Place the"
-	say "     credential and re-run, or hand-place $LAYER_DIR/privacy-patterns.txt (0600)."
+# The only way to reach here with no wrapper is a GENUINE FIRST PROVISION: the other state — a
+# credential present that nothing can authenticate with — already refused, far above, before this box
+# was touched (quince#236, ruling item 2). So this branch has one meaning again, which is what it had
+# before the identity moved and what made the old `say`-and-continue correct.
+if [ -z "$LAYER_WRAPPER" ]; then
+	say "NOT placing the private layer: this box holds no $ROLE credential yet."
+	say "     That is expected on a FIRST provision. preflight will refuse to start the box"
+	say "     until the layer is present. Place the credential and re-run, or hand-place"
+	say "     $LAYER_DIR/privacy-patterns.txt (0600)."
 elif [ -d "$LAYER_DIR/.git" ]; then
 	# Re-wired on every run, not only on first clone: this is what REPAIRS the boxes already in the
 	# field, which were provisioned before the helper was persisted and cannot fetch until it is.
