@@ -75,3 +75,30 @@ func TestTerminateClearsTheLivePhase(t *testing.T) {
 		t.Errorf("percent was not preserved: %v — it is the last true measurement, not a live claim", lj.row.Percent)
 	}
 }
+
+// TestSucceedClearsLiveness closes the half quince#314's review caught: the contract said every
+// terminal state carries no liveness, and `succeed` was still writing `active`. Latent rather than
+// user-visible — both consumers gate on terminal state — but a contract that the engine contradicts
+// is the strongest claim this project makes, made falsely.
+//
+// `Phase` is asserted to STAY `done`, which is the asymmetry: `done` is a true statement about a
+// succeeded job, where `active` is not.
+func TestSucceedClearsLiveness(t *testing.T) {
+	h := newHarness(t, fakeParams{}, TransportUSB)
+	lj := &liveJob{row: store.JobRow{
+		ID: "01SUCCEEDLIVENESS000000000", UDID: testUDID, State: StateCommitting,
+		Phase: "committing", Liveness: LivenessActive,
+	}}
+
+	h.eng.succeed(lj, "01VERSION00000000000000000")
+
+	if lj.row.State != StateSucceeded {
+		t.Fatalf("state = %q, want %q", lj.row.State, StateSucceeded)
+	}
+	if lj.row.Liveness != LivenessNone {
+		t.Errorf("a succeeded job kept liveness %q — quince#313, ruled on quince#314", lj.row.Liveness)
+	}
+	if lj.row.Phase != PhaseDone {
+		t.Errorf("phase = %q, want %q — success is the one terminal state with a true phase", lj.row.Phase, PhaseDone)
+	}
+}
