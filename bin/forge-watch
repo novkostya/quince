@@ -3248,9 +3248,28 @@ owed_role() {
 	# over a hook that had already surrendered.
 	#
 	# The architect arm survived only because the legacy PAT happens to still be on that box. That is
-	# luck, not coverage, and it is worth knowing when the arch box is next cleaned up.
+	# luck, not coverage — and the luck was spent rather than banked: the REVIEW KEY is the live
+	# architect credential, exactly as the coder key is the live implementer one, and this function
+	# did not know it. So the arch box's role rested entirely on a credential this paragraph already
+	# described as due for cleanup, and that cleanup would have returned `none` there. Same defect as
+	# quince#238, one seat over, found while building something that reads this answer.
+	#
+	# WHAT `none` COSTS ON THAT BOX, so the severity is not left to be guessed: the `Stop` hook stops
+	# asserting that a watch is owed — quince#238's whole finding — and, since quince#292, both
+	# self-caused suppression arms fail OPEN. The second is noise rather than deafness, which is the
+	# right direction, but the first is the guard against ending a session nothing can wake.
+	#
+	# THE REVIEW KEY IS CHECKED BEFORE THE LEGACY PAT for the same precedence reason the bot arm
+	# gives below: one seat, new credential and old, and the live one should win. It is checked AFTER
+	# the coder key so a box that somehow held both still calls itself the implementer — the
+	# authoring seat is the one that must never think it may approve.
 	if [ -f "${QUINCE_CODER_KEY_FILE:-$HOME_DIR/.config/quince/quince-coder.pem}" ]; then
 		printf 'implementer %s/bin/gh-coder author\n' "$(repo_root)"
+	elif [ -f "${QUINCE_REVIEW_KEY_FILE:-$HOME_DIR/.config/quince/quince-review.pem}" ]; then
+		# `bin/gh-review` rather than `bin/gh-arch`, because the key IS the App's and the App is what
+		# casts verdicts and merges. A box identified by this credential and handed the PAT wrapper
+		# would be told to reach for a tool for a credential it was not identified by.
+		printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
 	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
 		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
 	elif [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
