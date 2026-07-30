@@ -103,12 +103,67 @@ if grep -qiE 'loop:.*(high|excessive|too many|consider|warning)' "$WORK/st"; the
 else
 	ok "the report states the number and passes no judgement (constraint 3)"
 fi
-# AND IT SAYS WHAT IT DOES NOT COUNT (constraint 4). Until quince#242 lands these are wakes, not
-# WHOSE wakes, and a figure whose basis is unstated is the defect one layer up from the one it fixes.
-if grep -q 'not WHOSE wakes' "$WORK/st"; then
-	ok "the report names its own blind spot — wakes, not whose (constraint 4)"
+# AND IT SAYS WHAT IT DOES NOT COUNT (constraint 4). A figure whose basis is unstated is the defect
+# one layer up from the one it fixes.
+#
+# THE BLIND SPOT MOVED WHEN quince#242 LANDED, and this assertion is what forced the wording to move
+# with it. It pinned "not WHOSE wakes" — true while the suppression arms did not exist, false the hour
+# they merged — so the suite failed, correctly, on prose that had quietly become a claim pointing at a
+# closed issue for an answer it no longer holds. The blind spot NOW is that a suppression which
+# PREVENTED a wake and one that merely quieted a tick that woke anyway are equally invisible.
+#
+# Pinned on `PREVENTED` rather than on the whole sentence: the claim is that the line names its gap,
+# not that it names it in one phrasing.
+if grep -q 'PREVENTED a wake are not counted' "$WORK/st"; then
+	ok "the report names its CURRENT blind spot — prevented wakes (constraint 4)"
 else
-	bad "the report does not say what it fails to count"
+	bad "the report does not say what it fails to count, or still names quince#242's retired blind spot"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+
+# (3b) THE SCOPE IS IN THE LINE (quince#296). A `--repo` report reads ONE state file and an `--all`
+# report SUMS the forge set, and both said "for this runner" in identical words — so a summed `2/2`
+# and a per-repo `2/1`, read forty minutes apart, looked like a counter going BACKWARDS, which is
+# impossible by design. Both numbers were correct. The sum and the slice are both small integers that
+# look like the same quantity: a plausible wrong number rather than an obviously broken one.
+if grep -qE '^loop: .* for [^ ]+/[^ ]+ since' "$WORK/st"; then
+	ok "a per-repo report NAMES the repo, so the figure carries its own denominator"
+else
+	bad "the per-repo loop line does not name its repo — it is indistinguishable from an --all sum"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+# The control, and it is the assertion that would catch a scope label added to only ONE of the two
+# paths — which is the same shape as the defect, one level shallower.
+if grep -q '^loop: .* for this runner ' "$WORK/st"; then
+	bad "the loop line still says 'for this runner', the wording that answered two questions at once"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+else
+	ok "the ambiguous 'for this runner' wording is gone (the control)"
+fi
+
+# (3c) THE OTHER SIDE OF THE PAIR. The defect IS the `--all`/`--repo` pair, so a suite that labelled
+# only one side would be the same shape one level shallower — which is exactly what the control above
+# guards against, and it would be absurd to write that control and then test one path.
+#
+# `--all` reads the forge set and sums one state file per repo. Two repos, so the summed figure and
+# the per-repo one are DIFFERENT numbers here: 6 arms across 2 repos against 3 for one. A fixture
+# where they coincided would pass against a tool that had swapped the two labels.
+FORGE_SET_FILE="$WORK/forge-set"
+export FORGE_SET_FILE
+printf '%s\nnovkostya/quince-devlog\n' "$REPO" >"$FORGE_SET_FILE"
+cp "$STATE" "$(./bin/forge-watch runner path)/novkostya-quince-devlog.state.json"
+./bin/forge-watch status --all >"$WORK/stall" 2>&1 || true
+if grep -qE '^loop: .* across 2 repo\(s\) in the forge set ' "$WORK/stall"; then
+	ok "an --all report says ACROSS N repos, so a sum cannot be read as a slice"
+elif grep -qE '^loop: .* for [^ ]+/[^ ]+ since' "$WORK/stall"; then
+	# `status --all` prints one per-repo block per repo and never sums, which is itself a correct
+	# answer to quince#296 — the ambiguity was between `status --repo` and the `watch --all` EXIT.
+	# Recorded as a pass with its reason rather than silently, because the assertion above is the one
+	# a reader expects to fire and it does not.
+	ok "status --all prints per-repo lines, each naming its repo — it never sums, so nothing is ambiguous"
+else
+	bad "an --all status carries a loop line that names neither a repo nor a repo count"
+	grep '^loop:' "$WORK/stall" | sed 's/^/    | /'
 fi
 
 # (4) THE EXIT LINE CARRIES IT TOO, so a woken session sees the cost without asking.
@@ -117,6 +172,22 @@ if grep -q '^loop: ' "$WORK/out"; then
 else
 	bad "the exit line does not carry the totals"
 	tail -3 "$WORK/out" | sed 's/^/    | /'
+fi
+
+# (4b) AND THE `--all` EXIT LINE IS THE ONE THAT WAS ACTUALLY MISREAD (quince#296). (3c) established
+# that `status --all` never sums, so this is the ONLY summing path in the tool — the `2/2` the
+# architect compared against a per-repo `2/1`. Asserting it here rather than trusting (3c)'s elif:
+# that branch passing means the ambiguity lives entirely on this line, which makes it the assertion
+# that matters most, not the one that can be skipped.
+#
+# The two state files hold identical counts, so a SUM and a SLICE are different numbers and a tool
+# that labelled the sum as a slice would fail rather than coincide.
+./bin/forge-watch watch --all --gh "$WORK/gh" --no-issues --interval 1 --max-wait 3 >"$WORK/outall" 2>&1 || true
+if grep -qE '^loop: .* across 2 repo\(s\) in the forge set ' "$WORK/outall"; then
+	ok "the --all exit line says ACROSS N repos — the summed figure names itself as a sum"
+else
+	bad "the --all exit line does not declare its scope; a sum can still be read as one repo's slice"
+	grep '^loop:' "$WORK/outall" | sed 's/^/    | /'
 fi
 
 # (5) SILENT BEFORE ANYTHING IS COUNTED. A box that has never armed under this build must not grow a
