@@ -196,6 +196,18 @@ Job: {
                "bytes_done": 2400000000, "bytes_total": 3600000000,
                "files_received": 149,
                "liveness": "active"},   // active | silent_but_connected | suspected_stall
+  // A TERMINAL JOB CARRIES NO RUNNING PHASE (qn.4a, corrected by quince#313). Once `state` is
+  // terminal — succeeded | failed | cancelled | connection_lost — `phase` and `liveness` are empty
+  // (`succeeded` sets phase "done" as it always has). They describe a live process and a finished
+  // job is not one; a client rendering `waiting_for_passcode` on a failed job tells the user to act
+  // on something that is over, which is the `State honesty` rule failing at its own example.
+  // `percent` is NOT cleared: on a failure it is the last true measurement of how far the job got —
+  // information about the past rather than a claim about now.
+  //
+  // Clients should still gate live narration on `state` rather than on `phase`. This paragraph says
+  // what the server sends; a consumer that asks "is this job running" before quoting a running
+  // field is correct whatever a producer does, and both consumers that got this wrong got it wrong
+  // by reading `phase` without reading `state`.
   "started_at": "...", "finished_at": "..." | null,
   "error": {"code": "device_disconnected", "message": "..."} | null,
   "retry_of": "01H..." | null,          // set when the user retried a failed job
