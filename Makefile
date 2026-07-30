@@ -227,6 +227,55 @@ gates: $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only
 # that means something else.
 DEVCT_SCRIPTS   := deploy/devct/devct deploy/devct/devct-template deploy/devct/lib.sh
 SH_LIBS         := deploy/devct/lib.sh
+
+# ---------------------------------------------------------------------------
+# THE SHELL SUITES RUN IN BUSYBOX, BECAUSE BUSYBOX IS WHAT SHIPS (quince#246).
+#
+# `deploy/Dockerfile`'s runtime stage is `FROM $(ALPINE_IMAGE)`, so the product's shell is BusyBox
+# `ash` and its coreutils are BusyBox. CI is `ubuntu-latest` — bash and GNU coreutils — so until now
+# these suites were gated against an environment the product never runs in. That is not "add a
+# harsher gate"; it is stop gating against the wrong one.
+#
+# `shellcheck -s sh` cannot substitute: it checks the shell LANGUAGE, not coreutils FLAGS.
+# `ls --time-style=…`, `find -newermt` and `${PIPESTATUS[0]}` all pass shellcheck cleanly and all
+# fail on BusyBox — measured on a box, in `deploy/dev.md`.
+#
+# BARE ALPINE PLUS ONLY WHAT THE SUITES NEED, ruled 2026-07-30, and deliberately NOT the shipped
+# runtime image. That image also carries `python3`, `openssh-client`, `ca-certificates`, `tzdata` and
+# the libimobiledevice runtime deps — none of which a shell suite touches, and pinning to it would
+# make the gate weaker than bare Alpine for no gain. `jq`, `git` and `make` are the same
+# implementations on Alpine as anywhere, so adding them reintroduces nothing GNU; the same three are
+# what `toolchain-uv` installs.
+#
+# 18 OF 18 PASS, measured. Bare Alpine alone is 5 of 18 — the rest need `jq` or `git`. The last
+# holdout was `home-resolution-test`, which needed `gh` on PATH and is fixed in quince#162, which is
+# why there is no exclusion list here at all.
+SH_SUITES       := privacy-check-test forge-watch-test preflight-test provision-guard-test \
+                   forge-watch-exits-test forge-watch-stop-test forge-watch-fixtures-doc-test \
+                   quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
+                   forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
+                   home-resolution-test wrapper-boundary-test gate-scope-test \
+                   sh-lint-coverage-test allowlist-coverage-test
+SH_SUITE_IMAGE  := $(ALPINE_IMAGE)
+# `bash` is here for ONE reason and it is not to run the suites under it — `/bin/sh` stays BusyBox
+# `ash`, which is the whole point. `pr-title-refs-test` has two assertions that deliberately invoke
+# `bash` to pin an exit code, because quince#224's defect was a usage error exiting 1 under bash — an
+# ALLOCATED code in that contract, so it impersonated a real finding. Without `bash` installed those
+# two cases skip, and the suite says so in its own output: "no bash here, so this run cannot see
+# quince#224". Measured: 35 passed in bare Alpine, 37 on a host.
+#
+# Containerising without it would have quietly dropped two assertions from the gate — the "do not
+# silently run a subset" failure this whole change exists to avoid, arriving inside the fix for it.
+# Caught by reading the count rather than the colour: 35 where the host says 37.
+SH_SUITE_PKGS   := jq git make bash
+
+# THE FAST PATH SURVIVES, which is a constraint rather than a nicety: a session iterating on a fix
+# must be able to run one suite without paying container startup. `make forge-watch-test` still runs
+# directly on the host, and `QUINCE_SH_RUN_HERE=1 make gates-sh` runs the whole set that way. The
+# container is the GATE; the host run is the loop you work in.
+#
+# The same variable is what the container sets for itself, so the recipe cannot recurse into another
+# container: inside, the suites are already in the right environment and run directly.
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
                    deploy/runner/preflight-test deploy/runner/provision-guard-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
@@ -274,24 +323,18 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# when it cannot run" is precisely the bug this suite exists to hold shut — leaving its
 	@# proof to whoever remembers would reproduce the defect one level up (quince#41, #64).
 	@# Synthetic fixtures only: no private layer needed, so it runs here, on CI, and anywhere.
-	@$(MAKE) --no-print-directory privacy-check-test
-	@$(MAKE) --no-print-directory forge-watch-test
-	@$(MAKE) --no-print-directory preflight-test
-	@$(MAKE) --no-print-directory provision-guard-test
-	@$(MAKE) --no-print-directory forge-watch-exits-test
-	@$(MAKE) --no-print-directory forge-watch-stop-test
-	@$(MAKE) --no-print-directory forge-watch-fixtures-doc-test
-	@$(MAKE) --no-print-directory quince-runner-status-test
-	@$(MAKE) --no-print-directory pr-title-refs-test
-	@$(MAKE) --no-print-directory forge-watch-roundtrip-test
-	@$(MAKE) --no-print-directory forge-watch-ownership-test
-	@$(MAKE) --no-print-directory forge-watch-composition-test
-	@$(MAKE) --no-print-directory scratch-reap-test
-	@$(MAKE) --no-print-directory home-resolution-test
-	@$(MAKE) --no-print-directory wrapper-boundary-test
-	@$(MAKE) --no-print-directory gate-scope-test
-	@$(MAKE) --no-print-directory sh-lint-coverage-test
-	@$(MAKE) --no-print-directory allowlist-coverage-test
+	@# THE SUITES, in BusyBox (quince#246). Reported rather than implied, because a gate that
+	@# containerises some of its work and says `clean` cannot be told from one that containerised all
+	@# of it — quince#41's shape, and the reason the count and the image are both printed.
+	@if [ -n "$(QUINCE_SH_RUN_HERE)" ]; then \
+	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) ON THIS HOST (QUINCE_SH_RUN_HERE set) — NOT the BusyBox gate"; \
+	  $(MAKE) --no-print-directory $(SH_SUITES); \
+	else \
+	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) in $(SH_SUITE_IMAGE) + $(SH_SUITE_PKGS) — BusyBox ash, as the image ships"; \
+	  $(RUNTIME) run --rm -e QUINCE_SH_RUN_HERE=1 -v $(ROOT):/src -w /src $(SH_SUITE_IMAGE) \
+	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && exec make --no-print-directory $(SH_SUITES)'; \
+	  echo "gates-sh: all $(words $(SH_SUITES)) shell suite(s) ran in $(SH_SUITE_IMAGE) — none skipped, none host-side"; \
+	fi
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
