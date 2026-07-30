@@ -1,0 +1,140 @@
+#!/bin/sh
+# allowlist-coverage — the `make` allowlist is TOTAL, in both directions.
+#
+# THE DEFECT (quince#256). `.claude/settings.json` allowlisted the LANGUAGE gates — `gates-go`,
+# `gates-ui`, `gates-ui-e2e`, `gates-vault`, `image` — and not one of the shell test suites. Those
+# arrived incrementally, each in a PR that touched no settings file, so the gap was drift rather
+# than a decision. Measured on 2026-07-30: **19 of 34 documented targets had no entry**, and they
+# were almost exactly the sub-targets `make gates-sh` invokes — i.e. the suites a session runs while
+# iterating on a fix were the ones it could not invoke individually.
+#
+# WHY A GATE RATHER THAN THE NINETEEN ENTRIES. The entries were added (quince#256 item 1) and have a
+# shelf life: the twentieth target lands and reopens it. The count itself proves the point — an
+# earlier sweep at `af1bb8a` found **17**, and two more targets landed within the hour. Days was the
+# estimate; hours was the measurement.
+#
+# AND THE GAP IS INVISIBLE IN NORMAL OPERATION, which is the reason it survived. The permission
+# classifier waves an unlisted command through, so nothing surfaces the omission until the classifier
+# is *gone* — and a gate that only fails during an outage is a gate that fails when you can least act
+# on it. That is the same shape as quince#41 (a gate reporting clean about what it never read) and
+# quince#200 (a lint list nothing compared against disk); this is the third instance, and it is the
+# reason this file exists rather than a longer list of entries.
+#
+# TWO DIRECTIONS, AND THEY KEY ON DIFFERENT SETS — this asymmetry is the whole subtlety:
+#
+#   1. every DOCUMENTED target (one carrying a `## ` help string) must have an allow entry;
+#   2. every `Bash(make …)` entry must name a REAL target (any `.PHONY` declaration).
+#
+# Not the same set, and using one for both is wrong in both directions. Measured here:
+#
+#   .PHONY targets                38
+#   documented (`## `) targets    34
+#   real but undocumented         preflight  tc-go  tc-node  tc-uv
+#
+# `make preflight` IS allowlisted and is NOT documented — a real target with no `## ` text. A
+# direction-2 check keyed on documented targets would report that rule **dead**. Meanwhile `tc-go`,
+# `tc-node` and `tc-uv` are real, undocumented, and correctly *not* allowlisted: they are internal
+# toolchain build steps nobody invokes by hand, so a direction-1 check keyed on real targets would
+# demand three entries nobody wants. The ruling on quince#256 said "every `make help` target has an
+# entry, and every entry names a real target", and that precision is load-bearing rather than loose.
+#
+# Direction 2 is the one that catches a RENAMED target leaving a dead allow rule behind, which is how
+# an allowlist quietly accumulates claims about commands that no longer exist.
+#
+# Three exit codes, the same contract as the other gates here (quince#41):
+#
+#   0  the allowlist is total in both directions
+#   1  a documented target has no entry, or an entry names no real target
+#   2  DID NOT RUN — an extraction came back empty, so the comparison would be vacuous
+#
+# A 2 is NEVER clean. Every extraction below is by SHAPE (a grep over the Makefile, a jq over the
+# settings file), so a reformat breaks it LOUDLY rather than silently comparing two empty sets — the
+# failure mode that would make this file worse than nothing.
+set -eu
+
+ME=$(basename "$0")
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+# Overridable so the suite can point this at SYNTHETIC trees, and so the negative control is
+# reproducible by a reviewer rather than a thing the author did once by hand — the same hook, for the
+# same reason, as PR_TITLE_REFS_BIN and PRIVACY_CHECK_BIN. Without it a test would have to copy this
+# script into a temp tree, which is how a suite ends up exercising a stale copy of the thing it
+# checks.
+ROOT="${ALLOWLIST_COVERAGE_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
+MAKEFILE="$ROOT/Makefile"
+SETTINGS="$ROOT/.claude/settings.json"
+
+[ -f "$MAKEFILE" ] || die2 "no Makefile at $MAKEFILE"
+[ -f "$SETTINGS" ] || die2 "no settings file at $SETTINGS"
+command -v jq >/dev/null 2>&1 || die2 "jq is required — the settings file is JSON"
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+# --- the three sets ------------------------------------------------------------------------------
+# DOCUMENTED targets, read with the SAME pattern `make help` itself uses, so the two cannot disagree.
+# `help`'s recipe is: grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST). Reading the Makefile rather
+# than running `make help` also means this needs no container runtime and cannot be confused by the
+# ANSI colouring help emits.
+grep -hE '^[a-zA-Z0-9_-]+:.*?## ' "$MAKEFILE" | sed 's/:.*//' | sort -u >"$TMP/documented"
+[ -s "$TMP/documented" ] || die2 "no documented targets found — help's '## ' pattern moved, and this comparison would be vacuous"
+
+# REAL targets: every .PHONY declaration. A non-phony file target would be missed, and that is
+# acceptable here: this Makefile declares every target phony, and a file target is not something a
+# session invokes by name.
+grep -hE '^\.PHONY: ' "$MAKEFILE" | sed 's/^\.PHONY: //' | tr ' ' '\n' | grep -v '^$' | sort -u >"$TMP/real"
+[ -s "$TMP/real" ] || die2 "no .PHONY targets found — the declarations moved, and direction 2 would be vacuous"
+
+# ALLOWLISTED targets. `Bash(make X)` and `Bash(make X *)` both yield X.
+#
+# Entries whose first token begins with `-` are FLAG forms, not targets — `Bash(make -C /root/…)` is
+# the scratch-root entry from quince#256 item 2a, and treating `-C` as a target name would report it
+# as a dead rule forever. Skipped explicitly rather than filtered by accident.
+jq -r '.permissions.allow[]? | select(startswith("Bash(make "))' "$SETTINGS" |
+	sed 's/^Bash(make //; s/)$//' |
+	awk '{ if (substr($1,1,1) != "-") print $1 }' |
+	sort -u >"$TMP/allowed"
+[ -s "$TMP/allowed" ] || die2 "no Bash(make …) allow entries found — the settings shape moved, and both directions would be vacuous"
+
+# --- direction 1: every documented target has an entry -------------------------------------------
+# EXCLUSIONS, each needing a reason that survives "why not just allowlist it?". Empty today, and
+# worth saying so: the first entry should have to argue against a file recording that the set has
+# been empty and workable.
+EXCLUDED=''
+
+miss1=''
+while read -r t; do
+	[ -n "$t" ] || continue
+	grep -qxF "$t" "$TMP/allowed" && continue
+	printf '%s\n' "$EXCLUDED" | grep -qxF "$t" && continue
+	miss1="$miss1 $t"
+done <"$TMP/documented"
+
+# --- direction 2: every entry names a real target -------------------------------------------------
+miss2=''
+while read -r t; do
+	[ -n "$t" ] || continue
+	grep -qxF "$t" "$TMP/real" && continue
+	miss2="$miss2 $t"
+done <"$TMP/allowed"
+
+# --- report ---------------------------------------------------------------------------------------
+rc=0
+if [ -n "$miss1" ]; then
+	printf '%s: DOCUMENTED TARGET(S) WITH NO ALLOW ENTRY —%s\n' "$ME" "$miss1" >&2
+	printf '        → add "Bash(make <target>)" to .claude/settings.json, or add it to EXCLUDED in\n' >&2
+	printf '          %s with a reason. Without an entry the command works only while the\n' "$0" >&2
+	printf '          permission classifier is available, and fails when it is not (quince#256).\n' >&2
+	rc=1
+fi
+if [ -n "$miss2" ]; then
+	printf '%s: ALLOW ENTR(IES) NAMING NO REAL TARGET —%s\n' "$ME" "$miss2" >&2
+	printf '        → the target was renamed or removed and the rule was left behind. Delete the\n' >&2
+	printf '          entry, or restore the target. A rule naming nothing is a claim about a command\n' >&2
+	printf '          that does not exist.\n' >&2
+	rc=1
+fi
+[ "$rc" -eq 0 ] || exit 1
+
+printf '%s: clean — %s documented target(s) all allowlisted, %s entr(ies) all name real targets\n' \
+	"$ME" "$(wc -l <"$TMP/documented" | tr -d ' ')" "$(wc -l <"$TMP/allowed" | tr -d ' ')"
