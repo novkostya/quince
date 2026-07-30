@@ -147,5 +147,28 @@ else
 	ok "a known role prints no degraded-mode note (the control)"
 fi
 
+# (4) THE ARCHITECT SEAT'S *LIVE* CREDENTIAL, which is the App key and not the legacy PAT. This file
+# already declared `$REVIEW` and never placed it — (2) proves the architect behaviour using the PAT,
+# which is the credential the arch box happens to still hold rather than the one it is identified by.
+# So the seat's role rested entirely on a token that `owed_role`'s own comment calls luck, and
+# retiring it would have resolved that box to `none` — disarming the `Stop` hook there exactly as
+# quince#238 did on the implementer seat, and quietly turning (3)'s fail-open into its steady state.
+#
+# The assertion is the same as (2) on purpose: same PR, same branch, same answer, different
+# credential. If the two ever disagree, one of the two arms has stopped meaning `architect`.
+_out=$(run_role "$REVIEW")
+if printf '%s\n' "$_out" | grep -q 'EXITING on the event'; then
+	ok "the review App key ALONE identifies the architect seat — not only the legacy PAT"
+else
+	bad "a box holding only the live architect credential does not behave as the architect" \
+		"owed_role must branch on QUINCE_REVIEW_KEY_FILE; without it the seat depends on a PAT due for cleanup."
+	printf '%s\n' "$_out" | grep -E '^event=|watch-idle|DISABLED' | sed 's/^/    | /'
+fi
+if printf '%s\n' "$_out" | grep -q 'suppression is DISABLED'; then
+	bad "the review key resolved to role=none — the arm is missing or misspelled"
+else
+	ok "...and does so as a KNOWN role, printing no degraded-mode note"
+fi
+
 printf '\nforge-watch-role-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

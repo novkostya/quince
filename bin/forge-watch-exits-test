@@ -253,10 +253,17 @@ fi
 # means holding a credential and reaching the forge, so a suite that tried would skip on CI and pass
 # by omission — quince#41's shape, in the gate meant to catch a gate that had stopped checking.
 #
-# WHY THESE TWO ASSERTIONS AND NOT "every wrapper appears here". `gh-review` is the reviewer and is
-# not a watch role at all, and `gh-bot` is deliberately retained as an unmodified record
-# (`decisions/0014` condition 1) while no longer being anything a session should be told to run. A
-# blanket rule would demand both and be wrong about both.
+# WHY THESE ASSERTIONS AND NOT "every wrapper appears here". `gh-bot` is deliberately retained as an
+# unmodified record (`decisions/0014` condition 1) while no longer being anything a session should be
+# told to run, so a blanket rule would demand it and be wrong.
+#
+# THIS PARAGRAPH USED TO EXCLUDE `gh-review` TOO — *"the reviewer, and not a watch role at all"* —
+# and that was exactly backwards. The review key IS the architect box's live credential, the way the
+# coder key is the implementer's, and `owed_role` did not know it: the arch box's role rested
+# entirely on the LEGACY PAT, which the function's own comment already called luck rather than
+# coverage. A tidy-up of that PAT would have returned `none` there and taken the `Stop` hook's
+# assertion with it. The symmetry is asserted below now, because the reasoning that excluded it read
+# as sound and was wrong for a whole seat.
 role_body=$(awk '/^owed_role\(\)/,/^}/' "$FW")
 if [ -z "$role_body" ]; then
 	bad "could not extract owed_role's body — the extraction broke" \
@@ -268,6 +275,16 @@ else
 	else
 		bad "owed_role does not mention QUINCE_CODER_KEY_FILE — the implementer box will resolve to role=none" \
 			"quince#238: role=none makes the Stop hook fail open on the seat that opens PRs, and it does so in a shape that reads as normal — on a box with genuinely no credential, 'whether a watch is owed was NOT checked' is the expected output."
+	fi
+
+	# 1b. THE SAME ASSERTION FOR THE OTHER SEAT, and it is not symmetry for its own sake: without it
+	# the architect box's role depends on the legacy PAT alone, and this file's own subject is
+	# enumerations that stay total while the set changes underneath them.
+	if printf '%s' "$role_body" | grep -q 'QUINCE_REVIEW_KEY_FILE'; then
+		ok "owed_role branches on the LIVE architect credential (quince-review App key)"
+	else
+		bad "owed_role does not mention QUINCE_REVIEW_KEY_FILE — the arch box's role rests on the legacy PAT alone" \
+			"Retiring that PAT resolves the architect seat to role=none, which disarms the Stop hook's assertion there exactly as quince#238 did on the implementer seat."
 	fi
 
 	# 2. NO ARM MAY HAND BACK A WRAPPER FOR A RETIRED IDENTITY. The remedy this function prints is a
