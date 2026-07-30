@@ -113,11 +113,19 @@ and this one should not have to relearn it:
 
 ```sh
 KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}#[0-9]+'
-git log --format=%B origin/main...HEAD | grep -inE "$KW"   # the commit messages
+git log --format=%B origin/main..HEAD | grep -inE "$KW"    # the commit messages — TWO dots
 grep -inE "$KW" "$BODY"                                    # the PR body
 ```
 
 Whatever either one prints, you either meant it or you did not — decide deliberately.
+
+**TWO dots here, THREE in the privacy sweep, and the difference is not a slip.** `A...B` is the
+symmetric difference, so it also reports commits already on `main` — and this check ran against its
+own branch and flagged a **merged** commit, which is somebody else's problem and already history. The
+privacy sweep wants that breadth, because sweeping too much costs nothing and missing a leak is
+permanent. This one wants the opposite: a hit you cannot act on is noise, and a check that cries wolf
+on merged work is a check people learn to skim. Measured on this branch — `...` reported 1 hit,
+`..` reported 0, and 0 was the true answer.
 
 **`closingIssuesReferences` is NECESSARY AND NOT SUFFICIENT.** It reflects the **PR body only**. A
 commit message landing on the default branch closes issues too, and with `--rebase` every commit
