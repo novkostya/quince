@@ -177,6 +177,16 @@ did not, and a review caught the symlink one `git add` away from a public repo.
 clone; the work has to execute on a container host (`deploy/dev.md`). Do not install a
 toolchain anywhere, and do not plan a PR you cannot prove.
 
+**This box is Alpine: BusyBox `ash`, and NO PYTHON** (quince#246). `command -v python3` is empty on
+every session box, so reaching for it costs a cycle to an exit `127` — three such instances in one
+afternoon, on two seats, and once the defensive `python3 … || { sed … }` form failed *differently*
+and cost more than the original. **Use `jq` for JSON, and do not assume GNU flags**: `${PIPESTATUS[0]}`,
+`ls --time-style` and `find -newermt` all work in CI and all fail here. Python is absent
+deliberately, and BusyBox is what the release image ships — so the fix is never to install
+something, it is to write the portable form. Full statement, with what was measured and the one
+trap quince#246 got wrong, in [`deploy/dev.md`](../../../deploy/dev.md), *What a session box
+actually is*.
+
 **Take the gate lane explicitly: say out loud that you are starting a ladder.** The container, network
 and cache-volume names are fixed rather than per-run, so two ladders on one box destroy each other —
 and the damage does not present as "two ladders collided", it presents as **a flake**, which is the
