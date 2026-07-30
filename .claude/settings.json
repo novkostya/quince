@@ -138,7 +138,8 @@
       "Bash(deploy/devct/devct-template *)",
       "Bash(./deploy/devct/devct *)",
       "Bash(./deploy/devct/devct-template *)",
-      "Bash(make allowlist-coverage-test)"
+      "Bash(make allowlist-coverage-test)",
+      "Bash(make suite-coverage-test)"
     ]
   }
 }
