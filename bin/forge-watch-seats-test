@@ -101,6 +101,22 @@ fresh() { # <state-dir-suffix>
 	rm -rf "$XDG_STATE_HOME"
 }
 
+# THIS SUITE IS ABOUT THE IMPLEMENTER SEAT, AND NOW HAS TO SAY SO (quince#292). The suppression it
+# asserts is role-dependent: an ARCHITECT seat suppresses nothing — reviewing other runners' branches
+# is the entire job — and a box that cannot identify its role fails OPEN. `owed_role` decides from
+# which credential is present, so in the containerised gate, where none is, assertion (3) inverted and
+# `arch1/…` woke the watch.
+#
+# THE IRONY IS WORTH THE LINE: this is quince#265's suite, and quince#265's fix is what created
+# quince#292 by populating the suppression set on a seat where suppression is wrong. Its own
+# containerised run is what caught the follow-on. Pinning all four paths also stops the suite reading
+# this box's real credential store, which would make its result depend on which seat ran it.
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
+
 seats_file "$WORK/seats.rl" r1 arch1
 
 # (1) a name ABSENT from the committed list is refused.

@@ -261,7 +261,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    home-resolution-test wrapper-boundary-test gate-scope-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
-                   closing-refs-check-test
+                   closing-refs-check-test forge-watch-role-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -323,6 +323,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \
+                   bin/forge-watch-role-test \
                    bin/forge-watch-stderr-test
 
 .PHONY: gates-sh
@@ -456,6 +457,10 @@ forge-watch-seats-test: ## A seat declared on the OTHER box is attributable here
 .PHONY: forge-watch-stderr-test
 forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (quince#279)
 	@bin/forge-watch-stderr-test
+
+.PHONY: forge-watch-role-test
+forge-watch-role-test: ## Branch-ownership suppression is role-dependent (quince#292)
+	@bin/forge-watch-role-test
 
 .PHONY: closing-refs-check-test
 closing-refs-check-test: ## The closing-keyword gate's own refusals, all three exit codes (quince#293)

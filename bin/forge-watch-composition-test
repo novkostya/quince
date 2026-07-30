@@ -180,6 +180,19 @@ fi
 # The stub forge. `$WORK/turn` is the clock: 1 baseline, 2 moves A's PR, 3 moves B's.
 # ---------------------------------------------------------------------------
 export XDG_STATE_HOME="$WORK/state"
+
+# TWO IMPLEMENTER RUNNERS IS THE WHOLE SUBJECT, so the seat has to be pinned (quince#292).
+# Branch-ownership suppression is role-dependent — an architect seat suppresses nothing, and a box
+# that cannot identify its role fails OPEN — and `owed_role` decides from which credential is present.
+# In the containerised gate there is none, so phases 2 and 3 below, which assert that A does not wake
+# on B's event and vice versa, would invert. Pinning all four paths also stops the suite reading this
+# box's real credential store, which would make its result depend on which seat ran it.
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
+
 export STUB_WORK="$WORK"
 # The stub records a `gh pr list --json` array; the queue fetch now speaks GraphQL. One shared
 # conversion, never a copy per suite — see the header of the file itself.

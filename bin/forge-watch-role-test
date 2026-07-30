@@ -1,0 +1,151 @@
+#!/bin/sh
+# forge-watch-role-test — branch-ownership suppression is ROLE-DEPENDENT (quince#292).
+#
+# THE DEFECT. `wake_filter` silenced every PR event on the ARCHITECT seat. quince#174 built it so two
+# IMPLEMENTER runners on one box would not wake each other, where "another declared runner owns that
+# branch" correctly means "not my business" — and on the architect seat it means the opposite, because
+# reviewing other runners' branches is the entire job and every implementer PR is on an `r<N>/` branch
+# by canon. Measured on that box: four events in, one survived, and the suppressed ones included
+# `event=review`.
+#
+# IT WAS CREATED BY THE FIX FOR THE OPPOSITE BUG. quince#265 found the filter INERT on that seat —
+# `other_runner_names` returned empty — and `.claude/seats` populated it (quince#276). Working, for
+# that role, is silence.
+#
+# WHY A SUITE AND NOT A LOOP FIXTURE. The role comes from WHICH CREDENTIAL IS PRESENT (`owed_role`),
+# and the loop-fixture harness has no way to set that. This drives the real `watch` verb with the
+# credential paths pointed at temp files, which is the only way to reach all three arms.
+#
+# THE `none` CASE IS THE ONE THAT MATTERS. `owed_role` has already returned `none` wrongly on a live
+# box, undetected across two sessions, when the credentials it knew had been retired (quince#238) —
+# and the architect arm survives today only because a legacy PAT happens to remain there, so `none`
+# is that box's expected future state. Suppressing on an unidentifiable role would restore the
+# deafness through a cleanup nobody connected to the watch.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export QUINCE_SESSION_ID=role-test-session
+REPO=novkostya/quince
+
+FORGE_SEATS_FILE="$WORK/seats"
+export FORGE_SEATS_FILE
+printf 'r1\nr4\narch1\n' >"$FORGE_SEATS_FILE"
+
+# A stub whose ONE PR is on ANOTHER seat's branch, and which moves on the second turn. That is the
+# whole question: whose business is `r1/their-work` on each seat?
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+case "$1 ${2:-}" in
+"issue list") printf '[]\n'; exit 0 ;;
+"issue view") printf '{}\n'; exit 0 ;;
+esac
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+at=2026-07-30T10:00:00Z
+[ "$turn" = 2 ] && at=2026-07-30T11:00:00Z
+cat <<ROW | jq -f "$STUB_INVERSE"
+[{"number":501,"state":"OPEN","updatedAt":"$at","title":"t","headRefName":"r1/their-work",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB
+chmod +x "$WORK/gh"
+export STUB_WORK="$WORK"
+STUB_INVERSE="$PWD/bin/testdata/forge/gh-array-to-graphql.jq"
+export STUB_INVERSE
+[ -f "$STUB_INVERSE" ] || {
+	printf 'forge-watch-role-test: missing %s — DID NOT RUN\n' "$STUB_INVERSE" >&2
+	exit 2
+}
+
+# Every credential path is pinned into $WORK, so the suite cannot read this box: without that,
+# `owed_role` falls back to the real store and the result depends on which seat runs the suite —
+# the trap `preflight-test` documents having been bitten by.
+CODER="$WORK/coder.pem"
+ARCH="$WORK/arch.token"
+BOT="$WORK/bot.token"
+REVIEW="$WORK/review.pem"
+
+# `$1` = which credential to place (or none). Returns the watch output for a baseline tick plus a
+# tick in which the other seat's PR moves.
+run_role() {
+	rm -f "$CODER" "$ARCH" "$BOT" "$REVIEW"
+	[ "$1" = none ] || printf 'a credential\n' >"$1"
+	rm -rf "$WORK/state"
+	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		./bin/forge-watch runner set r4 >/dev/null 2>&1
+	printf '1\n' >"$WORK/turn"
+	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait 3 >/dev/null 2>&1 || true
+	# A SECOND declared runner in the registry, so `r1` is genuinely somebody else's rather than
+	# unattributable — an unknown prefix wakes everybody and would pass the implementer assertion for
+	# the wrong reason.
+	printf 'r1\n' >"$WORK/state/quince/runners/another-session"
+	printf '2\n' >"$WORK/turn"
+	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait 4 >"$WORK/out" 2>&1 || true
+	cat "$WORK/out"
+}
+
+# (1) IMPLEMENTER — unchanged, and measured correct on the live box before this change.
+_out=$(run_role "$CODER")
+if printf '%s\n' "$_out" | grep -q 'watch-idle'; then
+	ok "implementer: another runner's PR does NOT wake (quince#174, unchanged)"
+else
+	bad "implementer: woke on another runner's PR — quince#174's suppression is gone"
+	printf '%s\n' "$_out" | grep -E '^event=' | sed 's/^/    | /'
+fi
+
+# (2) ARCHITECT — the fix. The same PR, the same branch, the opposite answer, because reviewing
+# other runners' branches is what the role IS.
+_out=$(run_role "$ARCH")
+if printf '%s\n' "$_out" | grep -q 'EXITING on the event'; then
+	ok "architect: the same PR DOES wake — reviewing others' branches is the job (quince#292)"
+else
+	bad "architect: still deaf to another runner's PR"
+	printf '%s\n' "$_out" | grep -E '^event=|watch-idle' | sed 's/^/    | /'
+fi
+
+# (3) NONE — fails OPEN, and SAYS SO. The case with a measured history of being wrong, and the one
+# no box currently produces.
+_out=$(run_role none)
+if printf '%s\n' "$_out" | grep -q 'EXITING on the event'; then
+	ok "unidentifiable role: fails OPEN — the PR wakes"
+else
+	bad "unidentifiable role: suppressed, so a credential cleanup would restore the deafness silently"
+	printf '%s\n' "$_out" | grep -E '^event=|watch-idle' | sed 's/^/    | /'
+fi
+if printf '%s\n' "$_out" | grep -q 'suppression is DISABLED'; then
+	ok "...and says so, rather than degrading silently (CLAUDE.md)"
+else
+	bad "failed open without reporting it — a silent degraded mode"
+	printf '%s\n' "$_out" | sed 's/^/    | /'
+fi
+# THE CONTROL for (3): a working role must NOT print the degraded-mode note, or the assertion above
+# passes on a tool that always prints it and the line means nothing.
+_out=$(run_role "$CODER")
+if printf '%s\n' "$_out" | grep -q 'suppression is DISABLED'; then
+	bad "the degraded-mode note fires on a KNOWN role — it would become wallpaper"
+else
+	ok "a known role prints no degraded-mode note (the control)"
+fi
+
+printf '\nforge-watch-role-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

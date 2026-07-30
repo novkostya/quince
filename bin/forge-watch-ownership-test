@@ -40,6 +40,21 @@ export XDG_STATE_HOME="$WORK/state"
 export QUINCE_SESSION_ID=ownership-test-session
 REPO=novkostya/quince
 
+# THIS SUITE IS ABOUT THE IMPLEMENTER SEAT, AND NOW HAS TO SAY SO (quince#292). Branch-ownership
+# suppression is role-dependent: an ARCHITECT seat suppresses nothing, because reviewing other
+# runners' branches is the entire job, and a box that cannot identify its role fails OPEN. `owed_role`
+# reads which credential is present — so in the containerised gate, where none is, this suite's
+# premise vanished and every suppression assertion below inverted. Caught by `gates-sh` on the branch
+# that introduced the role arm.
+#
+# Pinning all four paths into $WORK also stops the suite reading the real store, which would make its
+# result depend on which seat ran it — the trap `preflight-test` records having been bitten by.
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
+
 # ITS OWN SEAT LIST (quince#265). `runner set` now refuses a name absent from the committed
 # `.claude/seats`, and `r1`/`r2` happen to be in it — so this suite would pass either way TODAY and
 # start failing the day the real list is edited. A suite that depends on production data is a suite
