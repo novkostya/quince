@@ -256,7 +256,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
-                   gates-sh-exit-test forge-watch-stderr-test
+                   gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -317,6 +317,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
+                   bin/forge-watch-counters-test \
                    bin/forge-watch-stderr-test
 
 .PHONY: gates-sh
@@ -448,6 +449,10 @@ forge-watch-seats-test: ## A seat declared on the OTHER box is attributable here
 	@bin/forge-watch-seats-test
 
 .PHONY: forge-watch-stderr-test
+.PHONY: forge-watch-counters-test
+forge-watch-counters-test: ## The loop counts its own cycles, and the count survives (quince#282)
+	@bin/forge-watch-counters-test
+
 forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (quince#279)
 	@bin/forge-watch-stderr-test
 

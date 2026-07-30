@@ -381,6 +381,13 @@ step() {
 	# answer into the uninformative one.
 	_prev_watch=$(jq -c '.watch // null' "$_prev" 2>/dev/null || printf 'null')
 	[ -n "$_prev_watch" ] || _prev_watch=null
+	# THE CYCLE COUNTERS ARE STATE IN THE SAME SENSE AND NEEDED THE SAME CARRY-FORWARD (quince#282
+	# item 4, and quince#103 is the identical defect one field over). `step` writes the OBSERVATION as
+	# the new state, and an observation has no `.arms` — so without this the counter was incremented
+	# by `watch_arm` and erased by the very next tick. Found by measuring a live arm and reading back
+	# `arms=unset`, not by reading the code: the increment was correct and its persistence was not.
+	_prev_counts=$(jq -c '{arms: (.arms // 0), wakes: (.wakes // 0)}' "$_prev" 2>/dev/null || printf 'null')
+	[ -n "$_prev_counts" ] || _prev_counts=null
 
 	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
 
@@ -396,9 +403,10 @@ step() {
 			printf 'event=queue-empty\n'
 		fi
 		printf '%s' "$_now" | jq -c --argjson decl "$_prev_decl" --argjson previtems "$_prev_iss" \
-			--argjson watch "$_prev_watch" '
+			--argjson watch "$_prev_watch" --argjson counts "$_prev_counts" '
 			. + {observed: true}
 			| if $watch == null then . else .watch = $watch end
+			| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes) end
 			| if $decl == null then . else
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
@@ -685,7 +693,7 @@ step() {
 	# it. Overwriting knowledge with an absence is how a recompute flap becomes an event, and a
 	# transition re-announced every tick is the wallpaper this tool has already been fixed for once.
 	printf '%s' "$_now" | jq -c --argjson old "$_prev_prs" --argjson decl "$_prev_decl" \
-		--argjson previtems "$_prev_iss" --argjson watch "$_prev_watch" '
+		--argjson previtems "$_prev_iss" --argjson watch "$_prev_watch" --argjson counts "$_prev_counts" '
 		. + {observed: true, prs: [
 			.prs[] as $p
 			| if ($p.merge_state // "UNKNOWN") != "UNKNOWN" then $p
@@ -700,6 +708,7 @@ step() {
 		# the channel this whole feature exists to make reliable. Absence is reported by
 		# `issue-fetch-failed`; it is never allowed to mean "nothing there".
 		| if $watch == null then . else .watch = $watch end
+		| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes) end
 		| if $decl == null then . else
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
@@ -851,6 +860,69 @@ state_dir() {
 state_path_for() {
 	# owner/name -> owner-name.state.json, so one file per watched repo and no nesting to create.
 	printf '%s/%s.state.json' "$(state_dir)" "$(printf '%s' "$1" | tr '/' '-')"
+}
+
+# --- LOOP SELF-ACCOUNTING (quince#282 item 4) --------------------------------------------------
+#
+# `status` reports LIVENESS. Nothing reported that a seat had armed 63 times and exited 53 in one
+# session, or that the ceremony around those cycles cost ~35 minutes — the aggregate surfaced only
+# because somebody was asked to reflect and went looking. A gate that reports what it covered is this
+# project's answer to everything else; the loop reported only that it woke.
+#
+# THE COUNTERS ARE PER-RUNNER BY CONSTRUCTION, not by keying: `state_dir` is already
+# `…/forge-watch/<name>/`, so r1 cannot read r4 into its own totals without a second decision
+# (quince#278). They live at TOP LEVEL in each state file rather than inside `.watch`, which `arm`
+# replaces wholesale — see the note there.
+#
+# NEVER RESET AUTOMATICALLY. A counter that quietly restarts makes the loop look cheaper than it is,
+# which is the exact failure this issue is about. Clearing one is a deliberate act: delete the field.
+#
+# THE NUMBER, NEVER A JUDGEMENT. No threshold, no "this looks high" — 63 arms is alarming in a quiet
+# hour and unremarkable in the hour twenty PRs landed, and the reader has that context where the tool
+# does not.
+loop_state_files() { # <all> <repo> <state>
+	if [ "$1" = yes ]; then
+		for _lsf_r in $(forge_set "$FORGE_SET_FILE"); do
+			printf '%s\n' "$(state_path_for "$_lsf_r")"
+		done
+	else
+		printf '%s\n' "${3:-$(state_path_for "$2")}"
+	fi
+}
+
+bump_wakes() { # <all> <repo> <state>
+	loop_state_files "$1" "$2" "$3" | while IFS= read -r _bw_f; do
+		[ -f "$_bw_f" ] || continue
+		# NOT `jq … && mv … || rm`, which reads as if-then-else and is not one: the `rm` also fires
+		# when `mv` fails, and a half-written counter is worth less than none. SC2015 caught the same
+		# shape in quince#265 and it is the second time tonight.
+		if jq -c '.wakes = ((.wakes // 0) + 1)' "$_bw_f" >"$_bw_f.new" 2>/dev/null; then
+			mv "$_bw_f.new" "$_bw_f"
+		else
+			rm -f "$_bw_f.new"
+		fi
+	done
+}
+
+# Summed across the watched repos, because an `--all` watch is ONE loop over several state files and
+# a per-repo figure would understate the cycle count by however many repos are declared.
+loop_totals() { # <all> <repo> <state>
+	_lt_a=0
+	_lt_w=0
+	while IFS= read -r _lt_f; do
+		[ -f "$_lt_f" ] || continue
+		_lt_a=$((_lt_a + $(jq -r '.arms // 0' "$_lt_f" 2>/dev/null || printf 0)))
+		_lt_w=$((_lt_w + $(jq -r '.wakes // 0' "$_lt_f" 2>/dev/null || printf 0)))
+	done <<EOF
+$(loop_state_files "$1" "$2" "$3")
+EOF
+	[ "$_lt_a" -gt 0 ] || return 0
+	# WHAT IT DOES NOT COUNT, said in the line itself and not only in a doc (quince#242 constraint 4).
+	# Until the self-caused arm exists, these are WAKES, not *whose* wakes — and on this project a
+	# large share of them are the seat's own acts. A figure whose basis is unstated is the defect one
+	# layer up from the one this measures.
+	printf 'loop: %s arm(s), %s wake(s) for this runner since counting began — wakes, not WHOSE wakes (quince#242 unbuilt).\n' \
+		"$_lt_a" "$_lt_w"
 }
 
 # ---------------------------------------------------------------------------
@@ -2688,7 +2760,13 @@ watch_arm() {
 		            owner_pid: $opid, owner_pid_start: (if $ostart == "" then null else $ostart end),
 		            interval_s: (if $prev_due == null then $iv else ($prev_iv // $iv) end),
 		            armed_at: $ts, starting_bound_s: $bd,
-		            last_watcher_tick: null, due: $prev_due}' \
+		            last_watcher_tick: null, due: $prev_due}
+		# LOOP SELF-ACCOUNTING (quince#282 item 4). Counted at TOP LEVEL and not inside `.watch`,
+		# because the line above REPLACES `.watch` wholesale on every arm — a counter living there
+		# would reset once per arm and report 1 forever, which is the "silently resets" failure the
+		# ruling names. Never reset automatically: a counter that quietly restarts makes the loop look
+		# cheaper than it is, and this issue exists because the cost was invisible.
+		| .arms = ((.arms // 0) + 1)' \
 		"$_as" >"$_as.new" && mv "$_as.new" "$_as"
 }
 
@@ -2745,7 +2823,14 @@ watch_loop() {
 		wake_filter "$_wevt" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		if [ -n "$_wwake" ]; then
+			# LOOP SELF-ACCOUNTING (quince#282 item 4): count the wake, then REPORT the cumulative
+			# figures. `status` reports liveness; nothing reported that this seat had armed 63 times
+			# in a session, and the aggregate was found only because somebody was asked to reflect.
+			# The number, never a judgement — 63 arms is alarming in a quiet hour and unremarkable in
+			# the hour twenty PRs landed, and the reader has that context where the tool does not.
+			bump_wakes "$_wall" "$_wrepo" "$_wstate"
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
+			loop_totals "$_wall" "$_wrepo" "$_wstate"
 			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
 			return 0
 		fi
@@ -2764,6 +2849,11 @@ watch_loop() {
 		if [ "$_welapsed" -ge "$_wmax" ]; then
 			printf 'event=watch-idle elapsed=%ss ticks=%s\n' "$_welapsed" "$_wticks"
 			printf 'forge-watch: watch EXITING on the idle bound — nothing happened, which is a report and not a silence. ARM AGAIN.\n'
+			# Reported on the idle line too (quince#282 item 4). An idle exit is still a CYCLE — it
+			# cost an arm and an interval — and a counter visible only on the wake path would
+			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
+			# counted as a wake: nothing woke.
+			loop_totals "$_wall" "$_wrepo" "$_wstate"
 			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
 			return 6
 		fi
@@ -3214,6 +3304,9 @@ status)
 		fi
 		printf 'forge-watch: repo=%s\n' "$_rr"
 		watch_report "$_rs" "$_now" "$_ra" "$_ro" || _rrc=$?
+		# The cumulative cycle figures, where a session already looks (quince#282 item 4). `status`
+		# answers "is it live"; this answers "what has this loop cost", which nothing answered.
+		loop_totals no "$_rr" "$_rs"
 		# WHAT THIS WATCH WILL NOT WAKE ON, reported where a session already looks (quince#111
 		# face 3). The filter is silent by design and silence is the one thing this tool refuses to
 		# leave unexplained: a session that meets an unexpected quiet should be able to see the

@@ -1,0 +1,135 @@
+#!/bin/sh
+# forge-watch-counters-test — the loop counts its own cycles, and the count SURVIVES (quince#282 #4).
+#
+# WHY A SUITE AND NOT A FIXTURE. The loop fixtures assert only lines matching `^event=` — the harness
+# greps for exactly that before comparing — so a `loop: N arm(s) …` report is invisible to every one
+# of them. A counter with no coverage in a directory full of coverage is the shape this project keeps
+# filing, so it gets a driver of its own.
+#
+# WHAT IT IS FOR. `status` answers "is the watch live". Nothing answered "what has this loop cost" —
+# the architect seat armed 63 times and exited 53 in one session and found out only by being asked to
+# reflect (quince#282). A gate that reports what it covered is this project's answer to everything
+# else; the loop reported only that it woke.
+#
+# THE PERSISTENCE ASSERTION IS THE ONE THAT MATTERS, and it is here because the first version of the
+# feature FAILED it. `watch_arm` incremented correctly and `step` erased it on the very next tick:
+# step writes the OBSERVATION as the new state, and an observation has no `.arms`. That is quince#103
+# exactly, one field over — the watcher record needed the same carry-forward for the same reason. It
+# was found by arming a live watch and reading back `arms=unset`, NOT by reading the code, because
+# the increment was correct in isolation and only its persistence was wrong.
+#
+# Synthetic and hermetic: its own XDG_STATE_HOME, a stub gh, no network, no credential.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=counters-test-session
+FORGE_SEATS_FILE="$WORK/seats"
+export FORGE_SEATS_FILE
+printf 'r1\n' >"$FORGE_SEATS_FILE"
+REPO=novkostya/quince
+
+# A stub that answers the queue with an empty list and the discovery scan with an empty repo, so the
+# watch runs to its idle bound without ever waking. Quiet is what these assertions need: a wake would
+# end the loop early and make the arm count depend on timing.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+case "$1 ${2:-}" in
+"issue list") printf '[]\n'; exit 0 ;;
+"issue view") printf '{}\n'; exit 0 ;;
+esac
+printf '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\n'
+STUB
+chmod +x "$WORK/gh"
+
+./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf 'forge-watch-counters-test: could not declare a runner — DID NOT RUN\n' >&2
+	exit 2
+}
+STATE="$(./bin/forge-watch runner path)/novkostya-quince.state.json"
+
+arm_once() {
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait 2 >"$WORK/out" 2>&1 || true
+}
+
+# (1) THE COUNT SURVIVES TICKS. Three arms, each running several ticks to its idle bound. If `step`
+# does not carry the counters forward, this reads 1 — which is exactly what the first version did.
+arm_once
+arm_once
+arm_once
+_arms=$(jq -r '.arms // 0' "$STATE" 2>/dev/null || printf 0)
+if [ "$_arms" = 3 ]; then
+	ok "three arms count three, so the counter survives the ticks between them"
+else
+	bad "expected arms=3, got $_arms — step is erasing the counter (quince#103's shape)"
+fi
+
+# (2) AN IDLE EXIT IS A CYCLE BUT NOT A WAKE. Counting idle exits as wakes would make a quiet hour
+# look busy, which inverts the very ratio this exists to expose.
+_wakes=$(jq -r '.wakes // 0' "$STATE" 2>/dev/null || printf 0)
+if [ "$_wakes" = 0 ]; then
+	ok "an idle exit is counted as an arm and NOT as a wake"
+else
+	bad "expected wakes=0 after idle-only runs, got $_wakes"
+fi
+
+# (3) IT IS REPORTED WHERE A SESSION LOOKS. A counter nothing prints is a counter nobody reads, and
+# the defect this closes was precisely an unreported aggregate.
+./bin/forge-watch status --repo "$REPO" >"$WORK/st" 2>&1 || true
+if grep -q '^loop: 3 arm(s), 0 wake(s)' "$WORK/st"; then
+	ok "status reports the cumulative figures"
+else
+	bad "status does not report the loop totals"
+	grep -E '^loop:|^watch=' "$WORK/st" | sed 's/^/    | /'
+fi
+# THE NUMBER, NEVER A JUDGEMENT (ruling constraint 3). 63 arms is alarming in a quiet hour and
+# unremarkable in the hour twenty PRs landed; the reader has that context and the tool does not.
+if grep -qiE 'loop:.*(high|excessive|too many|consider|warning)' "$WORK/st"; then
+	bad "the report editorialises — constraint 3 is the number and no threshold"
+else
+	ok "the report states the number and passes no judgement (constraint 3)"
+fi
+# AND IT SAYS WHAT IT DOES NOT COUNT (constraint 4). Until quince#242 lands these are wakes, not
+# WHOSE wakes, and a figure whose basis is unstated is the defect one layer up from the one it fixes.
+if grep -q 'not WHOSE wakes' "$WORK/st"; then
+	ok "the report names its own blind spot — wakes, not whose (constraint 4)"
+else
+	bad "the report does not say what it fails to count"
+fi
+
+# (4) THE EXIT LINE CARRIES IT TOO, so a woken session sees the cost without asking.
+if grep -q '^loop: ' "$WORK/out"; then
+	ok "the watch exit line reports the totals as well as status"
+else
+	bad "the exit line does not carry the totals"
+	tail -3 "$WORK/out" | sed 's/^/    | /'
+fi
+
+# (5) SILENT BEFORE ANYTHING IS COUNTED. A box that has never armed under this build must not grow a
+# `loop: 0 arm(s)` line on every status — noise that teaches the reader to skip the section.
+: >"$WORK/fresh.json"
+printf '{"observed":true,"prs":[]}\n' >"$WORK/fresh.json"
+./bin/forge-watch status --repo "$REPO" --state "$WORK/fresh.json" >"$WORK/st0" 2>&1 || true
+if grep -q '^loop: ' "$WORK/st0"; then
+	bad "a state with no counters still printed a loop line"
+	grep '^loop:' "$WORK/st0" | sed 's/^/    | /'
+else
+	ok "a state that has never been armed prints no loop line (the control)"
+fi
+
+printf '\nforge-watch-counters-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
