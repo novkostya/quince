@@ -488,6 +488,12 @@ step() {
 		| "event=opened pr=\(.number)"'
 
 	# merged / closed: present before, now MERGED or gone.
+	#
+	# NO `count=` HERE, DELIBERATELY, and this is the line to read before adding one for symmetry
+	# with `event=review` below: a PR merges ONCE, so the cardinality is inherently 1 and the field
+	# would be dead text. The asymmetry is the whole point — many verdicts per PR against one merge
+	# per PR — and it is why only `review` needs a count to make a self-caused guard safe. On this
+	# channel presence alone is already unambiguous.
 	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
 		[.[] | select(.state == "MERGED")
 		     | select(.number as $n | ($old | map(select(.state == "MERGED") | .number) | index($n)) | not)]
