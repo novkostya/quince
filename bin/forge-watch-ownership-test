@@ -146,5 +146,32 @@ else
 	sed -n '1,6p' "$WORK/out"
 fi
 
+# (5) THE UNATTRIBUTABLE BRANCH IS REPORTED, not merely tolerated (quince#230).
+#
+# Cases (2)-(4) prove the filter's decisions. This proves the state is VISIBLE, which is the half that
+# was missing: `canon/nobody-claims-this` wakes every watch because no declared prefix matches it, and
+# until now nothing said so — the symptom is indistinguishable from ordinary noise, which is how a
+# live guard came to rest on an undocumented convention (five of six open PRs lacked the prefix).
+#
+# The fixture holds exactly ONE such branch out of three, so the count is a known answer rather than
+# whatever the box happens to hold. Asserting the NUMBER is the point: a note firing on any non-zero
+# set would pass against a miscount, and a miscount here is what quince#174's review caught once
+# already — `startswith(.)` comparing a branch to itself, counting every PR as somebody else's.
+./bin/forge-watch status --repo "$REPO" >"$WORK/status" 2>&1 || true
+if grep -q '1 PR(s) on this record carry NO declared runner prefix' "$WORK/status"; then
+	ok "status names the ONE unattributable branch, with its count (quince#230)"
+else
+	bad "status did not report the unprefixed branch canon/nobody-claims-this"
+	grep -E 'note:|watch=' "$WORK/status" | sed 's/^/    | /'
+fi
+# The control: the count must EXCLUDE the branch this runner owns and the one another declared runner
+# owns, or "unattributable" would just be a second name for "every PR".
+if grep -qE '(2|3) PR\(s\) on this record carry NO declared runner prefix' "$WORK/status"; then
+	bad "the unattributable count swept up a claimed branch — r1/my-work or r2/their-work"
+	grep -E 'note:' "$WORK/status" | sed 's/^/    | /'
+else
+	ok "claimed branches are NOT counted as unattributable (the control)"
+fi
+
 printf '\nforge-watch-ownership-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
