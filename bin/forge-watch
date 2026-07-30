@@ -2904,7 +2904,14 @@ actor_filter() { # <events-file> <map-file> <role> <runner> <default-repo> <supp
 		}
 		FILENAME == mapf { own[$1 SUBSEP $2] = $3; next }
 		{
-			if ($0 !~ /(^| )event=updated( |$)/) { print; next }
+			# THE KIND GATE, and the issue surface was outside it until quince#307. Both arms of the
+			# self-caused suppression considered PR events only, so a seat woke itself on every issue
+			# comment it wrote — and for the architect an issue comment is the PRIMARY OUTPUT, because
+			# a ruling IS an issue comment. The `prevented` counter therefore undercounted precisely
+			# the act that seat performs most, which is worse than the wasted wakes: that counter is
+			# the instrument quince#242 exists to produce.
+			isiss = ($0 ~ /(^| )event=issue-(updated|comment)( |$)/)
+			if (!isiss && $0 !~ /(^| )event=updated( |$)/) { print; next }
 			pr = ""; repo = ""; actor = ""; kind = ""; cmtr = ""
 			n = split($0, a, " ")
 			for (i = 1; i <= n; i++) {
@@ -2913,6 +2920,26 @@ actor_filter() { # <events-file> <map-file> <role> <runner> <default-repo> <supp
 				if (a[i] ~ /^actor=/)     actor = substr(a[i], 7)
 				if (a[i] ~ /^kind=/)      kind  = substr(a[i], 6)
 				if (a[i] ~ /^committer=/) cmtr  = substr(a[i], 11)
+			}
+			if (isiss) {
+				# Same unknown-wakes rule as below: `unattributed` is the tool saying it cannot
+				# tell, and a missing actor is not a name either.
+				if (actor == "" || actor == "unattributed") { print; next }
+				if (norm(actor) != me) { print; next }
+				# THE IMPLEMENTER IS CARVED OUT, and it is not an oversight. `quince-coder` is ONE
+				# App shared by every runner (quince#227), so on that seat `actor=quince-coder`
+				# names the SEAT and not the SESSION — another runner commenting on an issue this
+				# one declared is indistinguishable from this one commenting. quince#307 states the
+				# case that must not be eaten as "an issue comment by SOMEBODY ELSE on a declared
+				# issue must still wake", and another runner is somebody else. There is nothing on
+				# an issue comment to disambiguate them with — no `committer=` analogue, no
+				# session marker — so this arm declines rather than guesses, and the implementer
+				# half stays open until quince#227 gives that seat a session-scoped identity.
+				#
+				# The architect has no such ambiguity: one box, one signing key, one seat.
+				if (role != "architect") { print; next }
+				sup++
+				next
 			}
 			# `actor=unattributed` is the tool saying it cannot tell. It is not a name and must never
 			# be treated as one: unknown wakes, the same rule the ownership filter follows.
