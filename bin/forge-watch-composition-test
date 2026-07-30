@@ -124,6 +124,26 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# THIS SUITE'S OWN SEAT LIST (quince#265). `runner set` refuses a name absent from the committed
+# `.claude/seats`, and every name this suite declares is a fixture — `ra`, `rb`, `c1`…`c8` are not
+# seats, and adding them to the real file to make a test pass would put fixture names into the list
+# that decides ownership for every session on both boxes.
+#
+# A LIST RATHER THAN NO LIST, deliberately: pointing `FORGE_SEATS_FILE` at a nonexistent path would
+# also work, by taking the additive no-list branch — and would then exercise a path no real session
+# is on. This keeps the suite one step from production, where a list exists and the names are in it.
+FORGE_SEATS_FILE=$WORK/seats
+export FORGE_SEATS_FILE
+{
+	printf '# fixture seats for forge-watch-composition-test\n'
+	printf 'ra\nrb\n'
+	_s=1
+	while [ "$_s" -le 8 ]; do
+		printf 'c%s\n' "$_s"
+		_s=$((_s + 1))
+	done
+} >"$FORGE_SEATS_FILE"
+
 # ---------------------------------------------------------------------------
 # Phase 0 — THE REGISTRY UNDER CONCURRENT WRITES.
 #

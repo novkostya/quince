@@ -71,8 +71,14 @@ derive from the runner name, and this skill never told you to set one — the sa
 until quince#208. Undeclared, `forge-watch` cannot tell which watch is its own and refuses to arm.
 
 ```sh
-bin/forge-watch runner set <name>     # ONCE, FIRST. Short, stable, yours: arch1, arch2, …
+bin/forge-watch runner set <name>     # ONCE, FIRST. Must be listed in .claude/seats.
 ```
+
+**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265).
+This seat is the reason the file exists: `arch1` was declared only on the arch box, so the
+implementer box could not attribute `arch1/…` branches and woke on every one of them — and, worse in
+the other direction, `other_runner_names` on the arch box returned **empty**, which made the wake
+filter a documented no-op there that had never suppressed anything. Adding a seat is a PR.
 
 **The order is not cosmetic.** Declaring *after* seeding relocates the state directory — from the
 undeclared top-level path to `…/forge-watch/<name>` — which **orphans any observation already

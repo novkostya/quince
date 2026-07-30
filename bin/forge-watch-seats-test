@@ -1,0 +1,266 @@
+#!/bin/sh
+# forge-watch-seats-test — a seat declared on the OTHER box must be attributable on this one, and a
+# name absent from the committed list must not be declarable at all (quince#265).
+#
+# WHAT WAS BROKEN, and it is worse than it sounds. `wake_filter` decides ownership by prefix-matching
+# a branch against declared runner names, and it read only the LOCAL registry — while the branch
+# namespace is GLOBAL. So `arch1/…` is correctly prefixed under the convention and still
+# unattributable on the implementer box, because `arch1` was declared on the other one. It then fails
+# OPEN and wakes every watch here.
+#
+# Measured 2026-07-30, and the two boxes are not symmetric:
+#
+#   implementer box   declares r1 r2 r3 r4   suppresses 5 PRs
+#   architect box     declares arch1 only    suppresses 0 — `other_runner_names` returns EMPTY, so
+#                                            the filter is a documented no-op there and has never
+#                                            suppressed anything
+#
+# THE NEGATIVE CONTROL IS THE RETROSPECTIVE PROOF. Assertion (4) removes `arch1` from the list and
+# watches the same PR wake — which is the pre-#265 behaviour exactly. Without it, (3) would pass
+# against a tool that suppressed on some other ground, and this suite would be asserting that a
+# branch is quiet rather than that the LIST is what quietened it.
+#
+# THE REFUSAL IS THE ANTI-DRIFT HALF (assertions 1-2, 5-6). A committed list nobody is forced to
+# update is the drift class quince#200 and quince#256 both exist to close, so the list is
+# authoritative rather than advisory: `runner set` refuses a name absent from it. Assertion 6 pins the
+# additive boundary — no list, no refusal — because a stranger's clone must not be blocked by a file
+# they have no reason to have, which is the resurrection test in `CLAUDE.md`.
+#
+# Synthetic and hermetic: a stub `gh` returning a fixed queue, no network, no credential.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export QUINCE_SESSION_ID=seats-test-session
+REPO=novkostya/quince
+
+# A stub forge with two PRs: mine, and one on a branch belonging to a seat that is declared ONLY in
+# the committed list. `$WORK/turn` is the clock — 1 baseline, 2 moves the other seat's PR.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+case "$*" in
+*"issue view"*) printf '{}\n'; exit 0 ;;
+esac
+base=2026-07-29T10:00:00Z
+mine=$base; theirs=$base
+case "$turn" in
+2) theirs=2026-07-29T11:00:00Z ;;
+esac
+row() {
+cat <<ROW
+ {"number":$1,"state":"OPEN","updatedAt":"$2","title":"t","headRefName":"$3",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}
+ROW
+}
+{
+printf '['
+row 101 "$mine"   "r1/my-work"
+printf ','
+row 909 "$theirs" "arch1/canon-thing"
+printf ']\n'
+} | jq -f "$STUB_INVERSE"
+STUB
+chmod +x "$WORK/gh"
+export STUB_WORK="$WORK"
+STUB_INVERSE="$PWD/bin/testdata/forge/gh-array-to-graphql.jq"
+export STUB_INVERSE
+[ -f "$STUB_INVERSE" ] || {
+	printf 'forge-watch-seats-test: missing %s — the stub cannot answer the queue fetch\n' "$STUB_INVERSE" >&2
+	exit 1
+}
+
+# --- The refusal (quince#265's anti-drift half) ------------------------------------------------
+#
+# Each of these gets a FRESH state home, because `runner set` is once-per-session and a name that
+# stuck from an earlier assertion would make the next one pass without deciding anything.
+
+seats_file() { # <path> <name>...
+	_sf=$1
+	shift
+	printf '# a test list\n' >"$_sf"
+	for _n in "$@"; do printf '%s\n' "$_n" >>"$_sf"; done
+}
+
+fresh() { # <state-dir-suffix>
+	XDG_STATE_HOME="$WORK/state-$1"
+	export XDG_STATE_HOME
+	rm -rf "$XDG_STATE_HOME"
+}
+
+seats_file "$WORK/seats.rl" r1 arch1
+
+# (1) a name ABSENT from the committed list is refused.
+fresh refuse
+if FORGE_SEATS_FILE="$WORK/seats.rl" ./bin/forge-watch runner set r9 >"$WORK/o" 2>&1; then
+	bad "runner set accepted r9, which is not in the committed list"
+else
+	if grep -q 'not in' "$WORK/o" && grep -q 'seats.rl' "$WORK/o"; then
+		ok "runner set REFUSES a name absent from the committed list, naming the file"
+	else
+		bad "refused, but the message does not name the list — a session cannot act on it"
+		sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+	fi
+fi
+# The remedy has to be reachable from the refusal, or the drift just moves into a puzzled session.
+if grep -q 'r1' "$WORK/o" && grep -q 'arch1' "$WORK/o"; then
+	ok "the refusal lists the known seats"
+else
+	bad "the refusal does not say which names ARE known"
+	sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+fi
+
+# (2) a name PRESENT in the list is accepted — the control for (1). Without this, a `runner set` that
+# refused unconditionally would pass assertion (1) and break every session on the box.
+fresh accept
+if FORGE_SEATS_FILE="$WORK/seats.rl" ./bin/forge-watch runner set r1 >"$WORK/o" 2>&1; then
+	ok "runner set ACCEPTS a name present in the committed list (the control)"
+else
+	bad "runner set refused r1, which IS in the committed list"
+	sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+fi
+
+# --- The fix: a seat declared only in the committed list is attributable ------------------------
+
+STATE_OF() { printf '%s/novkostya-quince.state.json' "$(./bin/forge-watch runner path)"; }
+
+run_watch() { # <turn> <max-wait>
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+
+# The registry holds ONLY this session, so `other_runner_names_from local` is empty and every
+# suppression below can only have come from the committed list. That is what makes (3) and (4) a
+# clean pair rather than two results with two possible causes.
+fresh fix
+FORGE_SEATS_FILE="$WORK/seats.rl" ./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf '  FAIL could not declare a runner name for the suppression assertions\n'
+	exit 1
+}
+export FORGE_SEATS_FILE="$WORK/seats.rl"
+
+run_watch 1 3
+if grep -q 'watch-idle' "$WORK/out"; then
+	ok "the baseline tick does not wake"
+else
+	bad "expected watch-idle on the baseline tick"
+	sed -n '1,4p' "$WORK/out" | sed 's/^/    | /'
+fi
+if [ "$(jq -r '[(.prs // [])[] | select(.branch != null)] | length' "$(STATE_OF)" 2>/dev/null || printf 0)" -ge 2 ]; then
+	ok "the observation records headRefName for both PRs"
+else
+	bad "no branch on the observation — the filter would pass everything unexamined"
+fi
+
+# (3) THE FIX. `arch1` is in no local registry on this box; only the committed list knows it.
+run_watch 2 4
+if grep -q 'event=updated pr=909' "$WORK/out"; then
+	ok "the other seat's event is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected pr=909's event to be printed"
+	sed -n '1,6p' "$WORK/out" | sed 's/^/    | /'
+fi
+if grep -q 'watch-idle' "$WORK/out"; then
+	ok "a seat known ONLY from the committed list does NOT wake this watch (quince#265)"
+else
+	bad "woke on pr=909 (arch1/…), whose seat is declared in the committed list"
+	sed -n '1,6p' "$WORK/out" | sed 's/^/    | /'
+fi
+
+# (3b) status must say WHICH SOURCE attributed it (constraint 3 of the ruling). A stale registry
+# entry is a dead session this box can clear; a wrong committed name is a PR. One merged note would
+# name the seat without saying which remedy to reach for.
+./bin/forge-watch status --repo "$REPO" >"$WORK/status" 2>&1 || true
+if grep -q 'attributed via the committed list' "$WORK/status"; then
+	ok "status attributes the suppression to the committed list, by name"
+else
+	bad "status does not say the committed list is what attributed arch1/canon-thing"
+	grep -E 'note:' "$WORK/status" | sed 's/^/    | /'
+fi
+if grep -q 'attributed via the local registry' "$WORK/status"; then
+	bad "status credited the LOCAL registry, which holds no other runner in this fixture"
+	grep -E 'note:' "$WORK/status" | sed 's/^/    | /'
+else
+	ok "status does NOT credit the local registry, which holds nobody else here (the control)"
+fi
+
+# (4) THE NEGATIVE CONTROL, and the retrospective proof: with `arch1` absent from the list, the same
+# PR wakes. This is precisely the pre-#265 behaviour, so it shows the list is doing the work.
+fresh control
+seats_file "$WORK/seats.no-arch" r1
+FORGE_SEATS_FILE="$WORK/seats.no-arch" ./bin/forge-watch runner set r1 >/dev/null 2>&1
+export FORGE_SEATS_FILE="$WORK/seats.no-arch"
+run_watch 1 3
+run_watch 2 6
+if grep -q 'EXITING on the event' "$WORK/out" && grep -q 'event=updated pr=909' "$WORK/out"; then
+	ok "with arch1 NOT listed the same PR WAKES — the list is what suppresses (pre-#265 behaviour)"
+else
+	bad "pr=909 did not wake with arch1 absent, so assertion (3) proves nothing about the list"
+	sed -n '1,6p' "$WORK/out" | sed 's/^/    | /'
+fi
+
+# --- The additive boundary ---------------------------------------------------------------------
+
+# (5) an unlisted name is refused only at DECLARATION. Constraint 1 of the ruling: a session already
+# declared must not break because the list is briefly behind for its own name.
+fresh already
+seats_file "$WORK/seats.rl2" r1 arch1
+FORGE_SEATS_FILE="$WORK/seats.rl2" ./bin/forge-watch runner set r1 >/dev/null 2>&1
+seats_file "$WORK/seats.rl2" arch1 # r1 removed from under a live session
+if FORGE_SEATS_FILE="$WORK/seats.rl2" ./bin/forge-watch runner get >"$WORK/o" 2>&1 &&
+	grep -q '^r1$' "$WORK/o"; then
+	ok "an ALREADY-declared name keeps working when the list drops it (constraint 1)"
+else
+	bad "runner get broke for a declared session after the list changed under it"
+	sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+fi
+
+# (6) NO list, NO refusal. A clone without `.claude/seats` behaves exactly as it did before, which is
+# what makes this change additive and keeps the resurrection test in `CLAUDE.md` true.
+fresh nolist
+if FORGE_SEATS_FILE="$WORK/does-not-exist" ./bin/forge-watch runner set anything >"$WORK/o" 2>&1; then
+	ok "with no committed list present, runner set accepts any name (additive)"
+else
+	bad "runner set refused although no committed list exists — this is not additive"
+	sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+fi
+
+# (7) COMMENTS AND BLANKS ARE NOT SEATS. The real list is mostly prose, so a parser that returned
+# `#` or an empty string would make `startswith("#/")` the ownership test — and an empty prefix
+# matches EVERY branch, which is fail-closed by accident: the whole queue would go quiet.
+fresh parse
+{
+	printf '# a comment naming r7\n\n'
+	printf '  r1  \n'
+	printf '\t# trailing comment\n'
+	printf 'arch1 # inline\n'
+} >"$WORK/seats.messy"
+if FORGE_SEATS_FILE="$WORK/seats.messy" ./bin/forge-watch runner set r1 >"$WORK/o" 2>&1; then
+	ok "a name with surrounding whitespace is recognised"
+else
+	bad "whitespace around a seat name defeated recognition"
+	sed -n '1,5p' "$WORK/o" | sed 's/^/    | /'
+fi
+fresh parse2
+if FORGE_SEATS_FILE="$WORK/seats.messy" ./bin/forge-watch runner set r7 >"$WORK/o" 2>&1; then
+	bad "r7 was accepted, but it appears only inside a COMMENT"
+else
+	ok "a name appearing only in a comment is not a seat"
+fi
+
+printf '\nforge-watch-seats-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

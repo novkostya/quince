@@ -40,6 +40,16 @@ export XDG_STATE_HOME="$WORK/state"
 export QUINCE_SESSION_ID=ownership-test-session
 REPO=novkostya/quince
 
+# ITS OWN SEAT LIST (quince#265). `runner set` now refuses a name absent from the committed
+# `.claude/seats`, and `r1`/`r2` happen to be in it — so this suite would pass either way TODAY and
+# start failing the day the real list is edited. A suite that depends on production data is a suite
+# whose result is about the box rather than the code. It also pins what the two SOURCES contribute:
+# with only these two names listed, every suppression below can come from the local registry or from
+# this file and from nothing else, which is what makes the counts in (5) a known answer.
+FORGE_SEATS_FILE=$WORK/seats
+export FORGE_SEATS_FILE
+printf '# fixture seats for forge-watch-ownership-test\nr1\nr2\n' >"$FORGE_SEATS_FILE"
+
 # A stub forge whose answer changes between ticks. `$WORK/turn` is the clock: 1 baseline, 2 moves
 # the OTHER declared runner's PR, 3 moves the UNCLAIMED branch, 4 moves mine.
 cat >"$WORK/gh" <<'STUB'
