@@ -256,7 +256,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
-                   gates-sh-exit-test
+                   gates-sh-exit-test forge-watch-stderr-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -316,7 +316,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
-                   bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test
+                   bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
+                   bin/forge-watch-stderr-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -445,6 +446,10 @@ forge-watch-ownership-test: ## Another runner's event must not wake mine (quince
 .PHONY: forge-watch-seats-test
 forge-watch-seats-test: ## A seat declared on the OTHER box is attributable here (quince#265)
 	@bin/forge-watch-seats-test
+
+.PHONY: forge-watch-stderr-test
+forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (quince#279)
+	@bin/forge-watch-stderr-test
 
 # quince#111's four faces, TOGETHER, which no other suite does — every one of them drives a single
 # runner against state describing another. Gated rather than hand-run for the reason quince#64 gives

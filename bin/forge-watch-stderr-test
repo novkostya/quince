@@ -1,0 +1,101 @@
+#!/bin/sh
+# forge-watch-stderr-test — the session-liveness probe must not leak raw shell errors (quince#279).
+#
+# THE BUG. `_rs_alive()` reads every `/proc/<pid>/environ` to decide whether a session still exists:
+#
+#     _rsa_env=$(tr '\0' '\n' <"$_rsa_e" 2>/dev/null || true)
+#
+# `2>/dev/null` redirects **`tr`'s** stderr — and `tr` never runs. The SHELL performs `<"$_rsa_e"`
+# before exec, so a failed open is reported on the shell's own stderr, which that redirection does not
+# cover; `|| true` catches the status, not the text. Observed in the wild reclaiming a runner name:
+#
+#     ./bin/forge-watch: line 3472: can't open /proc/1415762/environ: Permission denied
+#     forge-watch: reclaimed "r1" from a session that is gone (sess-A) — …
+#
+# The reclaim was correct. The two lines above it read like a broken box, and `owed --hook` runs on
+# every `Stop`, so this can surface at the end of any turn attributed to nothing.
+#
+# WHY THIS SUITE IS TWO WEAK TESTS RATHER THAN ONE STRONG ONE, stated up front because the shape is
+# the finding. The production trigger is a TOCTOU that ROOT CANNOT SYNTHESISE: the process is alive at
+# glob time and at `[ -r ]` time and a ZOMBIE by the time we open, and a zombie's environ returns EPERM
+# even to root. Everything else that fails to open is also caught by the `-r` guard, and as root
+# essentially nothing that passes `-r` then fails. Three fixtures were tried and rejected:
+#
+#   a directory named `environ`  — open(2) SUCCEEDS on a directory; the read fails and that error is
+#                                  `tr`'s, which the existing `2>/dev/null` already covers. Proves
+#                                  nothing, and it is what the first version of this suite used.
+#   a unix socket                — could not be created without a helper the boxes do not carry
+#   a nonexistent path           — leaks correctly, but `[ -r ]` skips it, so the tool never reaches it
+#
+# So: (1) drives the real idiom against a path that genuinely fails to open, proving the fix is the
+# fix; (2) asserts the SHIPPED LINE uses the fixed form, which is what makes (1) a regression guard
+# rather than a fact about shell. Neither is an end-to-end proof and the PR says so.
+#
+# (2) is the same instrument the Makefile already uses for the `curl -k` ban and the TITLE
+# interpolation rule — a grep over source, because the rule is about the source and a comment is not a
+# control.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+GONE=$WORK/no-such-file
+
+# (1a) THE FIXTURE IS POTENT — the OLD idiom over an unopenable path really does leak, despite its
+# `2>/dev/null`. Without this, (1b) would pass against a fixture that triggers nothing.
+{ _old=$(tr '\0' '\n' <"$GONE" 2>/dev/null || true); } 2>"$WORK/old.err" || true
+if [ -s "$WORK/old.err" ]; then
+	ok "the OLD idiom leaks the shell's own error despite 2>/dev/null (the bug, reproduced)"
+else
+	bad "the old idiom leaked nothing — this suite cannot distinguish the fix from the bug"
+fi
+
+# (1b) THE FIX, over the same path: silent.
+{ _new=$( { tr '\0' '\n' <"$GONE"; } 2>/dev/null || true); } 2>"$WORK/new.err" || true
+if [ -s "$WORK/new.err" ]; then
+	bad "the grouped form still leaked — the fix is not the fix"
+	sed -n '1,3p' "$WORK/new.err" | sed 's/^/    | /'
+else
+	ok "grouping the redirection silences it (the fix)"
+fi
+
+# (1c) AND IT MUST STILL READ. A fix that silenced the probe by breaking it would pass (1b).
+printf 'A=1\nB=2\n' | tr '\n' '\0' >"$WORK/real"
+_v=$( { tr '\0' '\n' <"$WORK/real"; } 2>/dev/null || true)
+if printf '%s\n' "$_v" | grep -qx 'A=1' && printf '%s\n' "$_v" | grep -qx 'B=2'; then
+	ok "the grouped form still reads a real environ correctly (the control)"
+else
+	bad "the grouped form did not read the fixture — silence bought by breaking the read"
+fi
+
+# (2) THE SHIPPED LINE USES IT. This is what makes the above a regression guard on THIS repo rather
+# than a true statement about POSIX shell that would hold forever with the bug reinstated.
+_line=$(grep -n '_rsa_env=' bin/forge-watch || true)
+if [ -z "$_line" ]; then
+	printf 'forge-watch-stderr-test: DID NOT RUN — no _rsa_env= line in bin/forge-watch;\n' >&2
+	printf '  the probe was renamed or removed and this suite is now blind. Re-point it.\n' >&2
+	exit 2
+fi
+# shellcheck disable=SC2016  # `$_rsa_e` is the LITERAL text being searched for in another file, not
+# a variable this script expands. Double quotes would expand it to "" here and the pattern would then
+# match the leaking form too — a false pass, which is the one outcome this assertion must not have.
+if printf '%s\n' "$_line" | grep -q '{ tr .* <"\$_rsa_e"; }'; then
+	ok "bin/forge-watch's liveness probe uses the grouped redirection"
+else
+	bad "bin/forge-watch's liveness probe is back to the leaking form (quince#279)"
+	printf '    | %s\n' "$_line"
+fi
+
+printf '\nforge-watch-stderr-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

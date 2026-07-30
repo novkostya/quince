@@ -141,7 +141,8 @@
       "Bash(./deploy/devct/devct-template *)",
       "Bash(make allowlist-coverage-test)",
       "Bash(make suite-coverage-test)",
-      "Bash(make gates-sh-exit-test)"
+      "Bash(make gates-sh-exit-test)",
+      "Bash(make forge-watch-stderr-test)"
     ]
   }
 }
