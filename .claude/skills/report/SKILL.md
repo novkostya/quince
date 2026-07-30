@@ -112,10 +112,22 @@ Sweep both surfaces, in the same shape as the privacy sweep above — that gate 
 and this one should not have to relearn it:
 
 ```sh
-KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}#[0-9]+'
+KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}[^A-Za-z0-9_-]#[0-9]+'
 git log --format=%B origin/main..HEAD | grep -inE "$KW"    # the commit messages — TWO dots
 grep -inE "$KW" "$BODY"                                    # the PR body
 ```
+
+**`[^A-Za-z0-9_-]` before the `#` is what skips the SAFE forms.** A qualified reference is blocked by
+the alphanumeric immediately before the hash — the same trick `bin/pr-title-refs` uses — so without it
+the sweep flags every qualified citation in the file and a check that fires on safe text is one people
+learn to skim. Measured on a four-line corpus: with it, only the two bare forms are reported; without
+it, all four.
+
+**And do NOT write it as `(^|[^A-Za-z0-9_-])` to also catch a line that starts with the reference.**
+BusyBox `grep -E` — which is `/bin/grep` on these boxes — treats a **mid-pattern `^` as a zero-width
+assertion that succeeds anywhere**, so the alternation matches the empty string and the guard is
+silently disabled. Measured: `printf 'abc\n' | grep -cE 'a(^|x)bc'` → **1** on BusyBox. The bracket
+alone is correct and portable; the "more careful" version is the one that does nothing.
 
 Whatever either one prints, you either meant it or you did not — decide deliberately.
 
