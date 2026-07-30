@@ -261,7 +261,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    home-resolution-test wrapper-boundary-test gate-scope-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
-                   closing-refs-check-test forge-watch-role-test
+                   closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -323,7 +323,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \
-                   bin/forge-watch-role-test \
+                   bin/forge-watch-role-test bin/forge-ledger bin/forge-watch-selfcaused-test \
                    bin/forge-watch-stderr-test
 
 .PHONY: gates-sh
@@ -753,3 +753,7 @@ push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 clean: ## Drop cache volumes and locally-built images
 	-$(RUNTIME) volume rm $(GO_BUILD_VOL) $(GO_MOD_VOL) $(PNPM_VOL) $(UV_VOL) $(E2E_MODULES)
 	-$(RUNTIME) rmi $(TC_GO) $(TC_NODE) $(TC_UV) $(IMAGE_NAME):$(IMAGE_TAG)
+
+.PHONY: forge-watch-selfcaused-test
+forge-watch-selfcaused-test: ## An act this runner performed must not wake it (quince#242)
+	@bin/forge-watch-selfcaused-test

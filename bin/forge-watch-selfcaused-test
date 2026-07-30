@@ -1,0 +1,256 @@
+#!/bin/sh
+# forge-watch-selfcaused-test — an act this runner performed must not wake it, and an act it cannot
+# fully account for must (quince#242, the ledger arm).
+#
+# WHY A SUITE AND NOT A FIXTURE, the same reason as `forge-watch-ownership-test`: the replay fixtures
+# drive the PURE half — hand `step` an observation, compare events — and this decision is made one
+# layer out, between the printing of events and the deciding on them, against a file that a DIFFERENT
+# PROGRAM wrote. A fixture crafting a ledger by hand would pin the consumer and miss the producer,
+# and the producer is where the interesting failure lives: `bin/forge-ledger` and `forge-watch` each
+# spell the ledger's filename, and nothing but an end-to-end run holds them together. So every row
+# here is written by the real `forge-ledger record`, never by `printf` into a path this file chose.
+#
+# THE PROPERTY, so the assertions can be checked against it: the filter decides what WAKES, never
+# what is SEEN. Every event is printed either way; suppression is reported as a note, and only the
+# exit is affected.
+#
+# WHAT THIS SUITE DELIBERATELY CANNOT SHOW: a real approval also moves `updatedAt`, so in the wild
+# it emits `event=updated` TOO, and that line wakes the session regardless of anything here. The
+# stub holds `updatedAt` still precisely to isolate the arm under test. That is not the suite
+# cheating — it is the reason the ledger alone does not reduce wakes, made visible: every scenario
+# below needs the other line held back by hand to demonstrate anything at all.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=selfcaused-test-session
+REPO=novkostya/quince
+
+# Pinned for the same reason `forge-watch-ownership-test` pins them: `owed_role` reads which
+# credential is present, and in the containerised gate none is — so the role arm would disable
+# branch-ownership suppression and this suite would be measuring a different code path than it
+# claims. A coder key makes the role `implementer`, which is the seat the wrappers below act as.
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
+
+# One declared runner and one seat name, so `other_runner_names` is empty and branch-ownership
+# suppression is a no-op. This suite is about the OTHER arm; leaving the ownership filter live would
+# make every "did not wake" assertion ambiguous between the two.
+FORGE_SEATS_FILE=$WORK/seats
+export FORGE_SEATS_FILE
+printf '# fixture seats for forge-watch-selfcaused-test\nr1\n' >"$FORGE_SEATS_FILE"
+
+STUB_INVERSE="$PWD/bin/testdata/forge/gh-array-to-graphql.jq"
+export STUB_INVERSE
+[ -f "$STUB_INVERSE" ] || {
+	printf 'forge-watch-selfcaused-test: missing %s — the stub cannot answer the queue fetch\n' "$STUB_INVERSE" >&2
+	exit 1
+}
+
+# `updatedAt` NEVER MOVES ACROSS TURNS. See the header: holding it still is what suppresses the
+# `event=updated` line so the typed event can be observed alone.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+case "$*" in
+*"issue view"*) printf '{}\n'; exit 0 ;;
+esac
+state=OPEN; merged=null; reviews='[]'
+case "$turn" in
+2) reviews='[{"state":"APPROVED","submittedAt":"2026-07-30T11:00:00Z","author":{"login":"quince-coder"}}]' ;;
+3) reviews='[{"state":"APPROVED","submittedAt":"2026-07-30T11:00:00Z","author":{"login":"quince-coder"}},
+             {"state":"APPROVED","submittedAt":"2026-07-30T11:05:00Z","author":{"login":"someone-else"}}]' ;;
+4) state=MERGED; merged=\"2026-07-30T11:10:00Z\" ;;
+esac
+# PR 502 IS ALWAYS OPEN AND NEVER CHANGES, and it is not padding. Without it, turn 4 merges the only
+# PR in the queue and the tick emits `event=queue-empty` — which is wake-worthy, and which woke the
+# merged scenario for a reason that has nothing to do with suppression. A second PR keeps the queue
+# non-empty so the merge can be observed alone.
+cat <<ROW | jq -f "$STUB_INVERSE"
+[{"number":501,"state":"$state","updatedAt":"2026-07-30T10:00:00Z","title":"t","headRefName":"r1/mine",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":$reviews,"comments":[],"commits":[],
+  "mergedAt":$merged,"mergedBy":null,"mergeStateStatus":"CLEAN"},
+ {"number":502,"state":"OPEN","updatedAt":"2026-07-30T10:00:00Z","title":"t","headRefName":"r1/other",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB
+chmod +x "$WORK/gh"
+export STUB_WORK="$WORK"
+
+./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf '  FAIL could not declare a runner name\n'
+	exit 1
+}
+STATE=$(./bin/forge-watch runner path)/novkostya-quince.state.json
+LEDGER=$(./bin/forge-ledger path)
+
+# THE PATH AGREEMENT IS THE FIRST ASSERTION, because every other one in this file silently degrades
+# to "nothing was suppressed" if the two programs disagree about where the ledger lives — and
+# "nothing was suppressed" is also what a correctly-empty ledger looks like.
+case "$LEDGER" in
+"$(./bin/forge-watch runner path)"/*) ok "forge-ledger's path is under this runner's state dir (per-runner by construction)" ;;
+*) bad "forge-ledger path '$LEDGER' is not under $(./bin/forge-watch runner path)" ;;
+esac
+
+run_watch() {
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+baseline() {
+	rm -f "$STATE" "$LEDGER"
+	run_watch 1 3
+	grep -q 'watch-idle' "$WORK/out" || printf '  note: baseline did not settle idle\n'
+}
+# THE POST-CONDITION IS NOT OPTIONAL, and this suite learned why the hard way. `forge-ledger` fails
+# OPEN by design: an argv it cannot attribute writes nothing and exits 0. So "no row" is what a
+# BROKEN writer and a quiet correct one both look like, and the first version of this file asserted
+# only that a row had been CONSUMED — which passed against a row that was never written, while the
+# real bug (the parser stopped scanning one word before `--repo`) failed every other assertion. A
+# helper that does not check its own effect makes every later assertion conditional on a silence.
+record() {
+	_before=$(wc -l <"$LEDGER" 2>/dev/null || printf 0)
+	./bin/forge-ledger record pr "$1" 501 --repo "$REPO"
+	_after=$(wc -l <"$LEDGER" 2>/dev/null || printf 0)
+	[ "$_after" -eq $((_before + 1)) ] || {
+		printf '  FAIL forge-ledger recorded nothing for "pr %s 501 --repo %s"\n' "$1" "$REPO"
+		fail=$((fail + 1))
+	}
+}
+
+# (1) THE CORE CASE: one verdict, one row, no wake.
+baseline
+record review
+run_watch 2 4
+if grep -q 'event=review pr=501 count=1' "$WORK/out"; then
+	ok "the self-caused review is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected event=review pr=501 to be printed"
+	sed -n '1,8p' "$WORK/out"
+fi
+if grep -q 'note: 1 self-caused event(s) suppressed' "$WORK/out"; then
+	ok "the suppression is REPORTED, not silent"
+else
+	bad "no note — a suppression nobody can see is indistinguishable from a missed event"
+	sed -n '1,8p' "$WORK/out"
+fi
+if grep -q 'watch-idle' "$WORK/out"; then
+	ok "this runner's own verdict does NOT wake it"
+else
+	bad "woke on its own recorded verdict"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (2) CONSUME-ONCE. The row is spent by (1); nothing else may ever use it.
+if [ ! -s "$LEDGER" ]; then
+	ok "the row was consumed — the ledger is empty again"
+else
+	bad "the row survived the suppression it caused: $(cat "$LEDGER")"
+fi
+
+# (3) THE COUNT GUARD, which is the whole reason quince#242 step 1 exists. Two verdicts landed in
+# one tick and only ONE of them is mine — the other seat's must still wake me. Suppressing on
+# presence alone would swallow it, and a MISSED wake is the expensive direction.
+baseline
+record review
+run_watch 3 6
+if grep -q 'EXITING on the event' "$WORK/out" && grep -q 'count=2' "$WORK/out"; then
+	ok "count=2 against ONE recorded verdict still WAKES — another seat's verdict is in there"
+else
+	bad "suppressed a two-verdict event holding only one of mine — a missed wake"
+	sed -n '1,8p' "$WORK/out"
+fi
+if grep -q 'note: .* self-caused' "$WORK/out"; then
+	bad "reported a suppression on the tick it correctly refused to suppress"
+else
+	ok "nothing claimed suppressed when nothing was (the note's control)"
+fi
+
+# (4) …and the ledger is UNTOUCHED when the guard refuses. A row spent on an event that still woke
+# the session would be a row unavailable to the event it was actually for.
+if [ "$(wc -l <"$LEDGER" 2>/dev/null || printf 0)" -eq 1 ]; then
+	ok "the refused suppression left the row unspent"
+else
+	bad "the row was consumed by an event that woke anyway"
+fi
+
+# (5) BOTH verdicts accounted for: two rows, count=2, silent.
+baseline
+record review
+record review
+run_watch 3 4
+# THE NOTE COUNTS EVENT LINES, NOT VERDICTS — `1`, from a line that spent TWO rows. That is the
+# right unit for a note about a wake decision (one line was withheld from it), and this assertion
+# expected `2` at first, which is the reading a reader might also reach. Pinned at `1` so the two
+# units cannot be quietly swapped: `note: 2` here would mean two separate events were suppressed.
+if grep -q 'watch-idle' "$WORK/out" && grep -q 'note: 1 self-caused' "$WORK/out"; then
+	ok "count=2 against TWO recorded verdicts suppresses the line, spending both rows"
+else
+	bad "did not suppress a two-verdict event fully accounted for"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (6) `event=merged` takes NO count and needs none — a PR merges once, so presence is unambiguous.
+baseline
+record merge
+run_watch 4 4
+if grep -q 'event=merged pr=501' "$WORK/out" && grep -q 'watch-idle' "$WORK/out"; then
+	ok "a merge this runner performed does not wake it (presence, no count)"
+else
+	bad "woke on its own merge"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (7) NO LEDGER, NO SUPPRESSION — the pre-quince#242 behaviour, which is what a box with no declared
+# runner and a session that has performed no acts must both still get. Fail open, everywhere.
+baseline
+run_watch 2 6
+if grep -q 'EXITING on the event' "$WORK/out"; then
+	ok "with an empty ledger every event wakes exactly as before"
+else
+	bad "suppressed something with no ledger to justify it"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (8) THE WRITER'S NARROWNESS, asserted rather than assumed. `pr comment` produces `issue-comment`,
+# which already carries `actor=` and is the actor arm's business; a row for it would be a second
+# mechanism for a problem that has one.
+rm -f "$LEDGER"
+./bin/forge-ledger record pr comment 501 --repo "$REPO"
+./bin/forge-ledger record pr view 501 --repo "$REPO"
+./bin/forge-ledger record issue view 12 --repo "$REPO"
+if [ ! -s "$LEDGER" ]; then
+	ok "only 'pr review' and 'pr merge' are recorded — comment, view and issue write nothing"
+else
+	bad "recorded a verb whose event already carries an actor: $(cat "$LEDGER")"
+fi
+
+# (9) FAIL OPEN ON AN UNATTRIBUTABLE ACT. `gh` would resolve a missing --repo from the checkout's
+# remote; this must not guess, because a row against the wrong PR suppresses an event nobody caused.
+./bin/forge-ledger record pr review 501
+./bin/forge-ledger record pr review --repo "$REPO"
+if [ ! -s "$LEDGER" ]; then
+	ok "no --repo, or no number: no row, so the wake stands"
+else
+	bad "guessed a target it was not given: $(cat "$LEDGER")"
+fi
+
+printf '\nforge-watch-selfcaused-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

@@ -162,4 +162,23 @@ GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
 unset GITHUB_TOKEN
 export GH_TOKEN
 
+# SELF-CAUSED LEDGER (quince#242). Two verbs — `pr review` and `pr merge` — produce forge events
+# that carry NO actor, because `forge-watch` computes them by diffing observations. Recording them
+# as this runner performs them is what lets its own watch tell them from another seat's.
+#
+# THE `exec` IS KEPT FOR EVERYTHING ELSE, and that is the whole reason `classify` exists as a
+# separate verb: this is a CREDENTIAL wrapper, so the blast radius of a behaviour change here is
+# every forge call the session makes. Only the two recordable verbs take the fork-and-wait path.
+#
+# RECORDED ONLY ON SUCCESS. A `gh pr review` that failed produces no event to suppress, so its row
+# would sit unconsumed until it swallowed the NEXT verdict on that PR — somebody else's, which is a
+# MISSED wake and the one direction this subsystem must not fail in. The exit status is passed
+# through unchanged either way; the ledger never affects what the caller sees.
+_ledger="$(dirname "$0")/forge-ledger"
+if [ -x "$_ledger" ] && "$_ledger" classify "$@" >/dev/null 2>&1; then
+	gh "$@" && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then "$_ledger" record "$@" || :; fi
+	exit "$_rc"
+fi
+
 exec gh "$@"
