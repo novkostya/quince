@@ -262,7 +262,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
-                   forge-watch-actor-test
+                   forge-watch-actor-test forge-watch-postmerge-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -325,7 +325,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \
                    bin/forge-watch-role-test bin/forge-ledger bin/forge-watch-selfcaused-test \
-                   bin/forge-watch-actor-test \
+                   bin/forge-watch-actor-test bin/forge-watch-postmerge-test \
                    bin/forge-watch-stderr-test
 
 .PHONY: gates-sh
@@ -763,3 +763,7 @@ forge-watch-selfcaused-test: ## An act this runner performed must not wake it (q
 .PHONY: forge-watch-actor-test
 forge-watch-actor-test: ## An act attributed to this seat must not wake it (quince#242 step 3)
 	@bin/forge-watch-actor-test
+
+.PHONY: forge-watch-postmerge-test
+forge-watch-postmerge-test: ## Post-merge housekeeping does not wake; a post-merge comment does (quince#83)
+	@bin/forge-watch-postmerge-test

@@ -462,7 +462,7 @@ step() {
 		        # So this reports what BOTH paths can see. It does NOT claim the branch was deleted — a
 		        # label change or a base change on a merged PR lands here too, and every one of them
 		        # shares the property that matters: nothing is pending.
-		        (if ($o.state // "") == "MERGED" then "actor=unattributed after=merge"
+		        (if ($o.state // "") == "MERGED" then "actor=unattributed kind=post-merge"
 		         else "actor=unattributed" end)
 		   else "actor=\($a.actor) kind=\($a.kind)"
 		        # `committer=` ONLY WHERE IT EXISTS, which is `kind=commit` and nothing else (quince#242
@@ -2940,6 +2940,34 @@ actor_filter() { # <events-file> <map-file> <role> <runner> <default-repo> <supp
 	' mapf="$_af_map" "$_af_map" "$_af_evt"
 }
 
+# --- POST-MERGE HOUSEKEEPING (quince#83) --------------------------------------------------------
+#
+# `--delete-branch` moves `updatedAt` a second or two after the merge and appears in no activity
+# list, so the backstop fires `actor=unattributed` on EVERY merge. `/architect` §6 reads that as go
+# and look — so a session correctly investigates a post-merge non-event once per merge, hunting the
+# author action §6 names as the commonest cause and which, measured across ten merges in one evening
+# on this box, never happened once.
+#
+# ALL THREE CLAUSES OR NONE, which is constraint 1 of the ruling and is what makes this a
+# conservative inference rather than a guess: the PR was `MERGED` at the PREVIOUS observation, its
+# `updatedAt` moved, and NOTHING in its activity is newer. The classifier at `:441` already requires
+# all three to stamp `kind=post-merge` — the third is exactly the `$a == null` arm — so this filter
+# reads the label rather than re-deriving it, and there is one place to be wrong instead of two.
+#
+# A POST-MERGE COMMENT IS THE CASE THIS MUST NOT EAT, and the third clause is what protects it: a
+# comment lands in `activity` with a newer timestamp, so the event is attributed and never carries
+# this label. `issue83-a-post-merge-comment-still-wakes.json` is the fixture that pins it, and it is
+# the only thing standing between this and a lost signal.
+postmerge_filter() { # <events-file> <suppressed-count-out>
+	_pm_evt=$1
+	_pm_out=$2
+	awk -v cnt="$_pm_out" '
+		/(^| )event=updated( |$)/ && /(^| )kind=post-merge( |$)/ { sup++; next }
+		{ print }
+		END { print sup + 0 > cnt }
+	' "$_pm_evt"
+}
+
 wake_worthy() {
 	# $1 is a file holding ONE tick's output, $2 is "first" for the first tick of this watch; prints
 	# the lines that justify waking a session.
@@ -3183,6 +3211,8 @@ watch_loop() {
 	_wact=$(mktemp)
 	_wactc=$(mktemp)
 	_wcf=$(mktemp)
+	_wpm=$(mktemp)
+	_wpmc=$(mktemp)
 	# Resolved ONCE, here, rather than per tick, because re-reading every interval would let a
 	# mid-run registry edit silently change what wakes a watcher that is already running.
 	#
@@ -3283,7 +3313,21 @@ watch_loop() {
 			printf 'note: %s event(s) suppressed as caused by this seat — attributed by the actor= on the event itself (quince#242). Printed above regardless.\n' \
 				"$(cat "$_wactc")"
 		fi
-		wake_filter "$_wact" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
+		# POST-MERGE HOUSEKEEPING (quince#83), and it is a THIRD mechanism rather than a case of the
+		# two above — constraint 4 of the ruling, and the reason it gets its own filter, its own count
+		# and its own note. Those arms key on the actor being THIS SEAT's; this event is
+		# `unattributed` by construction, so neither covers the other and conflating them would make
+		# both figures mean less.
+		#
+		# It is also why this does NOT feed the `prevented` counter: that measures self-caused
+		# suppression specifically, and quietly widening it here would silently redefine a number
+		# quince#242 was closed on.
+		postmerge_filter "$_wact" "$_wpmc" >"$_wpm"
+		if [ "$(cat "$_wpmc" 2>/dev/null || printf 0)" != 0 ]; then
+			printf 'note: %s post-merge event(s) suppressed — the PR was already MERGED and nothing in its activity is newer, so nobody is waiting on anything (quince#83). Printed above regardless.\n' \
+				"$(cat "$_wpmc")"
+		fi
+		wake_filter "$_wpm" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		# THE COUNTERFACTUAL (quince#296, closing quince#242). Computed ONLY when suppression happened
 		# and the tick is not waking — the one case where the answer can be yes, so the ordinary quiet
@@ -3312,7 +3356,7 @@ watch_loop() {
 			bump_wakes "$_wall" "$_wrepo" "$_wstate"
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf" "$_wpm" "$_wpmc"
 			return 0
 		fi
 		if [ "$_wrc" != 0 ]; then
@@ -3320,7 +3364,7 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
-				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
+				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf" "$_wpm" "$_wpmc"
 				return 7
 			fi
 		else
@@ -3335,7 +3379,7 @@ watch_loop() {
 			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
 			# counted as a wake: nothing woke.
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf" "$_wpm" "$_wpmc"
 			return 6
 		fi
 		sleep "$_wiv"
