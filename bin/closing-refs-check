@@ -106,6 +106,33 @@ printf '' | "$GREP" -qiE "$KW" 2>/dev/null || [ $? -eq 1 ] ||
 FOUND=0
 SCANNED=''
 
+# CODE SPANS ARE STRIPPED BEFORE MATCHING, and only from `--text` (quince#294 review).
+#
+# The first version advised "backtick it" and then FLAGGED backticked text — advice the tool refuses,
+# which is worse than either half alone. And it contradicted this gate's own measured table, where
+# backticked-inline and fenced are both `no`. Every future PR discussing this trap will quote it, and
+# `/report` tells authors to backtick when they do, so the gate would have fired on every
+# correctly-written one. My own words, from the qualified-reference case: *a check that fires on safe
+# text is one people learn to skim.*
+#
+# LINE NUMBERS ARE PRESERVED by blanking rather than deleting, so a reported line still points at the
+# right place in the original file.
+#
+# NOT APPLIED TO COMMIT MESSAGES, deliberately. The backtick measurement was taken on a PR BODY, which
+# GitHub renders as markdown. Whether the auto-close parser honours backticks in a raw commit message
+# is UNMEASURED — so commit messages keep the literal match and over-fire, which is the safe
+# direction: a false hit there costs one reading, a missed one closes an issue.
+#
+# INDENTED (four-space) code blocks are NOT stripped either, for the same reason in miniature: telling
+# them from list continuations needs a real markdown parse, and not stripping them over-fires.
+strip_code() { # <file> -> stdout, same line count, code content blanked
+	awk '
+		/^[[:space:]]*```/ { infence = !infence; print ""; next }
+		infence            { print ""; next }
+		{ line = $0; gsub(/`[^`]*`/, "", line); print line }
+	' "$1"
+}
+
 if [ -n "$REF" ]; then
 	git rev-parse --git-dir >/dev/null 2>&1 || cannot_run "--ref given but this is not a git repository"
 	# TWO DOTS, ALWAYS, and a three-dot range is NORMALISED rather than obeyed.
@@ -140,17 +167,25 @@ if [ -n "$TEXT" ]; then
 	# becomes empty is a failed write, so the gate degrades exactly when something already went wrong.
 	# Same reasoning, same wording, as quince#237 fixed in `privacy-check`.
 	[ -s "$TEXT" ] || cannot_run "--text $TEXT is EMPTY — refusing to report clean over nothing"
-	if "$GREP" -inE "$KW" "$TEXT" >/dev/null 2>&1; then
+	# Matched against the code-stripped copy, then the ORIGINAL line is printed for the reader — the
+	# stripped one would show a hole where the code span was and read as a tool bug.
+	_stripped=$(mktemp)
+	strip_code "$TEXT" >"$_stripped"
+	_hits=$("$GREP" -inE "$KW" "$_stripped" | cut -d: -f1 || true)
+	if [ -n "$_hits" ]; then
 		printf '%s: CLOSING REFERENCE in %s\n' "$ME" "$TEXT" >&2
-		"$GREP" -inE "$KW" "$TEXT" | sed "s/^/    /" >&2
+		for _ln in $_hits; do
+			printf '    %s:%s\n' "$_ln" "$(sed -n "${_ln}p" "$TEXT")" >&2
+		done
 		FOUND=1
 	fi
+	rm -f "$_stripped"
 	SCANNED="${SCANNED}text "
 fi
 
 if [ "$FOUND" -eq 1 ]; then
 	printf '%s: whatever is listed above, you either meant it or you did not — decide deliberately.\n' "$ME" >&2
-	printf '%s: to reference without closing, use a repo-qualified form or backtick it.\n' "$ME" >&2
+	printf '%s: to reference without closing, use a repo-qualified form, or put it in backticks (body only — a commit message is matched literally).\n' "$ME" >&2
 	exit 1
 fi
 

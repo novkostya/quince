@@ -59,6 +59,11 @@ expect() {
 # --- 1. THE FOUR INSTANCES, as fixtures ------------------------------------------------------
 # Assembled rather than written, so this file never contains a live one. `H` is the hash character.
 H='#'
+# The backtick is assembled too, for the same reason as the hash and to keep shellcheck honest:
+# a literal one inside single quotes reads as an unexpanded command substitution (SC2016), and
+# suppressing that warning across a file whose whole subject is literal text is the wrong trade.
+TICK=$(printf '\140')
+FENCE=$(printf '\140\140\140')
 
 # Instance 1 and 2: a body DISCLAIMING the close. The parser is not negation-aware, so the disclaimer
 # is itself the link — and both instances were exactly this sentence.
@@ -124,6 +129,45 @@ expect "repo-qualified references are not flagged" 0 "clean" \
 printf 'Refs quince%s282, and this closes %s290 on merge.\n' "$H" "$H" >"$WORK/mixed.md"
 expect "...but a bare one in the same sentence IS flagged (the control)" 1 "CLOSING REFERENCE" \
 	"$CHECK" --text "$WORK/mixed.md"
+
+# --- 2b. THE GATE MUST ACCEPT THE REMEDIATION IT PRINTS (quince#294 review) -------------------
+#
+# The first version advised "backtick it" and then flagged backticked text — advice the tool refuses.
+# Worse than either half alone, and it contradicted this gate's own measured table. Every PR that
+# discusses this trap quotes it, and `/report` tells authors to backtick when they do, so the gate
+# would have fired on every correctly-written one.
+printf 'see %sclose %s282%s for the trap\n' "$TICK" "$H" "$TICK" >"$WORK/inline.md"
+expect "a backticked reference is NOT flagged — the advice the gate prints" 0 "clean" \
+	"$CHECK" --text "$WORK/inline.md"
+printf 'prose here\n\n%s\nclose %s283\n%s\n\nmore prose\n' "$FENCE" "$H" "$FENCE" >"$WORK/fenced.md"
+expect "a FENCED reference is not flagged either" 0 "clean" \
+	"$CHECK" --text "$WORK/fenced.md"
+# THE CONTROL, and it is what stops the strip becoming a blanket amnesty: a bare reference on a line
+# OUTSIDE any code must still fail, in the same file as the safe ones.
+printf 'see %sclose %s282%s inline\n\n%s\nclose %s283\n%s\n\nand a bare close %s284 here\n' \
+	"$TICK" "$H" "$TICK" "$FENCE" "$H" "$FENCE" "$H" >"$WORK/mixed.md"
+expect "...but a BARE one in the same file still fails (the control)" 1 "284" \
+	"$CHECK" --text "$WORK/mixed.md"
+# And the reported LINE NUMBER must survive the stripping — blanked, not deleted — or the reader is
+# sent to the wrong line and stops trusting the output.
+_mixed_out=$("$CHECK" --text "$WORK/mixed.md" 2>&1 || true)
+if printf '%s\n' "$_mixed_out" | grep -q '    7:'; then
+	ok "the reported line number survives the code stripping"
+else
+	bad "the line number is wrong after stripping — blanking must preserve line count"
+	printf '%s\n' "$_mixed_out" | sed 's/^/    | /'
+fi
+# COMMIT MESSAGES ARE DELIBERATELY NOT STRIPPED. The backtick measurement was taken on a PR body,
+# which GitHub renders as markdown; whether the auto-close parser honours backticks in a RAW commit
+# message is unmeasured, so that surface over-fires on purpose. This pins the asymmetry so nobody
+# "makes it consistent" without taking the measurement first.
+git -C "$REPO" checkout -q -b ticked
+echo three >>"$REPO/a"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm "$(printf 'note the trap\n\nsee %sclose %s777%s in the body\n' "$TICK" "$H" "$TICK")"
+expect "a backticked reference in a COMMIT MESSAGE still fires (unmeasured, so conservative)" 1 "commit message" \
+	sh -c "cd '$REPO' && '$CHECK' --ref main..ticked"
+git -C "$REPO" checkout -q topic
 
 # --- 3. IT CANNOT REPORT CLEAN OVER NOTHING (the quince#41 contract) --------------------------
 expect "no arguments refuses rather than reporting clean" 2 "nothing to scan" "$CHECK"
