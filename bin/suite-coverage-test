@@ -1,0 +1,143 @@
+#!/bin/sh
+# suite-coverage-test — the suite-totality gate's own failure paths.
+#
+# WHY THIS EXISTS. `suite-coverage` is a gate whose entire product is a refusal, and it was written
+# because a *count* was mistaken for a *check*: quince#271 claimed "18 of 18, no exclusion list" while
+# one suite was excluded by omission. A totality gate with no tests is that same defect one level up —
+# it would report `clean` about a comparison it failed to make, and nothing would distinguish that
+# from a repository where every suite really is gated.
+#
+# EVERY CASE IS SYNTHETIC: a throwaway git repo with its own Makefile, reached through
+# `SUITE_COVERAGE_ROOT`. Nothing reads the real tree, which matters because the real tree is what the
+# gate normally asserts about — a suite that read it would go green the day somebody fixed the
+# Makefile, for reasons unrelated to this code.
+#
+# A GIT REPO, not just a directory, and that is a finding rather than a detail. The first version of
+# these controls used `git archive | tar`, which leaves no `.git` — so `git ls-files` returned nothing
+# and the gate refused with exit 2 instead of reporting a violation. It was RIGHT to: an empty
+# universe makes every direction vacuous, and refusing is the designed answer. But it meant the
+# controls proved nothing until they were built properly, which is the shape of quince#104's
+# negative-control-that-passed-for-the-wrong-reason.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+GATE="${SUITE_COVERAGE_BIN:-$HERE/suite-coverage}"
+[ -x "$GATE" ] || { printf 'suite-coverage-test: %s is not executable\n' "$GATE" >&2; exit 2; }
+command -v git >/dev/null 2>&1 || {
+	printf 'suite-coverage-test: DID NOT RUN — git is absent and the gate enumerates tracked files.\n' >&2
+	exit 2
+}
+command -v make >/dev/null 2>&1 || {
+	printf 'suite-coverage-test: DID NOT RUN — make is absent and the lists are make variables.\n' >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+pass=0
+fail=0
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	if [ -n "$substr" ] && ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+# tree <dir> <SH_SUITES value> <SH_SUITES_EXCL value> <suite-scripts…>
+#
+# The fixture Makefile carries a .PHONY line per named target, because direction 2 asks whether an
+# entry names a real TARGET. `alpha-test` is deliberately a target with NO script of its own — that
+# is `forge-watch-test`'s shape, and the case that makes direction 2's set different from
+# direction 1's.
+tree() {
+	d=$1 suites=$2 excl=$3
+	shift 3
+	mkdir -p "$d/bin"
+	{
+		printf 'SH_SUITES := %s\n' "$suites"
+		printf 'SH_SUITES_EXCL := %s\n' "$excl"
+		for t in $suites; do printf '.PHONY: %s\n%s:\n\t@true\n' "$t" "$t"; done
+	} >"$d/Makefile"
+	for s in "$@"; do
+		printf '#!/bin/sh\nexit 0\n' >"$d/bin/$s"
+		chmod +x "$d/bin/$s"
+	done
+	(
+		cd "$d"
+		git init -q .
+		git config user.email t@t
+		git config user.name t
+		git add -A
+		git commit -qm fixture
+	) >/dev/null 2>&1
+}
+run_in() { SUITE_COVERAGE_ROOT="$1" "$GATE"; }
+
+# --- clean, including the two legitimate asymmetries ----------------------------------------------
+A="$TMP/clean"
+tree "$A" "alpha-test beta-test" "gamma-test" beta-test gamma-test
+expect "clean when every suite on disk is gated or excluded" 0 "clean" -- run_in "$A"
+# `alpha-test` is an SH_SUITES entry with no script — forge-watch-test's shape. Direction 1 must not
+# demand a file for it, and direction 2 must accept it because the TARGET exists.
+expect "an entry with no script of its own is fine — it is a make target" 0 "clean" -- run_in "$A"
+# `gamma-test` is on disk and excluded by name. It must not be reported as ungated.
+expect "an excluded suite is accounted for, not reported missing" 0 "gamma-test" -- run_in "$A"
+
+# --- 1. a suite on disk that nothing gates --------------------------------------------------------
+# THE ACTUAL DEFECT: quince#271 had exactly this shape — a committed suite in neither list.
+B="$TMP/ungated"
+tree "$B" "alpha-test beta-test" "" beta-test delta-test
+expect "a suite gated by nothing is a finding" 1 "delta-test" -- run_in "$B"
+expect "…and names the direction" 1 "GATED BY NOTHING" -- run_in "$B"
+
+# --- 2. an SH_SUITES entry naming no make target ---------------------------------------------------
+C="$TMP/deadentry"
+mkdir -p "$C/bin"
+{
+	printf 'SH_SUITES := alpha-test ghost-test\nSH_SUITES_EXCL :=\n'
+	printf '.PHONY: alpha-test\nalpha-test:\n\t@true\n'
+} >"$C/Makefile"
+printf '#!/bin/sh\nexit 0\n' >"$C/bin/alpha-test"
+chmod +x "$C/bin/alpha-test"
+(cd "$C" && git init -q . && git config user.email t@t && git config user.name t && git add -A && git commit -qm f) >/dev/null 2>&1
+expect "an entry naming no make target is a finding" 1 "ghost-test" -- run_in "$C"
+expect "…and names the direction" 1 "NAMING NO MAKE TARGET" -- run_in "$C"
+
+# --- 3. a stale exclusion --------------------------------------------------------------------------
+# The nastiest of the three, and the reason it gets its own direction: if a suite is RENAMED, the new
+# name is ungated AND the stale exclusion is what stops direction 1 from being the whole story. Here
+# the real suite is still excluded too, so direction 1 stays quiet and this isolates direction 3.
+D="$TMP/stale"
+tree "$D" "alpha-test" "gamma-test was-renamed-test" gamma-test
+expect "an exclusion naming no suite is a finding" 1 "was-renamed-test" -- run_in "$D"
+expect "…and names the direction" 1 "STALE EXCLUSION" -- run_in "$D"
+
+# --- exit 2: DID NOT RUN, never a quiet pass -------------------------------------------------------
+E="$TMP/nosuites"
+tree "$E" "" "" alpha-test
+expect "an empty SH_SUITES REFUSES rather than passing vacuously" 2 "SH_SUITES came back empty" -- run_in "$E"
+
+F="$TMP/notarepo"
+mkdir -p "$F/bin"
+printf 'SH_SUITES := alpha-test\n.PHONY: alpha-test\nalpha-test:\n\t@true\n' >"$F/Makefile"
+expect "a tree that is not a git repo REFUSES — an empty universe is not coverage" 2 "no *-test scripts found" -- \
+	run_in "$F"
+
+expect "a missing Makefile REFUSES" 2 "no Makefile" -- run_in "$TMP/definitely-absent"
+
+printf '\nsuite-coverage-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1

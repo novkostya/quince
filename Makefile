@@ -250,7 +250,7 @@ SH_LIBS         := deploy/devct/lib.sh
 # 18 OF 18 PASS, measured. Bare Alpine alone is 5 of 18 — the rest need `jq` or `git`. The last
 # holdout was `home-resolution-test`, which needed `gh` on PATH and is fixed in quince#162, which is
 # why there is no exclusion list here at all.
-SH_SUITES       := privacy-check-test forge-watch-test preflight-test provision-guard-test \
+SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test preflight-test provision-guard-test \
                    forge-watch-exits-test forge-watch-stop-test forge-watch-fixtures-doc-test \
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
@@ -304,7 +304,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
-                   bin/allowlist-coverage bin/allowlist-coverage-test
+                   bin/allowlist-coverage bin/allowlist-coverage-test \
+                   bin/suite-coverage bin/suite-coverage-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -318,6 +319,9 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# permission classifier waves an unlisted command through, so nothing surfaces the omission
 	@# until the classifier is gone, which is when you can least act on it.
 	@bin/allowlist-coverage
+	@# The same totality argument aimed at the SUITES themselves (quince#246 review): every *-test
+	@# script is in SH_SUITES or named in SH_SUITES_EXCL. Host-side; reads the Makefile and git.
+	@bin/suite-coverage
 	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
 	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
@@ -453,6 +457,15 @@ wrapper-boundary-test: ## A boundary refusal must outrank an environment one in 
 # which is `preflight`; real-but-undocumented-and-not, which is `tc-go`). Synthetic throughout, via
 # ALLOWLIST_COVERAGE_ROOT, so it never reads the real tree and cannot go green because somebody
 # fixed the allowlist.
+# quince#246 review's other half. `suite-coverage` is the gate; this proves the gate. Its most
+# valuable cases are the two ASYMMETRIES — an SH_SUITES entry with no script of its own
+# (forge-watch-test's shape) must be accepted, and an excluded suite must not be reported missing —
+# because a check that got either wrong would fail forever on this repository. Synthetic throughout
+# via SUITE_COVERAGE_ROOT: every case builds a throwaway git repo, so it never reads the real tree.
+.PHONY: suite-coverage-test
+suite-coverage-test: ## The suite-totality gate's own refusals, all three directions (quince#246)
+	@bin/suite-coverage-test
+
 .PHONY: allowlist-coverage-test
 allowlist-coverage-test: ## The allowlist totality gate's own refusals, both directions (quince#256)
 	@bin/allowlist-coverage-test

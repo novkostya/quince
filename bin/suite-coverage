@@ -1,0 +1,148 @@
+#!/bin/sh
+# suite-coverage — every shell test suite is either GATED or EXCLUDED BY NAME.
+#
+# THE DEFECT (quince#246, found in review of quince#271). `gates-sh` containerised eighteen suites
+# and the PR claimed "18 of 18, no exclusion list at all". Both halves were false: there was an
+# exclusion, `bin/forge-fetch-equivalence-test`, and nothing named it.
+#
+# IT WENT MISSING BECAUSE THE TOTALS MATCHED BY COINCIDENCE, which is the whole reason this file
+# exists rather than a longer comment:
+#
+#   SH_SUITES                18 entries — 17 map to a script, plus `forge-watch-test`, a make
+#                                         target with no script of that name
+#   *-test scripts on disk   18 files   — 17 listed, plus forge-fetch-equivalence-test, unlisted
+#
+# One omission on each side, cancelling out. "18 of 18" read as totality and was a subset — the exact
+# failure the containerisation change existed to prevent, inside that change. Counting is not
+# checking, and two numbers agreeing is not the same as two SETS agreeing.
+#
+# THREE DIRECTIONS, and each catches a different way this rots:
+#
+#   1. every `*-test` script on disk is in SH_SUITES or SH_SUITES_EXCL
+#        → a new suite cannot be added and silently never run
+#   2. every SH_SUITES entry names a real make target
+#        → a renamed target cannot leave a dead entry that gates nothing
+#   3. every SH_SUITES_EXCL entry names a script that exists
+#        → a renamed script cannot leave a dead EXCLUSION, which is the nastiest of the three:
+#          the file it used to excuse is now uncovered AND unlisted, and direction 1 would have
+#          caught that only if the exclusion had not still been sitting there absorbing it
+#
+# DIRECTION 2 IS DELIBERATELY NOT "names a script". `forge-watch-test` is a make target that runs
+# `bin/forge-watch replay …` and there is no `bin/forge-watch-test`. Keying direction 2 on scripts
+# would report it as dead forever. Same asymmetry as bin/allowlist-coverage, where direction 1 keys
+# on documented targets and direction 2 on real ones, and for the same reason: the two questions are
+# about different sets, and using one set for both is wrong in both directions.
+#
+# THE LISTS ARE READ THROUGH `make`, never by parsing the Makefile. They are multi-line with
+# backslash continuations, and a hand-rolled parser would drift from what `gates-sh` actually runs —
+# which is precisely the class of defect this gate is for. `make -f -` on a generated fragment that
+# `include`s the real Makefile gets the values make itself would use.
+#
+# Three exit codes, the same contract as the other gates here (quince#41):
+#
+#   0  every suite is gated or excluded by name, and no entry is dead
+#   1  a suite is covered by nothing, or an entry names nothing
+#   2  DID NOT RUN — an extraction came back empty, so a comparison would be vacuous
+#
+# A 2 is NEVER clean. Two empty sets compare equal, and that vacuous pass is the one outcome that
+# would make this file worse than not having it.
+set -eu
+
+ME=$(basename "$0")
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+ROOT="${SUITE_COVERAGE_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
+[ -f "$ROOT/Makefile" ] || die2 "no Makefile at $ROOT/Makefile"
+command -v make >/dev/null 2>&1 || die2 "make is required — the suite lists are make variables"
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+# Ask make for a variable's value, using the real Makefile.
+#
+# SINGLE QUOTES ARE LOAD-BEARING and shellcheck is wrong here, which is why the suppression is narrow
+# and explained rather than blanket — the same call `bin/forge-watch` makes for FETCH_QUERY, for the
+# same reason. `$(%s)` must reach MAKE as the literal characters `$(SH_SUITES)`, because it is a make
+# variable reference. Letting the shell expand it would substitute this shell's (unset) variable and
+# hand make an empty list — which the guards below would then report as "the variable moved", a false
+# DID NOT RUN that reads exactly like a real one.
+# shellcheck disable=SC2016
+mkvar() {
+	printf 'include %s\n.DEFAULT_GOAL := __suite_coverage_print\n__suite_coverage_print:\n\t@printf "%%s\\n" $(%s)\n' \
+		"$ROOT/Makefile" "$1" >"$TMP/frag.mk"
+	(cd "$ROOT" && make -s -f "$TMP/frag.mk" 2>/dev/null) | grep -v '^$' | sort -u
+}
+
+mkvar SH_SUITES >"$TMP/suites"
+[ -s "$TMP/suites" ] || die2 "SH_SUITES came back empty — the variable moved or the Makefile will not parse, and every check below would be vacuous"
+mkvar SH_SUITES_EXCL >"$TMP/excl" || :
+
+# Real make targets, for direction 2. Every target in this Makefile is declared .PHONY.
+grep -hE '^\.PHONY: ' "$ROOT/Makefile" | sed 's/^\.PHONY: //' | tr ' ' '\n' | grep -v '^$' | sort -u >"$TMP/targets"
+[ -s "$TMP/targets" ] || die2 "no .PHONY targets found — direction 2 would be vacuous"
+
+# The suites on disk. `git ls-files` so the answer is about what is COMMITTED: an untracked scratch
+# suite is nobody's business, a committed one that runs nowhere is this gate's whole subject.
+command -v git >/dev/null 2>&1 || die2 "git is required to enumerate tracked suites"
+(cd "$ROOT" && git ls-files) 2>/dev/null | grep -E '(^|/)[A-Za-z0-9_-]+-test$' | sed 's|.*/||' | sort -u >"$TMP/disk"
+[ -s "$TMP/disk" ] || die2 "no *-test scripts found under git — the naming convention moved, and direction 1 would be vacuous"
+
+rc=0
+
+# --- 1. every suite on disk is gated or excluded --------------------------------------------------
+miss=''
+while read -r s; do
+	[ -n "$s" ] || continue
+	grep -qxF "$s" "$TMP/suites" && continue
+	grep -qxF "$s" "$TMP/excl" 2>/dev/null && continue
+	miss="$miss $s"
+done <"$TMP/disk"
+if [ -n "$miss" ]; then
+	printf '%s: SUITE(S) GATED BY NOTHING —%s\n' "$ME" "$miss" >&2
+	printf '        → add it to SH_SUITES so gates-sh runs it, or to SH_SUITES_EXCL with a reason\n' >&2
+	printf '          in the comment above that variable. A committed suite that runs nowhere is a\n' >&2
+	printf '          test nobody is paying attention to (quince#246).\n' >&2
+	rc=1
+fi
+
+# --- 2. every SH_SUITES entry is a real target ----------------------------------------------------
+dead=''
+while read -r s; do
+	[ -n "$s" ] || continue
+	grep -qxF "$s" "$TMP/targets" || dead="$dead $s"
+done <"$TMP/suites"
+if [ -n "$dead" ]; then
+	printf '%s: SH_SUITES ENTR(IES) NAMING NO MAKE TARGET —%s\n' "$ME" "$dead" >&2
+	printf '        → the target was renamed or removed. gates-sh would fail on it, but only when\n' >&2
+	printf '          somebody runs the whole ladder; fix the entry or restore the target.\n' >&2
+	rc=1
+fi
+
+# --- 3. every exclusion still refers to something -------------------------------------------------
+stale=''
+if [ -s "$TMP/excl" ]; then
+	while read -r s; do
+		[ -n "$s" ] || continue
+		grep -qxF "$s" "$TMP/disk" || stale="$stale $s"
+	done <"$TMP/excl"
+fi
+if [ -n "$stale" ]; then
+	printf '%s: STALE EXCLUSION(S) —%s\n' "$ME" "$stale" >&2
+	printf '        → the excluded suite no longer exists under that name. Delete the exclusion. A\n' >&2
+	printf '          dead exclusion is worse than a dead entry: if the file was RENAMED, the new\n' >&2
+	printf '          name is now gated by nothing and this stale line is what stops anyone noticing.\n' >&2
+	rc=1
+fi
+
+[ "$rc" -eq 0 ] || exit 1
+
+if [ -s "$TMP/excl" ]; then
+	printf '%s: clean — %s suite(s) gated, %s excluded by name (%s), %s on disk accounted for\n' "$ME" \
+		"$(wc -l <"$TMP/suites" | tr -d ' ')" \
+		"$(wc -l <"$TMP/excl" | tr -d ' ')" \
+		"$(tr '\n' ' ' <"$TMP/excl" | sed 's/ $//')" \
+		"$(wc -l <"$TMP/disk" | tr -d ' ')"
+else
+	printf '%s: clean — %s suite(s) gated, none excluded, %s on disk accounted for\n' "$ME" \
+		"$(wc -l <"$TMP/suites" | tr -d ' ')" "$(wc -l <"$TMP/disk" | tr -d ' ')"
+fi
