@@ -873,6 +873,21 @@ func (e *Engine) terminate(lj *liveJob, state, code, msg string) {
 		fin := e.now()
 		r.FinishedAt = &fin
 		r.ErrorCode, r.ErrorMessage = code, msg
+		// THE PHASE MUST NOT OUTLIVE THE JOB (quince#313). `succeed` clears it; this did not — so a
+		// job that failed while parked at `waiting_for_passcode`, which is the ordinary shape of a
+		// Wi-Fi backup nobody unlocked, stayed terminal-with-a-live-phase and both consumers went on
+		// telling the user to enter a passcode for a job that was over. That is the `State honesty`
+		// rule failing at its own example.
+		//
+		// EMPTY RATHER THAN `PhaseDone`: `done` is what success means here, so a failed job claiming
+		// it would trade one false statement for another. Empty says the honest thing — there is no
+		// phase, because nothing is in progress.
+		//
+		// `Liveness` goes with it, for the same reason and in the same breath: it is the other field
+		// that describes a live process, and `succeed` settles it too. `Percent` is deliberately LEFT
+		// ALONE — on a failure it is the last true measurement of how far the job got, which is
+		// information about the past rather than a claim about now.
+		r.Phase, r.Liveness = "", ""
 	})
 	e.log.Info("backup: job terminal", "job", lj.row.ID, "udid", lj.row.UDID, "state", state, "code", code)
 }

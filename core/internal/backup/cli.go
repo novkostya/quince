@@ -53,6 +53,15 @@ func DriveToCompletion(ctx context.Context, eng *Engine, b *bus.Bus, udid, trans
 }
 
 func progressNote(j wire.Job) string {
+	// A TERMINAL JOB NARRATES NOTHING LIVE, and this is asked BEFORE any running field is read
+	// (quince#313). The engine now clears `Phase` on termination, which makes the branch below
+	// unreachable through the engine — this is kept anyway, because the defect was a consumer
+	// quoting a running field without asking whether the job was still running, and that is wrong
+	// independently of what any producer does. Demo scripts, reconciled rows and every future
+	// producer reach this function too.
+	if store.JobIsTerminal(j.State) {
+		return ""
+	}
 	if j.Progress.Phase == PhaseWaitingForPasscode {
 		return " (enter the passcode on the device)"
 	}
