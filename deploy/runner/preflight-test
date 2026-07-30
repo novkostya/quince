@@ -545,6 +545,40 @@ expect "a split private layer counts both lists" 0 "the gate reports lists 1 cas
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
 	"QUINCE_PRIVATE_LAYER=$SPLIT_LAYER"
 
+# THE COUNT IS QUOTED FROM A BANNER THAT NOW CARRIES OTHER LINES TOO (quince#220). `preflight` took
+# the FIRST line beginning "lists"; when quince#220 added a provenance line — under its first name,
+# `lists provenance …` — preflight quoted the PROVENANCE where a count belongs, and the two
+# assertions above are what caught it.
+#
+# WHAT THIS DOES AND DOES NOT PROVE, measured rather than assumed. It proves the count survives a
+# MULTI-LINE banner, against a git-backed layer that really emits both lines — which the non-git
+# fixtures above cannot do. It does **not** prove the `lists <digit>` anchor: once the line was
+# renamed to `pattern source …`, no banner line begins with "lists" except the count, so reverting
+# the anchor to `lists .*` leaves this passing (verified — 44/0 either way). The anchor is defensive
+# against the NEXT such line and is deliberately untested, because testing it would mean keeping a
+# decoy line in the banner purely to be matched wrongly.
+#
+# It needs an `origin` and mode 600: preflight ALREADY refuses a layer clone with no remote
+# (quince#121 — "frozen at whatever it holds now") and notes a world-readable list. Both fired on the
+# first version of this fixture, which is preflight's other checks doing their job on a fixture built
+# to exercise a third.
+GIT_LAYER="$TMP/layer-git"
+mkdir -p "$GIT_LAYER"
+printf 'zzsynthetic-onlyzz\n' >"$GIT_LAYER/privacy-patterns.txt"
+chmod 600 "$GIT_LAYER/privacy-patterns.txt"
+if git -C "$GIT_LAYER" init -q -b main >/dev/null 2>&1 &&
+	git -C "$GIT_LAYER" config user.email fixture@example.invalid &&
+	git -C "$GIT_LAYER" config user.name fixture &&
+	git -C "$GIT_LAYER" remote add origin "$TMP/layer-git-origin" &&
+	git -C "$GIT_LAYER" add -A >/dev/null 2>&1 &&
+	git -C "$GIT_LAYER" commit -qm patterns >/dev/null 2>&1; then
+	expect "the COUNT is quoted even when a provenance line precedes it" 0 "the gate reports lists 1 case-insensitive" -- \
+		QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+		"QUINCE_PRIVATE_LAYER=$GIT_LAYER"
+else
+	printf 'skip the git-backed layer could not be built — provenance/count ordering unproven here\n'
+fi
+
 # A loose mode is REPORTED, NOT ENFORCED — matching the apk-drift reporter, and for the same
 # reason: refusing to start over a permission bit turns a one-command fix into an outage. It must
 # still be said, because this is a list OF the sensitive strings.

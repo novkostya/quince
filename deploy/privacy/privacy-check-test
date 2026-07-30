@@ -417,5 +417,56 @@ printf '2\n' >"$floor_two"
 expect "the floor counts both lists, so a case split is not a shrink" 0 "clean" -- \
 	at "$clean_repo" env "PRIVACY_FLOOR_FILE=$floor_two" "$CHECK" --patterns "$split" --ref main...HEAD
 
+# --- WHICH list was used, not just how many (quince#220) -------------------------------------
+#
+# Two boxes ran materially different pattern lists for hours, both printing `clean`, both banners
+# internally consistent, both canaries green — a canary proves *a* matcher, never the SAME one. It
+# was caught by a human comparing two banners quoted in two PR bodies, which is not a control.
+#
+# THE POINT OF THESE FIVE: the banner must distinguish three states that previously looked
+# identical — current, behind, and CANNOT TELL. The third earns its assertions, because a gate that
+# reports "not behind" when it has never fetched has converted *unknown* into *verified current*,
+# which is this issue's own failure wearing a fix's clothes.
+pat_remote="$TMP/pat-remote"
+make_patterns "$pat_remote"
+git -C "$pat_remote" init -q -b main
+git -C "$pat_remote" config user.email fixture@example.invalid
+git -C "$pat_remote" config user.name 'fixture'
+git -C "$pat_remote" add -A
+git -C "$pat_remote" commit -qm "patterns v1"
+
+pat_behind="$TMP/pat-behind"
+git clone -q "$pat_remote" "$pat_behind" 2>/dev/null
+printf 'zznewpatternzz\n' >>"$pat_remote/privacy-patterns.txt"
+git -C "$pat_remote" commit -qam "patterns v2"
+git -C "$pat_behind" fetch -q origin main
+# Point the tracking ref at v2 while the worktree stays on v1 — precisely a box that fetched and
+# never merged, which is the shape the stale architect box was in.
+git -C "$pat_behind" update-ref refs/remotes/origin/main "$(git -C "$pat_remote" rev-parse HEAD)"
+
+expect "a BEHIND pattern clone says so, and says the sweep used the older list" 0 "BEHIND by 1 commit" -- \
+	at "$clean_repo" "$CHECK" --patterns "$pat_behind" --ref main...HEAD
+# THE CONTROL: it must still SWEEP. A provenance line that turned a clean sweep into a refusal
+# would satisfy the assertion above and break every gate on both boxes.
+expect "a behind clone still sweeps and still reports clean (the control)" 0 "clean" -- \
+	at "$clean_repo" "$CHECK" --patterns "$pat_behind" --ref main...HEAD
+
+git -C "$pat_behind" merge -q --ff-only origin/main
+expect "an up-to-date clone hedges that not-behind is not a live check" 0 "not behind as of this box's LAST FETCH" -- \
+	at "$clean_repo" "$CHECK" --patterns "$pat_behind" --ref main...HEAD
+
+# CANNOT TELL, twice — the two states that must never read as "current".
+expect "a pattern dir that is not a git worktree says staleness cannot be judged" 0 "not a git worktree" -- \
+	at "$clean_repo" "$CHECK" --patterns "$good" --ref main...HEAD
+pat_noup="$TMP/pat-noup"
+make_patterns "$pat_noup"
+git -C "$pat_noup" init -q -b main
+git -C "$pat_noup" config user.email fixture@example.invalid
+git -C "$pat_noup" config user.name 'fixture'
+git -C "$pat_noup" add -A
+git -C "$pat_noup" commit -qm "local only"
+expect "a clone with NO upstream says it cannot tell, rather than reporting 0 behind" 0 "cannot tell whether the list is current" -- \
+	at "$clean_repo" "$CHECK" --patterns "$pat_noup" --ref main...HEAD
+
 printf '\nprivacy-check-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
