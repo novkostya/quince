@@ -10,10 +10,27 @@ disable-model-invocation: true
 Take one unit of work and carry it to merged. Self-onboard, plan, **post the plan and keep going** —
 the plan is a checkpoint, not the deliverable.
 
-## 0. A watch may already exist, and it may already be dead
+## 0. Declare the runner, THEN ask whether a watch already exists
 
-If this session is resuming work — a `/kickoff <pr>` woken by an event, or a session whose process
-restarted — ask before arming anything, and **say which of the six answers you got**:
+**Declaring RELOCATES the state directory, so a `status` read before it answers about the wrong
+path** (quince#241). Until `runner set` runs, state resolves to the undeclared top-level path rather
+than `…/forge-watch/<name>` — so a session **resuming a name that has state** is told `absent` when
+the truth is `dead`, and that is the one substitution this whole section exists to prevent: `dead`
+carries an accrued observation to re-arm from, `absent` says nothing was ever armed. §3 already says
+to declare first; it just sat three sections below the read.
+
+```sh
+bin/forge-watch runner set <name>   # ONCE per session. Must be listed in .claude/seats.
+```
+
+**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265). That
+list is what lets a watch on the OTHER box attribute your branches. §3 carries the rest — what the
+name does to the scratch root, and the guard against an empty one — and nothing there changes except
+that this step has already happened by the time you reach it.
+
+**Now ask about the watch.** If this session is resuming work — a `/kickoff <pr>` woken by an event,
+or a session whose process restarted — ask before arming anything, and **say which of the six answers
+you got**:
 
 ```sh
 bin/forge-watch status --repo novkostya/quince   # 0 live · 9 starting · 3 dead · 4 absent · 5 wedged · 10 orphaned
@@ -104,11 +121,19 @@ placeholder for months, so there was no place to point a reaper at and 33 clones
 days. `bin/scratch-reap` reaps that root and only that root, so one runner never touches another's
 trees (quince#45, quince#111).
 
-**Declare the runner FIRST.** Nothing else in this repository ever called `runner set`, so
-`runner get` failed and this block computed `$HOME/scratch/` with an empty name component —
-every session cloning into one directory, sharing a watch state, owning no branches. It failed
-silently, as an empty string in a path, which is why `$HOME/scratch` did not exist on any box.
-One host is *meant* to run several implementers concurrently; the name is what keeps them apart.
+**The runner is already declared — §0 does it, before it reads any state** (quince#241). The
+`runner set` line is repeated below so this block stays readable on its own, and running it twice is
+harmless: **re-declaring your OWN name from the same session is a clean no-op** — measured, exit 0,
+same state directory, no reseed. (A name held by a *live* other session is refused; one whose holder
+is provably gone is **reclaimed** rather than refused, reusing its state directory without resetting
+it — quince#211.) What matters is that the declaration has **already** happened by the time you
+reach this block.
+
+Nothing else in this repository ever called `runner set`, so `runner get` failed and this block
+computed `$HOME/scratch/` with an empty name component — every session cloning into one directory,
+sharing a watch state, owning no branches. It failed silently, as an empty string in a path, which is
+why `$HOME/scratch` did not exist on any box. One host is *meant* to run several implementers
+concurrently; the name is what keeps them apart.
 
 **The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265). That
 list is what lets a watch on the OTHER box attribute your branches: the branch namespace is global,
