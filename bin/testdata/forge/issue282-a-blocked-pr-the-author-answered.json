@@ -1,0 +1,67 @@
+{
+  "note": "quince#282 item 5, ruled 2026-07-30: a PR you BLOCKED has no event that returns it to you. `/architect` §6 covers a PR you PARKED pending someone else — re-examined every tick — but this one was waiting on the AUTHOR, and the instant the author answered it silently became waiting on the REVIEWER with nothing marking the transition. Measured: quince-devlog#140 sat CHANGES_REQUESTED for 1h45m after the requested change landed, while five other PRs merged, so the queue was demonstrably being worked. THE FOUR PRs HERE ARE THE FOUR CASES AND THREE OF THEM MUST BE SILENT. 401 is the plain positive: the author pushed after the verdict, committer == author, fires via=commit. 402 is quince-devlog#140 itself: the author COMMENTED and pushed nothing, fires via=comment — and a reader told only `answered` would go looking for a push that never happened, which is why via= exists. 403 IS THE ONE THIS DESIGN EXISTS FOR: a commit dated AFTER the verdict whose committer differs from its author, which is a REBASE by the merging seat and not an answer. It is quince#287 verbatim — a commit authored before the verdict, restamped after it — and with `strict: true` on this repo every merge puts every open PR BEHIND and every one is cleared by a rebase, so a committedDate test alone would fire on all of them and announce that a human acted when none did. 404 is the supersede case: a later verdict of any kind means the reviewer has spoken again, so the PR is no longer one waiting to be re-read. Note 403 also carries a comment after the verdict from a THIRD party, not the author, which must not rescue it through the comment arm.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 401, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z", "branch": "r4/one",   "merge_state": "BLOCKED", "checks": [], "reviews": [], "author": "quince-coder", "activity": [] },
+      { "number": 402, "state": "OPEN", "updatedAt": "2026-07-30T06:00:00Z", "branch": "r4/two",   "merge_state": "BLOCKED", "checks": [], "reviews": [], "author": "quince-coder", "activity": [] },
+      { "number": 403, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z", "branch": "r4/three", "merge_state": "BLOCKED", "checks": [], "reviews": [], "author": "quince-coder", "activity": [] },
+      { "number": 404, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z", "branch": "r4/four",  "merge_state": "BLOCKED", "checks": [], "reviews": [], "author": "quince-coder", "activity": [] }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 401, "state": "OPEN", "updatedAt": "2026-07-30T09:40:00Z", "branch": "r4/one",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T09:21:36Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T09:31:09Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" }
+        ]
+      },
+      {
+        "number": 402, "state": "OPEN", "updatedAt": "2026-07-30T07:00:00Z", "branch": "r4/two",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T06:53:53Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T06:59:00Z", "actor": "quince-coder", "kind": "comment" }
+        ]
+      },
+      {
+        "number": 403, "state": "OPEN", "updatedAt": "2026-07-30T09:40:00Z", "branch": "r4/three",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T09:21:36Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T09:31:09Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-review" },
+          { "at": "2026-07-30T09:35:00Z", "actor": "novkostya", "kind": "comment" }
+        ]
+      },
+      {
+        "number": 404, "state": "OPEN", "updatedAt": "2026-07-30T09:40:00Z", "branch": "r4/four",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }, { "state": "APPROVED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T09:21:36Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T09:25:00Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" },
+          { "at": "2026-07-30T09:31:05Z", "actor": "quince-review", "kind": "review", "state": "APPROVED" }
+        ]
+      }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=401 at=2026-07-30T09:40:00Z actor=quince-coder kind=commit",
+    "event=updated pr=402 at=2026-07-30T07:00:00Z actor=quince-coder kind=comment",
+    "event=updated pr=403 at=2026-07-30T09:40:00Z actor=novkostya kind=comment",
+    "event=updated pr=404 at=2026-07-30T09:40:00Z actor=quince-review kind=review",
+    "event=review pr=401 verdict=CHANGES_REQUESTED",
+    "event=review pr=402 verdict=CHANGES_REQUESTED",
+    "event=review pr=403 verdict=CHANGES_REQUESTED",
+    "event=review pr=404 verdict=APPROVED",
+    "event=review-answered pr=401 blocked_at=2026-07-30T09:21:36Z by=quince-review via=commit",
+    "event=review-answered pr=402 blocked_at=2026-07-30T06:53:53Z by=quince-review via=comment"
+  ]
+}
