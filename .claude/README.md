@@ -51,7 +51,27 @@ it exists.
 **Committed (`settings.json`) — complete and optional.** It allowlists the project's own
 entrypoints: the `make` gate targets, ordinary `git` and `gh` verbs, the container runtimes
 that every gate runs inside, and the documentation domains that the
-*version-pins-and-interface-facts-are-looked-up-live* rule sends you to. It also carries the
+*version-pins-and-interface-facts-are-looked-up-live* rule sends you to.
+
+**Two things about the `make` entries that JSON cannot carry as a comment** (quince#256):
+
+*Every* target is listed, not only the language gates. It used to be only those, because each suite
+added since arrived in a PR that did not think about the allowlist — drift, not a decision. Measured
+2026-07-30: **19 of 34 `make help` targets had no entry**, and they were almost exactly the
+sub-targets `make gates-sh` invokes — so the suites a session runs while iterating on a fix were the
+ones it could not invoke individually. Note `make preflight` is listed and is **not** in `make help`:
+it is a real `.PHONY` target with no `##` text, so a completeness check must compare against real
+targets rather than help output, or it will report that rule dead.
+
+**The `-C` entries are SCOPED TO THE SCRATCH ROOT, and unscoped was refused.** Sessions work in
+`$HOME/scratch/<runner>/quince` while the shell's cwd resets to this repo between calls, and neither
+`cd` nor any `-C` form matched anything — so during a classifier outage no gate could be pointed at
+the tree holding the work. `Bash(make -C /root/scratch/* *)` closes that. `Bash(make -C *)` was
+**refused** on quince#256 and should stay refused: an allow entry means *run without review*, and a
+Makefile is arbitrary code, so unscoped it grants "run any Makefile anywhere on this box,
+unreviewed". Same reasoning for `git -C`. Widening it is an Operator question, not a convenience.
+
+It also carries the
 **reference environment** — a Proxmox host and the containers it provisions — under convention
 names only. Those entries are inert on a machine where the names don't resolve, so nothing
 about this repo requires Proxmox: it is the setup that is documented and known to work, not
