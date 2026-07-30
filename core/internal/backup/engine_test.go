@@ -240,10 +240,35 @@ func awaitTerminal(e *Engine, id string, window, ceiling time.Duration) (wire.Jo
 // near-identical loops, which the architect review of #61 correctly called out: a copy that drifts
 // produces a confidently wrong message naming the wrong mechanism, which is the failure #57 was
 // filed for arriving through the fix's own door. One implementation cannot drift from itself.
+// graceBudgetFactor bounds how long ONE grace phase may go on absorbing the no-progress window
+// before the window is allowed to accrue anyway (quince#178).
+//
+// A grace phase pauses the window; without a bound it RESETS it forever. Measured on quince#178: the
+// engine sets `waiting_for_passcode` at the transcript's line 8 and nothing ever clears it — the
+// failure lines that follow set the fail reason and the terminal state without touching `Phase`. So
+// from line 8 on, every poll reset the window, and the test could not fail at its 10s window at all.
+// It could only reach the 2m ceiling, structurally rather than by luck, and then report a stall of
+// `0s` and a window that "never accrued" — a message about the wrong quantity, which is the exact
+// failure #57 was filed for arriving one layer down.
+//
+// THIS BOUNDS THE HARNESS, NOT THE ENGINE. The engine's passcode pause is deliberate and unbounded
+// by design, and that is not changed here. What is bounded is how long a TEST will keep believing a
+// phase that has stopped saying anything: after this many windows, "waiting" is no longer the
+// expected behaviour, it is the finding. Three is chosen to sit far enough above ordinary jitter
+// that a real passcode wait in a scripted test never trips it, and far enough below the ceiling that
+// the message arrives in ~30s rather than 2m.
+const graceBudgetFactor = 3
+
 type waitTracker struct {
 	start, lastMoved time.Time
 	last, movedBy    string
 	window, ceiling  time.Duration
+
+	// graceSince is when the CURRENT grace phase began absorbing; gracePhase is which one, so a job
+	// moving from one grace phase to another gets a fresh budget rather than inheriting a spent one.
+	graceSince time.Time
+	gracePhase string
+	graceSpent bool
 }
 
 func newWaitTracker(window, ceiling time.Duration) *waitTracker {
@@ -254,12 +279,31 @@ func newWaitTracker(window, ceiling time.Duration) *waitTracker {
 // observe records one poll. The window restarts when the job visibly advanced, and ALSO when it sits
 // in a phase that is meant to wait — a grace phase accrues no idle — and the tracker remembers which
 // of the two it was, because that is the whole content of the eventual message.
+//
+// The grace reset is now BUDGETED. Once one grace phase has absorbed graceBudgetFactor windows
+// without the job advancing, it stops resetting and the window accrues from there, so the wait ends
+// at roughly (factor+1) windows with a message naming the stuck phase instead of at the ceiling with
+// a message about a window that never accrued.
 func (w *waitTracker) observe(j wire.Job) {
 	if sig := progressSig(j); sig != w.last {
 		w.last, w.lastMoved, w.movedBy = sig, time.Now(), "progress"
-	} else if gracePhases[j.Progress.Phase] {
-		w.lastMoved, w.movedBy = time.Now(), "the grace phase "+j.Progress.Phase
+		w.gracePhase, w.graceSpent = "", false
+		return
 	}
+	if !gracePhases[j.Progress.Phase] {
+		w.gracePhase, w.graceSpent = "", false
+		return
+	}
+	if w.gracePhase != j.Progress.Phase {
+		w.gracePhase, w.graceSince, w.graceSpent = j.Progress.Phase, time.Now(), false
+	}
+	if time.Since(w.graceSince) >= graceBudgetFactor*w.window {
+		// Budget spent: stop resetting. `lastMoved` stays where it was, so the window that has
+		// already been accruing since the budget ran out is the one reported.
+		w.graceSpent = true
+		return
+	}
+	w.lastMoved, w.movedBy = time.Now(), "the grace phase "+j.Progress.Phase
 }
 
 // bounds measures both clocks ONCE and reports whether either fired, so the message quotes the
@@ -284,15 +328,29 @@ func (w *waitTracker) bounds() (stalled, elapsed time.Duration, fired bool) {
 // repro and a SIGQUIT dump, which is exactly the cost this message exists to stop paying.
 func (w *waitTracker) why(e *Engine, id string, stalled, elapsed time.Duration) string {
 	cause := fmt.Sprintf("no progress for %v", stalled.Round(time.Millisecond))
-	if stalled < w.window {
+	switch {
+	case stalled < w.window:
 		cause = fmt.Sprintf("exceeded the %v ceiling; the %v no-progress window never accrued "+
 			"because it was last reset by %s", w.ceiling, w.window, w.movedBy)
+	case w.graceSpent:
+		// The case quince#178 was unreadable for. Naming the phase and how long it has been stuck
+		// is the difference between "a window never accrued" — a fact about the harness — and
+		// "nothing has cleared waiting_for_passcode for 30s", which is a fact about the job.
+		cause = fmt.Sprintf("stuck in the grace phase %s for %v: it absorbed its %dx%v budget and "+
+			"the %v window then accrued, so nothing has cleared that phase",
+			w.gracePhase, time.Since(w.graceSince).Round(time.Millisecond),
+			graceBudgetFactor, w.window, w.window)
 	}
 	return fmt.Sprintf("%s (elapsed %v, %s)", cause, elapsed.Round(time.Millisecond), describe(e, id))
 }
 
 // describe renders a job's observable state for a failure message.
 func describe(e *Engine, id string) string {
+	// A tracker-level check has no engine and should not have to build one to assert the message
+	// text. Distinguished from "job row absent", which is a finding about a live engine.
+	if e == nil {
+		return "no engine (tracker-level check)"
+	}
 	j, ok := e.Job(id)
 	if !ok {
 		return "job row absent"
@@ -1243,4 +1301,88 @@ func TestFailedBackupReportsTheDeviceReason(t *testing.T) {
 	if len(h.mgr.Versions(testUDID)) != 0 {
 		t.Fatal("a refused backup must leave no version")
 	}
+}
+
+// TestWaitTrackerBoundsAGraceStall pins quince#178's remedy: ONE grace phase may absorb the
+// no-progress window for a bounded time, after which the window accrues anyway.
+//
+// The defect it prevents is not a wrong assertion, it is an UNREADABLE one. `waiting_for_passcode`
+// is set by the transcript and never cleared, so before this bound every poll reset the window and
+// the wait could not end at the window at all — only at the 2m ceiling, and then with a message
+// about a window that never accrued rather than about the phase nothing had cleared.
+//
+// Time is real here rather than injected, which is why the window is milliseconds: the tracker reads
+// `time.Now()` directly, and threading a clock through it to test a bound about time would be a
+// larger change to production-adjacent test scaffolding than the bound itself.
+func TestWaitTrackerBoundsAGraceStall(t *testing.T) {
+	const window = 20 * time.Millisecond
+	stuck := wire.Job{State: StateBackingUp}
+	stuck.Progress.Phase = PhaseWaitingForPasscode
+	stuck.Progress.Liveness = "active"
+
+	w := newWaitTracker(window, waitCeiling)
+	deadline := time.Now().Add(2 * time.Second) // far below waitCeiling; a failure here is the bug
+	var stalled, elapsed time.Duration
+	fired := false
+	for time.Now().Before(deadline) {
+		w.observe(stuck)
+		if stalled, elapsed, fired = w.bounds(); fired {
+			break
+		}
+		time.Sleep(window / 4)
+	}
+
+	if !fired {
+		t.Fatalf("a job stuck in %s never ended the wait: the grace phase is still resetting the "+
+			"window without bound, which is quince#178", PhaseWaitingForPasscode)
+	}
+	if elapsed >= waitCeiling {
+		t.Fatalf("the wait reached the %v ceiling (elapsed %v) instead of the grace budget", waitCeiling, elapsed)
+	}
+	if !w.graceSpent {
+		t.Fatalf("the wait ended without the grace budget being marked spent (stalled %v, elapsed %v) "+
+			"— the message will name the wrong mechanism", stalled, elapsed)
+	}
+	// The bound is what makes the message possible; assert the message too, because a bound that
+	// fires with the old text buys nothing. `why` is the whole point of the tracker.
+	msg := w.why(nil, "", stalled, elapsed)
+	if !strings.Contains(msg, PhaseWaitingForPasscode) || !strings.Contains(msg, "stuck in the grace phase") {
+		t.Fatalf("the failure message does not name the stuck phase: %s", msg)
+	}
+	if strings.Contains(msg, "never accrued") {
+		t.Fatalf("the message still reports the ceiling case, which is what quince#178 was filed for: %s", msg)
+	}
+}
+
+// TestWaitTrackerGraceBudgetDoesNotBiteAJobThatMoves is the control, and without it the bound above
+// would pass against a tracker that had simply stopped honouring grace phases at all — which would
+// re-open issue #31, where a loaded runner failed a legitimate wait because the window degenerated
+// into a wall-clock budget. A job that keeps advancing must never trip the budget, however long it
+// spends in a grace phase.
+func TestWaitTrackerGraceBudgetDoesNotBiteAJobThatMoves(t *testing.T) {
+	const window = 20 * time.Millisecond
+	w := newWaitTracker(window, waitCeiling)
+	moving := wire.Job{State: StateBackingUp}
+	moving.Progress.Phase = PhaseWaitingForPasscode
+	moving.Progress.Liveness = "active"
+
+	deadline := time.Now().Add(graceBudgetFactor*window*3 + 200*time.Millisecond)
+	for i := 0; time.Now().Before(deadline); i++ {
+		moving.Progress.FilesReceived = int64(i) // the job is visibly advancing
+		w.observe(moving)
+		if _, _, fired := w.bounds(); fired {
+			t.Fatalf("the wait ended for a job that was advancing every poll (%s), after %d polls "+
+				"— the grace budget is biting progress rather than stillness", describeNothing(w), i)
+		}
+		time.Sleep(window / 4)
+	}
+	if w.graceSpent {
+		t.Fatal("the grace budget was marked spent while the job was advancing on every poll")
+	}
+}
+
+// describeNothing renders the tracker's own state for the control's failure message; the engine
+// helpers want a live *Engine and this test deliberately has none.
+func describeNothing(w *waitTracker) string {
+	return fmt.Sprintf("movedBy=%s gracePhase=%q graceSpent=%v", w.movedBy, w.gracePhase, w.graceSpent)
 }
