@@ -62,11 +62,28 @@ to avoid. (`bin/gh-coder` uses `openssl base64 -A` anyway, which is portable and
 Three of four held; the fourth would have taught the next reader to work around a problem that does
 not exist.
 
-**Python is deliberately absent, not missing by accident.** Nothing in the tree needs it and `jq`
-covers the use, so the asymmetry settles it: the cost of absence is a loud, self-correcting `127`,
-while the cost of presence is a host package that exists on the session boxes but **not** in the
-pinned toolchain containers or the release image — which invites committed tooling that depends on
-it and then fails where it matters. Do not install it to make an error go away.
+**Python is deliberately absent from the BOX, and it is very much present in the image.** Both facts
+matter and the first draft of this section got the second one wrong — see the correction below.
+
+The reason not to install it on a session box is **host surface**, not scarcity: a session box is a
+driver and a container host, the toolchain-container design exists precisely so language runtimes
+live in containers rather than on hosts, and nothing a *session* does needs Python — `jq` covers the
+JSON use, and the cost of absence is a loud, self-correcting `127`. Do not install it to make an
+error go away; write the `jq` form.
+
+> **CORRECTION (quince#246 follow-up).** This paragraph used to say the cost of presence was "a host
+> package that exists on the session boxes but **not** in the pinned toolchain containers or the
+> release image — which invites committed tooling that depends on it and then fails where it
+> matters." **That is false, and it merged.** `deploy/Dockerfile` installs `python3` in *both*:
+> `:38` (`toolchain-uv`: `apk add --no-cache git make python3`) and `:147` (the shipping `runtime`
+> stage, for the vault venv). `:108` even says so outright — *"the same Alpine (3.24) base the
+> runtime uses (identical `/usr/bin/python3`)"*.
+>
+> So committed tooling that depends on Python does **not** fail where it matters; the vault is
+> written in it. The conclusion — don't install it on a box — survives, but on the host-surface
+> argument the original issue actually made, not on the invented one. Recorded rather than quietly
+> rewritten, because a section whose whole subject is *"verify the trap on the box before writing it
+> down"* asserted a fact about the image without opening the Dockerfile, and got it past a review.
 
 **And do not "fix" a box towards GNU.** `deploy/Dockerfile`'s runtime stage is `FROM
 ${ALPINE_IMAGE}`, so **BusyBox is the production truth** and the boxes match the shipped image.
