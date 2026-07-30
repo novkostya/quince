@@ -311,9 +311,15 @@ four blind spots of quince#43 all live in that gap. So, when deciding whether yo
 
 - **`updatedAt` says WHEN, never WHO.** Fetch the actor. A session read a bare timestamp, assumed the
   latest activity was its own, and reported "nothing owed from me" with three items owed. `event=updated`
-  carries `actor=`; when it says `actor=unattributed` that is honest — commonly a checklist box being
-  ticked, which moves `updatedAt` through a channel no activity list can see — and it means *go and
-  look*, not *nothing happened*.
+  carries `actor=`; when it says `actor=unattributed` that is honest — a checklist box being ticked, a
+  label change, a base change, all of which move `updatedAt` through a channel no activity list can
+  see — and it means *go and look*, not *nothing happened*.
+  **UNLESS the line also carries `kind=post-merge`, in which case nothing is pending** (quince#83): the
+  PR was already `MERGED` at the previous observation and nothing in its activity is newer, so no
+  author is waiting and no verdict is owed. `--delete-branch` emits one on **every** merge, and those
+  events are now suppressed from the wake decision rather than merely labelled. *"Commonly a checklist
+  box"* was measured **false** — across ten merges in one evening the branch-deletion case fired every
+  time and the checklist case never — so the sentence above holds only for the case it is narrowed to.
 - **`reviewDecision` does not move across a fix.** A PR you fixed still reads `CHANGES_REQUESTED` until
   a new review lands. It is not a signal about whose turn it is; it is a record of the last verdict.
 - **Green checks mean different things depending on turn.** Awaiting first review, red is what changes
