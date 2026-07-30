@@ -1,0 +1,42 @@
+{
+  "note": "quince#306, the DIAGNOSIS half. r4 observed a newly declared issue emitting a comment event for a comment SEVEN HOURS OLD, while a second issue declared 70 minutes later baselined silently — two behaviours, same tool, same session, and it could not settle which was the defect. Neither is. `issue-first-observation` fires on `$o == null`: NOT IN THE PREVIOUS OBSERVATION. Declaring an issue is not what baselines it — being unseen is. Here #83 is already in the set as `via=referenced`, because the session's own open PR names it (quince#80 half two watches those automatically, with no declaration). Declaring it only changes `via=`, so the diff runs as it always has and the comment that accrued since the last observation is emitted — correctly, and that is how r4 found an architect ruling it had missed. The age of the comment is IRRELEVANT and is the thing that made this look wrong: what the tool compares is the stored observation, so a state file that is seven hours stale reports seven hours of accrual on its next tick. Pair with issue306-a-genuinely-new-issue-baselines-however-old-its-comments.json — that one holds the comment age fixed and changes only whether the issue was already there, which is the single variable this whole report turns on.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 302, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "issues": {
+      "declared": [],
+      "declared_at": null,
+      "items": [
+        { "number": 83, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z", "via": "referenced",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [ {"at":"2026-07-30T08:30:00Z","actor":"quince-coder","kind":"comment"} ] }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 302, "state": "OPEN", "updatedAt": "2026-07-30T09:00:00Z",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "issues": {
+      "declared": [83],
+      "declared_at": "2026-07-30T16:30:16Z",
+      "items": [
+        { "number": 83, "state": "OPEN", "updatedAt": "2026-07-30T09:41:49Z", "via": "declared",
+          "closed_at": null, "state_reason": "", "labels": [],
+          "activity": [
+            {"at":"2026-07-30T08:30:00Z","actor":"quince-coder","kind":"comment"},
+            {"at":"2026-07-30T09:41:49Z","actor":"quince-review","kind":"comment"}
+          ] }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-updated issue=83 at=2026-07-30T09:41:49Z actor=quince-review kind=comment via=declared",
+    "event=issue-comment issue=83 count=1 at=2026-07-30T09:41:49Z actor=quince-review via=declared"
+  ]
+}
