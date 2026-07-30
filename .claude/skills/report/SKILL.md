@@ -112,12 +112,18 @@ Sweep both surfaces, in the same shape as the privacy sweep above — that gate 
 and this one should not have to relearn it:
 
 ```sh
-KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}#[0-9]+'
-git log --format=%B origin/main..HEAD | grep -inE "$KW"    # the commit messages — TWO dots
-grep -inE "$KW" "$BODY"                                    # the PR body
+make closing-refs-check REF=origin/main..HEAD TEXT="$BODY"
 ```
 
-Whatever either one prints, you either meant it or you did not — decide deliberately.
+Whatever it prints, you either meant it or you did not — decide deliberately. Exit **0** nothing
+found · **1** found, with source and line · **2 DID NOT LOOK** — bad arguments, an unreadable or an
+empty body. As with the privacy gate, a `2` is never a clean result.
+
+**This was a hand-run `grep` pair until quince#293, and the prose around it was wrong THREE TIMES in
+the ninety minutes after it was written** — wrong range, wrong surfaces, wrong pattern — each found by
+running it and none by reading it. What follows is why the gate behaves as it does; the gate is what
+makes it happen every time. Everything the prose got wrong is now an assertion in
+`bin/closing-refs-check-test`.
 
 **TWO dots here, THREE in the privacy sweep, and the difference is not a slip.** `A...B` is the
 symmetric difference, so it also reports commits already on `main` — and this check ran against its
@@ -152,7 +158,7 @@ Three consequences, and only the first is obvious:
   and a commit message written the bare way is a PR that *will* close on merge while
   `closingIssuesReferences` reads `[]` the whole time. Measured on quince#291: qualified in the body,
   bare in the message, field empty, and the issue closes. So *"I checked the body"* and *"I checked
-  the field"* are the same incomplete answer — which is how three people, twice, concluded a link was
+  the field"* are the same incomplete answer — which is how both seats, and one of them twice, concluded a link was
   gone when it was not. **Read both, every time; they are not two views of one fact.**
 
 **Knowing the keyword list does not protect you.** Three instances, each by someone who knew: a body

@@ -1,0 +1,145 @@
+#!/bin/sh
+# closing-refs-check-test — the gate's own failure paths, and the four real instances as fixtures.
+#
+# WHY THIS SUITE EXISTS IN THIS SHAPE. quince#293 shipped this rule as PROSE, and the prose was wrong
+# THREE TIMES in the ninety minutes after it was written:
+#
+#   wrong range     three-dot reported an already-merged commit
+#   wrong surfaces  the body was checked and the commit messages were not
+#   wrong pattern   it flagged repo-qualified references, which are measured SAFE
+#
+# Every one was found by RUNNING it; not one by reading it. So each correction is an assertion below,
+# and the four field instances are fixtures rather than anecdotes.
+#
+# EVERY EXAMPLE IN THIS FILE IS BACKTICKED, REPO-QUALIFIED, OR BUILT AT RUNTIME. Instance 3 was a
+# commit message that reproduced the trap while documenting it, so a suite about the trap is exactly
+# the file most likely to become instance 5. The bare forms are assembled with `printf` into temp
+# files and never written literally here.
+set -eu
+
+cd "$(dirname "$0")/.."
+CHECK="${CLOSING_REFS_BIN:-$PWD/bin/closing-refs-check}"
+[ -x "$CHECK" ] || {
+	printf 'closing-refs-check-test: %s is not executable\n' "$CHECK" >&2
+	exit 2
+}
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# `$1` name, `$2` expected exit, `$3` expected substring (may be empty), rest: argv.
+expect() {
+	_n=$1 _want=$2 _sub=$3
+	shift 3
+	_out=$("$@" 2>&1) && _got=0 || _got=$?
+	if [ "$_got" -ne "$_want" ]; then
+		bad "$_n — wanted exit $_want, got $_got"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	if [ -n "$_sub" ] && ! printf '%s\n' "$_out" | grep -qF "$_sub"; then
+		bad "$_n — exit $_got was right, output lacked: $_sub"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	ok "$_n (exit $_got)"
+}
+
+# --- 1. THE FOUR INSTANCES, as fixtures ------------------------------------------------------
+# Assembled rather than written, so this file never contains a live one. `H` is the hash character.
+H='#'
+
+# Instance 1 and 2: a body DISCLAIMING the close. The parser is not negation-aware, so the disclaimer
+# is itself the link — and both instances were exactly this sentence.
+printf 'Implements the thing. Does not close %s282 — item 1 remains.\n' "$H" >"$WORK/disclaimer.md"
+expect "a DISCLAIMED bare reference is still a closing reference" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/disclaimer.md"
+
+# Instance 3: the same text inside a COMMIT MESSAGE, which `closingIssuesReferences` never sees.
+REPO="$WORK/repo"
+mkdir -p "$REPO"
+git -C "$REPO" init -q -b main
+git -C "$REPO" config user.email fixture@example.invalid
+git -C "$REPO" config user.name fixture
+echo one >"$REPO/a"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm "baseline"
+git -C "$REPO" checkout -q -b topic
+echo two >>"$REPO/a"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm "$(printf 'review fix: drop the phrasing\n\nThe body said Does not close %s282 - the sentence diagnosed earlier.\n' "$H")"
+expect "a bare reference in a COMMIT MESSAGE is found" 1 "commit message" \
+	sh -c "cd '$REPO' && '$CHECK' --ref main..topic"
+
+# --- 2. THE THREE CORRECTIONS THE PROSE NEEDED -----------------------------------------------
+
+# Correction 1: THREE-DOT would report the already-merged commit. Here `main` carries a bare
+# reference the topic branch does not, so a symmetric-difference range finds it and a two-dot one
+# does not. Obeying the caller would make the gate cry wolf on somebody else's merged work.
+MREPO="$WORK/merged"
+mkdir -p "$MREPO"
+git -C "$MREPO" init -q -b main
+git -C "$MREPO" config user.email fixture@example.invalid
+git -C "$MREPO" config user.name fixture
+echo base >"$MREPO/a"
+git -C "$MREPO" add -A
+git -C "$MREPO" commit -qm baseline
+git -C "$MREPO" checkout -q -b topic
+echo t >>"$MREPO/a"
+git -C "$MREPO" add -A
+git -C "$MREPO" commit -qm "topic work, nothing to see"
+git -C "$MREPO" checkout -q main
+echo m >>"$MREPO/b"
+git -C "$MREPO" add -A
+git -C "$MREPO" commit -qm "$(printf 'someone elses merged work, closes %s999\n' "$H")"
+expect "a three-dot range is NORMALISED, not obeyed" 0 "normalised to" \
+	sh -c "cd '$MREPO' && '$CHECK' --ref main...topic"
+expect "...and the merged commit is NOT reported" 0 "clean" \
+	sh -c "cd '$MREPO' && '$CHECK' --ref main...topic"
+
+# Correction 2: BOTH surfaces. A body that is safe and a message that is not must still fail — this
+# is quince#291 exactly, where the API field read empty and the issue closed anyway.
+printf 'Fixes quince%s290. Qualified, so the body links nothing.\n' "$H" >"$WORK/safebody.md"
+expect "a safe BODY does not excuse an unsafe commit message" 1 "commit message" \
+	sh -c "cd '$REPO' && '$CHECK' --ref main..topic --text '$WORK/safebody.md'"
+
+# Correction 3: repo-qualified references are SAFE and must not be flagged. Without this the gate
+# fires on ordinary citations and becomes wallpaper.
+printf 'Refs quince%s282, and quince%s291 closed quince%s290 on merge.\n' "$H" "$H" "$H" >"$WORK/qualified.md"
+expect "repo-qualified references are not flagged" 0 "clean" \
+	"$CHECK" --text "$WORK/qualified.md"
+# The control: the SAME sentence with a bare reference must fail, or assertion above proves only that
+# the gate is silent rather than that it discriminates.
+printf 'Refs quince%s282, and this closes %s290 on merge.\n' "$H" "$H" >"$WORK/mixed.md"
+expect "...but a bare one in the same sentence IS flagged (the control)" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/mixed.md"
+
+# --- 3. IT CANNOT REPORT CLEAN OVER NOTHING (the quince#41 contract) --------------------------
+expect "no arguments refuses rather than reporting clean" 2 "nothing to scan" "$CHECK"
+expect "an unknown argument refuses" 2 "unknown argument" "$CHECK" --nope
+: >"$WORK/empty.md"
+expect "an EMPTY text file refuses rather than sweeping nothing" 2 "EMPTY" \
+	"$CHECK" --text "$WORK/empty.md"
+expect "an unreadable text file refuses" 2 "not readable" \
+	"$CHECK" --text "$WORK/does-not-exist.md"
+expect "an unusable matcher refuses rather than falling back" 2 "not found" \
+	env CLOSING_REFS_GREP=/nonexistent/not-a-grep "$CHECK" --text "$WORK/qualified.md"
+
+# And a clean run SAYS WHAT IT SCANNED — `0` answers "did anything match", only the list answers
+# "was anything looked at".
+expect "a clean run names the surfaces it scanned" 0 "commit-messages" \
+	sh -c "cd '$MREPO' && '$CHECK' --ref main..topic"
+
+printf '\nclosing-refs-check-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
