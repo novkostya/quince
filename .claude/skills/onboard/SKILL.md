@@ -61,11 +61,24 @@ the index and then what the frontier rung touches.
 ```sh
 # GH is the READ WRAPPER FOR YOUR SEAT, and naming it that way rather than naming a command is
 # the point — /onboard serves three audiences and only one of them can use bare `gh`.
-#   on a session box   bin/gh-coder (implementer) or bin/gh-arch (architect) — whichever is there
-#   with gh auth login bare `gh`
-#   neither            web URLs, and say so
-GH=$(command -v ./bin/gh-coder || command -v ./bin/gh-arch || printf 'gh')
+#
+# SELECT ON THE CREDENTIAL, NEVER ON THE SCRIPT. All four wrappers are COMMITTED files, so every
+# clone on every box carries every one of them, executable — `command -v ./bin/gh-coder` is
+# therefore true everywhere and cannot distinguish two seats. The first draft of this block tested
+# exactly that and so always chose `gh-coder`, which on the architect box hits its own boundary
+# guard and says "a REVIEWER APP KEY is present … Remove it" — telling a cold architect session,
+# in its first act, to delete the credential that box exists to hold. The guard is right; the
+# selection handed it an impossible question (quince#149 review).
+#
+# So ask which wrapper this box's credential lets ACT. Each fails closed when it is not this seat's,
+# so at most three cheap calls settle it. `bin/gh-review` is deliberately absent: it is the verdict
+# path, not a read path (`/architect` §1), and /onboard must never reach for it.
+if   ./bin/gh-coder api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-coder
+elif ./bin/gh-arch  api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-arch
+elif gh             api /rate_limit >/dev/null 2>&1; then GH=gh
+else GH=""; fi                     # no usable credential — web URLs, and SAY SO
 for r in $(sed 's/#.*//' .claude/forge-set | grep -v '^[[:space:]]*$'); do
+  [ -n "$GH" ] || { printf 'no forge credential — read %s on the web, and report that\n' "$r"; continue; }
   "$GH" issue list --repo "$r" --state open
   "$GH" pr list   --repo "$r" --state open
 done
@@ -84,6 +97,12 @@ done
 The runner row was open until 2026-07-29 — quince#149 filed it as *"unmeasured — I hold no bot token
 and will not guess"*, correctly, because an architect box cannot hold the implementer identity. An
 implementer session closed it, and the answer is the same on both.
+
+**A capability check that tests for a FILE cannot distinguish two boxes that both carry the file** —
+and in this repository every box carries all four wrappers, because they are committed. That is the
+third arrival of one shape: `preflight`'s presence-is-not-freshness (quince#121), `gh-coder`'s
+presence-is-not-usable (quince#234), and now presence-is-not-*this-seat's*. The remedy is the same
+each time: ask the thing to act, rather than asking whether it exists.
 
 The reason the wrapper is not named unconditionally is the **resurrection test**: a stranger who
 clones the public repos must be able to run this, and hardcoding `bin/gh-coder` would assume a
@@ -116,7 +135,7 @@ Check, and report the result rather than assuming it:
 | --- | --- |
 | `make help` prints "Runtime detected: …" | no container runtime → **no gate can run here**. Don't install anything: this box is a driver, gates belong on a container host (`deploy/dev.md`). |
 | `git --version` | can't push from here |
-| `"$GH" api /rate_limit` answers (the `$GH` from §4) | your seat's wrapper cannot reach the forge. **Do not use `gh auth status`** — a session box is expected to show *unauthenticated*, deliberately: its credential is read at point of use rather than being a `gh auth login` session, so it cannot leak into an ambient one. `auth status` therefore reports a healthy box as broken |
+| `$GH` from §4 is non-empty | **no wrapper's credential could reach the forge** — §4 already established this by asking each one to act, so report it rather than re-testing. Empty means web URLs, and say so. **Do not use `gh auth status`** — a session box is expected to show *unauthenticated*, deliberately: its credential is read at point of use rather than being a `gh auth login` session, so it cannot leak into an ambient one. `auth status` therefore reports a healthy box as broken |
 | `make privacy-check` exits 0 or 2 | **`2` means the gate cannot sweep on this box** and every sweep you owe is owed, not done — sanitize by hand against `CLAUDE.md` and say so with the head named. It no longer exits 0 in that state (quince#41). A provisioned box should have the private layer already (quince#44) |
 | `test -f ~/.config/quince/quince-coder.pem && echo present \|\| echo absent` | absent → you cannot author; ask for the credential, never invent one. `quince-bot.token` is the retired predecessor (decisions/0014) and its account is suspended. **Use exactly this form** (quince#245): that directory holds private keys and is deliberately unreadable — `Read(~/.config/quince/**)` is in `.claude/settings.json`'s `deny` block and `ls` of it is refused too, so the two natural moves both come back as a permission refusal. `test -f` answers the question the row actually asks — *does the file exist* — without reading or listing anything. **A refusal there is the guard working, not a broken box** |
 
