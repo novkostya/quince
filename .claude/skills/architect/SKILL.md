@@ -396,6 +396,18 @@ bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"
 bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 ```
 
+**THE ARM MUST BE A SINGLE, UNCOMPOUNDED INVOCATION — nothing before it, nothing after it, no `;`,
+no `&&`, no `&`, no `eval`** (quince#282). "Run it in the background" is not enough on its own, and
+this seat proved it twice in one session: both times the arm was written compounded, both times it
+silently did not survive, and `status` said `dead` seconds later. The second attempt left an
+**`orphaned`** watcher — running, owner gone, refusing the next clean arm — which then needed `stop`
+before anything could be armed at all.
+
+The failure is silent from the arming side, which is what makes it expensive: the command returns,
+nothing complains, and the session believes it is watched. Backgrounding is a property of **how the
+harness runs the call**, so a `&` inside it backgrounds a *child of the wrong process* and the
+watcher's owner is gone the moment the compound statement finishes. Same rule in `/kickoff` §6.
+
 **This section named the mechanism and never said when in the turn to run it** (quince#100). The
 natural reading — arm once you know you need one, right after handling the events that woke you — is
 the broken one: self-caused events are deliberately not suppressed (quince#62, item 6), so a watch

@@ -269,6 +269,17 @@ bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"
 bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60
 ```
 
+**THE ARM MUST BE A SINGLE, UNCOMPOUNDED INVOCATION — nothing before it, nothing after it, no `;`,
+no `&&`, no `&`, no `eval`** (quince#282). "Run it in the background" is not enough on its own: the
+architect seat wrote it compounded twice in one session, and both times the arm silently did not
+survive — `status` said `dead` seconds later, and the second left an **`orphaned`** watcher that
+refused the next clean arm until it was `stop`ped.
+
+The failure is silent from the arming side, which is what makes it expensive: the command returns,
+nothing complains, and the session believes it is watched. Backgrounding is a property of **how the
+harness runs the call**, so a `&` inside it backgrounds a *child of the wrong process* and the
+watcher's owner is gone the moment the compound statement finishes.
+
 **This section used to say "the moment your first PR is open, ARM THE WATCH" and never said when in the
 turn**, and the natural reading of that — arm as soon as you know you need one — is the broken one
 (quince#100). Self-caused events are deliberately not suppressed (quince#62), and **an implementer's
