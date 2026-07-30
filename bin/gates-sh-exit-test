@@ -1,0 +1,116 @@
+#!/bin/sh
+# gates-sh-exit-test — `make gates-sh` must NOT say `clean` when a containerised suite fails
+# (quince#274).
+#
+# WHAT THIS IS ABOUT. A shell `if` block exits with the status of the LAST command it ran, so
+#
+#     $(RUNTIME) run … make $(SH_SUITES); \
+#     echo "gates-sh: … containerised …"; \
+#
+# reports the ECHO. Measured on `main`: 15 failing assertions in `forge-watch-composition-test`, and
+# `make gates-sh` printed `gates-sh: clean` and exited 0. Only the CONTAINER arm was affected, and it
+# is the default — the one CI runs. The `QUINCE_SH_RUN_HERE` arm was correct by accident, because
+# `$(MAKE) …` happens to be last in it.
+#
+# WHY IT DRIVES THE REAL RECIPE AND NOT A COPY. A hermetic mini-Makefile reproducing "the pattern"
+# would pass forever while the real recipe rotted — the vacuity this repository keeps filing (quince#104,
+# and quince#272's controls, which proved nothing until they were rebuilt against real repos). So this
+# invokes the actual `make gates-sh`, with `RUNTIME` pointed at a STUB that fails on the suite image
+# and succeeds on every other. No container is started and nothing is downloaded.
+#
+# THE CONTROL IS NOT OPTIONAL. A gate that always fails would satisfy the first assertion, so the
+# second runs the same recipe with a stub that succeeds and requires `clean` and exit 0. One direction
+# alone cannot tell "propagates the status" from "broken the other way".
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# The image the suites run in, read from the Makefile rather than restated — a hardcoded `alpine:…`
+# here would stop matching the day the pin moves and the stub would then succeed on the suite run,
+# turning assertion 1 green for the wrong reason.
+SUITE_IMAGE=$(make --no-print-directory print-sh-suite-image 2>/dev/null || true)
+if [ -z "$SUITE_IMAGE" ]; then
+	printf 'gates-sh-exit-test: could not read SH_SUITE_IMAGE from the Makefile — DID NOT RUN\n' >&2
+	exit 2
+fi
+
+# A stub container runtime. It never starts anything: it inspects argv, and fails only for the suite
+# image, so the shellcheck step above still "succeeds" and the recipe reaches the part under test.
+cat >"$WORK/rt-fail" <<STUB
+#!/bin/sh
+case "\$*" in
+*"$SUITE_IMAGE"*) exit 1 ;;
+esac
+exit 0
+STUB
+cat >"$WORK/rt-ok" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$WORK/rt-fail" "$WORK/rt-ok"
+
+run_gates_sh() { # <stub>
+	# QUINCE_SH_RUN_HERE must be UNSET, or the recipe takes the host arm and this tests nothing.
+	env -u QUINCE_SH_RUN_HERE make --no-print-directory gates-sh RUNTIME="$1" \
+		>"$WORK/out" 2>&1
+}
+
+# (1) THE BUG. Suite container fails → the gate must fail, and must not claim clean.
+if run_gates_sh "$WORK/rt-fail"; then
+	bad "gates-sh exited 0 although the suite run FAILED (quince#274)"
+	grep -E '^gates-sh:' "$WORK/out" | sed 's/^/    | /'
+else
+	ok "gates-sh exits non-zero when the suite container fails"
+fi
+if grep -q '^gates-sh: clean' "$WORK/out"; then
+	bad "gates-sh printed 'clean' over a failed suite run — the exact false-green of quince#274"
+	grep -E '^gates-sh:' "$WORK/out" | sed 's/^/    | /'
+else
+	ok "gates-sh does NOT print 'clean' when the suite run failed"
+fi
+# The failure has to be ATTRIBUTABLE. A non-zero exit whose output blames nothing sends the next
+# session to the wrong gate.
+if grep -q 'SUITE(S) FAILED' "$WORK/out"; then
+	ok "the output names the suite run as the failure"
+else
+	bad "nothing in the output says the suites are what failed"
+	grep -E '^gates-sh:' "$WORK/out" | sed 's/^/    | /'
+fi
+
+# (2) THE CONTROL. Same recipe, a stub that succeeds → clean and exit 0.
+if run_gates_sh "$WORK/rt-ok"; then
+	ok "gates-sh still exits 0 when the suite run succeeds (the control)"
+else
+	bad "gates-sh failed even though the stub runtime succeeded — broken the other way"
+	tail -12 "$WORK/out" | sed 's/^/    | /'
+fi
+if grep -q '^gates-sh: clean' "$WORK/out"; then
+	ok "gates-sh prints 'clean' when the suite run succeeds (the control)"
+else
+	bad "gates-sh did not print 'clean' on the success path"
+	grep -E '^gates-sh:' "$WORK/out" | sed 's/^/    | /'
+fi
+# And the accounting line #246 added is still there on the success path — the fix must not have
+# bought its correctness by dropping what made the gate honest about WHERE the suites ran.
+if grep -q 'containerised in' "$WORK/out"; then
+	ok "the containerised-count accounting survives the fix (quince#246 is not undone)"
+else
+	bad "the accounting line is gone — the gate no longer says where the suites ran"
+	grep -E '^gates-sh:' "$WORK/out" | sed 's/^/    | /'
+fi
+
+printf '\ngates-sh-exit-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
