@@ -134,12 +134,18 @@ still closed the issue on merge, from the message of the commit that did the cle
 | backticked inline, or inside a fenced block | **no** |
 | repo-qualified — the keyword beside `quince#N` | **no** |
 
-Two consequences, and the second surprises people:
+Three consequences, and only the first is obvious:
 
 - **To quote the trap safely, backtick it or qualify it.** This section does both throughout.
 - **A repo-qualified reference never auto-closes.** The project's own citation convention is
   inherently safe — and it means a PR written that way must close its issue by hand, or use a bare
   reference on purpose.
+- **THE TWO SURFACES CAN DISAGREE, AND THE FIELD ONLY SEES ONE.** A body written the qualified way
+  and a commit message written the bare way is a PR that *will* close on merge while
+  `closingIssuesReferences` reads `[]` the whole time. Measured on quince#291: qualified in the body,
+  bare in the message, field empty, and the issue closes. So *"I checked the body"* and *"I checked
+  the field"* are the same incomplete answer — which is how three people, twice, concluded a link was
+  gone when it was not. **Read both, every time; they are not two views of one fact.**
 
 **Knowing the keyword list does not protect you.** Three instances, each by someone who knew: a body
 disclaiming the close; the body of the PR *fixing* that, written by the author of the diagnosis; and
