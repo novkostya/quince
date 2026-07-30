@@ -298,5 +298,128 @@ else
 	sed -n '1,8p' "$WORK/out"
 fi
 
+
+# --- THE ISSUE SURFACE (quince#307) -------------------------------------------------------------
+#
+# Both arms gated on PR event kinds, so `event=issue-updated` and `event=issue-comment` passed
+# through untouched and ALWAYS woke. For the architect that is not an edge: a ruling IS an issue
+# comment, so the seat woke itself on its primary output, and the `prevented` counter undercounted
+# exactly the act that seat performs most.
+#
+# The stub answers three kinds of call, because a tick that watches issues makes all three: the
+# discovery scan (`issue list`), the per-issue read (`issue view`), and the PR queue. The PR queue
+# is deliberately EMPTY — a PR event in the same tick would wake the session either way and every
+# assertion below would pass against an arm that suppressed nothing.
+cat >"$WORK/gh3" <<'STUB3'
+#!/bin/sh
+if [ "$1" = issue ] && [ "$2" = list ]; then printf '[]\n'; exit 0; fi
+if [ "$1" = issue ] && [ "$2" = view ]; then
+  turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+  up=2026-07-30T10:00:00Z
+  cmts='[{"createdAt":"2026-07-30T09:00:00Z","author":{"login":"novkostya"}}]'
+  case "$turn" in
+  2) up=2026-07-30T12:00:00Z
+     cmts='[{"createdAt":"2026-07-30T09:00:00Z","author":{"login":"novkostya"}},
+            {"createdAt":"2026-07-30T11:30:00Z","author":{"login":"quince-review"}}]' ;;
+  3) up=2026-07-30T12:00:00Z
+     cmts='[{"createdAt":"2026-07-30T09:00:00Z","author":{"login":"novkostya"}},
+            {"createdAt":"2026-07-30T11:30:00Z","author":{"login":"quince-coder"}}]' ;;
+  4) up=2026-07-30T12:00:00Z ;;
+  esac
+  printf '{"number":900,"state":"OPEN","updatedAt":"%s","closedAt":null,"stateReason":null,"labels":[],"comments":%s}\n' "$up" "$cmts"
+  exit 0
+fi
+# ONE UNCHANGING PR, and it is not decoration. `actor_filter` returns early for the implementer
+# when the ownership map is EMPTY — with no branch there is nothing that seat can account for — so
+# an issue-only stub made the implementer scenario below pass whether or not the carve-out it
+# claims to pin existed. Measured: with an empty queue, deleting the carve-out left the suite at
+# 20/20. This PR never moves, so it contributes a branch to the map and no event of its own.
+cat <<'ROW' | jq -f "$STUB_INVERSE"
+[{"number":601,"state":"OPEN","updatedAt":"2026-07-30T10:00:00Z","title":"t","headRefName":"r1/mine",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB3
+chmod +x "$WORK/gh3"
+
+run_issue_watch() { # <turn> <max-wait>
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh3" --issue 900 \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+issue_baseline() {
+	rm -f "$STATE"
+	run_issue_watch 1 3
+}
+
+# (11) ARCHITECT, its OWN comment on a declared issue: printed, not woken. The filed defect.
+seat architect
+issue_baseline
+run_issue_watch 2 4
+if grep -q 'event=issue-comment issue=900' "$WORK/out"; then
+	ok "the self-caused issue comment is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected event=issue-comment issue=900 to be printed"
+	sed -n '1,10p' "$WORK/out"
+fi
+if woke; then
+	bad "architect woke on its OWN comment on a declared issue — quince#307 is not fixed"
+	sed -n '1,10p' "$WORK/out"
+else
+	ok "architect: its own issue comment does NOT wake it"
+fi
+if grep -q 'suppressed as caused by this seat' "$WORK/out"; then
+	ok "the issue suppression is REPORTED, not silent"
+else
+	bad "no note — a suppression nobody can see is indistinguishable from a missed event"
+fi
+
+# (12) ARCHITECT, SOMEBODY ELSE's comment on the same declared issue: WAKES. quince#307 names this
+# as the case that must not be eaten, and it is the entire value of the declared-issue set — a
+# ruling arriving on an issue this seat is watching is the signal the loop exists to catch.
+issue_baseline
+run_issue_watch 3 6
+if woke; then
+	ok "architect: another seat's comment on a declared issue WAKES it"
+else
+	bad "suppressed another seat's issue comment — the signal the declared set exists for"
+	sed -n '1,10p' "$WORK/out"
+fi
+
+# (13) `actor=unattributed` on the issue backstop — a title or label edit. Unknown wakes, the same
+# rule the PR half follows, and quince#307 restates it because it is the easiest to lose.
+#
+# THIS CASE PINS THE PROPERTY, NOT THE LINE, and saying so is the honest version. Measured: deleting
+# the `actor == "unattributed"` guard leaves the suite at 20/20, because `norm(actor) != me` already
+# excludes the literal — `me` is never `unattributed`. The guard is defence in depth, mirroring the
+# PR arm's shape and its stated rule, and no behaviour distinguishes its presence. What this case
+# does assert is the requirement itself: an unattributed issue update must wake. A future arm that
+# reached the same suppression by another route would still be caught here.
+issue_baseline
+run_issue_watch 4 6
+if woke; then
+	ok "an unattributed issue update WAKES — cannot-tell is never read as this seat"
+else
+	bad "treated 'unattributed' as an identity on the issue surface"
+	sed -n '1,10p' "$WORK/out"
+fi
+
+# (14) IMPLEMENTER, the SHARED App's comment: WAKES, and the carve-out is the point.
+#
+# `quince-coder` is ONE App across every runner (quince#227), so on that seat the actor names the
+# SEAT and not the SESSION — another runner's comment on an issue this one declared is byte-for-byte
+# the same line as this one's own. There is no `committer=` analogue on an issue comment to tell
+# them apart, so this arm declines to guess. Without this case the suite would pass against an
+# implementation that suppressed both, silently eating one runner's message to another.
+seat implementer
+issue_baseline
+run_issue_watch 3 6
+if woke; then
+	ok "implementer: a quince-coder comment WAKES it — the App is shared, so it may be another runner"
+else
+	bad "suppressed a shared-App issue comment — another runner's message to this one is now silent"
+	sed -n '1,10p' "$WORK/out"
+fi
+
 printf '\nforge-watch-actor-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
