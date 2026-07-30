@@ -297,6 +297,54 @@ else
 		ok "no owed_role arm hands back a wrapper for a retired identity"
 	fi
 
+	# 2b. FIELD 2 IS THE **READ** WRAPPER, AND IT IS DRIVEN RATHER THAN GREPPED (quince#303).
+	#
+	# quince#299 made the architect arm return `bin/gh-review` on the argument that the App is what
+	# casts verdicts — true, and about the wrong field. Every consumer of field 2 is a READ: `owed`'s
+	# forge query, its fetch default, and the watch command the `Stop` hook prints. So the change put
+	# a **watch loop** onto a wrapper that mints a fresh installation token per call and caches
+	# nothing, which `bin/gh-review` itself flags: *"if that ever bites, cache it."*
+	#
+	# THE SECTION HEADER ABOVE SAYS THIS CANNOT BE DRIVEN — *"driving `owed_role` for real means
+	# holding a credential and reaching the forge"* — AND THAT IS FALSE FOR THIS PATH. `owed_role`
+	# performs `[ -f ]` tests and nothing else, and `owed --hook` fails open by design, so pointing
+	# the four credential variables at temp files exercises the real arm with no forge and no secret.
+	# The checks above are still right to be static; this one never had to be, and the reason it was
+	# is an assumption nobody re-measured.
+	_er_w=$(mktemp -d)
+	printf 'a credential\n' >"$_er_w/rev"
+	printf 'a credential\n' >"$_er_w/pat"
+	printf 'r1\n' >"$_er_w/seats"
+	# A DECLARED RUNNER FIRST, or the hook fails open one step EARLIER — on "no runner name" — and
+	# names no wrapper at all. Both assertions then compare against an empty string and fail for a
+	# reason that has nothing to do with the field under test. Caught by writing them.
+	XDG_STATE_HOME="$_er_w/state" QUINCE_SESSION_ID=exits-test-role \
+		FORGE_SEATS_FILE="$_er_w/seats" "$FW" runner set r1 >/dev/null 2>&1 || true
+	hook_wrapper() { # <review-key-path> <arch-token-path> -> the wrapper(s) the Stop hook names
+		XDG_STATE_HOME="$_er_w/state" QUINCE_SESSION_ID=exits-test-role \
+			QUINCE_CODER_KEY_FILE="$_er_w/absent" QUINCE_BOT_TOKEN_FILE="$_er_w/absent" \
+			QUINCE_REVIEW_KEY_FILE="$1" QUINCE_ARCH_TOKEN_FILE="$2" \
+			"$FW" owed --hook 2>&1 | grep -oE 'bin/gh-[a-z]+' | sort -u | tr '\n' ' '
+	}
+	_er_both=$(hook_wrapper "$_er_w/rev" "$_er_w/pat")
+	_er_apponly=$(hook_wrapper "$_er_w/rev" "$_er_w/absent")
+	rm -rf "$_er_w"
+
+	# The arch box holds BOTH today, and must read through the CACHED wrapper.
+	case "$_er_both" in
+	*gh-arch*) ok "architect holding both credentials reads through the cached wrapper (quince#303)" ;;
+	*) bad "the Stop hook hands the arch box '$_er_both' while the PAT is present" \
+		"quince#303: a tick is one pr list per repo plus one issue view per declared issue, and an uncached App wrapper measured ~1.84 s per call — most of a 90 s interval spent minting one-hour tokens it then discards." ;;
+	esac
+
+	# With the PAT retired it must FALL BACK, not refuse: correct-but-slow beats broken, and the fix
+	# for the slow case is a token cache — "a second secret at rest", a decision nobody has made.
+	case "$_er_apponly" in
+	*gh-review*) ok "…and falls back to the App wrapper once the PAT is gone, rather than refusing" ;;
+	*) bad "a box holding only the review key gets '$_er_apponly' — no usable read wrapper" \
+		"Retiring the PAT must degrade to correct-but-slow, never to a wrapper for a credential that is not there." ;;
+	esac
+
 	# 3. Every wrapper it DOES name must actually be there. Cheap, and it is the assertion that keeps
 	# the two above from being satisfied by a typo.
 	_missing=''

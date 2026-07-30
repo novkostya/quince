@@ -3572,10 +3572,38 @@ owed_role() {
 	if [ -f "${QUINCE_CODER_KEY_FILE:-$HOME_DIR/.config/quince/quince-coder.pem}" ]; then
 		printf 'implementer %s/bin/gh-coder author\n' "$(repo_root)"
 	elif [ -f "${QUINCE_REVIEW_KEY_FILE:-$HOME_DIR/.config/quince/quince-review.pem}" ]; then
-		# `bin/gh-review` rather than `bin/gh-arch`, because the key IS the App's and the App is what
-		# casts verdicts and merges. A box identified by this credential and handed the PAT wrapper
-		# would be told to reach for a tool for a credential it was not identified by.
-		printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
+		# FIELD 2 IS THE **READ** WRAPPER, AND quince#299 GOT THAT WRONG BY ANSWERING A DIFFERENT
+		# QUESTION (quince#303). Its argument was *"the key IS the App's and the App is what casts
+		# verdicts and merges"* — true, and about VERDICTS. Every consumer of this field is a READ:
+		#
+		#   :4103  owed_repos "$_rolegh"        asks the forge which PRs are open
+		#   :4120  owed_arm_hint …              prints the watch command a session will run
+		#   :4182  _ghcmd=$_rolegh              `owed`'s own fetch default, run on EVERY turn end
+		#
+		# Not one of them casts anything. So the field never wanted the verdict wrapper, and handing
+		# it one put a **watch loop** onto a credential that mints a fresh installation token per call
+		# and caches nothing — which `bin/gh-review:114` calls out itself: *"NOT CACHED, deliberately …
+		# the cost is two HTTPS round-trips per call. If that ever bites, cache it."*
+		#
+		# IT BITES. Measured on the implementer box against `bin/gh-coder`, the same App-wrapper shape:
+		# **five calls in 9.2 s, ~1.84 s each.** A tick is one `pr list` per repo plus one `issue view`
+		# per declared issue, and the arch seat declares tens — so a tick spends most of a 90 s
+		# interval minting and discarding one-hour tokens. That is not overhead, it is a tick that
+		# barely fits between its own ticks.
+		#
+		# DETECTION IS UNCHANGED AND STAYS WITH THE REVIEW KEY, which is quince#299's actual fix and is
+		# right: the box is identified by its live credential. This chooses only what that box should
+		# READ through, which is a separate question with a separate answer.
+		#
+		# PREFER THE PAT WHILE IT EXISTS, and fall back rather than refuse. `gh-arch` caches; when it
+		# is retired the fallback is correct-but-slow rather than broken, and that is the honest
+		# degradation — the fix for it is a token cache, which is *"a second secret at rest with a
+		# lifetime to manage"* and a decision nobody has made.
+		if [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
+			printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
+		else
+			printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
+		fi
 	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
 		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
 	elif [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
