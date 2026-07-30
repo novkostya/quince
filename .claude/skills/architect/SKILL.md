@@ -13,11 +13,35 @@ the protocol below is distilled from failures that were expensive when they were
 
 Ends with a report and an armed loop. It writes no code.
 
-## 0. A watch may already exist, and it may already be dead
+## 0. Declare the runner, THEN read the watch state — in that order
 
-**Before the identity check, before anything.** A watch's state lives on disk precisely so it survives
-this session's process restarting; the loop is rebuilt from it, never assumed. Ask, and **say which of
-the six answers you got**:
+**Declaring RELOCATES the state directory, so a `status` read before it answers about the wrong
+path** (quince#241). Until `runner set` runs, state resolves to the undeclared top-level path rather
+than `…/forge-watch/<name>`. For a repeat name — a session resuming a name that has state — that
+reports **`absent`** where the truth is **`dead`**, which is the exact substitution the rest of this
+section spends twenty lines warning against: `dead` carries an accrued observation to re-arm from,
+`absent` says nothing was ever armed. Measured on the architect box 2026-07-29: §0 reported *"absent
+(exit 4) … Cold start; nothing inherited"* at 15:03:58Z, and at 15:08:24Z the session discovered that
+declaring the name had moved the state directory out from under that answer. It was a genuine cold
+start that day, so nothing was lost — **the defect is that the report could not have told the two
+apart.** This skill's own §1 already said *"declare first, before anything reads or writes state"*,
+and then §0 ran first and read state.
+
+```sh
+bin/forge-watch runner set <name>     # ONCE, FIRST. Must be listed in .claude/seats.
+```
+
+**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265).
+This seat is the reason the file exists: `arch1` was declared only on the arch box, so the
+implementer box could not attribute `arch1/…` branches and woke on every one of them — and, worse in
+the other direction, `other_runner_names` on the arch box returned **empty**, which made the wake
+filter a documented no-op there that had never suppressed anything. Adding a seat is a PR.
+
+**A taken name is refused**, so two sessions on one box cannot silently share a state directory.
+
+**Now, and only now, read the watch state.** It lives on disk precisely so it survives this session's
+process restarting; the loop is rebuilt from it, never assumed. Ask, and **say which of the six
+answers you got**:
 
 ```sh
 bin/forge-watch status --all      # declared set; exits 0 live / 9 starting / 3 dead / 4 absent / 5 wedged / 10 orphaned
@@ -64,27 +88,19 @@ Collapsing `dead` into `absent` is how a restarted watch silently becomes a fres
 nothing changed" since a beginning it invented; collapsing `wedged` into `dead` is how you are told to
 start a second watcher beside a live one. Full reasoning: [`../../loop-protocol.md`](../../loop-protocol.md).
 
-## 1. Declare the runner, THEN assert the identity boundary
+## 1. Assert the identity boundary
 
-**Declare first, before anything reads or writes state.** `§4`'s checkout root and `§6`'s watch both
-derive from the runner name, and this skill never told you to set one — the same gap `/kickoff` had
-until quince#208. Undeclared, `forge-watch` cannot tell which watch is its own and refuses to arm.
+**The runner name is already declared — §0 does it, first, before any state is read.** `§4`'s
+checkout root and `§6`'s watch both derive from it, and this skill never told you to set one until
+quince#208 — the same gap `/kickoff` had. Undeclared, `forge-watch` cannot tell which watch is its
+own and refuses to arm.
 
-```sh
-bin/forge-watch runner set <name>     # ONCE, FIRST. Must be listed in .claude/seats.
-```
-
-**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265).
-This seat is the reason the file exists: `arch1` was declared only on the arch box, so the
-implementer box could not attribute `arch1/…` branches and woke on every one of them — and, worse in
-the other direction, `other_runner_names` on the arch box returned **empty**, which made the wake
-filter a documented no-op there that had never suppressed anything. Adding a seat is a PR.
-
-**The order is not cosmetic.** Declaring *after* seeding relocates the state directory — from the
-undeclared top-level path to `…/forge-watch/<name>` — which **orphans any observation already
-seeded** there, leaving the watch to diff against nothing. Measured on the architect box on
-2026-07-29, by a session that seeded, armed, was refused, declared, and found its seed stranded.
-A taken name is refused, so two sessions on one box cannot silently share a state directory.
+**The order is not cosmetic, and it is why the declaration sits in §0 rather than here.** Declaring
+*after* seeding relocates the state directory — from the undeclared top-level path to
+`…/forge-watch/<name>` — which **orphans any observation already seeded** there, leaving the watch to
+diff against nothing. Measured on the architect box on 2026-07-29, by a session that seeded, armed,
+was refused, declared, and found its seed stranded. This section carried the instruction while §0 ran
+first and read state anyway, which is quince#241.
 
 `approver ≠ author` is the authority model. It is structural only if the machine you are on holds
 one credential and not the other:
