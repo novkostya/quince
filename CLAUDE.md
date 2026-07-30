@@ -91,6 +91,15 @@ repo is not a message bus, and no human is an RPC layer.
 
    - **`BEHIND`** — mechanical, tree-preserving, no decision in it. **The merging seat does it**,
      with `gh pr update-branch --rebase`. Asking is a wasted round trip.
+     **But only when the branch is awaiting the MERGING SEAT** — approved, or approved-pending-CI
+     (quince#207). `BEHIND` is a fact about the branch; **whose turn it is** is the fact that decides,
+     and a PR can be `BEHIND` *and* `CHANGES_REQUESTED` at once. **The merging seat may move a branch
+     it is about to consume, not one somebody else is still holding.** When it is awaiting the author
+     — `CHANGES_REQUESTED`, draft, or a conflict — leave it: the author's next push rebases it anyway.
+     Measured on quince#203, within thirty minutes of the un-narrowed rule landing: the architect
+     rebased to `09bbbeb`, the author force-pushed `07cf66a` built on the old base six minutes later,
+     `git merge-base --is-ancestor` said the rebase was **discarded**, and the branch was `BEHIND`
+     again — one rebase and one full CI run spent on a head nothing would ever merge.
    - **`DIRTY`** — a conflict, which is an *edit*: someone must choose which lines survive.
      **The author does it.** A merging seat that resolves a conflict in a file it did not write
      and then approves its own resolution has broken `approver ≠ author` by following this rule,
