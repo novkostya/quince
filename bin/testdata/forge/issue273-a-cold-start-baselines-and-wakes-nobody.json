@@ -1,0 +1,22 @@
+{
+  "note": "quince#273's baseline half, and the case that decides whether the class is usable at all. On a FIRST observation there is no highwater, so every open issue in the repository is trivially `above` nothing — and a version that emitted `issue-new` for each would wake on twenty-eight issues at once on a cold start, which teaches a reader to ignore the class and makes it worse than absent. The mark must be ESTABLISHED silently here and only compared against on later ticks. Same baseline-versus-new discrimination `tick-overdue` already makes — dropped on the first tick, woken on later ones — and the same one `first-observation` makes for the PR half. `before` carries no `issues` at all, which is what a genuinely cold state file looks like. The expectation is EMPTY on purpose: the tick's job here is to learn, not to report. Pair this with issue273-a-newly-filed-issue-is-news.json — that one proves the mark is compared, this one proves it is not compared before it exists, and neither alone would catch a version that got the other direction wrong.",
+  "before": {
+    "observed": true,
+    "prs": []
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "open_seen": [
+        282,
+        279,
+        274,
+        273,
+        270
+      ],
+      "scan_limit": 30
+    }
+  },
+  "expect_events": []
+}

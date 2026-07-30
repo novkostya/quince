@@ -206,7 +206,7 @@ usage: forge-watch <verb>
 events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
         merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
         issue-first-observation · issue-updated · issue-comment · issue-closed · issue-reopened ·
-        issue-fetch-failed
+        issue-fetch-failed · issue-new · issue-scan-failed
 
   The issue events mirror the PR ones and for the same reasons. `issue-updated` is the BACKSTOP —
   any movement of an issue's updatedAt, with the actor that can account for it — so a label change, a
@@ -219,6 +219,18 @@ events: first-observation · queue-empty · updated · opened · review · check
   declared set safe: the new issue establishes its own baseline and wakes nobody, while the issues
   already in the set keep their history. A per-tick baseline would have blinded the whole set every
   time one was added.
+
+  `issue-new` IS A DIFFERENT QUESTION AND THE TWO ARE EASY TO CONFUSE (quince#273).
+  `issue-first-observation` means *newly added to MY SET* — a session declared it — and is dropped by
+  `wake_worthy`, correctly: choosing to watch something must not wake you. `issue-new` means *newly
+  EXISTS on the forge*, which nobody chose, and it wakes. Until it existed, a freshly filed issue was
+  neither declared nor referenced by any open PR, so it entered no watch at all — and since the gap
+  protocol makes a new issue the way a blocked session REQUESTS A RULING, the ruling channel was the
+  one channel with no wake. It is scoped to the whole `.claude/forge-set`, with no author filter and
+  no label filter: the seats do not separate by author (implementer and supervisor both file as
+  `app/quince-coder`), and a label filter would re-create the declared-set problem one field over.
+  `issue-scan-failed` is its unreachable case and does not wake, for the same reason
+  `issue-fetch-failed` does not.
 
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
@@ -381,7 +393,9 @@ step() {
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
 			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
-			  end' \
+			  end
+			| .issues = ((.issues // {}) + {highwater:
+			    ([(($decl // {}).highwater // 0)] + (.issues.open_seen // []) | max)})' \
 			>"$_prev.new" && mv "$_prev.new" "$_prev"
 		return 0
 	fi
@@ -513,6 +527,35 @@ step() {
 		| select($o == null)
 		| "event=issue-first-observation issue=\($i.number) state=\($i.state) via=\($i.via // "declared")"'
 
+	# issue-new: AN ISSUE THAT DID NOT EXIST LAST TICK (quince#273, ruled 2026-07-30).
+	#
+	# DISTINCT FROM `issue-first-observation`, and the distinction is the whole fix. That event means
+	# "newly added to MY SET" — it fires when a session declares an issue, which is why `wake_worthy`
+	# drops it, and that suppression is correct: adding an issue must not spuriously wake. This one
+	# means "newly EXISTS on the forge", which nobody chose and nobody can predict. Same
+	# baseline-versus-new discrimination `tick-overdue` already makes: dropped on the first tick,
+	# woken on later ones.
+	#
+	# NO AUTHOR FILTER AND NO LABEL FILTER — both ruled, and both are the obvious idea that is wrong
+	# here. Suppressing your own filings sounds right until you notice the identities do not separate
+	# the seats: the implementer AND the supervisor both file as `app/quince-coder` (quince#227), so
+	# author-suppression on this box would swallow supervisor-filed RULING REQUESTS — this issue's own
+	# failure, reintroduced by its fix. A label filter re-creates the declared-set problem one field
+	# over: a second curated list that can omit the thing you needed.
+	#
+	# THE BASELINE IS THE HIGHWATER, absent on a first observation. `select($hw > 0)` is what keeps a
+	# cold start from emitting one event per open issue in the repository — 28 of them here — which
+	# would be a first tick that wakes on everything and teaches the reader to ignore the class.
+	printf '%s' "$_now" | jq -r --argjson decl "$_prev_decl" '
+		(($decl.highwater // 0)) as $hw
+		| select($hw > 0)
+		| (.issues.open_seen // []) as $seen
+		| ($seen | map(select(. > $hw)) | sort) as $new
+		| ($new[] | "event=issue-new issue=\(.)"),
+		  (if ($new | length) > 0 and ($new | length) == ($seen | length) and ($seen | length) > 0
+		   then "note: every issue in the scan window (\(.issues.scan_limit // "?")) is newer than the last tick — there may be more beyond it (quince#273)"
+		   else empty end)'
+
 	# issue-updated: THE BACKSTOP, identical in role to `updated` on the PR half. A label change, a
 	# title edit or a body edit moves updatedAt and appears in no activity list, so those land on
 	# `unattributed` — the tool saying it cannot tell, which is the true statement and not the same
@@ -604,7 +647,9 @@ step() {
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
 			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
-		  end' \
+		  end
+		| .issues = ((.issues // {}) + {highwater:
+		    ([(($decl // {}).highwater // 0)] + (.issues.open_seen // []) | max)})' \
 		>"$_prev.new" && mv "$_prev.new" "$_prev"
 }
 
@@ -778,6 +823,14 @@ FORGE_SET_FILE=${FORGE_SET_FILE:-.claude/forge-set}
 # ADDITIVE, never a replacement (ruled): the local registry still decides, and this adds the seats
 # that live on other boxes.
 FORGE_SEATS_FILE=${FORGE_SEATS_FILE:-.claude/seats}
+
+# How many of the newest OPEN issues the per-tick discovery scan reads (quince#273). Not a silent
+# cap: the highwater comparison it feeds is correct under any window, because only the newest numbers
+# can be above the mark — and when every returned number IS above it, the tick says the window may
+# have truncated rather than quietly assuming it did not. 30 is a wide margin over any plausible
+# per-interval filing rate; the whole point of the mark is that being wrong here costs a note and
+# never a missed issue.
+ISSUE_SCAN_LIMIT=${ISSUE_SCAN_LIMIT:-30}
 
 seat_names() {
 	# Names from the committed list. Comments and blanks stripped, the same shape `forge-set` is read
@@ -1269,6 +1322,10 @@ replay() {
 			# because three copies of it would rot independently:
 			# bin/testdata/forge/gh-array-to-graphql.jq. (`forge-watch-roundtrip-test` hand-writes
 			# the empty envelope instead, deliberately — see that file's header.)
+			# The discovery scan's answer, optional and singular: it does not need a per-tick queue,
+			# because what it feeds is a highwater and only the newest number matters (quince#273).
+			jq -e '.issue_list_payload' "$_f" >"$_tmp/payload.issuelist" 2>/dev/null ||
+				: >"$_tmp/payload.issuelist"
 			_inv="$(dirname "$0")/testdata/forge/gh-array-to-graphql.jq"
 			[ -f "$_inv" ] || die "missing $_inv — the loop stub cannot answer the queue fetch without it"
 			cat >"$_tmp/gh" <<EOF
@@ -1277,6 +1334,15 @@ replay() {
 # kind, and the LAST payload of a kind repeats forever — so "nothing changed" is the steady state,
 # which is what a watch must keep running through. Two queues, because a tick that watches issues
 # makes two kinds of call and a single queue would feed one kind's payload to the other.
+# \`issue list\` is the DISCOVERY scan (quince#273) and must be answered SEPARATELY from \`issue view\`.
+# Without this arm it drew from the issue-VIEW queue — one call's payload shape fed to another — and
+# every loop fixture that declares no issues emitted \`issue-scan-failed\` on every tick. A fixture
+# opts in by providing \`issue_list_payload\`; the default is an EMPTY repository, which establishes a
+# highwater of nothing and emits no events, so every fixture written before quince#273 reads unchanged.
+if [ "\$1" = issue ] && [ "\$2" = list ]; then
+	if [ -s "$_tmp/payload.issuelist" ]; then cat "$_tmp/payload.issuelist"; else printf '[]\n'; fi
+	exit 0
+fi
 case "\$1" in
 issue) k=issue; n=$_ni ;;
 api)   k=pr; n=$_np; wire=graphql ;;
@@ -1867,6 +1933,38 @@ tick() {
 	fi
 	rm -f "$_iss"
 
+	# A NEWLY FILED ISSUE IS NEWS, and until quince#273 it entered no watch at all. `fetch_issues`
+	# above reads only what was DECLARED or REFERENCED by an open PR — and an issue is neither at the
+	# moment it is filed. `CLAUDE.md` makes issues the tracker AND the gap protocol makes them the
+	# ruling channel, so a blocked session's request for a ruling arrives through the one channel the
+	# ruling seat is not woken by. Measured: quince#265 landed on the architect's own quince#230
+	# ruling and reached that seat only because the Operator asked by hand.
+	#
+	# A HIGHWATER MARK, NOT A SET DIFF, and this is the design decision worth reading. GitHub
+	# allocates issue and PR numbers monotonically from one sequence, so "newer than anything I have
+	# seen" is exactly "numbered above the highest I have seen" — measured on this repo, 282 > 279 >
+	# 277 > 274 > 273 in both number and createdAt order, and `gh issue list` returns newest first.
+	# That matters because the alternative — list every open issue and diff the set — needs an
+	# UNBOUNDED fetch to be correct, and a bounded one is a silent cap: exactly what `fetch_issues`
+	# refuses one function up, for the same reason. A highwater is correct under any window, because
+	# the only numbers that can be new are the newest ones.
+	#
+	# THE WINDOW IS STILL REPORTED, because "harmless" and "unstated" are different things.
+	_newiss=$(mktemp)
+	if "$_gh" issue list -R "$_repo" --state open --limit "$ISSUE_SCAN_LIMIT" \
+		--json number >"$_newiss" 2>/dev/null; then
+		jq -c --slurpfile seen "$_newiss" --argjson lim "$ISSUE_SCAN_LIMIT" \
+			'.issues = ((.issues // {}) + {open_seen: ($seen[0] | map(.number)), scan_limit: $lim})' \
+			"$_obs" >"$_obs.new" && mv "$_obs.new" "$_obs"
+	else
+		# Reported, never silent: a failed scan means "I cannot tell whether anything new arrived",
+		# which is not "nothing arrived". It does NOT fail the tick — `--fail-after` is about the
+		# DECLARED channel, and killing a watch over a repo-wide scan the session never asked for
+		# would be the tool punishing it for this feature's own cost.
+		printf 'event=issue-scan-failed repo=%s\n' "$_repo"
+	fi
+	rm -f "$_newiss"
+
 	step "$_state" "$_obs"
 
 	# The heartbeat is written AFTER step(), so a tick that died mid-step does not leave a timestamp
@@ -2335,6 +2433,13 @@ wake_worthy() {
 		# not: one is a missed read, a run of them is a watch that is not watching, and --fail-after
 		# is what tells the two apart. It is PRINTED either way.
 		/^event=issue-fetch-failed/ { next }
+		# The DISCOVERY scan failing is the same class one step out (quince#273): it means "I cannot
+		# tell whether anything new arrived", which is not "something arrived". Waking on it would
+		# turn every transient forge hiccup into a wake for a question the tick could not answer.
+		# PRINTED either way, so a session that meets an unexpected quiet can see the reason — and
+		# note that `issue-new` itself is NOT filtered here: it falls through to the catch-all and
+		# wakes, with no author or label arm, which is the ruling.
+		/^event=issue-scan-failed/ { next }
 		# A close/reopen on a MERELY-REFERENCED issue does not wake: nobody declared it, so nobody is
 		# blocked on it, and tidying an issue an open PR happens to name is the noise the ruling
 		# flagged. A close on a DECLARED issue does wake — that is the blocker clearing. Printed

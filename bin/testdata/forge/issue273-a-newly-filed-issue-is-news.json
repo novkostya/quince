@@ -1,0 +1,57 @@
+{
+  "note": "quince#273, ruled 2026-07-30: a newly filed issue entered NO watch. `fetch_issues` reads only what was DECLARED or REFERENCED by an open PR, and an issue is neither at the moment it is filed — so the channel the gap protocol makes the RULING channel was the one channel with no wake. Measured: quince#265 landed on the architect's own quince#230 ruling and reached that seat only because the Operator asked by hand. THE BASELINE IS A HIGHWATER MARK, not a set diff: GitHub allocates issue and PR numbers monotonically from one sequence, so `new` is exactly `numbered above the highest seen`, which is correct under ANY window — where diffing a bounded list would be a silent cap, the thing `fetch_issues` refuses one function up. Here `before.issues.highwater` is 273 and the scan returns 282, 279, 274 and two older ones; only the three above the mark are news. THE TWO OLDER NUMBERS ARE THE CONTROL: a version that emitted one event per scanned issue, or that ignored the mark, would emit five and this fixture would fail. `issue-new` carries NO actor and NO label, deliberately — both filters were ruled out, because the implementer and supervisor seats file under one App identity (quince#227) so an author filter would swallow supervisor-filed ruling requests, and a label filter re-creates the declared-set problem one field over. Note that 270 is DECLARED and already in items: it must NOT produce an `issue-new`, because it is not new — it is merely still open, which is what distinguishes this event from `issue-first-observation`.",
+  "before": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [
+        270
+      ],
+      "declared_at": "2026-07-30T06:00:00Z",
+      "highwater": 273,
+      "items": [
+        {
+          "number": 270,
+          "state": "OPEN",
+          "updatedAt": "2026-07-30T06:00:00Z",
+          "closed_at": null,
+          "state_reason": "",
+          "labels": [],
+          "activity": [],
+          "via": "declared"
+        }
+      ]
+    }
+  },
+  "after": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "open_seen": [
+        282,
+        279,
+        274,
+        273,
+        270
+      ],
+      "scan_limit": 30,
+      "items": [
+        {
+          "number": 270,
+          "state": "OPEN",
+          "updatedAt": "2026-07-30T06:00:00Z",
+          "closed_at": null,
+          "state_reason": "",
+          "labels": [],
+          "activity": [],
+          "via": "declared"
+        }
+      ]
+    }
+  },
+  "expect_events": [
+    "event=issue-new issue=274",
+    "event=issue-new issue=279",
+    "event=issue-new issue=282"
+  ]
+}
