@@ -2855,6 +2855,53 @@ watch_loop() {
 	# Empty `_wothers` — the one-runner case — turns the filter into a no-op.
 	_wowner=$(runner_name)
 	other_runner_names "$_wowner" >"$_wothers" 2>/dev/null || : >"$_wothers"
+
+	# THE SUPPRESSION IS ROLE-DEPENDENT, AND IT WAS APPLIED TO BOTH SEATS (quince#292).
+	#
+	# quince#174 built this so two IMPLEMENTER runners on one box would not wake each other. There,
+	# "another declared runner owns that branch" correctly means "not my business". ON THE ARCHITECT
+	# SEAT IT MEANS THE OPPOSITE: reviewing other runners' branches is the entire job, and every
+	# implementer PR is on an `r<N>/` branch by canon — so the rule became "wake for issue events,
+	# never for any PR event". Measured on that box: four events in, one survived, and the suppressed
+	# ones included `event=review`.
+	#
+	# IT WAS CREATED BY THE FIX FOR THE OPPOSITE BUG. quince#265 found `other_runner_names` returning
+	# EMPTY on the architect seat — an inert filter — and `.claude/seats` populated it (quince#276).
+	# The filter then WORKED, and working, for that role, is silence: a hole closed and its inverse
+	# opened in one change.
+	#
+	# THE ROLE COMES FROM THE CREDENTIAL, not from a file. `owed_role` decides it by which key is
+	# present, the same way `preflight` does, and a credential cannot be edited to lie the way a role
+	# field in `.claude/seats` could. quince#276 made that file refusal-bearing; giving it a field
+	# whose wrongness SILENCES a seat would raise the stakes on it considerably.
+	#
+	# `none` FAILS OPEN AND SAYS SO, and that is not symmetry for its own sake. `owed_role` has
+	# already returned `none` wrongly on a live box, undetected across two sessions, when the
+	# credentials it knew had been retired (quince#238) — and the architect arm currently survives
+	# only because a legacy PAT happens to remain on that box, so `none` is the EXPECTED future state
+	# there. Suppressing on an unidentifiable role would restore this deafness through a cleanup
+	# nobody connected to the watch. A degraded mode is surfaced, never silent (`CLAUDE.md`).
+	#
+	# THE COST OF AN EMPTY `theirs` ON THE ARCHITECT SEAT: two architect runners on one box would wake
+	# each other — quince#174 returning on the other seat. One arch seat exists today. SHAPE 3 IS WHAT
+	# RESOLVES IT — wake for a branch you do not own IF you are a reviewer of it — and it needs a
+	# notion of reviewership this tool does not have. Recorded so the next person meets the known
+	# answer rather than re-deriving it.
+	#
+	# THE STRING IS `architect`, NOT `arch`. The proposal on quince#292 said `arch`; implemented
+	# literally the arm never matches, `theirs` stays populated, and the seat stays deaf — a fix that
+	# ships, passes review and changes nothing. Second time in a day a mechanism was described from
+	# memory one token off, and both times the wrong token was the load-bearing one.
+	_wrole=$(owed_role | cut -d' ' -f1)
+	case "$_wrole" in
+	implementer) ;;
+	architect) : >"$_wothers" ;;
+	*)
+		: >"$_wothers"
+		printf 'note: branch-ownership suppression is DISABLED — this box could not determine its role (owed_role=%s), so every PR event wakes. Reported rather than silent (quince#292).\n' \
+			"${_wrole:-empty}"
+		;;
+	esac
 	while :; do
 		if [ "$_wall" = yes ]; then
 			tick_all "$_wgh" "$$" "$_wiv" >"$_wevt" && _wrc=0 || _wrc=$?
