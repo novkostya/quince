@@ -44,6 +44,10 @@ const (
 	LivenessActive          = "active"
 	LivenessSilentConnected = "silent_but_connected"
 	LivenessSuspectedStall  = "suspected_stall"
+	// LivenessNone is what a job carries once it is TERMINAL: the three values above are all claims
+	// about a process that is running, and a finished job has none. Named rather than a bare "" at
+	// two call sites, so the intent is readable where it is set (quince#313).
+	LivenessNone = ""
 )
 
 // Progress phases.

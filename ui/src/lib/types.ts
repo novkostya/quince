@@ -37,7 +37,11 @@ export type JobState =
   | "cancelled"
   | "connection_lost";
 
-export type Liveness = "active" | "silent_but_connected" | "suspected_stall";
+// `""` is what a TERMINAL job carries: the other three are claims about a process that is
+// running, and a finished job has none (quince#313, contracts §2). The union is widened rather
+// than the empty value being smuggled in as a cast — a closed union that the server can violate
+// is a type that lies, and this one was already being violated by every failed job.
+export type Liveness = "" | "active" | "silent_but_connected" | "suspected_stall";
 
 export interface JobProgress {
   phase: string;

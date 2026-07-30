@@ -288,6 +288,10 @@ func (e *Engine) Reconcile() error {
 		if e.versionQ != nil {
 			if vid, ok := e.versionQ.VersionForJob(r.UDID, r.ID); ok {
 				r.State, r.Phase, r.Percent = StateSucceeded, PhaseDone, f64(100)
+				// The third terminal writer, and the one most likely to be missed: these rows are
+				// crash-orphaned, so whatever liveness they carry was written by a process that no
+				// longer exists (quince#313).
+				r.Liveness = LivenessNone
 				r.FinishedAt, r.VersionID = &fin, strptr(vid)
 				r.ErrorCode, r.ErrorMessage = "", ""
 				if err := e.st.UpdateJob(r); err != nil {
@@ -300,6 +304,11 @@ func (e *Engine) Reconcile() error {
 			}
 		}
 		r.State, r.FinishedAt = StateConnectionLost, &fin
+		// The FOURTH terminal writer. Same reason as the roll-forward above and more pointed here:
+		// this row was orphaned by a crash, so its phase and liveness were written by a process that
+		// no longer exists — the clearest possible case of a live claim outliving the thing it
+		// described (quince#313).
+		r.Phase, r.Liveness = "", LivenessNone
 		r.ErrorCode, r.ErrorMessage = ErrInterrupted, "interrupted by a restart"
 		if err := e.st.UpdateJob(r); err != nil {
 			e.log.Error("backup: reconcile persist failed", "job", r.ID, "error", err)
@@ -887,7 +896,7 @@ func (e *Engine) terminate(lj *liveJob, state, code, msg string) {
 		// that describes a live process, and `succeed` settles it too. `Percent` is deliberately LEFT
 		// ALONE — on a failure it is the last true measurement of how far the job got, which is
 		// information about the past rather than a claim about now.
-		r.Phase, r.Liveness = "", ""
+		r.Phase, r.Liveness = "", LivenessNone
 	})
 	e.log.Info("backup: job terminal", "job", lj.row.ID, "udid", lj.row.UDID, "state", state, "code", code)
 }
@@ -895,7 +904,15 @@ func (e *Engine) terminate(lj *liveJob, state, code, msg string) {
 func (e *Engine) succeed(lj *liveJob, versionID string) {
 	e.transition(lj, func(r *store.JobRow) {
 		r.State, r.Phase, r.Percent = StateSucceeded, PhaseDone, f64(100)
-		r.Liveness = LivenessActive
+		// TERMINAL MEANS NO LIVENESS, succeeded included (quince#313, ruled on that PR). This set
+		// `active` — a claim that a process is running, on a job that had just finished. Latent
+		// rather than user-visible, because both consumers gate on terminal state; what it costs is
+		// the contract and the engine disagreeing, and somebody later removing a consumer guard on
+		// the strength of the contract.
+		//
+		// `Phase` stays `done` here and is cleared only on failure. The asymmetry is deliberate:
+		// `done` is a TRUE statement about a succeeded job, where `active` is not.
+		r.Liveness = LivenessNone
 		fin := e.now()
 		r.FinishedAt, r.VersionID = &fin, &versionID
 	})
