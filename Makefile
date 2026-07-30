@@ -255,7 +255,8 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test \
-                   sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test
+                   sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
+                   gates-sh-exit-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -285,6 +286,15 @@ SH_SUITE_IMAGE  := $(ALPINE_IMAGE)
 # Caught by reading the count rather than the colour: 35 where the host says 37.
 SH_SUITE_PKGS   := jq git make bash
 
+# Deliberately UNDOCUMENTED (no `##`), so it stays out of `make help` and out of the permission
+# allowlist that `bin/allowlist-coverage` keys on documented targets. It exists for
+# `bin/gates-sh-exit-test`, which must know the suite image to stub a runtime that fails only for it
+# — restating `alpine:…` in the suite would stop matching the day the pin moves, and the stub would
+# then succeed on the suite run and turn that test green for the wrong reason (quince#274).
+.PHONY: print-sh-suite-image
+print-sh-suite-image:
+	@echo "$(SH_SUITE_IMAGE)"
+
 # THE FAST PATH SURVIVES, which is a constraint rather than a nicety: a session iterating on a fix
 # must be able to run one suite without paying container startup. `make forge-watch-test` still runs
 # directly on the host, and `QUINCE_SH_RUN_HERE=1 make gates-sh` runs the whole set that way. The
@@ -306,7 +316,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
-                   bin/suite-coverage bin/suite-coverage-test
+                   bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -347,15 +357,25 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# THE SUITES, in BusyBox (quince#246). Reported rather than implied, because a gate that
 	@# containerises some of its work and says `clean` cannot be told from one that containerised all
 	@# of it — quince#41's shape, and the reason the count and the image are both printed.
+	@#
+	@# EVERY ARM ENDS IN THE STATUS THAT DECIDES, and the `if`s below are load-bearing rather than
+	@# stylistic (quince#274). A shell `if` block exits with the status of the LAST command it ran, so
+	@# `$(RUNTIME) run …; echo …` reports the ECHO — and this recipe printed `gates-sh: clean` and
+	@# exited 0 over a suite with 15 failing assertions. That is the exact defect the comment three
+	@# lines up cites #41 about, introduced by the change that wrote the comment: the accounting line
+	@# added to make the gate honest is what swallowed the failure. Keep the status last.
 	@if [ -n "$(QUINCE_SH_RUN_HERE)" ]; then \
 	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) ON THIS HOST (QUINCE_SH_RUN_HERE set) — NOT the BusyBox gate"; \
 	  $(MAKE) --no-print-directory $(SH_SUITES); \
 	else \
 	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) in $(SH_SUITE_IMAGE) + $(SH_SUITE_PKGS) — BusyBox ash, as the image ships"; \
 	  echo "gates-sh: EXCLUDED from the container, $(words $(SH_SUITES_EXCL)): $(SH_SUITES_EXCL) — needs a live forge and a credential; run it on a host"; \
-	  $(RUNTIME) run --rm -e QUINCE_SH_RUN_HERE=1 -v $(ROOT):/src -w /src $(SH_SUITE_IMAGE) \
-	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && exec make --no-print-directory $(SH_SUITES)'; \
-	  echo "gates-sh: $(words $(SH_SUITES)) containerised in $(SH_SUITE_IMAGE), $(words $(SH_SUITES_EXCL)) excluded by name above — no suite ran host-side unannounced"; \
+	  if $(RUNTIME) run --rm -e QUINCE_SH_RUN_HERE=1 -v $(ROOT):/src -w /src $(SH_SUITE_IMAGE) \
+	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && exec make --no-print-directory $(SH_SUITES)'; then \
+	    echo "gates-sh: $(words $(SH_SUITES)) containerised in $(SH_SUITE_IMAGE), $(words $(SH_SUITES_EXCL)) excluded by name above — no suite ran host-side unannounced"; \
+	  else \
+	    echo "gates-sh: SUITE(S) FAILED in $(SH_SUITE_IMAGE) — see the suite output above"; exit 1; \
+	  fi; \
 	fi
 	@echo "gates-sh: clean"
 
@@ -470,6 +490,10 @@ wrapper-boundary-test: ## A boundary refusal must outrank an environment one in 
 .PHONY: suite-coverage-test
 suite-coverage-test: ## The suite-totality gate's own refusals, all three directions (quince#246)
 	@bin/suite-coverage-test
+
+.PHONY: gates-sh-exit-test
+gates-sh-exit-test: ## gates-sh must not say `clean` over a failed suite run (quince#274)
+	@bin/gates-sh-exit-test
 
 .PHONY: allowlist-coverage-test
 allowlist-coverage-test: ## The allowlist totality gate's own refusals, both directions (quince#256)
