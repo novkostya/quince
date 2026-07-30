@@ -2618,6 +2618,95 @@ wake_filter() {
 	' others="$_wf_others" mapf="$_wf_map" "$_wf_others" "$_wf_map" "$_wf_evt"
 }
 
+# --- SELF-CAUSED SUPPRESSION, THE LEDGER ARM (quince#242) ---------------------------------------
+#
+# `event=review` and `event=merged` are computed by DIFFING two observations, and a diff knows what
+# changed but not who changed it. So they carry no `actor=`, and a session that approves a PR and
+# then arms a watch is woken by its own approval. `bin/forge-ledger` records those two acts as this
+# runner performs them; this consumes a row when it recognises the event that row explains.
+#
+# THIS ARM ALONE DOES NOT REDUCE WAKES, and saying so is the point of the sentence rather than
+# modesty. One act emits TWO lines — the typed event here, and an `event=updated` that carries its
+# own `actor=` — so suppressing only this one leaves the other to wake the session anyway. The actor
+# arm is what completes it. Landing them separately was ruled deliberately; a PR claiming a wake
+# reduction it cannot yet deliver would be the "suppressed=1 beside a watch that woke anyway" this
+# subsystem has produced before.
+#
+# CONSUME-ONCE, AND THE COUNT IS THE GUARD. `count=` (quince#242 step 1) says how many verdicts the
+# tick collapsed into one line. A row is spent only when the count MATCHES what this runner can
+# account for: if the line says `count=2` and the ledger holds one of mine, the other is somebody
+# else's and the event WAKES. Suppressing on presence alone would swallow another seat's verdict —
+# a missed wake, which is the expensive direction. `event=merged` needs no such guard: a PR merges
+# once, so presence is unambiguous there.
+#
+# RUNS BEFORE THE OWNERSHIP FILTER, and the order is load-bearing rather than incidental. An
+# implementer that approves ANOTHER runner's PR writes a row for a branch the ownership filter is
+# about to drop; consume after it and that row is never spent, and sits until it swallows the next
+# verdict on that PR — somebody else's. Consuming against everything the tick printed keeps the
+# ledger tracking what happened rather than what survived a filter.
+#
+# NO LIFETIME RULE AND NO PAIRING. A row is spent or it is not; nothing here remembers an ACT across
+# ticks, so `:284`'s ruling against cross-tick de-duplication is untouched. What makes that possible
+# is attributing each LINE independently where it lands, instead of trying to cancel the act that
+# produced both.
+selfcaused_filter() { # <events-file> <default-repo> <suppressed-count-out>
+	_sc_evt=$1
+	_sc_defrepo=$2
+	_sc_out=$3
+	printf '0\n' >"$_sc_out"
+	# The filename is written here and in `bin/forge-ledger`, and nothing but the end-to-end suite
+	# pins them together — a divergence would disable suppression silently, which is why the suite
+	# records through the real writer rather than crafting a ledger by hand.
+	_sc_led="$(state_dir)/selfcaused.ledger"
+	# No ledger, no rows: the pre-quince#242 behaviour exactly, which is what a box with no declared
+	# runner and a session that has performed no acts should both get.
+	if [ ! -s "$_sc_led" ]; then
+		cat "$_sc_evt"
+		return 0
+	fi
+	_sc_rest=$(mktemp)
+	if awk -v defrepo="$_sc_defrepo" -v rest="$_sc_rest" -v cnt="$_sc_out" '
+		FILENAME == led { have[$1 SUBSEP $2 SUBSEP $3]++; next }
+		{
+			kind = ""
+			if ($0 ~ /(^| )event=review( |$)/)      kind = "review"
+			else if ($0 ~ /(^| )event=merged( |$)/) kind = "merged"
+			if (kind == "") { print; next }
+			pr = ""; repo = ""; c = 1; sawcount = 0
+			n = split($0, a, " ")
+			for (i = 1; i <= n; i++) {
+				if (a[i] ~ /^pr=/)    pr   = substr(a[i], 4)
+				if (a[i] ~ /^repo=/)  repo = substr(a[i], 6)
+				if (a[i] ~ /^count=/) { c = substr(a[i], 7) + 0; sawcount = 1 }
+			}
+			if (pr == "") { print; next }
+			if (repo == "") repo = defrepo
+			# A review line with no count= is one this build cannot account for — an event from a
+			# state file written before step 1. Unaccountable wakes.
+			if (kind == "review" && sawcount == 0) { print; next }
+			k = repo SUBSEP pr SUBSEP kind
+			if (have[k] >= c) { have[k] -= c; sup++; next }
+			print
+		}
+		END {
+			for (k in have) {
+				split(k, p, SUBSEP)
+				for (j = 0; j < have[k]; j++) print p[1], p[2], p[3] > rest
+			}
+			print sup + 0 > cnt
+		}
+	' led="$_sc_led" "$_sc_led" "$_sc_evt"; then
+		# Rewritten only on success. An awk that died must leave the ledger alone: blanking it would
+		# turn a transient failure into a permanent one wake at a time, and the rows are the only
+		# record that the acts happened.
+		mv -f "$_sc_rest" "$_sc_led" 2>/dev/null || rm -f "$_sc_rest"
+	else
+		rm -f "$_sc_rest"
+		printf '0\n' >"$_sc_out"
+		cat "$_sc_evt"
+	fi
+}
+
 wake_worthy() {
 	# $1 is a file holding ONE tick's output, $2 is "first" for the first tick of this watch; prints
 	# the lines that justify waking a session.
@@ -2856,6 +2945,8 @@ watch_loop() {
 	_wmap=$(mktemp)
 	_wmine=$(mktemp)
 	_wothers=$(mktemp)
+	_wself=$(mktemp)
+	_wsupc=$(mktemp)
 	# Resolved ONCE, here, rather than per tick, because re-reading every interval would let a
 	# mid-run registry edit silently change what wakes a watcher that is already running.
 	#
@@ -2937,7 +3028,18 @@ watch_loop() {
 		# judged. Rebuilt each time rather than hoisted: the queue changes under a long watch, and a
 		# map computed once would answer about the queue as it was when the watcher armed.
 		ownership_map "$_wall" "$_wrepo" "$_wstate" >"$_wmap" 2>/dev/null || : >"$_wmap"
-		wake_filter "$_wevt" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
+		# BEFORE the ownership filter — see the header of `selfcaused_filter` for why the order is
+		# load-bearing rather than incidental.
+		selfcaused_filter "$_wevt" "$_wrepo" "$_wsupc" >"$_wself"
+		if [ "$(cat "$_wsupc" 2>/dev/null || printf 0)" != 0 ]; then
+			# NEVER SILENT. A suppression nobody can see is indistinguishable from a watcher that
+			# missed the event, and this project has shipped that confusion before. The note is
+			# printed rather than counted away, and it names the arm so a reader can tell it from
+			# branch-ownership suppression on the line above.
+			printf 'note: %s self-caused event(s) suppressed from the wake decision — acts this runner performed, matched against its own ledger (quince#242). Printed above regardless.\n' \
+				"$(cat "$_wsupc")"
+		fi
+		wake_filter "$_wself" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		if [ -n "$_wwake" ]; then
 			# LOOP SELF-ACCOUNTING (quince#282 item 4): count the wake, then REPORT the cumulative
@@ -2948,7 +3050,7 @@ watch_loop() {
 			bump_wakes "$_wall" "$_wrepo" "$_wstate"
 			printf 'forge-watch: watch EXITING on the event(s) above (tick %s) — handle them, then ARM AGAIN. A watch that exited is a watch that is not watching.\n' "$_wticks"
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
 			return 0
 		fi
 		if [ "$_wrc" != 0 ]; then
@@ -2956,7 +3058,7 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
-				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
+				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
 				return 7
 			fi
 		else
@@ -2971,7 +3073,7 @@ watch_loop() {
 			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
 			# counted as a wake: nothing woke.
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
-			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers"
+			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc"
 			return 6
 		fi
 		sleep "$_wiv"

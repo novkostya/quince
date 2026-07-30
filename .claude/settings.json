@@ -146,6 +146,7 @@
       "Bash(make forge-watch-counters-test)",
       "Bash(make closing-refs-check-test)",
       "Bash(make forge-watch-role-test)",
+      "Bash(make forge-watch-selfcaused-test)",
       "Bash(make closing-refs-check)",
       "Bash(make closing-refs-check *)"
     ]

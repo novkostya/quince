@@ -1,0 +1,177 @@
+#!/bin/sh
+# forge-ledger — record the forge acts THIS runner performed, so its own watch can tell them from
+# somebody else's (quince#242, step 2 of the ruled sequence).
+#
+# THE PROBLEM IT SOLVES, AND THE HALF IT DOES NOT. `event=review` and `event=merged` carry no actor:
+# they are computed by diffing two observations, and a diff knows what changed but not who changed
+# it. So a session that approves a PR and then arms a watch is woken by its own approval, every time.
+# The neighbouring `event=updated` line DOES carry `actor=`, needs no ledger, and is suppressed by
+# the actor arm instead (step 3). **This tool alone therefore does NOT reduce wakes** — the act's
+# other line still fires. That is not a defect in it; it is why the ruling says both arms or neither.
+#
+# WHY THE TWO LINES ARE NOT PAIRED, which is the design decision worth the most here. Every earlier
+# attempt tried to cancel one ACT, and an act's two lines can arrive a tick apart — so cancelling the
+# act needs state carried across ticks, which is exactly what `forge-watch:284` ruled against for
+# `event=updated` de-duplication. Attributing each LINE independently, where it lands, costs nothing
+# when they split: each arm handles its own line in whichever tick it arrives, with no memory of the
+# other. No lifetime rule, no pairing, no de-duplication, and `:284` untouched.
+#
+# FAIL OPEN, EVERYWHERE. No runner declared, no state directory, an unparseable argv, a `gh` call
+# with no `--repo`: every one of them means NO ROW, which means no suppression, which means the wake
+# still happens. The failure this tool must never have is a row it should not have written, because
+# that suppresses a wake that was somebody else's — and a missed wake is the direction this whole
+# subsystem exists to avoid. An extra wake costs a re-arm.
+#
+# RECORDED ONLY AFTER THE ACT SUCCEEDED. See `bin/gh-coder`'s call site: a `gh pr review` that failed
+# produces no event to suppress, so its row would sit unconsumed until it swallowed the NEXT verdict
+# on that PR — somebody else's. That is the one way this tool can cause the failure it exists to
+# avoid, and it is closed at the call site rather than here.
+set -eu
+
+ME=forge-ledger
+WATCH="$(dirname "$0")/forge-watch"
+
+die() {
+	printf '%s: %s\n' "$ME" "$1" >&2
+	exit 1
+}
+
+ledger_path() {
+	# Per-runner by construction: `runner path` is already `…/forge-watch/<name>/`, so r1 cannot
+	# consume r4's rows without a second decision being made somewhere. Same property the loop
+	# counters rely on (quince#278).
+	#
+	# A failure here is NOT an error. No declared runner means no ledger means no suppression, and a
+	# box that has not migrated gets exactly the behaviour it has today.
+	_lp_d=$("$WATCH" runner path 2>/dev/null) || return 1
+	[ -n "$_lp_d" ] || return 1
+	printf '%s/selfcaused.ledger' "$_lp_d"
+}
+
+# classify — exit 0 if this argv is an act worth recording, and print `<kind>` on stdout.
+#
+# EXACTLY TWO VERBS, and the narrowness is deliberate: this is consulted by a CREDENTIAL wrapper on
+# every forge call it makes, and the two it matches are the two whose events carry no actor. `pr
+# comment` is not here because the event it produces (`issue-comment`) already carries `actor=`;
+# adding it would be a second mechanism for a problem that has one.
+classify() {
+	_cl_seen_pr=no
+	_cl_verb=""
+	for _cl_a in "$@"; do
+		case "$_cl_a" in
+		-*) continue ;;
+		esac
+		# `if` rather than `[ … ] && x=yes`: under `set -e` an AND-OR list whose LAST command never
+		# runs still reports the test's failure, so a first word that is not `pr` would exit the
+		# whole script instead of returning 1 from this function. It survived a smoke test because
+		# the caller wraps it in `$( … ) || …` and a killed subshell is also non-zero — the failure
+		# and the intended answer are the same exit code, which is what makes it worth avoiding
+		# rather than measuring.
+		if [ "$_cl_seen_pr" = no ]; then
+			if [ "$_cl_a" = pr ]; then _cl_seen_pr=yes; fi
+			continue
+		fi
+		_cl_verb=$_cl_a
+		break
+	done
+	[ "$_cl_seen_pr" = yes ] || return 1
+	case "$_cl_verb" in
+	review) printf 'review\n' ;;
+	merge) printf 'merged\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+# parse_target — print `<repo> <pr>` for a classified argv, or fail.
+#
+# BOTH ARE REQUIRED AND NEITHER IS INFERRED. `gh` resolves a missing `--repo` from the checkout's
+# remote and a missing number from the current branch; this does not, because guessing either one
+# wrong writes a row against a PR nobody acted on. Unresolvable means no row means the wake stands.
+parse_target() {
+	_pt_repo=""
+	_pt_pr=""
+	_pt_want_repo=no
+	_pt_seen_pr=no
+	_pt_seen_verb=no
+	for _pt_a in "$@"; do
+		if [ "$_pt_want_repo" = yes ]; then
+			_pt_repo=$_pt_a
+			_pt_want_repo=no
+			continue
+		fi
+		case "$_pt_a" in
+		--repo | -R)
+			_pt_want_repo=yes
+			continue
+			;;
+		--repo=*)
+			_pt_repo=${_pt_a#--repo=}
+			continue
+			;;
+		-*) continue ;;
+		esac
+		if [ "$_pt_seen_pr" = no ]; then
+			if [ "$_pt_a" = pr ]; then _pt_seen_pr=yes; fi
+			continue
+		fi
+		if [ "$_pt_seen_verb" = no ]; then
+			_pt_seen_verb=yes
+			continue
+		fi
+		# The first bare word after the verb, and ONLY the first — a later bare word is a flag's
+		# argument, not a second PR number. A PR URL or a branch name is NOT accepted: only a number
+		# is unambiguous, and `event=review pr=N` is keyed on the number.
+		#
+		# DO NOT `break` HERE. The obvious version did, and `--repo` almost always comes AFTER the
+		# number on a real command line — so it stopped scanning one word before the field it
+		# needed and returned "unattributable" for every ordinary invocation. It fails OPEN, so the
+		# symptom is an empty ledger and no suppression, which is also exactly what a correct,
+		# quiet ledger looks like. Caught only because a suite asserted a row was CONSUMED and
+		# passed against a row that had never been written.
+		if [ -z "$_pt_pr" ]; then
+			case "$_pt_a" in
+			'' | *[!0-9]*) return 1 ;;
+			esac
+			_pt_pr=$_pt_a
+		fi
+	done
+	if [ -z "$_pt_repo" ] || [ -z "$_pt_pr" ]; then return 1; fi
+	case "$_pt_repo" in
+	*/*) ;;
+	*) return 1 ;;
+	esac
+	printf '%s %s\n' "$_pt_repo" "$_pt_pr"
+}
+
+case "${1:-}" in
+path)
+	ledger_path || die "no runner is declared on this box — there is no ledger, and no suppression."
+	;;
+classify)
+	shift
+	classify "$@" || exit 1
+	;;
+record)
+	shift
+	_kind=$(classify "$@") || exit 0
+	_target=$(parse_target "$@") || exit 0
+	_path=$(ledger_path) || exit 0
+	_dir=$(dirname "$_path")
+	[ -d "$_dir" ] || mkdir -p "$_dir" 2>/dev/null || exit 0
+	printf '%s %s\n' "$_target" "$_kind" >>"$_path" 2>/dev/null || exit 0
+	;;
+'' | -h | --help | help)
+	cat <<EOF
+usage: $ME record <gh-argv…>   append a row if this argv is a recordable act (silent, always 0)
+       $ME classify <gh-argv…> exit 0 and print the kind if this argv is recordable
+       $ME path                print this runner's ledger path
+
+Rows are '<owner/name> <pr> <review|merged>'. The reader is forge-watch's selfcaused filter, which
+consumes a row when it suppresses the event it explains. See the header of this file for why the
+ledger covers only the two events that carry no actor.
+EOF
+	;;
+*)
+	die "unknown verb '$1' — try '$ME --help'."
+	;;
+esac
