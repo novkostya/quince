@@ -559,7 +559,7 @@ Then, on the events:
 - **`event=updated … actor=unattributed` means go and look**, not nothing happened. Its commonest cause
   here is an author ticking a checklist box, which moves `updatedAt` through a channel that appears in
   no activity list.
-  **UNLESS IT CARRIES `after=merge`, in which case nothing is pending and there is nothing to look at**
+  **UNLESS IT CARRIES `kind=post-merge`, in which case nothing is pending and there is nothing to look at**
   (quince#83). The PR was already MERGED at the previous observation, so no author is waiting on you and
   no verdict is owed. `--delete-branch` produces one of these on **every** merge — the deletion moves
   `updatedAt` a second or two after the merge and appears in no activity list either — and *"the

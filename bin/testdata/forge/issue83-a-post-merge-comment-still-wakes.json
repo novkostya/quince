@@ -1,0 +1,70 @@
+{
+  "note": "quince#83 constraint 3, and it is the only thing standing between the suppression and a lost signal. `kind=post-merge` is SUPPRESSED from the wake decision, so the case that must never carry that label is a PR somebody actually said something on after it merged — a reviewer noting a follow-up, an Operator ruling in a thread, a correction. THE THIRD CLAUSE IS WHAT PROTECTS IT: the label needs `MERGED` at the previous observation AND `updatedAt` moved AND nothing in activity newer, and a comment lands in activity with a newer timestamp, so the event is attributed and never labelled. Dropping that clause would turn a conservative inference into the guess the filer warned against, and this fixture is what fails if anybody does. PR 703 is the comment; PR 704 is its partner in the SAME observation with nothing newer, so one tick produces both a suppressed event and a woken one — a fixture where only the surviving case appeared would pass against a build that had stopped labelling anything at all.",
+  "before": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 703,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T07:10:00Z",
+        "branch": "r4/landed-then-discussed",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T07:10:00Z", "actor": "app/quince-review", "kind": "merge"}
+        ]
+      },
+      {
+        "number": 704,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T07:10:00Z",
+        "branch": "r4/landed-quietly",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T07:10:00Z", "actor": "app/quince-review", "kind": "merge"}
+        ]
+      }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 703,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T07:20:00Z",
+        "branch": "r4/landed-then-discussed",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T07:10:00Z", "actor": "app/quince-review", "kind": "merge"},
+          {"at": "2026-07-30T07:20:00Z", "actor": "novkostya", "kind": "comment"}
+        ]
+      },
+      {
+        "number": 704,
+        "state": "MERGED",
+        "updatedAt": "2026-07-30T07:20:00Z",
+        "branch": "r4/landed-quietly",
+        "author": "quince-coder",
+        "merge_state": "UNKNOWN",
+        "checks": [],
+        "reviews": [],
+        "activity": [
+          {"at": "2026-07-30T07:10:00Z", "actor": "app/quince-review", "kind": "merge"}
+        ]
+      }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=703 at=2026-07-30T07:20:00Z actor=novkostya kind=comment",
+    "event=updated pr=704 at=2026-07-30T07:20:00Z actor=unattributed kind=post-merge"
+  ]
+}
