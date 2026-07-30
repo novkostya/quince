@@ -77,8 +77,36 @@ while IFS=: read -r w args; do
 	esac
 
 	# (2) HOME set: every derived path must come from it, not from a hardcoded root.
+	#
+	# A STUB `gh` IS ON PATH FOR THIS ASSERTION, and that is quince#162's fix. The gh wrappers print
+	# their credential path in USAGE, and usage comes after their `command -v gh` dependency check —
+	# so on a host without `gh` they die first, the path never prints, and this assertion reports
+	# `inconclusive`, which is scored as a FAILURE. Measured in a bare alpine:3.24 container:
+	# 10 passed / 2 failed, the two being `gh-bot` and `gh-arch`.
+	#
+	# That gave `gates-sh` an UNDECLARED HOST REQUIREMENT on `gh`, contradicting `Makefile:8`
+	# ("`make` + a container runtime with BuildKit") — and green CI could never catch it, because
+	# `ubuntu-latest` preinstalls the GitHub CLI. A check that passes on every host anyone runs it on
+	# and fails on the host the docs describe is the interactive-path/service-path asymmetry one level
+	# up. `gh-review` passed by ACCIDENT throughout, because its usage prints before its dependency
+	# loop — the same ordering quince#157 is about, here producing a false green rather than a wrong
+	# message.
+	#
+	# THE STUB IS THE RIGHT INSTRUMENT, not a relaxation: this assertion is about where a path comes
+	# FROM and has no interest in `gh` existing. Relaxing it to accept the dependency refusal would
+	# score an unrecognised outcome green, which the comment below rightly forbids. Reordering the
+	# wrappers so usage precedes the dependency check is quince#162's other option and would satisfy
+	# quince#157 too — but it moves a check inside the identity-boundary wrappers, and that is not a
+	# change to make for a test's convenience.
+	#
+	# Same shape as the stub `awk` in (3) below, which this file already relies on. It exits 0 and is
+	# never invoked: the wrappers only ask `command -v`.
+	ghstub=$(mktemp -d)
+	printf '#!/bin/sh\nexit 0\n' >"$ghstub/gh"
+	chmod +x "$ghstub/gh"
 	# shellcheck disable=SC2086
-	out=$(sh -c 'HOME=$1; export HOME; shift; exec "$@" 2>&1' _ "$fake" "$w" $args </dev/null || true)
+	out=$(PATH="$ghstub:$PATH" sh -c 'HOME=$1; export HOME; shift; exec "$@" 2>&1' _ "$fake" "$w" $args </dev/null || true)
+	rm -rf "$ghstub"
 	case "$out" in
 	*"$fake/"*)
 		ok "$w derives its paths from HOME"
