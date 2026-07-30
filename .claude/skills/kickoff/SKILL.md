@@ -181,11 +181,11 @@ toolchain anywhere, and do not plan a PR you cannot prove.
 every session box, so reaching for it costs a cycle to an exit `127` — three such instances in one
 afternoon, on two seats, and once the defensive `python3 … || { sed … }` form failed *differently*
 and cost more than the original. **Use `jq` for JSON, and do not assume GNU flags**: `${PIPESTATUS[0]}`,
-`ls --time-style` and `find -newermt` all work in CI and all fail here. Python is absent
-deliberately, and BusyBox is what the release image ships — so the fix is never to install
-something, it is to write the portable form. Full statement, with what was measured and the one
-trap quince#246 got wrong, in [`deploy/dev.md`](../../../deploy/dev.md), *What a session box
-actually is*.
+`ls --time-style` and `find -newermt` all work in CI and all fail here. Python is absent from **the
+box** deliberately — it *is* in the release image, for the vault — and BusyBox is what that image
+ships as its shell, so the fix is never to install something on the host, it is to write the
+portable form. Full statement, with what was measured and the two traps quince#246 got wrong, in
+[`deploy/dev.md`](../../../deploy/dev.md), *What a session box actually is*.
 
 **Take the gate lane explicitly: say out loud that you are starting a ladder.** The container, network
 and cache-volume names are fixed rather than per-run, so two ladders on one box destroy each other —
