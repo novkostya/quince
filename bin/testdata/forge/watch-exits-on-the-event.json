@@ -52,7 +52,7 @@
   "expect_events": [
     "event=first-observation count=1",
     "event=updated pr=61 at=2026-07-26T19:28:36Z actor=novkostya kind=review",
-    "event=review pr=61 verdict=CHANGES_REQUESTED"
+    "event=review pr=61 count=1 verdict=CHANGES_REQUESTED"
   ],
   "expect_exit": 0
 }

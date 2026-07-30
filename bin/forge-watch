@@ -500,7 +500,19 @@ step() {
 		| ($old | map(select(.number == $p.number)) | first) as $o
 		| ($p.reviews // []) as $new | (($o.reviews // [])) as $was
 		| select(($new | length) > ($was | length))
-		| "event=review pr=\($p.number) verdict=\($new | last | .state)"'
+		# `count=` IS THE CARDINALITY, and it exists because ONE event fires per TICK however many
+		# verdicts landed (quince#242). Without it a consumer cannot tell "the one verdict I cast"
+		# from "mine plus another seat" — the discrimination the self-caused ledger needs. A
+		# suppression keyed on presence alone would let my own approval swallow an event that also
+		# carried another verdict, and a missed wake is the expensive direction.
+		#
+		# Mirrors `issue-comment`, which solved the same problem on the channel next door.
+		#
+		# It also MITIGATES — does not fix — the last-wins reporting on this very line: a reader told
+		# `verdict=APPROVED` cannot know a second verdict landed in the same tick, and `count=2` says
+		# the reported verdict is not the whole story. The line still reports `last`; fixing that is
+		# separable and deliberately not done here.
+		| "event=review pr=\($p.number) count=\(($new | length) - ($was | length)) verdict=\($new | last | .state)"'
 
 	# review-answered: A PR YOU BLOCKED THAT THE AUTHOR HAS SINCE ANSWERED (quince#282 item 5).
 	#

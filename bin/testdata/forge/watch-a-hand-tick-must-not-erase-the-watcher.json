@@ -76,7 +76,7 @@
       },
       "expect_events": [
         "event=updated pr=102 at=2026-07-27T13:05:00Z actor=novkostya kind=review",
-        "event=review pr=102 verdict=CHANGES_REQUESTED"
+        "event=review pr=102 count=1 verdict=CHANGES_REQUESTED"
       ],
       "expect_state": [
         ".watch != null",
