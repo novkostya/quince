@@ -256,6 +256,22 @@ SH_SUITES       := privacy-check-test forge-watch-test preflight-test provision-
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test \
                    sh-lint-coverage-test allowlist-coverage-test
+# THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
+#
+# `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
+# and GraphQL fetch paths against the real API, and its wrapper loop tries `gh-coder`, `gh-arch`,
+# `gh-review` in turn. None of that is hermetic in bare Alpine, and it never will be. It stays a
+# host-run suite, deliberately outside this ladder — its own header says so — and it remains in
+# SH_ENTRYPOINTS, so shellcheck still reads it.
+#
+# HOW IT WENT MISSING IS THE INSTRUCTIVE PART: the totals matched by COINCIDENCE. `SH_SUITES` has 18
+# entries and there are 18 `*-test` scripts on disk, but they are not the same 18 — `forge-watch-test`
+# is a make target with no script of that name (it runs `forge-watch replay`), and
+# `forge-fetch-equivalence-test` is a script with no entry. One omission on each side, cancelling out,
+# so "18 of 18" looked like totality and was a subset. That is the failure this whole change exists to
+# prevent, and the excluded file's own comment already names the class: "a skip that looks like
+# coverage" — written about a seat skipping it, now true of the gate.
+SH_SUITES_EXCL  := forge-fetch-equivalence-test
 SH_SUITE_IMAGE  := $(ALPINE_IMAGE)
 # `bash` is here for ONE reason and it is not to run the suites under it — `/bin/sh` stays BusyBox
 # `ash`, which is the whole point. `pr-title-refs-test` has two assertions that deliberately invoke
@@ -331,9 +347,10 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	  $(MAKE) --no-print-directory $(SH_SUITES); \
 	else \
 	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) in $(SH_SUITE_IMAGE) + $(SH_SUITE_PKGS) — BusyBox ash, as the image ships"; \
+	  echo "gates-sh: EXCLUDED from the container, $(words $(SH_SUITES_EXCL)): $(SH_SUITES_EXCL) — needs a live forge and a credential; run it on a host"; \
 	  $(RUNTIME) run --rm -e QUINCE_SH_RUN_HERE=1 -v $(ROOT):/src -w /src $(SH_SUITE_IMAGE) \
 	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && exec make --no-print-directory $(SH_SUITES)'; \
-	  echo "gates-sh: all $(words $(SH_SUITES)) shell suite(s) ran in $(SH_SUITE_IMAGE) — none skipped, none host-side"; \
+	  echo "gates-sh: $(words $(SH_SUITES)) containerised in $(SH_SUITE_IMAGE), $(words $(SH_SUITES_EXCL)) excluded by name above — no suite ran host-side unannounced"; \
 	fi
 	@echo "gates-sh: clean"
 
