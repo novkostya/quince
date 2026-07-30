@@ -358,6 +358,15 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# containerises some of its work and says `clean` cannot be told from one that containerised all
 	@# of it — quince#41's shape, and the reason the count and the image are both printed.
 	@#
+	@# `safe.directory /src` IS NOT BOILERPLATE — it is the first thing the fixed exit code caught
+	@# (quince#274). `actions/checkout` marks the repo safe at its HOST path; inside the container the
+	@# same tree is `/src`, owned by a uid the container's root is not, so every `git` call in a suite
+	@# dies with `detected dubious ownership`. On CI that silently took THREE `gate-scope-test`
+	@# assertions down — an exported SCOPE, MAKEFLAGS propagation, and `image` skipping an empty range
+	@# — from the moment quince#246 containerised the suites. It never reproduced on a box, where the
+	@# tree and the container's root share a uid. Two defects from one change, and the false-green is
+	@# what kept the second invisible.
+	@#
 	@# EVERY ARM ENDS IN THE STATUS THAT DECIDES, and the `if`s below are load-bearing rather than
 	@# stylistic (quince#274). A shell `if` block exits with the status of the LAST command it ran, so
 	@# `$(RUNTIME) run …; echo …` reports the ECHO — and this recipe printed `gates-sh: clean` and
@@ -371,7 +380,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	  echo "gates-sh: running $(words $(SH_SUITES)) shell suite(s) in $(SH_SUITE_IMAGE) + $(SH_SUITE_PKGS) — BusyBox ash, as the image ships"; \
 	  echo "gates-sh: EXCLUDED from the container, $(words $(SH_SUITES_EXCL)): $(SH_SUITES_EXCL) — needs a live forge and a credential; run it on a host"; \
 	  if $(RUNTIME) run --rm -e QUINCE_SH_RUN_HERE=1 -v $(ROOT):/src -w /src $(SH_SUITE_IMAGE) \
-	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && exec make --no-print-directory $(SH_SUITES)'; then \
+	    sh -c 'apk add --no-cache -q $(SH_SUITE_PKGS) >/dev/null && git config --global --add safe.directory /src && exec make --no-print-directory $(SH_SUITES)'; then \
 	    echo "gates-sh: $(words $(SH_SUITES)) containerised in $(SH_SUITE_IMAGE), $(words $(SH_SUITES_EXCL)) excluded by name above — no suite ran host-side unannounced"; \
 	  else \
 	    echo "gates-sh: SUITE(S) FAILED in $(SH_SUITE_IMAGE) — see the suite output above"; exit 1; \
