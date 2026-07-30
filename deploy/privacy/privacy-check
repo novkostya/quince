@@ -170,7 +170,53 @@ if [ "$CS_COUNT" -gt 0 ]; then
 	compiles "$CS_LIST" || cannot_run "matcher $GREP_PATH cannot compile the patterns in $CS_LIST ($GREP_VERSION)"
 fi
 
+# --- WHICH list, not just how many (quince#220) ----------------------------------------------
+# The counts alone cannot distinguish "swept with the current list" from "swept with a stale one".
+# Measured 2026-07-29: the two boxes ran materially different lists for hours, both printing `clean`,
+# both banners internally consistent, both canaries passing — the canary proved *a* matcher, just not
+# the same one. It was caught by a human comparing two banners quoted in two PR bodies, which is not
+# a control. Naming the commit makes one banner auditable against the repo and two exactly comparable.
+#
+# LOCAL-ONLY ON PURPOSE, and this is the constraint that shaped it: the gate must not need network.
+# `@{upstream}` is the LAST-FETCHED remote ref, so the divergence below is "as of this box's last
+# fetch" and not a live answer — a box that has never fetched reads "not behind" while being days
+# stale. The banner says so in those words, because a freshness number that overstates what it knows
+# is worse than none: it converts "unknown" into "verified current".
+#
+# `preflight` asserting a LIVE fetch is quince#220's option 1 and is deliberately NOT this change:
+# that makes whether a box may START depend on network reachability, which is a different trade.
+pattern_provenance() {
+	[ -d "$PATTERN_DIR" ] || return 0
+	command -v git >/dev/null 2>&1 || {
+		say "pattern source UNKNOWN — no git on this box, so the list's commit cannot be named"
+		return 0
+	}
+	_pp_desc=$(git -C "$PATTERN_DIR" log -1 --format='%h %cd' --date=short 2>/dev/null || true)
+	if [ -z "$_pp_desc" ]; then
+		say "pattern source UNKNOWN — $PATTERN_DIR is not a git worktree, so staleness cannot be judged"
+		return 0
+	fi
+	_pp_dirty=''
+	[ -n "$(git -C "$PATTERN_DIR" status --porcelain 2>/dev/null || true)" ] && _pp_dirty=' +UNCOMMITTED'
+	# `--left-right --count HEAD...@{upstream}` prints "<ahead>\t<behind>". No upstream: say that,
+	# rather than letting an empty string become a reassuring 0.
+	_pp_div=$(git -C "$PATTERN_DIR" rev-list --left-right --count 'HEAD...@{upstream}' 2>/dev/null || true)
+	if [ -z "$_pp_div" ]; then
+		_pp_state='no upstream configured — this box cannot tell whether the list is current'
+	else
+		_pp_behind=${_pp_div##*"$(printf '\t')"}
+		case $_pp_behind in
+		'' | *[!0-9]*) _pp_state="could not read the divergence ('$_pp_div') — treating staleness as unknown" ;;
+		0) _pp_state="not behind as of this box's LAST FETCH, which may itself be old — this is not a live check" ;;
+		*) _pp_state="BEHIND by $_pp_behind commit(s) as of this box's last fetch — this sweep used the OLDER list" ;;
+		esac
+	fi
+	say "pattern source $_pp_desc$_pp_dirty ($PATTERN_DIR)"
+	say "      → $_pp_state"
+}
+
 say "matcher $GREP_PATH ($GREP_VERSION)"
+pattern_provenance
 if [ "$CS_COUNT" -gt 0 ]; then
 	say "lists $CI_COUNT case-insensitive + $CS_COUNT case-sensitive"
 else
