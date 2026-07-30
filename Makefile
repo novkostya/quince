@@ -238,7 +238,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
-                   bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh
+                   bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
+                   bin/allowlist-coverage bin/allowlist-coverage-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -246,6 +247,12 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# or only about a list somebody remembered to update (quince#200). Host-side: it reads
 	@# `git ls-files` and needs no container.
 	@bin/sh-lint-coverage $(SH_ENTRYPOINTS) $(SH_LIBS)
+	@# The same totality argument one layer over, for the PERMISSION allowlist rather than the lint
+	@# list (quince#256). Host-side and needs no container: it reads the Makefile and the settings
+	@# file. It runs here because the gap it catches is invisible in normal operation — the
+	@# permission classifier waves an unlisted command through, so nothing surfaces the omission
+	@# until the classifier is gone, which is when you can least act on it.
+	@bin/allowlist-coverage
 	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
 	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
@@ -284,6 +291,7 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@$(MAKE) --no-print-directory wrapper-boundary-test
 	@$(MAKE) --no-print-directory gate-scope-test
 	@$(MAKE) --no-print-directory sh-lint-coverage-test
+	@$(MAKE) --no-print-directory allowlist-coverage-test
 	@echo "gates-sh: clean"
 
 # The rung-loop spec's G1, which until now was run by nothing (quince#64). Every round of
@@ -377,6 +385,17 @@ gate-scope-test: ## The gate map is total and the skipping is never silent (quin
 .PHONY: wrapper-boundary-test
 wrapper-boundary-test: ## A boundary refusal must outrank an environment one in the gh wrappers (quince#157)
 	@bin/wrapper-boundary-test
+
+# quince#256 item 3's other half, and the same argument as sh-lint-coverage-test below: a totality
+# check with no tests would report `clean` about a comparison it had failed to make. The cases that
+# earn their keep are the ASYMMETRY ones — direction 1 keys on documented targets, direction 2 on
+# real ones, and a fixture encodes each legitimate mismatch (real-but-undocumented-and-allowlisted,
+# which is `preflight`; real-but-undocumented-and-not, which is `tc-go`). Synthetic throughout, via
+# ALLOWLIST_COVERAGE_ROOT, so it never reads the real tree and cannot go green because somebody
+# fixed the allowlist.
+.PHONY: allowlist-coverage-test
+allowlist-coverage-test: ## The allowlist totality gate's own refusals, both directions (quince#256)
+	@bin/allowlist-coverage-test
 
 # quince#200's other half. `sh-lint-coverage` is the gate; this proves the gate. A coverage check
 # with no tests would be the same defect it exists to close, one level up — it would report `clean`

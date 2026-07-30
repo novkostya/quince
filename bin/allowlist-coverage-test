@@ -1,0 +1,141 @@
+#!/bin/sh
+# allowlist-coverage-test — the totality gate's own failure paths.
+#
+# WHY THIS EXISTS. `allowlist-coverage` is a gate whose entire product is a REFUSAL, and quince#256
+# is the story of a gap that survived because nothing surfaced it. A totality check with no tests is
+# that defect one level up: it would report `clean` about a comparison it had failed to make, and
+# nothing would distinguish that from an allowlist that is genuinely total. So every case asserts the
+# exit code AND a substring, because the code alone cannot separate "a target has no entry" from
+# "an entry names no target" from "the extraction broke".
+#
+# EVERY CASE IS SYNTHETIC — a throwaway tree with its own Makefile and settings file, reached through
+# `ALLOWLIST_COVERAGE_ROOT`. Nothing here reads the real repository, which matters because the real
+# repository is what the gate normally asserts about: a suite that read it would pass or fail for
+# reasons unrelated to the code under test, and would go green the moment somebody fixed the tree.
+#
+# THE ASYMMETRY IS THE THING MOST WORTH TESTING. Direction 1 keys on DOCUMENTED targets (a `## ` help
+# string), direction 2 on REAL targets (`.PHONY`). Using one set for both is wrong in both
+# directions, and the fixtures below encode a real instance of each: a target that is real but
+# undocumented and legitimately allowlisted (`preflight`'s shape), and one that is real but
+# undocumented and legitimately NOT allowlisted (`tc-go`'s shape).
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+GATE="${ALLOWLIST_COVERAGE_BIN:-$HERE/allowlist-coverage}"
+[ -x "$GATE" ] || { printf 'allowlist-coverage-test: %s is not executable\n' "$GATE" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || {
+	printf 'allowlist-coverage-test: DID NOT RUN — jq is absent and the gate reads JSON. Refusing rather than skipping.\n' >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+pass=0
+fail=0
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	if [ -n "$substr" ] && ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return 0
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+# tree <dir> <makefile-body-file> <allow-json-array>
+tree() {
+	mkdir -p "$1/.claude"
+	cp "$2" "$1/Makefile"
+	jq -n --argjson a "$3" '{permissions: {allow: $a}}' >"$1/.claude/settings.json"
+}
+run_in() { ALLOWLIST_COVERAGE_ROOT="$1" "$GATE"; }
+
+# The reference Makefile every case starts from. Four targets, deliberately covering all four
+# combinations of documented/real that the gate has to tell apart:
+#   alpha    documented + real      -> needs an entry
+#   beta     documented + real      -> needs an entry
+#   hidden   real, NOT documented   -> may be allowlisted (preflight's shape) but is not required to be
+#   internal real, NOT documented   -> correctly has no entry (tc-go's shape)
+cat >"$TMP/Makefile.ref" <<'MK'
+.PHONY: alpha
+alpha: ## does alpha
+	@true
+.PHONY: beta
+beta: ## does beta
+	@true
+.PHONY: hidden
+hidden:
+	@true
+.PHONY: internal
+internal:
+	@true
+MK
+
+# --- clean, and the asymmetry it depends on -------------------------------------------------------
+A="$TMP/clean"
+tree "$A" "$TMP/Makefile.ref" '["Bash(make alpha)","Bash(make beta *)","Bash(make hidden)"]'
+expect "clean when every documented target has an entry" 0 "clean" -- run_in "$A"
+# `hidden` is allowlisted and NOT documented — preflight's exact shape. A direction-2 check keyed on
+# DOCUMENTED targets would call that rule dead, which is the mistake this fixture exists to catch.
+expect "an allowlisted target that is real but UNDOCUMENTED is not a dead rule" 0 "clean" -- run_in "$A"
+# `internal` is real, undocumented and unlisted — tc-go's shape. A direction-1 check keyed on REAL
+# targets would demand an entry for it.
+expect "a real, undocumented target does NOT require an entry" 0 "clean" -- run_in "$A"
+# `Bash(make beta *)` is the wildcard form and must count as covering `beta`.
+expect "the wildcard form Bash(make X *) counts as an entry" 0 "clean" -- run_in "$A"
+
+# --- direction 1: a documented target with no entry ------------------------------------------------
+B="$TMP/miss1"
+tree "$B" "$TMP/Makefile.ref" '["Bash(make alpha)"]'
+expect "a documented target with no entry is a finding" 1 "beta" -- run_in "$B"
+expect "…and it says which direction failed" 1 "NO ALLOW ENTRY" -- run_in "$B"
+
+# --- direction 2: an entry naming no real target ---------------------------------------------------
+C="$TMP/miss2"
+tree "$C" "$TMP/Makefile.ref" '["Bash(make alpha)","Bash(make beta)","Bash(make renamed-away)"]'
+expect "an entry naming no real target is a finding — the dead-rule direction" 1 "renamed-away" -- run_in "$C"
+expect "…and it says which direction failed" 1 "NAMING NO REAL TARGET" -- run_in "$C"
+
+# --- the flag forms must not be read as target names -----------------------------------------------
+# `Bash(make -C /root/scratch/* *)` is quince#256's scratch-root entry. Read as a target it would be
+# a permanent dead rule called `-C`, and the gate would fail forever on its own repository.
+D="$TMP/flags"
+tree "$D" "$TMP/Makefile.ref" '["Bash(make alpha)","Bash(make beta)","Bash(make -C /root/scratch/* *)"]'
+expect "a -C entry is skipped, not read as a target named -C" 0 "clean" -- run_in "$D"
+
+# --- exit 2: DID NOT RUN, never a quiet pass -------------------------------------------------------
+# The failure mode this repository keeps filing is a gate that cannot run and says clean. Each of
+# these asserts the other choice by name.
+E="$TMP/no-entries"
+tree "$E" "$TMP/Makefile.ref" '[]'
+expect "no Bash(make …) entries at all REFUSES rather than passing vacuously" 2 "DID NOT RUN" -- run_in "$E"
+
+F="$TMP/no-doc"
+mkdir -p "$F/.claude"
+printf '.PHONY: alpha\nalpha:\n\t@true\n' >"$F/Makefile"
+jq -n '{permissions:{allow:["Bash(make alpha)"]}}' >"$F/.claude/settings.json"
+expect "a Makefile with no documented targets REFUSES — help's pattern moved" 2 "no documented targets" -- \
+	run_in "$F"
+
+G="$TMP/no-phony"
+mkdir -p "$G/.claude"
+printf 'alpha: ## does alpha\n\t@true\n' >"$G/Makefile"
+jq -n '{permissions:{allow:["Bash(make alpha)"]}}' >"$G/.claude/settings.json"
+expect "a Makefile with no .PHONY REFUSES — direction 2 would be vacuous" 2 "no .PHONY targets" -- \
+	run_in "$G"
+
+expect "a missing Makefile REFUSES" 2 "no Makefile" -- run_in "$TMP/definitely-not-a-tree"
+
+printf '\nallowlist-coverage-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
