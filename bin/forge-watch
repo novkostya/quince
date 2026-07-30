@@ -1066,7 +1066,13 @@ EOF
 	# finding that the arms are quieting ticks which would have woken anyway; withholding it until it
 	# turned positive would make the figure unfalsifiable — the exact shape this counter exists to
 	# stop the loop reporting about itself.
-	printf 'loop: %s arm(s), %s wake(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing.\n' \
+	# THE CITATION IS quince#242 AND NOT quince#296, and getting that wrong was the finding on the
+	# review of this very change. quince#296 owns the SCOPE half — per-repo against a sum, in
+	# identical words — which the `%s` above fixes. `prevented` is quince#242's, mentioned nowhere in
+	# quince#296. A reader follows this citation from a printed line to understand the figure, so
+	# sending them to an issue about denominators to learn what `prevented` measures would be a line
+	# that misleads, inside the fix for a line that misled.
+	printf 'loop: %s arm(s), %s wake(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing (quince#242).\n' \
 		"$_lt_a" "$_lt_w" "$_lt_p" "$_lt_scope"
 }
 
