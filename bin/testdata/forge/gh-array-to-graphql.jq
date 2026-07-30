@@ -25,6 +25,12 @@
 # `gh` would have delivered it, so a fixture asserting what happens to an unresolved author is
 # asserting something real. Emitting `null` here would make that fixture vacuous.
 #
+# AN UNCONCLUDED CHECK IS THE SAME SHAPE ONE FIELD OVER (quince#247): `gh` renders a check still in
+# flight as `conclusion: ""`, GraphQL as `null`. Mapped back to null here for the identical reason, so
+# a recorded payload carrying a pending check reaches the shaping the way `gh` would have delivered
+# it. Without this the round trip would silently "fix" the pending case and the equivalence suite
+# would stop being able to see it.
+#
 # The empty string used to be a live defect as well — the shaping read `.login // "unknown"` and an
 # empty string is TRUTHY in jq, so it yielded `actor=`. Fixed in the shaping (quince#199), where it
 # belonged; `bin/testdata/forge/unresolved-commit-author-is-unknown.json` is the fixture that rides
@@ -45,5 +51,7 @@
               authors: {nodes: [ (.authors // [])[] |
                          {user: (if (.login // "") == "" then null else {login: .login} end)} ]}}} ]},
   rollup: {nodes: [ {commit: {statusCheckRollup: {contexts: {nodes:
-            [ (.statusCheckRollup // [])[] | {__typename: "CheckRun", name, conclusion} ]}}}} ]}
+            [ (.statusCheckRollup // [])[] |
+              {__typename: "CheckRun", name,
+               conclusion: (if (.conclusion // "") == "" then null else .conclusion end)} ]}}}} ]}
 } ]}}}}

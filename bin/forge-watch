@@ -1606,6 +1606,23 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
 # `actor=`; it now pipes through `or_unknown`, which treats `null` and `""` alike. So this line
 # still reproduces what `gh` emits — that is its job — and nothing downstream depends on the empty
 # string meaning anything.
+#
+# A CHECK THAT HAS NOT CONCLUDED IS `""` HERE TOO, AND FOR THE SAME REASON (quince#247). `gh pr list
+# --json statusCheckRollup` renders an in-flight check as `conclusion: ""`; GraphQL gives `null`. The
+# `// ""` on both rollup branches maps it back, so the two paths agree — the `StatusContext` branch
+# gets it as well, on the same argument, even though no such row was ever observed in either repo.
+#
+# IT WAS FOUND BY A SUITE GOING RED, WHICH IS THE PART WORTH KEEPING. `forge-fetch-equivalence-test`
+# compares the shaped observation of both paths, so `conclusion: null` vs `""` failed it — but ONLY
+# while some PR in the window had a check in flight. Green when CI is idle, red when it is busy: a
+# flake's exact signature, and the most expensive possible disguise on a project that has spent days
+# chasing real ones. Measured 2026-07-29 on quince#235 with three checks IN_PROGRESS.
+#
+# BENIGN FOR EVENTS, and that was checked rather than assumed: the only consumer is the `checks` event
+# at :496-498, which selects `conclusion == "FAILURE"` and then compares against the stored previous
+# value, so a pending→FAILURE transition fires on BOTH spellings and no event differs. What was
+# actually wrong is that a suite whose whole claim is "the shaped observation is identical" carried a
+# standing failure — and a suite with a known-red assertion is one nobody reads the output of.
 FETCH_NORMALISE='
 def merged_by: if . == null then null
                elif .__typename == "Bot" then {login: ("app/" + .login)}
@@ -1620,8 +1637,8 @@ def author:    if . == null then null else {login: .login} end;
     commits:  [ .commits.nodes[]  | {committedDate: .commit.committedDate,
                                      authors: [ .commit.authors.nodes[] | {login: (.user.login // "")} ]} ],
     statusCheckRollup: [ (.rollup.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
-                         | if .__typename == "CheckRun" then {name, conclusion}
-                           else {name: .context, conclusion: .state} end ]
+                         | if .__typename == "CheckRun" then {name, conclusion: (.conclusion // "")}
+                           else {name: .context, conclusion: (.state // "")} end ]
   } ]'
 
 tick() {

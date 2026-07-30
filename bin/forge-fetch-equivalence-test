@@ -21,8 +21,16 @@
 # WHAT IT CAUGHT, twice, in opposite directions, and neither was visible by reading the code:
 # `gh` renders a Bot actor as `app/quince-review` for `mergedBy` and as bare `quince-review` for
 # comment and review authors. Normalising both the same way — either way — silently reclassifies
-# every App act, and `wake_worthy` filters on actor names. A sampled test would have missed it on
-# most PRs; the exhaustive one failed on 83 cutoffs and then on 17.
+# every App act. A sampled test would have missed it on most PRs; the exhaustive one failed on 83
+# cutoffs and then on 17.
+#
+# THAT SENTENCE USED TO END "and `wake_worthy` filters on actor names", WHICH IS FALSE. Measured
+# 2026-07-30: `actor` is printed and shaped and reaches no decision anywhere — `wake_worthy` filters
+# on event KINDS, `wake_filter` on BRANCH ownership (quince#111). The reason to preserve the asymmetry
+# is the equivalence itself, which is this suite's whole subject, not a downstream filter. The same
+# false claim sat in `forge-watch`'s FETCH_NORMALISE note and is corrected there by quince#222's PR;
+# it is fixed here too because leaving a known-false justification in a file being edited is worse
+# than the duplication.
 #
 # NETWORK IS REQUIRED, so a box without a usable wrapper SKIPS and says so. It must never pass by
 # omission — quince#41 is a gate that reported clean having checked nothing, and this suite is
@@ -86,6 +94,88 @@ if [ -z "$QUERY" ] || [ -z "$NORMALISE" ] || [ -z "$NCOM" ]; then
 	printf '\nforge-fetch-equivalence-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
 	exit 1
 fi
+
+# --- SYNTHETIC ROUND TRIPS, before the network gate ------------------------------------------------
+# THE LIVE COMPARISON CAN ONLY SEE A FIELD THAT HAPPENS TO BE PRESENT IN THE WINDOW, and quince#247 is
+# what that costs: an in-flight check is `conclusion: ""` in `gh` and `null` in GraphQL, so the
+# `shaped observation identical` assertion failed — but ONLY while some PR had CI running. Green when
+# idle, red when busy. That is a flake's exact signature, and on the day it was found the *same* suite
+# passed under the pre-fix tool twenty minutes later because nothing was running.
+#
+# So the spellings that must round-trip are asserted DETERMINISTICALLY here, with no network and no
+# dependence on what the forge happens to be doing. These run on every box, including one that must
+# skip everything below.
+#
+# THE DIRECTION MATTERS, and the first version of this block got it wrong in a way worth recording.
+# It fed a `gh`-shaped payload through the inverter and back through FETCH_NORMALISE and asserted the
+# field survived. That is a CLOSED LOOP: the inverter and the normaliser are mutual inverses, and the
+# PRE-FIX pair round-tripped `""` just as happily as the fixed pair, so the assertion passed against
+# the very defect it was written for. Caught by running it against the pre-fix tool — the control is
+# the only reason it is not still vacuous.
+#
+# What diverges is not the loop but the two SOURCES: the real GraphQL API answers `null` where `gh`
+# answers `""`. So the assertion has to start from a GRAPHQL-shaped payload — what the API really
+# sends — and require the normaliser to produce what `gh` would have. One direction, no inverter.
+#
+# It reuses `$NORMALISE`, already extracted from the tool above by shape, rather than re-extracting: a
+# second extraction mechanism in one file is the drift this suite exists to prevent, one level down.
+RT=$(mktemp -d)
+NORM="$RT/normalise.jq"
+printf '%s\n' "$NORMALISE" >"$NORM"
+
+if [ ! -s "$NORM" ]; then
+	bad "could not write FETCH_NORMALISE to a file — the assertions below would be vacuous"
+else
+	# <name> <graphql-shaped-payload-file> <jq-path> <expected-json>
+	normalises() {
+		_n_got=$(jq -f "$NORM" "$2" | jq -c "$3")
+		if [ "$_n_got" = "$4" ]; then
+			ok "normalises $1"
+		else
+			bad "normalises $1 WRONGLY" "want $4 / got $_n_got"
+		fi
+	}
+	gql() { # write a GraphQL-shaped one-PR envelope with the rollup/commit bits substituted
+		cat >"$RT/gql.json" <<GQL
+{"data":{"repository":{"pullRequests":{"nodes":[{
+  "number":1,"state":"OPEN","updatedAt":"2026-07-30T03:00:00Z","title":"t","headRefName":"b",
+  "mergedAt":null,"mergeStateStatus":"BLOCKED","mergedBy":null,
+  "closingIssuesReferences":{"nodes":[]},"comments":{"nodes":[]},"reviews":{"nodes":[]},
+  "commits":{"nodes":[{"commit":{"committedDate":"2026-07-30T02:59:00Z","authors":{"nodes":[$1]}}}]},
+  "rollup":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[$2]}}}}]}
+}]}}}}
+GQL
+	}
+
+	# quince#247. The real API sends `conclusion: null` for a check still in flight; `gh` sends `""`.
+	# The normaliser must produce what `gh` would have, or the two fetch paths disagree exactly while
+	# CI is busy — which is why the live comparison below could only see this some of the time.
+	gql '{"user":{"login":"x"}}' '{"__typename":"CheckRun","name":"gates","conclusion":null},{"__typename":"CheckRun","name":"image","conclusion":"SUCCESS"}'
+	normalises "an UNCONCLUDED check as \"\" (quince#247)" "$RT/gql.json" \
+		'.[0].statusCheckRollup' '[{"name":"gates","conclusion":""},{"name":"image","conclusion":"SUCCESS"}]'
+
+	# A StatusContext row takes the same treatment, on the same argument. No such row was ever observed
+	# in either repository, so this is the one case here asserted from the shape rather than a sighting.
+	gql '{"user":{"login":"x"}}' '{"__typename":"StatusContext","context":"legacy","state":null}'
+	normalises "an unconcluded StatusContext as \"\" (unobserved, by symmetry)" "$RT/gql.json" \
+		'.[0].statusCheckRollup' '[{"name":"legacy","conclusion":""}]'
+
+	# quince#199's neighbour, and the control for the two above: an unresolved commit author arrives as
+	# `user: null` and must become `""`, NOT "unknown" — `or_unknown` in the shaping is what makes it
+	# `unknown`, one layer up. If this ever returns "unknown" the normaliser has absorbed a job that
+	# belongs elsewhere and the fixtures that ride this path go vacuous.
+	gql 'null' ''
+	normalises "an unresolved commit author as \"\" (quince#199)" "$RT/gql.json" \
+		'.[0].commits[0].authors' '[{"login":""}]'
+
+	# The negative control: a CONCLUDED check and a RESOLVED author must pass through untouched, or the
+	# three above would pass just as well against a normaliser that blanked everything.
+	gql '{"user":{"login":"someone"}}' '{"__typename":"CheckRun","name":"gates","conclusion":"FAILURE"}'
+	normalises "a concluded check and a resolved author untouched (the control)" "$RT/gql.json" \
+		'[.[0].statusCheckRollup, .[0].commits[0].authors]' \
+		'[[{"name":"gates","conclusion":"FAILURE"}],[{"login":"someone"}]]'
+fi
+rm -rf "$RT"
 
 # A wrapper that can actually reach the forge. Never gh-bot: it is the implementer identity and this
 # is a read-only comparison that any reading seat can make.
