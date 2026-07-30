@@ -53,7 +53,7 @@
     ]
   },
   "expect_events": [
-    "event=updated pr=401 at=2026-07-30T09:40:00Z actor=quince-coder kind=commit",
+    "event=updated pr=401 at=2026-07-30T09:40:00Z actor=quince-coder kind=commit committer=quince-coder",
     "event=updated pr=402 at=2026-07-30T07:00:00Z actor=quince-coder kind=comment",
     "event=updated pr=403 at=2026-07-30T09:40:00Z actor=novkostya kind=comment",
     "event=updated pr=404 at=2026-07-30T09:40:00Z actor=quince-review kind=review",

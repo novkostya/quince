@@ -1,0 +1,281 @@
+#!/bin/sh
+# forge-watch-actor-test — `event=updated` caused by this seat must not wake it, and everything the
+# seat cannot positively account for must (quince#242, step 3, the actor arm).
+#
+# THE THREE SPELLINGS ARE THE POINT OF THIS FILE. Measured against a live state file: the same App
+# appears as `quince-coder` (review/comment author), `quince-coder[bot]` (commit committer) and
+# `app/quince-review` (mergedBy, in gh's rendering). A comparison against the bare login — the
+# obvious one, and the literal form of the ruling — matches reviews and comments and misses every
+# push. It would have shipped, passed review and suppressed almost nothing. Every scenario below
+# uses a DIFFERENT spelling on purpose; a suite that used one would prove the arm works for one.
+#
+# THE NEGATIVE CASES ARE THE VALUABLE HALF. Suppression is a promise not to wake, so each one is a
+# chance to lose an event permanently, and the failure is invisible from the inside — nothing
+# happens, which is also what a quiet forge looks like. `unattributed`, another seat, another
+# runner's branch, an unknown branch and `kind=commit` are all here for that reason.
+#
+# Synthetic and hermetic: a stub `gh` returning a fixed queue, no network, no credential.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=actor-test-session
+REPO=novkostya/quince
+
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+
+FORGE_SEATS_FILE=$WORK/seats
+export FORGE_SEATS_FILE
+printf '# fixture seats for forge-watch-actor-test\nr1\n' >"$FORGE_SEATS_FILE"
+
+STUB_INVERSE="$PWD/bin/testdata/forge/gh-array-to-graphql.jq"
+export STUB_INVERSE
+[ -f "$STUB_INVERSE" ] || {
+	printf 'forge-watch-actor-test: missing %s\n' "$STUB_INVERSE" >&2
+	exit 1
+}
+
+# `$WORK/turn` selects WHO moved PR 601 and HOW. Every turn moves `updatedAt` to the same later
+# value, so the events differ only in their attribution — which is the variable under test.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+up=2026-07-30T10:00:00Z
+acts='[]'
+case "$turn" in
+2) up=2026-07-30T12:00:00Z
+   acts='[{"createdAt":"2026-07-30T11:30:00Z","author":{"login":"quince-coder"}}]' ;;
+3) up=2026-07-30T12:00:00Z
+   acts='[{"createdAt":"2026-07-30T11:30:00Z","author":{"login":"quince-review"}}]' ;;
+4) up=2026-07-30T12:00:00Z
+   acts='[{"createdAt":"2026-07-30T11:30:00Z","author":{"login":"novkostya"}}]' ;;
+5) up=2026-07-30T12:00:00Z ;;
+esac
+cat <<ROW | jq -f "$STUB_INVERSE"
+[{"number":601,"state":"OPEN","updatedAt":"$up","title":"t","headRefName":"r1/mine",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":$acts,"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"},
+ {"number":602,"state":"OPEN","updatedAt":"2026-07-30T10:00:00Z","title":"t","headRefName":"r2/theirs",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB
+chmod +x "$WORK/gh"
+export STUB_WORK="$WORK"
+
+./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf '  FAIL could not declare a runner name\n'
+	exit 1
+}
+STATE=$(./bin/forge-watch runner path)/novkostya-quince.state.json
+
+# A coder key makes `owed_role` say `implementer`; the architect PAT says `architect`. Both seats are
+# exercised, because the arm is DIFFERENT on each and the difference is the part quince#292 proved a
+# filter can get exactly backwards.
+#
+# THE ARCHITECT SEAT IS SELECTED BY THE LEGACY PAT and not the review App key, which is a note about
+# a different PR rather than a preference: `owed_role` on `main` does not branch on the review key at
+# all, so the PAT is the only credential that resolves to `architect` today. quince#299 fixes that;
+# this suite deliberately does not depend on it, so the two can land in either order.
+seat() {
+	rm -f "$QUINCE_CODER_KEY_FILE" "$QUINCE_REVIEW_KEY_FILE" "$QUINCE_ARCH_TOKEN_FILE"
+	case "$1" in
+	implementer) printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE" ;;
+	architect) printf 'a credential\n' >"$QUINCE_ARCH_TOKEN_FILE" ;;
+	esac
+}
+run_watch() {
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+baseline() {
+	rm -f "$STATE"
+	run_watch 1 3
+}
+woke() { grep -q 'EXITING on the event' "$WORK/out"; }
+
+# (1) IMPLEMENTER, its own comment on its own branch: printed, not woken.
+seat implementer
+baseline
+run_watch 2 4
+if grep -q 'event=updated pr=601' "$WORK/out"; then
+	ok "the self-caused update is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected event=updated pr=601 to be printed"
+	sed -n '1,8p' "$WORK/out"
+fi
+if woke; then
+	bad "implementer woke on its own comment on its own branch"
+	sed -n '1,8p' "$WORK/out"
+else
+	ok "implementer: its own act on its own branch does NOT wake it"
+fi
+if grep -q 'note: 1 event(s) suppressed as caused by this seat' "$WORK/out"; then
+	ok "the suppression is REPORTED, not silent"
+else
+	bad "no note — a suppression nobody can see is indistinguishable from a missed event"
+fi
+
+# (2) IMPLEMENTER, the ARCHITECT's act on its branch: this is the event the seat exists to receive.
+baseline
+run_watch 3 6
+if woke; then
+	ok "implementer: the architect acting on my branch WAKES me"
+else
+	bad "suppressed another seat's act — the event this whole subsystem exists to deliver"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (3) IMPLEMENTER, a HUMAN's act: same rule, different name. The Operator is not this seat.
+baseline
+run_watch 4 6
+if woke; then
+	ok "implementer: the Operator acting on my branch WAKES me"
+else
+	bad "suppressed a human's act"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (4) `actor=unattributed` — a label change, a title edit, a base change. The tool is saying it
+# CANNOT TELL, and that is not a name. Unknown wakes, the same rule the ownership filter follows.
+baseline
+run_watch 5 6
+if woke; then
+	ok "unattributed WAKES — cannot-tell is never read as this seat"
+else
+	bad "treated 'unattributed' as an identity and suppressed it"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (5) ARCHITECT, its own act: suppressed with NO branch test, because reviewing other runners'
+# branches is the entire job and one arch seat exists.
+seat architect
+baseline
+run_watch 3 4
+if woke; then
+	bad "architect woke on its own act"
+	sed -n '1,8p' "$WORK/out"
+else
+	ok "architect: its own act does NOT wake it, on any branch"
+fi
+
+# (6) ARCHITECT, the IMPLEMENTER's act: wakes. The control for (5) — without it, (5) would pass
+# against an arm that suppressed everything.
+baseline
+run_watch 2 6
+if woke; then
+	ok "architect: an implementer push WAKES it (the control for the branch-free arm)"
+else
+	bad "architect suppressed the implementer's act"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (7) NO IDENTIFIABLE ROLE: suppress nothing. quince#292 is the precedent — the same box, the same
+# `owed_role`, and a filter that fell back to silence instead of noise.
+seat none
+baseline
+run_watch 2 6
+if woke; then
+	ok "an unidentifiable role suppresses NOTHING — fails open, as quince#292 requires"
+else
+	bad "suppressed on a box that cannot say which seat it is"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# --- THE PUSH CASES, WHICH ARE THE POINT OF THE WHOLE ARM ---------------------------------------
+#
+# A push is the implementer's commonest self-caused update, and its `actor` is the ONE attribution
+# this project has already filed as wrong (quince#222): a rebase replays the original authorship, so
+# `gh pr update-branch --rebase` from the arch box on my branch emits `actor=quince-coder[bot]` —
+# my login, another seat's act. quince#216 is the recorded instance, and `CLAUDE.md` §5 makes that
+# rebase the merging seat's standing duty, so it is routine rather than rare.
+#
+# THE DISCRIMINATOR IS `committer=`, measured on this box's live state file before the arm was built:
+#
+#   actor=quince-coder[bot]  committer=quince-coder[bot]   my own push          -> suppress
+#   actor=quince-coder[bot]  committer=quince-review[bot]  the architect rebase -> WAKE
+#
+# The two scenarios below are those two lines. Nothing else in this file can tell the arm apart from
+# one that reads `actor` alone, which is why they are the last and largest section.
+#
+# THEY ALSO EXERCISE THE `[bot]` SPELLING, which the earlier scenarios do not reach: a comment author
+# is the bare login and a commit committer carries the suffix. An arm that normalised only one of
+# them would pass everything above and fail exactly here.
+push_stub() { # <committer-login>
+	cat >"$WORK/gh2" <<STUB2
+#!/bin/sh
+turn=\$(cat "\$STUB_WORK/turn" 2>/dev/null || printf 1)
+up=2026-07-30T10:00:00Z
+commits='[]'
+if [ "\$turn" = 2 ]; then
+  up=2026-07-30T12:00:00Z
+  commits='[{"committedDate":"2026-07-30T11:30:00Z","authors":[{"login":"quince-coder[bot]"}],"committer":"$1"}]'
+fi
+cat <<ROW | jq -f "\$STUB_INVERSE"
+[{"number":601,"state":"OPEN","updatedAt":"\$up","title":"t","headRefName":"r1/mine",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":\$commits,
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB2
+	chmod +x "$WORK/gh2"
+	rm -f "$STATE"
+	printf 1 >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh2" --no-issues --interval 1 --max-wait 3 >"$WORK/out" 2>&1 || true
+	printf 2 >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh2" --no-issues --interval 1 --max-wait 6 >"$WORK/out" 2>&1 || true
+}
+
+# (8) THE FIELD SURVIVES THE ROUND TRIP AT ALL. This is not ceremony: `gh-array-to-graphql.jq` DROPPED
+# `committer`, so every stub and every recorded fixture reached the shaping with `committer: ""` —
+# indistinguishable from an unresolvable committer, and invisible to the equivalence suite whose
+# subject is that this conversion is exact. Both scenarios below would have passed vacuously, one by
+# accident and one for the wrong reason. Assert the wire before asserting the decision.
+seat implementer
+push_stub 'quince-coder[bot]'
+if grep -q 'actor=quince-coder\[bot\] kind=commit committer=quince-coder\[bot\]' "$WORK/out"; then
+	ok "event=updated carries committer= for a commit (the field reaches the filter at all)"
+else
+	bad "no committer= on the event — the two scenarios below prove nothing"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (9) MY OWN PUSH: committer == actor == me. Suppressed.
+if woke; then
+	bad "implementer woke on its own push to its own branch — the arm's main case"
+	sed -n '1,8p' "$WORK/out"
+else
+	ok "implementer: its own push (committer == actor) does NOT wake it"
+fi
+
+# (10) THE ARCHITECT'S REBASE OF MY BRANCH: my login in actor, theirs in committer. WAKES.
+#
+# THIS IS THE ASSERTION THE WHOLE DESIGN TURNS ON. An arm reading `actor` alone suppresses this, and
+# the session then stops waking on the single most routine thing done to its branches — silently,
+# because a suppressed event and a quiet forge look identical from the inside.
+push_stub 'quince-review[bot]'
+if grep -q 'committer=quince-review\[bot\]' "$WORK/out" && woke; then
+	ok "implementer: another seat's REBASE of my branch WAKES me (quince#222 cannot bite)"
+else
+	bad "suppressed a rebase by another seat — the arm is reading actor alone"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+printf '\nforge-watch-actor-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

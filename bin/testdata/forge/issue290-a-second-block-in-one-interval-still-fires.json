@@ -31,7 +31,7 @@
     ]
   },
   "expect_events": [
-    "event=updated pr=601 at=2026-07-30T11:01:30Z actor=quince-coder kind=commit",
+    "event=updated pr=601 at=2026-07-30T11:01:30Z actor=quince-coder kind=commit committer=quince-coder",
     "event=review pr=601 count=1 verdict=CHANGES_REQUESTED",
     "event=review-answered pr=601 blocked_at=2026-07-30T11:01:00Z by=quince-review via=commit"
   ]
