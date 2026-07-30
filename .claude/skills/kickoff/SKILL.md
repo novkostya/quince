@@ -120,7 +120,10 @@ git clone https://github.com/novkostya/quince.git "$SCRATCH"/quince && cd "$SCRA
 git config user.name  "quince-coder[bot]"
 git config user.email "310563582+quince-coder[bot]@users.noreply.github.com"
 git config credential.https://github.com.helper "$PWD/bin/git-coder --credential-helper"
-git checkout -b <qn.N|pr.N>/<short-title>
+# `$RUNNER/`, not the topic alone (quince#230). The prefix is what `wake_filter` prefix-matches to
+# decide whose event an update is, so a branch without it cannot be attributed to any session.
+# `$RUNNER` is already in hand three lines up — use it rather than retyping the name.
+git checkout -b "$RUNNER"/<short-title>
 ```
 
 **The guard is not ceremony.** `runner get` exits non-zero and prints nothing when undeclared, so

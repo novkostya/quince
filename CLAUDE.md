@@ -56,8 +56,26 @@ repo is not a message bus, and no human is an RPC layer.
 1. **One issue or rung → several small PRs, each carrying ONE reviewable claim.** Review
    is triggered early and often; a PR nobody can review in one sitting is mis-scoped.
 2. **Fresh clone per unit of work.** `git clone https://github.com/novkostya/quince.git`
-   into a scratch dir, branch `<rung-or-pr>/<short-title>`. No worktrees, no long-lived
-   checkout, no rsync from a workstation.
+   into a scratch dir, branch **`<runner>/<short-title>`** — the runner name this session declared,
+   then the topic. No worktrees, no long-lived checkout, no rsync from a workstation.
+
+   **The prefix is LOAD-BEARING, not stylistic: it is what `forge-watch`'s `wake_filter` reads**
+   to decide whether an event belongs to this session or to another runner on the same box
+   (quince#174). `b` is the branch and the test is a prefix match, so a branch that does not carry
+   its runner's name cannot be attributed to anyone. **Do not "tidy" this back to a topic-only
+   name.** This line said `<rung-or-pr>/<short-title>` until quince#230, two lines from `/kickoff`
+   printing the same thing and from the tool printing *"this session owns branches `r4/…`"* — and
+   five of six PRs open on one afternoon carried no runner prefix, so a live guard was resting on a
+   habit. It survived only because its failure mode is the harmless one: an unattributable branch
+   makes `wake_filter` fail **open**, which looks like ordinary noise. A prefix filter in a
+   fail-*closed* position — `owed`, as proposed on quince#227 — would have reported nothing owed
+   for every one of them.
+
+   **It is not a trade against readability.** `r4/pr-title-refs-usage-exits` is runner-prefixed
+   *and* topic-readable; the prefix is one short token and the title follows it unharmed.
+
+   **Going forward only.** Branches already open under the old convention are not migrated —
+   `quince-devlog#127` is one and is deliberately stranded (devlog#129).
 3. **Gates run on a container host, never on the driving workstation** (`deploy/dev.md`):
    `make gates` / `make image` / `make gates-ui-e2e`, each inside a pinned toolchain
    container. A gate that seems to need a tool installed locally means you are in the

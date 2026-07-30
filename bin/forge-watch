@@ -2973,6 +2973,31 @@ status)
 				[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another declared runner (%s) — their events are printed but do NOT wake this watch.\n' \
 					"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')"
 			fi
+			# AND THE BRANCHES THAT BELONG TO NOBODY (quince#230). `wake_filter` decides ownership by
+			# PREFIX-MATCHING the branch against declared runner names, so a branch carrying none of
+			# them cannot be attributed to any session — and that failure is SILENT because it fails
+			# OPEN: no prefix matches, the suppression is never taken, and the event wakes every
+			# watch. It reads as ordinary noise, which is why a live guard sat on an undocumented
+			# convention until five of six open PRs turned out to lack the prefix.
+			#
+			# REPORTED, NOT REFUSED, deliberately: quince#230's ruling asks for visibility first and
+			# leaves escalation to a later change. Rung 1 of anything is make it visible.
+			#
+			# Counted against EVERY declared name including this session's own, and OUTSIDE the
+			# `-s "$_rot"` gate above. A one-runner box has no other name to compare against, but its
+			# branches still decide whether attribution works the day a second runner appears —
+			# gating this on another runner already existing would hide it exactly while it is
+			# cheapest to fix.
+			_ran=$(mktemp)
+			{ printf '%s\n' "$_rn"; cat "$_rot" 2>/dev/null || true; } >"$_ran"
+			_ucnt=$(jq -r --rawfile names "$_ran" '
+				($names | split("\n") | map(select(length > 0) | . + "/")) as $t
+				| [(.prs // [])[] | select(.branch != null) | . as $pr
+				   | select(any($t[]; . as $p | ($pr.branch | startswith($p))) | not)] | length' \
+				"$_rs" 2>/dev/null || printf 0)
+			[ "$_ucnt" = 0 ] || printf 'note: %s PR(s) on this record carry NO declared runner prefix — nothing can attribute them, so their events wake EVERY watch (quince#230). Name new branches <runner>/<short-title>.\n' \
+				"$_ucnt"
+			rm -f "$_ran"
 			rm -f "$_rot"
 		fi
 		return "${_rrc:-0}"
