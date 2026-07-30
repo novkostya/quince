@@ -102,6 +102,51 @@ coverage list was one word. `0` answers *did anything match*; only the list answ
 anything looked at*, and this project has already been bitten once by a gate whose satisfied
 answer could not be distinguished from a gate that never ran.
 
+## 2b. Closing-keyword sweep — TWO surfaces, and quoting the trap is itself an instance
+
+**A closing keyword next to a bare `#N` auto-closes that issue on merge, and GitHub's parser is not
+negation-aware.** Writing *"does not close #N"* links the PR as closing `#N`. So does explaining the
+bug in a commit message.
+
+Sweep both surfaces, in the same shape as the privacy sweep above — that gate already got this right
+and this one should not have to relearn it:
+
+```sh
+KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}#[0-9]+'
+git log --format=%B origin/main...HEAD | grep -inE "$KW"   # the commit messages
+grep -inE "$KW" "$BODY"                                    # the PR body
+```
+
+Whatever either one prints, you either meant it or you did not — decide deliberately.
+
+**`closingIssuesReferences` is NECESSARY AND NOT SUFFICIENT.** It reflects the **PR body only**. A
+commit message landing on the default branch closes issues too, and with `--rebase` every commit
+message is in scope rather than just the merge subject. Measured: a PR whose body had been cleaned
+still closed the issue on merge, from the message of the commit that did the cleaning, while
+`closingIssuesReferences` read `[]` throughout.
+
+**What is measured safe** — 2026-07-30, on a live open PR, body edited and re-read:
+
+| form | links? |
+| --- | --- |
+| the keyword beside a bare `#N` in prose | **yes**, including inside *"does not …"* |
+| the same in a commit message | **yes**, and invisible to `closingIssuesReferences` |
+| backticked inline, or inside a fenced block | **no** |
+| repo-qualified — the keyword beside `quince#N` | **no** |
+
+Two consequences, and the second surprises people:
+
+- **To quote the trap safely, backtick it or qualify it.** This section does both throughout.
+- **A repo-qualified reference never auto-closes.** The project's own citation convention is
+  inherently safe — and it means a PR written that way must close its issue by hand, or use a bare
+  reference on purpose.
+
+**Knowing the keyword list does not protect you.** Three instances, each by someone who knew: a body
+disclaiming the close; the body of the PR *fixing* that, written by the author of the diagnosis; and
+the commit message of the commit that removed it from that body. Each time the knowledge was aimed at
+the surface that had bitten last. The trap is not the list — it is that **reproducing the offending
+text is itself an instance**, so write about it backticked or qualified, never bare.
+
 ## 3. Deploy + click list (DoD)
 
 **Deploy by default. Don't ask, don't wait to be asked:**
