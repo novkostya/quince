@@ -146,7 +146,7 @@ repo is not a message bus, and no human is an RPC layer.
    timestamp, not an authority (devlog#52).
 7. **Definition of done** — CI green · privacy swept · review approved · a dev-deploy URL
    in the PR · a ≤5-line what-to-click list · a devlog journal entry. The deploy is
-   automatic (`devct deploy`, and `/report` runs it by default), and the URL is the
+   automatic (`make demo`, which is what `/report` runs by default), and the URL is the
    **convention name** — an address never enters PR text. When there is no URL, exactly one
    of two sentences is true and it must be the one written: **`deploy: not applicable — no
    runnable change`** (docs, config, spec) or **`deploy: unavailable — <reason>`** (no
