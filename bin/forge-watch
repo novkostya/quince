@@ -203,8 +203,8 @@ usage: forge-watch <verb>
   nothing. Stated here because it is a decision, and an undocumented decision is indistinguishable
   from an accident (raised in review of quince#87).
 
-events: first-observation · queue-empty · updated · opened · review · checks · mergeability ·
-        merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
+events: first-observation · queue-empty · updated · opened · review · review-answered · checks ·
+        mergeability · merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
         issue-first-observation · issue-updated · issue-comment · issue-closed · issue-reopened ·
         issue-fetch-failed · issue-new · issue-scan-failed
 
@@ -231,6 +231,16 @@ events: first-observation · queue-empty · updated · opened · review · check
   `app/quince-coder`), and a label filter would re-create the declared-set problem one field over.
   `issue-scan-failed` is its unreachable case and does not wake, for the same reason
   `issue-fetch-failed` does not.
+
+  `review-answered` IS THE ONE CONDITION THAT FLIPS WHOSE TURN IT IS WITH NO EVENT OF ITS OWN
+  (quince#282 item 5). A PR you blocked is waiting on the AUTHOR; the instant the author answers it is
+  waiting on YOU, and nothing marks that. The push produces one wake, and a reviewer who is mid-task
+  when it lands never sees it again — quince-devlog#140 sat 1h45m past its fix while five other PRs
+  merged. It fires when the newest verdict is `CHANGES_REQUESTED` and the author has since either
+  pushed or commented, and `via=` says which, because the two want different reading.
+  **A commit only counts when `committer == author`.** `committedDate` is rewritten by a rebase, and
+  `strict: true` here makes a rebase the routine answer to every merge — so a date test alone would
+  claim the author acted on every one of them. GitHub stamps whoever ran `update-branch` as committer.
 
   `updated` is the BACKSTOP: any change to a PR's updatedAt emits it, whether or not a typed
   event also fired. The typed events classify; the backstop guarantees nothing is invisible.
@@ -483,6 +493,53 @@ step() {
 		| ($p.reviews // []) as $new | (($o.reviews // [])) as $was
 		| select(($new | length) > ($was | length))
 		| "event=review pr=\($p.number) verdict=\($new | last | .state)"'
+
+	# review-answered: A PR YOU BLOCKED THAT THE AUTHOR HAS SINCE ANSWERED (quince#282 item 5).
+	#
+	# THE STATE THAT FLIPS OWNERSHIP WITH NO EVENT. `/architect` §6's corollary covers a PR you PARKED
+	# pending someone else's decision — re-examined every tick. This one was not parked: it was waiting
+	# on the AUTHOR, and the instant the author answered it silently became waiting on the REVIEWER,
+	# with nothing marking the transition. The author's push produces one wake; if the reviewer is
+	# mid-task when it lands, that event is consumed by whatever tick sees it first and never
+	# re-surfaces. Measured: quince-devlog#140 sat CHANGES_REQUESTED for 1h45m after the requested
+	# change landed, while five other PRs merged — so the queue was demonstrably being worked.
+	#
+	# `committer == actor` IS THE WHOLE TRICK, and a date test alone is wrong here. `committedDate` is
+	# REWRITTEN by a rebase: on quince#287 a commit authored 17 minutes BEFORE the verdict carried a
+	# committedDate after it, because the merging seat rebased. `strict: true` on this repo makes every
+	# merge put every open PR BEHIND and every one of those is cleared by a rebase (CLAUDE.md §5), so a
+	# date test would announce "the author answered you" on every routine one — a false signal that
+	# says a human acted when none did. GitHub stamps whoever ran `update-branch` as the COMMITTER, so
+	# the two differing is exactly a rebase.
+	#
+	# OR, NOT AND, and it fails OPEN: an author who pushes without commenting is caught by the commit
+	# arm, one who comments without pushing by the comment arm. A false wake costs one re-arm; a missed
+	# one cost 1h45m, and this event exists because that was measured rather than imagined.
+	#
+	# `via=` NAMES WHICH SIGNAL FIRED, because the remedy differs: on quince-devlog#140 it was the
+	# COMMENT, and a reader told only "answered" would go looking for a push that never happened.
+	#
+	# THE TWO ARMS COMPARE DIFFERENT NAMESPACES, AND MIXING THEM WOULD SILENTLY NEVER MATCH. Measured
+	# live 2026-07-30: a commit author renders `quince-coder[bot]` while the PR author and comment
+	# authors render bare `quince-coder` — the same `gh`/GraphQL asymmetry the fetch-equivalence suite
+	# exists to preserve. So the commit arm compares committer to the COMMIT actor (both commit-side,
+	# both suffixed) and the comment arm compares to the PR author (both bare). Comparing a commit
+	# actor to the PR author would be false for every App-authored PR, which is all of them here.
+	printf '%s' "$_now_prs" | jq -r '
+		.[] as $p
+		| ($p.activity // []) as $a
+		| ([$a[] | select(.kind == "review" and .state == "CHANGES_REQUESTED")] | sort_by(.at) | last) as $cr
+		| select($cr != null)
+		# A later verdict of any kind supersedes the block — the reviewer has spoken again, so this is
+		# no longer a PR waiting to be re-read.
+		| select([$a[] | select(.kind == "review" and .at > $cr.at)] | length == 0)
+		| ([$a[] | select(.at > $cr.at and .kind == "commit" and .committer != "" and .committer == .actor)]
+		   | sort_by(.at) | last) as $push
+		| ([$a[] | select(.at > $cr.at and .kind == "comment" and .actor == ($p.author // ""))]
+		   | sort_by(.at) | last) as $said
+		| select($push != null or $said != null)
+		| (if $push != null then "commit" else "comment" end) as $via
+		| "event=review-answered pr=\($p.number) blocked_at=\($cr.at) by=\($cr.actor) via=\($via)"'
 
 	# checks: a FAILURE that was not there before, named. Two deliberate narrowings, both from what
 	# the fixtures encode:
@@ -1639,12 +1696,14 @@ query($owner:String!, $name:String!, $n:Int!, $ncom:Int!) {
       nodes {
         number state updatedAt title headRefName mergedAt mergeStateStatus
         mergedBy { __typename login }
+        author { login }
         closingIssuesReferences(first:20) { nodes { number } }
         comments(last:40) { nodes { createdAt author { login } } }
         reviews(last:40)  { nodes { state submittedAt author { login } } }
         commits(last:$ncom) { nodes { commit {
           committedDate
           authors(first:1) { nodes { user { login } } }
+          committer { user { login } }
         } } }
         rollup: commits(last:1) { nodes { commit { statusCheckRollup {
           contexts(first:50) { nodes {
@@ -1718,11 +1777,13 @@ def author:    if . == null then null else {login: .login} end;
 [ .data.repository.pullRequests.nodes[] | {
     number, state, updatedAt, title, headRefName, mergedAt, mergeStateStatus,
     mergedBy: (.mergedBy | merged_by),
+    author: (.author | author),
     closingIssuesReferences: [ .closingIssuesReferences.nodes[] | {number} ],
     comments: [ .comments.nodes[] | {createdAt,   author: (.author | author)} ],
     reviews:  [ .reviews.nodes[]  | {state, submittedAt, author: (.author | author)} ],
     commits:  [ .commits.nodes[]  | {committedDate: .commit.committedDate,
-                                     authors: [ .commit.authors.nodes[] | {login: (.user.login // "")} ]} ],
+                                     authors: [ .commit.authors.nodes[] | {login: (.user.login // "")} ],
+                                     committer: (.commit.committer.user.login // "")} ],
     statusCheckRollup: [ (.rollup.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
                          | if .__typename == "CheckRun" then {name, conclusion: (.conclusion // "")}
                            else {name: .context, conclusion: (.state // "")} end ]
@@ -1858,10 +1919,26 @@ tick() {
 		merge_state: (.mergeStateStatus // "UNKNOWN"),
 		checks: [(.statusCheckRollup // [])[] | {name, conclusion}],
 		reviews: [(.reviews // [])[] | {state}],
+		# THE AUTHOR of the PR, and the review STATE and commit COMMITTER on the activity entries, are
+		# what quince#282 item 5 needs to answer "has the author acted since the verdict" — recorded
+		# HERE rather than derived later, for the reason `branch` is (quince#111): the pure half runs
+		# against events long after the payload is gone, and a filter that cannot see the fact it
+		# filters on falls back to firing on everything.
+		# (No apostrophes in this block: it is inside a SHELL single-quoted string, so one ends it.)
+		author: (.author.login | or_unknown),
 		activity: (
 			  [(.comments // [])[] | {at: .createdAt,    actor: (.author.login | or_unknown), kind: "comment"}]
-			+ [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login | or_unknown), kind: "review"}]
-			+ [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login | or_unknown), kind: "commit"}]
+			+ [(.reviews  // [])[] | {at: .submittedAt,  actor: (.author.login | or_unknown), kind: "review",
+						  state: (.state // "")}]
+			# `committer` DISCRIMINATES A REBASE FROM AN ANSWER, and nothing else does. `committedDate`
+			# is REWRITTEN by a rebase — measured on quince#287, where a commit authored 17 minutes
+			# BEFORE the verdict carried a committedDate after it, because the merging seat rebased.
+			# With `strict: true` on this repo every merge puts every PR BEHIND and every one is
+			# cleared by a rebase, so a date test alone would announce "the author answered you" on
+			# every routine one. GitHub stamps the actor who ran `update-branch` as the COMMITTER, so
+			# `committer == author` is exact rather than heuristic.
+			+ [(.commits  // [])[] | {at: .committedDate, actor: (((.authors // [])[0]).login | or_unknown), kind: "commit",
+						  committer: (.committer // "")}]
 			+ (if .mergedAt then [{at: .mergedAt, actor: (.mergedBy.login | or_unknown), kind: "merge"}] else [] end)
 		)}]}' "$_raw" >"$_obs" ||
 		die "could not shape the observation for $_repo"
