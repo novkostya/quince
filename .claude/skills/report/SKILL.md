@@ -150,7 +150,7 @@ still closed the issue on merge, from the message of the commit that did the cle
 
 Three consequences, and only the first is obvious:
 
-- **To quote the trap safely, backtick it or qualify it.** This section does both throughout.
+- **To quote the trap safely, backtick it or qualify it.** This section does both throughout — and the gate accepts both in a PR body. **In a COMMIT MESSAGE, only qualification is accepted**: whether the parser honours backticks in raw commit text is unmeasured, so the gate over-fires there on purpose.
 - **A repo-qualified reference never auto-closes.** The project's own citation convention is
   inherently safe — and it means a PR written that way must close its issue by hand, or use a bare
   reference on purpose.
