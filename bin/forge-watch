@@ -580,7 +580,15 @@ step() {
 		# tick that first saw it — the `first-observation` discipline, one event over.
 		| ($old | map(select(.number == $p.number)) | first) as $o
 		| select($o != null)
-		| select(($o | answered) == null)
+		| ($o | answered) as $was
+		# THE KEY IS WHICH BLOCK, NOT MERELY ANSWERED-VS-NOT. Both observations can be answered and
+		# describe DIFFERENT blocks: a reviewer requests changes and the author answers, both inside
+		# one interval, so the predicate is non-null on each side and a null-vs-non-null test sees no
+		# transition and says nothing. That is a MISSED wake — the expensive direction, where a
+		# spurious one costs a drain and a missing one costs a review that never happens. Not
+		# hypothetical: the only two-verdicts-in-one-interval case in this project was 79 s apart,
+		# well inside a 90 s tick.
+		| select($was == null or $was.blocked_at != $now.blocked_at)
 		| "event=review-answered pr=\($p.number) blocked_at=\($now.blocked_at) by=\($now.by) via=\($now.via)"'
 
 	# checks: a FAILURE that was not there before, named. Two deliberate narrowings, both from what

@@ -1,0 +1,38 @@
+{
+  "note": "The third of the quince#290 set, and the one that keeps the transition test from over-narrowing. Found in review of the fix: keying the transition on null-vs-non-null means BOTH observations can be answered while describing DIFFERENT blocks — a reviewer requests changes and the author answers, both inside one interval — and nothing fires. That is a MISSED wake, which is the expensive direction: a spurious wake costs one drain, a missing one costs a review that never happens. Not hypothetical — the only two-verdicts-in-one-interval case in this project's history was 79 s apart, well inside a 90 s tick. So the key is the BLOCK, not the boolean: fire when `blocked_at` differs from the one already reported. THE THREE FIXTURES ARE A SET AND NONE IS REDUNDANT: issue282-a-blocked-pr-the-author-answered proves it fires when the condition becomes true, issue290-review-answered-does-not-repeat proves it stays silent while one block persists, and this proves it fires again for a NEW block. The pre-fix code passed the first; the null-vs-non-null fix passed the first two.",
+  "before": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 601, "state": "OPEN", "updatedAt": "2026-07-30T11:00:00Z", "branch": "r4/two-blocks",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T11:00:00Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T11:00:30Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" }
+        ]
+      }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      {
+        "number": 601, "state": "OPEN", "updatedAt": "2026-07-30T11:01:30Z", "branch": "r4/two-blocks",
+        "merge_state": "BLOCKED", "checks": [], "reviews": [{ "state": "CHANGES_REQUESTED" }, { "state": "CHANGES_REQUESTED" }],
+        "author": "quince-coder",
+        "activity": [
+          { "at": "2026-07-30T11:00:00Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T11:00:30Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" },
+          { "at": "2026-07-30T11:01:00Z", "actor": "quince-review", "kind": "review", "state": "CHANGES_REQUESTED" },
+          { "at": "2026-07-30T11:01:19Z", "actor": "quince-coder", "kind": "commit", "committer": "quince-coder" }
+        ]
+      }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=601 at=2026-07-30T11:01:30Z actor=quince-coder kind=commit",
+    "event=review pr=601 verdict=CHANGES_REQUESTED",
+    "event=review-answered pr=601 blocked_at=2026-07-30T11:01:00Z by=quince-review via=commit"
+  ]
+}
