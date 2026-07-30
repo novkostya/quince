@@ -3469,7 +3469,18 @@ runner)
 			for _rsa_e in /proc/[0-9]*/environ; do
 				[ -r "$_rsa_e" ] || continue
 				_rsa_seen=$((_rsa_seen + 1))
-				_rsa_env=$(tr '\0' '\n' <"$_rsa_e" 2>/dev/null || true)
+				# THE BRACES ARE THE FIX, and `2>/dev/null` alone was never one (quince#279). The
+				# message does not come from `tr`: the SHELL performs `<"$_rsa_e"` before exec, so a
+				# failed open is reported on the SHELL's stderr, which a redirection attached to `tr`
+				# cannot cover. `|| true` catches the status, not the text. Grouping puts the
+				# redirection inside something whose stderr is redirected.
+				#
+				# `-r` above stays and is not the bug. It is a TOCTOU no guard closes: the process is
+				# alive at glob time and at `[ -r ]` time and a ZOMBIE by the time we open — and
+				# reading a zombie's environ returns EPERM, not ENOENT, hence "Permission denied" for
+				# a file that was readable a microsecond earlier. Likeliest exactly here, where
+				# `runner set` probes sessions that are in the middle of exiting.
+				_rsa_env=$( { tr '\0' '\n' <"$_rsa_e"; } 2>/dev/null || true)
 				if printf '%s\n' "$_rsa_env" |
 					grep -qx -e "CLAUDE_CODE_SESSION_ID=$1" -e "QUINCE_SESSION_ID=$1"; then
 					return 0
