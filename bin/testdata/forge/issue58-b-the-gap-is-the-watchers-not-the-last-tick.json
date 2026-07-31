@@ -1,0 +1,23 @@
+{
+  "kind": "watch",
+  "note": "quince#58, and the case the first version of this feature got WRONG. `.last_tick` records ANY tick, including the FOREGROUND CATCH-UP that /kickoff section 6 and /architect section 6 both require immediately before arming — so in the real flow it is seconds old by the time the report renders, while the watcher stopped long before. Measured on the first live run: `tick-overdue` said late=1036s beside an `unreconciled` window FIVE SECONDS wide. Naming an interval precisely and naming the wrong one is worse than not emitting the line, and it is the defect this issue exists to remove, rebuilt inside its own fix. HERE THE TWO DIFFER BY DESIGN, which is the whole point: `last_watcher_tick` is 05:00:00Z and `last_tick` is 05:59:55Z, five seconds before now, exactly as a hand-run catch-up would leave it. `from` must be 05:00:00Z. The sibling fixture cannot catch this — both timestamps are equal there, so it passes under either precedence, which is why one fixture was not enough. `from` is also what `due` is derived from one line above, so after this the two agree by construction.",
+  "state": {
+    "observed": true,
+    "prs": [],
+    "last_tick": "2026-07-28T05:59:55Z",
+    "watch": {
+      "pid": 4242,
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-28T05:00:00Z",
+      "due": "2026-07-28T05:01:00Z"
+    }
+  },
+  "now": "2026-07-28T06:00:00Z",
+  "pid_alive": "no",
+  "expect": [
+    "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-28T05:00:00Z age=3600s reason=no_process",
+    "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued.",
+    "event=tick-overdue due=2026-07-28T05:01:00Z late=3540s interval=60s",
+    "event=unreconciled from=2026-07-28T05:00:00Z to=2026-07-28T06:00:00Z basis=state-diff"
+  ]
+}
