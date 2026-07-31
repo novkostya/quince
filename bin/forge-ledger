@@ -48,36 +48,58 @@ ledger_path() {
 	printf '%s/selfcaused.ledger' "$_lp_d"
 }
 
-# classify — exit 0 if this argv is an act worth recording, and print `<kind>` on stdout.
+# classify — exit 0 if this argv is an act worth recording, and print `<subject> <kind>` on stdout.
 #
-# EXACTLY TWO VERBS, and the narrowness is deliberate: this is consulted by a CREDENTIAL wrapper on
-# every forge call it makes, and the two it matches are the two whose events carry no actor. `pr
-# comment` is not here because the event it produces (`issue-comment`) already carries `actor=`;
-# adding it would be a second mechanism for a problem that has one.
+# FOUR VERBS ACROSS TWO SUBJECTS, and the narrowness is still the rule: this is consulted by a
+# CREDENTIAL wrapper on every forge call it makes, and every verb here produces an event that
+# carries NO actor. That is the whole membership test.
+#
+#   pr review     -> event=review           diffed from two observations; no actor
+#   pr merge      -> event=merged           same
+#   issue close   -> event=issue-closed     `gh issue view` does not report who closed an issue
+#   issue reopen  -> event=issue-reopened   same
+#
+# `pr comment` and `issue comment` are NOT here, and that exclusion is the load-bearing half: the
+# events they produce carry `actor=` and are suppressed by the actor arm instead. Adding them would
+# be a second mechanism for a problem that already has one.
+#
+# THE SUBJECT IS PRINTED, AND NO BEHAVIOUR TODAY DISTINGUISHES ITS PRESENCE (quince#307).
+# Stated plainly because the obvious justification is wrong and I wrote it before measuring:
+# the numbers DO collide — both repositories carry a PR 307 and an issue 307 — but the KIND
+# vocabulary is already disjoint across subjects (`review`/`merged` are PR-only,
+# `issue-closed`/`issue-reopened` are issue-only), so a key of repo+number+kind is already
+# total. Collapsing the subject on both sides leaves the suite at 16/16. Measured, not assumed.
+#
+# It is here for the extension that is one verb away: `pr close` and `pr reopen` are ordinary
+# acts a session performs on its own work, and the moment either joins the vocabulary above,
+# `closed` means two different things and repo+number+kind stops being total. Adding the field
+# then would be a row-format migration under pressure; adding it now costs one word.
 classify() {
-	_cl_seen_pr=no
+	_cl_subject=""
 	_cl_verb=""
 	for _cl_a in "$@"; do
 		case "$_cl_a" in
 		-*) continue ;;
 		esac
 		# `if` rather than `[ … ] && x=yes`: under `set -e` an AND-OR list whose LAST command never
-		# runs still reports the test's failure, so a first word that is not `pr` would exit the
+		# runs still reports the test's failure, so a first word that is neither noun would exit the
 		# whole script instead of returning 1 from this function. It survived a smoke test because
 		# the caller wraps it in `$( … ) || …` and a killed subshell is also non-zero — the failure
 		# and the intended answer are the same exit code, which is what makes it worth avoiding
 		# rather than measuring.
-		if [ "$_cl_seen_pr" = no ]; then
-			if [ "$_cl_a" = pr ]; then _cl_seen_pr=yes; fi
+		if [ -z "$_cl_subject" ]; then
+			if [ "$_cl_a" = pr ] || [ "$_cl_a" = issue ]; then _cl_subject=$_cl_a; fi
 			continue
 		fi
 		_cl_verb=$_cl_a
 		break
 	done
-	[ "$_cl_seen_pr" = yes ] || return 1
-	case "$_cl_verb" in
-	review) printf 'review\n' ;;
-	merge) printf 'merged\n' ;;
+	[ -n "$_cl_subject" ] || return 1
+	case "$_cl_subject/$_cl_verb" in
+	pr/review) printf 'pr review\n' ;;
+	pr/merge) printf 'pr merged\n' ;;
+	issue/close) printf 'issue issue-closed\n' ;;
+	issue/reopen) printf 'issue issue-reopened\n' ;;
 	*) return 1 ;;
 	esac
 }
@@ -111,7 +133,9 @@ parse_target() {
 		-*) continue ;;
 		esac
 		if [ "$_pt_seen_pr" = no ]; then
-			if [ "$_pt_a" = pr ]; then _pt_seen_pr=yes; fi
+			# Either noun. `classify` has already decided this argv is recordable and which subject
+			# it is; this only has to find where the number starts.
+			if [ "$_pt_a" = pr ] || [ "$_pt_a" = issue ]; then _pt_seen_pr=yes; fi
 			continue
 		fi
 		if [ "$_pt_seen_verb" = no ]; then
@@ -163,12 +187,18 @@ record)
 '' | -h | --help | help)
 	cat <<EOF
 usage: $ME record <gh-argv…>   append a row if this argv is a recordable act (silent, always 0)
-       $ME classify <gh-argv…> exit 0 and print the kind if this argv is recordable
+       $ME classify <gh-argv…> exit 0 and print '<subject> <kind>' if this argv is recordable
        $ME path                print this runner's ledger path
 
-Rows are '<owner/name> <pr> <review|merged>'. The reader is forge-watch's selfcaused filter, which
-consumes a row when it suppresses the event it explains. See the header of this file for why the
-ledger covers only the two events that carry no actor.
+Rows are '<owner/name> <number> <pr|issue> <review|merged|issue-closed|issue-reopened>'.
+
+THE SUBJECT FIELD IS THIRD AND WAS ADDED BY quince#307. Rows used to be three fields keyed on the
+number alone, which cannot tell PR 307 from issue 307 — and both repositories have both. The reader
+migrates a three-field row by reading it as subject 'pr', which is what every such row is: nothing
+but PR acts could be recorded before the field existed.
+
+The reader is forge-watch's selfcaused filter, which consumes a row when it suppresses the event it
+explains. See the header of this file for why the ledger covers only events that carry no actor.
 EOF
 	;;
 *)
