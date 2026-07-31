@@ -10,6 +10,7 @@ import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { modelLine } from "@/features/devices/modelName";
 import { PairDialog } from "@/features/devices/PairDialog";
+import { WifiSyncControl } from "@/features/devices/WifiSyncControl";
 import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
@@ -78,10 +79,11 @@ export function DeviceDetailsPage() {
                   encryption: {device.backup_encryption}
                 </Badge>
               ) : null}
-              {/* "unknown" renders nothing, as with the two above. That is the honest state
-                  whenever quince has not read the flag — which today is every REAL device: the
-                  lockdown key is unmeasured until qn.7's hardware spike, so the read refuses to
-                  guess rather than reporting a confident "off". Only --demo shows this badge. */}
+              {/* "unknown" renders nothing, as with the two above — the honest state whenever
+                  quince has not read the flag (an unconfirmed pairing, or a failed read).
+                  This comment used to say the key was unmeasured and only --demo could show the
+                  badge; both went false on 2026-07-31 when the key was measured on hardware and
+                  a real device rendered `Wi-Fi sync: on`, then `off` across a Finder toggle. */}
               {device.wifi_sync !== "unknown" ? (
                 <Badge tone={device.wifi_sync === "on" ? "ok" : "warn"}>
                   Wi-Fi sync: {device.wifi_sync}
@@ -118,6 +120,7 @@ export function DeviceDetailsPage() {
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
                 </Button>
+                <WifiSyncControl device={device} />
               </>
             ) : (
               <PairDialog udid={device.udid} autoOpen={pairIntent} />
