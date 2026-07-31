@@ -188,12 +188,57 @@ creation moment, and notes that *immutable after creation* and *probed at startu
 a dataset remounted as something else.
 
 **They stop disagreeing once "creation" is defined by the storage's own contents rather than by a
-UI event:**
+UI event** — but the storage's contents are **not** enough on their own, and the first version of
+this rule got that wrong. The rule:
 
-> **The first startup that finds a reachable path with no `quince-storage.json` at its root IS
-> that storage's creation moment.** quince probes the backend then, writes the marker, and never
-> probes for selection again. Every later startup and every pre-backup check **reads** the
-> marker and **compares** — it does not re-select.
+> **The first startup that finds a reachable path with no `quince-storage.json` at its root **and
+> no row in `storages` for that config entry** is that storage's creation moment.** quince probes
+> the backend then, writes the marker, and never probes for selection again.
+>
+> **A reachable path with no marker, for a storage the DB already knows, is a MISSING MEDIUM** —
+> refuse, exactly as a mismatched marker refuses. Never re-create, never re-probe.
+>
+> Every later startup and every pre-backup check **reads** the marker and **compares** — it does
+> not re-select.
+
+**The second clause exists because the first clause alone silently writes backups to the system
+disk** (quince#381 review, architect `arch1`). An unmounted mountpoint is a reachable path with no
+marker: `/mnt/backup-disk` is an ordinary readable, empty directory on the root filesystem while
+the disk is unplugged, because the marker is on the disk and the disk is not there. Under
+contents-only the rung would then (1) probe and get **`copy`** rather than the disk's `zfs`,
+(2) write a marker with a **new UUID** into the mountpoint, (3) have that marker **shadowed**
+rather than deleted the moment the real disk mounts over it — so it returns on the next unmount —
+and (4) accept backups **onto the root filesystem**, filling the system disk while the user
+believes they are going to the removable one.
+
+*Wrote to the mountpoint instead of the mount* is a classic, it is silent, and this rung's own
+first sentence names *"a fast internal pool and a removable disk"* as the motivating case. It also
+breaks two rules the *Rule check* clears: the backend comes out `copy` by a **silent downgrade** —
+precisely what gap 4 point 2 refuses when a marker is present and mismatched, with no equivalent
+guard on the absent-marker path — and the storage reports itself created, reachable and healthy
+while the medium is absent, which is a **state-honesty** failure.
+
+**The discriminator was already in the rung and unused.** Story 1 puts a `storages` table in the
+DB and *Rung-ruled decision 4* makes `storage_id` a marker UUID, so **the DB already knows whether
+a storage has ever been created.** *Path reachable, no marker* stops being one state and becomes
+two.
+
+**Keyed on the config entry's `name`, not its `path`** — stated because it is load-bearing. A
+path moves (a disk remounted elsewhere); the name is the stable user-facing label. When the medium
+**is** present the marker is authoritative and reconciles the rest: a known `storage_id` found at a
+new path is a **move**, recorded, not a new storage.
+
+**The residual, stated rather than engineered away.** The very first startup after declaring a
+storage whose medium is absent — no marker *and* no DB row — is still indistinguishable from a
+genuine creation. The rule is therefore accompanied by a written requirement: **declare a storage
+with its medium present.** Closing it mechanically would mean recording an expected filesystem or
+device id at creation and comparing it; that is deliberately **not** in this rung, and is noted in
+*Known gaps* as the thing to cost if the residual ever bites.
+
+**One mitigation is taken, because it costs nothing and the residual is the one silent case left.**
+Creation is a **loud, user-visible event** — logged and surfaced with the path, the probed backend
+and the reason, never an ordinary startup line. A storage that quince believes it just created is
+exactly the thing a user must be able to contradict.
 
 That gives all three of the epic's requirements at once: selection at creation (point 2),
 immutability (bullet 2), and a health check before each use (point 2 again) — without inventing
@@ -203,6 +248,11 @@ It also makes the remount case a **refusal** rather than a silent downgrade. If 
 `zfs` and the probe now says `copy`, quince does not back up to that storage and says exactly
 why. Silently accepting the new backend would write versions the marker misdescribes; silently
 refusing would be a fallback. Neither is permitted.
+
+**And it supplies the companion to `backend: "unknown"` that story 5 was already reaching for.**
+*Known storage, medium absent* is a distinct state from *never yet reached*, which is the
+`unreachable` vs `artifact gone` distinction story 5 exists to make representable — the pieces
+were in the rung and the rule simply had not used them.
 
 ### Reachability is checked, never assumed, and never queued
 
@@ -369,6 +419,9 @@ Each is independently checkable.
 2. **Each storage carries its identity.** `quince-storage.json` written at the creation moment,
    self-checksummed; read and compared at every startup and before every backup; a mismatch
    refuses; a corrupt marker refuses. The new anchored offsite exclude rule ships with it.
+   **Creation requires no marker AND no `storages` row for the config entry** — an absent marker
+   for a storage the DB knows is a **missing medium**, which refuses rather than re-creating.
+   Creation is a loud, user-visible event naming the path, the probed backend and the reason.
 3. **The storage layer resolves a root.** `buildStorage` returns a registry of one `Backend` per
    storage; `Manager` resolves per `(device, storage)`. `layout.go` is unchanged — a diff
    touching it is a finding against this story.
@@ -379,8 +432,11 @@ Each is independently checkable.
    `reachable: false` and a reason, and a backup to a *different* storage is unaffected.
 6. **A backup names a storage.** `POST /api/jobs {storage_id?}` — resolved to `default` when
    omitted, 409 unreachable, 404 unknown; `Job.storage_id` records the resolved concrete storage.
-7. **The pre-backup check.** Reachable, and the probed backend still matches the marker, before
-   any transfer begins. A mismatch is a distinguishable, actionable failure — never a downgrade.
+7. **The pre-backup check.** Reachable, the marker present, and the probed backend still matching
+   it, before any transfer begins. Three distinguishable, actionable failures — **unreachable**,
+   **missing medium** (path readable, marker gone, DB row present) and **backend mismatch** — never
+   a downgrade and never a re-create. `missing medium` is the state that keeps an unplugged disk's
+   mountpoint from being treated as an empty new storage.
 8. **The cost is stated before it is paid.** For a `(device, storage)` pair with no prior version,
    the API reports that the next backup will be full, and the committed version's `kind` is
    `full`.
@@ -401,9 +457,10 @@ Beyond `make gates`.
 | --- | --- | --- | --- |
 | **G1** | 10 | Two temp roots; the replay-transcript harness backs one device up to each. Both commit and verify. `latest/` under A is byte-identical before and after B's commit. **This is quince#378's gate, and it needs no second disk — two directories on one filesystem are two storages.** | CI |
 | **G2** | 8 | A `(device, storage-B)` pair with no prior version reports full **before** start, and the committed version's `kind` is `full`. Asserted on the API answer *and* on the marker, so a UI-only claim cannot pass it. | CI |
-| **G3** | 2 | Marker round-trip; a hash-mismatched marker refuses; a backend-mismatched marker refuses. **And the invisibility claim, asserted rather than assumed**: with `quince-storage.json` present at a fixture root, `reconcileUDIDs` and `scanJournals` return exactly what they returned without it. | CI |
+| **G3** | 2 | Marker round-trip; a hash-mismatched marker refuses; a backend-mismatched marker refuses. **And the invisibility claim, asserted rather than assumed — all four walks, not two**: with `quince-storage.json` present at a fixture root, `reconcileUDIDs`, `scanJournals`, `Scan` and `Verify` each return exactly what they returned without it. `Scan` and `Verify` are invisible *by construction* (they start a level or more below the marker), so their assertions are regression guards against a future refactor that moves either up a level, not discoveries. Stated because the *Rule check* row claims a measurement, and G3 named two walks while the row credited four (quince#381 review). | CI |
 | **G4** | 2 | `PathExcluded("<subdir>/quince-storage.json", AnchoredFilterRules("<subdir>"))` is true, and the two existing rules still behave — the D5a anchoring hazard is re-proven, not trusted. | CI |
 | **G5** | 5 | An unreachable storage (a root made unreadable mid-run) is **listed** with a reason, and a backup to another storage completes. Nothing queues. | CI |
+| **G5b** | 2, 7 | **The unmounted-mountpoint gate.** A storage is created at a fixture root; the root is then emptied to simulate the medium being absent (marker gone, path still readable, DB row present). quince must report **missing medium** and **refuse** — it must NOT re-probe, must NOT write a second marker, and must NOT accept a backup. Asserted on all three, because the failure this guards is silent and its symptom is a full system disk. | CI |
 | **G6** | 4 | A pre-`0006` DB fixture opens; every existing version resolves to the implicit storage; `browse_root` is unchanged for every one of them. | CI |
 | **G7** | 1 | A `config.yml` with no `storages:` key produces exactly one storage at `QUINCE_BACKUPS` and byte-identical behaviour to `main`. The no-regression gate for every deployment in the field. | CI |
 | **G8** | 9 | The selector renders both storages, disables the unreachable one with its reason, and shows the full-transfer warning on the storage that has no prior version. | ui-e2e |
@@ -439,7 +496,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | --- | --- |
 | **Don't improvise architecture** | The four decisions that are not this rung's go to the Operator as `PROPOSED (gap)` blocks with options and recommendations. Each is a recommendation, explicitly not a decision. Nothing is built on a pending proposal. |
 | **Contracts are stop-and-ask** | Gaps 1, 2 and 3 are contract surfaces (§2, §1/§2, §6); gap 4 is storage semantics (design §5). **No code lands before the verdicts.** |
-| **Never mutate a committed version** | **The rung's sharpest near-miss, and it is answered by measurement rather than by argument.** `quince-storage.json` is written into a root that already holds committed versions. It sits above every device dir, hence above every version; interface facts 5 and 6 name the four walks it is invisible to and the one rule that would otherwise have shipped it offsite. G3 asserts the invisibility rather than assuming it. `latest/` is still changed only by the marker-guarded exchange, under each root independently. |
+| **Never mutate a committed version** | **The rung's sharpest near-miss, and it is answered by measurement rather than by argument.** `quince-storage.json` is written into a root that already holds committed versions. It sits above every device dir, hence above every version; interface facts 5 and 6 name the four walks it is invisible to and the one rule that would otherwise have shipped it offsite. **G3 asserts all four** — two by observation (`reconcileUDIDs`, `scanJournals`) and two as regression guards over paths that are invisible by construction (`Scan`, `Verify`), which is stated in G3 rather than left as an unqualified "measured". `latest/` is still changed only by the marker-guarded exchange, under each root independently. |
 | **No silent caps or fallbacks** | A backend/identity mismatch **refuses**; it never downgrades to what it found. An unreachable storage is listed with a reason, never hidden and never queued. The `copy`-backend warning path is unchanged and now fires per storage. |
 | **State honesty** | The full-transfer claim is stated **before** the transfer, from the server's knowledge of prior versions, and G2 asserts it against the committed marker so a UI-only claim cannot pass. `backend: "unknown"` on a storage never yet reached means quince does not know — not a guess. G9 is declared owed with an owner rather than quietly skipped. |
 | **Config tidiness (D12)** | Storages live in `config.yml` with defaults and no secrets; the empty-list default reproduces today's behaviour exactly (G7). **Near-miss, declared:** a storage-list change needs a **restart**, which D12 permits only if the spec says why — gap 3 says why, and *Rung-ruled decisions* #1 records it. |
@@ -498,6 +555,13 @@ beyond the four declared above.
 3. **Not a gap, recorded so a later rung does not rediscover it:** epic point 7's continuous
    reconciliation becomes *buildable* the moment story 5 lands, because *unreachable* and
    *artifact gone* stop being one state. It is deliberately not built here.
+4. **The creation residual, left open on purpose.** The very first startup after declaring a
+   storage whose medium is absent has neither a marker nor a `storages` row, so it is
+   indistinguishable from a genuine creation. Carried by a **written requirement** — *declare a
+   storage with its medium present* — plus the loud creation event, rather than by a mechanism.
+   **What to cost if it ever bites:** recording an expected filesystem or device id at creation and
+   comparing it before accepting the path. Deliberately out of this rung; recorded here so the next
+   session finds the option already named instead of rediscovering the case.
 
 ---
 

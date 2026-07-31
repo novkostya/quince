@@ -323,12 +323,39 @@ file):
 *selected at creation and immutable thereafter*, **and** a reachability check before each backup —
 but a storage arriving from `config.yml` has no creation event, and *immutable after creation*
 and *probed at startup* then disagree about a dataset remounted as something else. They stop
-disagreeing once creation is defined by the storage's own contents:
+disagreeing once creation is defined by the storage's own contents — **and by whether quince has
+created this storage before**, which the first version of this proposal omitted:
 
-> **The first startup that finds a reachable path with no `quince-storage.json` at its root IS
-> that storage's creation moment.** quince probes the backend then, writes the marker, and never
-> probes for selection again. Every later startup and every pre-backup check **reads** the marker
-> and **compares**; it does not re-select.
+> **The first startup that finds a reachable path with no `quince-storage.json` at its root **and
+> no row in `storages` for that config entry** is that storage's creation moment.** quince probes
+> the backend then, writes the marker, and never probes for selection again.
+>
+> **A reachable path with no marker, for a storage the DB already knows, is a MISSING MEDIUM** —
+> refuse, exactly as a mismatched marker refuses. Never re-create, never re-probe.
+>
+> Every later startup and every pre-backup check **reads** the marker and **compares**; it does not
+> re-select.
+
+**Without the second clause an unmounted mountpoint is created as a new storage, and backups then
+go to the system disk** (found at spec review, quince#381). `/mnt/backup-disk` is a readable, empty
+directory on the root filesystem whenever the disk is unplugged — the marker is on the disk. A
+contents-only rule probes it as **`copy`** rather than the disk's `zfs`, writes a **new UUID** into
+the mountpoint, has that marker **shadowed rather than deleted** when the disk mounts over it (so it
+returns on the next unmount), and accepts backups onto the root filesystem while the user believes
+they are going to the removable one. Silent, and the epic's own motivating case is a removable disk.
+
+The discriminator already exists: the `storages` table plus a marker-derived `storage_id` mean the
+DB knows whether a storage has ever been created, so *path reachable, no marker* resolves into two
+states instead of one. **Keyed on the config entry's `name`, not its `path`** — a path moves when a
+disk is remounted elsewhere; when the medium is present the marker is authoritative and a known
+`storage_id` at a new path is a **move**, not a new storage.
+
+**Residual, stated rather than engineered away:** the very first startup after declaring a storage
+whose medium is absent has neither marker nor row, and is indistinguishable from a genuine
+creation. The accompanying written requirement is **declare a storage with its medium present**.
+Closing it mechanically means recording an expected filesystem/device id at creation — deliberately
+out of this rung. Creation is therefore a **loud, user-visible event** naming the path, the probed
+backend and the reason, so the one remaining silent case is not silent.
 
 A marker that is present and **disagrees** with the probe — the remount case — is a **refusal**:
 quince does not back up to that storage and says exactly why. Accepting the new backend would
