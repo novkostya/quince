@@ -373,7 +373,16 @@ Storage: {
   "default": true,             // exactly one storage is default
   "reachable": true,
   "unreachable_reason": null,  // set when reachable is false; SHOWN, never thrown — an unreachable
-                               // storage must not block backups to any other (epic point 5)
+                               // storage must not block backups to any other (epic point 5).
+                               // THREE distinguishable causes, because the remedy differs:
+                               //   path_unreachable  the path itself cannot be read
+                               //   missing_medium    the path reads, the marker is GONE, and the DB
+                               //                     knows this storage — an unplugged disk's bare
+                               //                     mountpoint. Refuses; never re-creates. Added at
+                               //                     spec review (quince#381): without it an unmounted
+                               //                     mountpoint is created as a NEW storage and
+                               //                     backups land on the system disk.
+                               //   backend_mismatch  the marker and the probe disagree (remount)
   "will_be_full": true         // this device's next backup here is a FULL transfer, because
                                // incremental is scoped to (device, storage) and there is no prior
                                // version on this one. See the open sub-question in §1.
