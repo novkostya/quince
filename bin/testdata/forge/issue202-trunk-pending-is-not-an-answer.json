@@ -1,0 +1,18 @@
+{
+  "note": "quince#202 constraint 2, and the case the ruling singled out. A run in flight reports `state: PENDING` with null conclusions — measured live on `main` while the cost was being checked — and a design that reads that as either verdict is wrong half the time. So PENDING emits NOTHING and the previous answer is carried, exactly as `mergeability` refuses to report `UNKNOWN` as a condition. The expectation is EMPTY on purpose: the tick's job here is to wait, not to report. Pair this with the red fixture — that one proves a transition is seen, this one proves a non-answer is not mistaken for one.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "aaaaaaaabbbb", "state": "SUCCESS",
+      "contexts": [ {"name": "gates", "conclusion": "SUCCESS"} ] }
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "ccccccccdddd", "state": "PENDING",
+      "contexts": [ {"name": "gates", "conclusion": ""} ] }
+  },
+  "expect_events": []
+}

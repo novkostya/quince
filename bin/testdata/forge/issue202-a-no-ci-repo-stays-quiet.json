@@ -1,0 +1,16 @@
+{
+  "note": "The control for the `none` fixture beside it, and the one that decides whether the state is usable. Having announced once that a repository has no CI, the tick must never mention it again — otherwise half the declared set emits a line every interval forever, and a reader learns to skim the family that carries a red trunk. Same state on both sides, so the diff sees no change and says nothing.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "aaaaaaaabbbb", "state": "none", "contexts": [] }
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "bbbbbbbbcccc", "state": "none", "contexts": [] }
+  },
+  "expect_events": []
+}

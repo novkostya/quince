@@ -762,6 +762,43 @@ step() {
 		| ($new | sort_by(.at) | last) as $c
 		| "event=issue-comment issue=\($i.number) count=\(($new | length) - ($was | length)) at=\($c.at) actor=\($c.actor) via=\($i.via // "declared")"'
 
+
+	# --- THE TRUNK (quince#202) ------------------------------------------------------------------
+	#
+	# CONSTRAINT 1: its own event family, never folded into `checks`. That classifier is per-PR by
+	# construction and every narrowing in it is reasoned about pull requests; a trunk event borrowing
+	# it would inherit rules written for a different subject.
+	#
+	# CONSTRAINT 2: a TRANSITION, and `PENDING` is neither answer. A run in flight reports
+	# `state: PENDING` with null conclusions, and a design that reads that as either verdict is wrong
+	# half the time — so it is carried, exactly as `mergeability` refuses to report `UNKNOWN` as a
+	# condition. `none` is the FOURTH state and is not `PENDING`: it means the repository has no CI at
+	# all, which `quince-devlog` deliberately does not, and folding it into "no answer yet" would wait
+	# forever for a verdict that cannot arrive.
+	#
+	# WHY FIRST OBSERVATION IS SILENT-BUT-SPOKEN. A trunk seen for the first time emits
+	# `trunk-first-observation`, which `wake_worthy` drops — the same baseline-versus-news
+	# discrimination `first-observation` and `issue-first-observation` already make. Arming a watch
+	# must not wake the session that armed it.
+	_prev_trunk=$(jq -c '.trunk // null' "$_prev" 2>/dev/null || printf 'null')
+	[ -n "$_prev_trunk" ] || _prev_trunk=null
+	printf '%s' "$_now" | jq -r --argjson old "$_prev_trunk" '
+		(.trunk // null) as $t
+		| select($t != null)
+		| if $old == null then
+			"event=trunk-first-observation branch=\($t.branch) state=\($t.state)"
+		  elif $old.state == $t.state then
+			empty
+		  elif $t.state == "PENDING" or $t.state == "none" then
+			# Carried, not reported as a verdict. A tick that says nothing here is saying "no answer
+			# yet", which is the true statement.
+			empty
+		  elif $t.state == "FAILURE" or $t.state == "ERROR" then
+			"event=trunk-failed branch=\($t.branch) oid=\($t.oid[0:7]) was=\($old.state) checks=[\([$t.contexts[] | select(.conclusion != "SUCCESS" and .conclusion != "") | .name] | join(","))]"
+		  elif $t.state == "SUCCESS" then
+			"event=trunk-recovered branch=\($t.branch) oid=\($t.oid[0:7]) was=\($old.state)"
+		  else empty end'
+
 	# issue-closed / issue-reopened: a CLOSE wakes a session that DECLARED the issue, because a
 	# closed blocker is exactly the news it is blocked waiting for. It does NOT wake for an issue that
 	# is merely REFERENCED by an open PR — that is the tidying case the ruling worried about, and
@@ -1658,6 +1695,22 @@ replay() {
 			# the empty envelope instead, deliberately — see that file's header.)
 			# The discovery scan's answer, optional and singular: it does not need a per-tick queue,
 			# because what it feeds is a highwater and only the newest number matters (quince#273).
+			# THE TRUNK ANSWER (quince#202), a per-tick queue like the two above. A fixture opts in
+			# with `trunk_payloads`; the default is ONE answer describing a repository with NO CI,
+			# which emits a single `trunk-first-observation … state=none` and then stays quiet.
+			# Chosen over answering with an error, so a fixture that never mentions trunk is not
+			# asserting a failed fetch every tick — and over silence, because a stub that answered
+			# nothing would let a broken trunk fetch pass unnoticed in every loop fixture.
+			_nt=$(jq '.trunk_payloads // [] | length' "$_f")
+			_pi=0
+			while [ "$_pi" -lt "$_nt" ]; do
+				jq -c --argjson i "$_pi" '.trunk_payloads[$i]' "$_f" >"$_tmp/payload.trunk.$_pi"
+				_pi=$((_pi + 1))
+			done
+			if [ "$_nt" -eq 0 ]; then
+				printf '{"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"0000000000","statusCheckRollup":null}}}}}\n' >"$_tmp/payload.trunk.0"
+				_nt=1
+			fi
 			jq -e '.issue_list_payload' "$_f" >"$_tmp/payload.issuelist" 2>/dev/null ||
 				: >"$_tmp/payload.issuelist"
 			_inv="$(dirname "$0")/testdata/forge/gh-array-to-graphql.jq"
@@ -1676,6 +1729,12 @@ replay() {
 if [ "\$1" = issue ] && [ "\$2" = list ]; then
 	if [ -s "$_tmp/payload.issuelist" ]; then cat "$_tmp/payload.issuelist"; else printf '[]\n'; fi
 	exit 0
+fi
+if [ "\$1" = api ] && printf '%s' "\$*" | grep -q defaultBranchRef; then
+	c=\$(cat "$_tmp/calls.trunk" 2>/dev/null || echo 0); c=\$((c + 1))
+	printf '%s\\n' "\$c" >"$_tmp/calls.trunk"
+	i=\$((c - 1)); [ "\$i" -lt $_nt ] || i=\$(($_nt - 1))
+	cat "$_tmp/payload.trunk.\$i"; exit 0
 fi
 case "\$1" in
 issue) k=issue; n=$_ni ;;
@@ -1855,6 +1914,74 @@ declare_all() {
 		mkdir -p "$(dirname "$_da_st")"
 		declare_issues "$_da_mode" "$_da_specs" "$_da_r" "$_da_st"
 	done
+}
+
+
+# TRUNK_QUERY / fetch_trunk — the THIRD subject (quince#202, ruled 2026-07-30).
+#
+# WHY A SEPARATE QUERY, which reverses this issue's own first measurement. The trunk block rides
+# inside the queue query for `cost=0`, and that is a fact about ONE implementation rather than about
+# the design: `FETCH_NORMALISE` flattens the envelope to a flat ARRAY of PRs and `:2168` fails the
+# tick on anything else, so a repository-level fact has nowhere to live in that shape. Putting it
+# there means widening the contract `forge-fetch-equivalence-test` exists to defend, across 56
+# fixtures and the shared stub inverse.
+#
+# Measured standalone: **cost=1 per repo per tick** — 120 points/hour on the two-repo set at 60 s,
+# against a 5,000/hour limit, taking the total to 7.2%. A 2.4% increment is a smaller thing to spend
+# than that contract, and it buys ISOLATION: a malformed trunk answer cannot take the queue
+# observation down with it, which is exactly what `payload_not_an_array` exists to prevent and what
+# widening it would have re-opened.
+#
+# FAILURE IS SILENT-BUT-RECORDED, not fatal. A trunk fetch that fails leaves `.trunk` absent, and the
+# diff below treats absent as "no answer" rather than as a change. `--fail-after` is about the
+# DECLARED channel; killing a watch over trunk health nobody declared would be this feature charging
+# the session for its own cost — the same reasoning `issue-scan-failed` already uses one function up.
+# shellcheck disable=SC2016
+TRUNK_QUERY='
+query($owner:String!, $name:String!) {
+  repository(owner:$owner, name:$name) {
+    defaultBranchRef { name target { ... on Commit {
+      oid
+      statusCheckRollup { state contexts(first:20) { nodes {
+        __typename
+        ... on CheckRun { name conclusion }
+        ... on StatusContext { context state }
+      } } }
+    } } }
+  }
+}'
+
+fetch_trunk() { # <repo> <gh> <out-file>
+	_ft_repo=$1
+	_ft_gh=$2
+	_ft_out=$3
+	_ft_owner=${_ft_repo%%/*}
+	_ft_name=${_ft_repo#*/}
+	_ft_raw=$(mktemp)
+	if ! "$_ft_gh" api graphql -f query="$TRUNK_QUERY" \
+		-F owner="$_ft_owner" -F name="$_ft_name" >"$_ft_raw" 2>/dev/null; then
+		printf 'event=trunk-fetch-failed repo=%s reason=query_failed\n' "$_ft_repo"
+		rm -f "$_ft_raw"
+		return 1
+	fi
+	# `statusCheckRollup: null` is NOT "pending" and NOT a failure — it is a repository with no CI at
+	# all, which `quince-devlog` deliberately is. Recorded as `state: "none"` so the diff can tell it
+	# from an answer, because folding it into PENDING would mean waiting forever for a verdict that
+	# cannot arrive: silent, and indistinguishable from a healthy trunk, which is this issue's own
+	# failure mode reintroduced by its fix.
+	if ! jq -e '.data.repository.defaultBranchRef' "$_ft_raw" >/dev/null 2>&1; then
+		printf 'event=trunk-fetch-failed repo=%s reason=no_default_branch\n' "$_ft_repo"
+		rm -f "$_ft_raw"
+		return 1
+	fi
+	jq -c '.data.repository.defaultBranchRef as $r | {
+		branch: $r.name,
+		oid: ($r.target.oid // ""),
+		state: ($r.target.statusCheckRollup.state // "none"),
+		contexts: [($r.target.statusCheckRollup.contexts.nodes // [])[]
+			| {name: (.name // .context // ""), conclusion: (.conclusion // .state // "")}]
+	}' "$_ft_raw" >"$_ft_out" 2>/dev/null || : >"$_ft_out"
+	rm -f "$_ft_raw"
 }
 
 # fetch_issues — ONE `gh issue view` per declared issue, into the observation.
@@ -2324,6 +2451,16 @@ tick() {
 		printf 'event=issue-scan-failed repo=%s\n' "$_repo"
 	fi
 	rm -f "$_newiss"
+
+	# THE TRUNK, fetched separately and merged here (quince#202). Same shape as the issues merge
+	# above: its own call, its own file, folded into the observation so the PURE half can diff it.
+	# A failure leaves `.trunk` absent, which the diff reads as "no answer" rather than as a change.
+	_trunk=$(mktemp)
+	if fetch_trunk "$_repo" "$_gh" "$_trunk" && [ -s "$_trunk" ]; then
+		jq -c --slurpfile t "$_trunk" '.trunk = $t[0]' "$_obs" >"$_obs.new" &&
+			mv "$_obs.new" "$_obs"
+	fi
+	rm -f "$_trunk"
 
 	step "$_state" "$_obs"
 
@@ -3079,6 +3216,19 @@ wake_worthy() {
 		# flagged. A close on a DECLARED issue does wake — that is the blocker clearing. Printed
 		# either way; this filter has never decided what is SEEN.
 		/^event=issue-(closed|reopened)/ { if ($0 ~ /via=referenced/) next }
+		# THE TRUNK BASELINE (quince#202 constraint 2). Seeing the trunk for the first time is not a
+		# change from anything, and waking the session that just armed a watch is the busy loop
+		# `first-observation` and `issue-first-observation` already refuse.
+		/^event=trunk-first-observation/ { next }
+		# `trunk-recovered` is GOOD NEWS AND STILL NOT A WAKE, which is the part worth stating. The
+		# ruling is wake on `SUCCESS → FAILURE` ONLY: a trunk that goes green again resolves the
+		# thing that woke somebody, and waking a second session to tell it the problem is over turns
+		# every red into two interruptions. PRINTED, so a reader sees the recovery in the log.
+		/^event=trunk-recovered/ { next }
+		# A failed trunk fetch does not wake, for the same reason a failed issue read does not: one
+		# is a missed read, a run of them is a watch that is not watching, and `--fail-after` is what
+		# tells those apart. Printed either way.
+		/^event=trunk-fetch-failed/ { next }
 		/^event=queue-empty/ { if (base[repo($0)]) next }
 		/^event=/ { print }
 	' "$1" "$1"

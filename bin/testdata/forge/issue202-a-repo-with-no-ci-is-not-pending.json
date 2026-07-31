@@ -1,0 +1,17 @@
+{
+  "note": "quince#202's FOURTH state, found by measuring rather than by design. `novkostya/quince-devlog` returns `statusCheckRollup: null` — it has no CI, deliberately, which `CLAUDE.md` records as repo-specific rather than drift. That is not PENDING. PENDING means no answer YET and is carried until one arrives; `none` means no answer EVER, and a design that folds them together waits forever for a verdict that cannot come — silent, and indistinguishable from a healthy trunk, which is the exact failure this issue was filed about, reintroduced by its own fix. Recorded as `state: \"none\"` by `fetch_trunk` so the diff can tell them apart. Half the declared forge set is permanently in this state, so it is not an edge case discovered later. The first observation is announced ONCE and then never again: a repository that cannot answer should say so, in the same spirit as `privacy-check` exiting 2 rather than 0.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "aaaaaaaabbbb", "state": "none", "contexts": [] }
+  },
+  "expect_events": [
+    "event=trunk-first-observation branch=main state=none"
+  ]
+}
