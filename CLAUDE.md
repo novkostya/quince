@@ -57,6 +57,28 @@ repo is not a message bus, and no human is an RPC layer.
 
 1. **One issue or rung → several small PRs, each carrying ONE reviewable claim.** Review
    is triggered early and often; a PR nobody can review in one sitting is mis-scoped.
+
+   **SEQUENCE them; do NOT STACK them** — Operator ruling, 2026-07-31 (quince#388). Branch each PR
+   from `main`. A PR based on another PR's branch is *stacked*, and the cost of that is not the
+   review, it is the merge: **merging the base with `--delete-branch` — the documented normal thing
+   to do — silently CLOSES the stacked PR.** One second later, no warning, nothing in the merge
+   output, and `forge-watch` reports the dependent as `DIRTY`, which is the shape §5 tells the
+   merging seat to leave alone.
+
+   **It becomes irrecoverable the moment the author pushes**, which is the natural next action for a
+   branch whose base has just landed. Two `422`s close the door in sequence: `state cannot be
+   changed. The <base> branch has been deleted`, then `Cannot change the base branch of a closed pull
+   request`. Recreating the base ref clears the first and reveals the last one — `the <head> branch
+   was force-pushed or recreated` — and no seat can get past that. **The commits survive; the pull
+   request and its verdict do not.** Measured on quince#384, which was approved, and had to be
+   reopened as quince#387.
+
+   **"Discouraged", not "never", and the difference is where the cost lands.** quince#375's slice
+   stacked for a real reason: 1a and 1b both edited `bin/wrapper-boundary-test` and would have
+   conflicted. Sequencing that costs **one review cycle** — land 1a, then branch 1b from `main` and
+   resolve nothing. That is the trade the ruling accepts, and it is cheap against losing an approved
+   PR. When you stack anyway, say so in the PR body so the merging seat knows before it merges the
+   base — the forge shows the base branch, and it is easy to miss.
 2. **Fresh clone per unit of work.** `git clone https://github.com/novkostya/quince.git`
    into a scratch dir, branch **`<runner>/<short-title>`** — the runner name this session declared,
    then the topic. No worktrees, no long-lived checkout, no rsync from a workstation.
@@ -138,6 +160,21 @@ repo is not a message bus, and no human is an RPC layer.
    `2026-07-27T21:53:23Z`, then #138, #142 and devlog#54, #57 — reads `mergedBy:
    app/quince-review`. Bounded at that timestamp on purpose: everything merged **earlier** that
    day, quince#134 included, was merged by `novkostya`.
+
+   **BEFORE `--delete-branch`, CHECK FOR PRs STACKED ON THIS ONE** (quince#388). Rung 1 above says
+   do not stack; this is what the merging seat does when somebody did anyway, or when a stack
+   predates the ruling. One command, and it costs nothing when the answer is empty:
+
+   ```sh
+   gh pr list -R <repo> --json number,baseRefName \
+     -q '.[] | select(.baseRefName=="<this PR head branch>") | .number'
+   ```
+
+   **If it returns anything, retarget those PRs to `main` FIRST** — `gh api -X PATCH
+   repos/<owner>/<repo>/pulls/<n> -f base=main` — and only then merge. Retargeting is legal while
+   the dependent is still open and impossible one second after it is not, which is the whole
+   window. Deleting the branch is not the defect and branch hygiene is worth keeping; doing it
+   while a dependent is open is.
    **This ladder is the ARCHITECT's, and only the architect can climb it.** Both wrappers are
    architect-seat tools and both refuse on the implementer box — `gh-arch` because a bot token is
    present (devlog#7: the box that authors must not hold the identity that approves), and
