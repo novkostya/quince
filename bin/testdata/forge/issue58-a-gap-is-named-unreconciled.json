@@ -1,0 +1,23 @@
+{
+  "kind": "watch",
+  "note": "quince#58, Operator ruling 2026-07-27: `tick-overdue` already names an interval the watch could not see, and the missing half was that the catch-up tick's FINDINGS must not read as a complete account of it. A tick diffs the CURRENT queue against the STORED observation, so a PR that opened AND closed inside the gap leaves no trace at all — 'no events' is a claim about the endpoints presented as a claim about the interval. Not wrong; UNFALSIFIABLE. Here the watch was due at 05:01:00Z and it is now 06:00:00Z, so the interval from the last tick at 05:00:00Z is 3600s wide and nothing observed it. THE QUEUE IS EMPTY AND THAT IS THE POINT: this state has no PRs, so a state diff has nothing to report, and without the `unreconciled` line the whole report would be `tick-overdue` plus silence — which is exactly the shape the retiring architect read as 'nothing was missed', four times, and could not have justified. THE RULING DELIBERATELY DOES NOT REQUIRE FINDING the vanished PR: reconciliation against the events API was ruled out, because its retention fails in exactly the long-gap case this worries about most. The tool is required to stop claiming there was nothing to find. `unreconciled` does NOT wake — it rides beside `tick-overdue`, which already does, and the pair is one fact.",
+  "state": {
+    "observed": true,
+    "prs": [],
+    "last_tick": "2026-07-28T05:00:00Z",
+    "watch": {
+      "pid": 4242,
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-28T05:00:00Z",
+      "due": "2026-07-28T05:01:00Z"
+    }
+  },
+  "now": "2026-07-28T06:00:00Z",
+  "pid_alive": "no",
+  "expect": [
+    "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-28T05:00:00Z age=3600s reason=no_process",
+    "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued.",
+    "event=tick-overdue due=2026-07-28T05:01:00Z late=3540s interval=60s",
+    "event=unreconciled from=2026-07-28T05:00:00Z to=2026-07-28T06:00:00Z basis=state-diff"
+  ]
+}

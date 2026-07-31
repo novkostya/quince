@@ -1,6 +1,6 @@
 {
   "kind": "loop",
-  "note": "Found by arming the verb for real, not by reasoning about it. Re-arming from a `dead` watch ALWAYS produces `tick-overdue` — the previous watcher stopped ticking, so its `due` is in the past by definition. If that woke the session, every re-arm-from-dead would exit immediately and report as news the gap that the arming step announced one line earlier. It is a fact about the watch that ENDED. So the first tick's overdue is printed and does not wake; the run here ends on the idle bound, and the PR that was already in the state produces nothing because nothing happened to it. A later `tick-overdue` — the loop starved while running — is a different claim and still wakes.  TRUNK, ADDED BY quince#202: this is the ONLY loop fixture carrying an `initial` observed state, so it is the only one whose first tick reaches the trunk diff at all — the others start cold, where `step` emits `first-observation` and never gets there. It therefore gains `trunk-first-observation … state=none`, which the stub answers by default for a fixture that does not mention trunk. The line is DROPPED by `wake_worthy`, so the exit stays 6 and this fixture keeps asserting exactly what it was written to assert: a re-arm does not wake on its own gap.",
+  "note": "Found by arming the verb for real, not by reasoning about it. Re-arming from a `dead` watch ALWAYS produces `tick-overdue` — the previous watcher stopped ticking, so its `due` is in the past by definition. If that woke the session, every re-arm-from-dead would exit immediately and report as news the gap that the arming step announced one line earlier. It is a fact about the watch that ENDED. So the first tick's overdue is printed and does not wake; the run here ends on the idle bound, and the PR that was already in the state produces nothing because nothing happened to it. A later `tick-overdue` — the loop starved while running — is a different claim and still wakes.  TRUNK, ADDED BY quince#202: this is the ONLY loop fixture carrying an `initial` observed state, so it is the only one whose first tick reaches the trunk diff at all — the others start cold, where `step` emits `first-observation` and never gets there. It therefore gains `trunk-first-observation … state=none`, which the stub answers by default for a fixture that does not mention trunk. The line is DROPPED by `wake_worthy`, so the exit stays 6 and this fixture keeps asserting exactly what it was written to assert: a re-arm does not wake on its own gap. AND IT IS THE WITNESS THAT event=unreconciled DOES NOT WAKE (quince#58). The line is printed here and the loop still ends on exit=6, the idle bound — not on the event. If wake_worthy stopped dropping it, this fixture would exit 0 and the name it carries would become false. to=NOW is normalised by the harness because it is the moment the loop happened to run; from= is asserted, because it comes from this fixture's own state.",
   "repo": "novkostya/quince",
   "interval": 2,
   "max_wait": 4,
@@ -54,7 +54,8 @@
   "expect_events": [
     "event=tick-overdue due=2026-07-26T19:01:00Z late=Ns interval=60s",
     "event=trunk-first-observation branch=main state=none",
-    "event=watch-idle elapsed=Ns ticks=N"
+    "event=watch-idle elapsed=Ns ticks=N",
+    "event=unreconciled from=2026-07-26T19:00:00Z to=NOW basis=state-diff"
   ],
   "expect_exit": 6
 }
