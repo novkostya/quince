@@ -39,9 +39,18 @@ git clone --depth 1 https://github.com/novkostya/quince-devlog.git "$DEVLOG_DIR"
 In that clone, in this order:
 
 - `progress.md` — the **one-line state** at the top (the frontier, what is proven, what is
-  owed), then the per-rung dashboard, then as much of the decisions log as the question at
-  hand needs. It is long and append-heavy: read the top thoroughly, then search rather
-  than scroll.
+  owed) and the per-rung dashboard. **Read it whole; it is 71 lines.** It was 5,446, and this
+  bullet used to say *"long and append-heavy … search rather than scroll"*: the narrative left
+  on 2026-07-31 (quince-devlog#152) and what remains is current state only, kept that way by
+  `bin/dashboard-size`.
+- `decisions/` — one file per decision, citable by path. **This is where the decisions log went**;
+  read `decisions/0000` first, then whichever bear on the question at hand.
+- **the `journal` branch** — one entry per file, newest first in its generated `README.md`.
+  **A default clone checks out `main` and the web UI shows `main`, so nothing surfaces this
+  unless you go and look for it.** You do not need it to resume — `progress.md` and `decisions/`
+  carry the state and the rulings, and the journal carries *how they were arrived at*. Read it
+  when a decision's reasoning matters or a citation points into it; `letters.md` there resolves
+  the retired `(a)`–`(do)` ids.
 - `roadmap.md` — the milestones and the next rungs (`qn.N`).
 - `program/quince.program.md` — the gate ladder, spec shape, gap protocol, review
   protocol, perf budgets. (On *process* — where work runs, branching, landing — `CLAUDE.md`

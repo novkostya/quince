@@ -264,30 +264,49 @@ fix before asking for review.
 
 ## 6. The journal entry
 
-Append to the devlog `progress.md` decisions log — at the **bottom**, newest last — in its
-established bullet style, **date-anchored and citing PR/issue numbers**. Letters `(a)`–`(do)`
-are retired; never mint one.
+**THE JOURNAL IS NOT IN `progress.md`, AND THIS SECTION SAID IT WAS UNTIL 2026-07-31**
+(quince-devlog#30's ruling, delivered by quince-devlog#152). That file is now 71 lines — the
+one-line state and the per-rung dashboard — with no decisions log in it to append to, and
+`bin/dashboard-size` fails if one reappears. A session following the old text either failed outright
+or wrote a journal entry into the one file the size gate exists to guard. Recorded rather than
+quietly replaced, because the instruction was live and wrong for a day.
+
+**One entry, one file, on the unprotected `journal` branch of `quince-devlog`** —
+`<YYYY-MM>/<YYYY-MM-DD>-<short-slug>.md`. **No pull request.** A journal is append-only events with
+no shared mutable state, so disjoint filenames make concurrent appends rebase cleanly, and review
+machinery would charge its full coordination cost for a structure that needs none.
+
+An H1, then the entry — **date-anchored, citing PR and issue numbers**. Letters `(a)`–`(do)` are
+retired; never mint one, and `letters.md` on that branch resolves the existing ones.
 
 ```
-- 2026-07-25: **the claim in one bold sentence** — what changed, what was proven (name the
-  gates), what is owed and by whom. ([#12](https://github.com/novkostya/quince/pull/12))
+# 2026-07-25 — the claim, one sentence
+
+**The claim, one sentence in bold.** What changed, what was proven (name the gates), what is
+owed and by whom. ([quince#12](https://github.com/novkostya/quince/pull/12))
 ```
-
-Also flip the **one-line state** at the top and the rung's dashboard row if the frontier
-moved, and add any new open question to the dashboard's list.
-
-Whether an implementer session can commit this itself depends on access that changes over
-time, so check instead of assuming:
 
 ```sh
-gh api repos/novkostya/quince-devlog -q .permissions           # is push true?
-gh api repos/novkostya/quince-devlog/branches/main/protection  # 404 = not protected
+git checkout journal && git pull --rebase        # always; several runners append the same day
+$EDITOR 2026-07/2026-07-31-a-short-slug.md
+bin/journal-index                                # regenerate README.md — never hand-edit it
+git add -A && git commit -m "journal: <the claim>"
+<your-quince-clone>/deploy/privacy/privacy-check --ref origin/journal...HEAD
+git push origin journal                          # rejected? pull --rebase, regenerate, push again
 ```
 
-Write access and an unprotected branch → clone the devlog, commit the entry under the same
-bot identity, push. Otherwise → a devlog PR, or the exact text in the product PR thread for
-the architect to commit. Never silently drop the entry, and never say it landed when it
-hasn't.
+**THE SWEEP IS NOT OPTIONAL AND IT IS THE ONLY GUARD.** There is no reviewer on this branch. Exit
+`0` clean · `1` a match · **`2` DID NOT RUN, which is never a clean result**.
+`bin/pre-push-journal` enforces it on the push path — install it once per clone — and **does not
+cover the API route** a box with no git credential helper must use, because there is no push to
+intercept. The branch README documents both routes; read it before appending from such a box.
+
+**`progress.md` is a SEPARATE act with a separate route.** Touch it only if the frontier moved or an
+open question changed — the one-line state, the rung's dashboard row, the question list. It lives on
+`main`, which is protected, so that is a **pull request** and the journal entry must not wait on it.
+Two artifacts, two routes; conflating them is exactly what this section used to get wrong.
+
+Never silently drop the entry, and never say it landed when it has not.
 
 ## 7. Close the loop
 
