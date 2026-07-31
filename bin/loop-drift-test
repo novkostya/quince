@@ -1,0 +1,241 @@
+#!/bin/sh
+# loop-drift-test — the command-drift gate, driven against synthetic protocol/skill pairs.
+#
+# SYNTHETIC AND NOT AGAINST THE REPOSITORY'S OWN FILES, deliberately. A suite asserting "the real
+# `.claude/` is clean" would pass for two reasons that must not be confused: the documents agree, or
+# the extractor found nothing and compared nothing. Every case below builds a tiny tree with a known
+# answer, so a gate that silently stopped seeing fenced blocks fails here instead of going quiet.
+#
+# THE HALF THAT IS EASY TO SKIP is the NEGATIVE one: not "does it catch drift" but "does it stay
+# quiet when the copies legitimately differ". The protocol carries both seats' recipes and each skill
+# carries one, so a gate demanding equality would fail on every correct repository — and would then
+# be turned off rather than fixed. Cases 3 and 4 exist for that.
+# shellcheck disable=SC2016  # Every `$PWD` below is LITERAL TEXT: these strings are the documented
+# command lines this gate compares, and expanding one would make the fixture stop resembling the
+# document. The single quotes are the assertion, exactly as in bin/pr-title-refs-test.
+set -eu
+
+cd "$(dirname "$0")/.."
+GATE="${QUINCE_LOOP_DRIFT:-$PWD/bin/loop-drift}"
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+[ -x "$GATE" ] || {
+	printf 'loop-drift-test: %s is not executable — nothing to test\n' "$GATE" >&2
+	exit 1
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# build <name> <protocol-body> <skill-body> — a throwaway .claude tree; prints its root.
+build() {
+	_b_d="$tmp/$1"
+	mkdir -p "$_b_d/skills/demo"
+	printf '# protocol\n\n```sh\n%s\n```\n' "$2" >"$_b_d/loop-protocol.md"
+	printf '# skill\n\n```sh\n%s\n```\n' "$3" >"$_b_d/skills/demo/SKILL.md"
+	printf '%s' "$_b_d"
+}
+
+# run <root> -- exit code in $rc, combined output in $tmp/out
+run() {
+	set +e
+	QUINCE_LOOP_PROTOCOL="$1/loop-protocol.md" QUINCE_SKILL_ROOT="$1" \
+		"$GATE" >"$tmp/out" 2>&1
+	rc=$?
+	set -e
+}
+
+ARCH_TICK='bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"'
+ARCH_WATCH='bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60'
+IMPL_TICK='bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"'
+IMPL_TICK_OLD='bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"'
+
+# --- 1. AGREEMENT IS CLEAN ---------------------------------------------------------------------
+d=$(build agree "$ARCH_TICK
+$ARCH_WATCH" "$ARCH_TICK
+$ARCH_WATCH")
+run "$d"
+if [ "$rc" -eq 0 ] && grep -q 'clean' "$tmp/out"; then
+	ok "identical commands in both files: exit 0"
+else
+	bad "agreement was not clean (rc=$rc): $(cat "$tmp/out")"
+fi
+if grep -q 'COMMANDS ONLY' "$tmp/out"; then
+	ok "the clean line states its own limit — a reader cannot take it for 'the documents agree'"
+else
+	bad "the clean result does not say what it did not check: $(cat "$tmp/out")"
+fi
+
+# --- 2. THE REAL INSTANCE: A CHANGED WRAPPER ----------------------------------------------------
+# This is quince#54's first live catch, reproduced. `loop-protocol.md` said `bin/gh-bot` — the
+# wrapper for an account suspended on 2026-07-28 — while `/kickoff` had moved to `bin/gh-coder`. The
+# normative file instructed the implementer seat to run a command that refuses.
+d=$(build wrapper "$IMPL_TICK_OLD" "$IMPL_TICK")
+run "$d"
+if [ "$rc" -eq 1 ]; then
+	ok "a changed WRAPPER is drift — the instance this gate was built on"
+else
+	bad "a changed wrapper produced rc=$rc"
+fi
+if grep -q 'gh-bot' "$tmp/out" && grep -q 'gh-coder' "$tmp/out"; then
+	ok "the report shows BOTH sides — 'not present' is not actionable without what it disagrees with"
+else
+	bad "the report does not show both sides: $(cat "$tmp/out")"
+fi
+
+# --- 3. LEGITIMATE DIFFERENCE STAYS QUIET -------------------------------------------------------
+# The protocol carries both seats; a skill carries one. Containment, not equality — and if this
+# case failed, the gate would be red on every correct repository and would be disabled rather than
+# fixed.
+d=$(build subset "$ARCH_TICK
+$ARCH_WATCH
+$IMPL_TICK" "$IMPL_TICK")
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "a skill carrying only ITS OWN seat's command is clean — the protocol is allowed to be a superset"
+else
+	bad "a legitimate subset was reported as drift (rc=$rc): $(cat "$tmp/out")"
+fi
+
+# Prose is never read. The whole scope note of quince#54 is that the skills carry the command and
+# the protocol carries the why, so wildly different prose must not register.
+d="$tmp/prose"
+mkdir -p "$d/skills/demo"
+printf '# protocol\n\nLong explanation nobody copies.\n\n```sh\n%s\n```\n' "$ARCH_TICK" >"$d/loop-protocol.md"
+printf '# skill\n\nCompletely different prose, and that is the design.\n\n```sh\n%s\n```\n' "$ARCH_TICK" >"$d/skills/demo/SKILL.md"
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "prose differing wildly is NOT drift — only the inlined imperative is compared"
+else
+	bad "differing prose was reported as drift (rc=$rc)"
+fi
+
+# A command mentioned in PROSE rather than in a fence is not an inlined command, so it is not
+# compared. Stated as a case because it is the boundary of what the extractor claims.
+d="$tmp/unfenced"
+mkdir -p "$d/skills/demo"
+printf '# protocol\n\n```sh\n%s\n```\n' "$ARCH_TICK" >"$d/loop-protocol.md"
+printf '# skill\n\nRun `bin/forge-watch tick --repo x --gh y` when you feel like it.\n\n```sh\n%s\n```\n' \
+	"$ARCH_TICK" >"$d/skills/demo/SKILL.md"
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "a command in PROSE (no fence) is not compared — the extractor's boundary, asserted not assumed"
+else
+	bad "an unfenced mention was treated as an inlined command (rc=$rc)"
+fi
+
+# --- 4. NORMALISATION, EACH FORM PRESENT IN THE REAL SOURCES ------------------------------------
+d=$(build comment "$ARCH_TICK" "$ARCH_TICK                 # architect")
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "a trailing # comment does not make a command differ (the protocol annotates; the skills do not)"
+else
+	bad "a trailing comment registered as drift (rc=$rc)"
+fi
+
+d=$(build cont "$ARCH_WATCH" "$ARCH_WATCH \\
+  --issue 71")
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "a trailing \\ continuation does not make a command differ — the same command over two lines"
+else
+	bad "a line continuation registered as drift (rc=$rc)"
+fi
+
+d=$(build ws "$ARCH_TICK" "  bin/forge-watch   tick  --all   --gh \"\$PWD/bin/gh-arch\"")
+run "$d"
+if [ "$rc" -eq 0 ]; then
+	ok "whitespace runs and indentation do not make a command differ"
+else
+	bad "whitespace registered as drift (rc=$rc)"
+fi
+
+# --- 5. AN ADDED FLAG IS DRIFT ------------------------------------------------------------------
+# The comparison is whole-line, not substring: a skill that grows a flag the protocol never gained
+# has drifted, and a substring test would call it a match.
+d=$(build addflag "$ARCH_WATCH" "$ARCH_WATCH --fail-after 3")
+run "$d"
+if [ "$rc" -eq 1 ]; then
+	ok "a skill that GAINS a flag is drift"
+else
+	bad "an added flag was not caught (rc=$rc)"
+fi
+
+# THE OTHER DIRECTION, and it is the one that pins `grep -Fx` rather than `grep -F`. Here the
+# PROTOCOL gained the flag and the skill did not, so the skill's line is a strict PREFIX of the
+# protocol's. A substring test finds it and reports clean; only a whole-line test calls it drift.
+#
+# Added after a mutation survived: swapping `-Fxq` for `-Fq` left the suite at 15/15, because the
+# case above searches for the LONGER string in the SHORTER file and fails either way. This is the
+# likelier direction in practice too — the protocol is normative, so it is where a new flag lands
+# first, and a skill left behind is a session running the old command.
+d=$(build protoflag "$ARCH_WATCH --fail-after 3" "$ARCH_WATCH")
+run "$d"
+if [ "$rc" -eq 1 ]; then
+	ok "a PROTOCOL that gains a flag the skill lacks is drift — pins whole-line, not substring"
+else
+	bad "a skill left behind by the protocol was not caught (rc=$rc): $(cat "$tmp/out")"
+fi
+
+# --- 6. REFUSALS ARE NOT PASSES -----------------------------------------------------------------
+# Exit 2 twice over, because both are states in which nothing was compared and a 0 would be a lie.
+set +e
+QUINCE_LOOP_PROTOCOL="$tmp/nope.md" QUINCE_SKILL_ROOT="$tmp/agree" "$GATE" >"$tmp/out" 2>&1
+rc=$?
+set -e
+if [ "$rc" -eq 2 ] && grep -q 'NOT a clean result' "$tmp/out"; then
+	ok "a missing protocol REFUSES with 2 — never 0, because nothing was compared"
+else
+	bad "a missing protocol produced rc=$rc: $(cat "$tmp/out")"
+fi
+
+d="$tmp/noskill"
+mkdir -p "$d/skills/demo"
+printf '# protocol\n\n```sh\n%s\n```\n' "$ARCH_TICK" >"$d/loop-protocol.md"
+printf '# skill\n\nNo commands here at all.\n' >"$d/skills/demo/SKILL.md"
+run "$d"
+if [ "$rc" -eq 2 ]; then
+	ok "a protocol with NO skill inlining anything refuses — the gate has no subject and says so"
+else
+	bad "an empty skill set did not refuse (rc=$rc): $(cat "$tmp/out")"
+fi
+
+# A protocol whose fences stopped being visible — the extractor's own failure mode. It must refuse
+# rather than report every skill as drifted or, worse, report clean.
+d="$tmp/nofence"
+mkdir -p "$d/skills/demo"
+printf '# protocol\n\nbin/forge-watch tick --all --gh x\n' >"$d/loop-protocol.md"
+printf '# skill\n\n```sh\n%s\n```\n' "$ARCH_TICK" >"$d/skills/demo/SKILL.md"
+run "$d"
+if [ "$rc" -eq 2 ]; then
+	ok "a protocol carrying the recipe OUTSIDE a fence refuses — it cannot tell that from a protocol that lost it"
+else
+	bad "an unfenced protocol produced rc=$rc rather than refusing: $(cat "$tmp/out")"
+fi
+
+# --- 7. DISCOVERY IS BY CONTENT, NOT BY A LIST --------------------------------------------------
+# A new skill is covered the day it is written. A hand-written file list would be one more copy to
+# drift, inside the tool whose subject is copies drifting.
+d=$(build newskill "$ARCH_TICK" "$ARCH_TICK")
+mkdir -p "$d/skills/brandnew"
+printf '# new\n\n```sh\nbin/forge-watch watch --all --gh "$PWD/bin/nope" --interval 60\n```\n' \
+	>"$d/skills/brandnew/SKILL.md"
+run "$d"
+if [ "$rc" -eq 1 ] && grep -q 'brandnew' "$tmp/out"; then
+	ok "a skill nobody registered anywhere is checked anyway — discovery is by content"
+else
+	bad "a newly added skill was not discovered (rc=$rc): $(cat "$tmp/out")"
+fi
+
+printf 'loop-drift-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
