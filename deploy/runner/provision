@@ -487,6 +487,76 @@ if [ -d "$LAYER_DIR/.git" ]; then
 	fi
 fi
 
+# --- 4c. the journal pre-push hook, as a property of the BOX -----------------------------------
+# quince#308. quince-devlog's `journal` branch is appended to directly — no pull request, no
+# reviewer — so `bin/pre-push-journal` is the only thing between an Operator-private string and a
+# public branch that every box replicates. Git does not distribute hooks: that guard was in force
+# only in a clone where somebody ran `--install`, which is the property the hook was built to
+# remove, moved one level up.
+#
+# WHY A TEMPLATE AND NOT AN INSTALL. A per-box install does nothing for a scratch clone made an hour
+# later, and a scratch clone is where journal entries are actually written (`/report` clones
+# quince-devlog per session). `init.templateDir` is the only mechanism that acts at CLONE time, so
+# it is the only one whose reach matches where the pushes come from.
+#
+# MEASURED, git 2.54.0, because the obvious reading of the name is that it is an `init` setting:
+#   git -c init.templateDir=T clone …                     -> hook present
+#   git config --global init.templateDir T; git clone …   -> hook present
+# Both. It is honoured by `clone` and it is read from persistent config, which is what makes a
+# one-time provisioning step cover every future clone.
+#
+# NOT `core.hooksPath`, which would need no template and could never go stale. A global
+# `core.hooksPath` REPLACES `.git/hooks` for every repository on the box, so any repo-local hook
+# installed afterwards is silently inert — and silently inert is the failure mode this project files
+# most often. The template costs a copy per clone; `hooksPath` costs the ability to notice.
+#
+# UNCONDITIONAL ACROSS ROLES, including supervisor. The hook is inert for every push that does not
+# touch `refs/heads/journal`, and on a seat with no private layer the gate exits 2 (DID NOT RUN) so
+# the hook REFUSES — the right answer for a seat that cannot sweep, not a reason to leave it out.
+DEVLOG_URL="${DEVLOG_URL:-https://github.com/novkostya/quince-devlog.git}"
+DEVLOG_DIR="${DEVLOG_DIR:-/root/quince-devlog}"
+GIT_TEMPLATE_DIR="${GIT_TEMPLATE_DIR:-/root/.config/git/template}"
+
+# The delegate source. Pristine, like the launchpad and for the same reason: it is where a tool is
+# READ from, never a workspace. Public, so no credential is involved — a session that needs to
+# WRITE the devlog clones its own copy under $HOME/scratch with its own helper.
+if [ -d "$DEVLOG_DIR/.git" ]; then
+	if git -C "$DEVLOG_DIR" fetch -q origin main && git -C "$DEVLOG_DIR" reset -q --hard origin/main; then
+		say "devlog clone updated at $DEVLOG_DIR ($(git -C "$DEVLOG_DIR" rev-parse --short HEAD))"
+	else
+		say "WARNING: could not update the devlog clone at $DEVLOG_DIR — the journal hook it supplies"
+		say "     is whatever that clone holds now. Present is not fresh (quince#121)."
+	fi
+elif git clone -q "$DEVLOG_URL" "$DEVLOG_DIR"; then
+	say "devlog clone placed at $DEVLOG_DIR ($(git -C "$DEVLOG_DIR" rev-parse --short HEAD))"
+else
+	say "WARNING: could not clone $DEVLOG_URL to $DEVLOG_DIR. The template hook below is still"
+	say "     installed, and it will REFUSE any push to the journal branch until this succeeds."
+fi
+
+# The template carries a SHIM, not a copy of the hook — see deploy/runner/pre-push-shim for why.
+# Installed even when the clone above failed: a shim with no delegate refuses journal pushes and
+# waves everything else through, which is the state a box should be in when it cannot sweep.
+mkdir -p "$GIT_TEMPLATE_DIR/hooks"
+install -m 0755 "$RUNNER_DIR/deploy/runner/pre-push-shim" "$GIT_TEMPLATE_DIR/hooks/pre-push"
+git config --global init.templateDir "$GIT_TEMPLATE_DIR"
+say "git template at $GIT_TEMPLATE_DIR — every clone made on this box from now on carries the journal pre-push hook"
+
+# The hook refuses every journal push until this is set, by design: it will not guess where the
+# product checkout lives, because guessing wrong means sweeping with a gate that is not this box's.
+# The launchpad is the right target for the same reason it supplies the service file — provision
+# resets it to origin/main on every run, so it is the checkout whose freshness this script owns.
+# (quince#322 and quince#324 are about a launchpad that is behind because provision has not been
+# RE-RUN; that is the same freshness story as everything else here, not a reason to point elsewhere.)
+git config --global quince.privacy-check "$RUNNER_DIR/deploy/privacy/privacy-check"
+say "privacy gate for the journal hook: $RUNNER_DIR/deploy/privacy/privacy-check"
+
+# CLONES THAT ALREADY EXIST ON THIS BOX ARE NOT RETROFITTED, and saying so is the point: a template
+# acts at clone time and cannot reach backwards. Scratch clones are short-lived by design
+# (`bin/scratch-reap`), so the window closes on its own — but a long-lived one made before this ran
+# has no hook, and nothing on the box will tell you which.
+say "note: clones made BEFORE this run have no hook — a template acts at clone time only"
+
 # --- 5. the service --------------------------------------------------------------------------
 # PROVENANCE, and it is not decoration: the service file comes from the launchpad clone, which
 # tracks main. So a fix merged into a branch reaches this box only after it LANDS and the launchpad

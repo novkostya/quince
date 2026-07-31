@@ -218,6 +218,15 @@ quietly re-architecting it here would be exactly the improvisation its own point
   report every sweep clean, so it looks like it ran. A world-readable list is **reported, not
   enforced**, matching the apk-drift reporter: refusing to start over a permission bit turns a
   one-command fix into an outage.
+- **G1c (quince#308)** — `provision` writes a **git template** so every clone made on the box carries
+  the quince-devlog journal pre-push hook, and `preflight` **reports** whether it is wired. A template
+  because it acts at **clone** time: a per-box install does nothing for the scratch clone an hour
+  later, which is where journal entries are actually written. `make pre-push-shim-test` drives the
+  copied artifact — a **shim** that delegates, so a template copy taken once cannot go stale — in
+  every push state, and the rows that matter most are the **non-refusing** ones: this hook is in every
+  clone on the box, so the expensive failure is refusing an ordinary push, not admitting a journal
+  one. Whether preflight should **refuse** a box with no hook rather than report is quince#308 step 4,
+  the same refuse-or-degrade question G1b answers for the private layer, and it is unruled.
 - **G2** — the service starts, `rc-service quince-runner status` reports a live session, and it appears at
   claude.ai/code (story 4). **Operator leg:** connect from the phone and send one message (story 5).
 - **G3** — `kill` the process; `supervise-daemon` restarts it; a new session registers. The report states the

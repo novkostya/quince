@@ -262,7 +262,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
-                   forge-watch-actor-test forge-watch-postmerge-test
+                   forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -310,6 +310,7 @@ print-sh-suite-image:
 # container: inside, the suites are already in the right environment and run directly.
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
                    deploy/runner/preflight-test deploy/runner/provision-guard-test \
+                   deploy/runner/pre-push-shim deploy/runner/pre-push-shim-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
@@ -591,6 +592,10 @@ pr-title-check: ## Bare #N in a PR title must resolve there (REPO=owner/name + T
 .PHONY: preflight-test
 preflight-test: ## preflight's refusals — the runner spec's G1 (synthetic; no runner needed)
 	@deploy/runner/preflight-test
+
+.PHONY: pre-push-shim-test
+pre-push-shim-test: ## the journal pre-push shim in every push state (quince#308; hermetic, no git)
+	@deploy/runner/pre-push-shim-test
 
 .PHONY: provision-guard-test
 provision-guard-test: ## provision's identity guard in every credential state (quince#234; synthetic, dry-run)

@@ -103,3 +103,39 @@ send the next reader off to recreate a repo when the real fix is a one-click col
 An **empty** list is refused as well, and it is the worse case: it matches nothing and reports every
 sweep clean, so it looks like the gate ran. A world-readable list is reported but not enforced —
 `chmod 600` it, but a permission bit will not stop the box booting.
+
+## The journal pre-push hook is a property of the box, not of a clone
+
+`quince-devlog`'s `journal` branch is appended to **directly — no pull request, so no reviewer**. Its
+`bin/pre-push-journal` refuses a push that has not come back clean from the privacy gate, and git does
+not distribute hooks: it was in force only where somebody remembered to run `--install` (quince#308).
+
+`provision` closes that by writing a **git template**, because a template acts at **clone** time and a
+scratch clone made an hour later is where journal entries are actually written:
+
+| what | where |
+| --- | --- |
+| the delegate — the real hook | `/root/quince-devlog`, reset to `origin/main` on every `provision` run |
+| the template hook — a shim | `/root/.config/git/template/hooks/pre-push` |
+| wiring | `git config --global init.templateDir` + `quince.privacy-check` |
+
+**The template carries a shim, not a copy.** A copy is taken once and then goes stale, and this hook's
+own reach was already corrected once in its first week (quince-devlog#159 narrowed what
+quince-devlog#155 claimed). A stale privacy control that still reports clean is the shape quince#121
+named. So every clone runs whatever `provision` last pulled, and updating it is a `git pull`.
+
+**It cannot brick the box.** The shim narrows to `refs/heads/journal` *before* it requires the
+delegate, so an ordinary push succeeds even with no devlog clone present at all — and a journal push
+refuses. Both directions are pinned by `make pre-push-shim-test`.
+
+**Not `core.hooksPath`.** That would need no template and could never go stale, and it replaces
+`.git/hooks` for every repository on the box — so any repo-local hook installed afterwards is
+silently inert. The template costs a copy per clone; `hooksPath` costs the ability to notice.
+
+Two limits, stated because neither is visible from the box:
+
+- **Clones made before the run are not retrofitted.** A template acts at clone time and cannot reach
+  backwards. Scratch clones are short-lived (`bin/scratch-reap`), so the window closes on its own.
+- **`preflight` reports this and does not refuse.** Whether a box that can author journal entries
+  with no gate should be allowed to *start* is quince#308 step 4 — the same refuse-or-degrade
+  question the private layer got, ruled there and unruled here.

@@ -1,0 +1,67 @@
+#!/bin/sh
+# pre-push-shim — the box-level pre-push hook that DELEGATES to quince-devlog's journal guard.
+#
+# WHAT THIS CLOSES. `quince-devlog`'s `bin/pre-push-journal` refuses a push to the unprotected
+# `journal` branch that has not come back clean from the privacy gate. Git does not distribute
+# hooks: it is in force only in a clone where somebody ran `--install`, which is the property the
+# hook was built to remove, moved one level up (quince#308).
+#
+# `provision` copies this file into a git TEMPLATE directory and points `init.templateDir` at it, so
+# every clone made on the box from then on — including a `/kickoff` scratch clone made an hour
+# later — carries it without anybody remembering. Measured, git 2.54.0: `init.templateDir` is
+# honoured by `git clone` and not only by `git init`, from `--global` config and not only from `-c`.
+#
+# WHY A SHIM AND NOT A COPY OF THE HOOK. A template copy is taken once and then goes stale, and the
+# hook's own reach has already been corrected once in its short life (quince-devlog#159 narrowed
+# what quince-devlog#155 claimed). A stale privacy control that still reports clean is this
+# project's most-filed defect — `preflight`'s presence-is-not-freshness (quince#121) is the same
+# shape. So the copied artifact is a POINTER and the logic stays wherever `provision` refreshes it:
+# every clone on the box runs the same version, and updating it is a `git pull` rather than a
+# re-provision of every clone.
+#
+# WHY IT MUST NOT REFUSE WHEN THE REAL HOOK IS ABSENT — except for a journal push. A template hook
+# runs on EVERY push from EVERY clone on this box, so a bare "the hook is missing, refuse" would
+# take the box's entire ability to push with it, over a control that concerns one branch of one
+# repository. It narrows FIRST and requires the hook SECOND. The narrowing is a substring test over
+# the whole ref block rather than per-line parsing: over-matching costs a required file, and
+# `pre-push-journal` does the exact per-line matching itself. Under-matching is the direction that
+# would be unsafe, and a buffer containing `refs/heads/journal` cannot fail to contain it.
+#
+# NOT INSTALLED BY THIS FILE. It is copied, by `provision`. Running it by hand does nothing useful:
+# with no ref lines on stdin it reads an empty block, matches nothing and exits 0, which is the
+# correct answer to "no push is happening".
+#
+#   QUINCE_JOURNAL_HOOK   override the delegate path (the suite uses it; a box does not need to)
+set -eu
+
+real=${QUINCE_JOURNAL_HOOK:-/root/quince-devlog/bin/pre-push-journal}
+
+# git feeds a pre-push hook one line per ref on stdin: <local ref> <local sha> <remote ref> <remote
+# sha>. Buffer it whole: the decision needs all of it, and the delegate needs it again afterwards.
+refs=$(cat)
+
+case "$refs" in
+*refs/heads/journal*) ;;
+*)
+	# Nothing here concerns the journal branch. Silent by design: this runs on every push on the
+	# box, and a hook that announces itself on each one trains its reader to stop looking.
+	exit 0
+	;;
+esac
+
+if [ ! -x "$real" ]; then
+	echo "pre-push-shim: this push touches refs/heads/journal, and the guard that must sweep it is" >&2
+	echo "  NOT PRESENT at $real" >&2
+	echo "" >&2
+	echo "  The journal branch has no pull request and no reviewer, so the privacy gate is the only" >&2
+	echo "  thing between an Operator-private string and a public branch. REFUSING the push." >&2
+	echo "  Nothing was swept." >&2
+	echo "" >&2
+	echo "  Fix: run deploy/runner/provision on this box, which places the quince-devlog clone this" >&2
+	echo "  delegates to. Or set QUINCE_JOURNAL_HOOK to a checkout that carries bin/pre-push-journal." >&2
+	exit 1
+fi
+
+# Replay the block to the delegate. `printf` rather than `echo` because a ref block is data, and
+# a pipeline rather than `exec` because the delegate's exit code is the hook's answer.
+printf '%s\n' "$refs" | "$real" "$@"
