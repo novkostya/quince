@@ -1,0 +1,140 @@
+{
+  "kind": "sequence",
+  "note": "quince#348. `issue-new` re-fired on EVERY tick, forever, for every issue above the highwater — so a watch exited on tick 1 on every arm and could never reach a quiet state. Measured on the implementer box: three consecutive ticks, seconds apart, no forge activity between them, eight identical `issue-new` lines each time, and `highwater` unchanged at 309 while `last_tick` advanced. THE CAUSE IS IN THE WRITE-BACK, NOT IN THE DIFF. `step()` builds `$decl` as the previous issue block minus `items` (forge-watch:359) — which carries the previous `open_seen` and `scan_limit` as well as the declared set — and the persist then did `.issues = ($decl + {items: …})`, restoring the OLD scan over the fresh one. The highwater line immediately below computes `max($decl.highwater, .issues.open_seen)`, and by then `.issues.open_seen` IS the old list, so it could only ever return what it already was. The diff that EMITS the events reads `$_now.issues.open_seen` and was always correct: the tool noticed the new issues and then failed to remember it had. WHY 63 FIXTURES PASSED ON THE BROKEN CODE, which is the reason this file is a `sequence` and not a pair: every `issue-new` fixture was a single before/after step, and one step cannot observe that the second step repeats itself. A pair fixture asserts what a tick EMITS; only a sequence asserts what the tick LEAVES BEHIND, and the defect lived entirely in what was left behind. TICK 0 IS THE CONTROL AND TICK 1 IS THE CLAIM: 340 and 335 are above the highwater of 330 and are news exactly once; 322 is below it and is never news; the second tick sees the identical scan and must be SILENT. Against the broken write-back, tick 1 emits the same two lines again and this fixture fails on both the events and the state predicate.",
+  "initial": {
+    "observed": true,
+    "prs": [],
+    "issues": {
+      "declared": [
+        322
+      ],
+      "declared_at": "2026-07-31T06:00:00Z",
+      "highwater": 330,
+      "open_seen": [
+        330,
+        322
+      ],
+      "scan_limit": 30,
+      "items": [
+        {
+          "number": 322,
+          "state": "OPEN",
+          "updatedAt": "2026-07-31T06:00:00Z",
+          "closed_at": null,
+          "state_reason": "",
+          "labels": [],
+          "activity": [],
+          "via": "declared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "label": "two issues above the highwater are news, once",
+      "observation": {
+        "observed": true,
+        "prs": [],
+        "issues": {
+          "open_seen": [
+            340,
+            335,
+            330,
+            322
+          ],
+          "scan_limit": 30,
+          "items": [
+            {
+              "number": 322,
+              "state": "OPEN",
+              "updatedAt": "2026-07-31T06:00:00Z",
+              "closed_at": null,
+              "state_reason": "",
+              "labels": [],
+              "activity": [],
+              "via": "declared"
+            }
+          ]
+        }
+      },
+      "expect_events": [
+        "event=issue-new issue=335",
+        "event=issue-new issue=340"
+      ],
+      "expect_state": [
+        ".issues.highwater == 340",
+        ".issues.open_seen == [340, 335, 330, 322]",
+        ".issues.declared == [322]",
+        ".issues.scan_limit == 30"
+      ]
+    },
+    {
+      "label": "the identical scan, one tick later, is SILENT",
+      "observation": {
+        "observed": true,
+        "prs": [],
+        "issues": {
+          "open_seen": [
+            340,
+            335,
+            330,
+            322
+          ],
+          "scan_limit": 30,
+          "items": [
+            {
+              "number": 322,
+              "state": "OPEN",
+              "updatedAt": "2026-07-31T06:00:00Z",
+              "closed_at": null,
+              "state_reason": "",
+              "labels": [],
+              "activity": [],
+              "via": "declared"
+            }
+          ]
+        }
+      },
+      "expect_events": [],
+      "expect_state": [
+        ".issues.highwater == 340",
+        ".issues.declared == [322]"
+      ]
+    },
+    {
+      "label": "a genuinely new issue is still news after convergence",
+      "observation": {
+        "observed": true,
+        "prs": [],
+        "issues": {
+          "open_seen": [
+            348,
+            340,
+            335,
+            330,
+            322
+          ],
+          "scan_limit": 30,
+          "items": [
+            {
+              "number": 322,
+              "state": "OPEN",
+              "updatedAt": "2026-07-31T06:00:00Z",
+              "closed_at": null,
+              "state_reason": "",
+              "labels": [],
+              "activity": [],
+              "via": "declared"
+            }
+          ]
+        }
+      },
+      "expect_events": [
+        "event=issue-new issue=348"
+      ],
+      "expect_state": [
+        ".issues.highwater == 348"
+      ]
+    }
+  ]
+}

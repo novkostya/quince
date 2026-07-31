@@ -357,6 +357,11 @@ step() {
 	# here rather than arriving in the payload — an observation that carried its own declaration
 	# could quietly change what is watched, which is the failure mode `.claude/forge-set` exists to
 	# prevent one level up.
+	# THE PREVIOUS ISSUE BLOCK, MINUS ITEMS — the declared set, its timestamp, the highwater, and the
+	# LAST SCAN. That last part is the trap quince#348 fell into: `$decl` carries `open_seen` and
+	# `scan_limit` too, so a persist that writes `.issues = ($decl + …)` restores the OLD scan over
+	# the fresh one and the highwater it feeds can then only ever return what it already was. Both
+	# persist sites re-apply the new scan explicitly for that reason; see `$scan` at each.
 	_prev_decl=$(jq -c 'if (.issues // null) == null then null else (.issues | del(.items)) end' "$_prev" 2>/dev/null || printf 'null')
 	[ -n "$_prev_decl" ] || _prev_decl=null
 	_prev_iss=$(jq -c '.issues.items // []' "$_prev" 2>/dev/null || printf '[]')
@@ -411,7 +416,8 @@ step() {
 			| if $decl == null then . else
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
-			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
+				| (((.issues // {}) | {open_seen, scan_limit} | with_entries(select(.value != null)))) as $scan
+			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))} + $scan)
 			  end
 			| .issues = ((.issues // {}) + {highwater:
 			    ([(($decl // {}).highwater // 0)] + (.issues.open_seen // []) | max)})' \
@@ -855,7 +861,8 @@ step() {
 		| if $decl == null then . else
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
-			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))})
+			| (((.issues // {}) | {open_seen, scan_limit} | with_entries(select(.value != null)))) as $scan
+			| .issues = ($decl + {items: ($ni + ($previtems | map(select(. as $p | ($seen | index($p.number)) | not))))} + $scan)
 		  end
 		| .issues = ((.issues // {}) + {highwater:
 		    ([(($decl // {}).highwater // 0)] + (.issues.open_seen // []) | max)})' \
