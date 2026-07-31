@@ -393,4 +393,43 @@ if [ -z "$scanned" ]; then
 	say "NOTHING TO SWEEP — the scope is empty. This is not evidence that the branch is clean."
 	exit 0
 fi
+
+# AND THE GUARD ABOVE CANNOT FIRE FOR A BRANCH SCOPE, WHICH IS WHERE IT WAS NEEDED MOST (quince#393).
+#
+# `branch-name` is a source that can NEVER be absent — a branch always has a name — so `$scanned` is
+# never empty once `--ref` is given, and an EMPTY RANGE printed `clean — swept branch-name` and exited
+# 0. A vacuous pass wearing the vocabulary of a real one: the exact defect the paragraph above says
+# this file was written to remove, surviving through the one source that cannot go missing.
+#
+# TWO LINES DISAGREED AND ONLY THE SECOND WAS TRUE. `scope` announced five sources — `diff:added +
+# message:… + author:… + committer:… + branch-name` — while `clean` named one.
+#
+# HOW IT IS REACHED, and it is not exotic: the natural order is stage → sweep → commit, and swept at
+# that point the range is EMPTY. That is how it was found — appending a journal entry, on the one
+# branch that has no pull request and therefore no reviewer, where this banner is the only guard.
+# `bin/pre-push-journal` does not close it: that enforces THAT a sweep ran, and one did, saying clean.
+#
+# THE TEST IS THE SURVIVING SOURCE, NOT THE RANGE. Range semantics are the wrong instrument:
+# `git diff A...B` is merge-base-to-B, so a deletions-only range legitimately has an empty
+# `branch-diff` while `commit-message` is full, and a rev-list count over a symmetric difference
+# answers a different question again. Asking "did anything but the branch NAME survive" needs neither
+# and cannot misfire on either case.
+#
+# REFUSAL RATHER THAN A NOTE, following this file's own doctrine rather than inventing one:
+# `add_source` already rules that "a source the CALLER NAMED and which turned out to be empty is a
+# refusal" (quince#237). `--ref` names a range; a range with nothing in it is that same case. The
+# empty-STAGED path above stays exit 0 deliberately — nothing was requested there, the caller asked
+# for whatever happened to be staged — and that asymmetry is the point rather than an inconsistency.
+if [ -n "$REF" ]; then
+	_substantive=""
+	for _s in $scanned; do
+		[ "$_s" = "branch-name" ] || _substantive="$_substantive $_s"
+	done
+	[ -n "$_substantive" ] || cannot_run "the range '$REF' is EMPTY — there was nothing to sweep.
+    Swept: branch-name. NOT swept: branch-diff, commit-message, commit-identity.
+    Refusing rather than reporting a clean sweep of a range with no commits in it. Usually this is a
+    sweep run BEFORE committing: the staged tree is not in the range yet, so stage, COMMIT, then
+    sweep."
+fi
+
 say "clean — swept$scanned against $((CI_COUNT + CS_COUNT)) patterns"

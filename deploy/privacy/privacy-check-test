@@ -184,6 +184,27 @@ expect "committed violation IS caught by whole-branch mode" 1 "PRIVACY VIOLATION
 expect "whole-branch hit names its source" 1 "branch-diff:" -- \
 	at "$committed" "$CHECK" --patterns "$good" --ref main...HEAD
 
+# AN EMPTY RANGE IS A REFUSAL, AND THE STAGED CASE ABOVE IS EXACTLY WHY IT NEEDS ITS OWN ARM
+# (quince#393). The guard that case pins — `[ -z "$scanned" ]` — CANNOT FIRE for a branch scope,
+# because `branch-name` is a source that can never be absent. So `--ref` over a range with no commits
+# printed `clean — swept branch-name` and exited 0: a vacuous pass wearing the vocabulary of a real
+# one, which is the thing the assertion four lines up exists to prevent in the OTHER mode.
+#
+# `HEAD...HEAD` is the shape a session actually produces — sweeping `origin/<branch>...HEAD` after
+# STAGING but before COMMITTING, which is the natural order and leaves the range empty. That is how
+# this was found: appending to the `journal` branch, where the banner is the only guard because there
+# is no pull request and therefore no reviewer.
+expect "an EMPTY range refuses rather than reporting clean" 2 "is EMPTY" -- \
+	at "$committed" "$CHECK" --patterns "$good" --ref HEAD...HEAD
+# The refusal must carry the gate's own three-code contract, or a reader cannot tell it from a hit.
+expect "the empty-range refusal says nothing was swept" 2 "Nothing was swept" -- \
+	at "$committed" "$CHECK" --patterns "$good" --ref HEAD...HEAD
+# NAMING WHAT WAS NOT SWEPT IS THE POINT. The defect was two lines disagreeing — `scope` announcing
+# five sources while `clean` named one — so a refusal that does not enumerate the missing ones leaves
+# the reader where they started.
+expect "it names the sources that were NOT swept" 2 "NOT swept: branch-diff" -- \
+	at "$committed" "$CHECK" --patterns "$good" --ref HEAD...HEAD
+
 # Commit messages are public history under the same rule as the diff, and no gate covered them.
 msgrepo="$TMP/msg"
 make_repo "$msgrepo" "nothing private here" "wire up 203.0.113.42 for the demo"
