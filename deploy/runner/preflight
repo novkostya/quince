@@ -162,10 +162,33 @@ arch)
 	fi
 	;;
 supervisor)
-	# THE THIRD SEAT, AND ITS RULE IS THE ABSENCE OF EVERY OTHER ONE. This is where the Operator and
-	# a session talk: it coordinates, measures and prepares, and it holds no forge credential at all.
-	# Holding none is what makes it structurally unable to author or approve, so it can never muddy
-	# `approver ≠ author` even by accident — and that is the whole of its security property.
+	# THE THIRD SEAT, AND ITS RULE IS NOW AN ALLOWLIST: ONE credential may be here, and no other.
+	# This is where the Operator and a session talk — it coordinates, measures and prepares — and
+	# until quince#375 it held NO forge credential at all.
+	#
+	# WHAT CHANGED, AND WHAT IT COSTS. quince#375 ruled the seat a GitHub App with `contents: write`,
+	# `pull_requests: write` and `issues: write`, so it authors under its own name instead of
+	# borrowing the implementer's. Everything the seat had produced until then — quince#237-#246,
+	# quince#344, quince-devlog#139 and #141 — went out as `app/quince-coder` behind a hand-written
+	# relay banner, and quince#344 is the proposal arguing that borrowing produces a false record.
+	#
+	# This arm's old comment said holding no credential *"is the whole of its security property"*, and
+	# that sentence is now false. The property that replaces it is weaker and worth stating plainly
+	# rather than dressing up: **absence of every credential** is a sentence anyone can verify;
+	# **absence of every credential except one** is a list that can drift. `decisions/0007`'s
+	# territory — a control that is easy to state is worth more than one that is merely correct — and
+	# the price was named in the proposal before the ruling rather than discovered after it.
+	#
+	# WHAT STILL HOLDS, so the weakening is not read as a collapse. The seat holds exactly ONE
+	# identity, so everything it does is attributable to the seat that did it, which is the failure
+	# this box exists to prevent (quince-devlog#118) and is not the same as containment.
+	# `approver ≠ author` survives per-PR because GitHub refuses an approval from a PR's own author,
+	# and `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy.
+	#
+	# THE ALLOWLIST IS THE PAIR, NOT THE PERMISSION. `quince-analyst.pem` being allowed is only half
+	# of it; the other half is that all four of the other seats' credentials stay refused, and that
+	# half is what `bin/gh-analyst` asserts from the wrapper side. Two checks, same claim, so a hand
+	# run cannot quietly cross a boundary the service refuses to cross.
 	#
 	# Said plainly because the box is NOT isolated and claiming otherwise would be worse than saying
 	# nothing: it holds ssh into both working seats, and root ssh to a box that holds a credential
@@ -187,6 +210,11 @@ supervisor)
 	# clone carries a credential too, which is why the arch arm below reports on the private layer's.
 	# This seat has no private layer and no clone it commits from, so that surface is absent here —
 	# but "absent by construction" is the claim, not "checked".
+	# THE ALLOWED ONE IS NAMED FIRST, AND ONLY AS A PATH. The list below is what may NOT be here; the
+	# analyst key is simply absent from it, which is what makes this an allowlist rather than a
+	# denylist with an exception bolted on. `quince-analyst.app-id` is not a credential — it is on the
+	# App's settings page — so it is not considered either way.
+	_sv_allowed="${QUINCE_ANALYST_KEY_FILE:-/root/.config/quince/quince-analyst.pem}"
 	_sv_found=""
 	for _sv_f in \
 		"${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}" \
@@ -200,10 +228,28 @@ supervisor)
 		[ -n "$_sv_val" ] && _sv_found="${_sv_found:+$_sv_found and }\$$_sv_v (in the environment)"
 	done
 	if [ -n "$_sv_found" ]; then
-		bad "a FORGE CREDENTIAL is present at $_sv_found on a box whose role is 'supervisor'. This seat holds none, deliberately: it is the seat that cannot author and cannot approve, and a credential here makes that false. Remove it — or run this box as the seat that owns that credential, but not both."
+		bad "an OTHER SEAT'S FORGE CREDENTIAL is present at $_sv_found on a box whose role is 'supervisor'. This seat holds exactly one identity — the analyst App key at $_sv_allowed — and nothing else, so that everything done from here is attributable to the seat that did it. Remove it — or run this box as the seat that owns that credential, but not both."
+	elif [ -f "$_sv_allowed" ]; then
+		ok "role supervisor: the analyst App key is present and no other seat's credential is — exactly one identity, as required"
 	else
-		ok "role supervisor: no forge credential present — this seat can neither author nor approve, as required"
+		# NOT `bad`, and this mirrors the arch arm's reviewer-key clause rather than inventing a
+		# posture. A box provisioned before the App existed is a correct box that predates a change,
+		# and refusing to start it would strand the seat the Operator talks to. What is lost is that
+		# the seat can act under its own name; it can still coordinate and measure, which is what it
+		# did for its whole life until quince#375.
+		printf 'preflight: role supervisor: no analyst key at %s — this seat can coordinate but cannot act under its own name, so anything it produces must be relayed by another identity (quince#375 unbuilt on this box).\n' "$_sv_allowed"
 	fi
+
+	# PRESENCE IS NOT CAPABILITY, AND THIS ARM DELIBERATELY ONLY CHECKS PRESENCE — said out loud
+	# because the arch arm one screen up does the stronger thing and a reader will notice the
+	# asymmetry. That arm asks the reviewer credential to MINT a token, on quince#121's lesson: a key
+	# can be present and unusable — revoked, mismatched, unreadable, or on a box with no openssl —
+	# and every one of those reads as "installed" to a check that looks at the filesystem.
+	#
+	# The same assertion belongs here and is NOT made, because it would make this box refuse to START
+	# when the forge is unreachable — and this is the coordination and break-glass seat, the one whose
+	# availability matters most when something else is broken. That trade was ruled for the arch box
+	# and has NOT been ruled for this one. Filed on quince#375 rather than decided here.
 	;;
 *)
 	bad "unknown QUINCE_RUNNER_ROLE='$ROLE' — expected 'implementer', 'arch' or 'supervisor'. Refusing rather than guessing which identity rules apply."
@@ -235,6 +281,25 @@ esac
 # holds no forge credential to commit with — and the sweep belongs to the seat that publishes, which
 # is the seat that can be held to it. Requiring the layer here would put a second copy of the
 # Operator's private material on a third box to satisfy a check that seat can never fail meaningfully.
+#
+# ⚠ THE PREMISE OF THE PARAGRAPH ABOVE IS WITHDRAWN, AND THE BEHAVIOUR IS DELIBERATELY UNCHANGED
+# PENDING A RULING (quince#375). *"It commits nothing — it holds no forge credential to commit with"*
+# stopped being true when the analyst App landed with `contents: write` on all five repositories. The
+# supervisor seat now publishes: it can push a branch and open a pull request from a box with no
+# pattern list, where `make privacy-check` exits **2 — DID NOT RUN** — and it can push
+# `refs/heads/journal`, which has no pull request and therefore no reviewer, and which `CLAUDE.md`
+# says the privacy gate is the ONLY guard on.
+#
+# The question is quince#44's, which was ruled for the other two seats and has not been ruled here:
+# does this box now require the private layer in order to START? Both answers cost something real —
+# yes puts a third complete copy of the private record on a third box, which is `pr.6`'s
+# concentration concern; no means the honest control is a refusal to PUBLISH rather than a refusal to
+# start, and something has to carry it.
+#
+# NOT REWORDED INTO SOMETHING THAT READS CORRECT. A justification whose premise is gone is exactly
+# the "document describing a narrower reality than the one that exists" defect this project files
+# more than any other, and quietly rewriting the sentence would hide that a control changed meaning.
+# It is marked instead, and the ruling is owed on quince#375.
 #
 # The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
 # re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
@@ -420,7 +485,7 @@ else
 fi
 
 else
-	ok "role supervisor: no private layer required — this seat runs no privacy gate, because it commits nothing and the sweep belongs to the seat that publishes"
+	ok "role supervisor: no private layer required BY THIS CHECK — and since quince#375 that is an unruled gap rather than a property. This seat can now publish (analyst App, contents: write), so a push from here would be swept by a gate that exits 2, DID NOT RUN. Ruling owed on quince#375; the behaviour is deliberately unchanged until then."
 fi
 
 # --- the journal pre-push hook (quince#308) ---------------------------------------------------
