@@ -28,16 +28,23 @@ apart.** This skill's own §1 already said *"declare first, before anything read
 and then §0 ran first and read state.
 
 ```sh
-bin/forge-watch runner set <name>     # ONCE, FIRST. `arch<N>` — a seat is a pattern, not a list.
+bin/forge-watch runner set <name>     # ONCE, FIRST. `arch<N>` — a pattern (r/arch/analyst), not a list.
 ```
 
-**The name must LOOK like a seat — `arch<N>` here, `r<N>` for an implementer — and `runner set`
-REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). This seat is the
+**The name must LOOK like a seat — `arch<N>` here, `r<N>` for an implementer, `analyst<N>` for the
+analyst — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by
+quince#330; third seat quince#375). This seat is the
 reason the check exists: `arch1` was declared only on the arch box, so the implementer box could
 not attribute `arch1/…` branches and woke on every one — and, worse in the other direction,
 `other_runner_names` on the arch box returned **empty**, which made the wake filter a documented
 no-op there that had never suppressed anything. **Both are fixed by shape**: attribution no longer
-needs a population, so it works on a one-seat box, and adding a seat is no longer a PR.
+needs a population, so it works on a one-seat box, and adding an ordinal is no longer a PR.
+
+**Adding a KIND still is, and quince#375 is the first one.** `analyst<N>` cost a one-line change to
+the alternation, which is the intended price of a third seat: a seventh implementer is arithmetic, a
+third kind is a decision. **The ordinal is required there too** — bare `analyst` is refused, because a
+bare word is the *"a prefix that is NOT a seat being read as one"* risk the pattern carries and the
+deleted list did not.
 
 **A taken name is refused**, so two sessions on one box cannot silently share a state directory.
 

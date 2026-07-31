@@ -130,7 +130,13 @@ export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
 printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
 
 # (1) A NAME THAT IS NOT A SEAT IS REFUSED — the risk the pattern carries and the list did not.
-for _bad in journal feature main r arch xr1 ''; do
+#
+# BARE `analyst` IS IN THIS LIST AND NOT THE NEXT ONE, WHICH IS THE POINT OF THE ORDINAL (quince#375).
+# The third seat joined the alternation because it now owns branches, and the obvious spelling of its
+# name is a bare word — which is precisely the *"a prefix that is NOT a seat being read as one"* risk
+# this assertion exists for. `analyst` is a plausible topic prefix; `analyst1` is not. It sits beside
+# `r` and `arch`, which are refused for exactly the same reason and always have been.
+for _bad in journal feature main r arch analyst xr1 ''; do
 	fresh "refuse-${_bad:-empty}"
 	if ./bin/forge-watch runner set "$_bad" >"$WORK/o" 2>&1; then
 		bad "runner set accepted \"$_bad\", which is not a seat name"
@@ -141,7 +147,7 @@ done
 
 # (2) A SEAT NAME IS ACCEPTED — the control for (1). Without it, a `runner set` broken outright
 # would satisfy every case above.
-for _good in r1 r7 r66 arch1 arch2; do
+for _good in r1 r7 r66 arch1 arch2 analyst1 analyst2; do
 	fresh "accept-$_good"
 	if ./bin/forge-watch runner set "$_good" >"$WORK/o" 2>&1; then
 		ok "runner set accepts \"$_good\""
@@ -208,6 +214,64 @@ for _d in "$PWD" /tmp; do
 	fi
 done
 [ "$_cwd_ok" = 1 ] && ok "the refusal is identical from every working directory (no file is read)"
+
+# (6) THE THIRD SEAT, IN BOTH DIRECTIONS (quince#375) -------------------------------------------
+#
+# (3) proves an `arch1/…` branch is attributed here with no local registry entry. The analyst seat has
+# the same shape and a worse exposure: it lives on a THIRD box, so nothing on this one can ever have
+# it in a registry, and quince#375 gave it `pull_requests: write` — so it opens PRs, and every one of
+# them is an event on a branch this box must decide about.
+#
+# THE PAIR IS THE ASSERTION, NOT EITHER HALF. `analyst1/…` must be silent and `analyst/…` must WAKE.
+# Alone, the first would pass against a pattern that swallowed any `analyst`-ish prefix — which is the
+# bare-word form this change deliberately refuses — and the second would pass against a tool that
+# suppressed nothing. Together they pin the ordinal, which is the only real decision in this change.
+# The branch under test is read from a FILE by the stub, exactly as `turn` already is, rather than
+# baked in by a second heredoc per case. One stub, two cases, and the only thing that differs between
+# them is the one string this assertion is about.
+cat >"$WORK/gh3" <<'STUB3'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+ref=$(cat "$STUB_WORK/ref")
+t=2026-07-29T10:00:00Z
+[ "$turn" = 1 ] || t=2026-07-29T11:00:00Z
+cat <<ROW | jq -f "$STUB_INVERSE"
+[{"number":101,"state":"OPEN","updatedAt":"2026-07-29T10:00:00Z","title":"t","headRefName":"r1/my-work",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"},
+ {"number":910,"state":"OPEN","updatedAt":"$t","title":"t","headRefName":"$ref",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB3
+chmod +x "$WORK/gh3"
+
+for _case in "analyst1/scoping-thing:quiet" "analyst/scoping-thing:wake"; do
+	_ref=${_case%%:*}
+	_want=${_case#*:}
+	fresh "third-seat-$_want"
+	./bin/forge-watch runner set r1 >/dev/null 2>&1 || bad "could not declare r1"
+	printf '%s' "$_ref" >"$WORK/ref"
+	printf 1 >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh3" --no-issues --interval 1 --max-wait 3 >/dev/null 2>&1 || true
+	printf 2 >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh3" --no-issues --interval 1 --max-wait 5 >"$WORK/o" 2>&1 || true
+	if grep -q 'EXITING on the event' "$WORK/o"; then
+		if [ "$_want" = wake ]; then
+			ok "\`$_ref\` is NOT a seat name — the bare word still wakes, which is why the ordinal is required"
+		else
+			bad "woke on $_ref — the third seat's branch was not attributed"
+			sed -n '1,6p' "$WORK/o"
+		fi
+	else
+		if [ "$_want" = quiet ]; then
+			ok "a branch owned by analyst1 does NOT wake this seat, from a box that can never have it in a registry"
+		else
+			bad "suppressed $_ref — a bare topic prefix was read as a seat, which this change's ordinal exists to prevent"
+			sed -n '1,6p' "$WORK/o"
+		fi
+	fi
+done
 
 printf "\nforge-watch-seats-test: %d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ]

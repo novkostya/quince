@@ -1196,7 +1196,29 @@ FORGE_SET_FILE=${FORGE_SET_FILE:-.claude/forge-set}
 # THE RISK THIS CARRIES INSTEAD is a prefix that is NOT a seat being read as one — `journal/…`,
 # `feature/…` — which the enumeration made impossible by construction. That is what the suite pins in
 # both directions, and it is the assertion to keep if any other is ever dropped.
-SEAT_PATTERN='^(r|arch)[0-9][0-9]*$'
+#
+# THE THIRD SEAT, AND THE PARAGRAPH IT REVERSES (quince#375). `analyst` joins the alternation because
+# the supervisor seat now OWNS BRANCHES: quince#375 ruled it `contents: write` + `pull_requests:
+# write`, so it authors pull requests, and a branch nobody can attribute wakes every watch on every
+# box.
+#
+# `CLAUDE.md` currently argues the OPPOSITE — *"`SEAT_PATTERN` should therefore NOT be widened as part
+# of this"* — and that conclusion was correctly reached under a narrower scope: `issues: write` alone
+# forecloses opening a pull request, so the seat would have owned no branch and needed no attribution.
+# The premise was withdrawn when the grant widened, and the conclusion inverts with it. Recorded here
+# rather than left to the canon PR alone, because the merged reasoning stays citable and a reader who
+# lands on it has no other way to know its premise is gone.
+#
+# THE ORDINAL IS REQUIRED — `analyst1`, never bare `analyst`. Three reasons, in order of weight: a
+# bare word is exactly the *"a prefix that is NOT a seat being read as one"* risk the paragraph above
+# names as the price of moving from a list to a pattern, and `analyst` is a plausible topic prefix;
+# the ordinal is what lets two analyst sessions run at once, the way `r1`..`r7` already do; and *name
+# plus ordinal* stays uniform across all three seats, so the rule remains one sentence.
+#
+# The already-merged `analyst/propose-identity` branch is NOT attributed by this and is not migrated —
+# `CLAUDE.md` says the convention is going-forward only, and that branch is the bootstrap artefact of
+# an identity that did not exist yet.
+SEAT_PATTERN='^(r|arch|analyst)[0-9][0-9]*$'
 
 is_seat_name() { # <name> -> 0 if it is a seat name
 	printf '%s' "${1:-}" | grep -qE "$SEAT_PATTERN"
