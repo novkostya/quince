@@ -169,3 +169,40 @@ it("pulls the quiet variant back to the margin so its text aligns with its neigh
   render(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
   expect(screen.getByRole("button", { name: /turn on wi-fi sync/i }).className).not.toContain("-ml-3");
 });
+
+// An OFFLINE device with the flag on: no USB and no Wi-Fi, so the op can reach it on neither
+// transport. Before quince#325 (2a) the control read `!onUSB` as "must be on Wi-Fi", so this
+// rendered a live button whose confirmation opened with "This device is connected over Wi-Fi" —
+// about a device connected to nothing. Reported from an Operator screenshot.
+it("DISABLES disable on a device that is not there at all, and says why", () => {
+  const post = vi.fn();
+  render(<WifiSyncControl device={device({ wifi_sync: "on", transports: {} })} post={post} />);
+
+  expect(screen.getByRole("button", { name: /turn off wi-fi sync/i })).toBeDisabled();
+  expect(screen.getByText(/connect the device to turn this off/i)).toBeTruthy();
+  // The claim that was false: nothing may assert a Wi-Fi connection this device does not have.
+  expect(screen.queryByText(/connected over wi-fi/i)).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+});
+
+// The other direction, which is what stops the fix above from over-reaching: a device that IS on
+// Wi-Fi must still be disable-able, behind the confirmation. Asserting only the disabled case would
+// pass just as well with the control switched off for everyone.
+it("still offers disable over Wi-Fi, behind the confirmation", () => {
+  const post = vi.fn().mockResolvedValue({ op_id: "op-3" });
+  render(
+    <WifiSyncControl
+      device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
+      post={post}
+    />,
+  );
+
+  const button = screen.getByRole("button", { name: /turn off wi-fi sync/i });
+  expect(button).not.toBeDisabled();
+  fireEvent.click(button);
+  expect(screen.getByText(/connected over wi-fi/i)).toBeTruthy();
+  // The trigger and the dialog's confirm share a name, so take the last — the one in the dialog.
+  const named = screen.getAllByRole("button", { name: /^turn off wi-fi sync$/i });
+  fireEvent.click(named[named.length - 1]);
+  expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
+});

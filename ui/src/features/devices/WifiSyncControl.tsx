@@ -28,8 +28,18 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
 
   const on = device.wifi_sync === "on";
   const onUSB = device.transports.usb != null;
+  // `on USB` and `here at all` are DIFFERENT questions, and answering the second with the first is
+  // what put a live "Turn off Wi-Fi sync" on a device that was simply gone — offering a confirmation
+  // dialog that opened with "This device is connected over Wi-Fi" about a device connected to
+  // nothing (quince#325 (2a), from an Operator screenshot). An absent device is unreachable on
+  // either transport, so the op would reach nothing.
+  const present = onUSB || device.transports.wifi != null;
   const needsUSBToEnable = !on && !onUSB;
-  const willDisconnect = on && !onUSB;
+  const willDisconnect = on && !onUSB && present;
+  // Disabled-with-a-reason rather than hidden, the same shape DeviceCard uses for "Back up now" on
+  // an offline device — the card keeps its layout and the user is told why, instead of the control
+  // silently vanishing whenever the phone walks out of range.
+  const unreachable = on && !present;
 
   const run = () => {
     setConfirming(false);
@@ -58,7 +68,7 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
         // keeps its full width. Not needed for `outline`, which has a border at the margin already.
         className={on ? "-ml-3" : undefined}
         onClick={() => (willDisconnect ? setConfirming(true) : run())}
-        disabled={inFlight || needsUSBToEnable}
+        disabled={inFlight || needsUSBToEnable || unreachable}
       >
         {on ? <WifiOff size={14} /> : <Wifi size={14} />}
         {on ? "Turn off Wi-Fi sync" : "Turn on Wi-Fi sync"}
@@ -72,6 +82,9 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
           Connect by cable to turn this on — with Wi-Fi sync off the device does not announce itself
           over Wi-Fi.
         </p>
+      ) : null}
+      {unreachable ? (
+        <p className="max-w-xs text-xs text-muted">Connect the device to turn this off.</p>
       ) : null}
 
       {/* The disconnect consequence is NOT standing text — it is the confirmation dialog's whole
