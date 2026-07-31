@@ -74,6 +74,13 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
 
+	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
+	// committed to, which is now the DEFAULT declared storage rather than the retired
+	// QUINCE_BACKUPS. Read from the same place buildStorage read it so the two cannot drift —
+	// a preflight that measures free space on a different filesystem than the one being written
+	// to is a check that passes for the wrong reason.
+	engineBackupsRoot, _ := defaultStorage(cfgSvc.Current().Storage)
+
 	// Device.last_backup derives from the committed versions (qn.4c finding (v)): the version
 	// registry is the source of truth for "has this device been backed up", so a device shows its
 	// real last backup immediately after a restart — including versions adopted from a restored
@@ -116,7 +123,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	eng := backup.New(backup.Options{
 		BaseCtx: ctx, Store: st, Storage: storageMgr, VersionQ: storageMgr, Devices: reg,
 		Prober: opsMgr, Announcer: reg,
-		Bus: eventBus, Log: log, Config: ecfg, Backups: bootstrap.Backups, NewID: id.New,
+		Bus: eventBus, Log: log, Config: ecfg, Backups: engineBackupsRoot, NewID: id.New,
 		Tool: backup.ToolConfig{
 			Bin: "idevicebackup2", UsbmuxdSocket: dcfg.UsbmuxdSocket, NetmuxdAddr: dcfg.NetmuxdAddr,
 		},
@@ -136,15 +143,16 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 // `device repair-working-copy`) can operate on a truthful, reconciled registry WITHOUT starting the
 // muxer supervisor / device registry / enrichment goroutines the full stack spins up. Reconcile runs
 // before returning (same as serve) so adopted/missing versions are reflected.
-func buildStorage(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *config.Service,
+func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Service,
 	st *store.Store, eventBus *bus.Bus, log *slog.Logger) *storage.Manager {
 	scfg := cfgSvc.Current().Storage
+	root, name := defaultStorage(scfg)
 	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
-		Backend: scfg.Backend, Backups: bootstrap.Backups, AppVersion: version.String(),
+		Backend: scfg.Backend, Backups: root, AppVersion: version.String(),
 		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
 		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
 	}, log)
-	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, bootstrap.Backups,
+	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, root,
 		storage.RetentionPolicy{
 			KeepRecent: scfg.Retention.KeepRecent,
 			KeepDaily:  scfg.Retention.KeepDaily,
@@ -153,6 +161,34 @@ func buildStorage(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *confi
 	if err := storageMgr.Reconcile(ctx); err != nil {
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
-	log.Info("storage subsystem ready", "backend", backendName, "reason", reason)
+	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName, "reason", reason)
 	return storageMgr
+}
+
+// defaultStorage returns the root and name of the storage a backup goes to when none is named.
+//
+// qn.6c STORY 1 ONLY: the root now comes from `storage.storages` instead of the retired
+// QUINCE_BACKUPS, and quince still holds exactly ONE backend. Holding one per storage is story 3
+// and a separate PR on purpose — this change moves where the root comes FROM, that one changes how
+// MANY there are, and bundling them would put a signature ripple across ~32 test call sites into
+// the same diff as the retirement.
+//
+// Callers reach here only past config.CheckStorages, which refuses to serve on an absent or empty
+// list, so there is nothing to guess through and no fallback: the empty return is what an
+// unreachable-by-construction case should look like. storage.Select then surfaces an unusable root
+// loudly rather than inventing one.
+func defaultStorage(scfg config.StorageConfig) (root, name string) {
+	if scfg.Storages == nil {
+		return "", ""
+	}
+	entries := *scfg.Storages
+	for _, s := range entries {
+		if s.Default {
+			return s.Path, s.Name
+		}
+	}
+	if len(entries) > 0 {
+		return entries[0].Path, entries[0].Name
+	}
+	return "", ""
 }

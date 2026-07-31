@@ -69,13 +69,45 @@ func unknownKeys(raw map[string]any, t reflect.Type, prefix string) []Warning {
 			warnings = append(warnings, Warning{Path: path, Message: fmt.Sprintf("unknown config key %q (ignored)", path)})
 			continue
 		}
-		if f.Type.Kind() == reflect.Struct {
+		switch ft := deref(f.Type); ft.Kind() {
+		case reflect.Struct:
 			if sub, ok := v.(map[string]any); ok {
-				warnings = append(warnings, unknownKeys(sub, f.Type, prefix+k+".")...)
+				warnings = append(warnings, unknownKeys(sub, ft, prefix+k+".")...)
+			}
+		case reflect.Slice:
+			// qn.6c: recurse into slices of structs. Without this a typo INSIDE a storages
+			// entry (`pathh:`) is silently dropped by yaml.Unmarshal and never reported —
+			// the guard would cover `storage.storages` itself and nothing under it, so a
+			// mistyped key reads as an omitted one and the storage lands somewhere the user
+			// did not name. Indexed, because "which entry" is the first thing you need.
+			elem := deref(ft.Elem())
+			if elem.Kind() != reflect.Struct {
+				continue
+			}
+			items, ok := v.([]any)
+			if !ok {
+				continue
+			}
+			for i, item := range items {
+				sub, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				warnings = append(warnings, unknownKeys(sub, elem, fmt.Sprintf("%s%s[%d].", prefix, k, i))...)
 			}
 		}
 	}
 	return warnings
+}
+
+// deref unwraps pointer types so a *[]T field is walked as []T. StorageConfig.Storages is a
+// pointer purely to distinguish an absent key from an empty list; that encoding must not also
+// decide whether the typo guard looks inside it.
+func deref(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
 }
 
 // Marshal serializes config canonically (struct field order = key order). qn.6 replaces

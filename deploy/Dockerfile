@@ -161,7 +161,7 @@ COPY --from=core-build /quince /usr/local/bin/quince
 
 # The vault venv's console script (quince-vault) on PATH.
 ENV PATH="/opt/quince/vault/.venv/bin:${PATH}"
-ENV QUINCE_DATA=/data QUINCE_CACHE=/cache QUINCE_BACKUPS=/backups QUINCE_LISTEN=:8080
+ENV QUINCE_DATA=/data QUINCE_CACHE=/cache QUINCE_LISTEN=:8080
 EXPOSE 8080
 ENTRYPOINT ["quince"]
 CMD ["serve"]

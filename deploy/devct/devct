@@ -382,7 +382,7 @@ name=$1
 port=$2
 nerdctl rm -f "$name" >/dev/null 2>&1 || true
 nerdctl run -d --name "$name" -p "$port:$port" \
-	-e QUINCE_LISTEN=":$port" -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	-e QUINCE_LISTEN=":$port" -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	quince:local serve --demo >/dev/null
 EOF
 

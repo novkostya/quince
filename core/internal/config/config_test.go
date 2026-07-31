@@ -163,7 +163,7 @@ func TestLoadBootstrapWarnsOnUnknownVar(t *testing.T) {
 	if b.Data != "/d" || b.Listen != ":9000" {
 		t.Errorf("bootstrap parse wrong: %+v", b)
 	}
-	if b.Cache != "/cache" || b.Backups != "/backups" {
+	if b.Cache != "/cache" {
 		t.Errorf("bootstrap defaults wrong: %+v", b)
 	}
 	if len(warns) != 1 || warns[0].Path != "QUINCE_TYPOO" {
@@ -171,11 +171,31 @@ func TestLoadBootstrapWarnsOnUnknownVar(t *testing.T) {
 	}
 }
 
+// TestLoadBootstrapWarnsOnRetiredBackupsVar is G7b's first half: QUINCE_BACKUPS is GONE, not
+// merely unused. A retirement that leaves the variable silently accepted is indistinguishable
+// from one that never happened, so the guard is that it now takes the unknown-variable path.
+func TestLoadBootstrapWarnsOnRetiredBackupsVar(t *testing.T) {
+	_, warns := LoadBootstrap([]string{"QUINCE_DATA=/d", "QUINCE_BACKUPS=/backups"})
+	if len(warns) != 1 || warns[0].Path != "QUINCE_BACKUPS" {
+		t.Fatalf("a retired QUINCE_BACKUPS must warn like any unknown var, got %+v", warns)
+	}
+}
+
 func TestValidateDirsFlagsNonWritable(t *testing.T) {
 	good := t.TempDir()
-	b := Bootstrap{Data: good, Cache: good, Backups: filepath.Join(good, "nope")}
+	b := Bootstrap{Data: good, Cache: filepath.Join(good, "nope")}
 	warns := ValidateDirs(b)
-	if len(warns) != 1 || warns[0].Path != "QUINCE_BACKUPS" {
-		t.Errorf("want one warning for missing backups dir, got %+v", warns)
+	if len(warns) != 1 || warns[0].Path != "QUINCE_CACHE" {
+		t.Errorf("want one warning for missing cache dir, got %+v", warns)
+	}
+}
+
+// TestValidateDirsDoesNotProbeStorage guards the other direction: ValidateDirs must not acquire a
+// backups probe again. Each declared storage is probed on the storage path, where an unreachable
+// one is a per-storage state rather than one global warning.
+func TestValidateDirsDoesNotProbeStorage(t *testing.T) {
+	good := t.TempDir()
+	if warns := ValidateDirs(Bootstrap{Data: good, Cache: good}); len(warns) != 0 {
+		t.Errorf("bootstrap dirs are data+cache only, got %+v", warns)
 	}
 }

@@ -490,9 +490,20 @@ is always safe and never user-visible beyond latency. Session scratch lives in
 app can run (unknown `QUINCE_*` vars are a startup warning, typo guard):
 
 ```
-QUINCE_DATA=/data   QUINCE_CACHE=/cache   QUINCE_BACKUPS=/backups
+QUINCE_DATA=/data   QUINCE_CACHE=/cache
 QUINCE_LISTEN=:8080
 ```
+
+**`QUINCE_BACKUPS` was RETIRED at `qn.6c`** (gap 3, Operator ruling 2026-07-31 — quince#378).
+Backup locations are **declared**, in `storage.storages` below: no env var, no implicit storage,
+no fallback. **Setting it now produces the ordinary unknown-`QUINCE_`-variable warning** — it is
+gone, not merely unread, and that is asserted rather than assumed.
+
+The retired variable carried a built-in `/backups` default, so every deployment had a working
+storage while declaring nothing. That implicit path is what the ruling removed: *"I see no reason
+to accumulate backward-compatibility garbage."* Both agent seats recommended keeping a fallback
+and both were wrong for the same reason — the argument priced a population of deployments that
+does not exist.
 
 **Everything else**: `/data/config.yml` — single source of truth, edited by the UI and
 by hand equally (stack D12: atomic validated writes, canonical order + generated
@@ -506,9 +517,24 @@ backup:
                             # false permits unencrypted backups behind persistent UI
                             # warnings (no Health/Keychain/passwords in such backups)
 storage:
+  storages:                 # REQUIRED, qn.6c. The ONLY key with no default: quince REFUSES TO
+                            # START without at least one, naming the key and printing what to
+                            # write. There is no sane default for where a user's backups live
+                            # now that QUINCE_BACKUPS is retired, and the honest form of "no
+                            # default" is a refusal, never a guess (D12 near-miss, declared).
+    - name: local           # stable identity across replug, where a PATH is not; keys the DB row
+      path: /backups        # absolute; unique across entries
+      default: true         # EXACTLY ONE — the storage a backup goes to when none is named
+                            # NOTE: no `backend` key. A storage's backend is discovered and frozen
+                            # at its creation moment and recorded in quince-storage.json (design
+                            # §5), never declared — a declared one could disagree with the medium,
+                            # which is the remount case the identity marker exists to refuse.
   backend: auto             # auto | zfs | reflink | hardlink | copy
+                            # GLOBAL this rung: every declared storage inherits it. Per-storage
+                            # zfs settings only start mattering when a second zfs storage exists,
+                            # which qn.6c cannot create (gap 3, second half, ruled as recommended).
                             # auto: zfs when storage.zfs is configured, else probe
-                            # reflink → hardlink → copy on the /backups filesystem
+                            # reflink → hardlink → copy on the storage's filesystem
   zfs:
     parent_dataset: ""      # e.g. rpool/userdata/iphone-backup; one child dataset per device
     mode: exec              # exec (delegated) | hook
@@ -549,43 +575,37 @@ ui:
 Schema is versioned by presence/absence of keys (missing keys = defaults, written back
 on next save); a key the app doesn't know is a warning surfaced in UI, never an error.
 
-**PROPOSED (gap): where storages are declared, against `QUINCE_BACKUPS` — `qn.6c`, quince#378.**
+**RULED (was `PROPOSED (gap)`): storages are DECLARED; `QUINCE_BACKUPS` is retired — `qn.6c`,
+Operator ruling 2026-07-31, relayed on quince#378.** Implemented above.
 
-This section says bootstrap env is *"deployment topology only"* and *"Everything else:
-`/data/config.yml`"*. A storage's **path** is topology by that reading — but at `qn.6c` there are
-N of them, env vars hold lists badly, and D12 requires every setting to be in `config.yml` and
-UI-editable. Measured at `main`: `QUINCE_BACKUPS` is bootstrap env (`config/bootstrap.go:15,:51`)
-and `storage:` carries `backend`, `zfs` and `retention` but **no path at all**
-(`config/schema.go:27-31`) — so this would be the first storage *location* in YAML, and this
-section has never had to arbitrate a path before.
+**Option (b) was chosen over the recommended (a).** (a) kept the env var as an implicit fallback
+synthesizing one storage when the list was empty; (b) retires it outright. **Both agent seats
+recommended (a) and both were wrong for the same reason** — the argument was *"this breaks every
+deployment in the field"*, and there is no field. There is one instance; the cost is editing one
+YAML file once. Against that, an env var with a built-in default that quietly conjures a storage
+is a permanent implicit path: cheap now, expensive later, load-bearing by the time anyone wants it
+gone.
 
-- **(a) A list in YAML, with `QUINCE_BACKUPS` as the implicit fallback:**
-  ```yaml
-  storage:
-    backend: auto        # unchanged — describes the IMPLICIT storage only
-    zfs: {...}           # unchanged — ditto
-    retention: {...}     # unchanged — ditto
-    storages: []         # EMPTY = synthesize one implicit storage at QUINCE_BACKUPS.
-                         # A non-empty list carries {name, path, default} per entry; the entry's
-                         # BACKEND is discovered and frozen at its creation moment (design §5),
-                         # never declared here.
-  ```
-- **(b) Retire `QUINCE_BACKUPS`; every storage is declared.** Breaks every deployment in the
-  field, and leaves a fresh install with no storage until an onboarding that does not exist.
+**What the ruling requires, and each is implemented rather than described.** No `storages:` key →
+**refuse to start**, name the key, print the remedy (`config.CheckStorages` + `StorageRequirement.Explain`,
+called on the serve path). The variable is **gone rather than unread** — it is no longer in
+`knownBootstrapVars`, so setting it produces the unknown-variable warning. A still-set
+`QUINCE_BACKUPS` is echoed in the refusal as the likely reason a working deployment stopped, and
+its value is suggested as the path to declare.
 
-**The rung recommends (a)** — the only option under which `qn.6c` does not depend on a future
-rung, and under which an unchanged `config.yml` keeps working byte-for-byte.
+**Why the refusal is NOT a `Validate` error, which is the load-bearing design point.** `Load()`
+discards a config that fails `Validate` and returns `Default()` with `OK:false`; `NewService`
+logs *"running on last-good defaults"* and continues — never fatal, by its own contract. Routing
+"no storages" through that path would start a daemon that serves a healthy-looking UI and can back
+nothing up. **That silent zero-storage start is the one outcome the ruling forbids**, so the check
+lives where it can stop the process. `Validate` still owns well-formedness of a list the user *did*
+declare (empty name/path, relative path, duplicate name or path, not exactly one `default: true`) —
+those are 422s, not exits.
 
-**A second half (a) does not settle:** whether `backend`, `zfs` and `retention` move **into** each
-list entry now, or stay global and are inherited. **Recommended: keep them global for this rung.**
-Per-storage zfs settings only start mattering when a second zfs storage exists, and `qn.6c` cannot
-create one. This cannot simply be assumed, because zfs intent is **config-declared and never
-probed** (`storage/probe.go:30-31`) — so a config-global zfs setting would silently apply to every
-declared storage.
+**`--demo` is unaffected and that is deliberate:** it serves fixture data and never builds the
+storage subsystem, so the refusal sits inside the live branch. A check placed before it would
+refuse every demo and every `ui-e2e` run over a subsystem they do not use.
 
-**Restart, declared rather than implied.** A change to `storage.storages` requires a restart in
-`qn.6c`: the backend is selected and probed at a storage's creation moment, and the registry holds
-one live `Backend` instance per storage. D12 permits a restart *"unless the spec says why"* — the
-spec says why.
-
-Spec: `docs/specs/qn.6c/qn.6c.md`, gap 3. **Not built until ruled.**
+**Second half, ruled as recommended:** `backend`, `zfs` and `retention` stay **global**; a declared
+entry inherits them. A **restart** is required to pick up a `storages:` change — D12 permits that
+only if the spec says why, and `docs/specs/qn.6c/qn.6c.md` says why.
