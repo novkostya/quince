@@ -415,11 +415,11 @@ esac
 # DRIVEN DIRECTLY, WHICH IS WHY THE HELPER IS A FLAG. As an inline `!f() { … }` in a `git -c` value
 # it could only be exercised by making git authenticate against a real remote — so the one path that
 # had to be right was the one path no suite could reach. Offline, no network, no remote, no git.
-rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY"
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
 printf 'a reviewer key\n' >"$RKEY"
 helper_out=$(PATH="$STUB" HOME="$WORK" \
 	QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
-	QUINCE_CODER_KEY_FILE="$CKEY" \
+	QUINCE_CODER_KEY_FILE="$CKEY" QUINCE_ANALYST_KEY_FILE="$NKEY" \
 	"$PWD/bin/git-coder" --credential-helper get 2>/dev/null) && helper_rc=0 || helper_rc=$?
 
 if [ "$helper_rc" -ne 0 ]; then
@@ -442,7 +442,7 @@ rm -f "$RKEY"
 for op in store erase; do
 	_o=$(PATH="$STUB" HOME="$WORK" QUINCE_BOT_TOKEN_FILE="$TOKEN" \
 		QUINCE_REVIEW_KEY_FILE="$RKEY" QUINCE_ARCH_TOKEN_FILE="$ATOK" \
-		QUINCE_CODER_KEY_FILE="$CKEY" \
+		QUINCE_CODER_KEY_FILE="$CKEY" QUINCE_ANALYST_KEY_FILE="$NKEY" \
 		"$PWD/bin/git-coder" --credential-helper "$op" 2>/dev/null) && _rc=0 || _rc=$?
 	if [ "$_rc" -eq 0 ] && [ -z "$_o" ]; then
 		ok "bin/git-coder: --credential-helper $op is a silent no-op"
@@ -547,6 +547,86 @@ case "$out" in
 	printf '       %s\n' "$out" | head -n 2
 	;;
 esac
+
+# --- 18. THE REVERSE DIRECTION: THE OTHER FOUR MUST REFUSE THE ANALYST KEY (quince#375) -------
+#
+# Part 14 proves `gh-analyst` refuses beside every other seat. That is ONE direction, and quince#103's
+# rule is that checking one direction of a two-directional property is not a check — which this suite
+# has now recorded twice (quince#204 parts 4-6, quince#232 parts 10-12) and is recording again.
+#
+# THE HOLE THIS CLOSES IS LIVE, not hypothetical. `quince-analyst.pem` is an AUTHORING credential —
+# `contents: write` + `pull_requests: write` — and its grant also permits a review verdict. So:
+#
+#   reviewer key + analyst key    → open a PR as the analyst, approve it as the architect
+#   architect token + analyst key → open a PR as the analyst, MERGE it
+#   coder key + analyst key       → author with gh-coder, approve with gh-analyst
+#
+# Every existing check in all four wrappers is CORRECT, and none of them sees any of these, because
+# each names the identities that existed when it was written. quince#204 is the same shape one level
+# down: there a rule naming one MECHANISM went false when the mechanism moved; here a rule naming two
+# IDENTITIES goes false when a third appears.
+#
+# DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, like every other part, because the ordering claim is half
+# the assertion: the wrong repair here is to install the missing tool and then place a second key.
+for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+	rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+	printf 'an analyst app key\n' >"$NKEY"
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"ANALYST APP KEY is present"*)
+		ok "$w: refuses beside the analyst key, ahead of the missing dependencies"
+		;;
+	*"is not installed"*)
+		bad "$w: an ENVIRONMENT refusal outranked the analyst boundary — the wrong repair is the one it invites"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*)
+		bad "$w: the analyst key is an authoring identity that can also approve, and nothing refused"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 19. NEGATIVE CONTROL for part 18 ----------------------------------------------------------
+# Deleting each wrapper's dependency check would pass all four rows above. With NO credential at all,
+# the dependency refusal must still speak — proving the analyst check was added AHEAD of it rather
+# than in place of it, in every one of the four.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"is not installed"*)
+		ok "$w: with no analyst key, the dependency refusal still speaks — the check was added, not substituted"
+		;;
+	*"is present"*)
+		bad "$w: claimed a credential that is not there"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*)
+		bad "$w: no dependency refusal — the analyst check may have replaced it"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 20. AND THE ANALYST KEY OUTRANKS THE USAGE MESSAGE IN ALL FOUR ----------------------------
+# Parts 3, 5, 9, 11 and 16's assertion, for the fifth credential. Every one of these wrappers exits 2
+# on no arguments, and a box holding two identities should be told THAT rather than how to call the
+# tool — which is the message a session is most likely to act on without thinking.
+printf 'an analyst app key\n' >"$NKEY"
+for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+	out=$(run "$w")
+	case "$out" in
+	*"ANALYST APP KEY is present"*)
+		ok "$w: the analyst boundary refusal outranks the usage message too"
+		;;
+	*)
+		bad "$w: with no arguments and an analyst key present, the boundary did not speak"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+rm -f "$NKEY"
 
 # --- EVERY CREDENTIAL WRAPPER CARRIES THE LEDGER (quince#316) ------------------------------------
 #
