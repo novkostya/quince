@@ -142,3 +142,17 @@ it("explains the disconnect inside the confirmation, not as standing text", () =
   fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
   expect(screen.getByText(/will disconnect it immediately/i)).toBeTruthy();
 });
+
+// Weight follows direction (quince#352): enable is the onboarding action this rung exists for and
+// gets a real button; disable is a setting nobody reaches for and recedes. Asserted because a
+// single weight is wrong half the time, and which half is not obvious from reading the component.
+it("gives ENABLE a prominent button and DISABLE a quiet one", () => {
+  const { unmount } = render(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
+  const enable = screen.getByRole("button", { name: /turn on wi-fi sync/i }).className;
+  expect(enable).toContain("border"); // outline
+  unmount();
+
+  render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
+  const disable = screen.getByRole("button", { name: /turn off wi-fi sync/i }).className;
+  expect(disable).not.toContain("border");
+});

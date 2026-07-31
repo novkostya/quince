@@ -41,9 +41,16 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
   // render wider and louder than "Back up now", the page's primary action.
   return (
     <div className="flex flex-col items-start gap-1">
+      {/* WEIGHT FOLLOWS DIRECTION, because the two directions are not the same kind of action
+          (quince#352). Turning Wi-Fi sync ON is the onboarding step this whole rung exists for —
+          once per device, and the thing standing between a user and cable-free backups, so it earns
+          a real button. Turning it OFF is a setting nobody reaches for, so it recedes to `ghost`.
+          Same control, opposite prominence; the alternative was one weight that is wrong half the
+          time. The full answer is #352 (disable does not belong on this page at all) and this is
+          the part that does not need a new home first. */}
       <Button
-        variant="ghost"
-        size="sm"
+        variant={on ? "ghost" : "outline"}
+        size={on ? "sm" : "md"}
         onClick={() => (willDisconnect ? setConfirming(true) : run())}
         disabled={inFlight || needsUSBToEnable}
       >
