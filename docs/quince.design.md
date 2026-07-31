@@ -106,12 +106,18 @@ out of argv, and importing it to guard a boolean would guard nothing. And **pair
 auto-enable it**: quince cannot distinguish a flag that was never set from one the user deliberately
 turned off, so flipping it as a side effect of pairing would silently overrule a choice.
 
-**The key inside that domain is unmeasured, and the read says so rather than guessing.** The domain
-is verified to exist at the pinned libimobiledevice; the hypothesised key name appears nowhere in
-that source. Until a hardware spike names it, the read answers `unknown` **without querying** —
-because a wrong key exits 0 printing nothing, and the absent-key rule would turn that into a
-confident `off` on every device. This is the state-honesty rule doing real work: the third enum
-value exists precisely so quince can say it does not know.
+**The key is `EnableWifiConnections`, measured on hardware 2026-07-31** — a boolean, read `true` on
+a device whose Wi-Fi sync was on. The read is over the muxer for the device's transport, which for
+Wi-Fi means netmuxd's own socket rather than usbmuxd's; a tool pointed at the default socket sees no
+network device at all.
+
+**How that key was arrived at is the part worth keeping.** The name was guessed correctly by the
+roadmap and appears **nowhere** in libimobiledevice's source, so nothing corroborated it until a
+device did — and until then the read answered `unknown` **without querying**, because a wrong key
+exits 0 printing nothing and the absent-key rule would turn that into a confident `off` on every
+device. The third enum value exists precisely so quince can say it does not know, and this is the
+case it was for. **One thing is still owed:** an off/on differential, which is what would prove this
+key is the one that *changes* rather than `SupportsWifiSyncing`, also true in the same dump.
 
 ## 4. The backup job state machine
 

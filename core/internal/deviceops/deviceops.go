@@ -55,10 +55,12 @@ type Tools struct {
 	Log            *slog.Logger
 	env            []string // extra child env (tests only)
 	argPrefix      []string // prepended to every argv (tests only: re-exec as the fake CLI)
-	// wifiSyncKey is the lockdown key wifiSync reads; empty means "unmeasured, do not ask the
-	// device" (see wifiSyncKeyUnmeasured). It lives on Tools rather than in a package var because
-	// enrichment reads it from a background goroutine while tests set it — as a package var that is
-	// a data race, and `go test -race` caught it as one.
+	// wifiSyncKey is the lockdown key wifiSync reads; empty means "do not ask the device", which is
+	// what it meant for every build before story 3 measured the name (see the wifiSyncKey const).
+	// The empty branch stays: it is the honest answer whenever the key is unknown, not scaffolding
+	// left behind. It lives on Tools rather than in a package var because enrichment reads it from a
+	// background goroutine while tests set it — as a package var that is a data race, and
+	// `go test -race` caught it as one.
 	wifiSyncKey string
 }
 
@@ -80,7 +82,7 @@ func NewTools(usbmuxdSocket, netmuxdAddr string, log *slog.Logger) *Tools {
 		UsbmuxdSocket:  usbmuxdSocket,
 		NetmuxdAddr:    netmuxdAddr,
 		Log:            log,
-		wifiSyncKey:    wifiSyncKeyUnmeasured,
+		wifiSyncKey:    wifiSyncKey,
 	}
 }
 

@@ -297,6 +297,46 @@ surface beyond the three declared above.
    ruled), and no user-visible claim, because `unknown` renders no badge. Filling it in after
    story 3 is a one-line diff.
 
+   **DISCHARGED 2026-07-31.** Story 3 ran; the key is `EnableWifiConnections` and the constant is
+   populated. The guard test inverted rather than being deleted — it now pins the *measured* value,
+   so editing it still requires a measurement. The empty branch stays reachable and tested, because
+   it is the honest answer whenever a key is unknown and the situation recurs for any second
+   unmeasured lockdown value.
+
+## Story 3 — the measurement, 2026-07-31
+
+Run read-only against the Operator's staging stand over Wi-Fi, with Operator-granted SSH.
+**Nothing was written to the device.** `com.apple.mobile.wireless_lockdown` returned six keys:
+
+| key | value | what it is |
+| --- | --- | --- |
+| **`EnableWifiConnections`** | **`<true/>`** | **the flag** — boolean, `true` while Wi-Fi sync was known on |
+| `EnableWifiDebugging` | `<false/>` | a different feature |
+| `SupportsWifi` | `<true/>` | capability, not state |
+| `SupportsWifiSyncing` | `<true/>` | capability, not state |
+| `BonjourFullServiceName` | *(withheld)* | string; embeds the device's MAC and link-local address |
+| `InstanceName` | *(withheld)* | string; same |
+
+The last two are Operator-private and appear only in the private layer. Key names are Apple's.
+
+**Proven:** the domain is readable over Wi-Fi through netmuxd; the key exists, is a boolean, and is
+`true` on a device with Wi-Fi sync on.
+
+**NOT proven, and left owed rather than closed:** that this key is what *changes* when the setting
+is toggled. One read with the flag on cannot separate it from `SupportsWifiSyncing`, also `true`.
+The differential needs Finder — the detour this rung exists to remove — and was not run.
+The internal evidence is strong but is still inference: within the same dump `EnableWifiDebugging`
+was `false` while this was `true`, so **the `Enable*` family carries state** (two members, different
+values) where `Supports*` is uniformly `true` and reads as capability. Only one device was
+reachable; the iPad was offline on both transports, so there is no cross-device confirmation either.
+
+**Operational fact, and the reason the read nearly failed to happen:** `ideviceinfo` in the
+container cannot see a Wi-Fi device by default. netmuxd is supervised on a **private socket**
+(qn.4c — its default is usbmuxd's, and binding that is a silent USB blackout), so `idevice_id -n`
+returns nothing while netmuxd's own log shows the device attached. The tool must be pointed at
+netmuxd explicitly via `USBMUXD_SOCKET_ADDRESS`, which is `Tools.socketAddr` done by hand. A session
+that does not know this concludes "no devices" on a box where the device is plainly present.
+
 ---
 
 ## Known gaps and open questions
