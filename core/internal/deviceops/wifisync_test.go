@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/wire"
@@ -280,11 +281,18 @@ func TestWifiSyncOpDistinguishesItsFailures(t *testing.T) {
 //
 // The op must publish the value SetWifiSync already READ BACK, which is verified rather than
 // assumed: SetWifiSync only returns nil after confirming the flag changed on the device.
+//
+// It asserts by REFLECTION rather than by naming fields, because Enrich replaces the stored
+// identity wholesale: a field left out of runWifiSync's literal is not "unchanged", it is published
+// as empty and persisted. The hand-written version of this test named three of six fields, and
+// dropping `Model: dev.Model` left the whole package green — measured in review. Reflection also
+// keeps working when Identity grows, which is the case a hand-written list cannot cover at all.
 func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing.T) {
 	devs := newFakeDevices()
 	dev := pairedUSBDevice(fakeUDID)
-	dev.Name, dev.Model, dev.BackupEncryption = "test-iphone", "iPhone17,2", "on"
-	dev.WifiSync = "on"
+	// Every field distinct, so a mix-up between two of them is caught as well as a blanking.
+	dev.Name, dev.Model, dev.IOSVersion = "dev-name", "dev-model", "dev-ios"
+	dev.BackupEncryption, dev.WifiSync = "on", "on"
 	devs.add(dev)
 	m := newWifiManager(t, devs, "wifi_on")
 
@@ -296,15 +304,32 @@ func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing
 		t.Fatalf("op = %+v, want succeeded", op)
 	}
 
-	id, ok := devs.lastEnrich(fakeUDID)
+	got, ok := devs.lastEnrich(fakeUDID)
 	if !ok {
-		t.Fatal("no identity was published at all")
+		t.Fatal("no identity was published at all — the stale-badge bug this test exists for")
 	}
-	if id.WifiSync != "off" {
-		t.Fatalf("WifiSync = %q after a successful disable, want off — a stale `on` is what the UI showed on hardware", id.WifiSync)
-	}
-	// The merge must not blank the rest: Enrich replaces the whole identity.
-	if id.Name != "test-iphone" || id.Paired != "yes" || id.BackupEncryption != "on" {
-		t.Fatalf("the rest of the identity was lost: %+v", id)
+
+	gv := reflect.ValueOf(got)
+	src := reflect.ValueOf(dev)
+	for i := 0; i < gv.NumField(); i++ {
+		name := gv.Type().Field(i).Name
+		if name == "WifiSync" {
+			// The one field the op is allowed to change, and the reason it ran.
+			if gv.Field(i).String() != "off" {
+				t.Errorf("WifiSync = %q after a successful disable, want off — a stale `on` is what the UI showed on hardware", gv.Field(i).String())
+			}
+			continue
+		}
+		// Identity's other fields are carried across from the device the registry already holds, so
+		// each must equal its same-named counterpart on wire.Device.
+		want := src.FieldByName(name)
+		if !want.IsValid() {
+			t.Fatalf("Identity.%s has no counterpart on wire.Device — a new field needs a decision "+
+				"about how runWifiSync carries it, not a silent empty string", name)
+		}
+		if gv.Field(i).String() != want.String() {
+			t.Errorf("Identity.%s = %q, want %q — Enrich REPLACES the identity, so a field missing "+
+				"from runWifiSync's literal is published empty", name, gv.Field(i).String(), want.String())
+		}
 	}
 }
