@@ -62,6 +62,7 @@
       "Bash(make privacy-check-test)",
       "Bash(make preflight-test)",
       "Bash(make provision-guard-test)",
+      "Bash(make pre-push-shim-test)",
       "Bash(make quince-runner-status-test)",
       "Bash(make scratch-reap-test)",
       "Bash(make home-resolution-test)",

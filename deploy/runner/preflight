@@ -423,6 +423,41 @@ else
 	ok "role supervisor: no private layer required — this seat runs no privacy gate, because it commits nothing and the sweep belongs to the seat that publishes"
 fi
 
+# --- the journal pre-push hook (quince#308) ---------------------------------------------------
+# REPORTED, NOT ENFORCED, and the distinction is a ruling I did not make. quince#308 step 4 asks
+# whether `preflight` should REFUSE to start a box that can author journal entries with no gate.
+# That is the same refuse-don't-degrade question the private layer got, it was ruled there by the
+# Operator, and it has not been ruled here — so this reports and does not decide. Turning these
+# `note` lines into `bad` is a one-line change once it is.
+#
+# WHY IT IS WORTH REPORTING AT ALL. The template acts at clone time, so a box provisioned before
+# quince#308 is silently in the un-hooked state forever: nothing about it looks wrong, and the
+# first sign would be an unswept push to a public branch. Visible at the moment somebody is already
+# reading this output is the cheapest moment it can be — the same argument as the claude-version
+# drift note below.
+#
+# BOTH HALVES, because either alone is a hook that does nothing: a template with no `init.templateDir`
+# is never copied, and a hook with no `quince.privacy-check` refuses every journal push.
+_tmpl=$(git config --global --get init.templateDir 2>/dev/null || true)
+if [ -n "$_tmpl" ] && [ -x "$_tmpl/hooks/pre-push" ]; then
+	ok "journal pre-push hook is in the git template at $_tmpl — clones made on this box carry it"
+else
+	printf 'preflight: note — no journal pre-push hook in a git template%s\n' \
+		"$([ -n "$_tmpl" ] && printf ' (init.templateDir=%s has no executable hooks/pre-push)' "$_tmpl")"
+	printf 'preflight:        Clones made on this box can push to quince-devlog'\''s unprotected journal\n'
+	printf 'preflight:        branch with nothing sweeping them. Fix: run deploy/runner/provision (quince#308).\n'
+fi
+_gate=$(git config --global --get quince.privacy-check 2>/dev/null || true)
+if [ -n "$_gate" ] && [ -x "$_gate" ]; then
+	ok "the journal hook has a privacy gate to call — $_gate"
+elif [ -n "$_gate" ]; then
+	printf 'preflight: note — quince.privacy-check is set to %s, which is not executable, so every\n' "$_gate"
+	printf 'preflight:        push to the journal branch will be REFUSED. Run deploy/runner/provision.\n'
+else
+	printf 'preflight: note — quince.privacy-check is unset, so every push to the journal branch will\n'
+	printf 'preflight:        be REFUSED by design. Run deploy/runner/provision (quince#308).\n'
+fi
+
 # --- the thing we are about to run ----------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
 	ok "claude present ($(claude --version 2>/dev/null || echo 'version unreadable'))"

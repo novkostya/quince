@@ -1,0 +1,228 @@
+#!/bin/sh
+# pre-push-shim-test — the shim in every state a push can put it in (quince#308).
+#
+# WHY THE NON-REFUSING ROWS ARE THE ONES THAT MATTER HERE. The shim is installed by `provision` into
+# EVERY clone on the box, so its blast radius is every push the box makes, and the failure that
+# would hurt most is not "it let a journal push through" — it is "it refused an ordinary push to a
+# feature branch because the devlog clone was missing". A suite that only drove the journal path
+# would pass against a shim that refuses everything, which is exactly the half-a-check quince#103
+# names.
+#
+# HERMETIC. No git, no network, no real hook: the delegate is a stub named through
+# QUINCE_JOURNAL_HOOK, and stdin is the ref block git would supply. That the shim needs neither is
+# itself a property worth pinning — it runs before a push, in whatever clone the box just made.
+set -eu
+
+cd "$(dirname "$0")/../.."
+SHIM="${QUINCE_PRE_PUSH_SHIM:-$PWD/deploy/runner/pre-push-shim}"
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+[ -x "$SHIM" ] || {
+	printf 'pre-push-shim-test: %s is not executable — nothing to test\n' "$SHIM" >&2
+	exit 1
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# A delegate that records what it was handed and succeeds.
+cat >"$tmp/delegate-ok" <<EOF
+#!/bin/sh
+cat >"$tmp/delegate-stdin"
+printf '%s\n' "\$@" >"$tmp/delegate-argv"
+exit 0
+EOF
+# A delegate that refuses, as the real hook does on a privacy match.
+cat >"$tmp/delegate-refuses" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+echo "delegate says no" >&2
+exit 1
+EOF
+chmod +x "$tmp/delegate-ok" "$tmp/delegate-refuses"
+
+# run <delegate> <stdin-file> -- prints rc, leaves stderr in $tmp/err
+run() {
+	_d=$1
+	_in=$2
+	shift 2
+	set +e
+	QUINCE_JOURNAL_HOOK="$_d" "$SHIM" "$@" <"$_in" >"$tmp/out" 2>"$tmp/err"
+	_rc=$?
+	set -e
+	rm -f "$tmp/delegate-stdin" 2>/dev/null || true
+	return $_rc
+}
+
+zero=0000000000000000000000000000000000000000
+head1=1111111111111111111111111111111111111111
+head2=2222222222222222222222222222222222222222
+
+printf 'refs/heads/journal %s refs/heads/journal %s\n' "$head1" "$head2" >"$tmp/in-journal"
+printf 'refs/heads/r5/x %s refs/heads/r5/x %s\n' "$head1" "$head2" >"$tmp/in-feature"
+printf 'refs/heads/main %s refs/heads/main %s\nrefs/heads/journal %s refs/heads/journal %s\n' \
+	"$head1" "$head2" "$head1" "$head2" >"$tmp/in-mixed"
+: >"$tmp/in-empty"
+printf 'refs/heads/journal %s refs/heads/journal %s\n' "$zero" "$zero" >"$tmp/in-delete"
+
+# --- 1. THE ORDINARY PUSH IS UNTOUCHED, WITH AND WITHOUT A DELEGATE ---------------------------
+# The second row is the one that stops this shim from being able to brick the box: a feature-branch
+# push must succeed even when the whole quince-devlog clone is absent. It is the state a freshly
+# built box is in between `provision`'s template step and its clone step, and the state any box is
+# in if that clone is ever removed.
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-ok" "$SHIM" origin git@example <"$tmp/in-feature" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -eq 0 ] && [ ! -f "$tmp/delegate-stdin" ]; then
+	ok "a push to a feature branch exits 0 and does NOT reach the delegate"
+else
+	bad "a push to a feature branch: rc=$rc, delegate reached=$([ -f "$tmp/delegate-stdin" ] && echo yes || echo no)"
+fi
+rm -f "$tmp/delegate-stdin"
+
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/does-not-exist" "$SHIM" origin git@example <"$tmp/in-feature" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+	ok "a feature-branch push succeeds with NO delegate on the box at all — the shim cannot brick pushes"
+else
+	bad "a feature-branch push with no delegate exited $rc, so an absent quince-devlog clone would block every push on the box"
+fi
+
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/does-not-exist" "$SHIM" origin git@example <"$tmp/in-empty" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+	ok "an empty ref block exits 0 — running the shim by hand is a no-op, not an error"
+else
+	bad "an empty ref block exited $rc"
+fi
+
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-ok" "$SHIM" origin git@example <"$tmp/in-feature" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ ! -s "$tmp/out" ] && [ ! -s "$tmp/err" ]; then
+	ok "a non-journal push is SILENT on both streams — this runs on every push, so noise would train the reader to skim"
+else
+	bad "a non-journal push printed something: out=$(wc -c <"$tmp/out") err=$(wc -c <"$tmp/err")"
+fi
+rm -f "$tmp/delegate-stdin"
+
+# --- 2. THE JOURNAL PUSH REACHES THE DELEGATE, INTACT -----------------------------------------
+# The ref block is the delegate's only input — it computes the sweep range from the two shas — so
+# "reached the delegate" is not enough: it has to arrive byte for byte.
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-ok" "$SHIM" origin git@example.com:x/y <"$tmp/in-journal" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -eq 0 ] && [ -f "$tmp/delegate-stdin" ]; then
+	if cmp -s "$tmp/in-journal" "$tmp/delegate-stdin"; then
+		ok "a journal push reaches the delegate with the ref block BYTE-IDENTICAL"
+	else
+		bad "the delegate received a different ref block: $(cat "$tmp/delegate-stdin")"
+	fi
+else
+	bad "a journal push did not reach the delegate (rc=$rc)"
+fi
+
+if [ -f "$tmp/delegate-argv" ] && grep -q '^origin$' "$tmp/delegate-argv" &&
+	grep -q '^git@example.com:x/y$' "$tmp/delegate-argv"; then
+	ok "the delegate is handed the hook's own argv — git passes the remote name and URL, and they survive"
+else
+	bad "argv did not reach the delegate: $(cat "$tmp/delegate-argv" 2>/dev/null)"
+fi
+rm -f "$tmp/delegate-stdin" "$tmp/delegate-argv"
+
+# A push that touches several branches at once, one of which is the journal. git sends one block,
+# so a shim that looked only at the FIRST line would wave this through.
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-ok" "$SHIM" origin git@example <"$tmp/in-mixed" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ -f "$tmp/delegate-stdin" ] && cmp -s "$tmp/in-mixed" "$tmp/delegate-stdin"; then
+	ok "a push carrying main AND journal in one block still reaches the delegate — the first line is not the whole answer"
+else
+	bad "a mixed push did not reach the delegate intact (rc=$rc)"
+fi
+rm -f "$tmp/delegate-stdin"
+
+# A journal DELETION still reaches the delegate. The shim does not get to decide that a deletion is
+# harmless — `pre-push-journal` has its own line for it, and duplicating that judgement here is how
+# two guards drift apart.
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-ok" "$SHIM" origin git@example <"$tmp/in-delete" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ -f "$tmp/delegate-stdin" ]; then
+	ok "a journal DELETION is passed on rather than judged here — one guard owns that decision"
+else
+	bad "a journal deletion never reached the delegate (rc=$rc)"
+fi
+rm -f "$tmp/delegate-stdin"
+
+# --- 3. THE DELEGATE'S VERDICT IS THE HOOK'S VERDICT -------------------------------------------
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/delegate-refuses" "$SHIM" origin git@example <"$tmp/in-journal" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q 'delegate says no' "$tmp/err"; then
+	ok "a refusing delegate refuses the push, and its reason reaches stderr rather than being swallowed"
+else
+	bad "a refusing delegate produced rc=$rc and stderr: $(cat "$tmp/err")"
+fi
+
+# --- 4. AN ABSENT DELEGATE REFUSES A JOURNAL PUSH ----------------------------------------------
+# The mirror of part 1's second row, and the pair is the whole design: absent means "carry on" for
+# every other branch and "refuse" for this one. Neither answer alone is the shim.
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/does-not-exist" "$SHIM" origin git@example <"$tmp/in-journal" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+	ok "an ABSENT delegate refuses a journal push — refuse rather than skip, as the gate itself does"
+else
+	bad "an absent delegate allowed a journal push (rc=$rc) — the unswept push this exists to stop"
+fi
+if grep -q 'Nothing was swept' "$tmp/err" && grep -q 'deploy/runner/provision' "$tmp/err"; then
+	ok "the refusal says nothing was swept AND names the command that fixes it"
+else
+	bad "the refusal message is missing the state or the fix: $(cat "$tmp/err")"
+fi
+
+# A delegate that exists but is not executable is the same class — present is not usable
+# (quince#234's shape) — and it must not be mistaken for "installed".
+#
+# ASSERTING THE MESSAGE AND NOT ONLY THE EXIT CODE, because the exit code alone does not
+# distinguish the two ways this can fail. Measured: with `-e` in place of `-x` the shim sails past
+# its own check and the push still fails — the SHELL refuses to exec a 0644 file — so `rc != 0`
+# held and the mutation survived the suite. The difference is entirely in what the pusher is told:
+# a designed refusal that names the state and the fix, or `Permission denied` from a line number.
+: >"$tmp/not-executable"
+set +e
+QUINCE_JOURNAL_HOOK="$tmp/not-executable" "$SHIM" origin git@example <"$tmp/in-journal" >"$tmp/out" 2>"$tmp/err"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q 'NOT PRESENT' "$tmp/err"; then
+	ok "a delegate that EXISTS but is not executable takes the shim's OWN refusal path — presence is not usability"
+elif [ "$rc" -ne 0 ]; then
+	bad "a non-executable delegate failed the push, but not through the shim's refusal: $(head -n 1 "$tmp/err")"
+else
+	bad "a non-executable delegate allowed a journal push (rc=$rc)"
+fi
+
+printf 'pre-push-shim-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
