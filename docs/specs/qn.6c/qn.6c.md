@@ -5,15 +5,28 @@ removable disk, say — can declare both to quince and aim a device's backup at 
 cost of that choice (a first backup to a new storage is a **full** transfer) stated before it
 starts.
 
-**Status: PROPOSED — awaiting the spec-review gate.** No code exists. This is the first rung of
-the multi-storage epic (`roadmap.md`, *"Storage as a first-class entity"*, captured 2026-07-22),
-which has never had rung numbers assigned; this is number one of them. Scoped by the Operator on
-2026-07-31 as [quince#378](https://github.com/novkostya/quince/issues/378).
+**Status: APPROVED, and ALL FOUR GAPS ARE RULED — code PRs may open.** The spec was approved on
+quince#381 (`quince-review[bot]` as the independent read, `@novkostya` as code owner on the two
+canon files). The rulings were relayed by architect session `arch1` on
+[quince#378](https://github.com/novkostya/quince/issues/378) — a **relay of an out-of-band
+Operator decision**, which is the citable record, not a forge artefact the Operator authored.
+First rung of the multi-storage epic (`roadmap.md`, *"Storage as a first-class entity"*, captured
+2026-07-22), scoped 2026-07-31.
 
-**Four decisions in this rung are NOT the rung's to make.** They touch contracts §1/§2/§6 and
-design §5, which are frozen. They are written into those documents as `PROPOSED (gap)` blocks in
-the same PR as this spec, and **no code implements any of them before a ruling.** They are
-restated in *Contract and design changes* below so this document is readable alone.
+**The four rulings, and where each one landed:**
+
+| gap | ruled | vs. what this spec recommended |
+| --- | --- | --- |
+| **1** — `Version.backend` | **keep it, and REDOCUMENT it** — `Version.backend` is *"how this version was made"*, `Storage.backend` is *"what this storage uses now"* | **better than (a).** Two distinct facts that agree permanently, because a storage's backend is immutable by gap 4's own rule — so it is not a denormalized copy awaiting a breaking removal, and the epic's "symptom" framing does not apply to the wire at all |
+| **2** — the storage collection | **as recommended**, and the open sub-question settled: `GET /api/storages` stays **device-independent**; `?udid=` is an optional parameter that adds `will_be_full` | *will the next backup be full* is a property of a **(device, storage) pair**, not of a storage; modelling it as a storage property would distort the resource for the storage-cards rung |
+| **3** — `QUINCE_BACKUPS` | **(b): HARD RETIRE it.** Every storage declared; no env var, no implicit storage, no fallback | **the architect recommended (a) and was OVERRULED.** See *Rung-ruled decisions* #5 for the dissent and the four costs the rung now carries |
+| **4** — `quince-storage.json` | **accepted as written**, including the offsite exclude | the exclude is the load-bearing half: a replicated marker makes two places assert one UUID |
+
+**Each implementing PR flips its `PROPOSED (gap)` block in canon to decided text, citing the
+ruling comment** — already required by the *Docs are part of the diff* row.
+
+**Two things are the Operator's and block nothing yet:** writing the staging stand's `storages:`
+entry before this rung lands, and reviewing the upgrade note when it appears.
 
 **What the rung is.** Today quince has exactly one `/backups`, one backend probed globally, and
 `Version.backend` recorded per version. The epic names that last field as *the symptom*: a
@@ -44,6 +57,11 @@ moment?*
 - `core/internal/demo` — two fixture storages, one of them deliberately unreachable.
 - `ui/` — a storage selector on *Back up now*, carrying the full-transfer warning.
 - `docs/` — contracts §1/§2/§6, design §5, stack D5/D12.
+- **An UPGRADE NOTE — a deliverable of this rung, not an afterthought** (gap 3's ruling). What to
+  add to `config.yml`, and that it must be added **before** upgrading or the instance stops
+  backing up. Retiring `QUINCE_BACKUPS` means an existing deployment that upgrades without a
+  `storages:` key has zero storages; every such deployment today relies on that variable's
+  built-in `/backups` default (`config/bootstrap.go:51`) while declaring nothing.
 
 **Out of scope, explicitly — and where each went:**
 
@@ -78,6 +96,18 @@ costs nothing, and it saves building onboarding twice.
 It also keeps this rung inside the program doc's rule that **a rung's goal is provable at rung
 close.** A spec that needed a creation UI to demonstrate two storages would be depending on a
 future rung's deliverable. This one does not: two storages are two entries in `config.yml`.
+
+**Correction — gap 3's ruling made part of this section false, and it is corrected rather than
+left standing.** This section argued the rung takes on **no** dependency on an onboarding that does
+not exist. Under the ruling (retire `QUINCE_BACKUPS`; every storage is declared) **a fresh install
+has no storage at all until someone hand-edits YAML** — which is that dependency, discharged by
+documentation rather than removed.
+
+Stated plainly because the difference matters to whoever builds onboarding: this rung does not
+*need* onboarding to be **provable** — G1 still runs on two directories with no creation UI, and
+the rung-close rule is still satisfied — but it does leave a fresh install **unusable** until a
+human writes a `storages:` entry. That is a real cost the ruling accepted knowingly, and the
+mitigation is story 1's **loud refusal** (new G7) plus the upgrade note, not a synthesized storage.
 
 ---
 
@@ -275,11 +305,19 @@ It is not built here.
 
 ---
 
-## Contract and design changes — declared, and NOT built until ruled
+## Contract and design changes — ALL FOUR RULED 2026-07-31
 
-Four `PROPOSED (gap)` blocks land in canon in the PR that carries this spec. Each states the
-question, the options, and a recommendation. **A recommendation is not a decision** — none of
-these is implemented before an Operator ruling, per the gap protocol and `CLAUDE.md`.
+**The four `PROPOSED (gap)` blocks are in canon and are now ruled** (relayed on quince#378; the
+summary table is at the top of this document). The sections below are kept **as they were put to
+the Operator** — question, options, recommendation — with the ruling recorded against each, rather
+than rewritten into the answer.
+
+**Kept rather than collapsed on purpose.** A ruling is only meaningful against the option set it
+chose from, and one of these went **against** the recommendation. Editing the alternatives away
+would leave a future reader unable to see what was decided, or that anything was — which is the
+same reason `decisions/0006` annotates rather than rewrites.
+
+**Each implementing PR flips its block in the canon doc to decided text**, citing the ruling.
 
 ### Gap 1 — `Version` gains a storage; does `backend` stay? (contracts §2)
 
@@ -299,6 +337,19 @@ then rather than this rung paying it now for a field nothing is yet confused by.
 `Version.browse_root` also stops being universally `/backups/<udid>/…`. That is a **documentation**
 change, not a shape change — it is already computed per request from the root (`browseRoot`,
 `layout.go:82`), so only the literals in the contract text are wrong once storages are plural.
+
+> **RULED — keep it, and REDOCUMENT it.** Not (a) exactly. The field stays and its **meaning
+> changes**: `Version.backend` is *"how this version was made"*; `Storage.backend` is *"what this
+> storage uses now"*. Two different facts that agree permanently, because a storage's backend is
+> immutable by gap 4's own rule.
+>
+> **That is better than what this spec asked for**, and worth understanding rather than just
+> implementing: (a) framed the field as a denormalized copy kept for compatibility, carrying an
+> implied future breaking removal. The redefinition makes it a **distinct, permanently true
+> field** that never needs removing — so the epic's *"symptom"* framing turns out not to apply to
+> the wire at all, only to the DB, where `versions.storage_id` fixes it.
+>
+> **Work this adds:** contracts §2 gets the **redefinition**, not merely the new field.
 
 ### Gap 2 — a `Storage` object, and how a job picks one (contracts §1 and §2)
 
@@ -342,6 +393,16 @@ the device being asked about, `"will_be_full": true` — or, if the review prefe
 the shapeliest sub-question in this gap**, because both forms work and they differ in whether a
 storage list is a device-independent resource.
 
+> **RULED as recommended, and the sub-question settled: the `?udid=` parameter.** All three
+> sub-answers stand — omitted `storage_id` → the `default` storage; unreachable → **409**; unknown
+> → **404**; `Job.storage_id` records the resolved concrete storage, never `"default"`; no queue.
+>
+> **`GET /api/storages` stays device-independent.** `will_be_full` appears only when `?udid=` is
+> passed. The reason is worth keeping: *will the next backup be full* is a property of a
+> **(device, storage) pair**, not of a storage — and the storage-cards rung that follows this one
+> wants a device-independent list. Putting a pair fact on the storage resource would distort it
+> for the next rung's benefit.
+
 ### Gap 3 — storages in `config.yml`, against `QUINCE_BACKUPS` (contracts §6)
 
 Contracts §6 says bootstrap env is *"deployment topology only"* and *"Everything else:
@@ -364,6 +425,18 @@ Interface fact 3 shows there is no storage location in YAML today at all.
 
 **Recommendation: (a).** It is the only option under which this rung does not depend on a future
 rung, and every deployment in the field keeps working with an unchanged `config.yml`.
+
+> **RULED (b) — HARD RETIRE `QUINCE_BACKUPS`. This recommendation was OVERRULED.** Every storage is
+> declared: no env var, no implicit storage, no synthesized fallback. A middle path was offered
+> after the ruling — migrate once at first start, writing a `storages:` entry from the current
+> `QUINCE_BACKUPS` into `config.yml` and never reading the env var again, feasible because
+> `config/service.go:89-110` already writes the file atomically — and the Operator considered it
+> and held (b).
+>
+> **Recorded with the dissent** (argue-then-defer, quince-devlog#49), and the four costs the rung
+> now carries are in *Rung-ruled decisions* #5. The load-bearing one: **G7 inverts** from a
+> no-regression gate into a **refusal** gate, because the outcome neither seat wants is a silent
+> zero-storage start that looks healthy.
 
 **The second half of this gap, which (a) does not settle:** `backend`, `zfs` and `retention` are
 today singular keys describing the one storage. Under (a) they describe the *implicit* storage.
@@ -406,16 +479,32 @@ Three decisions inside this one gap:
    and two places assert one UUID. That is precisely the question the file exists to answer.
    Excluding it keeps the epic's open fork open; including it would quietly decide it.
 
+> **RULED — accepted as written, including the creation-moment fix and the offsite exclude.**
+> Creation requires **no marker AND no `storages` row**; an absent marker for a storage the DB
+> already knows is a **missing medium** and refuses — never re-probe, never re-create — keyed on
+> the config entry's `name` rather than its `path`.
+>
+> **The exclude is named as the load-bearing half**: a replicated marker makes two places assert
+> one UUID, which silently decides the epic's still-open point 3. The creation residual stays
+> carried by a written requirement plus the loud creation event, with the mechanical option in
+> *Known gaps* #4.
+
 ---
 
 ## Stories
 
 Each is independently checkable.
 
-1. **Storages exist as entities.** `storage.storages` in the config schema, validated; an empty
-   list synthesizes exactly one implicit storage at `QUINCE_BACKUPS`; exactly one storage is
-   `default`. A `config.yml` from before this rung produces one storage and behaviour identical
-   to today.
+1. **Storages exist as entities, and every one of them is declared.** `storage.storages` in the
+   config schema, validated; exactly one storage is `default`. **`QUINCE_BACKUPS` is retired** —
+   no implicit storage, no synthesized fallback, no env var read. A `config.yml` with no
+   `storages:` key **refuses to start**, names the key and prints what to write (G7); the env var
+   is gone rather than merely unused (G7b). **Ships with an upgrade note** — see the boundary.
+
+   *(Rewritten by gap 3's ruling. This story previously read "an empty list synthesizes exactly
+   one implicit storage at `QUINCE_BACKUPS`" and promised behaviour identical to today. The
+   Operator ruled the opposite and the architect's recommendation — mine — was overruled; see
+   *Rung-ruled decisions* #5 for the dissent and what it costs.)*
 2. **Each storage carries its identity.** `quince-storage.json` written at the creation moment,
    self-checksummed; read and compared at every startup and before every backup; a mismatch
    refuses; a corrupt marker refuses. The new anchored offsite exclude rule ships with it.
@@ -462,7 +551,8 @@ Beyond `make gates`.
 | **G5** | 5 | An unreachable storage (a root made unreadable mid-run) is **listed** with a reason, and a backup to another storage completes. Nothing queues. | CI |
 | **G5b** | 2, 7 | **The unmounted-mountpoint gate.** A storage is created at a fixture root; the root is then emptied to simulate the medium being absent (marker gone, path still readable, DB row present). quince must report **missing medium** and **refuse** — it must NOT re-probe, must NOT write a second marker, and must NOT accept a backup. Asserted on all three, because the failure this guards is silent and its symptom is a full system disk. | CI |
 | **G6** | 4 | A pre-`0006` DB fixture opens; every existing version resolves to the implicit storage; `browse_root` is unchanged for every one of them. | CI |
-| **G7** | 1 | A `config.yml` with no `storages:` key produces exactly one storage at `QUINCE_BACKUPS` and byte-identical behaviour to `main`. The no-regression gate for every deployment in the field. | CI |
+| **G7** | 1 | **REPLACED by gap 3's ruling — it now asserts the opposite of what it did.** A `config.yml` with **no `storages:` key REFUSES TO START**, names the missing key, and prints what to write. Asserted on all three: the refusal, the key named, and the remedy printed. **The refusal is the whole of the safety here.** The old G7 asserted an implicit storage synthesized from `QUINCE_BACKUPS` and byte-identical behaviour to `main`; the ruling retires that env var, so the old gate is not merely wrong, it is **unwritable**. The one outcome this must never have is a **silent zero-storage start that looks healthy** — an instance that comes up, shows no error, and quietly cannot back anything up. | CI |
+| **G7b** | 1 | `QUINCE_BACKUPS` is **gone**, not merely unused: set it to a valid path, start with a declared `storages:` list pointing elsewhere, and assert every version lands under the **declared** root. A retired variable that is still silently honoured somewhere is the failure this gate exists to catch. | CI |
 | **G8** | 9 | The selector renders both storages, disables the unreachable one with its reason, and shows the full-transfer warning on the storage that has no prior version. | ui-e2e |
 | **G9** | 10 | **OWED — hardware, Operator, a lab day.** A real device backed up to two real storages, the second a genuine full transfer of tens of gigabytes over the real transport. G1 proves the mechanism; only hardware proves the cost. | lab |
 | **G10** | all | `make privacy-check REF=origin/main...HEAD TEXT=<body>` over diff, commit messages and PR text. Storage **paths** are this rung's sharpest privacy surface — see *Rule check*. | host |
@@ -499,7 +589,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | **Never mutate a committed version** | **The rung's sharpest near-miss, and it is answered by measurement rather than by argument.** `quince-storage.json` is written into a root that already holds committed versions. It sits above every device dir, hence above every version; interface facts 5 and 6 name the four walks it is invisible to and the one rule that would otherwise have shipped it offsite. **G3 asserts all four** — two by observation (`reconcileUDIDs`, `scanJournals`) and two as regression guards over paths that are invisible by construction (`Scan`, `Verify`), which is stated in G3 rather than left as an unqualified "measured". `latest/` is still changed only by the marker-guarded exchange, under each root independently. |
 | **No silent caps or fallbacks** | A backend/identity mismatch **refuses**; it never downgrades to what it found. An unreachable storage is listed with a reason, never hidden and never queued. The `copy`-backend warning path is unchanged and now fires per storage. |
 | **State honesty** | The full-transfer claim is stated **before** the transfer, from the server's knowledge of prior versions, and G2 asserts it against the committed marker so a UI-only claim cannot pass. `backend: "unknown"` on a storage never yet reached means quince does not know — not a guess. G9 is declared owed with an owner rather than quietly skipped. |
-| **Config tidiness (D12)** | Storages live in `config.yml` with defaults and no secrets; the empty-list default reproduces today's behaviour exactly (G7). **Near-miss, declared:** a storage-list change needs a **restart**, which D12 permits only if the spec says why — gap 3 says why, and *Rung-ruled decisions* #1 records it. |
+| **Config tidiness (D12)** | Storages live in `config.yml` with no secrets, and gap 3's ruling makes this **stronger** than the spec first proposed: with `QUINCE_BACKUPS` retired, nothing about where a backup lands is implied by an env var invisible in the file. **Two near-misses, both declared.** (1) A storage-list change needs a **restart**, which D12 permits only if the spec says why — gap 3 says why, *Rung-ruled decisions* #1 records it. (2) **`storages` has no usable default and that is deliberate** — D12 says every setting has a sane default, and there is no sane default for *where the user's backups live* now that the implicit one is retired. The honest form of "no default" is a **refusal that names the key and prints what to write** (G7), never a guess and never a silent start. |
 | **No UI-only state** | The selector renders `GET /api/storages`; reachability and the full-transfer claim are both server answers. The UI stores neither. |
 | **Privacy is a commit-time gate** | **The sharpest surface in this rung is storage paths**, because the whole feature is about naming places on the Operator's own machines. Every path in this spec, in the fixtures, in the demo provider and in the config examples is `/backups` or an obvious placeholder. No lab topology, no real mount point, no dataset name from the private layer enters any of it. G10 sweeps diff, commit messages and PR text before every push. |
 | **Secrets discipline** | **Near-miss by adjacency.** This rung adds no secret — a storage path is not one — and must not acquire secret machinery. Backup passwords are untouched; nothing new reaches argv, env or logs. |
@@ -541,6 +631,35 @@ beyond the four declared above.
    answers *"is this the same storage?"*. This is epic challenge 1 taken as given rather than
    re-litigated.
 
+5. **NOT rung-ruled — an OPERATOR ruling recorded here with its dissent, because the rung must
+   carry its consequences.** Gap 3 was ruled **(b): hard-retire `QUINCE_BACKUPS`.** Every storage
+   is declared; no env var, no implicit storage, no synthesized fallback.
+
+   **The architect recommended against it, offered a middle path, and was overruled.** The middle
+   path was a one-time migration at first start — write a `storages:` entry from the current
+   `QUINCE_BACKUPS` into `config.yml`, log loudly, never read the env var again — which is feasible
+   because `config/service.go:89-110` already writes `config.yml` atomically. The Operator
+   considered it and held (b). Recorded per the argue-then-defer posture (quince-devlog#49), so a
+   future session does not have to reconstruct why the rung took this shape.
+
+   **What it buys:** every storage is explicit, and nothing about where a backup lands is implied
+   by a deployment variable that is invisible in `config.yml`.
+
+   **What it costs, and the rung carries all four:** an upgraded instance with no `storages:` key
+   has **zero storages** and cannot back up (every deployment today leans on the `/backups` default
+   at `bootstrap.go:51` while declaring nothing); the **staging stand** — soaking under real daily
+   use, with a `config.yml` predating the key — needs its entry written **before this rung lands**,
+   which is an Operator action and not a code change; **G7 inverts** from a no-regression gate into
+   a refusal gate; and the *Sequencing* section's claim that this rung depends on no future
+   onboarding is now **partly false** and is corrected there rather than left standing.
+
+   **What would settle who was right, stated in advance so it is not decided by whoever writes the
+   retrospective:** if a field deployment or the staging stand is caught out by an upgrade with no
+   `storages:` key, the dissent was right and G7's refusal is what saved it. If the
+   explicit-config property proves worth it and nothing is caught out, the ruling was right.
+   **Either way G7 is mandatory** — a silent zero-storage start that looks healthy is the one
+   outcome neither seat wants.
+
 ---
 
 ## Known gaps and open questions
@@ -567,15 +686,25 @@ beyond the four declared above.
 
 ## PR slicing
 
-| PR | claim | hardware |
-| --- | --- | --- |
-| 1 | this spec + the four `PROPOSED (gap)` blocks in canon | no |
-| — | **rulings** — no code PR opens before this | — |
-| 2 | stories 1 + 3 — the config list, the implicit storage, the registry (G7) | no |
-| 3 | story 2 — the identity marker and the offsite rule (G3, G4) | no |
-| 4 | story 4 — migration `0006`, `Version.storage_id`, `browse_root` (G6) | no |
-| 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check (G5) | no |
-| 6 | story 8 — the full-transfer claim (G2) | no |
-| 7 | story 9 — the selector (G8) | no |
-| 8 | story 10 — the acceptance case (G1) | no |
-| 9 | G9 written back into this spec | **yes** |
+Each code PR **flips its `PROPOSED (gap)` block in canon to decided text**, citing the ruling
+relay on quince#378.
+
+| PR | claim | state | hardware |
+| --- | --- | --- | --- |
+| 1 | this spec + the four `PROPOSED (gap)` blocks in canon | **merged** (quince#381) | no |
+| — | **rulings** — no code PR opened before this | **done** 2026-07-31 | — |
+| 1b | this amendment — the rulings recorded, G7 inverted, *Sequencing* corrected, story 1 rewritten | — | no |
+| 2 | stories 1 + 3 — the **declared** config list, the registry, the **loud refusal**, the upgrade note; flips contracts §6 (G7, G7b) | — | no |
+| 3 | story 2 — the identity marker and the offsite rule; flips design §5 (G3, G4, G5b) | — | no |
+| 4 | story 4 — migration `0006`, `Version.storage_id` **and the `backend` redefinition**; flips contracts §2 (G6) | — | no |
+| 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
+| 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
+| 7 | story 9 — the selector (G8) | — | no |
+| 8 | story 10 — the acceptance case (G1) | — | no |
+| 9 | G9 written back into this spec | — | **yes** |
+
+**PR 1b exists because the ruling falsified parts of a spec that was already merged**, and a
+merged spec asserting what the Operator overruled is the defect class this project files most.
+It is separated from PR 2 so the correction is not buried inside a code diff — and because PR 2's
+own scope grew: gap 3's ruling turned *"synthesize an implicit storage"* into *"refuse loudly, and
+ship an upgrade note"*.
