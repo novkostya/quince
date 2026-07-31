@@ -90,11 +90,34 @@ bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 `tick` is one pass and returns, so it belongs in the foreground; it is `watch` — the loop — that must
 never run there.
 
-**Why last.** Self-caused events are deliberately not suppressed (quince#62), and a session's last act
-is almost always a push, a comment, a review or a merge — which is precisely an event on something it
-is watching. So a watch armed *before* that act is dead by design by the time the turn ends, and the
+**Why last.** A session's last act is almost always a push, a comment, a review or a merge — which is
+precisely an event on something it is watching. Self-caused wake suppression covers **some** of those
+and not others, so a watch armed *before* the act is still dead by design more often than not, and the
 `Stop` hook is telling the truth when it says so. The rate is worst on the implementer side, whose
 self-caused events are *how a turn ends*, where an architect's approvals and merges are occasional.
+
+**Suppressed means NOT WOKEN ON, never NOT SEEN**, and that distinction is the whole of what
+quince#242 built. Every event is still printed, on every tick; the filters decide only whether the
+loop *ends*. This paragraph read *"self-caused events are deliberately not suppressed (quince#62)"*
+until quince#309, and quince#242 had made that false eight days earlier.
+
+| your own act | wakes you? |
+| --- | --- |
+| a review, merge, issue close or reopen **you** performed | **no** — the per-runner ledger cancels it |
+| a push to your own `<runner>/…` branch | **no** — the actor arm, on this seat's login |
+| **an issue comment you wrote, as the implementer** | **YES** — carved out on purpose |
+| your branch rebased by the merging seat | **YES** — `committer=` differs from `actor=` |
+| anything `actor=unattributed`, or a branch nobody claims | **YES** — unknown always wakes |
+
+**Do not reason forward from "suppression handles it".** The implementer carve-out is not a gap
+waiting to be closed: `quince-coder` is one App shared by every runner, so `actor=quince-coder` names
+the **seat** and not the **session**, and another runner's comment on your declared issue is
+indistinguishable from your own (quince#227, quince#307). The arm declines rather than guesses. The
+branch test has the same shape — it needs a `<runner>/` prefix that not every open PR carries.
+
+So the advice is unchanged and its reason is not. That combination is why this was worth one pass:
+**correct advice resting on a false mechanism outlives either error alone**, because the advice keeps
+working and nobody goes back to re-read the justification.
 
 **Why the tick, and why arming last is necessary but not sufficient.** A re-arm from `dead` correctly
 emits what accrued — and what accrued is the session's own actions from the turn just finished. So the

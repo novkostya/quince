@@ -287,11 +287,31 @@ forbids what you were doing correctly is a rule that gets ignored wholesale.
 
 **This section used to say "the moment your first PR is open, ARM THE WATCH" and never said when in the
 turn**, and the natural reading of that — arm as soon as you know you need one — is the broken one
-(quince#100). Self-caused events are deliberately not suppressed (quince#62), and **an implementer's
-last act is almost always a push or a comment**, which is precisely an event on a PR it is watching. So
-a watch armed before that act is dead *by design* by the time the turn ends, and the `Stop` hook below
-is telling the truth when it says so. That is worse for you than for the architect, whose self-caused
-events are approvals and merges — occasional — where yours are *how a turn ends*.
+(quince#100). **An implementer's last act is almost always a push or a comment**, which is precisely an
+event on a PR it is watching. Self-caused wake suppression covers some of those and not others, so a
+watch armed before that act is still dead by the time the turn ends more often than not, and the
+`Stop` hook below is telling the truth when it says so. That is worse for you than for the architect,
+whose self-caused events are approvals and merges — occasional — where yours are *how a turn ends*.
+
+**Suppressed means NOT WOKEN ON, never NOT SEEN.** Every event is still printed on every tick;
+quince#242's filters decide only whether the loop *ends*. This paragraph read *"self-caused events are
+deliberately not suppressed"* until quince#309, eight days after that stopped being true. **On your
+seat specifically:**
+
+- your own **push to a `<runner>/…` branch you own** does not wake you, and neither does a review,
+  merge or issue close you performed — the actor arm and the per-runner ledger respectively;
+- **your own issue comment DOES wake you**, deliberately. `quince-coder` is one App shared by every
+  runner, so `actor=quince-coder` names the **seat** and not the **session**: another runner
+  commenting on an issue you declared is indistinguishable from you doing it (quince#227,
+  quince#307), and the arm declines rather than guesses;
+- a **rebase of your branch by the merging seat** wakes you — `committer=` differs from `actor=`,
+  which is the point of the test;
+- `actor=unattributed`, and any branch without a `<runner>/` prefix, always wake. Not every open PR
+  carries the prefix, so this is the ordinary case rather than the edge one.
+
+**Do not reason forward from "suppression handles it, so I can arm whenever."** The advice above is
+unchanged; only its reason has been corrected. Correct advice resting on a false mechanism outlives
+either error alone, because the advice keeps working and nobody re-reads the justification.
 
 **Arming last is necessary and not sufficient, which is what step 2 is for.** A re-arm from `dead`
 correctly emits what accrued, and what accrued is your own actions from the turn just finished — so the

@@ -419,10 +419,27 @@ correctly is a rule that gets ignored wholesale — which is how the `&` got the
 
 **This section named the mechanism and never said when in the turn to run it** (quince#100). The
 natural reading — arm once you know you need one, right after handling the events that woke you — is
-the broken one: self-caused events are deliberately not suppressed (quince#62, item 6), so a watch
-armed *before* your next approval or merge is dead by design by the time the turn ends, and the `Stop`
-hook is telling the truth when it says so. Roughly a third of an architect's wakes are already
-self-inflicted; this is that same fact arriving one step earlier.
+the broken one: a watch armed *before* your next approval or merge can still be dead by the time the
+turn ends, and the `Stop` hook is telling the truth when it says so.
+
+**Suppressed means NOT WOKEN ON, never NOT SEEN.** This paragraph read *"self-caused events are
+deliberately not suppressed (quince#62, item 6)"* until quince#309, eight days after quince#242 built
+the suppression. Every event is still printed on every tick; the filters decide only whether the loop
+*ends*. **This seat is the better-covered of the two:**
+
+- your own **approvals and merges** do not wake you — the per-runner ledger cancels them, because
+  those lines are computed by diffing observations and carry no actor at all;
+- **your own issue comments do not wake you either**, since quince#307 — which matters here more than
+  anywhere, because a ruling **is** an issue comment, and it is this seat's primary output. The
+  implementer half of that arm is deliberately still open (quince#227): one App, many runners, so
+  `actor=quince-coder` names a seat rather than a session. You have one box and one signing key, so
+  you have no such ambiguity;
+- `actor=unattributed` still wakes you, and always will — unknown wakes is the rule the whole
+  subsystem is built on.
+
+So arming last matters less on this seat than it did, and **still arm last**: an approval whose event
+lands between your arm and your stop is not the only thing that can end a turn, and the cost of the
+ordering is nothing.
 
 **Arming last is necessary and not sufficient, which is what step 2 is for.** A re-arm from `dead`
 correctly emits what accrued, and what accrued is your own actions from the turn just finished — so the
