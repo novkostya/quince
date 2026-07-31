@@ -355,3 +355,35 @@ func TestAnnounceBackupPublishesDeviceUpdated(t *testing.T) {
 		t.Fatalf("announcing an absent device emitted %+v; want nothing", evs)
 	}
 }
+
+// wifi_sync must default to the literal "unknown", never the "" zero value: an empty string would
+// serialize into the contract enum as a fourth, undocumented value. This is the same hazard the
+// paired/backup_encryption defaults exist for, and a new field is exactly where it recurs.
+func TestDeviceShellDefaultsWifiSyncToUnknown(t *testing.T) {
+	r := NewRegistry(nil, nil)
+	r.mu.Lock()
+	dev := r.deviceShellLocked("SYNTHETIC-UDID-AAAA-0001")
+	r.mu.Unlock()
+	if dev.WifiSync != "unknown" {
+		t.Fatalf("WifiSync = %q, want unknown", dev.WifiSync)
+	}
+}
+
+func TestEnrichOverlaysWifiSyncAndEmptyLeavesDefault(t *testing.T) {
+	r := NewRegistry(nil, nil)
+	r.mu.Lock()
+	r.identity["u"] = Identity{WifiSync: "on"}
+	dev := r.deviceShellLocked("u")
+	r.mu.Unlock()
+	if dev.WifiSync != "on" {
+		t.Fatalf("WifiSync = %q, want on", dev.WifiSync)
+	}
+
+	r.mu.Lock()
+	r.identity["u"] = Identity{WifiSync: ""}
+	dev = r.deviceShellLocked("u")
+	r.mu.Unlock()
+	if dev.WifiSync != "unknown" {
+		t.Fatalf("an undetermined WifiSync = %q, want the unknown default", dev.WifiSync)
+	}
+}

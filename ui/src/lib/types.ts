@@ -20,6 +20,7 @@ export interface Device {
   transports: Transports;
   paired: "yes" | "no" | "unknown";
   backup_encryption: "on" | "off" | "unknown";
+  wifi_sync: "on" | "off" | "unknown";
   last_seen: string;
   last_backup: LastBackup | null;
 }

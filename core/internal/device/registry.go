@@ -328,14 +328,15 @@ func (r *Registry) mergedLocked(udid string) (wire.Device, bool) {
 
 // deviceShellLocked is the identity base for a UDID: the muxer-unknowable fields sit at
 // their honest default, with any lockdown Identity (qn.3) overlaid on top. Paired/
-// BackupEncryption default to the literal "unknown" (NOT the "" zero value, which would
-// violate the contract enum); an overlay leaves a field at its default when its Identity
+// BackupEncryption/WifiSync default to the literal "unknown" (NOT the "" zero value, which
+// would violate the contract enum); an overlay leaves a field at its default when its Identity
 // value is empty ("not determined"), never guessing.
 func (r *Registry) deviceShellLocked(udid string) wire.Device {
 	dev := wire.Device{
 		UDID:             udid,
 		Paired:           "unknown",
 		BackupEncryption: "unknown",
+		WifiSync:         "unknown",
 	}
 	if id, ok := r.identity[udid]; ok {
 		dev.Name = id.Name
@@ -346,6 +347,9 @@ func (r *Registry) deviceShellLocked(udid string) wire.Device {
 		}
 		if id.BackupEncryption != "" {
 			dev.BackupEncryption = id.BackupEncryption
+		}
+		if id.WifiSync != "" {
+			dev.WifiSync = id.WifiSync
 		}
 	}
 	if r.lastBackup != nil {
@@ -366,6 +370,7 @@ type Identity struct {
 	IOSVersion       string
 	Paired           string // yes | no | unknown ("" → leave default)
 	BackupEncryption string // on | off | unknown ("" → leave default)
+	WifiSync         string // on | off | unknown ("" → leave default)
 }
 
 // Enrich overlays lockdown identity onto the device keyed by udid. When the device is

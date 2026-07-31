@@ -284,6 +284,18 @@ surface beyond the three declared above.
    valuable on their own: knowing Wi-Fi sync is off is what makes the Finder instruction
    actionable in the story-9 branch. So the first PR is read-only and lands regardless of how
    the vehicle question is ruled.
+4. **Until story 3 names the key, the read returns `unknown` WITHOUT querying the device.**
+   Decided during the build of PR 2, because story 1's *"`<KEY>` is a build-time constant filled in
+   by story 3"* left the meantime ambiguous and the obvious reading is unsafe. `ideviceinfo -q
+   <domain> -k <wrong-key>` is expected to exit 0 printing nothing, and the absent-key rule this
+   rung deliberately copies turns that into **`off`** — so a placeholder key would make quince
+   assert confidently that every device has Wi-Fi sync disabled. That is the exact shape of qn.4a
+   finding (i)-A, which shipped once already.
+   So `wifiSyncKey` ships **empty**, `wifiSync` short-circuits to `unknown`, and a test asserts the
+   constant is still empty — the guard is against a future session "finishing" the feature by
+   filling in a plausible name. Rung-local: no contract change (the field and its enum are as
+   ruled), and no user-visible claim, because `unknown` renders no badge. Filling it in after
+   story 3 is a one-line diff.
 
 ---
 
