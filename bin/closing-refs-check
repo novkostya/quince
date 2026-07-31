@@ -96,6 +96,57 @@ done
 # careful-looking version is the one that does nothing.
 KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}[^A-Za-z0-9_-]#[0-9]+'
 
+# THE SECOND DIRECTION (quince#315): a closing keyword whose reference CANNOT BIND.
+#
+# GitHub resolves exactly `#N`, `GH-N` and `owner/repo#N`. This project's citation convention is
+# `quince#N` / `quince-devlog#N` — no slash, so not a repo reference, and not bare. The keyword
+# parses, binds to nothing, and produces no error, no warning, and an empty
+# `closingIssuesReferences` indistinguishable from a PR that never claimed to close anything.
+#
+# MEASURED BEFORE BUILDING, as the ruling asked. Across merged PRs, 39 of 98 in `quince` carry a
+# bound reference and 0 of 32 in `quince-devlog` do — so auto-close HAS worked here and the answer
+# to "has it ever" is yes. The boundary is sharp: quince#288, merged 10:00 on 2026-07-30, is the
+# LAST PR to bind, and every PR from #289 onward binds nothing. That is 38 minutes BEFORE this very
+# gate merged (quince#293, 11:59), so the gate is not the cause — hand adoption of the qualified
+# convention is, and the gate then made it permanent.
+#
+# Two correct decisions producing a silent failure between them, which is why neither side's author
+# saw it, and why this direction is the durable half: if the convention changes again, the
+# qualified-closing-line rule becomes obsolete and this check still catches the next version.
+#
+# awk RATHER THAN A SECOND grep PATTERN. The discriminator is "the qualifier contains no slash", and
+# expressing absence in a BusyBox ERE that must also avoid a mid-pattern `^` (see the warning above)
+# produced a pattern I could not convince myself was right by reading. awk splits the qualifier and
+# tests it, which is checkable by eye.
+inert_hits() { # <file> -> `<line>:<text>` for each CLOSING LINE whose reference binds to nothing
+	awk '
+		{
+			# LINE-INITIAL ONLY, and the existing suite is why. The first version matched the keyword
+			# anywhere and flagged `Refs quince#282, and quince#291 closed quince#290 on merge.` — prose
+			# NARRATING a close, which binds to nothing and is exactly what the author wants. That is the
+			# "a check that fires on safe text is one people learn to skim" failure this file already
+			# warns about, arriving in the direction added second.
+			#
+			# The bare-reference check above over-fires on the same prose DELIBERATELY, and the asymmetry
+			# is the point: a bare `#N` in prose really does close something, so a false hit there costs
+			# one reading and a miss costs an issue. An INERT reference in prose does nothing at all, so
+			# there is nothing to warn about — the defect only exists when the author MEANT to close.
+			# Intent is not in the text, but the ruling names the surface: a closing LINE. So that is
+			# what this matches, allowing a list bullet and bold markers.
+			if (match($0, /^[ \t]*([-*+][ \t]*)?[*_]{0,2}([Cc][Ll][Oo][Ss][Ee][SsDd]?|[Ff][Ii][Xx]([Ee][SsDd])?|[Rr][Ee][Ss][Oo][Ll][Vv][Ee][SsDd]?)[*_]{0,2}[ \t]/)) {
+				win = substr($0, RSTART + RLENGTH, 20)
+				if (match(win, /[A-Za-z][A-Za-z0-9_-]*#[0-9]+/)) {
+					tok = substr(win, RSTART, RLENGTH)
+					# `owner/repo#N` binds and is correct. The slash can only be BEFORE the matched token,
+					# so look at the character preceding it rather than inside it.
+					pre = (RSTART > 1) ? substr(win, RSTART - 1, 1) : " "
+					if (pre != "/") printf "%d:%s\n", NR, $0
+				}
+			}
+		}
+	' "$1"
+}
+
 GREP=${CLOSING_REFS_GREP:-grep}
 command -v "$GREP" >/dev/null 2>&1 || cannot_run "matcher $GREP not found"
 # Prove the matcher can COMPILE the pattern before trusting a no-match answer. A regex this shell
@@ -104,6 +155,7 @@ printf '' | "$GREP" -qiE "$KW" 2>/dev/null || [ $? -eq 1 ] ||
 	cannot_run "matcher $GREP cannot compile the closing-keyword pattern"
 
 FOUND=0
+INERT=0
 SCANNED=''
 
 # CODE SPANS ARE STRIPPED BEFORE MATCHING, and only from `--text` (quince#294 review).
@@ -157,6 +209,12 @@ if [ -n "$REF" ]; then
 		"$GREP" -inE "$KW" "$_msgs" | sed "s/^/    /" >&2
 		FOUND=1
 	fi
+	_inert=$(inert_hits "$_msgs")
+	if [ -n "$_inert" ]; then
+		printf '%s: CLOSING KEYWORD BOUND TO NOTHING in a commit message (%s)\n' "$ME" "$_r" >&2
+		printf '%s\n' "$_inert" | sed "s/^/    /" >&2
+		INERT=1
+	fi
 	rm -f "$_msgs"
 	SCANNED="${SCANNED}commit-messages "
 fi
@@ -179,11 +237,25 @@ if [ -n "$TEXT" ]; then
 		done
 		FOUND=1
 	fi
+	_inert=$(inert_hits "$_stripped")
+	if [ -n "$_inert" ]; then
+		printf '%s: CLOSING KEYWORD BOUND TO NOTHING in %s\n' "$ME" "$TEXT" >&2
+		printf '%s\n' "$_inert" | sed "s/^/    /" >&2
+		INERT=1
+	fi
 	rm -f "$_stripped"
 	SCANNED="${SCANNED}text "
 fi
 
-if [ "$FOUND" -eq 1 ]; then
+if [ "$INERT" -eq 1 ]; then
+	printf '%s: the keyword parsed and resolved to NOTHING. GitHub binds only #N, GH-N and\n' "$ME" >&2
+	printf '%s: owner/repo#N — a repo shorthand without the owner is none of them. Write\n' "$ME" >&2
+	printf '%s: "Closes novkostya/quince#N" on the closing line; prose citations are unchanged.\n' "$ME" >&2
+	printf '%s: A keyword that silently binds to nothing leaves the issue open after its work\n' "$ME" >&2
+	printf '%s: merges, which reads as a stall and gets the work re-taken (quince#315).\n' "$ME" >&2
+fi
+
+if [ "$FOUND" -eq 1 ] || [ "$INERT" -eq 1 ]; then
 	printf '%s: whatever is listed above, you either meant it or you did not — decide deliberately.\n' "$ME" >&2
 	printf '%s: to reference without closing, use a repo-qualified form, or put it in backticks (body only — a commit message is matched literally).\n' "$ME" >&2
 	exit 1
@@ -191,4 +263,4 @@ fi
 
 # Say WHAT was scanned, not only that it was clean. A short list is a signal: `0` answers "did
 # anything match", and only the list answers "was anything looked at" (quince#41).
-say "clean — no bare closing reference in ${SCANNED%% }"
+say "clean — no bare closing reference, and none bound to nothing, in ${SCANNED%% }"
