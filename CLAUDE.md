@@ -218,10 +218,23 @@ A scoped identity therefore **adds no capability**. What it removes is the *reas
 after which any borrowing is a signal that something is wrong, rather than the documented way this
 seat speaks.
 
-**The proposal.**
+**The proposal — RULED on 2026-07-31 (quince#375), WIDER than it asked for, and partly built.** The
+argument below is kept as it was made, because the ruling turned on it. What it *asks for* has been
+superseded, and each superseded clause says so inline rather than being quietly rewritten: a reader
+arriving from a citation must be able to see both what was proposed and what was decided.
 
 - A **GitHub App**, `quince-analyst`, installed on both repositories, granted **`issues: write`
   and nothing else** — no `contents`, no `pull_requests`, no `workflows`, no `administration`.
+
+  **SUPERSEDED.** The ruling granted **`contents: write` + `pull_requests: write` + `issues: write` +
+  `metadata: read`** on **five** repositories — `quince`, `quince-devlog`, `ios-backup-crypt`,
+  `ios-backup-parser` and the private `quince-local` — because the seat **authors pull requests** as
+  well as filing issues. The wide grant was ruled *not* a widening, on the argument this block already
+  makes: root ssh to a box that holds a credential **is** that credential, so it adds no reachable
+  capability and only removes the reason to borrow. Per-repo narrowing was rejected as theatre for
+  the same reason. Ceremony done the same day — App id `4449080`, permissions **probed** rather than
+  read off a settings page, including a measured negative under `.github/workflows/**` (403). So
+  quince#113's rule holds for a third identity: **no agent seat can push a workflow.**
 - **An App, not a personal access token, and not the Operator's.** A classic PAT's scopes are
   coarse, and this project has its own incident from exactly that granularity: `quince-bot` could
   delete any discussion in the devlog because the permission *"arrived with the classic `repo`
@@ -247,37 +260,69 @@ turns that into an allowlist: this file may be present, those may not. Still che
 `decisions/0007`'s territory — a control that is easy to state is worth more than one that is
 merely correct.
 
-**The analyst is not a seat in the watch sense, and needs no runner name.** Seat names exist for
-branch ownership, the state directory, the scratch root and the container namespace — `SEAT_PATTERN`
-in `bin/forge-watch`, which quince#333 made `^(r|arch)[0-9][0-9]*$` on 2026-07-31. `issues: write`
-forecloses opening a pull request, so the analyst owns no branch, arms no watch, runs no gate and
-builds no container; nothing in `wake_filter` ever needs to attribute it. **`SEAT_PATTERN` should
-therefore NOT be widened as part of this** — quince#333's own review required a test that `journal`,
-`feature` and `main` are not attributed, and admitting a name that never appears on a branch would
-loosen that control for no gain. The branch-attribution cost carried by the pull request proposing
-this block is a one-off property of the bootstrap, which is filed as the implementer App precisely
-because the identity does not exist yet.
+**That price is now owed rather than paid, and the gap is live.** The ceremony placed the key before
+the allowlist was built, so `preflight`'s supervisor arm still scans the four *old* credential files
+and does not know `quince-analyst.pem` exists. On the supervisor box it therefore prints *"role
+supervisor: no forge credential present — this seat can neither author nor approve, as required"*
+about a box that now holds an authoring credential. Two claims in that arm are false until the
+allowlist lands: that `ok` line, and `preflight`'s *"this seat … commits nothing"*. The allowlist is
+quince#375's PR 1c.
 
-**What does not change.** The seat still cannot author code, open a pull request, cast a review
-verdict, or merge. `approver ≠ author` is untouched: the analyst identity can open an issue and say
-things, and nothing else.
+**The analyst IS a seat in the watch sense, and its name is `analyst<N>`.** This paragraph argued the
+opposite and the argument was sound on its premise: seat names exist for branch ownership, the state
+directory, the scratch root and the container namespace, and **`issues: write` forecloses opening a
+pull request**, so a seat that owns no branch needs no attribution. **The premise was withdrawn when
+the ruling widened the grant** — the seat authors pull requests, so it owns branches, and a branch
+nobody can attribute wakes every watch on every box. The conclusion inverts with it: quince#379 made
+`SEAT_PATTERN` `^(r|arch|analyst)[0-9][0-9]*$` (was `^(r|arch)[0-9][0-9]*$`, quince#333).
 
-**Authored by the seat it would grant.** This block is written by the supervisor seat, proposing
-capability for itself, and that is worth naming rather than leaving for a reader to notice. Both
-approvers are independent of it — the Operator rules, the architect reviews — so the check holds;
-but the asymmetry is real and the ruling should be taken knowing it.
+**The ordinal is required — `analyst1`, never bare `analyst`** — and this is the one place the
+original paragraph's caution survives intact. quince#330 named *"a prefix that is NOT a seat being
+read as one"* as the price of moving from a list to a pattern, and `analyst` is not a hypothetical
+topic prefix: **quince#344 was filed on branch `analyst/propose-identity`**. Under a bare-word
+pattern that branch is seat-shaped, so `wake_filter` would attribute a topic branch to a seat and
+suppress wakes for it. It is **not migrated** — the convention is going-forward only, and that branch
+is the bootstrap artefact of an identity that did not yet exist.
 
-**Sequence, if ruled yes.** This PR is the proposal only. Then the ceremony creates the App and
-places its key on the supervisor box. Then a second PR flips this block from proposed to actual and
-lands the mechanism — `bin/gh-analyst`, its arm in `bin/wrapper-boundary-test`, the `preflight`
-allowlist, the `.claude/settings.json` entries, and `deploy/runner/provision`. Writing the canon
-before the App exists would document a state that does not exist, which is the defect quince#318
-corrected and quince#320 refused to repeat.
+**Adding an ORDINAL is free; adding a KIND is a one-line PR.** `r8` and `arch3` need nothing —
+quince#330 deleted the `.claude/seats` list, so there is no enumeration to update. Widening the
+alternation itself is the cost, and `analyst<N>` is the first time it has been paid.
 
-**Open for the ruling.** Whether `issues: write` is the right bound or too narrow to be useful
-(it forecloses the analyst opening its own PRs, deliberately); whether the identity installs on
-both repositories or only `quince`; whether `quince-devlog#139` closes with this or stays open as
-the record of the wider borrowing problem; and whether the name is right.
+**What does not change — and one thing that does.** `approver ≠ author` is untouched, and it is
+untouched *mechanically* rather than by restraint: GitHub refuses an approval from a pull request's
+own author, and `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy. **What
+changed is the sentence this paragraph used to carry** — *"the seat still cannot author code, open a
+pull request, cast a review verdict, or merge"*. It can now author code and open pull requests; it
+holds no `administration` and cannot merge. Corrected rather than deleted, because it was the
+load-bearing reassurance the ruling was taken against.
+
+**Authored by the seat it would grant, and the ruling has since been taken.** This block was written
+by the supervisor seat, proposing capability for itself, which is worth naming rather than leaving
+for a reader to notice. Both approvers were independent of it — the Operator ruled, the architect
+reviewed — so the check held; the asymmetry was real and the ruling was taken knowing it.
+
+**Sequence — ruled yes, and here is where it actually stands.** The ceremony created the App and
+placed its key on the supervisor box (done). The mechanism is quince#375's PR 1, sliced into five:
+
+| | | |
+| --- | --- | --- |
+| **1a** | `bin/gh-analyst`, refusing beside every other seat's credential, covered by `bin/wrapper-boundary-test` | quince#377, open |
+| **1b** | the other four wrappers refusing beside the **analyst** key — added to the checklist after review, because a box holding `quince-analyst.pem` beside `quince-review.pem` can author as one and approve as the other | not open |
+| **1c** | `preflight`'s supervisor arm becomes an allowlist — **the live gap above** | not open |
+| **1d** | `SEAT_PATTERN` admits `analyst<N>` | quince#379, **merged** |
+| **1e** | `deploy/runner/provision` knows the analyst credential | not open |
+
+The original clause said *"a second PR flips this block from proposed to actual"*, and this is that
+edit. Its reasoning still holds and is why the block was not written earlier: **writing canon before
+the App exists documents a state that does not exist**, the defect quince#318 corrected and
+quince#320 refused to repeat. The same rule is why the rows above say `not open` rather than
+describing what those PRs will contain.
+
+**The ruling, on every question this block left open.** `issues: write` was **too narrow** — the seat
+authors pull requests, so it was granted `contents: write` and `pull_requests: write` besides. The
+identity installs on **five** repositories, not two and not one. **`quince-devlog#139` closes with
+this.** The name **`quince-analyst` stands.**
+
 **Whatever is granted must be PROBED at grant time, not read off the App's settings page.** This
 project's one affirmative token-scope answer arrived unasked — `quince-bot` could delete any
 discussion in the devlog, a grant nobody decided, discovered by trying it rather than by reading a
@@ -295,10 +340,14 @@ around a refusal. The table runs in one direction with **three** exceptions, all
 | **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — RETIRED 2026-07-31, Discussions disabled; see below (devlog#30) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
+| **`quince-analyst`** — the supervisor seat, a GitHub App | push under `.github/workflows/**` — measured at the ceremony, 2026-07-31: `403` while an ordinary write to the same branch succeeded seconds later, so quince#113's rule holds for a third identity · **merge** — it holds no `administration`. It **`CAN`** author code and open pull requests (`contents: write` + `pull_requests: write`, quince#375), which is what distinguishes it from every earlier description of this seat |
 | **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
 
 **NO AGENT SEAT CAN RE-RUN A WORKFLOW RUN, and `workflows:` is not `actions:`.** All three refuse.
-Measured 2026-07-29, both remaining agent identities, within minutes of each other:
+**`quince-analyst` is a fourth agent identity and is `(unmeasured)` here** — its declared grant has no
+`actions:` at all, so it almost certainly refuses too, but nobody has run it and "almost certainly" is
+not what the rest of this table means. Measured 2026-07-29, both remaining agent identities, within
+minutes of each other:
 
 ```
 bin/gh-coder  run rerun 30467245714 --failed   → Resource not accessible by integration   (exit 1)
