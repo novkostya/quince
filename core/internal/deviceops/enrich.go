@@ -55,6 +55,25 @@ func (d *EnrichDriver) Run(ctx context.Context) {
 		}
 	}()
 
+	// Enrich whatever is ALREADY present, once, before waiting for events (quince#350).
+	//
+	// The muxd clients start before this driver does (cmd/quince/live.go), so a device that was
+	// already connected when quince started publishes its one and only device.attached before there
+	// is a subscriber, and is then never enriched. A device plugged in later always wins that race;
+	// a device present at boot loses it almost every time.
+	//
+	// It stayed invisible from qn.3 until qn.7 because the registry is seeded from SQLite, so a
+	// missed enrichment still produced a device with a name, `paired: yes` and `encryption: on` —
+	// the persisted values happened to be right. `wifi_sync` was the first field with no stale value
+	// to hide behind, so it rendered `unknown`, which hid its badge and its control. Found on
+	// hardware, by the Operator, 2026-07-31.
+	//
+	// A positive refresh rather than an ordering fix: refreshAll is idempotent and debounced, so a
+	// device attaching DURING startup is simply enriched twice. Reordering live.go would also close
+	// it — and would stay closed only until someone moved those lines, with nothing failing if they
+	// did.
+	d.refreshAll(ctx, timers)
+
 	for {
 		select {
 		case <-ctx.Done():

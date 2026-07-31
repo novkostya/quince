@@ -57,3 +57,38 @@ func TestEnrichDriverIgnoresNonAttach(t *testing.T) {
 		t.Fatal("device.updated should not trigger enrichment (would loop)")
 	}
 }
+
+// quince#350: a device already present when the driver starts must be enriched WITHOUT any
+// device.attached ever being published.
+//
+// The muxd clients start before this driver subscribes, so a device connected at boot publishes its
+// one and only attach into the void. It hid from qn.3 until qn.7 because the registry is seeded from
+// SQLite — the persisted name/paired/encryption happened to be right, so a missed enrichment looked
+// like a working one. `wifi_sync` was the first field with no stale value to fall back on.
+//
+// The test publishes NOTHING. That is the whole assertion: if this only passes because an event
+// arrives, it is not testing the race.
+func TestEnrichDriverEnrichesADevicePresentBeforeItStarts(t *testing.T) {
+	b := bus.New()
+	devs := newFakeDevices()
+	devs.add(usbDevice(fakeUDID)) // already connected, as at boot
+	d := NewEnrichDriver(fakeTools("DEVICEOPS_FAKE=paired"), devs, b, discard())
+	d.debounce = time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Run(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if id, ok := devs.lastEnrich(fakeUDID); ok && id.Model == "iPhone17,2" {
+			if id.Paired != "yes" || id.BackupEncryption != "on" {
+				t.Fatalf("enriched identity = %+v", id)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("a device present before the driver started was never enriched — quince#350, the bug " +
+		"that made the Operator press Rescan after every restart")
+}
