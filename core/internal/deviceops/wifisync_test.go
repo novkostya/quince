@@ -327,9 +327,14 @@ func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing
 			t.Fatalf("Identity.%s has no counterpart on wire.Device — a new field needs a decision "+
 				"about how runWifiSync carries it, not a silent empty string", name)
 		}
-		if gv.Field(i).String() != want.String() {
-			t.Errorf("Identity.%s = %q, want %q — Enrich REPLACES the identity, so a field missing "+
-				"from runWifiSync's literal is published empty", name, gv.Field(i).String(), want.String())
+		// DeepEqual over .Interface(), never .String(): reflect.Value.String() is a string-KIND
+		// accessor that returns a placeholder like "<int Value>" for anything else, so two DIFFERENT
+		// ints compare equal and the field passes unwitnessed. Identity is all strings today, which
+		// is precisely why this would have gone unnoticed until the guard was needed most — the
+		// first non-string field added to it, which is the case the comment above promises to cover.
+		if !reflect.DeepEqual(gv.Field(i).Interface(), want.Interface()) {
+			t.Errorf("Identity.%s = %v, want %v — Enrich REPLACES the identity, so a field missing "+
+				"from runWifiSync's literal is published empty", name, gv.Field(i).Interface(), want.Interface())
 		}
 	}
 }
