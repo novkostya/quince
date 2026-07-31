@@ -771,11 +771,29 @@ project wants. So the hook alone closes the exposure, and requiring the layer wo
 satisfied checklist item plus a third complete copy of the private record on the box that already
 holds root ssh into the other two — `pr.6`'s concentration concern, paid for nothing.
 
-**What that ruling makes load-bearing: quince#308 is the control, not provisioning hygiene.**
-`refs/heads/journal` has no pull request and therefore no reviewer, and the paragraph above says
-the privacy gate is the only guard on it. Until `provision` places the hook on **every** box, that
-guard is closed in design and open in practice. The analyst's pull-request path was never the
-exposure — a PR has a reviewer, and the reviewer sweeps.
+**What that ruling makes load-bearing: the journal pre-push hook, which is `provision`'s §4c and is
+NOT role-gated** — it installs a git template on every box whatever seat it is, so a provisioned
+supervisor box gets the guard exactly as the other two do. `refs/heads/journal` has no pull request
+and therefore no reviewer, and the paragraph above says the privacy gate is the only guard on it.
+The analyst's pull-request path was never the exposure — a PR has a reviewer, and the reviewer
+sweeps.
+
+**The gap is FRESHNESS, not a missing mechanism, and this paragraph said otherwise until it was
+checked.** It read *"quince#308 is the control, not provisioning hygiene … until `provision` places
+the hook on every box"* — which implies work outstanding. **quince#308 is CLOSED, `COMPLETED`,
+2026-07-31T09:46:29Z**, and `provision` has done all of this since. What is actually true is that a
+box which has not been **re-provisioned** since does not have it: measured on the architect box,
+where `preflight` reports `no journal pre-push hook in a git template` and `quince.privacy-check is
+unset`. That is the same story `provision` tells about itself for the launchpad (quince#322,
+quince#324) — *"provision has not been RE-RUN; that is the same freshness story as everything else
+here."*
+
+**Recorded rather than quietly fixed, because the error is this file's own defect class arriving
+inside the correction for it.** A ruling was carried into canon citing an issue that had been closed
+seven hours earlier, by a session that had read the closed-issue event and not connected it. The
+remedy is an Operator action — **re-run `deploy/runner/provision` on each box** — not a new work
+item, and it is worth knowing that the fail-closed half already works meanwhile: a box without the
+gate configured **refuses** journal pushes rather than making them unswept.
 
 **`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
 defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
