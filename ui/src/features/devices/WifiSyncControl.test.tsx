@@ -61,11 +61,10 @@ describe("WifiSyncControl", () => {
         post={vi.fn()}
       />,
     );
-    // The consequence is not actionable, so it lives in the button title rather than as standing
-    // text under a control nobody is looking at — but it must still be SOMEWHERE the user can find.
-    expect(
-      screen.getByRole("button", { name: /turn off wi-fi sync/i }).getAttribute("title"),
-    ).toMatch(/will disconnect it/i);
+    // Asserted as RENDERED TEXT, never a title: a tooltip does not exist on touch, and the
+    // iPhone is a first-class client (ui.design.md). A test that accepted a title would pass
+    // while the warning was invisible on the surface it matters most.
+    expect(screen.getByText(/will disconnect the device/i)).toBeTruthy();
   });
 
   // `unknown` means quince has not read the flag. Rendering a direction from it would be guessing.
