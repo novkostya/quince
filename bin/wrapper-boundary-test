@@ -441,5 +441,30 @@ for op in store erase; do
 	fi
 done
 
+
+# --- EVERY CREDENTIAL WRAPPER CARRIES THE LEDGER (quince#316) ------------------------------------
+#
+# quince#316 found `bin/gh-arch` had no `forge-ledger` call at all, so an act performed through it
+# recorded nothing and the next tick woke the seat that performed it — silently, because the ledger
+# fails open and an extra wake looks like an ordinary one. `CLAUDE.md` makes that wrapper the
+# STANDING merge fallback, so it is a documented path rather than an exotic one.
+#
+# THE RULING DECLINED THE REFACTOR AND NAMED THE GAP THIS CLOSES. Shape (2) — one sourced block all
+# wrappers share — was rejected on the measurement: at most 3 of 58 merges could have taken the
+# fallback, and possibly zero. Its argument was that *"a wrapper that forgets it is not detectable
+# today"*, with the revisit trigger being **a fourth wrapper appearing**. This case is that detector,
+# for the price of a loop: it costs nothing, needs no refactor, and fails the moment somebody adds a
+# credential wrapper without the four lines.
+#
+# It asserts PRESENCE, not behaviour — whether the call is correct is `forge-watch-selfcaused-test`'s
+# question, and saying which of the two this is matters more than the assertion.
+for w in bin/gh-coder bin/gh-review bin/gh-arch; do
+	if grep -q '_ledger" classify' "$w" && grep -q '_ledger" record' "$w"; then
+		ok "$w consults the ledger and records on success"
+	else
+		bad "$w has no forge-ledger call — acts through it wake the seat that performed them (quince#316)"
+	fi
+done
+
 printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
