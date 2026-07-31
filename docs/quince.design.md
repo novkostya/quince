@@ -305,6 +305,62 @@ keep N recent + M dailies + K weeklies (config; generous defaults; deletion alwa
 requires confirmed UI action or explicit policy opt-in), acting on quince-created
 versions only.
 
+**PROPOSED (gap): `quince-storage.json`, and when a config-declared storage gets probed —
+`qn.6c`, quince#378.**
+
+At `qn.6c` there are several roots. A removable disk's **path** changes on replug, so a storage
+identified by its path cannot answer *"is this the same storage?"* — hence a marker at the storage
+**root**, the analog of `quince-version.json` one tier up, modelled on `storage/marker.go` (a
+self-checksum over the marshalled struct with `Checksum` emptied — self-contained, no companion
+file):
+
+```jsonc
+{ "storage_id": "01J...", "backend": "zfs", "created_at": "...",
+  "app_version": "...", "checksum": "..." }
+```
+
+**The creation moment, which is the question quince#378 actually asks.** The epic wants the backend
+*selected at creation and immutable thereafter*, **and** a reachability check before each backup —
+but a storage arriving from `config.yml` has no creation event, and *immutable after creation*
+and *probed at startup* then disagree about a dataset remounted as something else. They stop
+disagreeing once creation is defined by the storage's own contents:
+
+> **The first startup that finds a reachable path with no `quince-storage.json` at its root IS
+> that storage's creation moment.** quince probes the backend then, writes the marker, and never
+> probes for selection again. Every later startup and every pre-backup check **reads** the marker
+> and **compares**; it does not re-select.
+
+A marker that is present and **disagrees** with the probe — the remount case — is a **refusal**:
+quince does not back up to that storage and says exactly why. Accepting the new backend would
+write versions the marker misdescribes; silently refusing would be a fallback. Neither is
+permitted (*no silent caps or fallbacks*).
+
+**May it be written into today's `/backups`, which already holds committed versions?
+Recommended yes, on measurement rather than argument.** The storage root is enumerated in exactly
+two places and both skip non-directories — `scanJournals` (`storage/journal.go:96-98`) and
+`Manager.reconcileUDIDs` (`storage/reconcile.go:156-161`, double-guarded by `IsDir()` **and**
+`validUDID`). `Scan` starts a level deeper at `latestDir`/`nsVersions`; `Verify`
+(`storage/verify.go:36`) runs against a *tree* dir, deeper still, and has no notion of a foreign
+entry at all. The marker also sits **above** every device dir, hence above every version, so
+*never mutate a committed version* is untouched. Written idempotently on first startup after
+upgrade.
+
+**One thing the measurement does NOT clear, and it is a real defect if unaddressed.**
+`AnchoredFilterRules` (`storage/offsite.go:16-21`) returns exactly two rules — `- /<subdir>/*/working/**`
+and `- /<subdir>/*/versions/**` — and **neither matches a root-level file**, so the marker would be
+**synced offsite**. A third anchored rule is required:
+
+```
+- /<subdir>/quince-storage.json
+```
+
+**Exclude rather than include, and the reason is the epic's own open fork.** Point 3 leans that
+offsite is a **replication** of a storage, not a storage. If the marker rides along, the replica
+claims its source's UUID and two places assert one identity — precisely the question the file
+exists to answer. Excluding it keeps that fork open; including it would decide it silently.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 4. **Not built until ruled.**
+
 ## 6. Security model
 
 This app shows a person's entire digital life; "LAN-only" is context, not a defense
