@@ -311,9 +311,25 @@ esac
 # WHAT THE SEAT LOSES: it cannot push the journal branch. That costs it nothing it needs — it files
 # issues and opens pull requests, and journal entries are written by the seats that hold the layer.
 #
-# WHAT THIS OBLIGATES, and it must not be dropped: quince#308 is no longer provisioning hygiene, it
-# IS the control. Until the hook is in the git template on this box the exposure is open in PRACTICE
-# while closed in DESIGN, and `preflight` reports that below rather than assuming it.
+# WHAT THIS OBLIGATES, and it must not be dropped: the journal pre-push hook IS the control now,
+# rather than provisioning hygiene. quince#308 is CLOSED — `provision` §4c already installs it via
+# `init.templateDir` and sets `quince.privacy-check`, unconditionally across roles — so nothing needs
+# building, and any box provisioned since that landed carries the guard.
+#
+# EXCEPT ON THIS SEAT, AND THAT IS MEASURED RATHER THAN INFERRED. `provision` accepts `--role
+# implementer` and `--role arch` and nothing else:
+#
+#     $ sh deploy/runner/provision --role supervisor --check-credentials
+#     provision: unknown role supervisor                              (exit 2)
+#
+# So §4c is UNREACHABLE on a supervisor box, and *"re-run provision on each box"* — the remedy the
+# ruling leans on — cannot be performed on the one seat the ruling is about. Until `provision` learns
+# the role, the hook and `quince.privacy-check` must be placed HERE BY HAND.
+#
+# It is fail-CLOSED meanwhile, which is why this is a gap rather than an incident: with
+# `quince.privacy-check` unset the hook REFUSES the push instead of sweeping nothing. The journal-hook
+# arm further down reports which state this box is actually in — read that rather than this comment,
+# which can only say what is true of the design.
 #
 # The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
 # re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
