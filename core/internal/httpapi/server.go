@@ -76,6 +76,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair", deps.handlePair())
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair/validate", deps.handlePairValidate())
 	apiMux.HandleFunc("POST /api/devices/{udid}/encryption", deps.handleEncryption())
+	apiMux.HandleFunc("POST /api/devices/{udid}/wifi-sync", deps.handleWifiSync())
 	apiMux.HandleFunc("POST /api/devices/{udid}/reset-working", deps.handleResetWorking())
 	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
 	apiMux.HandleFunc("POST /api/jobs", deps.handleJobCreate())

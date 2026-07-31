@@ -60,6 +60,11 @@ func TestHelperProcess(t *testing.T) {
 	// and it was a trap primed for the second one: a new domain would have been answered by
 	// fakeWillEncrypt, producing a green test that exercised the wrong code path entirely.
 	case hasArg(args, "-k"):
+		// A WRITE also carries -q/-k, so it must be recognised BEFORE the read arms — otherwise
+		// `--set-bool` falls through to the reader and the test proves nothing about the write.
+		if v := argValue(args, "--set-bool"); v != "" {
+			fakeSetWifiSync(scenario, v)
+		}
 		switch argValue(args, "-q") {
 		case backupDomain:
 			fakeWillEncrypt(scenario)
@@ -121,8 +126,22 @@ func argValue(args []string, flag string) string {
 // is unmeasured until qn.7's story 3 runs the domain differential on hardware, so the production
 // read refuses to query at all (see wifiSync). These scenarios exercise the parsing, not the key.
 func fakeWifiSync(scenario string) {
+	// When a test drives a WRITE followed by its read-back, DEVICEOPS_WIFI_STATE is the device's
+	// memory between the two fake processes. Present and written = report what the write set, so a
+	// successful SetWifiSync is a genuine round trip rather than two unrelated canned answers.
+	if p := os.Getenv("DEVICEOPS_WIFI_STATE"); p != "" {
+		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+			fmt.Println(string(b))
+			os.Exit(0)
+		}
+	}
 	switch scenario {
 	case "wifi_off":
+		fmt.Println("false")
+	case "wifi_set_lies":
+		// The device that accepts a write and applies nothing. It must report a FIXED value rather
+		// than falling through to the default, or the scenario only fails when the test happens to
+		// write in the opposite direction — which is a test that passes by luck of argument order.
 		fmt.Println("false")
 	case "wifi_never_set":
 		// Key ABSENT: exit 0, no output. The device saying "not enabled", not "I don't know".
@@ -286,4 +305,26 @@ func bumpCounter(path string) int {
 	n++
 	_ = os.WriteFile(path, []byte(strconv.Itoa(n)), 0o600)
 	return n
+}
+
+// fakeSetWifiSync impersonates `ideviceinfo … --set-bool <value>`. The write and the read-back that
+// follows it are the SAME fake process invoked twice, so the scenario has to decide what the
+// read-back reports — which is exactly how the story-7 case (a device that reports success and
+// changes nothing) is expressible at all.
+func fakeSetWifiSync(scenario, want string) {
+	switch scenario {
+	case "wifi_set_rejected":
+		fmt.Fprintln(os.Stderr, "ERROR: Could not set com.apple.mobile.wireless_lockdown/EnableWifiConnections: InvalidArg (-1)")
+		os.Exit(1)
+	case "wifi_set_lies":
+		// The device accepts the request and does not apply it. Exit 0, and the read-back
+		// (fakeWifiSync, scenario unchanged) keeps answering the OLD value.
+		os.Exit(0)
+	default:
+		// A real set: record it so the read-back in the same test reports the new value.
+		if p := os.Getenv("DEVICEOPS_WIFI_STATE"); p != "" {
+			_ = os.WriteFile(p, []byte(want), 0o600)
+		}
+		os.Exit(0)
+	}
 }

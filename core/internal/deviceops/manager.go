@@ -2,6 +2,7 @@ package deviceops
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -263,6 +264,74 @@ func (m *Manager) Encryption(_ context.Context, udid, action, password, oldPassw
 	op := m.startOp("encryption", udid, encStartMsg(action))
 	go m.runEncryption(op.ID, udid, transport, action, password, oldPassword, newPassword)
 	return op.ID, http.StatusAccepted, ""
+}
+
+// WifiSync enables or disables the device's Wi-Fi-sync flag (contracts §1
+// POST /api/devices/{udid}/wifi-sync). Same validation ladder as Encryption minus every password
+// branch — the value is a boolean, so there is no secret to require or to protect.
+func (m *Manager) WifiSync(_ context.Context, udid, action string) (string, int, string) {
+	if !validUDID(udid) {
+		return "", http.StatusBadRequest, "invalid udid"
+	}
+	dev, ok := m.devs.Device(udid)
+	if !ok {
+		return "", http.StatusNotFound, "no such device"
+	}
+	// Refuse on a device that is not CONFIRMED paired rather than letting the write fail deeper in:
+	// setting a lockdown value needs a trusted session, and "not paired" is a state the user can act
+	// on where "the device rejected it" is not.
+	if dev.Paired != "yes" {
+		return "", http.StatusConflict, "device is not paired with this host"
+	}
+	transport, ok := opTransport(dev)
+	if !ok {
+		return "", http.StatusConflict, "device is not connected"
+	}
+	if action != "enable" && action != "disable" {
+		return "", http.StatusUnprocessableEntity, "unknown action: " + action
+	}
+	op := m.startOp("wifi_sync", udid, wifiSyncStartMsg(action))
+	go m.runWifiSync(op.ID, udid, transport, action)
+	return op.ID, http.StatusAccepted, ""
+}
+
+func (m *Manager) runWifiSync(opID, udid, transport, action string) {
+	ctx, cancel := context.WithTimeout(m.baseCtx, deviceOpTimeout)
+	defer cancel()
+
+	if err := m.tools.SetWifiSync(ctx, udid, transport, action == "enable"); err != nil {
+		// Three failures the user must be able to tell apart, because the remedy differs and only
+		// one of them is "try again".
+		code, msg := "wifi_sync_failed", opErrMsg(err)
+		switch {
+		case errors.Is(err, ErrWifiSyncUnverifiable):
+			code = "wifi_sync_unavailable"
+			msg = "This build does not know which lockdown key holds the setting, so quince will not guess."
+		case errors.Is(err, ErrWifiSyncNotApplied):
+			code = "wifi_sync_not_applied"
+			msg = "The device accepted the change but did not apply it. Wi-Fi sync is unchanged."
+		}
+		m.setOp(opID, "failed", "", &wire.JobError{Code: code, Message: msg})
+		m.auditEvent("device.wifi_sync."+action, udid, "failed")
+		return
+	}
+	m.setOp(opID, "succeeded", wifiSyncDoneMsg(action), nil)
+	m.reEnrich(udid, transport)
+	m.auditEvent("device.wifi_sync."+action, udid, "ok")
+}
+
+func wifiSyncStartMsg(action string) string {
+	if action == "enable" {
+		return "Turning on Wi-Fi sync so this device can back up without a cable…"
+	}
+	return "Turning off Wi-Fi sync…"
+}
+
+func wifiSyncDoneMsg(action string) string {
+	if action == "enable" {
+		return "Wi-Fi sync is on. This device can now back up over Wi-Fi."
+	}
+	return "Wi-Fi sync is off. This device will only back up over USB."
 }
 
 func (m *Manager) runEncryption(opID, udid, transport, action, password, oldPassword, newPassword string) {

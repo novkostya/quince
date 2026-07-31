@@ -25,6 +25,10 @@ type stubOps struct {
 	opOK                 bool
 
 	recAction, recPW, recOld, recNew string
+
+	wifiOpID, wifiReason string
+	wifiStatus           int
+	recWifiAction        string
 }
 
 func (s *stubOps) Pair(context.Context, string) (string, int, string) {
@@ -36,6 +40,10 @@ func (s *stubOps) Validate(context.Context, string) (bool, int, string) {
 func (s *stubOps) Encryption(_ context.Context, _, action, pw, old, nw string) (string, int, string) {
 	s.recAction, s.recPW, s.recOld, s.recNew = action, pw, old, nw
 	return s.encOpID, s.encStatus, s.encReason
+}
+func (s *stubOps) WifiSync(_ context.Context, _, action string) (string, int, string) {
+	s.recWifiAction = action
+	return s.wifiOpID, s.wifiStatus, s.wifiReason
 }
 func (s *stubOps) Op(string) (wire.Op, bool) { return s.theOp, s.opOK }
 
@@ -210,5 +218,29 @@ func TestDeviceOpsUnavailableByDefault(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("default pair status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestWifiSyncAcceptedPassesAction(t *testing.T) {
+	ops := &stubOps{wifiOpID: "01WIFI", wifiStatus: http.StatusAccepted}
+	srv, c := opsServer(t, ops)
+	resp := postCSRF(t, c, srv, "/api/devices/DEV-1/wifi-sync", `{"action":"enable"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("wifi-sync status = %d, want 202", resp.StatusCode)
+	}
+	if ops.recWifiAction != "enable" {
+		t.Fatalf("action reaching the subsystem = %q, want enable", ops.recWifiAction)
+	}
+}
+
+// A device that is not paired is a 409 the user can act on, not a failure deeper in the stack.
+func TestWifiSyncUnpairedIs409(t *testing.T) {
+	ops := &stubOps{wifiStatus: http.StatusConflict, wifiReason: "device is not paired with this host"}
+	srv, c := opsServer(t, ops)
+	resp := postCSRF(t, c, srv, "/api/devices/DEV-1/wifi-sync", `{"action":"enable"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("wifi-sync status = %d, want 409", resp.StatusCode)
 	}
 }
