@@ -51,6 +51,12 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
       <Button
         variant={on ? "ghost" : "outline"}
         size={on ? "sm" : "md"}
+        // A ghost button has no background, so its TEXT sits at the size's px-3 inset while every
+        // neighbour's visible left edge — the filled "Back up now", the status line beneath it — is
+        // at the margin. It reads as a stray indent rather than as a quieter control. `-ml-3`
+        // cancels that padding so the text starts where the column starts, and the hover target
+        // keeps its full width. Not needed for `outline`, which has a border at the margin already.
+        className={on ? "-ml-3" : undefined}
         onClick={() => (willDisconnect ? setConfirming(true) : run())}
         disabled={inFlight || needsUSBToEnable}
       >
