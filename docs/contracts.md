@@ -80,10 +80,18 @@ POST /api/devices/{udid}/wifi-sync
      // THE OP VERIFIES ITS OWN WRITE (decisions/0004). lockdownd_set_value succeeding means
      // the device ACCEPTED the request, not that the setting took effect — unverified for
      // this domain, which quince had never written before. So the op re-reads and compares,
-     // and reports three distinguishable failures because the remedy differs:
+     // and reports four distinguishable failures because the remedy differs:
      //   wifi_sync_failed        the device rejected it — retryable
      //   wifi_sync_not_applied   accepted and not applied; the state is UNCHANGED, not unknown
+     //   wifi_sync_unconfirmed   accepted, and the read-back could not RUN — the state is
+     //                           UNKNOWN, which is neither of the two above (quince#363)
      //   wifi_sync_unavailable   this build does not know the key, so quince will not guess
+     // The unconfirmed/not_applied split is load-bearing rather than pedantic: conflating them
+     // reported a write that had WORKED as "Wi-Fi sync is unchanged" on hardware, and the user
+     // was told to expect a device that still syncs while holding one that needed a cable.
+     // unconfirmed does NOT appear on the one path where an unreadable read-back is EXPECTED:
+     // disabling over Wi-Fi severs the connection the read-back would use, so there the op
+     // SUCCEEDS and the value becomes wifi_sync: "unknown" (ruled quince#363).
 POST /api/devices/{udid}/reset-working → 202 {note} | 404 | 409 | 503
      // qn.5b Reset (accepted contract proposal, decisions (co)): DISCARD the device's dirty
      // working/ so the next backup starts clean from latest/ — losing only the partial, NEVER a

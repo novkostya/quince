@@ -424,6 +424,13 @@ func TestWifiSyncUnreadableIsOnlyForgivenOnTheDisableOverWifiPath(t *testing.T) 
 			if op.State != "failed" {
 				t.Fatalf("op.State = %q, want failed — only disable-over-Wi-Fi explains an unreadable read-back", op.State)
 			}
+			// And it carries its OWN code. `wifi_sync_failed` means the device REJECTED the write
+			// and is retryable; this is the opposite — accepted, unverifiable — so anything reading
+			// the generic code would draw the wrong remedy. `not_applied` is wrong for the other
+			// direction: it asserts the state is UNCHANGED, which a failed read cannot establish.
+			if op.Error == nil || op.Error.Code != "wifi_sync_unconfirmed" {
+				t.Fatalf("op.Error = %+v, want wifi_sync_unconfirmed", op.Error)
+			}
 		})
 	}
 }
