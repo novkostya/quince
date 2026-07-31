@@ -357,11 +357,24 @@ expect "supervisor with GH_TOKEN in the environment is refused" 1 "in the enviro
 expect "supervisor with NO credential at all still starts, and says what is lost" 0 "cannot act under its own name" -- \
 	QUINCE_RUNNER_ROLE=supervisor
 
-# THE UNRULED GAP IS ASSERTED AS AN ANNOUNCEMENT, deliberately (quince#375). The private-layer arm
-# still exempts this seat, and its justification — "it commits nothing" — is withdrawn now the seat
-# can publish. The behaviour is unchanged pending a ruling, so what is pinned is that the box SAYS
-# so: an exemption that has quietly become a gap must not read as a property.
-expect "the private-layer exemption announces itself as an unruled gap" 0 "unruled gap" -- \
+# THE EXEMPTION IS RULED, AND THE LINE MUST SAY WHICH (quince#375, Operator 2026-08-01). This case
+# pinned the literal "unruled gap" for one PR, while the justification's premise was withdrawn and the
+# answer was owed. The ruling is now in: no private layer here, the journal pre-push hook carries the
+# control. So the string moves with it — pinning "unruled gap" after a ruling would hold the arm at
+# the wrong claim, which is this file's own defect class one turn later.
+#
+# WHAT IS PINNED IS STILL THE ANNOUNCEMENT, not the behaviour, and that is the point: an exemption a
+# reader cannot distinguish from an unexamined default is worth no more than the default. The line has
+# to say it was DECIDED.
+expect "the private-layer exemption says it was RULED, not merely unchecked" 0 "RULED 2026-08-01" -- \
+	QUINCE_RUNNER_ROLE=supervisor
+
+# AND IT MUST POINT AT WHAT ACTUALLY CARRIES THE CONTROL. The ruling's own reasoning is that requiring
+# the layer would make the gate RUNNABLE without making it RUN — only `bin/pre-push-journal` invokes
+# it on a journal push. So a supervisor box that reads "no private layer required" and stops there has
+# read half of it; the arm has to send the reader to the hook lines, which are the ones that say
+# whether the control is INSTALLED rather than merely decided.
+expect "the exemption names the journal hook as the control, not the layer" 0 "journal pre-push hook" -- \
 	QUINCE_RUNNER_ROLE=supervisor
 
 # An unknown role refuses rather than guessing which identity rules apply — guessing would pick

@@ -282,24 +282,38 @@ esac
 # is the seat that can be held to it. Requiring the layer here would put a second copy of the
 # Operator's private material on a third box to satisfy a check that seat can never fail meaningfully.
 #
-# ⚠ THE PREMISE OF THE PARAGRAPH ABOVE IS WITHDRAWN, AND THE BEHAVIOUR IS DELIBERATELY UNCHANGED
-# PENDING A RULING (quince#375). *"It commits nothing — it holds no forge credential to commit with"*
-# stopped being true when the analyst App landed with `contents: write` on all five repositories. The
-# supervisor seat now publishes: it can push a branch and open a pull request from a box with no
-# pattern list, where `make privacy-check` exits **2 — DID NOT RUN** — and it can push
-# `refs/heads/journal`, which has no pull request and therefore no reviewer, and which `CLAUDE.md`
-# says the privacy gate is the ONLY guard on.
+# THE PREMISE OF THE PARAGRAPH ABOVE IS WITHDRAWN, AND THE EXEMPTION SURVIVES IT — RULED, not owed.
+# Operator ruling 2026-08-01, relayed by the architect on quince#375: **the supervisor box does NOT
+# require the private layer to start; the journal pre-push hook carries the control instead.**
 #
-# The question is quince#44's, which was ruled for the other two seats and has not been ruled here:
-# does this box now require the private layer in order to START? Both answers cost something real —
-# yes puts a third complete copy of the private record on a third box, which is `pr.6`'s
-# concentration concern; no means the honest control is a refusal to PUBLISH rather than a refusal to
-# start, and something has to carry it.
+# WHAT WENT FALSE. *"It commits nothing — it holds no forge credential to commit with"* stopped being
+# true when the analyst App landed with `contents: write` on all five repositories. The seat now
+# publishes: it can push a branch and open a pull request from a box with no pattern list, where
+# `make privacy-check` exits **2 — DID NOT RUN** — and it can push `refs/heads/journal`, which has no
+# pull request and therefore no reviewer, and which `CLAUDE.md` says the privacy gate is the ONLY
+# guard on.
 #
-# NOT REWORDED INTO SOMETHING THAT READS CORRECT. A justification whose premise is gone is exactly
-# the "document describing a narrower reality than the one that exists" defect this project files
-# more than any other, and quietly rewriting the sentence would hide that a control changed meaning.
-# It is marked instead, and the ruling is owed on quince#375.
+# WHY THE EXEMPTION STANDS ANYWAY, and the reasoning is kept because the outcome alone would read as
+# the cheap answer. The trade looked symmetric — a third copy of the private record against an
+# unguarded push path — and is not:
+#
+#   1. Requiring the layer makes the gate RUNNABLE; it does not make it RUN. Nothing invokes
+#      `privacy-check` on a journal push except `bin/pre-push-journal`. Requiring the layer alone
+#      would have bought a satisfied checklist item and no new guard.
+#   2. The hook NEEDS the pattern list, so on a box without one it REFUSES the push — fail-closed,
+#      which is the direction this project wants. The arm further down already reports exactly that.
+#   3. So the hook closes the exposure WITHOUT putting the lab topology and the external review
+#      transcripts on a third machine — `pr.6`'s concentration concern, on the box that already holds
+#      root ssh into the other two.
+#   4. The PULL REQUEST path was never the exposure: a PR has a reviewer, and the reviewer sweeps.
+#      Only `refs/heads/journal` has none, and that is the path the hook closes.
+#
+# WHAT THE SEAT LOSES: it cannot push the journal branch. That costs it nothing it needs — it files
+# issues and opens pull requests, and journal entries are written by the seats that hold the layer.
+#
+# WHAT THIS OBLIGATES, and it must not be dropped: quince#308 is no longer provisioning hygiene, it
+# IS the control. Until the hook is in the git template on this box the exposure is open in PRACTICE
+# while closed in DESIGN, and `preflight` reports that below rather than assuming it.
 #
 # The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
 # re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
@@ -485,7 +499,7 @@ else
 fi
 
 else
-	ok "role supervisor: no private layer required BY THIS CHECK — and since quince#375 that is an unruled gap rather than a property. This seat can now publish (analyst App, contents: write), so a push from here would be swept by a gate that exits 2, DID NOT RUN. Ruling owed on quince#375; the behaviour is deliberately unchanged until then."
+	ok "role supervisor: no private layer required — RULED 2026-08-01 (quince#375), not merely unchecked. This seat can publish (analyst App, contents: write), and the control is the journal pre-push hook rather than the layer: without a pattern list the hook REFUSES the push, which is fail-closed and needs no third copy of the private record here. The pull-request path has a reviewer and was never the exposure. Read the journal-hook lines below: they, not this one, say whether the control is INSTALLED."
 fi
 
 # --- the journal pre-push hook (quince#308) ---------------------------------------------------
