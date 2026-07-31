@@ -1415,7 +1415,18 @@ watch_report() {
 		  | select($w3 != null and ($w3.due // null) != null)
 		  | ($t - ($w3.due | fromdate)) as $late
 		  | select($late > ($w3.interval_s // 60))
-		  | "event=unreconciled from=\(.last_tick // $w3.last_watcher_tick // "unknown") to=\($t | todate) basis=state-diff" )
+		  # FROM IS THE WATCHER-S LAST TICK, NOT `.last_tick`, and the first version had it the other
+		  # way round. `.last_tick` records ANY tick — including the foreground catch-up that
+		  # `/kickoff` §6 and `/architect` §6 both require immediately before arming. So by the time
+		  # this line renders, `.last_tick` is seconds old and the interval it names is one that WAS
+		  # observed. Measured on the first live run of this feature: `tick-overdue` reported
+		  # late=1036s beside an `unreconciled` window five seconds wide.
+		  #
+		  # That is worse than not emitting the line at all: it names an interval, precisely, and
+		  # names the wrong one — the exact defect quince#58 exists to remove, rebuilt inside its own
+		  # fix. `last_watcher_tick` is the WATCHER-S cadence, which is the thing that stopped, and
+		  # it is what `due` is derived from one line above; the two now agree by construction.
+		  | "event=unreconciled from=\($w3.last_watcher_tick // .last_tick // "unknown") to=\($t | todate) basis=state-diff" )
 		' "$_st" || die "could not read watch state: $_st"
 
 	# The declared blocking set, and its AGE — printed only when there is one, so a state file that
