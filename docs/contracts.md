@@ -128,6 +128,35 @@ POST /api/jobs/{id}/cancel                              → 202 Job
 GET  /api/jobs/{id}/log                                 → text/plain (full so-far; live tail is WS)
 ```
 
+**PROPOSED (gap): a storage collection, and a job that names one — `qn.6c`, quince#378.**
+Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Additive:
+
+```
+GET  /api/storages                                        → {storages: Storage[]}
+POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
+```
+
+Three sub-decisions, each with the rung's recommendation:
+
+- **`storage_id` omitted** → the storage marked `default`, of which there is exactly one.
+  Recommended over a 422 because it is what keeps every existing single-storage client working
+  unchanged, which is what makes the whole change additive.
+- **The chosen storage is unreachable** → **409**, not 422. It is a state conflict the user can
+  act on (plug the disk in) — the same reading `POST /api/devices/{udid}/pair` already uses for
+  *not present on USB*. A 202-then-queue is explicitly refused: queuing fights the assisted model
+  (D13), and the multi-storage epic's own point 5 says an offline target is an honest "can't right
+  now", never a background retry.
+- **Unknown `storage_id`** → 404, matching unknown-device.
+
+`Job` gains `storage_id` (non-null, the **resolved concrete** storage — never the word "default",
+exactly as `transport` stores the resolved `usb`/`wifi` and never `auto`).
+
+Open inside this proposal: whether the *"this will be a full transfer"* claim (see `Storage` in
+§2) makes `GET /api/storages` device-scoped via `?udid=`, or is carried elsewhere. Both work; they
+differ in whether a storage list is a device-independent resource.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 2. **Not built until ruled.**
+
 ### Config
 
 ```
@@ -327,6 +356,51 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
              "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "..." }
 ```
 
+**PROPOSED (gap): `Storage` as an object, and what happens to `Version.backend` — `qn.6c`,
+quince#378.** The multi-storage epic names `Version.backend` as *the symptom* of a modeling
+error: a version's backend is really its **storage's** backend. `qn.6c` fixes the model; this
+proposal is about how much of that reaches the wire.
+
+```jsonc
+Storage: {
+  "id": "01J...",              // the UUID from quince-storage.json (design §5) — stable across
+                               // replug, which a PATH is not. Never the config `name`, which the
+                               // user may change.
+  "name": "pool",              // from config.yml; the label the UI shows
+  "path": "/backups",
+  "backend": "zfs" | "reflink" | "hardlink" | "copy" | "unknown",
+                               // "unknown" = never yet reached, so quince does not know. Not a guess.
+  "default": true,             // exactly one storage is default
+  "reachable": true,
+  "unreachable_reason": null,  // set when reachable is false; SHOWN, never thrown — an unreachable
+                               // storage must not block backups to any other (epic point 5)
+  "will_be_full": true         // this device's next backup here is a FULL transfer, because
+                               // incremental is scoped to (device, storage) and there is no prior
+                               // version on this one. See the open sub-question in §1.
+}
+
+Version: { ..., "storage_id": "01J..." }   // a field addition — non-breaking by this document's
+                                           // own header rule
+```
+
+**The open decision is `Version.backend`:**
+
+- **(a) Keep it, denormalized.** It is already on the wire, clients render it, and it remains a
+  true statement about the version (a version made on a zfs storage *is* a snapshot). The modeling
+  error is fixed where it actually bites — `versions.storage_id` in the DB, backend read from the
+  storage — and the wire keeps a convenience copy.
+- **(b) Remove it; clients join through `Storage`.** Cleaner, and breaking.
+
+**The rung recommends (a), with its cost stated rather than hidden:** it leaves the epic's symptom
+visible on the wire on purpose. A later rung that wants (b) pays a breaking change then, rather
+than this rung paying it now for a field nothing is yet confused by.
+
+`Version.browse_root` also stops being universally `/backups/<udid>/…` once roots are plural. That
+is a **documentation** change and not a shape change — it is already computed per request from the
+root, so only the literals above go stale.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 1. **Not built until ruled.**
+
 ## 3. WebSocket (`/api/ws`)
 
 One socket per client, server→client only (commands go via REST). Envelope:
@@ -465,3 +539,44 @@ ui:
 
 Schema is versioned by presence/absence of keys (missing keys = defaults, written back
 on next save); a key the app doesn't know is a warning surfaced in UI, never an error.
+
+**PROPOSED (gap): where storages are declared, against `QUINCE_BACKUPS` — `qn.6c`, quince#378.**
+
+This section says bootstrap env is *"deployment topology only"* and *"Everything else:
+`/data/config.yml`"*. A storage's **path** is topology by that reading — but at `qn.6c` there are
+N of them, env vars hold lists badly, and D12 requires every setting to be in `config.yml` and
+UI-editable. Measured at `main`: `QUINCE_BACKUPS` is bootstrap env (`config/bootstrap.go:15,:51`)
+and `storage:` carries `backend`, `zfs` and `retention` but **no path at all**
+(`config/schema.go:27-31`) — so this would be the first storage *location* in YAML, and this
+section has never had to arbitrate a path before.
+
+- **(a) A list in YAML, with `QUINCE_BACKUPS` as the implicit fallback:**
+  ```yaml
+  storage:
+    backend: auto        # unchanged — describes the IMPLICIT storage only
+    zfs: {...}           # unchanged — ditto
+    retention: {...}     # unchanged — ditto
+    storages: []         # EMPTY = synthesize one implicit storage at QUINCE_BACKUPS.
+                         # A non-empty list carries {name, path, default} per entry; the entry's
+                         # BACKEND is discovered and frozen at its creation moment (design §5),
+                         # never declared here.
+  ```
+- **(b) Retire `QUINCE_BACKUPS`; every storage is declared.** Breaks every deployment in the
+  field, and leaves a fresh install with no storage until an onboarding that does not exist.
+
+**The rung recommends (a)** — the only option under which `qn.6c` does not depend on a future
+rung, and under which an unchanged `config.yml` keeps working byte-for-byte.
+
+**A second half (a) does not settle:** whether `backend`, `zfs` and `retention` move **into** each
+list entry now, or stay global and are inherited. **Recommended: keep them global for this rung.**
+Per-storage zfs settings only start mattering when a second zfs storage exists, and `qn.6c` cannot
+create one. This cannot simply be assumed, because zfs intent is **config-declared and never
+probed** (`storage/probe.go:30-31`) — so a config-global zfs setting would silently apply to every
+declared storage.
+
+**Restart, declared rather than implied.** A change to `storage.storages` requires a restart in
+`qn.6c`: the backend is selected and probed at a storage's creation moment, and the registry holds
+one live `Backend` instance per storage. D12 permits a restart *"unless the spec says why"* — the
+spec says why.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 3. **Not built until ruled.**
