@@ -20,10 +20,10 @@ carries an accrued observation to re-arm from, `absent` says nothing was ever ar
 to declare first; it just sat three sections below the read.
 
 ```sh
-bin/forge-watch runner set <name>   # ONCE per session. `r<N>` — a seat is a pattern, not a list.
+bin/forge-watch runner set <name>   # ONCE per session. `r<N>` — a pattern (r/arch/analyst), not a list.
 ```
 
-**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). That
+**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect, `analyst<N>` for the analyst — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330; third seat quince#375). That
 shape is what lets a watch on the OTHER box attribute your branches. §3 carries the rest — what the
 name does to the scratch root, and the guard against an empty one — and nothing there changes except
 that this step has already happened by the time you reach it.
@@ -135,14 +135,20 @@ sharing a watch state, owning no branches. It failed silently, as an empty strin
 why `$HOME/scratch` did not exist on any box. One host is *meant* to run several implementers
 concurrently; the name is what keeps them apart.
 
-**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). That
+**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect, `analyst<N>` for the analyst — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330; third seat quince#375). That
 shape is what lets a watch on the OTHER box attribute your branches: the branch namespace is global,
 the local registry is not, so a name that is not seat-shaped wakes every watch on every box for every
-event it produces. The refusal names the file and lists the known seats. **Adding a seat is a PR** —
-that is the intended cost, and it is why the list cannot silently go stale.
+event it produces.
+
+**A new ORDINAL is free; a new KIND is a one-line PR** — and this paragraph said the opposite until
+quince#375. It read *"the refusal names the file and lists the known seats. Adding a seat is a PR"*,
+which was true of the committed `.claude/seats` list that quince#330 **deleted**: there is no file and
+no enumeration, so `r8` and `arch3` need nothing. What still costs a PR is widening the alternation
+itself, which quince#375 did for `analyst<N>`, and that is the intended cost — a third seat kind is a
+decision, where a seventh implementer is not.
 
 ```sh
-bin/forge-watch runner set <name>        # ONCE per session. `r<N>` — a pattern, not a list.
+bin/forge-watch runner set <name>        # ONCE per session. `r<N>` — a pattern (r/arch/analyst), not a list.
 RUNNER=$(bin/forge-watch runner get) || { echo "no runner declared — stop"; exit 1; }
 [ -n "$RUNNER" ] || { echo "runner name is empty — stop"; exit 1; }
 SCRATCH="$HOME/scratch/$RUNNER"
