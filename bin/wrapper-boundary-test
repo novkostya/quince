@@ -50,8 +50,13 @@
 # THE SIXTH IS THE FIRST WHOSE SEAT DOES BOTH (quince#375). `bin/gh-analyst` authors pull requests
 # AND can cast a verdict, so unlike the other five there is no half of the boundary it can name: its
 # rule is that ANY other seat's credential is a refusal, and part 14 drives all four. What keeps that
-# honest is not a separation within one box — it is that the box holds exactly one identity, which is
-# `deploy/runner/preflight`'s supervisor allowlist and is what this part is the wrapper-side half of.
+# honest is not a separation within one box — it is that the box holds exactly one identity.
+#
+# THAT SECOND HALF IS NOT BUILT YET. `deploy/runner/preflight`'s supervisor arm is still a denylist
+# that does not know this identity exists; PR 1c turns it into the allowlist these parts are the
+# wrapper-side counterpart of. Said in the future tense deliberately: until 1c lands, the ONLY thing
+# refusing a second identity on that box is the wrapper, and a reader who takes the pair for done
+# would not know the start-path half is missing.
 #
 # Synthetic and hermetic: a temp HOME, a temp token file, a stub PATH. Never reads or writes the
 # real ~/.config/quince, and never runs `gh`.
@@ -455,7 +460,9 @@ done
 # `gh-review`/`gh-arch` approve, so they refuse the implementer identity; `gh-coder`/`gh-bot` author,
 # so they refuse the approving ones. The analyst seat authors pull requests AND can cast a verdict on
 # somebody else's, so it has no half to name — its rule is that any other seat's credential is a
-# refusal, and that is the wrapper-side half of `deploy/runner/preflight`'s supervisor allowlist.
+# refusal. That will be the wrapper-side half of `deploy/runner/preflight`'s supervisor allowlist,
+# which PR 1c builds; on this branch the arm is still a denylist blind to this identity, so what these
+# rows drive is currently the only thing refusing a second identity on that box.
 #
 # EACH IS DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, as in parts 1 and 4, because the failure mode is
 # the same and so is the wrong repair it invites — and on the supervisor box, where this wrapper
