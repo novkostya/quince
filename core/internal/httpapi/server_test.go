@@ -286,7 +286,10 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	c := authedClient(t, srv)
 
 	body := `{"backup":{"transport":"usb","require_encryption":true},` +
-		`"storage":{"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+		// qn.6c: a saved config must declare a storage or PUT is a 422. This test is about CSRF,
+		// so the body carries a valid one rather than asserting the storage rule by accident.
+		`"storage":{"storages":[{"name":"local","path":"/backups","default":true}],` +
+		`"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
 		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
@@ -303,6 +306,32 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	req.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
 	if code := doStatus(t, c, req); code != http.StatusOK {
 		t.Fatalf("PUT with CSRF = %d, want 200", code)
+	}
+}
+
+// TestConfigPutRejectsRemovingTheLastStorage proves qn.6c's storage requirement AT THE API
+// BOUNDARY, not merely in the service. The UI is the editing surface (D12), so "remove your last
+// storage" is a thing a user can do in two clicks; answering 200 to it would accept, in silence,
+// an edit that disables backups entirely and stops the daemon starting. Silent acceptance is what
+// `no silent caps or fallbacks` forbids, and it is the defect this test exists to prevent
+// returning (quince#394 review).
+func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(testDeps(t)))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	body := `{"backup":{"transport":"usb","require_encryption":true},` +
+		`"storage":{"storages":[],` + // the user removed their last storage
+		`"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
+		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"ui":{"theme":"system"}}`
+
+	req := newReq(t, http.MethodPut, srv.URL+"/api/config", body)
+	req.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
+	if code := doStatus(t, c, req); code != http.StatusUnprocessableEntity {
+		t.Fatalf("PUT removing the last storage = %d, want 422", code)
 	}
 }
 

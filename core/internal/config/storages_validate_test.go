@@ -1,6 +1,10 @@
 package config
 
 import (
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +39,55 @@ func TestValidateDoesNotReportAbsentOrEmptyStorages(t *testing.T) {
 	}
 	if errs := Validate(withStorages()); len(errs) != 0 {
 		t.Errorf("empty storages is the REFUSAL's business, not Validate's; got %+v", errs)
+	}
+}
+
+// The other half of the pair above, and the reason both exist: Replace must REFUSE what Validate
+// PERMITS. The two paths differ in the property the exclusion rests on — Load discards a config
+// that fails Validate and runs on defaults, so an error there is dangerous; Replace returns the
+// errors and writes nothing, so an error there is exactly right. Conflating them once already
+// shipped a PUT that answered 200 to a config that could not start (quince#394 review).
+func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"absent", Default()},
+		{"empty", withStorages()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := Validate(tc.cfg); len(errs) != 0 {
+				t.Fatalf("precondition: Validate must still permit this, got %+v", errs)
+			}
+			errs, err := svc.Replace(tc.cfg)
+			if err != nil {
+				t.Fatalf("Replace: %v", err)
+			}
+			if len(errs) != 1 || errs[0].Path != "storage.storages" {
+				t.Fatalf("saving a config with no storage must be a 422 at storage.storages, got %+v", errs)
+			}
+			if _, statErr := os.Stat(path); statErr == nil {
+				t.Error("a refused save must write NOTHING; config.yml exists")
+			}
+		})
+	}
+}
+
+func TestReplaceAcceptsAConfigWithAStorage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	errs, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}))
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("a well-formed config must save: errs=%+v err=%v", errs, err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("an accepted save must write the file: %v", statErr)
 	}
 }
 

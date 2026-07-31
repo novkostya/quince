@@ -218,6 +218,27 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, error) {
 	if errs := Validate(c); len(errs) > 0 {
 		return errs, nil
 	}
+	// qn.6c: a SAVE must also satisfy the storage requirement, and this check lives here rather
+	// than in Validate for a reason that is easy to get backwards (quince#394 review).
+	//
+	// Validate deliberately does not report an absent or empty list, because Load() DISCARDS a
+	// config that fails Validate and falls back to Default() with OK:false — so a validation
+	// error there would produce a running daemon on defaults with no storage and no error, the
+	// silent zero-storage start gap 3's ruling forbids.
+	//
+	// Replace has the OPPOSITE property: it returns the errors and writes NOTHING. The hazard
+	// that justifies the exclusion is absent from this path, so excluding it here bought nothing
+	// and cost the rule. Without this, the UI could remove the last storage, get a 200, and the
+	// user would discover backups were disabled at the next restart — an acceptance that is
+	// silent, which is what `no silent caps or fallbacks` forbids and what D12 makes reachable by
+	// making the UI the editing surface.
+	if req := CheckStorages(c, nil); !req.OK() {
+		msg := "at least one storage must be declared — saving this would leave quince unable to back anything up, and it would refuse to start"
+		if req.Empty {
+			msg = "the storage list is empty — " + msg
+		}
+		return []wire.ConfigError{{Path: "storage.storages", Message: msg}}, nil
+	}
 	data, err := Marshal(c)
 	if err != nil {
 		return nil, err
