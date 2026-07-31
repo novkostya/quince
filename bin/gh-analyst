@@ -64,8 +64,20 @@ die() {
 # author, and `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy.
 #
 # So the rule is the strongest of the five and the simplest to state: ANY other seat's credential
-# here is a refusal. That mirrors `deploy/runner/preflight`'s supervisor arm, which is an allowlist
-# of exactly this one file.
+# here is a refusal.
+#
+# THE PREFLIGHT HALF OF THAT RULE DOES NOT EXIST YET — PR 1c makes it, and this comment said it was
+# already there. On `main` today `deploy/runner/preflight`'s supervisor arm is a DENYLIST of four
+# named files plus four environment variables, and it does not know this identity exists. So on the
+# supervisor box, which already holds the key, it scans four paths, finds none, and prints *"no forge
+# credential present — this seat can neither author nor approve, as required"* — false about a box
+# that now holds an authoring credential, from a gate designed to refuse rather than degrade.
+#
+# That defect belongs to the ceremony landing ahead of the mechanism, and 1c is where it is fixed.
+# Recorded in the present tense here rather than the aspirational one, because a session reading this
+# line to find out whether the preflight side is covered would have concluded that it is and stopped
+# looking. Once 1c lands, this becomes: that mirrors preflight's supervisor arm, which is an
+# allowlist of exactly this one file.
 #
 # Ordered above the dependency loop for the reason quince#157 records: an environment refusal invites
 # a repair, and a session repairing its way past this one ends up holding two identities on one box.
