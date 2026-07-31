@@ -1127,7 +1127,43 @@ FORGE_SET_FILE=${FORGE_SET_FILE:-.claude/forge-set}
 #
 # ADDITIVE, never a replacement (ruled): the local registry still decides, and this adds the seats
 # that live on other boxes.
-FORGE_SEATS_FILE=${FORGE_SEATS_FILE:-.claude/seats}
+# SEAT_PATTERN — what a seat name looks like, replacing the committed list (quince#330, ruled
+# 2026-07-31 after the Operator's *"if I spawn a new implementer it will be r7 and so on"*).
+#
+# WHY A PATTERN AND NOT A LIST. Seat names were ALREADY a pattern — `r1 r2 r3 …` and `arch1` — so
+# `.claude/seats` was a hand-maintained enumeration of something a regex describes completely. It
+# needed a PR per new seat, and the PR that would have added `r5` and `r6` (quince#331) was closed
+# rather than merged because `r7` would have needed the next one.
+#
+# AND IT DISSOLVES quince#330 RATHER THAN FIXING IT. That issue is "the guard fails open on a file
+# the stale launchpad does not have": `FORGE_SEATS_FILE` defaulted to a path relative to the CURRENT
+# DIRECTORY, the launchpad is behind `main` and has no `.claude/seats`, and the loader returned
+# success when the file was absent. Measured: the same `runner set r9` was REFUSED from a work clone
+# and ACCEPTED from the launchpad, which is where sessions actually run it. **A pattern has no file
+# to be missing**, so the check now behaves identically in every working directory and that class of
+# failure cannot recur here.
+#
+# WHAT IS LOST, and the ruling accepted it explicitly: a TYPO is now accepted — `r66` for `r6` matches
+# — where the list would have refused it. That failure is visible within one tick (a runner owning
+# branches nobody attributes to it), it is self-inflicted rather than adversarial, and the list only
+# caught it on boxes where the guard worked, which per quince#330 was not the launchpad.
+#
+# THE RISK THIS CARRIES INSTEAD is a prefix that is NOT a seat being read as one — `journal/…`,
+# `feature/…` — which the enumeration made impossible by construction. That is what the suite pins in
+# both directions, and it is the assertion to keep if any other is ever dropped.
+SEAT_PATTERN='^(r|arch)[0-9][0-9]*$'
+
+is_seat_name() { # <name> -> 0 if it is a seat name
+	printf '%s' "${1:-}" | grep -qE "$SEAT_PATTERN"
+}
+
+# branch_seat — the seat prefix of a branch, or nothing. `r5/foo/bar` -> `r5`; `journal/x` -> nothing.
+branch_seat() { # <branch>
+	_bs=${1%%/*}
+	[ "$_bs" != "${1:-}" ] || return 1 # no slash: not a prefixed branch at all
+	is_seat_name "$_bs" || return 1
+	printf '%s' "$_bs"
+}
 
 # How many of the newest OPEN issues the per-tick discovery scan reads (quince#273). Not a silent
 # cap: the highwater comparison it feeds is correct under any window, because only the newest numbers
@@ -1137,13 +1173,6 @@ FORGE_SEATS_FILE=${FORGE_SEATS_FILE:-.claude/seats}
 # never a missed issue.
 ISSUE_SCAN_LIMIT=${ISSUE_SCAN_LIMIT:-30}
 
-seat_names() {
-	# Names from the committed list. Comments and blanks stripped, the same shape `forge-set` is read
-	# with. Absent file is not an error — a clone without it behaves exactly as before this change,
-	# which is the fail-open direction and the one this issue keeps choosing.
-	[ -f "$FORGE_SEATS_FILE" ] || return 0
-	sed 's/#.*//' "$FORGE_SEATS_FILE" 2>/dev/null | tr -d ' \t' | grep -v '^$' | sort -u
-}
 
 forge_set() {
 	_f=$1
@@ -2634,14 +2663,17 @@ other_runner_names() {
 				printf '%s\n' "$_orn_n"
 			done
 		fi
-		seat_names
 	} | grep -vxF "$_orn_me" | sort -u
 }
 
 # The same population, split by SOURCE, so a report can say which one attributed a branch
 # (quince#265 constraint 3). A wrong entry in a committed file is invisible otherwise — and this whole
 # issue exists because an attribution failure was invisible.
-other_runner_names_from() { # <me> <local|seats>
+# other_runner_names_from — kept for the REPORT only, and only the local registry remains.
+# The `seats` arm read the committed list, which quince#330 replaced with a pattern; a pattern
+# has no population to enumerate, so there is nothing for a second source to report. The report
+# below now names one source instead of two.
+other_runner_names_from() { # <me> <local>
 	_ornf_me=$1
 	case "$2" in
 	local)
@@ -2653,26 +2685,6 @@ other_runner_names_from() { # <me> <local|seats>
 			[ -n "$_ornf_n" ] || continue
 			printf '%s\n' "$_ornf_n"
 		done | grep -vxF "$_ornf_me" | sort -u
-		;;
-	seats)
-		# Only names the local registry does NOT already carry, so the two reported sets are disjoint
-		# and their counts add up to the total rather than double-counting a seat declared in both.
-		#
-		# A TEMP FILE, not `grep -f <(…)`: process substitution is a bashism and this is `#!/bin/sh`,
-		# which on every box here is BusyBox `ash`. It would have failed as a syntax error at parse
-		# time — loudly, but only on the boxes, and `deploy/dev.md` exists because that class keeps
-		# being written by sessions that have GNU habits (quince#246).
-		_ornf_t=$(mktemp) || return 0
-		other_runner_names_from "$_ornf_me" local >"$_ornf_t"
-		# NOT `[ -s f ] && grep -vxF -f f || cat`. When the filter removes EVERY name grep exits 1,
-		# so the `||` arm fires and `cat` reads a stdin `grep` has already drained — right answer,
-		# reached by accident, and one refactor away from being wrong. SC2015 caught it.
-		if [ -s "$_ornf_t" ]; then
-			seat_names | grep -vxF "$_ornf_me" | grep -vxF -f "$_ornf_t" || :
-		else
-			seat_names | grep -vxF "$_ornf_me" || :
-		fi
-		rm -f "$_ornf_t"
 		;;
 	esac
 }
@@ -2697,17 +2709,25 @@ suppressed_count() { # <state-file> <names-file>
 wake_filter() {
 	_wf_evt=$1
 	_wf_map=$2
-	_wf_others=$3
+	_wf_me=$3
 	_wf_defrepo=$4
-	# Nothing known about any branch, or no OTHER runner exists to own one: unchanged behaviour.
-	# The second condition is the common case on a one-runner box and it makes this a no-op there,
-	# which is what a box that has not migrated should get.
-	if [ ! -s "$_wf_map" ] || [ ! -s "$_wf_others" ]; then
+	_wf_on=${5:-yes}
+	# Nothing known about any branch: unchanged behaviour. The SECOND condition is gone with
+	# quince#330 — it used to be "no other runner exists to own one", read from a list, which made
+	# this a no-op on a box that declared one seat. That is why the ARCH box suppressed nothing:
+	# its list held `arch1` alone, so `other_runner_names` was empty and the filter never ran.
+	# A pattern needs no population, so the filter now works on a one-seat box.
+	# ROLE-DEPENDENT, AND NOW EXPLICITLY SO (quince#292, preserved through quince#330). The
+	# architect must NOT suppress another runner's branch — reviewing them is the entire job —
+	# and an unidentifiable role must fail open. That used to be expressed by handing this
+	# function an EMPTY list of other runners, which worked only because the list existed. A
+	# pattern has no list to empty, so the switch has to be a switch: passing 'no' is now the
+	# only way to disable it, and a caller that forgets cannot silently get suppression.
+	if [ "$_wf_on" != yes ] || [ ! -s "$_wf_map" ]; then
 		cat "$_wf_evt"
 		return 0
 	fi
-	awk -v defrepo="$_wf_defrepo" '
-		FILENAME == others { theirs[$0 "/"] = 1; next }
+	awk -v defrepo="$_wf_defrepo" -v me="$_wf_me" -v pat="$SEAT_PATTERN" '
 		FILENAME == mapf   { own[$1 SUBSEP $2] = $3; next }
 		{
 			pr = ""; repo = ""
@@ -2723,11 +2743,15 @@ wake_filter() {
 			if (repo == "") repo = defrepo
 			b = own[repo SUBSEP pr]
 			if (b == "") { print; next }              # branch unknown -> wake
-			for (t in theirs)
-				if (index(b, t) == 1) next        # ANOTHER declared runner owns it -> silent
+			# THE SEAT TEST, replacing a prefix-match against a list (quince#330). A branch belongs to
+			# another seat when its prefix LOOKS LIKE a seat name and is not mine. `journal/x` and
+			# `feature/y` have prefixes that are not seat names, so they are unattributable and wake —
+			# which is the same answer the list gave, reached without the list.
+			p = b; sub(/\/.*$/, "", p)
+			if (p != b && p != me && p ~ pat) next    # ANOTHER seat owns it -> silent
 			print                                     # mine, or nobody s -> wake
 		}
-	' others="$_wf_others" mapf="$_wf_map" "$_wf_others" "$_wf_map" "$_wf_evt"
+	' mapf="$_wf_map" "$_wf_map" "$_wf_evt"
 }
 
 # --- SELF-CAUSED SUPPRESSION, THE LEDGER ARM (quince#242) ---------------------------------------
@@ -3309,11 +3333,12 @@ watch_loop() {
 	# ships, passes review and changes nothing. Second time in a day a mechanism was described from
 	# memory one token off, and both times the wrong token was the load-bearing one.
 	_wrole=$(owed_role | cut -d' ' -f1)
+	_wsuppress=yes
 	case "$_wrole" in
 	implementer) ;;
-	architect) : >"$_wothers" ;;
+	architect) _wsuppress=no ;;
 	*)
-		: >"$_wothers"
+		_wsuppress=no
 		printf 'note: branch-ownership suppression is DISABLED — this box could not determine its role (owed_role=%s), so every PR event wakes. Reported rather than silent (quince#292).\n' \
 			"${_wrole:-empty}"
 		;;
@@ -3368,7 +3393,7 @@ watch_loop() {
 			printf 'note: %s post-merge event(s) suppressed — the PR was already MERGED and nothing in its activity is newer, so nobody is waiting on anything (quince#83). Printed above regardless.\n' \
 				"$(cat "$_wpmc")"
 		fi
-		wake_filter "$_wpm" "$_wmap" "$_wothers" "$_wrepo" >"$_wmine"
+		wake_filter "$_wpm" "$_wmap" "$_wowner" "$_wrepo" "$_wsuppress" >"$_wmine"
 		_wwake=$(wake_worthy "$_wmine" "$_wfirst")
 		# THE COUNTERFACTUAL (quince#296, closing quince#242). Computed ONLY when suppression happened
 		# and the tick is not waking — the one case where the answer can be yes, so the ordinary quiet
@@ -3382,7 +3407,7 @@ watch_loop() {
 		# `[ a ] || [ b ]` rather than `[ a -o b ]`: the `-o` form is deprecated, shellcheck flags it
 		# (SC2166), and it parses surprisingly when either side is empty.
 		if [ -z "$_wwake" ] && { [ "$_wsupn" != 0 ] || [ "$_wactn" != 0 ]; }; then
-			wake_filter "$_wevt" "$_wmap" "$_wothers" "$_wrepo" >"$_wcf"
+			wake_filter "$_wevt" "$_wmap" "$_wowner" "$_wrepo" "$_wsuppress" >"$_wcf"
 			if [ -n "$(wake_worthy "$_wcf" "$_wfirst")" ]; then
 				bump_prevented "$_wall" "$_wrepo" "$_wstate"
 				printf 'note: this tick would have WOKEN without self-caused suppression — counted as a prevented wake (quince#242). The suppressed events are printed above.\n'
@@ -3929,27 +3954,26 @@ status)
 		# is this": the LOCAL registry, which knows sessions on this box, and the COMMITTED list, which
 		# knows seats that may live on the other one. They fail differently and their remedies do not
 		# overlap — a stale registry entry is a dead session this box can clear itself (quince#211),
-		# while a wrong or missing committed name is a PR against `.claude/seats`. One merged note would
+		# while a name that is not seat-shaped is a typo in one command. One merged note would
 		# name a seat without saying which of those two to reach for, which is the reporting defect
 		# quince#230 filed one layer down: a number with no route to the cause.
 		_rn=$(runner_name)
 		if [ -n "$_rn" ] && [ -f "$_rs" ]; then
-			for _rsrc in local seats; do
-				_rot=$(mktemp)
-				other_runner_names_from "$_rn" "$_rsrc" >"$_rot" 2>/dev/null || : >"$_rot"
-				if [ -s "$_rot" ]; then
-					case $_rsrc in
-					local) _rwhere='local registry' ;;
-					seats) _rwhere="committed list, $FORGE_SEATS_FILE" ;;
-					esac
-					_rcnt=$(suppressed_count "$_rs" "$_rot")
-					[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another declared runner (%s) — attributed via the %s. Their events are printed but do NOT wake this watch.\n' \
-						"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')" "$_rwhere"
-				fi
-				rm -f "$_rot"
-			done
+			# ONE SOURCE NOW, and the loop is gone with the list (quince#330). This reported "attributed
+			# via the local registry" or "via the committed list", because quince#265 wanted a number to
+			# carry a route to its cause. A pattern has no population to enumerate, so the only
+			# enumerable source left is the local registry — and a seat on ANOTHER box is now attributed
+			# by shape rather than by appearing in any list, which no count can name.
+			_rot=$(mktemp)
+			other_runner_names_from "$_rn" local >"$_rot" 2>/dev/null || : >"$_rot"
+			if [ -s "$_rot" ]; then
+				_rcnt=$(suppressed_count "$_rs" "$_rot")
+				[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Their events are printed but do NOT wake this watch.\n' \
+					"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')"
+			fi
+			rm -f "$_rot"
 			# The unattributable report below asks a different question — which branches match NOBODY —
-			# so it wants the UNION and rebuilds the full list rather than reusing either arm above.
+			# so it rebuilds the list rather than reusing the one above.
 			_rot=$(mktemp)
 			other_runner_names "$_rn" >"$_rot" 2>/dev/null || : >"$_rot"
 			# AND THE BRANCHES THAT BELONG TO NOBODY (quince#230). `wake_filter` decides ownership by
@@ -4278,22 +4302,22 @@ runner)
 			die "runner name must be [A-Za-z0-9._-], not starting with '.' or '-': got \"$_rs_name\".
     It becomes a directory component AND a branch prefix, so it has to be safe in both." ;;
 		esac
-		# A NAME ABSENT FROM THE COMMITTED SEAT LIST IS REFUSED (quince#265). The list is what lets
-		# `wake_filter` attribute a branch belonging to a seat on ANOTHER box, and a committed list
-		# nobody is forced to update is the drift quince#200 and quince#256 both exist to close. So it
-		# is authoritative rather than advisory: a new seat cannot declare itself until it appears
-		# there, and the drift becomes a refusal here — one PR wide, with the remedy in the message.
+		# A NAME THAT DOES NOT LOOK LIKE A SEAT IS REFUSED (quince#265, re-founded on a pattern by
+		# quince#330). The check is what lets `wake_filter` attribute a branch belonging to a seat on
+		# ANOTHER box, and it is authoritative rather than advisory: a name nothing can attribute
+		# must not be able to declare itself.
 		#
-		# ONLY WHEN THE LIST EXISTS. A clone without it behaves exactly as before, which keeps this
-		# additive and means a stranger's checkout is not blocked by a file they have no reason to have.
-		# And it refuses the DECLARATION only: constraint 1 of the ruling is that an already-declared
-		# session must not break if the list is briefly behind for its own name.
-		if [ -f "$FORGE_SEATS_FILE" ] && ! seat_names | grep -qxF "$_rs_name"; then
-			die "\"$_rs_name\" is not in $FORGE_SEATS_FILE, so no other box could attribute its branches.
-    Known seats: $(seat_names | tr '\n' ' ' | sed 's/ $//')
-    Add it there in a PR and re-run this. The list is authoritative on purpose (quince#265): it is
-    what stops a seat's events waking every watch on every other box, and a list nobody must update
-    goes stale silently."
+		# NO FILE IS READ, and that is the fix rather than a simplification. The committed list lived
+		# at a path relative to the CURRENT DIRECTORY, so the same call was REFUSED from a work clone
+		# and ACCEPTED from the launchpad — which has no `.claude/seats` at all, and an absent file
+		# meant allow-everything. Two live seats declared themselves through that hole. A pattern has
+		# no file to be missing, so this behaves identically from every working directory.
+		if ! is_seat_name "$_rs_name"; then
+			die "\"$_rs_name\" is not a seat name, so no other box could attribute its branches.
+    A seat is r<N> for an implementer or arch<N> for the architect — r1, r7, arch1, arch2.
+    The pattern is authoritative on purpose (quince#330): it is what stops a seat's events waking
+    every watch on every other box. It replaced a committed list that went stale silently and, worse,
+    could not be read at all from the launchpad where this command is usually typed."
 		fi
 		_rs_sid=$(session_id)
 		[ -n "$_rs_sid" ] || die "no session id in the environment (\$CLAUDE_CODE_SESSION_ID), so this
