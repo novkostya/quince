@@ -16,27 +16,33 @@ func withKey(t *Tools, key string) *Tools {
 
 const syntheticWifiKey = "SyntheticWifiSyncKey"
 
-// The load-bearing one: with no measured key, quince must NOT ask the device anything, because
-// `ideviceinfo -k <wrong-key>` is expected to exit 0 printing nothing — which scalarTriState reads
-// as "off". A guessed key would therefore make quince assert that every device has Wi-Fi sync
-// disabled. This is the test that stops a future session "finishing" the feature by filling in a
-// plausible constant.
-func TestWifiSyncUnmeasuredKeyReadsUnknownWithoutQueryingTheDevice(t *testing.T) {
-	if wifiSyncKeyUnmeasured != "" {
-		t.Fatalf("wifiSyncKeyUnmeasured is %q — it must ship empty until qn.7 story 3 measures it on hardware", wifiSyncKeyUnmeasured)
+// The key is now MEASURED (qn.7 story 3, 2026-07-31), so this pins the measured value rather than
+// the empty string it used to pin. It is not a tautology: it fails if someone edits the constant
+// without a hardware measurement to justify it, which is the same guard as before pointed the other
+// way. The value came from dumping com.apple.mobile.wireless_lockdown on a real device.
+func TestWifiSyncKeyIsTheMeasuredOne(t *testing.T) {
+	if wifiSyncKey != "EnableWifiConnections" {
+		t.Fatalf("wifiSyncKey = %q — story 3 measured EnableWifiConnections on hardware; changing it needs another measurement, not a guess", wifiSyncKey)
 	}
+}
+
+// The empty-key branch is STILL the honest answer when quince does not know the key, and it stays
+// reachable and tested even though production no longer takes it. Deleting it because the constant
+// is now populated would remove the behaviour that made shipping the unmeasured state safe — and
+// the same situation recurs the moment anyone reads a second, unmeasured lockdown value.
+func TestWifiSyncWithNoKeyReadsUnknownWithoutQueryingTheDevice(t *testing.T) {
 	// The scenario would answer "on" if a query were made at all, so a regression that starts
 	// querying shows up as "on" rather than as a silent pass.
-	tools := fakeTools("DEVICEOPS_FAKE=wifi_on")
+	tools := withKey(fakeTools("DEVICEOPS_FAKE=wifi_on"), "")
 	if got := tools.wifiSync(context.Background(), fakeUDID, TransportUSB); got != "unknown" {
 		t.Fatalf("wifiSync with no key = %q, want unknown", got)
 	}
 }
 
-// NewTools must carry the unmeasured key into production, not leave it to a caller to remember.
-func TestNewToolsShipsWithNoWifiSyncKey(t *testing.T) {
-	if got := NewTools("/tmp/usbmuxd.sock", "", nil).wifiSyncKey; got != "" {
-		t.Fatalf("NewTools wifiSyncKey = %q, want empty", got)
+// NewTools must carry the measured key into production, not leave it to a caller to remember.
+func TestNewToolsCarriesTheMeasuredWifiSyncKey(t *testing.T) {
+	if got := NewTools("/tmp/usbmuxd.sock", "", nil).wifiSyncKey; got != "EnableWifiConnections" {
+		t.Fatalf("NewTools wifiSyncKey = %q, want EnableWifiConnections", got)
 	}
 }
 

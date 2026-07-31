@@ -134,23 +134,30 @@ const (
 	wifiSyncDomain = "com.apple.mobile.wireless_lockdown"
 )
 
-// wifiSyncKeyUnmeasured is the lockdown key holding the Wi-Fi-sync flag, and it is DELIBERATELY
-// THE EMPTY STRING.
+// wifiSyncKey is the lockdown key holding the Wi-Fi-sync flag. MEASURED on hardware 2026-07-31
+// (qn.7 story 3), which is the only reason it is not still the empty string.
 //
-// The roadmap's hypothesis was "an EnableWifiConnections-ish key". Measured at the pinned
-// libimobiledevice 1.4.0: that string appears NOWHERE in the source, so the name has zero upstream
-// corroboration — it is a guess. qn.7's story 3 names it for real, by dumping the whole domain on a
-// device with Wi-Fi sync off and again with it on, then diffing. That needs hardware, which no
-// implementer box has.
+// The domain was dumped on a real device over Wi-Fi and returned six keys. This one is a boolean
+// and read `true` on a device whose Wi-Fi sync was known to be on. The others: EnableWifiDebugging
+// (a different feature), SupportsWifi and SupportsWifiSyncing (capability flags, uniformly true),
+// and two strings whose values embed the device's MAC and link-local address — Operator-private,
+// recorded only in the private layer.
 //
-// Until then wifiSync refuses to run a query at all, because the alternative is worse than useless:
-// `ideviceinfo -q <domain> -k <wrong-key>` is expected to exit 0 printing nothing, which
-// scalarTriState reads as "off" — so a guessed key would make quince state confidently that every
-// device has Wi-Fi sync disabled. That is the shape of qn.4a finding (i)-A, which shipped once.
-// An honest "unknown" is the whole point of having a third value.
+// PROVENANCE MATTERS HERE, so it is in the code rather than only in a PR thread. The roadmap
+// GUESSED this name, and the guess was right — but it could not be known to be: the string appears
+// NOWHERE in libimobiledevice 1.4.0 (measured, grep, no hits), so nothing corroborated it until a
+// device did. Shipping the guess unverified would have been correct by luck, and the failure mode
+// if it had been wrong is silent: `ideviceinfo -q <domain> -k <wrong-key>` exits 0 printing
+// nothing, which scalarTriState maps to "off" — a confident lie about every device, and the shape
+// of qn.4a finding (i)-A, which shipped once already.
 //
-// Filling this in is a one-line change once story 3 has run.
-const wifiSyncKeyUnmeasured = ""
+// STILL OWED, and deliberately not papered over: the OFF/ON differential. A single read with the
+// flag ON cannot prove this key is what CHANGES rather than SupportsWifiSyncing, which was also
+// true. The discrimination rests on internal evidence — within that one dump, EnableWifiDebugging
+// was `false` while this was `true`, so the Enable* family is state rather than capability — which
+// is strong, and is still an inference. Toggling needs Finder, the detour qn.7 exists to remove.
+// One 30-second toggle converts it to a measurement; until then this comment is the honest record.
+const wifiSyncKey = "EnableWifiConnections"
 
 // wifiSync reads the device's Wi-Fi-sync flag → the wifi_sync state (design §3), with willEncrypt's
 // unknown-vs-off rule: an absent key means "off", and "unknown" is reserved for a genuine failure

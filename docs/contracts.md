@@ -170,14 +170,14 @@ Device: {
   "backup_encryption": "on" | "off" | "unknown",   // lockdown com.apple.mobile.backup/WillEncrypt
   "wifi_sync": "on" | "off" | "unknown",           // lockdown com.apple.mobile.wireless_lockdown (qn.7)
      // Added at qn.7, ruled at that rung's spec review (quince#332) as a non-breaking field
-     // addition. The DOMAIN is verified to exist — it is in ideviceinfo's known-domain list at the
-     // pinned libimobiledevice 1.4.0, tagged iOS 4.0+. The KEY inside it is NOT: the hypothesised
-     // `EnableWifiConnections` appears NOWHERE in that source, so it stays unmeasured until qn.7's
-     // hardware spike names it (dump the domain with the flag off, again with it on, diff).
-     // Until then the server answers `unknown` for every real device WITHOUT querying, on purpose:
-     // a wrong key is expected to exit 0 printing nothing, which the on|off|unknown mapping reads
-     // as "off" — so a guessed key would make quince assert confidently that Wi-Fi sync is
-     // disabled everywhere. `unknown` means quince does not know, here as everywhere else.
+     // addition. Domain and key are both MEASURED on hardware, 2026-07-31: the key is
+     // `EnableWifiConnections`, a boolean, read `true` on a device whose Wi-Fi sync was on.
+     // It was NOT taken on trust — the name appears nowhere in libimobiledevice 1.4.0, so the
+     // roadmap's guess (which turned out correct) could not be known to be until a device said so,
+     // and the server shipped answering `unknown` WITHOUT querying until it did. Still owed: an
+     // off/on differential, which is what would prove this key is the one that CHANGES rather than
+     // `SupportsWifiSyncing`, also true in the same dump. `unknown` continues to mean quince does
+     // not know — a failed read, or an unconfirmed pairing, never a guess.
   "last_seen": "...",
   "last_backup": {"at": "...", "job_id": "..." | null, "status": "succeeded"} | null
      // job_id NULLABLE — ratified at the qn.4c spec review ((bz)). last_backup is derived
