@@ -194,6 +194,96 @@ repo is not a message bus, and no human is an RPC layer.
 - The architect reviews/approves/merges as the repo owner; the Operator is admin of last
   resort and the approver for architect-authored docs.
 
+**PROPOSED (gap): a third forge identity for the supervisor seat — `quince-analyst`.** Filed under
+the gap protocol because it touches the authority model, which canon says is not a rung-local
+decision. **Nothing below is in force.** Ruling wanted from the Operator; the architect is asked to
+review it as a design.
+
+**The gap.** The supervisor seat produces exactly two kinds of forge artifact — an issue, or a
+comment on one — and has no identity to sign them with. Everything it filed on 2026-07-29/30
+(quince#237–#246, quince-devlog#139, #141, and corrections on four of those) went out as
+`app/quince-coder`, borrowed over ssh from the implementer box, with a hand-written relay banner
+carrying the truth the API could not. That misattributes supervisor reasoning to the seat that
+writes code, and quince-devlog#139 filed it.
+
+**The fact that decides the shape, and it is not convenience.** The seat holds root ssh to both
+working boxes, so it already reaches **all three** identities — measured 2026-07-31:
+`bin/gh-coder` on the implementer box returns `app/quince-coder`, and on the architect box
+`bin/gh-review` answers `/installation/repositories` and `bin/gh-arch api user` returns
+`novkostya`. **So "the supervisor cannot author or approve" is already false.** What bounds this
+seat today is its own restraint — unbounded, unattributed and unrecorded. quince-devlog#139
+understated this and is owed a correction.
+
+A scoped identity therefore **adds no capability**. What it removes is the *reason* to borrow —
+after which any borrowing is a signal that something is wrong, rather than the documented way this
+seat speaks.
+
+**The proposal.**
+
+- A **GitHub App**, `quince-analyst`, installed on both repositories, granted **`issues: write`
+  and nothing else** — no `contents`, no `pull_requests`, no `workflows`, no `administration`.
+- **An App, not a personal access token, and not the Operator's.** A classic PAT's scopes are
+  coarse, and this project has its own incident from exactly that granularity: `quince-bot` could
+  delete any discussion in the devlog because the permission *"arrived with the classic `repo`
+  scope the token already held, the moment Discussions was enabled"* — a grant nobody decided.
+  Using the Operator's own token would be worse still: it authors as `novkostya`, which is the
+  confusion `bin/gh-coder` refuses in as many words, and quince#47 is the record of what a shared
+  login costs. In this project an Operator-authored artifact carries ruling weight, and a
+  supervisor finding wearing that login could be read as a ruling by a session with no way to tell.
+- The name follows the convention the other two set — **the act, not the host.** The boxes are
+  `quince-runner` and `quince-arch`; the identities are `quince-coder` and `quince-review`.
+  `quince-supervisor` would be the first identity named after its machine, and that word already
+  carries three senses here (the seat, the OpenRC service, and `supervise-daemon` — the status line
+  reads *"quince-supervisor: supervisor up"*). `analyst` names what the seat does in both its
+  modes: it studies the system and files what does not match (every issue above), and it works a
+  problem space into specified work items (rung scoping).
+
+**What it costs, stated rather than discovered later.** `deploy/runner/preflight`'s `supervisor`
+arm asserts the seat's rule today as a clean denylist — any of four credential files present,
+refuse — and its comment calls that *"the whole of its security property."* Granting this identity
+turns that into an allowlist: this file may be present, those may not. Still checkable, and
+**softer to audit**, because "absence of every credential" is a sentence anyone can verify and
+"absence of every credential except one" is a list that can drift. That is the price, and it is
+`decisions/0007`'s territory — a control that is easy to state is worth more than one that is
+merely correct.
+
+**The analyst is not a seat in the watch sense, and needs no runner name.** Seat names exist for
+branch ownership, the state directory, the scratch root and the container namespace — `SEAT_PATTERN`
+in `bin/forge-watch`, which quince#333 made `^(r|arch)[0-9][0-9]*$` on 2026-07-31. `issues: write`
+forecloses opening a pull request, so the analyst owns no branch, arms no watch, runs no gate and
+builds no container; nothing in `wake_filter` ever needs to attribute it. **`SEAT_PATTERN` should
+therefore NOT be widened as part of this** — quince#333's own review required a test that `journal`,
+`feature` and `main` are not attributed, and admitting a name that never appears on a branch would
+loosen that control for no gain. The branch-attribution cost carried by the pull request proposing
+this block is a one-off property of the bootstrap, which is filed as the implementer App precisely
+because the identity does not exist yet.
+
+**What does not change.** The seat still cannot author code, open a pull request, cast a review
+verdict, or merge. `approver ≠ author` is untouched: the analyst identity can open an issue and say
+things, and nothing else.
+
+**Authored by the seat it would grant.** This block is written by the supervisor seat, proposing
+capability for itself, and that is worth naming rather than leaving for a reader to notice. Both
+approvers are independent of it — the Operator rules, the architect reviews — so the check holds;
+but the asymmetry is real and the ruling should be taken knowing it.
+
+**Sequence, if ruled yes.** This PR is the proposal only. Then the ceremony creates the App and
+places its key on the supervisor box. Then a second PR flips this block from proposed to actual and
+lands the mechanism — `bin/gh-analyst`, its arm in `bin/wrapper-boundary-test`, the `preflight`
+allowlist, the `.claude/settings.json` entries, and `deploy/runner/provision`. Writing the canon
+before the App exists would document a state that does not exist, which is the defect quince#318
+corrected and quince#320 refused to repeat.
+
+**Open for the ruling.** Whether `issues: write` is the right bound or too narrow to be useful
+(it forecloses the analyst opening its own PRs, deliberately); whether the identity installs on
+both repositories or only `quince`; whether `quince-devlog#139` closes with this or stays open as
+the record of the wider borrowing problem; and whether the name is right.
+**Whatever is granted must be PROBED at grant time, not read off the App's settings page.** This
+project's one affirmative token-scope answer arrived unasked — `quince-bot` could delete any
+discussion in the devlog, a grant nobody decided, discovered by trying it rather than by reading a
+scope list (devlog#30). The ceremony should therefore record what the identity can actually do,
+measured, including at least one attempt at something it is meant to be unable to do.
+
 **What each identity cannot do — and, marked `CAN`, what one can that nobody granted it.** These
 have been discovered one at a time, by hitting them, each costing a session the time to work out
 that the failure was structural rather than local (devlog#48). Consult this before designing
