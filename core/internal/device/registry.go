@@ -415,6 +415,14 @@ func (r *Registry) Enrich(udid string, id Identity) {
 	}
 	if changed && listed {
 		r.bus.PublishEvent(wire.EventDeviceUpdated, dev)
+		return
+	}
+	if changed && r.log != nil {
+		// The identity CHANGED and no event carries it, so every open page keeps rendering the old
+		// value until it is reloaded. Silent until quince#325, where a badge that would not move was
+		// reported twice and the log had nothing to say about either.
+		r.log.Warn("device: identity changed but nothing was published — the UDID is neither present nor listed",
+			"present", present, "wifi_sync", id.WifiSync)
 	}
 }
 
