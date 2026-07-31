@@ -202,7 +202,7 @@ around a refusal. The table runs in one direction with **three** exceptions, all
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — see below (devlog#30) |
+| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — RETIRED 2026-07-31, Discussions disabled; see below (devlog#30) |
 | **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
 | **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
@@ -255,12 +255,18 @@ both wrappers above. Do not swap one memorised exit code for another: read the o
 recorded code was wrong *and* the recorded capability was wrong, in the same three lines, is the
 argument for reading rather than remembering.
 
-**The newest `CAN` is a hazard rather than a convenience, and it is the only one of the three
-that is: `quince-bot` can DELETE any discussion in `quince-devlog`.** Measured 2026-07-28,
-both identities, create *and* delete, each probe removing its own artifact (devlog#30). **Nobody
-granted this.** It arrived with the classic `repo` scope the token already held, the moment
-Discussions was enabled on the repository — a permission decision nobody made, produced by a
-container choice.
+**The newest `CAN` was a hazard rather than a convenience, and it is now RETIRED: `quince-bot`
+could DELETE any discussion in `quince-devlog`, and the Operator disabled Discussions on the
+repository on 2026-07-31, which is the only thing that removes it.** Measured while it was live
+on 2026-07-28, both identities, create *and* delete, each probe removing its own artifact
+(devlog#30); confirmed gone by `has_discussions=false`. **Nobody granted it.** It arrived with the
+classic `repo` scope the token already held, the moment Discussions was *enabled* — a permission
+decision nobody made, produced by a container choice.
+
+**Kept rather than deleted, because the shape outlives the instance.** Enabling a GitHub feature
+can hand every `repo`-scoped token a capability nobody reviewed, and disabling the feature — not
+revoking a grant — is what takes it back. Revoking `discussions: write` from the App would not have
+touched this, and the App's grant was a separate thing revoked separately.
 
 **The permission is real and nothing is at stake behind it, and that second clause is new.** This
 paragraph used to read *"devlog#30 moves the journal into Discussions … afterwards it is a set of
