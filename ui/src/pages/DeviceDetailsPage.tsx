@@ -120,12 +120,21 @@ export function DeviceDetailsPage() {
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
                 </Button>
-                <WifiSyncControl device={device} />
               </>
             ) : (
               <PairDialog udid={device.udid} autoOpen={pairIntent} />
             )}
           </div>
+
+          {/* Below the action row, not inside it. BackupControls renders its own column with a
+              status line under the button, so a third item in that flex-wrap row lands beside a
+              two-line sibling and reads as indented rubble — which is how it looked on hardware.
+              Its own block also matches its weight: a once-per-device setting, not an action. */}
+          {device.paired === "yes" ? (
+            <div className="mt-3">
+              <WifiSyncControl device={device} />
+            </div>
+          ) : null}
 
           <EncryptionDialog
             udid={device.udid}

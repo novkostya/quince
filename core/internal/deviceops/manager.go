@@ -316,7 +316,33 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		return
 	}
 	m.setOp(opID, "succeeded", wifiSyncDoneMsg(action), nil)
-	m.reEnrich(udid, transport)
+
+	// Publish the value SetWifiSync already read back, rather than re-reading it.
+	//
+	// reEnrich would be the obvious call and it is the wrong one here: disabling Wi-Fi sync on a
+	// Wi-Fi-connected device severs the transport, so by the time reEnrich runs, Info() fails, logs
+	// a warning and returns WITHOUT updating — leaving the UI showing `on` for a device that is now
+	// off and gone. Observed on hardware 2026-07-31.
+	//
+	// The value here is not a guess: SetWifiSync only returns nil after reading the flag back from
+	// the device and confirming it changed. Enrich replaces the whole identity, so the rest is
+	// carried over from what the registry already holds.
+	newState := "off"
+	if action == "enable" {
+		newState = "on"
+	}
+	if dev, ok := m.devs.Device(udid); ok {
+		m.devs.Enrich(udid, device.Identity{
+			Name: dev.Name, Model: dev.Model, IOSVersion: dev.IOSVersion,
+			Paired: dev.Paired, BackupEncryption: dev.BackupEncryption,
+			WifiSync: newState,
+		})
+	}
+	// Still refresh the rest of the identity when the device is reachable — a USB-connected device
+	// stays put, and this keeps the op's behaviour identical to the other device ops there.
+	if action == "enable" || transport == TransportUSB {
+		m.reEnrich(udid, transport)
+	}
 	m.auditEvent("device.wifi_sync."+action, udid, "ok")
 }
 

@@ -273,3 +273,38 @@ func TestWifiSyncOpDistinguishesItsFailures(t *testing.T) {
 		})
 	}
 }
+
+// The state fix. Disabling over Wi-Fi severs the transport the op runs on, so reEnrich's Info()
+// call fails and returns WITHOUT updating — leaving the UI showing `on` for a device that is now
+// off and gone. Observed on hardware 2026-07-31.
+//
+// The op must publish the value SetWifiSync already READ BACK, which is verified rather than
+// assumed: SetWifiSync only returns nil after confirming the flag changed on the device.
+func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing.T) {
+	devs := newFakeDevices()
+	dev := pairedUSBDevice(fakeUDID)
+	dev.Name, dev.Model, dev.BackupEncryption = "test-iphone", "iPhone17,2", "on"
+	dev.WifiSync = "on"
+	devs.add(dev)
+	m := newWifiManager(t, devs, "wifi_on")
+
+	opID, status, reason := m.WifiSync(context.Background(), fakeUDID, "disable")
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d (%s), want 202", status, reason)
+	}
+	if op := waitOp(t, m, opID); op.State != "succeeded" {
+		t.Fatalf("op = %+v, want succeeded", op)
+	}
+
+	id, ok := devs.lastEnrich(fakeUDID)
+	if !ok {
+		t.Fatal("no identity was published at all")
+	}
+	if id.WifiSync != "off" {
+		t.Fatalf("WifiSync = %q after a successful disable, want off — a stale `on` is what the UI showed on hardware", id.WifiSync)
+	}
+	// The merge must not blank the rest: Enrich replaces the whole identity.
+	if id.Name != "test-iphone" || id.Paired != "yes" || id.BackupEncryption != "on" {
+		t.Fatalf("the rest of the identity was lost: %+v", id)
+	}
+}
