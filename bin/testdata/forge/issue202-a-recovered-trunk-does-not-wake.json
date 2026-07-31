@@ -1,0 +1,25 @@
+{
+  "kind": "loop",
+  "note": "The control for the red one, and the direction the ruling was explicit about: wake on SUCCESS -> FAILURE ONLY. Red to green is good news and still not an interruption — a recovery resolves what already woke somebody, and waking a second session to say the problem is over turns every red into two. The event is EMITTED and printed; `wake_worthy` drops it, so this run ends on the idle bound rather than on the event. Without this fixture the red one would pass against a build that woke on every trunk transition, which is the noisy failure this family is one careless line away from.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 8,
+  "timeout_s": 90,
+  "payloads": [[
+    {"number":700,"state":"OPEN","updatedAt":"2026-07-31T09:00:00Z","title":"t","headRefName":"r5/x",
+     "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+     "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}
+  ]],
+  "trunk_payloads": [
+    {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"ccccccccdddd",
+      "statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"gates","conclusion":"FAILURE"}]}}}}}}},
+    {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"eeeeeeeeffff",
+      "statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"gates","conclusion":"SUCCESS"}]}}}}}}}
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=trunk-recovered branch=main oid=eeeeeee was=FAILURE",
+    "event=watch-idle elapsed=Ns ticks=N"
+  ],
+  "expect_exit": 6
+}

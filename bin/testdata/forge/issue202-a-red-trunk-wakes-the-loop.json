@@ -1,0 +1,24 @@
+{
+  "kind": "loop",
+  "note": "quince#202's whole point, asserted where it can be: the pair fixtures prove the EVENT is emitted, and only a loop fixture proves it WAKES. The queue is one unchanging PR across every tick, so nothing about the pull-request surface can explain the exit — if this run ends, `trunk-failed` is the only thing that could have ended it. The incident behind the issue is `main` red for 4h40m with a healthy watch re-arming throughout, found by accident; the merge that broke it went through this loop and was approved by the seat watching it.",
+  "repo": "novkostya/quince",
+  "interval": 2,
+  "max_wait": 30,
+  "timeout_s": 90,
+  "payloads": [[
+    {"number":700,"state":"OPEN","updatedAt":"2026-07-31T09:00:00Z","title":"t","headRefName":"r5/x",
+     "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+     "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}
+  ]],
+  "trunk_payloads": [
+    {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"aaaaaaaabbbb",
+      "statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[{"__typename":"CheckRun","name":"gates","conclusion":"SUCCESS"}]}}}}}}},
+    {"data":{"repository":{"defaultBranchRef":{"name":"main","target":{"oid":"ccccccccdddd",
+      "statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[{"__typename":"CheckRun","name":"gates","conclusion":"FAILURE"}]}}}}}}}
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=trunk-failed branch=main oid=ccccccc was=SUCCESS checks=[gates]"
+  ],
+  "expect_exit": 0
+}

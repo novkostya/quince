@@ -1,0 +1,20 @@
+{
+  "note": "quince#202 constraint 2, the direction that is NOT a wake. Red to green is good news and still not an interruption: the ruling is wake on SUCCESS -> FAILURE ONLY, because a recovery resolves the thing that already woke somebody, and waking a second session to say the problem is over turns every red into two interruptions. The event is still EMITTED and printed — `wake_worthy` drops it, this classifier does not, which is the same seen-versus-woken split every other family here follows. Without this fixture a build that woke on every trunk transition would pass the red one and nothing would notice.",
+  "before": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "ccccccccdddd", "state": "FAILURE",
+      "contexts": [ {"name": "gates", "conclusion": "FAILURE"} ] }
+  },
+  "after": {
+    "observed": true,
+    "prs": [ { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+      "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] } ],
+    "trunk": { "branch": "main", "oid": "eeeeeeeeffff", "state": "SUCCESS",
+      "contexts": [ {"name": "gates", "conclusion": "SUCCESS"} ] }
+  },
+  "expect_events": [
+    "event=trunk-recovered branch=main oid=eeeeeee was=FAILURE"
+  ]
+}

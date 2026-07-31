@@ -1,0 +1,28 @@
+{
+  "note": "quince#202, the event this family exists for. `main` was green and is now red, so the tick emits `trunk-failed` naming the branch, the short oid, what it was before, and WHICH checks are not green — because a red trunk with no named check sends the reader to the Actions tab to learn what the tick already knew. The PR queue is IDENTICAL across both observations on purpose: without that, a wake could be explained by queue movement and this fixture would prove nothing about trunk. The incident behind the issue is 4h40m of red `main` with a healthy watch re-arming throughout, found by accident — the merge that broke it went through the loop and was approved by the seat watching it.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+        "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "trunk": { "branch": "main", "oid": "aaaaaaaabbbb", "state": "SUCCESS",
+      "contexts": [ {"name": "gates", "conclusion": "SUCCESS"},
+                    {"name": "image", "conclusion": "SUCCESS"},
+                    {"name": "e2e",   "conclusion": "SUCCESS"} ] }
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 700, "state": "OPEN", "updatedAt": "2026-07-31T09:00:00Z",
+        "merge_state": "CLEAN", "checks": [], "reviews": [], "activity": [] }
+    ],
+    "trunk": { "branch": "main", "oid": "ccccccccdddd", "state": "FAILURE",
+      "contexts": [ {"name": "gates", "conclusion": "FAILURE"},
+                    {"name": "image", "conclusion": "SUCCESS"},
+                    {"name": "e2e",   "conclusion": "FAILURE"} ] }
+  },
+  "expect_events": [
+    "event=trunk-failed branch=main oid=ccccccc was=SUCCESS checks=[gates,e2e]"
+  ]
+}
