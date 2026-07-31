@@ -157,6 +157,15 @@ func serve(args []string) error {
 		jobControl = prov // qn.4b: the demo command surface is live (scripts on-demand jobs, no hardware)
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
+		// qn.6c gap 3: refuse to serve with no declared storage. Deliberately INSIDE this branch
+		// rather than above it — `--demo` serves fixture data and never touches storage (it takes
+		// the branch above, which does not call buildLiveStack), so a check placed before the
+		// branch would refuse every demo and every ui-e2e run over a subsystem they do not use.
+		// Placed before buildLiveStack so nothing is probed or reconciled on a config that cannot
+		// serve.
+		if req := config.CheckStorages(cfgSvc.Current(), os.Environ()); !req.OK() {
+			return req.Explain(os.Stderr, cfgPath)
+		}
 		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5
 		// storage + qn.4a backup engine), with startup reconciliation run in-order BEFORE serving
 		// (storage → job rows). Shared verbatim with the `backup` CLI.

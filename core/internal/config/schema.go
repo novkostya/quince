@@ -25,10 +25,35 @@ type BackupConfig struct {
 }
 
 // StorageConfig is the `storage:` section.
+//
+// qn.6c: Storages is FIRST because it is the only required key in this section and the only one
+// with no default — quince refuses to start without it (gap 3, ruled 2026-07-31: QUINCE_BACKUPS is
+// retired, so nothing conjures a storage any more). Backend/ZFS/Retention stay GLOBAL this rung and
+// every declared storage inherits them; per-storage zfs settings only start mattering when a second
+// zfs storage exists, which qn.6c cannot create.
+//
+// Storages is a POINTER so that an absent `storages:` key is distinguishable from `storages: []`.
+// Parse unmarshals over Default(), which makes absent and zero-value identical for every other
+// field — harmless where a default exists, and exactly wrong here, because "the user did not
+// declare storage" and "the user declared none" want the same refusal for different reasons and
+// must not be silently merged into "nil".
 type StorageConfig struct {
+	Storages  *[]StorageEntry `yaml:"storages" json:"storages"`
 	Backend   string          `yaml:"backend" json:"backend"` // auto | zfs | reflink | hardlink | copy
 	ZFS       ZFSConfig       `yaml:"zfs" json:"zfs"`
 	Retention RetentionConfig `yaml:"retention" json:"retention"`
+}
+
+// StorageEntry is one declared storage under `storage.storages:` (qn.6c story 1).
+//
+// There is deliberately NO backend field: a storage's backend is discovered and frozen at its
+// creation moment and recorded in quince-storage.json (design §5), never declared here. Declaring
+// it would invite an edit that disagrees with the medium, which is the remount case the identity
+// marker exists to refuse.
+type StorageEntry struct {
+	Name    string `yaml:"name" json:"name"`
+	Path    string `yaml:"path" json:"path"`
+	Default bool   `yaml:"default" json:"default"`
 }
 
 // ZFSConfig is `storage.zfs:`.

@@ -13,7 +13,7 @@ import (
 // passed as plain fields so this package does not import config).
 type Options struct {
 	Backend    string // auto | zfs | reflink | hardlink | copy
-	Backups    string // QUINCE_BACKUPS root
+	Backups    string // this storage's root (qn.6c; was QUINCE_BACKUPS)
 	AppVersion string
 	ZFSParent  string // storage.zfs.parent_dataset
 	ZFSMode    string // exec | hook

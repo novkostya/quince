@@ -48,7 +48,7 @@ type Options struct {
 	Log       *slog.Logger
 	Config    Config
 	Tool      ToolConfig
-	Backups   string // QUINCE_BACKUPS root, for the A3 preflight free-space check
+	Backups   string // the default storage's root (qn.6c), for the A3 preflight free-space check
 	NewID     func() string
 	Now       func() time.Time
 	FreeSpace func(string) (uint64, error) // nil → statfsFree

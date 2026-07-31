@@ -127,9 +127,22 @@ export interface WSEnvelope {
 
 // --- config (schema v0, contracts §6) ---
 
+// StorageEntry is one declared storage under `storage.storages` (qn.6c). There is no `backend`
+// field by design: a storage's backend is discovered and frozen at its creation moment and
+// recorded in quince-storage.json, never declared.
+export interface StorageEntry {
+  name: string;
+  path: string;
+  default: boolean;
+}
+
 export interface Config {
   backup: { transport: string; require_encryption: boolean };
   storage: {
+    // qn.6c: required server-side — quince refuses to start without at least one. Optional here
+    // because a document round-tripped through the UI must be able to represent a server that has
+    // none, rather than the client inventing an empty list and PUTting it back as if declared.
+    storages?: StorageEntry[];
     backend: string;
     zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
     retention: { keep_recent: number; keep_daily: number; keep_weekly: number };

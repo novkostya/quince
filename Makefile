@@ -668,7 +668,7 @@ else
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
 	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
-	  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	  $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null; \
 	status=0; \
 	$(RUN) --network $(E2E_NET) -w /src/ui \
@@ -709,7 +709,7 @@ demo: image ## Build this branch and serve it in --demo mode on this box; prints
 	started=no; \
 	for try in 1 2 3 4 5 6 7 8 9 10; do \
 	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8080 \
-	       -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp -e QUINCE_BACKUPS=/tmp \
+	       -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	       $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null 2>&1; then started=yes; break; fi; \
 	  $(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
 	  port=$$((port + 1)); \
