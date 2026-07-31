@@ -25,7 +25,7 @@ describe("WifiSyncControl", () => {
     render(<WifiSyncControl device={device()} post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /turn on wi-fi sync/i }));
-    expect(post).toHaveBeenCalledWith("/devices/DEV-1/wifi-sync", { action: "enable" });
+    expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "enable" });
   });
 
   it("offers to turn sync OFF when it is on, and posts disable", () => {
@@ -33,7 +33,7 @@ describe("WifiSyncControl", () => {
     render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
-    expect(post).toHaveBeenCalledWith("/devices/DEV-1/wifi-sync", { action: "disable" });
+    expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
   });
 
   // The finding that makes this control different from the encryption one. MEASURED 2026-07-31:
@@ -70,5 +70,23 @@ describe("WifiSyncControl", () => {
       <WifiSyncControl device={device({ wifi_sync: "unknown" })} post={vi.fn()} />,
     );
     expect(container.textContent).toBe("");
+  });
+
+  // The path is asserted against the OTHER device-op callers rather than against this component's
+  // own source, because the first version of these tests was written from the implementation and
+  // pinned its bug: the component posted to `/devices/…` with no `/api` prefix, five tests agreed
+  // with it, and it surfaced on hardware as a generic "Something went wrong" — generic precisely
+  // because a non-API path never returns the structured error the UI knows how to render.
+  //
+  // PairDialog posts `/api/devices/${udid}/pair`; EncryptionDialog `/api/devices/${udid}/encryption`.
+  // Deriving the expectation from that shared prefix is what a typo in this file cannot satisfy.
+  it("posts to the same /api/devices prefix the other device ops use", () => {
+    const post = vi.fn().mockResolvedValue({ op_id: "op-3" });
+    render(<WifiSyncControl device={device()} post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: /turn on wi-fi sync/i }));
+
+    const [path] = post.mock.calls[0];
+    expect(path.startsWith("/api/devices/")).toBe(true);
+    expect(path).toBe(`/api/devices/${device().udid}/wifi-sync`);
   });
 });

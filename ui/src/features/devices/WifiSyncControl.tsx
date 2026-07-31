@@ -29,7 +29,7 @@ export function WifiSyncControl({
   const needsUSBToEnable = !on && !onUSB;
 
   const submit = () =>
-    start(`/devices/${device.udid}/wifi-sync`, { action: on ? "disable" : "enable" });
+    start(`/api/devices/${device.udid}/wifi-sync`, { action: on ? "disable" : "enable" });
 
   return (
     <div className="flex flex-col gap-2">
