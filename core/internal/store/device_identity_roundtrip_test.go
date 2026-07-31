@@ -32,7 +32,18 @@ func TestDeviceIdentityRowRoundTripsEveryField(t *testing.T) {
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
 		if f.Kind() != reflect.String {
-			continue // UpdatedAt is set above; it has its own formatting path
+			// Today this skips exactly one field, UpdatedAt, which is set above and asserted
+			// separately because it round-trips through its own formatting path.
+			//
+			// LIMITATION, STATED BECAUSE THIS GUARD'S NAME CLAIMS MORE THAN IT DELIVERS: a future
+			// non-string field — an int, a bool — is silently OUTSIDE this loop. It would compile,
+			// pass every test, and fail to persist, which is precisely the quince#337 defect one
+			// type over, in the test that exists to make it impossible.
+			//
+			// If you are adding a non-string field: give it a distinct marker value above and an
+			// explicit comparison below, or widen this loop with a per-kind marker. Do not assume
+			// this test covers you just because it is named "EveryField".
+			continue
 		}
 		// A per-field marker, so a mix-up between two columns is caught as well as a drop.
 		f.SetString("rt-" + strings.ToLower(v.Type().Field(i).Name))
