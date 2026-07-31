@@ -45,25 +45,27 @@ export function WifiSyncControl({
         size="sm"
         onClick={submit}
         disabled={inFlight || needsUSBToEnable}
-        title={
-          needsUSBToEnable
-            ? "Connect the device by cable to turn Wi-Fi sync on — with it off, the device is not reachable over Wi-Fi."
-            : on && !onUSB
-              ? "This device is connected over Wi-Fi. Turning Wi-Fi sync off will disconnect it — it will reappear when you plug it in."
-              : undefined
-        }
       >
         {on ? <WifiOff size={14} /> : <Wifi size={14} />}
         {on ? "Turn off Wi-Fi sync" : "Turn on Wi-Fi sync"}
       </Button>
 
-      {/* Only the ACTIONABLE note is shown as standing text. "Plug it in" is something the user can
-          do now; the disconnect consequence is not, so it moved to the button's title rather than
-          occupying three lines under a control nobody is looking at. */}
+      {/* ONE line, in the one state where it applies — never a `title`. A tooltip does not exist on
+          touch, and `ui.design.md` makes the iPhone a first-class client: on a phone the user would
+          tap "Turn off Wi-Fi sync", watch the device vanish from the page, and never have seen the
+          sentence explaining it. That is the confusion this text exists to prevent, on the surface
+          where it is most likely. The weight problem was the paragraph setting the button's width,
+          which `items-start` fixes — not the sentence being present. */}
       {needsUSBToEnable ? (
         <p className="max-w-xs text-xs text-muted">
           Connect by cable to turn this on — with Wi-Fi sync off the device does not announce itself
           over Wi-Fi.
+        </p>
+      ) : null}
+
+      {on && !onUSB ? (
+        <p className="max-w-xs text-xs text-muted">
+          Turning this off will disconnect the device — it reappears when you plug it in.
         </p>
       ) : null}
 
