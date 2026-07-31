@@ -88,4 +88,34 @@ unset GITHUB_TOKEN
 GH_TOKEN=$(cat "$TOKEN_FILE")
 export GH_TOKEN
 
+
+# THE LEDGER, wired here by quince#316 — this wrapper had no ledger call at all, so an act performed
+# through it recorded nothing and the next tick woke the seat that performed it.
+#
+# WHY THAT MATTERS FOR THIS WRAPPER SPECIFICALLY. `CLAUDE.md` makes `gh-arch` a STANDING instruction
+# rather than an escape hatch: *"Architect, on a refused merge: retry once; if it is refused again,
+# merge through `bin/gh-arch` and say so on the PR."* So the documented remedy for an intermittent
+# classifier refusal produced a merge with no row, and `event=merged` carries no actor of its own —
+# it is diffed from two observations, and a diff knows what changed but not who changed it. The
+# failure is silent by design, because `forge-ledger` fails open and an extra wake looks like an
+# ordinary wake.
+#
+# MEASURED BEFORE FIXING (quince#316): at most 3 of 58 merges since 2026-07-30 could have taken this
+# path, and possibly zero — the architect seat reports 24 of them first-hand with no fallback taken.
+# The three are ambiguous by construction, because `gh-arch` authenticates as the architect PAT,
+# which is `novkostya`, and so is the Operator merging directly (quince#47). So this is cheap
+# insurance rather than a hot path, and the ruling was explicit that the SHARED-BLOCK refactor is
+# NOT justified on that evidence: three copies of these four lines is accepted, and the trigger to
+# revisit is a FOURTH wrapper appearing, not a count.
+#
+# RECORDED ONLY ON SUCCESS, and the exit status passes through unchanged — identical to `gh-coder`
+# and `gh-review`, because a failed act produces no event to suppress and its row would sit
+# unconsumed until it swallowed somebody else's.
+_ledger="$(dirname "$0")/forge-ledger"
+if [ -x "$_ledger" ] && "$_ledger" classify "$@" >/dev/null 2>&1; then
+	gh "$@" && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then "$_ledger" record "$@" || :; fi
+	exit "$_rc"
+fi
+
 exec gh "$@"
