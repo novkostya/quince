@@ -190,6 +190,34 @@ Each is independently checkable. **1, 2, 6 and 7 need no hardware. 3, 8 and 9 do
    unchanged must surface as a failed op with a distinguishable message. `decisions/0004` — *a
    mutation must be verified to have mutated* — applies directly, so the op **re-reads** and
    compares rather than trusting the exit code.
+> **PROPOSED (gap): story 7 has no answer for a write whose SUCCESS destroys the read path.**
+> Raised 2026-07-31 from hardware, filed as [quince#363](https://github.com/novkostya/quince/issues/363).
+> **Unruled — not built.** Recorded here because story 7 as written produces a false statement on one
+> path, and the next session to read it would build the same thing.
+>
+> **Measured on staging.** `disable` over Wi-Fi: `ideviceinfo --set-bool` returned cleanly, the
+> read-back 378 ms later could not reach the device, and the op failed with *"The device accepted the
+> change but did not apply it. Wi-Fi sync is unchanged."* **The write HAD applied** — the device left
+> Wi-Fi entirely, which is exactly what this rung measured turning the flag off does. Every clause of
+> that message was false, and the user was told to expect a device that still syncs while holding one
+> that needs a cable.
+>
+> **The rule is self-defeating for exactly one combination, and it is the destructive one.**
+> Enable-over-USB, disable-over-USB and enable-over-Wi-Fi all survive their own write.
+> Disable-over-Wi-Fi is the single case where *success* and *unverifiability* are the same event,
+> because the bit being written IS the device's ability to answer the read.
+>
+> **This does NOT overturn `decisions/0004`** (*a mutation must be verified to have mutated*). It asks
+> what counts as verification when the mutation removes the only channel that could observe it.
+> Proposed: for `disable` over `wifi` only, a clean set followed by the device becoming **unreachable
+> on that transport** is verification *by consequence* — the disappearance is caused by the very bit
+> written, is what this rung measured, and no other outcome of a clean set produces it.
+>
+> **Story 7's rule stands unchanged for the case it was written for:** a read-back that SUCCEEDS and
+> reports the old value is a genuine unapplied write and must stay a failed op. The gap is only
+> between *"reads back unchanged"* and *"cannot be read back"* — which the current wording treats as
+> one thing.
+
 8. **Hardware gate (the rung's acceptance).** A device whose Wi-Fi sync is **off** reads back
    `off` in quince, is turned `on` through quince alone with on-device steps narrated, and then
    completes a **Wi-Fi backup with no Mac ever involved.**
