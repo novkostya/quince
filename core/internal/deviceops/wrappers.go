@@ -120,8 +120,57 @@ func (t *Tools) info(ctx context.Context, udid, transport string, simple bool) (
 // password the device does not have. `unknown` stays reserved for a genuine failure to read (a
 // cold or locked lockdown, an unparseable value) — the case where quince really does not know.
 func (t *Tools) willEncrypt(ctx context.Context, udid, transport string) string {
-	args := append(networkArgs(transport), "-u", udid, "-q", "com.apple.mobile.backup", "-k", "WillEncrypt")
-	out, _, err := t.run(ctx, t.Ideviceinfo, transport, args...)
+	args := append(networkArgs(transport), "-u", udid, "-q", backupDomain, "-k", "WillEncrypt")
+	return scalarTriState(t.run(ctx, t.Ideviceinfo, transport, args...))
+}
+
+// Lockdown domains quince reads. Named because a scalar read is dispatched by domain, and a bare
+// string literal at the call site is what let one fake answer two different reads (qn.7).
+const (
+	backupDomain = "com.apple.mobile.backup"
+	// wifiSyncDomain is verified to EXIST: it is in ideviceinfo's known-domain list at the pinned
+	// libimobiledevice 1.4.0 (tools/ideviceinfo.c, tagged iOS 4.0+), so a -q read of it is accepted
+	// by the shipped binary. The KEY inside it is a different question — see wifiSyncKey.
+	wifiSyncDomain = "com.apple.mobile.wireless_lockdown"
+)
+
+// wifiSyncKeyUnmeasured is the lockdown key holding the Wi-Fi-sync flag, and it is DELIBERATELY
+// THE EMPTY STRING.
+//
+// The roadmap's hypothesis was "an EnableWifiConnections-ish key". Measured at the pinned
+// libimobiledevice 1.4.0: that string appears NOWHERE in the source, so the name has zero upstream
+// corroboration — it is a guess. qn.7's story 3 names it for real, by dumping the whole domain on a
+// device with Wi-Fi sync off and again with it on, then diffing. That needs hardware, which no
+// implementer box has.
+//
+// Until then wifiSync refuses to run a query at all, because the alternative is worse than useless:
+// `ideviceinfo -q <domain> -k <wrong-key>` is expected to exit 0 printing nothing, which
+// scalarTriState reads as "off" — so a guessed key would make quince state confidently that every
+// device has Wi-Fi sync disabled. That is the shape of qn.4a finding (i)-A, which shipped once.
+// An honest "unknown" is the whole point of having a third value.
+//
+// Filling this in is a one-line change once story 3 has run.
+const wifiSyncKeyUnmeasured = ""
+
+// wifiSync reads the device's Wi-Fi-sync flag → the wifi_sync state (design §3), with willEncrypt's
+// unknown-vs-off rule: an absent key means "off", and "unknown" is reserved for a genuine failure
+// to read. Queried only for paired devices, for the same trusted-session reason.
+//
+// Returns "unknown" without touching the device while the key is unset. That is not a stub standing
+// in for work — it is the honest answer to "is Wi-Fi sync on?" when quince does not yet know which
+// key to ask about.
+func (t *Tools) wifiSync(ctx context.Context, udid, transport string) string {
+	if t.wifiSyncKey == "" {
+		return "unknown"
+	}
+	args := append(networkArgs(transport), "-u", udid, "-q", wifiSyncDomain, "-k", t.wifiSyncKey)
+	return scalarTriState(t.run(ctx, t.Ideviceinfo, transport, args...))
+}
+
+// scalarTriState maps an `ideviceinfo -k` scalar read onto on | off | unknown. Shared by the two
+// reads so the absent-key rule cannot drift between them: exit 0 with EMPTY output is "off" (the
+// key is absent — the device saying no), a non-zero exit or an unparseable value is "unknown".
+func scalarTriState(out, _ string, err error) string {
 	if err != nil {
 		return "unknown"
 	}
@@ -152,6 +201,7 @@ func (t *Tools) Info(ctx context.Context, udid, transport string) (device.Identi
 	if vr == validatePaired {
 		id.Name, id.Model, id.IOSVersion = t.info(ctx, udid, transport, false)
 		id.BackupEncryption = t.willEncrypt(ctx, udid, transport)
+		id.WifiSync = t.wifiSync(ctx, udid, transport)
 	} else {
 		id.Name, id.Model, id.IOSVersion = t.info(ctx, udid, transport, true)
 	}

@@ -39,6 +39,7 @@ func (p *Provider) seed() {
 		Transports:       wire.Transports{USB: strptr(tPhoneUSB), WiFi: strptr(tPhoneWiFi)},
 		Paired:           "yes",
 		BackupEncryption: "on",
+		WifiSync:         "on", // set up already — the state a working Wi-Fi device is in
 		LastSeen:         tPhoneSeen,
 		LastBackup:       &wire.LastBackup{At: tBackupA, JobID: strptr(jobID), Status: "succeeded"},
 	}
@@ -50,6 +51,7 @@ func (p *Provider) seed() {
 		Transports:       wire.Transports{WiFi: strptr(tPadWiFi)}, // Wi-Fi only
 		Paired:           "yes",
 		BackupEncryption: "off", // exercises the unencrypted-device warning path
+		WifiSync:         "off", // the case qn.7 exists for: paired, but Wi-Fi sync never ticked
 		LastSeen:         tPadSeen,
 		LastBackup:       nil, // never backed up
 	}

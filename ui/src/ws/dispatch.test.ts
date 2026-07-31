@@ -20,6 +20,7 @@ function mkDevice(over: Partial<Device> = {}): Device {
     transports: { wifi: "2026-07-18T00:00:00Z" },
     paired: "yes",
     backup_encryption: "on",
+    wifi_sync: "unknown",
     last_seen: "2026-07-18T00:00:00Z",
     last_backup: null,
     ...over,

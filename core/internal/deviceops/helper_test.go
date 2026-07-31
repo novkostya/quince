@@ -55,8 +55,20 @@ func TestHelperProcess(t *testing.T) {
 		fakeValidate(scenario)
 	case hasArg(args, "pair"):
 		fakePair(scenario)
-	case hasArg(args, "-k"): // ideviceinfo -q com.apple.mobile.backup -k WillEncrypt
-		fakeWillEncrypt(scenario)
+	// A scalar lockdown read dispatches on its DOMAIN, never on the bare presence of -k.
+	// Until qn.7 there was exactly one such read, so `case hasArg(args, "-k")` was unambiguous —
+	// and it was a trap primed for the second one: a new domain would have been answered by
+	// fakeWillEncrypt, producing a green test that exercised the wrong code path entirely.
+	case hasArg(args, "-k"):
+		switch argValue(args, "-q") {
+		case backupDomain:
+			fakeWillEncrypt(scenario)
+		case wifiSyncDomain:
+			fakeWifiSync(scenario)
+		default:
+			fmt.Fprintln(os.Stderr, "fake: -k read for an unhandled domain:", argValue(args, "-q"))
+			os.Exit(2)
+		}
 	case hasArg(args, "-x"): // ideviceinfo -x
 		fakeInfo(args)
 	case hasArg(args, "encryption"):
@@ -87,6 +99,43 @@ func hasArg(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// argValue returns the token following flag, or "" when the flag is absent or trailing.
+func argValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// fakeWifiSync impersonates `ideviceinfo -q com.apple.mobile.wireless_lockdown -k <key>`.
+//
+// It mirrors fakeWillEncrypt's shape deliberately, INCLUDING the absent-key case, because the
+// unknown-vs-off rule is the one piece of qn.3 behaviour that was a shipped bug (qn.4a finding
+// (i)-A) and the fake is what keeps a re-implementation honest.
+//
+// NOTE what this fake does NOT establish: that the real key is named what quince asks for. That
+// is unmeasured until qn.7's story 3 runs the domain differential on hardware, so the production
+// read refuses to query at all (see wifiSync). These scenarios exercise the parsing, not the key.
+func fakeWifiSync(scenario string) {
+	switch scenario {
+	case "wifi_off":
+		fmt.Println("false")
+	case "wifi_never_set":
+		// Key ABSENT: exit 0, no output. The device saying "not enabled", not "I don't know".
+		os.Exit(0)
+	case "wifi_read_failed":
+		fmt.Fprintln(os.Stderr, "ERROR: Could not connect to lockdownd")
+		os.Exit(1)
+	case "wifi_garbage":
+		fmt.Println("perhaps")
+	default:
+		fmt.Println("true")
+	}
+	os.Exit(0)
 }
 
 func fakeValidate(scenario string) {

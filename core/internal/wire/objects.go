@@ -23,6 +23,7 @@ type Device struct {
 	Transports       Transports  `json:"transports"`
 	Paired           string      `json:"paired"`            // yes | no | unknown
 	BackupEncryption string      `json:"backup_encryption"` // on | off | unknown
+	WifiSync         string      `json:"wifi_sync"`         // on | off | unknown — lockdown wireless_lockdown (qn.7)
 	LastSeen         string      `json:"last_seen"`
 	LastBackup       *LastBackup `json:"last_backup"` // null when the device has no backups
 }

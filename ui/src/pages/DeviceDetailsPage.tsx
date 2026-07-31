@@ -78,6 +78,15 @@ export function DeviceDetailsPage() {
                   encryption: {device.backup_encryption}
                 </Badge>
               ) : null}
+              {/* "unknown" renders nothing, as with the two above. That is the honest state
+                  whenever quince has not read the flag — which today is every REAL device: the
+                  lockdown key is unmeasured until qn.7's hardware spike, so the read refuses to
+                  guess rather than reporting a confident "off". Only --demo shows this badge. */}
+              {device.wifi_sync !== "unknown" ? (
+                <Badge tone={device.wifi_sync === "on" ? "ok" : "warn"}>
+                  Wi-Fi sync: {device.wifi_sync}
+                </Badge>
+              ) : null}
             </div>
           </div>
 

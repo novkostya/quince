@@ -93,6 +93,26 @@ unencrypted backups silently omit Health, Keychain/passwords, call history and m
 an unencrypted device shows a persistent warning banner, and disabling encryption is
 allowed but explicitly discouraged in the UI copy.
 
+**Wi-Fi sync is a managed device property too** (qn.7). `wifi_sync` reads lockdown's
+`com.apple.mobile.wireless_lockdown` domain and follows `backup_encryption` exactly: the same
+`on | off | unknown` tri-state, the same absent-key-means-`off` rule, read only for a CONFIRMED
+paired device, refreshed with device info. It exists because the setting otherwise has to be
+ticked in Finder/iTunes, which breaks the D12 "everything in quince" promise for the **primary**
+transport — a user can pair over USB in quince and still need a Mac to turn Wi-Fi backups on.
+
+Two ways it deliberately differs from encryption. The value is **not a secret**, so the write uses
+the ordinary argv wrapper rather than the pty machinery — that machinery exists to keep a *password*
+out of argv, and importing it to guard a boolean would guard nothing. And **pairing does not
+auto-enable it**: quince cannot distinguish a flag that was never set from one the user deliberately
+turned off, so flipping it as a side effect of pairing would silently overrule a choice.
+
+**The key inside that domain is unmeasured, and the read says so rather than guessing.** The domain
+is verified to exist at the pinned libimobiledevice; the hypothesised key name appears nowhere in
+that source. Until a hardware spike names it, the read answers `unknown` **without querying** —
+because a wrong key exits 0 printing nothing, and the absent-key rule would turn that into a
+confident `off` on every device. This is the state-honesty rule doing real work: the third enum
+value exists precisely so quince can say it does not know.
+
 ## 4. The backup job state machine
 
 ```
