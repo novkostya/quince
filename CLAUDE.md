@@ -31,7 +31,9 @@ repo** — <https://github.com/novkostya/quince-devlog>:
 
 | Where | What |
 | --- | --- |
-| devlog `progress.md` | one-line state, per-rung dashboard, the full decisions log |
+| devlog `progress.md` | one-line state + per-rung dashboard — **current state only**, guarded by `bin/dashboard-size` |
+| devlog `decisions/` | the decisions log, **one file per decision** (`NNNN-slug.md`) |
+| devlog **`journal` branch** | the narrative journal, **one file per entry** — never merged into `main`, never protected |
 | devlog `roadmap.md` | milestones and rungs (`qn.N`) |
 | devlog `program/quince.program.md` | gate ladder, spec shape, gap protocol, review protocol |
 | devlog `proposals.md` | improvement-proposal ledger (accepted + declined, with reasons) |
@@ -260,13 +262,20 @@ granted this.** It arrived with the classic `repo` scope the token already held,
 Discussions was enabled on the repository — a permission decision nobody made, produced by a
 container choice.
 
-That matters because **devlog#30 moves the journal into Discussions.** Today the journal is
-`progress.md`: branch protection, a required approval, linear history, and every edit visible in
-a diff forever. Afterwards it is a set of discussions the implementer can remove with one API
-call — and **nothing on the forge records that a discussion was deleted.** The Operator has
-accepted that risk and the decision stands; what is not acceptable is it going unwritten, which
-is why this paragraph exists. The permission is real **today**; what the migration changes is
-what is at stake behind it, not the grant.
+**The permission is real and nothing is at stake behind it, and that second clause is new.** This
+paragraph used to read *"devlog#30 moves the journal into Discussions … afterwards it is a set of
+discussions the implementer can remove with one API call, and nothing on the forge records that a
+discussion was deleted."* **That migration did not happen.** It was ruled and then reversed on
+2026-07-30 (devlog#30), on evidence that decides it: when `quince-bot` was suspended, **196 of its
+commits stayed readable and 0 of its issues and PRs did** — a commit's author is metadata, an
+issue's author is a visibility key. The journal would have been authored by agent identities, and
+this project had already lost one.
+
+So the journal went to a git branch instead (devlog#152), Discussions is empty, and the delete
+permission now guards nothing. **Revoking `discussions: write` from the App would not remove it**
+either: it came with classic `repo` scope the moment Discussions was *enabled*, so only disabling
+Discussions on the repository does. Kept in this table as the one `CAN` row that is a hazard rather
+than a convenience, and as the record of a permission nobody decided to grant.
 
 **One more reason this row is worth its space: it is the first token-scope question in this
 project that came back *yes*.** The previous four were refusals — `read:org` twice (devlog#23,
@@ -423,16 +432,36 @@ stops being true, and an acknowledged norm ages better than an implied guarantee
 
 ### The journal
 
-Journal entries are **date-anchored and cite PR/issue numbers**, which GitHub allocates
-race-free:
+**The journal is the `journal` branch of the devlog, one file per entry** — not `progress.md`,
+which since 2026-07-30 holds current state only (devlog#152; the shape was ruled on devlog#30,
+reversing an earlier decision to use GitHub Discussions). The branch is **never merged into `main`
+and never protected**, because a journal is append-only immutable events with no shared mutable
+state, so a PR per entry charges git's full coordination cost for a data structure that needs none.
 
 ```
-- 2026-07-25: **the claim, one sentence in bold** — what changed, what was proven, what
-  is owed. ([#12](https://github.com/novkostya/quince/pull/12))
+<YYYY-MM>/<YYYY-MM-DD>-<short-slug>.md      one entry, H1 = "# <date> — <the claim>"
 ```
+
+Entries stay **date-anchored and cite PR/issue numbers**, which GitHub allocates race-free. The
+claim appears twice by design — as the H1 the generated index reads, and as the entry's own bold
+lead. Regenerate that index with `bin/journal-index` after every append.
+
+**A journal entry is ANNOTATED, never rewritten** (`decisions/0006`). An entry that turns out to be
+wrong is corrected by addition, with the original left standing: a citation is only worth something
+if the text it points at is the text that was there, and a quietly corrected entry destroys the
+evidence that anyone was misled. Nothing mechanically prevents a rewrite — what makes one
+*detectable* is that every box holds a clone, so a rewritten branch is contradicted by every copy.
+
+**THE PRIVACY GATE IS THE ONLY GUARD ON THAT BRANCH.** There is no pull request and therefore no
+reviewer. Run `make privacy-check REF=origin/journal...HEAD` before every append; `bin/pre-push-journal`
+enforces it on the push path and **cannot** see the API path that a box without a git credential
+helper must use. The branch's own `README.md` carries both routes.
 
 Lettered entries `(a)`–`(do)` are **retired**: they stay forever as citations from docs
-and git history — never mint a new one.
+and git history — never mint a new one. Two hazards in that id space, found by the migration and
+recorded in `letters.md` on the branch: `(j)`, `(n)` and `(o)` were **never minted**, so the
+sequence is not dense and a missing id does not mean a lost entry; and **`(ag)` was minted twice**,
+so a citation to it is ambiguous and always was.
 
 ## Skills — the workflow as commands
 
