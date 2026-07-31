@@ -337,6 +337,17 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		case errors.Is(err, ErrWifiSyncNotApplied):
 			code = "wifi_sync_not_applied"
 			msg = "The device accepted the change but did not apply it. Wi-Fi sync is unchanged."
+		case errors.Is(err, ErrWifiSyncUnreadable):
+			// Reached only on the paths the exemption above does NOT forgive — an enable, or over
+			// USB — where nothing about the write explains why the device stopped answering.
+			//
+			// Its own code rather than the generic one: `wifi_sync_failed` means "the device
+			// REJECTED it", which is retryable, and this is the opposite — the device accepted the
+			// write and the verification could not run. The state is UNKNOWN, which is neither
+			// "rejected" nor "unchanged" (quince#363).
+			code = "wifi_sync_unconfirmed"
+			msg = "The device accepted the change, but quince could not read the setting back to " +
+				"confirm it. Wi-Fi sync may or may not have changed."
 		}
 		m.setOp(opID, "failed", "", &wire.JobError{Code: code, Message: msg})
 		m.auditEvent("device.wifi_sync."+action, udid, "failed")

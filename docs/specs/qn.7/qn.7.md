@@ -208,9 +208,11 @@ Each is independently checkable. **1, 2, 6 and 7 need no hardware. 3, 8 and 9 do
    - **Unchanged:** a read-back that *succeeds* and reports the old value is a lying write and stays
      a failed op. The gap was only ever between *"reads back unchanged"* and *"cannot be read back"*.
 
-   **Still owed:** `docs/contracts.md` has no code for *"accepted, read-back could not run"* on the
-   paths that are **not** forgiven, so they currently fall to the generic `wifi_sync_failed`. Adding
-   one is a code-owned change needing the Operator's approval.
+   **The unforgiven paths get their own code, `wifi_sync_unconfirmed`** — an enable, or a disable
+   over USB, where nothing about the write explains why the device stopped answering. It is neither
+   `wifi_sync_failed` (which means *rejected*, and is retryable) nor `wifi_sync_not_applied` (which
+   asserts the state is *unchanged*, and a failed read establishes no such thing). `contracts.md`
+   carries the row; the enum is now four.
 
 8. **Hardware gate (the rung's acceptance).** A device whose Wi-Fi sync is **off** reads back
    `off` in quince, is turned `on` through quince alone with on-device steps narrated, and then
