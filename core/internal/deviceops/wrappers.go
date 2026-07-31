@@ -152,12 +152,21 @@ const (
 // nothing, which scalarTriState maps to "off" — a confident lie about every device, and the shape
 // of qn.4a finding (i)-A, which shipped once already.
 //
-// STILL OWED, and deliberately not papered over: the OFF/ON differential. A single read with the
-// flag ON cannot prove this key is what CHANGES rather than SupportsWifiSyncing, which was also
-// true. The discrimination rests on internal evidence — within that one dump, EnableWifiDebugging
-// was `false` while this was `true`, so the Enable* family is state rather than capability — which
-// is strong, and is still an inference. Toggling needs Finder, the detour qn.7 exists to remove.
-// One 30-second toggle converts it to a measurement; until then this comment is the honest record.
+// DISCHARGED 2026-07-31 — and by stronger evidence than the differential it was waiting for.
+//
+// This paragraph read "STILL OWED: the OFF/ON differential", because quince#336 was a single read
+// with the flag ON, which cannot separate this key from SupportsWifiSyncing — also `true` in that
+// one dump. The doubt was real and the discrimination rested on internal evidence.
+//
+// What settled it was not a second read. quince WROTE this key `false` on a real device and the
+// device left Wi-Fi entirely — measured, `idevice_id -n` stopped listing it — then came back when
+// the flag was set again over USB. A read differential would have shown the key CHANGES WITH Wi-Fi
+// sync; writing it shows the key CONTROLS Wi-Fi sync, which is the stronger claim and was not
+// available until the write path existed. Confirmed end to end by the Operator on the staging
+// stand (quince#363, quince#366).
+//
+// The reasoning is kept rather than deleted: it was correct to withhold the claim, and the
+// resolution arrived from a direction the comment did not anticipate.
 const wifiSyncKey = "EnableWifiConnections"
 
 // wifiSync reads the device's Wi-Fi-sync flag → the wifi_sync state (design §3), with willEncrypt's
