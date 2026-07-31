@@ -66,18 +66,23 @@ die() {
 # So the rule is the strongest of the five and the simplest to state: ANY other seat's credential
 # here is a refusal.
 #
-# THE PREFLIGHT HALF OF THAT RULE DOES NOT EXIST YET — PR 1c makes it, and this comment said it was
-# already there. On `main` today `deploy/runner/preflight`'s supervisor arm is a DENYLIST of four
-# named files plus four environment variables, and it does not know this identity exists. So on the
-# supervisor box, which already holds the key, it scans four paths, finds none, and prints *"no forge
-# credential present — this seat can neither author nor approve, as required"* — false about a box
-# that now holds an authoring credential, from a gate designed to refuse rather than degrade.
+# That mirrors `deploy/runner/preflight`'s supervisor arm, which is an allowlist of exactly this one
+# file. Two checks, same claim, from opposite ends: `preflight` gates whether the box STARTS, this
+# gates every action it takes, so a hand run cannot quietly cross a boundary the service refuses to.
 #
-# That defect belongs to the ceremony landing ahead of the mechanism, and 1c is where it is fixed.
-# Recorded in the present tense here rather than the aspirational one, because a session reading this
-# line to find out whether the preflight side is covered would have concluded that it is and stopped
-# looking. Once 1c lands, this becomes: that mirrors preflight's supervisor arm, which is an
-# allowlist of exactly this one file.
+# THIS SENTENCE WAS FALSE FOR ONE REVIEW CYCLE AND THE SEQUENCE IS WORTH KEEPING (quince#377 review).
+# The allowlist is PR 1c and landed as quince#380; this line asserted it while the arm was still a
+# denylist that did not know this identity existed. What made that worth a blocking finding rather
+# than tense-pedantry: the CEREMONY PLACED THE KEY BEFORE THE MECHANISM LANDED, so on the supervisor
+# box `preflight` was scanning four paths, finding none, and printing *"no forge credential present —
+# this seat can neither author nor approve, as required"* — false about a box that held an authoring
+# credential, from a gate whose design is to refuse rather than degrade.
+#
+# The claim is true again now, and it is true because quince#380 merged rather than because the
+# wording was softened. Recorded because the window is the interesting artefact: a comment describing
+# a mechanism that does not exist yet, in the file a session reads to find out whether it does, is the
+# same defect as one describing a mechanism that has moved — and this one closed in both directions
+# inside a day.
 #
 # Ordered above the dependency loop for the reason quince#157 records: an environment refusal invites
 # a repair, and a session repairing its way past this one ends up holding two identities on one box.
