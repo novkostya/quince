@@ -123,12 +123,16 @@ baseline() {
 # OPEN by design: an argv it cannot attribute writes nothing and exits 0. So "no row" is what a
 # BROKEN writer and a quiet correct one both look like, and the first version of this file asserted
 # only that a row had been CONSUMED — which passed against a row that was never written, while the
+# `2>/dev/null` DOES NOT COVER A SHELL REDIRECTION FAILURE — it silences the command, and
+# `<"$LEDGER"` on an absent file is the SHELL failing before `wc` ever runs. `baseline` removes the
+# ledger, so every one of these leaked a `can't open … no such file` line into the suite output.
+# Same defect the loop's liveness probe had (2026-07-30 journal); guard the file, do not silence it.
 # real bug (the parser stopped scanning one word before `--repo`) failed every other assertion. A
 # helper that does not check its own effect makes every later assertion conditional on a silence.
 record() {
-	_before=$(wc -l <"$LEDGER" 2>/dev/null || printf 0)
+	_before=$({ [ -f "$LEDGER" ] && wc -l <"$LEDGER"; } || printf 0)
 	./bin/forge-ledger record pr "$1" 501 --repo "$REPO"
-	_after=$(wc -l <"$LEDGER" 2>/dev/null || printf 0)
+	_after=$({ [ -f "$LEDGER" ] && wc -l <"$LEDGER"; } || printf 0)
 	[ "$_after" -eq $((_before + 1)) ] || {
 		printf '  FAIL forge-ledger recorded nothing for "pr %s 501 --repo %s"\n' "$1" "$REPO"
 		fail=$((fail + 1))
@@ -185,7 +189,7 @@ fi
 
 # (4) …and the ledger is UNTOUCHED when the guard refuses. A row spent on an event that still woke
 # the session would be a row unavailable to the event it was actually for.
-if [ "$(wc -l <"$LEDGER" 2>/dev/null || printf 0)" -eq 1 ]; then
+if [ "$({ [ -f "$LEDGER" ] && wc -l <"$LEDGER"; } || printf 0)" -eq 1 ]; then
 	ok "the refused suppression left the row unspent"
 else
 	bad "the row was consumed by an event that woke anyway"
@@ -229,15 +233,22 @@ else
 	sed -n '1,8p' "$WORK/out"
 fi
 
-# (8) THE WRITER'S NARROWNESS, asserted rather than assumed. `pr comment` produces `issue-comment`,
-# which already carries `actor=` and is the actor arm's business; a row for it would be a second
-# mechanism for a problem that has one.
+# (8) THE WRITER'S NARROWNESS, asserted rather than assumed. `pr comment` produces
+# `issue-comment` and `issue comment` produces the same — both already carry `actor=` and are
+# the actor arm's business; a row for either would be a second mechanism for a problem that
+# has one. `view` is read-only and produces no event at all.
+#
+# UPDATED BY quince#307: `issue close` and `issue reopen` ARE now recorded, so this case no
+# longer means "nothing about issues is recorded" — it means the vocabulary is still exactly
+# the events that carry no actor. The old label said "comment, view and issue write nothing",
+# which would have gone quietly false.
 rm -f "$LEDGER"
 ./bin/forge-ledger record pr comment 501 --repo "$REPO"
 ./bin/forge-ledger record pr view 501 --repo "$REPO"
 ./bin/forge-ledger record issue view 12 --repo "$REPO"
+./bin/forge-ledger record issue comment 12 --repo "$REPO"
 if [ ! -s "$LEDGER" ]; then
-	ok "only 'pr review' and 'pr merge' are recorded — comment, view and issue write nothing"
+	ok "comment and view write nothing, on EITHER subject — the vocabulary is the actorless events"
 else
 	bad "recorded a verb whose event already carries an actor: $(cat "$LEDGER")"
 fi
@@ -250,6 +261,52 @@ if [ ! -s "$LEDGER" ]; then
 	ok "no --repo, or no number: no row, so the wake stands"
 else
 	bad "guessed a target it was not given: $(cat "$LEDGER")"
+fi
+
+
+# --- quince#307: the issue surface ------------------------------------------------------------
+#
+# (9) AN ISSUE ROW MUST NOT SUPPRESS A PR EVENT. Both
+# repositories carry a PR 501 and an issue 501. A row recorded for CLOSING ISSUE 501 must not
+# suppress a REVIEW on PR 501 — that would be a missed wake, the one direction this subsystem must
+# never fail in.
+#
+# WHAT GUARANTEES IT IS THE KIND, NOT THE SUBJECT FIELD, and this comment said otherwise until it
+# was measured: collapsing the subject on both sides leaves this case passing, because `review` and
+# `issue-closed` are already different kinds. The subject is future-proofing for `pr close` (see
+# forge-ledger's header); this case pins the PROPERTY, and no case pins the field. Said out loud
+# rather than left as implied coverage. No issue stub needed: the row is written for the issue,
+# the event arrives for the PR.
+baseline
+_before=$({ [ -f "$LEDGER" ] && wc -l <"$LEDGER"; } || printf 0)
+./bin/forge-ledger record issue close 501 --repo "$REPO"
+_after=$({ [ -f "$LEDGER" ] && wc -l <"$LEDGER"; } || printf 0)
+if [ "$_after" -eq $((_before + 1)) ]; then
+	ok "an 'issue close' is recorded (the writer's new vocabulary reaches the ledger)"
+else
+	bad "forge-ledger recorded nothing for 'issue close 501'"
+fi
+run_watch 2 6
+if grep -q 'EXITING on the event' "$WORK/out"; then
+	ok "a closed ISSUE 501 does not suppress a review on PR 501 (guaranteed by the kind)"
+else
+	bad "an issue row swallowed a PR event of the same number: a MISSED wake, which is the direction that must never fail"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (10) THE LEGACY ROW. Rows written before quince#307 have three fields and no subject. They are
+# migrated as `pr`, which is what every one of them is. Ignoring them instead would leave them
+# unconsumed forever, and the act each explains would wake the session anyway — silent, and
+# indistinguishable from a quiet forge.
+baseline
+mkdir -p "$(dirname "$LEDGER")"   # baseline can leave the dir absent; without this the write fails and the case is vacuous
+printf '%s 501 merged\n' "$REPO" >"$LEDGER"
+run_watch 4 4
+if grep -q 'event=merged pr=501' "$WORK/out" && grep -q 'watch-idle' "$WORK/out"; then
+	ok "a THREE-field row written before quince#307 still suppresses (migrated as subject 'pr')"
+else
+	bad "a legacy row stopped being honoured — every row on every box at upgrade time is one of these"
+	sed -n '1,8p' "$WORK/out"
 fi
 
 printf '\nforge-watch-selfcaused-test: %d passed, %d failed\n' "$pass" "$fail"

@@ -2778,32 +2778,46 @@ selfcaused_filter() { # <events-file> <default-repo> <suppressed-count-out>
 	fi
 	_sc_rest=$(mktemp)
 	if awk -v defrepo="$_sc_defrepo" -v rest="$_sc_rest" -v cnt="$_sc_out" '
-		FILENAME == led { have[$1 SUBSEP $2 SUBSEP $3]++; next }
+		# A row is `<repo> <number> <subject> <kind>` since quince#307. A THREE-field row predates the
+		# subject and is migrated as `pr` — which is what every one of them is, because PR acts were
+		# the only recordable kind before the field existed. Migrating rather than ignoring: an
+		# unmatched row is never consumed, so it would sit in the ledger and the act it explains
+		# would wake the session anyway. Silent, and indistinguishable from a quiet forge.
+		FILENAME == led {
+			if (NF == 3) have[$1 SUBSEP $2 SUBSEP "pr" SUBSEP $3]++
+			else if (NF == 4) have[$1 SUBSEP $2 SUBSEP $3 SUBSEP $4]++
+			next
+		}
 		{
-			kind = ""
-			if ($0 ~ /(^| )event=review( |$)/)      kind = "review"
-			else if ($0 ~ /(^| )event=merged( |$)/) kind = "merged"
+			kind = ""; subj = ""
+			if ($0 ~ /(^| )event=review( |$)/)              { kind = "review";          subj = "pr" }
+			else if ($0 ~ /(^| )event=merged( |$)/)         { kind = "merged";          subj = "pr" }
+			else if ($0 ~ /(^| )event=issue-closed( |$)/)   { kind = "issue-closed";    subj = "issue" }
+			else if ($0 ~ /(^| )event=issue-reopened( |$)/) { kind = "issue-reopened";  subj = "issue" }
 			if (kind == "") { print; next }
-			pr = ""; repo = ""; c = 1; sawcount = 0
+			num = ""; repo = ""; c = 1; sawcount = 0
 			n = split($0, a, " ")
 			for (i = 1; i <= n; i++) {
-				if (a[i] ~ /^pr=/)    pr   = substr(a[i], 4)
+				if (subj == "pr"    && a[i] ~ /^pr=/)    num  = substr(a[i], 4)
+				if (subj == "issue" && a[i] ~ /^issue=/) num  = substr(a[i], 7)
 				if (a[i] ~ /^repo=/)  repo = substr(a[i], 6)
 				if (a[i] ~ /^count=/) { c = substr(a[i], 7) + 0; sawcount = 1 }
 			}
-			if (pr == "") { print; next }
+			if (num == "") { print; next }
 			if (repo == "") repo = defrepo
 			# A review line with no count= is one this build cannot account for — an event from a
-			# state file written before step 1. Unaccountable wakes.
+			# state file written before step 1. Unaccountable wakes. The issue state changes carry
+			# no count= and never have: one close is one event, so the default of 1 is exact rather
+			# than assumed, and requiring a count there would suppress nothing forever.
 			if (kind == "review" && sawcount == 0) { print; next }
-			k = repo SUBSEP pr SUBSEP kind
+			k = repo SUBSEP num SUBSEP subj SUBSEP kind
 			if (have[k] >= c) { have[k] -= c; sup++; next }
 			print
 		}
 		END {
 			for (k in have) {
 				split(k, p, SUBSEP)
-				for (j = 0; j < have[k]; j++) print p[1], p[2], p[3] > rest
+				for (j = 0; j < have[k]; j++) print p[1], p[2], p[3], p[4] > rest
 			}
 			print sup + 0 > cnt
 		}
