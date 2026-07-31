@@ -61,11 +61,10 @@ export function WifiSyncControl({ device, post }: { device: Device; post?: Start
         </p>
       ) : null}
 
-      {willDisconnect ? (
-        <p className="max-w-xs text-xs text-muted">
-          Turning this off will disconnect the device — it reappears when you plug it in.
-        </p>
-      ) : null}
+      {/* The disconnect consequence is NOT standing text — it is the confirmation dialog's whole
+          content, which is where it belongs: a warning about a click arrives at the moment of the
+          click, not as ambient prose above it. That also answers the earlier review correctly: the
+          objection was to a `title`, which does not exist on touch. A dialog does. */}
 
       <OpNarration op={op} starting={starting} startError={startError} />
 

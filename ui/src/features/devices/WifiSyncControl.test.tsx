@@ -54,18 +54,6 @@ describe("WifiSyncControl", () => {
 
   // Turning sync OFF over Wi-Fi severs the transport the op runs on. The write lands first, but the
   // device then vanishes from the page — which reads as a failure unless it was predicted.
-  it("warns that turning sync off over Wi-Fi will disconnect the device", () => {
-    render(
-      <WifiSyncControl
-        device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
-        post={vi.fn()}
-      />,
-    );
-    // Asserted as RENDERED TEXT, never a title: a tooltip does not exist on touch, and the
-    // iPhone is a first-class client (ui.design.md). A test that accepted a title would pass
-    // while the warning was invisible on the surface it matters most.
-    expect(screen.getByText(/will disconnect the device/i)).toBeTruthy();
-  });
 
   // `unknown` means quince has not read the flag. Rendering a direction from it would be guessing.
   it("renders nothing when the state is unknown", () => {
@@ -136,4 +124,21 @@ describe("disable confirmation", () => {
 
     expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
   });
+});
+
+// The disconnect consequence must be RENDERED somewhere a touch user meets it — the earlier review
+// rejected a `title` for exactly that reason. It now lives in the confirmation dialog, which is
+// where a warning about a click belongs: at the moment of the click rather than as ambient prose.
+it("explains the disconnect inside the confirmation, not as standing text", () => {
+  render(
+    <WifiSyncControl
+      device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
+      post={vi.fn()}
+    />,
+  );
+  // Nothing ambient before the click.
+  expect(screen.queryByText(/will disconnect it/i)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
+  expect(screen.getByText(/will disconnect it immediately/i)).toBeTruthy();
 });
