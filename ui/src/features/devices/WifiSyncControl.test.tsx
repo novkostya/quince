@@ -156,3 +156,16 @@ it("gives ENABLE a prominent button and DISABLE a quiet one", () => {
   const disable = screen.getByRole("button", { name: /turn off wi-fi sync/i }).className;
   expect(disable).not.toContain("border");
 });
+
+// The ghost variant has no background, so without this its text sits at px-3 while every
+// neighbour's visible left edge is at the margin — it reads as a stray indent. Asserted because it
+// is invisible in every behavioural test and was reported from a screenshot twice.
+it("pulls the quiet variant back to the margin so its text aligns with its neighbours", () => {
+  const { unmount } = render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
+  expect(screen.getByRole("button", { name: /turn off wi-fi sync/i }).className).toContain("-ml-3");
+  unmount();
+
+  // The prominent variant has a border at the margin to align to, so it must NOT be pulled.
+  render(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
+  expect(screen.getByRole("button", { name: /turn on wi-fi sync/i }).className).not.toContain("-ml-3");
+});
