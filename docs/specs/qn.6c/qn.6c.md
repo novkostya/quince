@@ -349,6 +349,15 @@ change, not a shape change — it is already computed per request from the root 
 > field** that never needs removing — so the epic's *"symptom"* framing turns out not to apply to
 > the wire at all, only to the DB, where `versions.storage_id` fixes it.
 >
+> **And the load-bearing argument is NOT compatibility, which was checked rather than assumed.**
+> Gap 3's ruling retired an implicit path precisely because *"keep it for compatibility"* is how
+> permanent cruft arrives, so *"keep `Version.backend`"* deserved the same scrutiny and got it.
+> It survives on a different footing: **a version can outlive its storage.** Remove-a-storage is
+> out of this rung but coming, and *detach-and-forget* is one of its candidate semantics — once the
+> storage row is gone, `storage_id` dangles and the backend is **not recoverable by join**. The
+> field is therefore not derivable in all futures, which makes it a genuine fact about the version
+> rather than a cached copy of somebody else's. No appeal to compatibility anywhere in that.
+>
 > **Work this adds:** contracts §2 gets the **redefinition**, not merely the new field.
 
 ### Gap 2 — a `Storage` object, and how a job picks one (contracts §1 and §2)
@@ -433,10 +442,11 @@ rung, and every deployment in the field keeps working with an unchanged `config.
 > `config/service.go:89-110` already writes the file atomically — and the Operator considered it
 > and held (b).
 >
-> **Recorded with the dissent** (argue-then-defer, quince-devlog#49), and the four costs the rung
-> now carries are in *Rung-ruled decisions* #5. The load-bearing one: **G7 inverts** from a
-> no-regression gate into a **refusal** gate, because the outcome neither seat wants is a silent
-> zero-storage start that looks healthy.
+> **The dissent was then RETRACTED on the Operator's reasoning** — it had priced a field of
+> deployments that does not exist, and an implicit env-var path is permanent cruft bought for
+> nothing. *Rung-ruled decisions* #5 carries the full record. What survives the retraction is
+> **G7's inversion**, on a **state-honesty** footing rather than a compatibility one: a silent
+> zero-storage start that looks healthy is the outcome to prevent.
 
 **The second half of this gap, which (a) does not settle:** `backend`, `zfs` and `retention` are
 today singular keys describing the one storage. Under (a) they describe the *implicit* storage.
@@ -503,8 +513,9 @@ Each is independently checkable.
 
    *(Rewritten by gap 3's ruling. This story previously read "an empty list synthesizes exactly
    one implicit storage at `QUINCE_BACKUPS`" and promised behaviour identical to today. The
-   Operator ruled the opposite and the architect's recommendation — mine — was overruled; see
-   *Rung-ruled decisions* #5 for the dissent and what it costs.)*
+   Operator ruled the opposite; both agent seats had recommended the fallback and both were wrong,
+   for the same reason — the argument priced a field of deployments that does not exist. See
+   *Rung-ruled decisions* #5 for the record and the retraction.)*
 2. **Each storage carries its identity.** `quince-storage.json` written at the creation moment,
    self-checksummed; read and compared at every startup and before every backup; a mismatch
    refuses; a corrupt marker refuses. The new anchored offsite exclude rule ships with it.
@@ -635,30 +646,43 @@ beyond the four declared above.
    carry its consequences.** Gap 3 was ruled **(b): hard-retire `QUINCE_BACKUPS`.** Every storage
    is declared; no env var, no implicit storage, no synthesized fallback.
 
-   **The architect recommended against it, offered a middle path, and was overruled.** The middle
-   path was a one-time migration at first start — write a `storages:` entry from the current
-   `QUINCE_BACKUPS` into `config.yml`, log loudly, never read the env var again — which is feasible
-   because `config/service.go:89-110` already writes `config.yml` atomically. The Operator
-   considered it and held (b). Recorded per the argue-then-defer posture (quince-devlog#49), so a
-   future session does not have to reconstruct why the rung took this shape.
+   **The architect recommended against it, was overruled, and then RETRACTED the dissent on the
+   Operator's reasoning.** Recorded in full because the retraction is the useful part.
+
+   The objection was *"this breaks every deployment in the field"* — and **there is no field.**
+   There is one instance, the Operator owns it, and the cost is editing one YAML file once. The
+   argument had silently priced a population of installs that does not exist. Against that, an env
+   var with a built-in default that quietly conjures a storage is a **permanent implicit path**:
+   cheap to add now, expensive to remove later, and load-bearing by the time anyone wants it gone.
+
+   > *"I am the only user atm and I see no reason to accumulate backward-compatibility garbage like
+   > Windows."* — Operator
+
+   **So the ruling is right on the merits, not merely the Operator's to make.** The argue-then-defer
+   record (quince-devlog#49) asks which seat was right; the answer is available now rather than
+   after an incident, and it is the Operator. An earlier draft of this entry carried a *"what would
+   settle who was right"* clause — **struck**, because it framed as pending evidence something the
+   reasoning already settles.
 
    **What it buys:** every storage is explicit, and nothing about where a backup lands is implied
-   by a deployment variable that is invisible in `config.yml`.
+   by a deployment variable invisible in `config.yml`.
 
-   **What it costs, and the rung carries all four:** an upgraded instance with no `storages:` key
-   has **zero storages** and cannot back up (every deployment today leans on the `/backups` default
-   at `bootstrap.go:51` while declaring nothing); the **staging stand** — soaking under real daily
-   use, with a `config.yml` predating the key — needs its entry written **before this rung lands**,
-   which is an Operator action and not a code change; **G7 inverts** from a no-regression gate into
-   a refusal gate; and the *Sequencing* section's claim that this rung depends on no future
-   onboarding is now **partly false** and is corrected there rather than left standing.
+   **Two things survive from the dissent, and neither is a compatibility argument:**
 
-   **What would settle who was right, stated in advance so it is not decided by whoever writes the
-   retrospective:** if a field deployment or the staging stand is caught out by an upgrade with no
-   `storages:` key, the dissent was right and G7's refusal is what saved it. If the
-   explicit-config property proves worth it and nothing is caught out, the ruling was right.
-   **Either way G7 is mandatory** — a silent zero-storage start that looks healthy is the one
-   outcome neither seat wants.
+   - **G7's inversion is mandatory** — a config with no `storages:` key must **refuse loudly**,
+     name the key and print the remedy. Not to protect a field, but because a silent zero-storage
+     start that *looks healthy* is a **state-honesty** failure. That reason is stronger than the
+     compatibility one it replaces.
+   - **The staging stand still needs its `storages:` entry written before this rung lands** — one
+     edit, the Operator's, blocked by nothing.
+
+   Two further consequences stand and the rung carries both: the *Sequencing* section's claim that
+   this rung depends on no future onboarding is **partly false** and is corrected there rather than
+   left standing, and an **upgrade note** is a named deliverable in the boundary.
+
+   **The generalisation, worth more than the instance:** an argument that reasons about *"every
+   deployment"* on a project with one deployment is not conservative, it is imaginary — and it costs
+   a permanent implicit path to buy nothing.
 
 ---
 
