@@ -1,0 +1,86 @@
+{
+  "kind": "sequence",
+  "note": "quince#348, and the SITE THE SIBLING FIXTURE DOES NOT REACH (review finding on quince#349). The fix lands at two persists; reverting the reporting one fails `issue348-the-highwater-advances`, and reverting the FIRST-OBSERVATION one at :419 fails nothing — 64 fixtures pass against the defective form. A combined revert cannot separate them: six failures are equally consistent with one site doing all the work. THE PATH IS THE ONE EVERY WATCH STARTS ON. `:419` sits under `_was_observed != true`, which is a state carrying a DECLARATION but no completed observation — precisely `runner set` then declare then first tick, the order /architect section 6 and /kickoff both prescribe on a cold start. THE FAILURE IS WORSE THAN THE REPORTING ONE AND THAT IS WHY THIS IS A SEQUENCE. With the fresh scan discarded here, the cold start never records an `open_seen` at all, so the highwater is established as 0 — and `select($hw > 0)` then drops EVERY `issue-new` forever. Not a repeating event: silent deafness to the whole class, on a watch that reports healthy. Tick 0 establishes the baseline silently, which is correct and is the control; tick 1 files a genuinely new issue above it and MUST wake. Against the pre-fix :419 the baseline is 0, tick 1 emits nothing, and this fixture fails on the missing event rather than on a state predicate. NOTE the first observation emits no issue-first-observation: that path reports the queue and establishes baselines, and the issue channel reports itself from the NEXT tick. The state predicates are what carry this fixture, which is the point — the events on tick 0 are identical either way.",
+  "initial": {
+    "prs": [],
+    "issues": {
+      "declared": [
+        322
+      ],
+      "declared_at": "2026-07-31T06:00:00Z",
+      "items": []
+    }
+  },
+  "steps": [
+    {
+      "label": "the first observation establishes the highwater, silently",
+      "observation": {
+        "observed": true,
+        "prs": [],
+        "issues": {
+          "open_seen": [
+            340,
+            335,
+            322
+          ],
+          "scan_limit": 30,
+          "items": [
+            {
+              "number": 322,
+              "state": "OPEN",
+              "updatedAt": "2026-07-31T06:00:00Z",
+              "closed_at": null,
+              "state_reason": "",
+              "labels": [],
+              "activity": [],
+              "via": "declared"
+            }
+          ]
+        }
+      },
+      "expect_events": [
+        "event=first-observation count=0",
+        "event=queue-empty"
+      ],
+      "expect_state": [
+        ".issues.highwater == 340",
+        ".issues.open_seen == [340, 335, 322]",
+        ".issues.declared == [322]"
+      ]
+    },
+    {
+      "label": "and a genuinely new issue then wakes — the baseline was real",
+      "observation": {
+        "observed": true,
+        "prs": [],
+        "issues": {
+          "open_seen": [
+            352,
+            340,
+            335,
+            322
+          ],
+          "scan_limit": 30,
+          "items": [
+            {
+              "number": 322,
+              "state": "OPEN",
+              "updatedAt": "2026-07-31T06:00:00Z",
+              "closed_at": null,
+              "state_reason": "",
+              "labels": [],
+              "activity": [],
+              "via": "declared"
+            }
+          ]
+        }
+      },
+      "expect_events": [
+        "event=issue-new issue=352"
+      ],
+      "expect_state": [
+        ".issues.highwater == 352"
+      ]
+    }
+  ]
+}
