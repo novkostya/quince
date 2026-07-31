@@ -87,7 +87,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	reg.SetPersist(func(udid string, idn device.Identity, lastSeen string) {
 		if err := st.UpsertDeviceIdentity(store.DeviceIdentityRow{
 			UDID: udid, Name: idn.Name, Model: idn.Model, IOSVersion: idn.IOSVersion,
-			Paired: idn.Paired, BackupEncryption: idn.BackupEncryption,
+			Paired: idn.Paired, BackupEncryption: idn.BackupEncryption, WifiSync: idn.WifiSync,
 			LastSeen: lastSeen, UpdatedAt: time.Now().UTC(),
 		}); err != nil {
 			log.Warn("device identity persist failed", "udid", udid, "error", err)
@@ -102,7 +102,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 				UDID: row.UDID, LastSeen: row.LastSeen,
 				Identity: device.Identity{
 					Name: row.Name, Model: row.Model, IOSVersion: row.IOSVersion,
-					Paired: row.Paired, BackupEncryption: row.BackupEncryption,
+					Paired: row.Paired, BackupEncryption: row.BackupEncryption, WifiSync: row.WifiSync,
 				},
 			})
 		}

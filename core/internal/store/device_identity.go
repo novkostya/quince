@@ -13,6 +13,7 @@ type DeviceIdentityRow struct {
 	IOSVersion       string
 	Paired           string
 	BackupEncryption string
+	WifiSync         string
 	LastSeen         string // RFC3339 UTC; "" = never seen present since this row was written
 	UpdatedAt        time.Time
 }
@@ -21,20 +22,21 @@ type DeviceIdentityRow struct {
 // advanced by the caller when the device is actually present, so it never regresses to a stale value.
 func (s *Store) UpsertDeviceIdentity(r DeviceIdentityRow) error {
 	_, err := s.db.Exec(`INSERT INTO device_identity
-		(udid, name, model, ios_version, paired, backup_encryption, last_seen, updated_at)
-		VALUES (?,?,?,?,?,?,?,?)
+		(udid, name, model, ios_version, paired, backup_encryption, wifi_sync, last_seen, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(udid) DO UPDATE SET
 			name=excluded.name, model=excluded.model, ios_version=excluded.ios_version,
 			paired=excluded.paired, backup_encryption=excluded.backup_encryption,
+			wifi_sync=excluded.wifi_sync,
 			last_seen=excluded.last_seen, updated_at=excluded.updated_at`,
-		r.UDID, r.Name, r.Model, r.IOSVersion, r.Paired, r.BackupEncryption,
+		r.UDID, r.Name, r.Model, r.IOSVersion, r.Paired, r.BackupEncryption, r.WifiSync,
 		r.LastSeen, fmtTime(r.UpdatedAt))
 	return err
 }
 
 // ListDeviceIdentities returns every persisted identity (read once at startup to seed the registry).
 func (s *Store) ListDeviceIdentities() ([]DeviceIdentityRow, error) {
-	rows, err := s.db.Query(`SELECT udid, name, model, ios_version, paired, backup_encryption,
+	rows, err := s.db.Query(`SELECT udid, name, model, ios_version, paired, backup_encryption, wifi_sync,
 		last_seen, updated_at FROM device_identity`)
 	if err != nil {
 		return nil, err
@@ -47,7 +49,7 @@ func (s *Store) ListDeviceIdentities() ([]DeviceIdentityRow, error) {
 			updated string
 		)
 		if err := rows.Scan(&r.UDID, &r.Name, &r.Model, &r.IOSVersion, &r.Paired,
-			&r.BackupEncryption, &r.LastSeen, &updated); err != nil {
+			&r.BackupEncryption, &r.WifiSync, &r.LastSeen, &updated); err != nil {
 			return nil, err
 		}
 		if t, err := parseTime(updated); err == nil {

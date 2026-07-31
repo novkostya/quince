@@ -1,0 +1,11 @@
+-- qn.7: persist wifi_sync alongside the other two lockdown-derived properties.
+--
+-- It was the ONLY one of the three that did not survive a restart (quince#337). paired and
+-- backup_encryption were restored for an offline device while wifi_sync came back as the honest
+-- `unknown` — correct in isolation, and wrong beside its siblings: the badge vanished on restart
+-- while the other two persisted, which reads as "sync got turned off" rather than "not read yet".
+--
+-- ALTER rather than a recreate: the table holds real identities on live installs (staging has two),
+-- and the default '' is exactly the "not determined" the registry already maps to its `unknown`
+-- default, so an existing row upgrades to correct-and-honest with no backfill.
+ALTER TABLE device_identity ADD COLUMN wifi_sync TEXT NOT NULL DEFAULT '';   -- on | off | unknown | ''
