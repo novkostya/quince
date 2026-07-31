@@ -15,7 +15,7 @@ import { EncryptionDialog, type EncryptionMode } from "@/features/devices/Encryp
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
-import { BackupControls } from "@/features/jobs/BackupControls";
+import { BackupControls, BackupControlsStatus } from "@/features/jobs/BackupControls";
 import { useBackup } from "@/features/jobs/useBackup";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,6 @@ export function DeviceDetailsPage() {
                   start={backup.start}
                   cancel={backup.cancel}
                   busy={backup.busy}
-                  error={backup.error}
                 />
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
@@ -126,8 +125,17 @@ export function DeviceDetailsPage() {
             )}
           </div>
 
-          {/* Below the action row, not inside it. BackupControls renders its own column with a
-              status line under the button, so a third item in that flex-wrap row lands beside a
+          {/* The action row holds BUTTONS and nothing else. Any text that stacks under a button
+              belongs here instead, because a flex item is as wide as its widest child: a status
+              line left inside the row silently sets its column's width and pushes the next button
+              out by the overhang (quince#325). */}
+          {device.paired === "yes" ? (
+            <div className="mt-2 flex flex-col gap-1">
+              <BackupControlsStatus device={device} activeJob={activeJob} error={backup.error} />
+            </div>
+          ) : null}
+
+          {/* Below the action row, not inside it. A third item in that flex-wrap row lands beside a
               two-line sibling and reads as indented rubble — which is how it looked on hardware.
               Its own block also matches its weight: a once-per-device setting, not an action. */}
           {device.paired === "yes" ? (
