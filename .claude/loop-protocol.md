@@ -327,6 +327,21 @@ So:
    `event=tick-overdue due=… late=…` for it. The events themselves cannot carry that fact: they arrive
    looking perfectly healthy, all at once, hours late.
 
+5. **And what that catch-up FOUND is not a complete account of the interval.** Beside the line above,
+   `forge-watch` emits `event=unreconciled from=… to=… basis=state-diff`. A tick diffs the *current*
+   queue against the *stored* observation, so a PR that opened **and** closed inside the gap leaves no
+   trace in it at all — "no events" is then a claim about the **endpoints** presented as a claim about
+   the **interval**. Not wrong; unfalsifiable.
+
+   The honest reading is **"no surviving change"**, never **"nothing happened"**. A retiring architect
+   session made the stronger claim four times in one turn, then filed quince#58 against itself on the
+   way out because it could not justify any of them.
+
+   **The tool is not required to find what vanished** — reconciliation against the events API was
+   ruled out, since its retention fails in exactly the long-gap case this matters most for. It is
+   required to stop claiming there was nothing to find. `unreconciled` is **printed and never woken
+   on**: `tick-overdue` always accompanies it and already wakes.
+
 ## Whose turn is it — the question the event model cannot answer
 
 `bin/forge-watch` tells you *that* something happened. It does not tell you whose move it is, and the

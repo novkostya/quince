@@ -204,7 +204,8 @@ usage: forge-watch <verb>
   from an accident (raised in review of quince#87).
 
 events: first-observation · queue-empty · updated · opened · review · review-answered · checks ·
-        mergeability · merged · tick-overdue · fetch-failed · queue-truncated · watch-idle · watch-failing ·
+        mergeability · merged · tick-overdue · unreconciled · fetch-failed · queue-truncated ·
+        watch-idle · watch-failing ·
         issue-first-observation · issue-updated · issue-comment · issue-closed · issue-reopened ·
         issue-fetch-failed · issue-new · issue-scan-failed
 
@@ -1389,7 +1390,32 @@ watch_report() {
 		  | select($w2 != null and ($w2.due // null) != null)
 		  | ($t - ($w2.due | fromdate)) as $late
 		  | select($late > ($w2.interval_s // 60))
-		  | "event=tick-overdue due=\($w2.due) late=\($late | floor)s interval=\($w2.interval_s // 60)s" )
+		  | "event=tick-overdue due=\($w2.due) late=\($late | floor)s interval=\($w2.interval_s // 60)s" ),
+		# THE INTERVAL IS UNRECONCILED, and this is the other half of the line above (quince#58,
+		# Operator ruling 2026-07-27). `tick-overdue` already names a gap the watch could not see.
+		# What was missing is that the FINDINGS of a catch-up tick must not read as a complete account
+		# of it: a tick diffs the current queue against the stored observation, so a PR that opened
+		# AND closed inside the gap leaves no trace at all. "No events" is then a claim about the
+		# ENDPOINTS presented as a claim about the INTERVAL — not wrong, UNFALSIFIABLE, which is the
+		# class this project keeps paying for.
+		#
+		# The honest statement is "no SURVIVING change", never "nothing happened". Those are the two
+		# claims the retiring architect separated when filing this, after making the stronger one
+		# four times in one session.
+		#
+		# WHAT THIS DELIBERATELY DOES NOT DO: reconcile against the events API. Ruled out explicitly
+		# — its retention is limited, so it fails in exactly the long-gap case the issue worries
+		# about most, and it is a far larger build than the honesty it buys. Requirement 1 of the
+		# issue stays unbuilt on purpose; requirement 3 IS the issue.
+		#
+		# It rides BESIDE `tick-overdue` and does not wake on its own (`wake_worthy` drops it): the
+		# two always co-occur, so a second waking line would be noise on a signal already firing.
+		# Printed, never woken on — the distinction quince#242 draws everywhere else.
+		( .watch as $w3
+		  | select($w3 != null and ($w3.due // null) != null)
+		  | ($t - ($w3.due | fromdate)) as $late
+		  | select($late > ($w3.interval_s // 60))
+		  | "event=unreconciled from=\(.last_tick // $w3.last_watcher_tick // "unknown") to=\($t | todate) basis=state-diff" )
 		' "$_st" || die "could not read watch state: $_st"
 
 	# The declared blocking set, and its AGE — printed only when there is one, so a state file that
@@ -1766,8 +1792,15 @@ EOF
 			# are normalised rather than asserted — a fixture that pinned them would fail on a loaded
 			# machine and teach everyone to ignore it. The EXIT CLASS is asserted, as a line, because it
 			# is the part a caller reads when it ignores stdout.
+			#
+			# `to=` on an `unreconciled` line is the SAME KIND OF FACT and needs the same treatment
+			# (quince#58): it is the moment the loop happened to run, so pinning it would produce a
+			# fixture that passes on the day it is written and fails every day after. `from=` is NOT
+			# normalised, deliberately — it comes from the fixture's own state file, so it is a
+			# property of the fixture and asserting it is the point.
 			_got=$(printf '%s\n' "$_out" | grep '^event=' |
-				sed 's/elapsed=[0-9]*s/elapsed=Ns/; s/ticks=[0-9]*/ticks=N/; s/late=[0-9]*s/late=Ns/' || true)
+				sed 's/elapsed=[0-9]*s/elapsed=Ns/; s/ticks=[0-9]*/ticks=N/; s/late=[0-9]*s/late=Ns/;
+				     s/\(event=unreconciled .*\)to=[^ ]*/\1to=NOW/' || true)
 			_got=$(printf '%s\nexit=%s\n' "$_got" "$_rc" | grep -v '^$' | sort)
 			_want=$(jq -r '.expect_events[], "exit=\(.expect_exit)"' "$_f" | sort)
 			compare_events "$(basename "$_f")" "$_got" "$_want" || _fail=1
@@ -3188,6 +3221,11 @@ wake_worthy() {
 	_ww_first=${2:-later}
 	awk -v first="$_ww_first" '
 		first == "first" && /^event=tick-overdue/ { next }
+		# `unreconciled` never wakes, on any tick. It is a CAVEAT ON THE REPORT rather than a thing
+		# that happened — it says the interval beside it cannot be accounted for, and it is emitted
+		# only alongside `tick-overdue`, which already wakes on every tick but the first. Waking on
+		# both would double every re-arm for one fact (quince#58).
+		/^event=unreconciled/ { next }
 		function repo(l,   i, n, a) {
 			n = split(l, a, " ")
 			for (i = 1; i <= n; i++)

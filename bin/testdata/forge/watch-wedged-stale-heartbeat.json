@@ -1,16 +1,23 @@
 {
   "kind": "watch",
-  "note": "The failure a pid check alone cannot see: the process is alive and it stopped ticking. `pid_alive=yes` would read as healthy to any supervisor that asked only 'is it running', which is the same shape as asking a monitor 'did anything change' when it never looked. Three missed intervals (FORGE_STALE_TICKS) is the threshold; the overdue event fires beside the classification rather than instead of it, because 'the watcher is wedged' and 'a tick was missed' are two facts and either can be true without the other. Its mirror is watch-live-nothing-to-do.json, where the same live pid with a fresh heartbeat is correctly healthy — neither instrument decides alone. WEDGED IS ITS OWN CLASS, and that was a review finding: it first shared `watch=dead`, exit 3, and the identical 'RE-ARM from this state' note with watch-dead-not-absent.json, whose process is GONE. The two need opposite remedies — here a process is still running by definition, so re-arming beside it puts two watchers on one state file (quince#50), and the duplicate is then not an unlucky race but the designed path, reached by doing what the tool said. This fixture pins the differing note and the differing exit class; pinning them as identical, which it previously did, is what would have kept them identical.",
+  "note": "The failure a pid check alone cannot see: the process is alive and it stopped ticking. `pid_alive=yes` would read as healthy to any supervisor that asked only 'is it running', which is the same shape as asking a monitor 'did anything change' when it never looked. Three missed intervals (FORGE_STALE_TICKS) is the threshold; the overdue event fires beside the classification rather than instead of it, because 'the watcher is wedged' and 'a tick was missed' are two facts and either can be true without the other. Its mirror is watch-live-nothing-to-do.json, where the same live pid with a fresh heartbeat is correctly healthy — neither instrument decides alone. WEDGED IS ITS OWN CLASS, and that was a review finding: it first shared `watch=dead`, exit 3, and the identical 'RE-ARM from this state' note with watch-dead-not-absent.json, whose process is GONE. The two need opposite remedies — here a process is still running by definition, so re-arming beside it puts two watchers on one state file (quince#50), and the duplicate is then not an unlucky race but the designed path, reached by doing what the tool said. This fixture pins the differing note and the differing exit class; pinning them as identical, which it previously did, is what would have kept them identical. SINCE quince#58 the report also carries event=unreconciled, and a WEDGED watch is the sharper case for it: the process is still alive, so nothing looks broken, and the interval since the last heartbeat is unobserved exactly as if it had died.",
   "state": {
-    "observed": true, "prs": [], "last_tick": "2026-07-26T10:00:00Z",
-    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-26T10:00:00Z",
-               "due": "2026-07-26T10:01:00Z" }
+    "observed": true,
+    "prs": [],
+    "last_tick": "2026-07-26T10:00:00Z",
+    "watch": {
+      "pid": 4242,
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-26T10:00:00Z",
+      "due": "2026-07-26T10:01:00Z"
+    }
   },
   "now": "2026-07-26T10:10:00Z",
   "pid_alive": "yes",
   "expect": [
     "watch=wedged state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-26T10:00:00Z age=600s reason=stale_heartbeat",
     "note: pid 4242 is running and has stopped ticking. Run `forge-watch stop` — it verifies the pid is still OUR watcher before signalling, and refuses if it was recycled. Then re-arm from this state; do not reseed it.",
-    "event=tick-overdue due=2026-07-26T10:01:00Z late=540s interval=60s"
+    "event=tick-overdue due=2026-07-26T10:01:00Z late=540s interval=60s",
+    "event=unreconciled from=2026-07-26T10:00:00Z to=2026-07-26T10:10:00Z basis=state-diff"
   ]
 }

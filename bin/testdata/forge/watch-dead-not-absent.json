@@ -1,19 +1,33 @@
 {
   "kind": "watch",
-  "note": "CASE 2, the one the original requirement could not check. State on disk, no process behind the recorded pid: this is `dead`, and it must be distinguishable from `absent`, because the response differs — a dead watch is RE-ARMED from its own state, while a cold start is seeded. Collapsing them is how a restarted watch silently becomes a fresh one that has 'seen nothing changed' since a beginning it invented. Timeline behind it: a host-client reconnect at 09:58:38Z on 2026-07-26 restarted the session process and dropped the pending wakeup; three PRs opened into the gap and the watch reported healthy for 44 minutes (quince-devlog#13).",
+  "note": "CASE 2, the one the original requirement could not check. State on disk, no process behind the recorded pid: this is `dead`, and it must be distinguishable from `absent`, because the response differs — a dead watch is RE-ARMED from its own state, while a cold start is seeded. Collapsing them is how a restarted watch silently becomes a fresh one that has 'seen nothing changed' since a beginning it invented. Timeline behind it: a host-client reconnect at 09:58:38Z on 2026-07-26 restarted the session process and dropped the pending wakeup; three PRs opened into the gap and the watch reported healthy for 44 minutes (quince-devlog#13). SINCE quince#58 THE REPORT ALSO CARRIES event=unreconciled: tick-overdue names the gap, and this line says the catch-up cannot account for what happened inside it — a state diff compares endpoints, so a PR that opened AND closed in there leaves no trace. Without it the pair reads as a complete account of the interval.",
   "state": {
     "observed": true,
-    "prs": [ { "number": 35, "state": "OPEN", "updatedAt": "2026-07-26T09:40:00Z",
-      "merge_state": "BLOCKED", "checks": [], "reviews": [], "activity": [] } ],
+    "prs": [
+      {
+        "number": 35,
+        "state": "OPEN",
+        "updatedAt": "2026-07-26T09:40:00Z",
+        "merge_state": "BLOCKED",
+        "checks": [],
+        "reviews": [],
+        "activity": []
+      }
+    ],
     "last_tick": "2026-07-26T09:56:16Z",
-    "watch": { "pid": 4242, "interval_s": 60, "last_watcher_tick": "2026-07-26T09:56:16Z",
-               "due": "2026-07-26T09:57:16Z" }
+    "watch": {
+      "pid": 4242,
+      "interval_s": 60,
+      "last_watcher_tick": "2026-07-26T09:56:16Z",
+      "due": "2026-07-26T09:57:16Z"
+    }
   },
   "now": "2026-07-26T10:40:19Z",
   "pid_alive": "no",
   "expect": [
     "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=2026-07-26T09:56:16Z age=2643s reason=no_process",
     "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued.",
-    "event=tick-overdue due=2026-07-26T09:57:16Z late=2583s interval=60s"
+    "event=tick-overdue due=2026-07-26T09:57:16Z late=2583s interval=60s",
+    "event=unreconciled from=2026-07-26T09:56:16Z to=2026-07-26T10:40:19Z basis=state-diff"
   ]
 }
