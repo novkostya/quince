@@ -77,6 +77,22 @@ if [ -f "$CODER_KEY" ]; then
 		"This machine can approve; holding the implementer identity too would let one box author" \
 		"and approve its own work. Remove it, or run gh-coder on the implementer box."
 fi
+# THE THIRD SEAT AUTHORS TOO, AND THIS WRAPPER DID NOT KNOW IT EXISTED (quince#375). The analyst App
+# holds `contents: write` + `pull_requests: write`, so `quince-analyst.pem` is an AUTHORING credential
+# — and this check's question is not "is the implementer here" but "can this box author", which is
+# why the two are not the same rule. A box holding the reviewer key and the analyst key can open a
+# pull request as the analyst and approve it as the architect, and until this line nothing refused.
+#
+# It is quince#204's finding from the other end: there, a rule naming one MECHANISM went false when
+# the mechanism moved; here, a rule naming two IDENTITIES goes false when a third appears. The
+# defence is the same and so is the reason it was invisible — every existing check was correct.
+ANALYST_KEY="${QUINCE_ANALYST_KEY_FILE:-$_home/.config/quince/quince-analyst.pem}"
+if [ -f "$ANALYST_KEY" ]; then
+	die "an ANALYST APP KEY is present at $ANALYST_KEY." \
+		"That seat AUTHORS pull requests (quince#375). This machine can approve; holding an authoring" \
+		"identity too would let one box open a change and cast the verdict on it." \
+		"Remove it, or run gh-analyst on the supervisor box."
+fi
 # The bot token stays a refusal alongside it: `decisions/0014` condition 1 requires that credential
 # to be left in place wherever it lives, so a box can hold it AND the App key, and both are the
 # implementer identity. Refusing beside either is the only reading that stays true.

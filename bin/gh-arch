@@ -50,6 +50,19 @@ if [ -f "$CODER_KEY" ]; then
 	printf 'gh-arch: author and approve its own work. Remove it, or run gh-coder on the implementer box.\n' >&2
 	exit 1
 fi
+# THE THIRD SEAT AUTHORS TOO, AND THIS WRAPPER DID NOT KNOW IT EXISTED (quince#375). The analyst App
+# holds `contents: write` + `pull_requests: write`, so `quince-analyst.pem` is an AUTHORING credential.
+# This seat MERGES, which is worse than approving: a box that can author and merge is the whole of
+# what the seat separation exists to prevent, and until this line a box holding the architect token
+# beside the analyst key could do both with nothing anywhere refusing.
+ANALYST_KEY="${QUINCE_ANALYST_KEY_FILE:-$_home/.config/quince/quince-analyst.pem}"
+if [ -f "$ANALYST_KEY" ]; then
+	printf 'gh-arch: an ANALYST APP KEY is present at %s.\n' "$ANALYST_KEY" >&2
+	printf 'gh-arch: that seat AUTHORS pull requests (quince#375). This seat merges, and one box that\n' >&2
+	printf 'gh-arch: can author and merge is what the seat separation exists to prevent.\n' >&2
+	printf 'gh-arch: Remove it, or run gh-analyst on the supervisor box.\n' >&2
+	exit 1
+fi
 # The bot token stays a refusal alongside it: `decisions/0014` condition 1 requires that credential
 # to be left in place wherever it lives, so a box can hold it AND the App key, and both are the
 # implementer identity. Refusing beside either is the only reading that stays true.

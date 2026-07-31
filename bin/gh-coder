@@ -64,6 +64,23 @@ if [ -f "$ARCH_TOKEN" ]; then
 		"That seat merges. A box that can author and merge is the whole of what the two-seat design" \
 		"exists to prevent. Remove it, or run gh-arch on the architect box."
 fi
+# THE THIRD SEAT CAN APPROVE, WHICH IS WHY IT BELONGS IN THIS LIST (quince#375). The checks above
+# refuse the APPROVING credentials, because this wrapper authors. `pull_requests: write` lets the
+# analyst App submit a review, so a box holding the coder key beside `quince-analyst.pem` could author
+# with this wrapper and approve its own work with `gh-analyst` — the same defect as the two above,
+# through an identity that did not exist when they were written.
+#
+# quince#375's ceremony did NOT measure an approval, deliberately: the honest tests either approve
+# something real or wait for an analyst PR to be refused on principle. The grant is declared and the
+# refusal is written against the DECLARED capability rather than a measured one, because a boundary
+# check is a claim about what a box COULD do (quince#232).
+ANALYST_KEY="${QUINCE_ANALYST_KEY_FILE:-$_home/.config/quince/quince-analyst.pem}"
+if [ -f "$ANALYST_KEY" ]; then
+	die "an ANALYST APP KEY is present at $ANALYST_KEY." \
+		"That seat can cast a review verdict (quince#375). This machine authors; holding an identity" \
+		"that can approve would let one box write a change and approve it." \
+		"Remove it, or run gh-analyst on the supervisor box."
+fi
 
 # NOT a refusal: a suspended `quince-bot` token may still sit beside this key, and decision 0014
 # requires that it be left in place. Both are the IMPLEMENTER identity, so holding them together
