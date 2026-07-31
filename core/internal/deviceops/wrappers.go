@@ -185,6 +185,17 @@ var ErrWifiSyncUnverifiable = errors.New("wi-fi sync key is unmeasured; refusing
 // which is a state to surface, not an operation to repeat.
 var ErrWifiSyncNotApplied = errors.New("device reported success but the value did not change")
 
+// ErrWifiSyncUnreadable is the write that was ACCEPTED and could not be read back — distinct from
+// ErrWifiSyncNotApplied, which asserts the state is UNCHANGED. Conflating the two put a false
+// sentence in front of the user: `contracts.md` defines `wifi_sync_not_applied` as "accepted and not
+// applied; the state is UNCHANGED, not unknown", and a failed read establishes neither half of that
+// (quince#363, ruled 2026-07-31).
+//
+// It is not always a failure. Disabling over Wi-Fi severs the transport the read-back would use, so
+// on that one path this error IS the expected consequence of success — see runWifiSync, which is
+// where that judgement belongs, because only the caller knows the action and the transport.
+var ErrWifiSyncUnreadable = errors.New("write accepted but the value could not be read back")
+
 // SetWifiSync writes the device's Wi-Fi-sync flag and VERIFIES IT LANDED, per decisions/0004 — a
 // mutation must be verified to have mutated.
 //
@@ -213,7 +224,8 @@ func (t *Tools) SetWifiSync(ctx context.Context, udid, transport string, enable 
 	// a user would see rather than a private notion of success.
 	got := t.wifiSync(ctx, udid, transport)
 	if got == "unknown" {
-		return fmt.Errorf("%w: read-back failed, so the write is unconfirmed", ErrWifiSyncNotApplied)
+		// NOT "not applied" — nothing here says the value is unchanged, only that it is unread.
+		return fmt.Errorf("%w: the read-back returned no value", ErrWifiSyncUnreadable)
 	}
 	if (got == "on") != enable {
 		return fmt.Errorf("%w: wanted %s, device still reports %s", ErrWifiSyncNotApplied, want, got)

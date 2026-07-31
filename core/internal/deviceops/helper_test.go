@@ -149,6 +149,20 @@ func fakeWifiSync(scenario string) {
 	case "wifi_read_failed":
 		fmt.Fprintln(os.Stderr, "ERROR: Could not connect to lockdownd")
 		os.Exit(1)
+	case "wifi_set_then_unreadable":
+		// The hardware case (quince#363): the write LANDS and the device is unreachable by the time
+		// the read-back runs, because turning Wi-Fi sync off is what removed the connection. The set
+		// branch deliberately records no state, so this read has nothing to report and fails exactly
+		// as the real one did.
+		fmt.Fprintln(os.Stderr, "ERROR: Could not connect to lockdownd on device")
+		os.Exit(1)
+	case "wifi_disable_lies":
+		// wifi_set_lies mirrored for the DISABLE direction. It reports a fixed `true` — the old
+		// value — so a disable that the device silently ignored is expressible at all. wifi_set_lies
+		// reports a fixed `false`, which a disable legitimately matches, so it can only catch a lying
+		// ENABLE. Two scenarios rather than one for the reason its own comment gives: a scenario that
+		// only fails in one argument direction is a test that passes by luck.
+		fmt.Println("true")
 	case "wifi_garbage":
 		fmt.Println("perhaps")
 	default:
@@ -319,6 +333,14 @@ func fakeSetWifiSync(scenario, want string) {
 	case "wifi_set_lies":
 		// The device accepts the request and does not apply it. Exit 0, and the read-back
 		// (fakeWifiSync, scenario unchanged) keeps answering the OLD value.
+		os.Exit(0)
+	case "wifi_set_then_unreadable":
+		// The write SUCCEEDS — and records nothing, so the read-back cannot fall through to the
+		// state file and instead takes its own failing branch. That ordering is the whole scenario:
+		// a successful write whose success is what makes the verification impossible.
+		os.Exit(0)
+	case "wifi_disable_lies":
+		// Accepts and applies nothing, recording no state so the read-back reports the OLD value.
 		os.Exit(0)
 	default:
 		// A real set: record it so the read-back in the same test reports the new value.
