@@ -190,6 +190,28 @@ Each is independently checkable. **1, 2, 6 and 7 need no hardware. 3, 8 and 9 do
    unchanged must surface as a failed op with a distinguishable message. `decisions/0004` — *a
    mutation must be verified to have mutated* — applies directly, so the op **re-reads** and
    compares rather than trusting the exit code.
+   **RULED 2026-07-31 — story 7 has one exception, because on one path SUCCESS destroys the
+   evidence** ([quince#363](https://github.com/novkostya/quince/issues/363)). Disabling over Wi-Fi
+   severs the connection the read-back would use, so the verification cannot run. Measured on
+   hardware: the set returned cleanly, the read-back failed 378 ms later, and the op reported *"the
+   device accepted the change but did not apply it; Wi-Fi sync is unchanged"* — about a device that
+   **had** changed, had left Wi-Fi, and needed a cable. Every clause was false.
+
+   - **The op SUCCEEDS** on the conjunction `disable` **and** over `wifi` **and** a clean set **and**
+     a read-back that returned *no value*. Anything else keeps its error.
+   - **The value becomes `unknown`, never an inferred `off`.** Nothing read the flag. `unknown` is
+     correct whichever way a later cable measurement lands, self-heals on the next USB read, and
+     cannot persist a wrong value into SQLite the way an inferred `off` would — the shape that hid
+     quince#350 for four rungs.
+   - **The operation and the value are different facts**, so `succeeded` with `unknown` is not a
+     contradiction; the narration carries the nuance and must not claim a read that did not happen.
+   - **Unchanged:** a read-back that *succeeds* and reports the old value is a lying write and stays
+     a failed op. The gap was only ever between *"reads back unchanged"* and *"cannot be read back"*.
+
+   **Still owed:** `docs/contracts.md` has no code for *"accepted, read-back could not run"* on the
+   paths that are **not** forgiven, so they currently fall to the generic `wifi_sync_failed`. Adding
+   one is a code-owned change needing the Operator's approval.
+
 8. **Hardware gate (the rung's acceptance).** A device whose Wi-Fi sync is **off** reads back
    `off` in quince, is turned `on` through quince alone with on-device steps narrated, and then
    completes a **Wi-Fi backup with no Mac ever involved.**

@@ -308,6 +308,23 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 	m.log.Info("deviceops: wifi_sync starting", "op", opID, "udid", udid, "action", action, "transport", transport)
 
 	if err := m.tools.SetWifiSync(ctx, udid, transport, action == "enable"); err != nil {
+		// DISABLING OVER WI-FI SEVERS THE READ-BACK, AND THAT IS SUCCESS, NOT FAILURE.
+		//
+		// The write removes the device's ability to answer over the transport the write ran on, so
+		// the verification cannot run — success and unverifiability are the same event, on this one
+		// path. Reporting failure told the Operator "the device accepted the change but did not
+		// apply it; Wi-Fi sync is unchanged" about a device that HAD changed and had left Wi-Fi,
+		// and could only be recovered with a cable. Every clause was false (quince#363).
+		//
+		// RECOGNISED, NOT GUESSED — the conjunction is deliberately narrow, and each clause carries
+		// weight. Only a disable, only over Wi-Fi, only after a clean set, and only when the
+		// read-back returned NO VALUE. A read-back that succeeds and reports the old value is a
+		// genuine lying write and keeps its error; a read-back that fails on any other path has no
+		// causal story explaining it and must not borrow this exemption.
+		if errors.Is(err, ErrWifiSyncUnreadable) && action == "disable" && transport == TransportWiFi {
+			m.wifiSyncDisableUnreadable(opID, udid, transport)
+			return
+		}
 		m.log.Warn("deviceops: wifi_sync failed",
 			"op", opID, "udid", udid, "action", action, "transport", transport, "error", err)
 		// Three failures the user must be able to tell apart, because the remedy differs and only
@@ -364,6 +381,53 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		m.reEnrich(udid, transport)
 	}
 	m.auditEvent("device.wifi_sync."+action, udid, "ok")
+}
+
+// wifiSyncDisableUnreadable handles the one path where a failed read-back means the write WORKED:
+// disabling over Wi-Fi, which severs the connection the read-back would use.
+//
+// THE OP SUCCEEDS AND THE VALUE BECOMES `unknown`, and those are not in tension — they are different
+// facts. The operation was sent, accepted, and produced its expected consequence; the value is
+// simply unread. Ruled 2026-07-31 (quince#363).
+//
+// `unknown` rather than an inferred `off`, which was the tempting answer and is the wrong one:
+//
+//   - nobody has confirmed by cable that the flag is false — the evidence is the device leaving
+//     Wi-Fi, which is strong but indirect, so `off` is a claim that a pending measurement could
+//     falsify while `unknown` is correct either way;
+//   - Enrich writes through to SQLite, so a wrong inference would PERSIST as a confident value with
+//     nothing to contradict it — the shape that hid quince#350 for four rungs;
+//   - `unknown` self-heals. The next enrichment over USB reads the truth and the badge corrects
+//     itself; a wrong `off` is only ever corrected by someone noticing.
+//
+// The tri-state exists for "quince has not read the flag". This is exactly that.
+func (m *Manager) wifiSyncDisableUnreadable(opID, udid, transport string) {
+	m.log.Info("deviceops: wifi_sync disable accepted, read-back unreachable — reporting success with an unknown value",
+		"op", opID, "udid", udid, "action", "disable", "transport", transport)
+
+	m.setOp(opID, "succeeded", wifiSyncDisconnectedMsg(), nil)
+
+	// Publish `unknown` rather than leaving the stale `on` standing: the badge then hides itself
+	// instead of asserting a value quince has not read.
+	if dev, ok := m.devs.Device(udid); ok {
+		m.devs.Enrich(udid, device.Identity{
+			Name: dev.Name, Model: dev.Model, IOSVersion: dev.IOSVersion,
+			Paired: dev.Paired, BackupEncryption: dev.BackupEncryption,
+			WifiSync: "unknown",
+		})
+	}
+	m.auditEvent("device.wifi_sync.disable", udid, "ok_unreadable")
+}
+
+// wifiSyncDisconnectedMsg narrates the case above. Three clauses and no more, and NOT ONE of them
+// claims a read that did not happen: what quince did, why the device is gone, and what the user
+// does next. "as far as quince could tell" is load-bearing — the alternative wordings all quietly
+// assert the value was verified.
+func wifiSyncDisconnectedMsg() string {
+	return "Wi-Fi sync is off on the device as far as quince could tell — the change was accepted " +
+		"and the device then left Wi-Fi, which is what turning this off does. quince cannot read the " +
+		"setting back over a connection that no longer exists. Reconnect by cable to confirm it or " +
+		"turn it back on."
 }
 
 func wifiSyncStartMsg(action string) string {

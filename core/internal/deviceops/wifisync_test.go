@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/wire"
@@ -336,5 +337,112 @@ func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing
 			t.Errorf("Identity.%s = %v, want %v — Enrich REPLACES the identity, so a field missing "+
 				"from runWifiSync's literal is published empty", name, gv.Field(i).Interface(), want.Interface())
 		}
+	}
+}
+
+// wifiDevice is the transport that matters for the disable exemption: Wi-Fi and NOT USB. A device on
+// both would run the op over USB (opTransport prefers it), where nothing is severed.
+func pairedWiFiDevice(udid string) wire.Device {
+	now := wire.Now()
+	d := wire.Device{UDID: udid, Transports: wire.Transports{WiFi: &now}}
+	d.Paired = "yes"
+	return d
+}
+
+// THE RULED CASE (quince#363). Disabling over Wi-Fi severs the connection the read-back would use,
+// so the verification cannot run — success and unverifiability are the same event. Reporting failure
+// told the Operator "the device accepted the change but did not apply it; Wi-Fi sync is unchanged"
+// about a device that HAD changed, had left Wi-Fi, and needed a cable. Every clause was false.
+func TestWifiSyncDisableOverWifiSucceedsWhenTheReadBackCannotRun(t *testing.T) {
+	devs := newFakeDevices()
+	dev := pairedWiFiDevice(fakeUDID)
+	dev.Name, dev.Model, dev.IOSVersion = "dev-name", "dev-model", "dev-ios"
+	dev.BackupEncryption, dev.WifiSync = "on", "on"
+	devs.add(dev)
+	m := newWifiManager(t, devs, "wifi_set_then_unreadable")
+
+	opID, status, reason := m.WifiSync(context.Background(), fakeUDID, "disable")
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d (%s), want 202", status, reason)
+	}
+	op := waitOp(t, m, opID)
+
+	if op.State != "succeeded" {
+		t.Fatalf("op.State = %q, want succeeded — the write landed; only the verification could not run", op.State)
+	}
+	if op.Error != nil {
+		t.Fatalf("op.Error = %+v, want nil", op.Error)
+	}
+	// The message must not assert a value quince never read, and must name the remedy.
+	if !strings.Contains(op.Message, "cable") {
+		t.Fatalf("message must name the cable as the remedy, got %q", op.Message)
+	}
+	if strings.Contains(op.Message, "unchanged") {
+		t.Fatalf("message must not claim the setting is unchanged, got %q", op.Message)
+	}
+
+	// `unknown`, NEVER an inferred `off`: nothing read the flag, and a wrong `off` would PERSIST
+	// through Enrich into SQLite as a confident value. `unknown` self-heals on the next USB read.
+	got, ok := devs.lastEnrich(fakeUDID)
+	if !ok {
+		t.Fatal("nothing was published — the badge would keep showing the stale `on`")
+	}
+	if got.WifiSync != "unknown" {
+		t.Fatalf("published wifi_sync = %q, want %q — an inferred value is a claim nobody verified", got.WifiSync, "unknown")
+	}
+	// The rest of the identity must survive: Enrich replaces it wholesale.
+	if got.Name != "dev-name" || got.Model != "dev-model" || got.BackupEncryption != "on" {
+		t.Fatalf("publishing the unknown blanked the identity: %+v", got)
+	}
+}
+
+// THE EXEMPTION IS NARROW, and this is the half that keeps it honest. Each clause of the conjunction
+// is dropped in turn; every one of them must still FAIL. Without this, "read-back failed" would
+// become a blanket excuse and a genuinely broken write on any other path would report success.
+func TestWifiSyncUnreadableIsOnlyForgivenOnTheDisableOverWifiPath(t *testing.T) {
+	for _, tc := range []struct {
+		name, action string
+		dev          wire.Device
+	}{
+		// Enabling does not sever anything, so an unreadable read-back has no causal story.
+		{"enable over wifi", "enable", pairedWiFiDevice(fakeUDID)},
+		// Over USB the connection survives the write, so the read-back should have worked.
+		{"disable over usb", "disable", pairedUSBDevice(fakeUDID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			devs := newFakeDevices()
+			d := tc.dev
+			d.WifiSync = "on"
+			devs.add(d)
+			m := newWifiManager(t, devs, "wifi_set_then_unreadable")
+
+			opID, status, _ := m.WifiSync(context.Background(), fakeUDID, tc.action)
+			if status != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202", status)
+			}
+			op := waitOp(t, m, opID)
+			if op.State != "failed" {
+				t.Fatalf("op.State = %q, want failed — only disable-over-Wi-Fi explains an unreadable read-back", op.State)
+			}
+		})
+	}
+}
+
+// A read-back that SUCCEEDS and reports the old value is a genuine lying write and keeps its own
+// error. Pinned beside the exemption because the two are one line apart in the manager, and the
+// whole point of quince#363 is that they had been conflated.
+func TestWifiSyncStillFailsWhenTheDeviceReadsBackUnchanged(t *testing.T) {
+	devs := newFakeDevices()
+	devs.add(pairedWiFiDevice(fakeUDID))
+	m := newWifiManager(t, devs, "wifi_disable_lies")
+
+	opID, _, _ := m.WifiSync(context.Background(), fakeUDID, "disable")
+	op := waitOp(t, m, opID)
+
+	if op.State != "failed" {
+		t.Fatalf("op.State = %q, want failed — the device read back and had not changed", op.State)
+	}
+	if op.Error == nil || op.Error.Code != "wifi_sync_not_applied" {
+		t.Fatalf("op.Error = %+v, want wifi_sync_not_applied", op.Error)
 	}
 }
