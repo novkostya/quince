@@ -185,5 +185,48 @@ expect "an unusable matcher refuses rather than falling back" 2 "not found" \
 expect "a clean run names the surfaces it scanned" 0 "commit-messages" \
 	sh -c "cd '$MREPO' && '$CHECK' --ref main..topic"
 
+
+# --- THE SECOND DIRECTION: a keyword that binds to NOTHING (quince#315) --------------------------
+#
+# Measured before this was built: 39 of 98 merged PRs in `quince` carry a bound closing reference
+# and 0 of 32 in `quince-devlog` do — and the boundary is sharp. quince#288 (10:00, 2026-07-30) is
+# the last to bind; everything from #289 on binds nothing, which is 38 minutes BEFORE this gate
+# merged. So the convention did it and the gate locked it in, rather than the gate causing it.
+printf 'Closes quince#307.\n' >"$WORK/inert.md"
+expect "a repo-shorthand closing line is a finding — it binds to nothing" 1 "BOUND TO NOTHING" \
+	./bin/closing-refs-check --text "$WORK/inert.md"
+
+printf 'Closes novkostya/quince#307.\n' >"$WORK/qualified-closing.md"
+expect "a FULLY qualified closing line is clean — owner/repo#N binds" 0 "clean" \
+	./bin/closing-refs-check --text "$WORK/qualified-closing.md"
+
+# THE CONTROL THAT SHAPED THE IMPLEMENTATION. The first version matched the keyword anywhere on the
+# line and flagged this — prose narrating a close that already happened, which binds to nothing and
+# is exactly what the author wants. The existing suite caught it. An INERT reference in prose is not
+# a defect: unlike a bare one, it does nothing, so there is nothing to warn about.
+printf 'Refs quince#282, and quince#291 closed quince#290 on merge.\n' >"$WORK/narration.md"
+expect "prose NARRATING a close is not a closing line" 0 "clean" \
+	./bin/closing-refs-check --text "$WORK/narration.md"
+
+# The surfaces a closing line really wears in this repository's PR bodies.
+printf -- '- Fixes quince-devlog#159\n' >"$WORK/bullet.md"
+expect "a bulleted closing line is still a closing line" 1 "BOUND TO NOTHING" \
+	./bin/closing-refs-check --text "$WORK/bullet.md"
+
+printf '**Closes quince#12**\n' >"$WORK/bold.md"
+expect "a bolded closing line is still a closing line" 1 "BOUND TO NOTHING" \
+	./bin/closing-refs-check --text "$WORK/bold.md"
+
+# BOTH DIRECTIONS AT ONCE must exit 1 and name both, because a body can carry one of each and a
+# reader who fixes only the loud one has fixed half.
+printf 'Closes #307.\nCloses quince#308.\n' >"$WORK/both.md"
+expect "a bare AND an inert reference both report" 1 "BOUND TO NOTHING" \
+	./bin/closing-refs-check --text "$WORK/both.md"
+_both=$(./bin/closing-refs-check --text "$WORK/both.md" 2>&1 || true)
+case "$_both" in
+*"CLOSING REFERENCE"*) ok "…and the bare one is still named alongside it" ;;
+*) bad "the inert finding masked the bare one — a reader would fix half" ;;
+esac
+
 printf '\nclosing-refs-check-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
