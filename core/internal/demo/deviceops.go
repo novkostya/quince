@@ -112,6 +112,51 @@ func (p *Provider) scriptEncryption(opID, udid, action string) {
 	}
 }
 
+// WifiSync scripts a Wi-Fi-sync op with the same validation the real manager applies.
+func (p *Provider) WifiSync(_ context.Context, udid, action string) (string, int, string) {
+	p.mu.RLock()
+	dev, ok := p.devices[udid]
+	p.mu.RUnlock()
+	if !ok {
+		return "", http.StatusNotFound, "no such device"
+	}
+	if dev.Paired != "yes" {
+		return "", http.StatusConflict, "device is not paired with this host"
+	}
+	if action != "enable" && action != "disable" {
+		return "", http.StatusUnprocessableEntity, "unknown action: " + action
+	}
+	opID := id.New()
+	msg := "Turning off Wi-Fi sync…"
+	if action == "enable" {
+		msg = "Turning on Wi-Fi sync so this device can back up without a cable…"
+	}
+	p.setOp(wire.Op{ID: opID, UDID: udid, Kind: "wifi_sync", State: "running", Message: msg})
+	go p.scriptWifiSync(opID, udid, action)
+	return opID, http.StatusAccepted, ""
+}
+
+// scriptWifiSync deliberately has NO waiting_for_user step. Whether iOS demands an on-device
+// confirmation for a lockdown write is unmeasured — it is one of qn.7's open questions — and
+// scripting a passcode prompt the real op may never emit would make the demo teach a flow that
+// does not exist. If hardware shows a confirmation, this gains one then.
+func (p *Provider) scriptWifiSync(opID, udid, action string) {
+	time.Sleep(900 * time.Millisecond)
+	on := action == "enable"
+	msg := "Wi-Fi sync is off. This device will only back up over USB."
+	if on {
+		msg = "Wi-Fi sync is on. This device can now back up over Wi-Fi."
+	}
+	p.setOp(wire.Op{ID: opID, UDID: udid, Kind: "wifi_sync", State: "succeeded", Message: msg})
+	p.flipDevice(udid, func(d *wire.Device) {
+		if on {
+			d.WifiSync = "on"
+		} else {
+			d.WifiSync = "off"
+		}
+	})
+}
+
 // flipDevice mutates the device under lock and announces device.updated.
 func (p *Provider) flipDevice(udid string, mutate func(*wire.Device)) {
 	p.mu.Lock()

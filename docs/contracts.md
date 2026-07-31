@@ -66,6 +66,24 @@ POST /api/devices/{udid}/encryption
      // that state to the UI.
      // NOTE: this is Apple's device-global backup password — the SAME password later
      // used to unlock versions in the vault. quince sets it, never keeps it.
+POST /api/devices/{udid}/wifi-sync
+     {action: "enable" | "disable"}                         → 202 {op_id} | 404 | 409 | 422
+     // qn.7, ruled at that rung's spec review (quince#332). Writes lockdown
+     // com.apple.mobile.wireless_lockdown/EnableWifiConnections so Wi-Fi backups can be
+     // turned on WITHOUT Finder — the D12 "everything in quince" promise for the PRIMARY
+     // transport. 409: not connected, or NOT PAIRED — a lockdown write needs a trusted
+     // session, and "not paired" is a state the user can act on where "the device
+     // rejected it" is not. 422: unknown action.
+     // NO PASSWORD, and that is a design point rather than an omission: the value is a
+     // boolean, so this op uses the plain argv path, NOT the pty machinery that exists to
+     // keep a password out of argv.
+     // THE OP VERIFIES ITS OWN WRITE (decisions/0004). lockdownd_set_value succeeding means
+     // the device ACCEPTED the request, not that the setting took effect — unverified for
+     // this domain, which quince had never written before. So the op re-reads and compares,
+     // and reports three distinguishable failures because the remedy differs:
+     //   wifi_sync_failed        the device rejected it — retryable
+     //   wifi_sync_not_applied   accepted and not applied; the state is UNCHANGED, not unknown
+     //   wifi_sync_unavailable   this build does not know the key, so quince will not guess
 POST /api/devices/{udid}/reset-working → 202 {note} | 404 | 409 | 503
      // qn.5b Reset (accepted contract proposal, decisions (co)): DISCARD the device's dirty
      // working/ so the next backup starts clean from latest/ — losing only the partial, NEVER a
@@ -280,10 +298,19 @@ Version: {
   // silently shrink history, masking exactly the drift a soak exists to surface.
 }
 
-Op: { "id": "...", "udid": "...", "kind": "pair" | "encryption",
+Op: { "id": "...", "udid": "...", "kind": "pair" | "encryption" | "wifi_sync",
       "state": "running" | "waiting_for_user" | "succeeded" | "failed",
       "message": "Tap Trust on the phone…",   // plain-language narration for the UI
       "error": {"code", "message"} | null }
+     // `wifi_sync` added at qn.7 and ruled at that rung's spec review (quince#332). An ENUM
+     // EXTENSION, which this document's header does not classify — it covers field additions
+     // and breaking changes only. Ruled additive here on the same reasoning as qn.6a's
+     // `seeding`: the only consumer is the in-repo UI, so a new member breaks nothing but an
+     // exhaustive switch with no default. Twice now by precedent rather than by rule; the
+     // header is owed a clause saying so.
+     // `wifi_sync` emits no `waiting_for_user`: whether iOS demands an on-device confirmation
+     // for a lockdown write is UNMEASURED, and narrating a passcode prompt the op may never
+     // fire would teach a flow that does not exist. It gains one if hardware shows one.
 
 Session: { "id": "...", "version_id": "...", "expires_at": "..." }
 

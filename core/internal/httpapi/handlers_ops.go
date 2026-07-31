@@ -77,6 +77,30 @@ func (d Deps) handleEncryption() http.HandlerFunc {
 	}
 }
 
+// wifiSyncRequest is the POST /api/devices/{udid}/wifi-sync body (contracts §1). No secret here —
+// the value is a boolean on the device, which is why this carries no password field and why the op
+// behind it uses the plain argv path rather than the pty one.
+type wifiSyncRequest struct {
+	Action string `json:"action"` // enable | disable
+}
+
+// handleWifiSync serves POST /api/devices/{udid}/wifi-sync → 202 {op_id}.
+func (d Deps) handleWifiSync() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req wifiSyncRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
+			return
+		}
+		opID, status, reason := d.Ops.WifiSync(r.Context(), r.PathValue("udid"), req.Action)
+		if status != http.StatusAccepted {
+			writeError(w, d.Log, status, statusCode(status), reason)
+			return
+		}
+		writeJSON(w, d.Log, http.StatusAccepted, map[string]string{"op_id": opID})
+	}
+}
+
 // handleOp serves GET /api/ops/{op_id} → Op (poll/refresh fallback for op.updated).
 func (d Deps) handleOp() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

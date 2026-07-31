@@ -2,7 +2,12 @@ package deviceops
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"path/filepath"
 	"testing"
+
+	"github.com/novkostya/quince/core/internal/wire"
 )
 
 // withKey sets the lockdown key on ONE Tools value. Deliberately per-instance rather than a
@@ -108,5 +113,163 @@ func TestInfoCarriesWifiSyncWhenPaired(t *testing.T) {
 	}
 	if id.WifiSync != "off" {
 		t.Fatalf("WifiSync = %q, want off", id.WifiSync)
+	}
+}
+
+// --- the write (story 4 wrapper + story 7 verification) ---
+
+// setTools builds Tools with the measured key and a state file, so a write and the read-back that
+// follows it see the same device.
+func setTools(t *testing.T, scenario string) *Tools {
+	t.Helper()
+	state := filepath.Join(t.TempDir(), "wifi-state")
+	return withKey(fakeTools("DEVICEOPS_FAKE="+scenario, "DEVICEOPS_WIFI_STATE="+state), syntheticWifiKey)
+}
+
+func TestSetWifiSyncRoundTrips(t *testing.T) {
+	for _, enable := range []bool{true, false} {
+		tools := setTools(t, "wifi_off")
+		if err := tools.SetWifiSync(context.Background(), fakeUDID, TransportUSB, enable); err != nil {
+			t.Fatalf("SetWifiSync(%v): %v", enable, err)
+		}
+		want := "off"
+		if enable {
+			want = "on"
+		}
+		if got := tools.wifiSync(context.Background(), fakeUDID, TransportUSB); got != want {
+			t.Fatalf("after SetWifiSync(%v) the device reads %q, want %q", enable, got, want)
+		}
+	}
+}
+
+// THE STORY-7 CASE, and the reason SetWifiSync re-reads at all: the tool exits 0 and the device
+// does not change. Without the read-back quince would report "Wi-Fi sync is on" on the strength of
+// having asked — the exact class of quince#313, where a component announced a state it had never
+// established.
+func TestSetWifiSyncDetectsASilentlyIgnoredWrite(t *testing.T) {
+	// ENABLE against a device stuck at `false`. The direction is deliberate: this test first
+	// disabled, which passes even against a fake that reports a constant `true` — a test that only
+	// fails when it happens to write the opposite of the default is passing by luck, and the
+	// manager-level version of it caught that.
+	tools := setTools(t, "wifi_set_lies")
+	err := tools.SetWifiSync(context.Background(), fakeUDID, TransportUSB, true)
+	if err == nil {
+		t.Fatal("SetWifiSync returned nil for a write the device ignored — it must not trust the exit code")
+	}
+	if !errors.Is(err, ErrWifiSyncNotApplied) {
+		t.Fatalf("error = %v, want ErrWifiSyncNotApplied so the caller can tell it from a retryable failure", err)
+	}
+}
+
+func TestSetWifiSyncSurfacesARejectedWrite(t *testing.T) {
+	tools := setTools(t, "wifi_set_rejected")
+	err := tools.SetWifiSync(context.Background(), fakeUDID, TransportUSB, true)
+	if err == nil {
+		t.Fatal("SetWifiSync returned nil for a rejected write")
+	}
+	if errors.Is(err, ErrWifiSyncNotApplied) {
+		t.Fatalf("a REJECTED write must not be reported as not-applied: %v", err)
+	}
+}
+
+// Refusing to write an unmeasured key is a distinct error, because the remedy is a hardware
+// measurement rather than a retry — and a caller that cannot tell those apart retries forever.
+func TestSetWifiSyncRefusesWithoutAMeasuredKey(t *testing.T) {
+	tools := withKey(fakeTools("DEVICEOPS_FAKE=wifi_on"), "")
+	err := tools.SetWifiSync(context.Background(), fakeUDID, TransportUSB, true)
+	if !errors.Is(err, ErrWifiSyncUnverifiable) {
+		t.Fatalf("error = %v, want ErrWifiSyncUnverifiable", err)
+	}
+}
+
+// --- the op (story 5) ---
+
+// pairedUSBDevice is what the WifiSync ladder requires: a lockdown write needs a trusted session,
+// so an unpaired device is refused up front rather than left to fail deeper in.
+func pairedUSBDevice(udid string) wire.Device {
+	d := usbDevice(udid)
+	d.Paired = "yes"
+	return d
+}
+
+func newWifiManager(t *testing.T, devs Devices, scenario string) *Manager {
+	t.Helper()
+	state := filepath.Join(t.TempDir(), "wifi-state")
+	m := newTestManager(t, devs, "DEVICEOPS_FAKE="+scenario, "DEVICEOPS_WIFI_STATE="+state)
+	m.tools.wifiSyncKey = syntheticWifiKey
+	return m
+}
+
+func TestWifiSyncOpSucceedsAndReEnriches(t *testing.T) {
+	devs := newFakeDevices()
+	devs.add(pairedUSBDevice(fakeUDID))
+	m := newWifiManager(t, devs, "wifi_off")
+
+	opID, status, reason := m.WifiSync(context.Background(), fakeUDID, "enable")
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d (%s), want 202", status, reason)
+	}
+	op := waitOp(t, m, opID)
+	if op.State != "succeeded" {
+		t.Fatalf("op = %+v, want succeeded", op)
+	}
+	if op.Kind != "wifi_sync" {
+		t.Fatalf("op.Kind = %q, want wifi_sync", op.Kind)
+	}
+}
+
+func TestWifiSyncOpValidation(t *testing.T) {
+	devs := newFakeDevices()
+	devs.add(pairedUSBDevice(fakeUDID))
+	unpaired := "SYNTHETIC-UDID-AAAA-0002"
+	devs.add(usbDevice(unpaired)) // Paired defaults to "" — not a confirmation
+	m := newWifiManager(t, devs, "wifi_off")
+
+	for _, tc := range []struct {
+		name, udid, action string
+		want               int
+	}{
+		{"bad udid", "!!", "enable", http.StatusBadRequest},
+		{"unknown device", "SYNTHETIC-UDID-AAAA-0009", "enable", http.StatusNotFound},
+		{"not paired", unpaired, "enable", http.StatusConflict},
+		{"unknown action", fakeUDID, "toggle", http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, got, _ := m.WifiSync(context.Background(), tc.udid, tc.action); got != tc.want {
+				t.Fatalf("status = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// The three failures must be distinguishable in the op's error CODE, not just its prose, because
+// only one of them ("failed") is worth retrying: an unmeasured key needs a hardware session, and a
+// silently-ignored write means the device declined and the state is unchanged.
+func TestWifiSyncOpDistinguishesItsFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, scenario, key, wantCode string
+	}{
+		{"device ignored the write", "wifi_set_lies", syntheticWifiKey, "wifi_sync_not_applied"},
+		{"device rejected the write", "wifi_set_rejected", syntheticWifiKey, "wifi_sync_failed"},
+		{"key was never measured", "wifi_off", "", "wifi_sync_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			devs := newFakeDevices()
+			devs.add(pairedUSBDevice(fakeUDID))
+			m := newWifiManager(t, devs, tc.scenario)
+			m.tools.wifiSyncKey = tc.key
+
+			opID, status, _ := m.WifiSync(context.Background(), fakeUDID, "enable")
+			if status != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202", status)
+			}
+			op := waitOp(t, m, opID)
+			if op.State != "failed" {
+				t.Fatalf("op.State = %q, want failed", op.State)
+			}
+			if op.Error == nil || op.Error.Code != tc.wantCode {
+				t.Fatalf("op.Error = %+v, want code %q", op.Error, tc.wantCode)
+			}
+		})
 	}
 }

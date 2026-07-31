@@ -105,6 +105,7 @@ type DeviceOps interface {
 	Pair(ctx context.Context, udid string) (opID string, status int, reason string)
 	Validate(ctx context.Context, udid string) (paired bool, status int, reason string)
 	Encryption(ctx context.Context, udid, action, password, oldPassword, newPassword string) (opID string, status int, reason string)
+	WifiSync(ctx context.Context, udid, action string) (opID string, status int, reason string)
 	Op(opID string) (wire.Op, bool)
 }
 
@@ -119,6 +120,9 @@ func (UnavailableDeviceOps) Validate(context.Context, string) (bool, int, string
 	return false, http.StatusServiceUnavailable, "device operations are unavailable"
 }
 func (UnavailableDeviceOps) Encryption(context.Context, string, string, string, string, string) (string, int, string) {
+	return "", http.StatusServiceUnavailable, "device operations are unavailable"
+}
+func (UnavailableDeviceOps) WifiSync(context.Context, string, string) (string, int, string) {
 	return "", http.StatusServiceUnavailable, "device operations are unavailable"
 }
 func (UnavailableDeviceOps) Op(string) (wire.Op, bool) { return wire.Op{}, false }

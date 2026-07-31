@@ -3,6 +3,7 @@ package deviceops
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -172,6 +173,52 @@ func (t *Tools) wifiSync(ctx context.Context, udid, transport string) string {
 	}
 	args := append(networkArgs(transport), "-u", udid, "-q", wifiSyncDomain, "-k", t.wifiSyncKey)
 	return scalarTriState(t.run(ctx, t.Ideviceinfo, transport, args...))
+}
+
+// ErrWifiSyncUnverifiable is returned when the key is not known, so quince cannot write it. It is a
+// distinct error rather than a generic failure because the remedy is a hardware measurement, not a
+// retry — and a caller that cannot tell those apart will retry forever.
+var ErrWifiSyncUnverifiable = errors.New("wi-fi sync key is unmeasured; refusing to write a guessed key")
+
+// ErrWifiSyncNotApplied is the story-7 case: the tool reported success and the device did not
+// change. Distinct from a write error for the same reason — it means the device declined silently,
+// which is a state to surface, not an operation to repeat.
+var ErrWifiSyncNotApplied = errors.New("device reported success but the value did not change")
+
+// SetWifiSync writes the device's Wi-Fi-sync flag and VERIFIES IT LANDED, per decisions/0004 — a
+// mutation must be verified to have mutated.
+//
+// The re-read is not belt-and-braces. `lockdownd_set_value` returning success means the device
+// accepted the request, not that the setting took effect, and this is a domain quince has never
+// written before: nobody has established that iOS applies this key without a reboot, a respring, or
+// a Trust re-confirm. Trusting the exit code would make quince report "Wi-Fi sync is on" on the
+// strength of having asked.
+//
+// Uses run, NOT the pty path: the value is a boolean, and pty.go exists to keep a PASSWORD out of
+// argv. Importing that machinery here would guard nothing.
+func (t *Tools) SetWifiSync(ctx context.Context, udid, transport string, enable bool) error {
+	if t.wifiSyncKey == "" {
+		return ErrWifiSyncUnverifiable
+	}
+	want := "false"
+	if enable {
+		want = "true"
+	}
+	args := append(networkArgs(transport), "-u", udid, "-q", wifiSyncDomain, "-k", t.wifiSyncKey, "--set-bool", want)
+	if _, stderr, err := t.run(ctx, t.Ideviceinfo, transport, args...); err != nil {
+		return fmt.Errorf("ideviceinfo --set-bool: %w: %s", err, lastLine(stderr))
+	}
+
+	// Read back through the SAME path the UI will show, so a mismatch here is exactly the mismatch
+	// a user would see rather than a private notion of success.
+	got := t.wifiSync(ctx, udid, transport)
+	if got == "unknown" {
+		return fmt.Errorf("%w: read-back failed, so the write is unconfirmed", ErrWifiSyncNotApplied)
+	}
+	if (got == "on") != enable {
+		return fmt.Errorf("%w: wanted %s, device still reports %s", ErrWifiSyncNotApplied, want, got)
+	}
+	return nil
 }
 
 // scalarTriState maps an `ideviceinfo -k` scalar read onto on | off | unknown. Shared by the two
