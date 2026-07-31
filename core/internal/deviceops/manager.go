@@ -305,11 +305,11 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 	// therefore indistinguishable from a silent no-op when a report arrives saying the badge did
 	// not move — which is exactly what happened on hardware (quince#325), leaving nothing in the
 	// log to tell the two apart.
-	m.log.Info("deviceops: wifi_sync starting", "op", opID, "action", action, "transport", transport)
+	m.log.Info("deviceops: wifi_sync starting", "op", opID, "udid", udid, "action", action, "transport", transport)
 
 	if err := m.tools.SetWifiSync(ctx, udid, transport, action == "enable"); err != nil {
 		m.log.Warn("deviceops: wifi_sync failed",
-			"op", opID, "action", action, "transport", transport, "error", err)
+			"op", opID, "udid", udid, "action", action, "transport", transport, "error", err)
 		// Three failures the user must be able to tell apart, because the remedy differs and only
 		// one of them is "try again".
 		code, msg := "wifi_sync_failed", opErrMsg(err)
@@ -348,7 +348,7 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 			WifiSync: newState,
 		})
 		m.log.Info("deviceops: wifi_sync applied and published",
-			"op", opID, "action", action, "transport", transport, "wifi_sync", newState)
+			"op", opID, "udid", udid, "action", action, "transport", transport, "wifi_sync", newState)
 	} else {
 		// The write SUCCEEDED on the device and the registry has already forgotten it, so there is
 		// nothing to publish onto and the new value is lost — the UI keeps whatever it last saw.
@@ -356,7 +356,7 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		// which a disable-over-Wi-Fi can reach by severing its own transport. Loud, because the
 		// device is now in a state quince asked for and cannot show.
 		m.log.Warn("deviceops: wifi_sync applied but NOT published — the registry no longer holds this device",
-			"op", opID, "action", action, "transport", transport, "wifi_sync", newState)
+			"op", opID, "udid", udid, "action", action, "transport", transport, "wifi_sync", newState)
 	}
 	// Still refresh the rest of the identity when the device is reachable — a USB-connected device
 	// stays put, and this keeps the op's behaviour identical to the other device ops there.
