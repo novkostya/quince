@@ -602,6 +602,17 @@ lives where it can stop the process. `Validate` still owns well-formedness of a 
 declare (empty name/path, relative path, duplicate name or path, not exactly one `default: true`) —
 those are 422s, not exits.
 
+**`PUT /api/config` is a THIRD path and answers 422, which is not the same check twice.** The
+requirement is enforced in `Service.Replace` as well as at startup, because `Replace` has the
+opposite property from `Load`: it returns the errors and **writes nothing**, so the hazard that
+justifies keeping this out of `Validate` does not exist there. Without it the UI could remove the
+user's last storage, receive a **200**, and the running daemon would keep serving on its
+already-loaded config — the user discovering at the next restart that backups were disabled. D12
+makes the UI the editing surface, so that is two clicks away; a silent acceptance of an edit that
+disables backups is exactly what *no silent caps or fallbacks* forbids. Found at review
+(quince#394): the exclusion had been reasoned from `Load`'s behaviour and applied to a path that
+does not share it.
+
 **`--demo` is unaffected and that is deliberate:** it serves fixture data and never builds the
 storage subsystem, so the refusal sits inside the live branch. A check placed before it would
 refuse every demo and every `ui-e2e` run over a subsystem they do not use.
