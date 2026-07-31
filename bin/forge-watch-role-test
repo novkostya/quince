@@ -9,7 +9,8 @@
 # `event=review`.
 #
 # IT WAS CREATED BY THE FIX FOR THE OPPOSITE BUG. quince#265 found the filter INERT on that seat —
-# `other_runner_names` returned empty — and `.claude/seats` populated it (quince#276). Working, for
+# `other_runner_names` returned empty — and `.claude/seats` populated it (quince#276), which the seat
+# PATTERN has since replaced entirely (quince#330). Working, for
 # that role, is silence.
 #
 # WHY A SUITE AND NOT A LOOP FIXTURE. The role comes from WHICH CREDENTIAL IS PRESENT (`owed_role`),
@@ -40,9 +41,15 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 export QUINCE_SESSION_ID=role-test-session
 REPO=novkostya/quince
 
-FORGE_SEATS_FILE="$WORK/seats"
-export FORGE_SEATS_FILE
-printf 'r1\nr4\narch1\n' >"$FORGE_SEATS_FILE"
+# NO SEAT LIST TO PROVISION (quince#330). This suite used to write `r1 r4 arch1` into a fixture
+# `FORGE_SEATS_FILE`, because `wake_filter` could not attribute a branch whose seat was not in the
+# list. A seat is now a PATTERN, so `r1/their-work` is attributable by shape alone and there is
+# nothing to set up.
+#
+# THE OLD PROVISIONING WAS LEFT BEHIND IN THE PR THAT REMOVED THE MECHANISM, and this comment exists
+# because that is worse than it sounds: the suite kept writing a file nothing loads and exporting a
+# variable nothing reads, and passed 7/7 either way — so no assertion could ever catch it. A reader
+# meeting live-looking provisioning concludes the mechanism is live. Found in review.
 
 # A stub whose ONE PR is on ANOTHER seat's branch, and which moves on the second turn. That is the
 # whole question: whose business is `r1/their-work` on each seat?
