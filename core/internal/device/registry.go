@@ -393,6 +393,17 @@ func (r *Registry) Enrich(udid string, id Identity) {
 		lastSeen = dev.LastSeen
 		r.offlineSeen[udid] = lastSeen
 	}
+	// A device that is GONE can still be ON SCREEN: qn.6a lists a UDID with committed versions as an
+	// offline shell. So whether an update reaches the UI must follow what the UI can RENDER, not what
+	// the muxer can currently see — which is the same decision Device() makes, reused rather than
+	// restated. Gating on presence alone loses precisely the updates that arrive BECAUSE the device
+	// left: turning Wi-Fi sync off severs the transport it runs on, so the op's verified read-back
+	// landed in the DB and never reached the page, leaving the badge reading `on` for a device that
+	// was off and gone until a reload (quince#325 (2a)/(2b), observed on hardware).
+	listed := present
+	if !listed && r.hasVersionsLocked(udid) {
+		dev, listed = r.offlineShellLocked(udid), true
+	}
 	persist := r.persistIdentity
 	r.mu.Unlock()
 
@@ -402,7 +413,7 @@ func (r *Registry) Enrich(udid string, id Identity) {
 	if persist != nil && (changed || present) {
 		persist(udid, id, lastSeen)
 	}
-	if changed && present {
+	if changed && listed {
 		r.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 	}
 }
