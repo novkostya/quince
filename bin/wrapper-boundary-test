@@ -44,8 +44,14 @@
 # legacy implementer wrapper and its account is suspended, so the hole was not live; it is closed
 # anyway, because a boundary check is a claim about THE BOX and not about whether a credential
 # currently authenticates. Parts 10-12 drive it. The count that matters: this suite now covers all
-# five wrappers, and the omission it just closed was invisible precisely because the neighbours were
+# six wrappers, and the omission it just closed was invisible precisely because the neighbours were
 # thorough.
+#
+# THE SIXTH IS THE FIRST WHOSE SEAT DOES BOTH (quince#375). `bin/gh-analyst` authors pull requests
+# AND can cast a verdict, so unlike the other five there is no half of the boundary it can name: its
+# rule is that ANY other seat's credential is a refusal, and part 14 drives all four. What keeps that
+# honest is not a separation within one box — it is that the box holds exactly one identity, which is
+# `deploy/runner/preflight`'s supervisor allowlist and is what this part is the wrapper-side half of.
 #
 # Synthetic and hermetic: a temp HOME, a temp token file, a stub PATH. Never reads or writes the
 # real ~/.config/quince, and never runs `gh`.
@@ -84,6 +90,7 @@ TOKEN="$WORK/bot.token"
 RKEY="$WORK/review.pem"
 ATOK="$WORK/arch.token"
 CKEY="$WORK/coder.pem"
+NKEY="$WORK/analyst.pem"
 
 run() {
 	# $1 wrapper, rest: argv. Runs with the stub PATH and credential paths we control. EVERY
@@ -95,7 +102,7 @@ run() {
 	# it, the parts below would be probing whatever the invoking user's real ~/.config/quince holds —
 	# which on the implementer box is a live signing key, and on the arch box is nothing. A suite that
 	# passes on one seat and fails on the other is worse than no suite, because the failure reads as a
-	# finding.
+	# finding. QUINCE_ANALYST_KEY_FILE joins it for the third seat, where the real key lives.
 	_w=$1
 	shift
 	PATH="$STUB" HOME="$WORK" \
@@ -103,6 +110,7 @@ run() {
 		QUINCE_REVIEW_KEY_FILE="$RKEY" \
 		QUINCE_ARCH_TOKEN_FILE="$ATOK" \
 		QUINCE_CODER_KEY_FILE="$CKEY" \
+		QUINCE_ANALYST_KEY_FILE="$NKEY" \
 		"$PWD/$_w" "$@" 2>&1 || true
 }
 
@@ -442,6 +450,101 @@ for op in store erase; do
 done
 
 
+# --- 14. gh-analyst: THE SEAT THAT DOES BOTH, SO IT REFUSES ALL FOUR (quince#375) -------------
+# Every wrapper above names ONE HALF of the boundary, because every seat above is one half of it.
+# `gh-review`/`gh-arch` approve, so they refuse the implementer identity; `gh-coder`/`gh-bot` author,
+# so they refuse the approving ones. The analyst seat authors pull requests AND can cast a verdict on
+# somebody else's, so it has no half to name — its rule is that any other seat's credential is a
+# refusal, and that is the wrapper-side half of `deploy/runner/preflight`'s supervisor allowlist.
+#
+# EACH IS DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, as in parts 1 and 4, because the failure mode is
+# the same and so is the wrong repair it invites — and on the supervisor box, where this wrapper
+# actually runs, the box is the one that must never be repaired into holding two identities.
+for _case in \
+	"RKEY:REVIEWER APP KEY is present:the reviewer key" \
+	"CKEY:IMPLEMENTER APP KEY is present:the implementer App key" \
+	"ATOK:ARCHITECT CREDENTIAL is present:the architect credential" \
+	"TOKEN:BOT TOKEN is present:the legacy bot token"; do
+	_var=${_case%%:*}
+	_rest=${_case#*:}
+	_want=${_rest%%:*}
+	_what=${_rest#*:}
+	rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+	eval "printf 'a credential\n' >\"\$$_var\""
+	out=$(run bin/gh-analyst pr view 1)
+	case "$out" in
+	*"$_want"*)
+		ok "bin/gh-analyst: refuses beside $_what, ahead of the missing dependencies"
+		;;
+	*"is not installed"*)
+		bad "bin/gh-analyst: an ENVIRONMENT refusal outranked the boundary for $_what"
+		printf '       %s\n' "$out" | head -n 1
+		;;
+	*)
+		bad "bin/gh-analyst: no boundary refusal for $_what — this box would hold two identities"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 15. THE NEGATIVE CONTROL for part 14 -----------------------------------------------------
+# Without it, a `gh-analyst` whose dependency check had been deleted would pass all four cases above.
+# The same stub PATH with NO other seat's credential must reach the dependency refusal — proving the
+# four checks were ADDED ahead of it rather than replacing it.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+out=$(run bin/gh-analyst pr view 1)
+case "$out" in
+*"is not installed"*)
+	ok "bin/gh-analyst: with no other seat's credential, the dependency refusal still speaks"
+	;;
+*"is present"*)
+	bad "bin/gh-analyst: claimed a credential that is not there"
+	printf '       %s\n' "$out" | head -n 1
+	;;
+*)
+	bad "bin/gh-analyst: no dependency refusal — the check may have been removed rather than reordered"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 16. gh-analyst's boundary outranks the usage message too ---------------------------------
+# Parts 3, 5, 9 and 11's assertion, for the sixth wrapper. `gh-analyst` exits 2 on no arguments, and a
+# box holding the wrong identity should be told THAT rather than how to call the tool.
+printf 'a reviewer key\n' >"$RKEY"
+out=$(run bin/gh-analyst)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-analyst: the boundary refusal outranks the usage message too"
+	;;
+*)
+	bad "bin/gh-analyst: with no arguments and a reviewer key present, the boundary did not speak"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# --- 17. WITH A LIVE AND A RETIRED CREDENTIAL PRESENT, THE LIVE ONE IS NAMED ------------------
+# Part 6's assertion, for this wrapper, and it is the one that decides whether a session can act on
+# the refusal. `quince-bot.token` is suspended and `decisions/0014` condition 1 requires it be left
+# wherever it lives, so a box holding it beside a live credential is a state that EXISTS. Naming the
+# dead one would send a session to delete it, watch the refusal persist, and conclude the guard is
+# broken. Either alone is already a refusal (part 14); what this pins is WHICH FILE THE MESSAGE NAMES.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+printf 'a reviewer key\n' >"$RKEY"
+printf 'a suspended bot token\n' >"$TOKEN"
+out=$(run bin/gh-analyst pr view 1)
+case "$out" in
+*"REVIEWER APP KEY is present"*)
+	ok "bin/gh-analyst: with both present, the refusal names the LIVE credential"
+	;;
+*"BOT TOKEN is present"*)
+	bad "bin/gh-analyst: named the suspended bot token while a live reviewer key sat beside it — removing it would not clear the refusal"
+	;;
+*)
+	bad "bin/gh-analyst: with two credentials present, no boundary refusal spoke"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
 # --- EVERY CREDENTIAL WRAPPER CARRIES THE LEDGER (quince#316) ------------------------------------
 #
 # quince#316 found `bin/gh-arch` had no `forge-ledger` call at all, so an act performed through it
@@ -458,7 +561,12 @@ done
 #
 # It asserts PRESENCE, not behaviour — whether the call is correct is `forge-watch-selfcaused-test`'s
 # question, and saying which of the two this is matters more than the assertion.
-for w in bin/gh-coder bin/gh-review bin/gh-arch; do
+#
+# AND IT FIRED, WHICH IS WHY IT IS WORTH THE LOOP. `bin/gh-analyst` (quince#375) is the wrapper
+# quince#316's ruling was waiting for — its declared revisit trigger was *a fourth wrapper appearing*
+# — and it is a seat that can cast a verdict, so an unrecorded `pr review` through it would wake the
+# analyst's own watch. Adding the name below is the whole cost, which is the case the ruling made.
+for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-analyst; do
 	if grep -q '_ledger" classify' "$w" && grep -q '_ledger" record' "$w"; then
 		ok "$w consults the ledger and records on success"
 	else

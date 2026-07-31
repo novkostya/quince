@@ -1,0 +1,207 @@
+#!/bin/sh
+# gh-analyst — run `gh` as the analyst identity: a GitHub App, on the supervisor box.
+#
+# THE FIFTH WRAPPER, AND THE FIRST WHOSE SEAT BOTH AUTHORS AND APPROVES. `gh-bot` and `gh-coder` are
+# the implementer, `gh-arch` and `gh-review` are the architect. Those two seats are deliberately
+# disjoint: one writes, the other judges, and `approver ≠ author` is a property of which box holds
+# which key. This seat is neither of them.
+#
+# WHAT IT IS FOR. The supervisor box is where the Operator and a session talk — it studies the
+# system, files what does not match, and works a problem space into specified work items. It had NO
+# forge credential at all, so everything it produced went out borrowed: quince#237-#246, quince#344,
+# quince-devlog#139 and #141 were all authored as `app/quince-coder` with a hand-written relay banner
+# saying who really wrote them. quince#344 is the proposal arguing that borrowing produces a false
+# record, and it was itself filed on a borrowed identity. This wrapper is what stops that.
+#
+# THE GRANT, ruled 2026-07-31 on quince#375: `contents: write` + `pull_requests: write` +
+# `issues: write` + `metadata: read`, installed on `quince`, `quince-devlog`, `ios-backup-crypt`,
+# `ios-backup-parser` and the private `quince-local`. MEASURED rather than read off a settings page
+# (quince#375, the ceremony report), including one measured NEGATIVE: a write under
+# `.github/workflows/**` returns 403 while an ordinary write to the same branch succeeds seconds
+# later. So quince#113's rule holds for a third identity — no agent seat can push a workflow.
+#
+# WHY THE WIDE GRANT IS NOT A WIDENING, since a reader meeting this file first will ask. The
+# supervisor box already holds root ssh into both working seats, and root ssh to a box that holds a
+# credential IS that credential. `contents: write` adds no REACHABLE capability; it removes the
+# reason to borrow one. Per-repo narrowing was ruled out as theatre for the same reason.
+#
+# Same allowlist reason as the other four: a permission rule never matches past a leading
+# `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
+set -eu
+
+# HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. Resolved from the passwd database
+# rather than assumed, so the same invocation works from a shell, from an OpenRC service (which gets
+# no HOME, and that is what took the arch box down after a reboot) and from cron.
+_home="${HOME:-$(awk -F: -v u="$(id -u)" '$3==u{print $6; exit}' /etc/passwd 2>/dev/null || true)}"
+[ -n "$_home" ] || {
+	printf 'gh-analyst: cannot locate a home directory — HOME is unset and uid %s has no passwd entry.\n' "$(id -u)" >&2
+	printf 'gh-analyst: set QUINCE_ANALYST_KEY_FILE and QUINCE_ANALYST_APP_ID_FILE explicitly.\n' >&2
+	exit 1
+}
+
+KEY_FILE="${QUINCE_ANALYST_KEY_FILE:-$_home/.config/quince/quince-analyst.pem}"
+APP_ID_FILE="${QUINCE_ANALYST_APP_ID_FILE:-$_home/.config/quince/quince-analyst.app-id}"
+API="${QUINCE_GITHUB_API:-https://api.github.com}"
+AH="Accept: application/vnd.github+json"
+
+die() {
+	printf 'gh-analyst: %s\n' "$1" >&2
+	shift
+	for line in "$@"; do printf 'gh-analyst: %s\n' "$line" >&2; done
+	exit 1
+}
+
+# IDENTITY BEFORE DEPENDENCIES (quince#157), AND THIS SEAT REFUSES BESIDE ALL FOUR.
+#
+# The other wrappers each refuse beside ONE SIDE of the boundary: `gh-review` and `gh-arch` refuse
+# the implementer identity because they approve; `gh-coder` and `gh-bot` refuse the approving
+# identities because they author. Every one of them can name the half it is not.
+#
+# This seat can do BOTH — it authors pull requests and it can cast a verdict on somebody else's — so
+# there is no half to name. What keeps it honest is not a separation of powers within one box; it is
+# that this box holds exactly one identity, so everything it does is attributable to the seat that
+# did it. `approver ≠ author` survives per-PR, because GitHub refuses an approval from a PR's own
+# author, and `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy.
+#
+# So the rule is the strongest of the five and the simplest to state: ANY other seat's credential
+# here is a refusal. That mirrors `deploy/runner/preflight`'s supervisor arm, which is an allowlist
+# of exactly this one file.
+#
+# Ordered above the dependency loop for the reason quince#157 records: an environment refusal invites
+# a repair, and a session repairing its way past this one ends up holding two identities on one box.
+# A boundary refusal must outrank an environment refusal because the environment is meant to be fixed
+# and the boundary is not. It needs nothing from the loop — `$_home` is resolved and `[ -f ]` is a
+# builtin — so ordering it first costs nothing.
+#
+# THE LIVE CREDENTIALS ARE NAMED FIRST, for the reason quince#204 pinned in the other wrappers: a
+# refusal that names a RETIRED credential sends a session to delete it, watch the refusal persist,
+# and conclude the guard is broken. `quince-bot.token` is suspended and `decisions/0014` condition 1
+# requires it be left wherever it lives, so it is checked last.
+REVIEW_KEY="${QUINCE_REVIEW_KEY_FILE:-$_home/.config/quince/quince-review.pem}"
+if [ -f "$REVIEW_KEY" ]; then
+	die "a REVIEWER APP KEY is present at $REVIEW_KEY." \
+		"This seat authors pull requests; holding the reviewer identity too would let one box write a" \
+		"change and cast the architect's verdict on it. Remove it, or run gh-review on the reviewer box."
+fi
+CODER_KEY="${QUINCE_CODER_KEY_FILE:-$_home/.config/quince/quince-coder.pem}"
+if [ -f "$CODER_KEY" ]; then
+	die "an IMPLEMENTER APP KEY is present at $CODER_KEY." \
+		"This seat can approve; holding the implementer identity too would let one box author work" \
+		"with gh-coder and approve it with this wrapper. Remove it, or run gh-coder on the implementer box."
+fi
+ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
+if [ -f "$ARCH_TOKEN" ]; then
+	die "an ARCHITECT CREDENTIAL is present at $ARCH_TOKEN." \
+		"That seat merges. A box that can author and merge is the whole of what the seat separation" \
+		"exists to prevent. Remove it, or run gh-arch on the architect box."
+fi
+BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
+if [ -f "$BOT_TOKEN" ]; then
+	die "a BOT TOKEN is present at $BOT_TOKEN." \
+		"That is the legacy implementer identity (decisions/0014). It is suspended, but a boundary" \
+		"check is a claim about THE BOX and not about whether a credential currently authenticates" \
+		"(quince#232). Remove it, or run gh-bot on the implementer box."
+fi
+
+if [ $# -eq 0 ]; then
+	printf 'usage: gh-analyst <gh arguments...>\n' >&2
+	printf '  runs gh as the quince-analyst App, minting a fresh installation token per call\n' >&2
+	printf '  key %s\n  app id %s\n' "$KEY_FILE" "$APP_ID_FILE" >&2
+	exit 2
+fi
+
+for tool in gh openssl curl jq; do
+	command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed" \
+		"this wrapper needs gh, openssl, curl and jq. On Alpine: apk add openssl curl jq." \
+		"openssl in particular is NOT in a minimal Alpine image and RS256 signing cannot proceed without it."
+done
+
+[ -f "$KEY_FILE" ] || die "no App private key at $KEY_FILE" \
+	"Refusing to fall back to the ambient gh credentials: doing so would act as whoever is signed in," \
+	"which on the Operator's own machine means acting as the Operator — the exact confusion quince#47" \
+	"records and quince-devlog#118 was caught committing, and the confusion this identity exists to end." \
+	"Generate a key from the App's settings page and place it there, mode 600."
+[ -f "$APP_ID_FILE" ] || die "no App id at $APP_ID_FILE" \
+	"The id is not a secret — it is on the App's settings page — but it is environment-specific," \
+	"so it is configuration and not a constant in a public repository."
+
+APP_ID=$(cat "$APP_ID_FILE")
+
+# --- mint a JWT, then exchange it for an installation token ----------------------------------
+# NOT CACHED, deliberately, and for the same reasons as the other App wrappers: an installation token
+# lives one hour, so a cache would be a second secret at rest with a lifetime this wrapper would have
+# to manage, plus an invalidation bug waiting to happen. Two HTTPS round-trips per call is the price.
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+now=$(date +%s)
+header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+# 60s of backdate absorbs clock skew between this box and GitHub; 9 minutes of life is well inside
+# the 10-minute maximum GitHub accepts for an App JWT.
+payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
+signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -binary -sign "$KEY_FILE" | b64url)
+jwt="$header.$payload.$signature"
+
+installations=$(curl -sS --fail-with-body -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations" 2>&1) || die "could not list installations" \
+	"$(printf '%s' "$installations" | head -n 3)" \
+	"Most likely: the key does not match app id $APP_ID, or the key has been revoked."
+
+# FIVE REPOSITORIES IS ONE INSTALLATION, and the distinction is worth a line because the ruling
+# enumerates five repos and this branch counts something else. An App installed on five repositories
+# of ONE account is a single installation with five repositories selected; the count here is
+# installations per ACCOUNT. So the expected answer is 1, and a 2 would mean the App had been
+# installed somewhere nobody ruled — which is exactly the state the override exists to make explicit
+# rather than silently pick a side of.
+count=$(printf '%s' "$installations" | jq -r 'if type=="array" then length else 0 end')
+case "$count" in
+0) die "app id $APP_ID has no installations" \
+	"The App exists but is installed nowhere, so it can reach no repository. Install it on the" \
+	"account and select the repositories ruled on quince#375." ;;
+1) : ;;
+*) # Picking .[0] would work today and silently pick the wrong one later. A wrapper that guesses
+	# which identity it is acting as is the thing this file exists to prevent.
+	[ -n "${QUINCE_ANALYST_INSTALLATION_ID:-}" ] || die \
+		"app id $APP_ID has $count installations; refusing to guess which one to act as." \
+		"Set QUINCE_ANALYST_INSTALLATION_ID to the one this box should use." ;;
+esac
+
+install_id="${QUINCE_ANALYST_INSTALLATION_ID:-$(printf '%s' "$installations" | jq -r '.[0].id')}"
+
+token=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $jwt" -H "$AH" \
+	"$API/app/installations/$install_id/access_tokens" 2>&1) || die \
+	"could not mint an installation token for installation $install_id" \
+	"$(printf '%s' "$token" | head -n 3)"
+
+GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
+[ -n "$GH_TOKEN" ] || die "installation $install_id returned no token" \
+	"Refusing to continue: an empty token would fall through to the ambient credentials."
+
+unset GITHUB_TOKEN
+export GH_TOKEN
+
+# SELF-CAUSED LEDGER (quince#242). Two verbs — `pr review` and `pr merge` — produce forge events that
+# carry NO actor, because `forge-watch` computes them by diffing observations. Recording them as this
+# runner performs them is what lets its own watch tell them from another seat's.
+#
+# THIS WRAPPER IS WHY THE LEDGER LOOP IN `bin/wrapper-boundary-test` EXISTS. quince#316 declined a
+# refactor that would have shared one block across the wrappers, on the measurement that the fallback
+# path was almost never taken — and named its revisit trigger as *a fourth wrapper appearing*. That
+# suite's last case is the detector it settled on instead. This is the fifth wrapper, and the four
+# lines below are what it is checking for.
+#
+# THE `exec` IS KEPT FOR EVERYTHING ELSE, and that is the whole reason `classify` exists as a
+# separate verb: this is a CREDENTIAL wrapper, so the blast radius of a behaviour change here is
+# every forge call the session makes. Only the two recordable verbs take the fork-and-wait path.
+#
+# RECORDED ONLY ON SUCCESS. A `gh pr review` that failed produces no event to suppress, so its row
+# would sit unconsumed until it swallowed the NEXT verdict on that PR — somebody else's, which is a
+# MISSED wake and the one direction this subsystem must not fail in. The exit status is passed
+# through unchanged either way; the ledger never affects what the caller sees.
+_ledger="$(dirname "$0")/forge-ledger"
+if [ -x "$_ledger" ] && "$_ledger" classify "$@" >/dev/null 2>&1; then
+	gh "$@" && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then "$_ledger" record "$@" || :; fi
+	exit "$_rc"
+fi
+
+exec gh "$@"
