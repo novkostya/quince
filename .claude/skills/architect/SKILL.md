@@ -28,14 +28,16 @@ apart.** This skill's own §1 already said *"declare first, before anything read
 and then §0 ran first and read state.
 
 ```sh
-bin/forge-watch runner set <name>     # ONCE, FIRST. Must be listed in .claude/seats.
+bin/forge-watch runner set <name>     # ONCE, FIRST. `arch<N>` — a seat is a pattern, not a list.
 ```
 
-**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265).
-This seat is the reason the file exists: `arch1` was declared only on the arch box, so the
-implementer box could not attribute `arch1/…` branches and woke on every one of them — and, worse in
-the other direction, `other_runner_names` on the arch box returned **empty**, which made the wake
-filter a documented no-op there that had never suppressed anything. Adding a seat is a PR.
+**The name must LOOK like a seat — `arch<N>` here, `r<N>` for an implementer — and `runner set`
+REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). This seat is the
+reason the check exists: `arch1` was declared only on the arch box, so the implementer box could
+not attribute `arch1/…` branches and woke on every one — and, worse in the other direction,
+`other_runner_names` on the arch box returned **empty**, which made the wake filter a documented
+no-op there that had never suppressed anything. **Both are fixed by shape**: attribution no longer
+needs a population, so it works on a one-seat box, and adding a seat is no longer a PR.
 
 **A taken name is refused**, so two sessions on one box cannot silently share a state directory.
 

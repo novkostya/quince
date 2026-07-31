@@ -20,11 +20,11 @@ carries an accrued observation to re-arm from, `absent` says nothing was ever ar
 to declare first; it just sat three sections below the read.
 
 ```sh
-bin/forge-watch runner set <name>   # ONCE per session. Must be listed in .claude/seats.
+bin/forge-watch runner set <name>   # ONCE per session. `r<N>` — a seat is a pattern, not a list.
 ```
 
-**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265). That
-list is what lets a watch on the OTHER box attribute your branches. §3 carries the rest — what the
+**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). That
+shape is what lets a watch on the OTHER box attribute your branches. §3 carries the rest — what the
 name does to the scratch root, and the guard against an empty one — and nothing there changes except
 that this step has already happened by the time you reach it.
 
@@ -135,14 +135,14 @@ sharing a watch state, owning no branches. It failed silently, as an empty strin
 why `$HOME/scratch` did not exist on any box. One host is *meant* to run several implementers
 concurrently; the name is what keeps them apart.
 
-**The name must be in `.claude/seats`, and `runner set` REFUSES one that is not** (quince#265). That
-list is what lets a watch on the OTHER box attribute your branches: the branch namespace is global,
-the local registry is not, so a seat missing from the file wakes every watch on every box for every
+**The name must LOOK like a seat — `r<N>` for an implementer, `arch<N>` for the architect — and `runner set` REFUSES one that does not** (quince#265, re-founded on a pattern by quince#330). That
+shape is what lets a watch on the OTHER box attribute your branches: the branch namespace is global,
+the local registry is not, so a name that is not seat-shaped wakes every watch on every box for every
 event it produces. The refusal names the file and lists the known seats. **Adding a seat is a PR** —
 that is the intended cost, and it is why the list cannot silently go stale.
 
 ```sh
-bin/forge-watch runner set <name>        # ONCE per session. Must be listed in .claude/seats.
+bin/forge-watch runner set <name>        # ONCE per session. `r<N>` — a pattern, not a list.
 RUNNER=$(bin/forge-watch runner get) || { echo "no runner declared — stop"; exit 1; }
 [ -n "$RUNNER" ] || { echo "runner name is empty — stop"; exit 1; }
 SCRATCH="$HOME/scratch/$RUNNER"
