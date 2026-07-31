@@ -1,0 +1,169 @@
+#!/bin/sh
+# loop-drift — assert that the loop commands INLINED in the skills still match `loop-protocol.md`.
+#
+# WHAT IT COVERS, AND SAYING SO IS PART OF THE RULING (quince#54). It compares `bin/forge-watch
+# tick` and `bin/forge-watch watch` invocations found inside fenced code blocks. Nothing else.
+#
+# WHAT IT DOES NOT COVER, WHICH IS MOST OF THE DRIFT THIS PROJECT ACTUALLY SUFFERS. The architect's
+# ruling on quince#54 lists seven recorded instances of documentation drift and this gate would have
+# caught NONE of them: every one was a SENTENCE that stopped matching the behaviour it described — a
+# header claiming 165 entries where the tool prints 166, a contract asserting a field is empty while
+# the code writes it, a skill naming a section of a file that no longer has one. That class is
+# claim-vs-mechanism, it was ruled NOT mechanically detectable, and it stays a review
+# responsibility.
+#
+# So read this gate's clean result as **the commands agree**, never as *the documents agree*. The
+# issue that asks for it is titled "nothing detects drift between loop-protocol.md and the commands
+# inlined in the skills", and after this lands the honest reading of that title is that COMMAND
+# drift is detected. A gate believed to cover more than it does is worse than no gate — the same
+# reason `bin/dashboard-size` says in its own header that it cannot be a required check on a
+# repository with no CI.
+#
+# WHY THE DUPLICATION EXISTS AT ALL, so nobody "fixes" it by making the skills reference the
+# protocol. quince#52 ruled the trade: referencing risks a session skipping the file, duplicating
+# risks the copies drifting, and SKIPPING IS THE WORSE FAILURE. A session that never opens
+# `loop-protocol.md` must still act correctly, so the command lives in both places on purpose. This
+# gate is the other half of that trade — it makes the copies agreeing a measurement rather than a
+# thing somebody has to remember.
+#
+# THE FILE LIST IS DISCOVERED, NOT DECLARED. Any file under `.claude/` that inlines one of these
+# commands is checked, so a new skill is covered the day it is written rather than the day somebody
+# remembers to add it here. A hand-written list of files-that-inline-the-recipe would be one more
+# copy to drift, inside the tool whose whole subject is copies drifting.
+#
+# CONTAINMENT, NOT EQUALITY, and the direction is the point: every invocation in a SKILL must appear
+# in the PROTOCOL. The reverse is allowed — `loop-protocol.md` is normative and carries both seats'
+# recipes, while each skill carries only its own, so demanding equality would fail on every line the
+# other role owns.
+#
+#   bin/loop-drift            check; 0 agree · 1 drift · 2 DID NOT RUN
+#   bin/loop-drift --list     print every invocation found, with its source, and exit 0
+#
+# Exit 2 is a REFUSAL, never a pass: no protocol file, or no skill inlining anything, means this
+# checked nothing — and a gate that reports clean over nothing is the defect the whole ladder exists
+# to prevent (`privacy-check`'s exit 2, `closing-refs-check`'s "DID NOT LOOK").
+set -eu
+
+ME=loop-drift
+cd "$(dirname "$0")/.."
+
+PROTOCOL="${QUINCE_LOOP_PROTOCOL:-.claude/loop-protocol.md}"
+SKILL_ROOT="${QUINCE_SKILL_ROOT:-.claude}"
+
+# The verbs whose invocations must agree. `tick` and `watch` are the arm recipe — the thing both
+# skills copy verbatim and the thing quince#54 names.
+#
+# `status`, `stop`, `runner` and `owed` are DELIBERATELY OUT, and this is a narrowing worth stating
+# rather than leaving implicit: those appear with concrete example arguments that differ on purpose
+# — `/kickoff` shows `status --repo novkostya/quince` where the protocol shows `status --repo
+# <owner/name>`, because a skill is written to be run and the protocol to be read. Including them
+# would make the gate fail on a difference that is intentional, and a gate that cries wolf gets
+# silenced rather than fixed.
+VERBS="${QUINCE_LOOP_VERBS:-tick watch}"
+
+die2() {
+	printf '%s: %s\n' "$ME" "$1" >&2
+	printf '%s: this is NOT a clean result. Nothing was compared.\n' "$ME" >&2
+	exit 2
+}
+
+# extract <file> — print `<line>\t<normalised invocation>` for every covered invocation in a fenced
+# block. Normalisation is exactly three things, and each is a real difference in the sources rather
+# than defensive tidying:
+#   - a trailing `\` continuation, because a multi-line example is the same command;
+#   - a trailing `# comment`, because the protocol annotates its two lines with `# architect` and
+#     `# implementer` and the skills do not;
+#   - runs of whitespace, because indentation inside a block varies.
+extract() {
+	awk -v verbs="$VERBS" '
+		BEGIN { n = split(verbs, v, " "); for (i = 1; i <= n; i++) want[v[i]] = 1 }
+		/^[ \t]*```/ { inblock = !inblock; next }
+		!inblock { next }
+		{
+			line = $0
+			# The verb is the word after `forge-watch`. Matching on the word rather than on a
+			# regex per verb keeps the VERBS list the single place they are named.
+			if (match(line, /bin\/forge-watch[ \t]+[a-z-]+/) == 0) next
+			verb = substr(line, RSTART, RLENGTH)   # "bin/forge-watch tick"
+			sub(/^.*[ \t]+/, "", verb)             # -> "tick"
+			if (!(verb in want)) next
+			sub(/[ \t]*\\[ \t]*$/, "", line)     # continuation
+			sub(/[ \t]+#.*$/, "", line)          # trailing comment
+			gsub(/[ \t]+/, " ", line)            # whitespace runs
+			sub(/^ /, "", line); sub(/ $/, "", line)
+			if (line == "") next
+			print FNR "\t" line
+		}
+	' "$1"
+}
+
+[ -f "$PROTOCOL" ] || die2 "no protocol at $PROTOCOL — there is nothing to compare the skills against."
+
+# Discover every file that inlines a covered command. The protocol itself is excluded: it is the
+# reference, not a copy of it.
+inliners=$(
+	find "$SKILL_ROOT" -name '*.md' -type f 2>/dev/null | sort | while read -r f; do
+		# `if` rather than `[ … ] && printf`, and this is not style. Under `set -e` an AND-OR list
+		# whose LAST command fails reports that failure, so a file inlining nothing would exit the
+		# whole discovery subshell — silently, since the `$( … )` capture swallows it and an empty
+		# result is indistinguishable from "no file inlines anything". Measured: the first version
+		# found NOTHING and refused with exit 2, which is the safe direction and gave no hint why.
+		# The same trap `bin/forge-ledger`'s header records.
+		if [ "$f" = "$PROTOCOL" ]; then continue; fi
+		if [ -n "$(extract "$f")" ]; then printf '%s\n' "$f"; fi
+	done
+)
+
+proto=$(extract "$PROTOCOL" | cut -f2- | sort -u)
+[ -n "$proto" ] || die2 "found no $VERBS invocation in a fenced block in $PROTOCOL. Either the
+  protocol stopped carrying the recipe, or the fence syntax changed and this tool can no longer see
+  it. Both are worth knowing; neither is clean."
+[ -n "$inliners" ] || die2 "no file under $SKILL_ROOT inlines a $VERBS invocation, so nothing was
+  compared. The skills are supposed to inline the recipe (quince#52) — if that stopped being true,
+  this gate has no subject and should be removed rather than left reporting clean."
+
+if [ "${1:-}" = "--list" ]; then
+	printf '%s: protocol %s\n' "$ME" "$PROTOCOL"
+	printf '%s\n' "$proto" | sed 's/^/  /'
+	for f in $inliners; do
+		printf '%s: inlines %s\n' "$ME" "$f"
+		extract "$f" | while IFS="$(printf '\t')" read -r ln cmd; do
+			printf '  %s:%s  %s\n' "$f" "$ln" "$cmd"
+		done
+	done
+	exit 0
+fi
+
+drift=0
+checked=0
+for f in $inliners; do
+	while IFS="$(printf '\t')" read -r ln cmd; do
+		[ -n "$cmd" ] || continue
+		checked=$((checked + 1))
+		# A literal, whole-line comparison: `grep -Fx` over the protocol's own normalised set. Not
+		# a substring test, which would let a skill add a flag and still match.
+		printf '%s\n' "$proto" | grep -Fxq -- "$cmd" && continue
+		drift=$((drift + 1))
+		printf '%s: DRIFT — %s:%s inlines a command the protocol does not carry\n' "$ME" "$f" "$ln" >&2
+		printf '    skill:    %s\n' "$cmd" >&2
+		# Show the protocol's nearest same-verb lines, because "not present" is not actionable on
+		# its own: the reader needs to see what it disagrees WITH.
+		# shellcheck disable=SC2016  # the sed script is literal; nothing here should expand
+		verb=$(printf '%s' "$cmd" | sed 's|.*bin/forge-watch ||; s| .*||')
+		printf '%s\n' "$proto" | grep -F "forge-watch $verb " | sed 's/^/    protocol: /' >&2 ||
+			printf '    protocol: carries no "%s" invocation at all\n' "$verb" >&2
+	done <<EOF
+$(extract "$f")
+EOF
+done
+
+nfiles=$(printf '%s\n' "$inliners" | wc -l | tr -d ' ')
+if [ "$drift" -gt 0 ]; then
+	printf '%s: %d command(s) drifted, across %s file(s), from %s\n' "$ME" "$drift" "$nfiles" "$PROTOCOL" >&2
+	printf '%s: fix the disagreement in BOTH places. Only the inlined imperative has to match —\n' "$ME" >&2
+	printf '    the prose is deliberately different, and this gate never reads it.\n' >&2
+	exit 1
+fi
+printf '%s: clean — %d inlined %s command(s) in %s file(s) all match %s\n' \
+	"$ME" "$checked" "$(printf '%s' "$VERBS" | tr ' ' '/')" "$nfiles" "$PROTOCOL"
+printf '%s: COMMANDS ONLY. Prose claims are not checked and were ruled not mechanically checkable (quince#54).\n' "$ME"

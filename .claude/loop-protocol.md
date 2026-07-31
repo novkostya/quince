@@ -82,7 +82,7 @@ forgetfulness (quince#100).
 # 1. do all the work first: every push, every comment, every review, every merge
 # 2. consume the catch-up SYNCHRONOUSLY, where the session that caused it can read it
 bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"                  # architect
-bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"     # implementer
+bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"     # implementer
 # 3. arm, last, against a now-current observation                     (BACKGROUND task)
 bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
 ```
@@ -158,7 +158,7 @@ So:
 
    ```sh
    bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60     # architect
-   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60   # implementer
+   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60   # implementer
    ```
 
    **And the DECLARED BLOCKING SET, which is the other half of what a watch is for** (quince#80). A
@@ -171,7 +171,7 @@ So:
    ```sh
    bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60 \
      --issue novkostya/quince#71 --issue novkostya/quince#80      # architect: owner/name#n required
-   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-bot" --interval 60 \
+   bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60 \
      --issue 71                                                   # implementer: bare n, one repo
    ```
 
