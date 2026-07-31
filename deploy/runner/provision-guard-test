@@ -83,6 +83,13 @@ BOT="$WORK/quince-bot.token"
 CODER="$WORK/quince-coder.pem"
 ARCH="$WORK/quince-arch.token"
 REVIEW="$WORK/quince-review.pem"
+# THE FIFTH PATH, PINNED FOR THE SAME REASON AS THE OTHER FOUR (quince#375). Nothing creates it by
+# default — every row below wants it absent — but the OVERRIDE must still be passed on every
+# invocation, because unsetting a path does not mean "absent", it means "fall back to
+# /root/.config/quince/quince-analyst.pem". That file exists on exactly one box: the supervisor box,
+# which is the seat the credential belongs to and a perfectly plausible place to run a suite from.
+# Without this, section 8 would pass here and every other row would refuse there.
+ANALYST="$WORK/quince-analyst.pem"
 
 # STUB WRAPPERS, AND EVERY ROW BELOW USES THEM (quince#236). `provision` now also decides the private
 # layer's identity before the dry-run exit, by asking which `gh-*` wrapper can ACT. The four credential
@@ -120,6 +127,7 @@ run() {
 		QUINCE_CODER_KEY_FILE="$CODER" \
 		QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		QUINCE_WRAPPER_DIRS="$WRAPDIR" \
 		QUINCE_PRIVATE_LAYER="$LAYER_FIX" \
 		sh "$PROVISION" --role "$_r" --check-credentials "$@" 2>&1 || true
@@ -132,6 +140,7 @@ rc_of() {
 		QUINCE_CODER_KEY_FILE="$CODER" \
 		QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		QUINCE_WRAPPER_DIRS="$WRAPDIR" \
 		QUINCE_PRIVATE_LAYER="$LAYER_FIX" \
 		sh "$PROVISION" --role "$_r" --check-credentials "$@" >/dev/null 2>&1
@@ -314,6 +323,7 @@ runl() { # <role>
 	set +e
 	LAYER_OUT=$(QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_CODER_KEY_FILE="$CODER" \
 		QUINCE_ARCH_TOKEN_FILE="$ARCH" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		QUINCE_WRAPPER_DIRS="$WRAPDIR" QUINCE_PRIVATE_LAYER="$LAYER_FIX" \
 		sh "$PROVISION" --role "$1" --check-credentials 2>&1)
 	LAYER_RC=$?
@@ -435,6 +445,90 @@ if [ "$LAYER_RC" -eq 0 ]; then
 else
 	bad "a matching helper was treated as a conflict — every re-provision would now refuse"
 	printf '       %s\n' "$LAYER_OUT" | head -n 4
+fi
+
+# =============================================================================================
+# 8. THE THIRD SEAT, WHICH THIS SCRIPT CANNOT PROVISION (quince#375)
+# =============================================================================================
+# quince#234's finding is that a seat is a SET of credentials, not one token, and that the guard had
+# NO LIVE COVERAGE ON EITHER REAL BOX because it knew only tokens. quince#375 adds a credential the
+# two-way split cannot see at all: `--role` accepts `implementer` and `arch`, so the analyst key is in
+# neither `_own_creds` nor `_other_creds`, and a box holding `quince-coder.pem` AND
+# `quince-analyst.pem` — two seats, one box — sailed through the both-seats refusal.
+#
+# THE FIRST ROW IS THE ONE THAT WAS BROKEN. It is the both-seats case with the new credential, and
+# before this change it exited 0.
+rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW" "$ANALYST"
+printf 'a credential\n' >"$CODER"
+printf 'a credential\n' >"$ANALYST"
+out=$(run implementer)
+case "$out" in
+*"ANALYST KEY"*)
+	ok "a coder key AND an analyst key is TWO SEATS on one box — refused (was a clean pass)"
+	;;
+*)
+	bad "two seats on one box passed: the guard is blind to the analyst key"
+	printf '       %s\n' "$out" | head -n 3
+	;;
+esac
+
+# THE REFUSAL MUST NOT OFFER EITHER OF THIS GUARD'S USUAL REMEDIES, and that is the whole reason it is
+# a separate branch rather than another entry in `_other_creds`. "Re-run with the right --role" sends
+# somebody to an argument that does not exist; "remove the credential that does not belong to this
+# seat" tells them to undo quince#375's ceremony. A refusal a session cannot act on is the dead end
+# quince#236 opened with.
+case "$out" in
+*"there is no"*"--role supervisor"*)
+	ok "the refusal names WHY neither usual remedy applies — there is no --role supervisor"
+	;;
+*)
+	bad "the refusal did not say that this script cannot provision the supervisor seat"
+	printf '       %s\n' "$out" | head -n 6
+	;;
+esac
+case "$out" in
+*"Do NOT re-run with another"*)
+	ok "it says explicitly not to re-run with another --role, which would configure the wrong box"
+	;;
+*)
+	bad "the refusal leaves re-running as the obvious next move, and it is the wrong one"
+	;;
+esac
+
+# THE ANALYST KEY ALONE IS ALSO A REFUSAL — the supervisor box itself. Not because holding it is
+# wrong, but because this script has no role for that seat, so anything it did there would be a
+# guess. Distinguished from the row above only by what else is present, so both must be driven.
+rm -f "$CODER"
+out=$(run implementer)
+case "$out" in
+*"ANALYST KEY"*)
+	ok "the analyst key ALONE is refused too — this script cannot provision that seat either"
+	;;
+*)
+	bad "the supervisor box would be provisioned as an implementer"
+	printf '       %s\n' "$out" | head -n 3
+	;;
+esac
+
+# EXIT 2, matching every other refusal in this file. A refusal that exits 1 is indistinguishable from
+# the ordinary failures further down, and this one arrives before the box is touched.
+rc=$(rc_of implementer)
+if [ "$rc" -eq 2 ]; then
+	ok "the analyst refusal exits 2, like every other guard refusal here"
+else
+	bad "the analyst refusal exited $rc, not 2"
+fi
+
+# THE NEGATIVE CONTROL, and without it a `provision` that refused unconditionally would pass all four
+# rows above. With the analyst key ABSENT, the ordinary implementer box must still provision.
+rm -f "$ANALYST"
+printf 'a credential\n' >"$CODER"
+rc=$(rc_of implementer)
+if [ "$rc" -eq 0 ]; then
+	ok "with no analyst key, an ordinary implementer box still passes (the control)"
+else
+	bad "the analyst guard refuses a box that does not hold the key — it fires unconditionally"
+	printf '       %s\n' "$(run implementer)" | head -n 4
 fi
 
 printf '\nprovision-guard-test: %d passed, %d failed\n' "$pass" "$fail"
