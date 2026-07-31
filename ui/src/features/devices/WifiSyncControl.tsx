@@ -31,36 +31,39 @@ export function WifiSyncControl({
   const submit = () =>
     start(`/api/devices/${device.udid}/wifi-sync`, { action: on ? "disable" : "enable" });
 
+  // `items-start` is structural, not cosmetic: without it the explanatory paragraph below sets this
+  // flex column's width and the button stretches to match it — which made a rare settings action
+  // render wider and louder than "Back up now", the page's actual primary action.
+  //
+  // `ghost` + `sm` for the same reason. Turning Wi-Fi sync on happens roughly once per device, so it
+  // belongs at tertiary weight beside a primary ("Back up now") and a secondary ("Manage
+  // encryption"). It was `outline` + default size, which put it level with the secondary.
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col items-start gap-1">
       <Button
-        variant="outline"
+        variant="ghost"
+        size="sm"
         onClick={submit}
         disabled={inFlight || needsUSBToEnable}
         title={
           needsUSBToEnable
             ? "Connect the device by cable to turn Wi-Fi sync on — with it off, the device is not reachable over Wi-Fi."
-            : undefined
+            : on && !onUSB
+              ? "This device is connected over Wi-Fi. Turning Wi-Fi sync off will disconnect it — it will reappear when you plug it in."
+              : undefined
         }
       >
         {on ? <WifiOff size={14} /> : <Wifi size={14} />}
         {on ? "Turn off Wi-Fi sync" : "Turn on Wi-Fi sync"}
       </Button>
 
+      {/* Only the ACTIONABLE note is shown as standing text. "Plug it in" is something the user can
+          do now; the disconnect consequence is not, so it moved to the button's title rather than
+          occupying three lines under a control nobody is looking at. */}
       {needsUSBToEnable ? (
-        <p className="max-w-prose text-sm text-muted">
-          Connect this device by cable to turn Wi-Fi sync on. While it is off the device does not
-          announce itself over Wi-Fi, so quince cannot reach it without USB.
-        </p>
-      ) : null}
-
-      {/* Turning sync OFF over Wi-Fi severs the transport the op is running on. The write lands
-          before the device drops and the op verifies it by reading back — but the device then
-          disappears from the Devices page, which would look like a failure without this line. */}
-      {on && !onUSB ? (
-        <p className="max-w-prose text-sm text-muted">
-          This device is connected over Wi-Fi. Turning Wi-Fi sync off will disconnect it — it will
-          reappear when you plug it in.
+        <p className="max-w-xs text-xs text-muted">
+          Connect by cable to turn this on — with Wi-Fi sync off the device does not announce itself
+          over Wi-Fi.
         </p>
       ) : null}
 

@@ -49,7 +49,7 @@ describe("WifiSyncControl", () => {
     );
 
     expect(screen.getByRole("button", { name: /turn on wi-fi sync/i })).toBeDisabled();
-    expect(screen.getByText(/connect this device by cable/i)).toBeTruthy();
+    expect(screen.getByText(/connect by cable to turn this on/i)).toBeTruthy();
   });
 
   // Turning sync OFF over Wi-Fi severs the transport the op runs on. The write lands first, but the
@@ -61,7 +61,11 @@ describe("WifiSyncControl", () => {
         post={vi.fn()}
       />,
     );
-    expect(screen.getByText(/will disconnect it/i)).toBeTruthy();
+    // The consequence is not actionable, so it lives in the button title rather than as standing
+    // text under a control nobody is looking at — but it must still be SOMEWHERE the user can find.
+    expect(
+      screen.getByRole("button", { name: /turn off wi-fi sync/i }).getAttribute("title"),
+    ).toMatch(/will disconnect it/i);
   });
 
   // `unknown` means quince has not read the flag. Rendering a direction from it would be guessing.
