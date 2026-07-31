@@ -309,5 +309,97 @@ else
 	sed -n '1,8p' "$WORK/out"
 fi
 
+
+# --- THE SUPPRESSION ITSELF, which is this change's headline claim (review finding on quince#319) --
+#
+# The cases above test the WRITER: a row appears after `forge-ledger record issue close`. Nothing
+# drove an `event=issue-closed` line through the FILTER, so deleting the reader's `issue-closed` arm
+# left the suite at 16/16 — measured by the reviewer, and it is exactly the shape `CLAUDE.md` calls a
+# finding rather than accepted debt: undeclared untested behaviour, and the behaviour is the point of
+# the PR.
+#
+# A SECOND STUB rather than more turns on the first: `$WORK/gh` deliberately holds `updatedAt` still
+# so typed PR events can be observed alone, and it answers `issue view` with `{}`. Teaching it issues
+# would entangle two fixtures whose whole design is that each isolates one line.
+cat >"$WORK/gh_issue" <<'STUB2'
+#!/bin/sh
+turn=$(cat "$STUB_WORK/turn" 2>/dev/null || printf 1)
+if [ "$1" = issue ] && [ "$2" = list ]; then printf '[]\n'; exit 0; fi
+if [ "$1" = issue ] && [ "$2" = view ]; then
+  st=OPEN; closed=null; up=2026-07-30T10:00:00Z
+  if [ "$turn" != 1 ]; then st=CLOSED; closed=\"2026-07-30T11:00:00Z\"; up=2026-07-30T11:00:00Z; fi
+  printf '{"number":900,"state":"%s","updatedAt":"%s","closedAt":%s,"stateReason":"COMPLETED","labels":[],"comments":[]}\n' "$st" "$up" "$closed"
+  exit 0
+fi
+# One unchanging PR so the queue is never empty — `queue-empty` is wake-worthy and would decide these
+# cases for a reason unrelated to suppression, the same trap PR 502 exists for above.
+cat <<ROW | jq -f "$STUB_INVERSE"
+[{"number":502,"state":"OPEN","updatedAt":"2026-07-30T10:00:00Z","title":"t","headRefName":"r1/other",
+  "closingIssuesReferences":[],"statusCheckRollup":[],"reviews":[],"comments":[],"commits":[],
+  "mergedAt":null,"mergedBy":null,"mergeStateStatus":"CLEAN"}]
+ROW
+STUB2
+chmod +x "$WORK/gh_issue"
+
+run_issue_watch() { # <turn> <max-wait>
+	printf '%s\n' "$1" >"$WORK/turn"
+	./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh_issue" --issue 900 \
+		--interval 1 --max-wait "$2" >"$WORK/out" 2>&1 || true
+}
+issue_baseline() {
+	rm -f "$STATE" "$LEDGER"
+	run_issue_watch 1 3
+}
+
+# (11) THE ARM WORKS, AND IT IS NOT ENOUGH — both halves asserted, because the second is the finding.
+#
+# Closing an issue emits TWO lines. The ledger arm suppresses `issue-closed`. The backstop
+# `issue-updated` carries `actor=unattributed` — `gh issue view` does not report who closed an issue —
+# and unknown wakes, so the tick wakes anyway.
+#
+# This is `bin/forge-ledger`'s own warning arriving on a surface it did not anticipate: *"This tool
+# alone does NOT reduce wakes — the act's other line still fires … it is why the ruling says both
+# arms or neither."* On the PR surface the other arm is the ACTOR arm, which reads `actor=` off
+# `event=updated`. On the issue surface there is no other arm, because the backstop has no actor to
+# read. So the two-mechanism split that works for a PR act has no counterpart here.
+#
+# Asserted rather than declared, so nobody has to rediscover it: the first half pins the arm this PR
+# adds, the second pins the gap it does not close. If a later change makes the tick quiet, THIS case
+# fails and its author is told exactly which sentence to update.
+issue_baseline
+mkdir -p "$(dirname "$LEDGER")"
+./bin/forge-ledger record issue close 900 --repo "$REPO"
+run_issue_watch 2 5
+if grep -q 'event=issue-closed issue=900' "$WORK/out"; then
+	ok "the self-caused issue-closed is still PRINTED (the filter decides waking, not seeing)"
+else
+	bad "expected event=issue-closed issue=900 to be printed"
+	sed -n '1,10p' "$WORK/out"
+fi
+if grep -q 'self-caused event(s) suppressed' "$WORK/out"; then
+	ok "…and it is SUPPRESSED from the wake decision, and the suppression is reported"
+else
+	bad "the reader's issue-closed arm did not fire — the arm this PR adds is not working"
+	sed -n '1,10p' "$WORK/out"
+fi
+if grep -q 'event=issue-updated issue=900 .*actor=unattributed' "$WORK/out" &&
+	grep -q 'EXITING on the event' "$WORK/out"; then
+	ok "…but the tick STILL WAKES on the unattributed backstop — the gap, pinned rather than described"
+else
+	bad "the backstop no longer wakes: this PR's stated limitation has changed and the text must too"
+	sed -n '1,10p' "$WORK/out"
+fi
+
+# (12) THE CONTROL. Without it (11)'s middle assertion passes against a reader that suppresses EVERY
+# issue-closed, including one somebody else performed on an issue this session declared — the signal
+# the declared set exists for, and the direction that must never fail.
+issue_baseline
+run_issue_watch 2 6
+if grep -q 'self-caused event(s) suppressed' "$WORK/out"; then
+	bad "suppressed an issue-closed nobody recorded performing: a missed wake"
+	sed -n '1,10p' "$WORK/out"
+else
+	ok "an issue closed with NO row is not suppressed — somebody else's close stays a signal"
+fi
 printf '\nforge-watch-selfcaused-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
