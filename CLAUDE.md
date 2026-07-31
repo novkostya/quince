@@ -771,12 +771,37 @@ project wants. So the hook alone closes the exposure, and requiring the layer wo
 satisfied checklist item plus a third complete copy of the private record on the box that already
 holds root ssh into the other two — `pr.6`'s concentration concern, paid for nothing.
 
-**What that ruling makes load-bearing: the journal pre-push hook, which is `provision`'s §4c and is
-NOT role-gated** — it installs a git template on every box whatever seat it is, so a provisioned
-supervisor box gets the guard exactly as the other two do. `refs/heads/journal` has no pull request
-and therefore no reviewer, and the paragraph above says the privacy gate is the only guard on it.
-The analyst's pull-request path was never the exposure — a PR has a reviewer, and the reviewer
-sweeps.
+**What that ruling makes load-bearing is the journal pre-push hook — and ON THE SUPERVISOR BOX THERE
+IS NO WAY TO INSTALL IT.** `refs/heads/journal` has no pull request and therefore no reviewer, and
+the paragraph above says the privacy gate is the only guard on it. The analyst's pull-request path
+was never the exposure — a PR has a reviewer, and the reviewer sweeps. **The journal path is the
+exposure, and its guard is currently undeliverable on the seat that now publishes.**
+
+```
+deploy/runner/provision:27
+case "$ROLE" in implementer|arch) ;; *) printf 'provision: unknown role %s\n' "$ROLE" >&2; exit 2 ;; esac
+```
+
+**`provision` accepts two roles. `preflight` accepts three.** So the supervisor box has never been
+provisioned by this script and cannot be: the hook, the git template and `quince.privacy-check` all
+arrive through `provision`, and it refuses that role with exit 2. quince#383 is the PR that makes
+that refusal *honest* rather than silent; it does not add the role.
+
+**This paragraph asserted the opposite and it was WRONG — caught by the Operator, not by me.** It
+read *"§4c … is NOT role-gated — it installs a git template on every box whatever seat it is, so a
+provisioned supervisor box gets the guard exactly as the other two do."* Both halves of the evidence
+were real and neither was sufficient: §4c genuinely sits outside any `case $ROLE`, and its own
+comment genuinely says *"UNCONDITIONAL ACROSS ROLES, including supervisor."* Unconditional **within
+a script that never runs for that role** is not unconditional. I read the section and never checked
+whether the script would accept the argument, which is the same defect one level up: a claim about
+reachable behaviour, verified only at the destination.
+
+**What is therefore true, stated so no one plans against the wrong version:** the fail-closed half
+works — a box with no `quince.privacy-check` **refuses** journal pushes rather than making them
+unswept — so nothing is currently leaking. But the ruling's chosen control is **unbuilt on the box it
+was chosen to protect**, and *"re-run `provision`"* is an instruction nobody can follow there. Either
+`provision` learns `--role supervisor`, or the ruling needs a different delivery mechanism. Tracked
+on quince#375.
 
 **The gap is FRESHNESS, not a missing mechanism, and this paragraph said otherwise until it was
 checked.** It read *"quince#308 is the control, not provisioning hygiene … until `provision` places
@@ -790,10 +815,22 @@ here."*
 
 **Recorded rather than quietly fixed, because the error is this file's own defect class arriving
 inside the correction for it.** A ruling was carried into canon citing an issue that had been closed
-seven hours earlier, by a session that had read the closed-issue event and not connected it. The
-remedy is an Operator action — **re-run `deploy/runner/provision` on each box** — not a new work
-item, and it is worth knowing that the fail-closed half already works meanwhile: a box without the
-gate configured **refuses** journal pushes rather than making them unswept.
+seven hours earlier, by a session that had read the closed-issue event and not connected it.
+
+**And the correction was itself wrong, in the same paragraph, one revision later.** It said the
+remedy was *"an Operator action — re-run `deploy/runner/provision` on each box — not a new work
+item."* **That is true for two boxes and impossible for the third**, per `provision:27` above. The
+honest split:
+
+- **implementer and arch** — re-run `provision`. A freshness problem, an Operator action, no new work.
+- **supervisor** — **there is no command.** The role does not exist in that script. This is a new
+  work item, not a re-run, and it is the box the ruling was about.
+
+**Three revisions, three wrong remedies, each more specific than the last** — *build the hook* (it
+existed), *re-run provision* (not on that box), and now *provision needs a role it does not have*.
+Left standing as a sequence rather than collapsed into the final answer, because the pattern is the
+lesson: each version was checked against the thing it named and none was checked against the box it
+was for.
 
 **`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
 defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
