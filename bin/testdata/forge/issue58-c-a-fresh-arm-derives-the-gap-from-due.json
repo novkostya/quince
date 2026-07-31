@@ -1,0 +1,23 @@
+{
+  "kind": "watch",
+  "note": "quince#58, and the THIRD version of this bound — the two before it were both wrong and both were found by running the tool rather than by reading it. A fresh arm writes a new `.watch` record with NO `last_watcher_tick` yet while a stale `due` SURVIVES, so the expression is reached with exactly one usable field. Preferring `.last_tick` there reproduced the original defect in a narrower window: measured twice on this box, a five-second `unreconciled` beside a 399s `tick-overdue`. That combination — old `due`, absent watcher tick — looked impossible from one record, which is why it took two observations and a controlled repro to believe. `due` IS the previous watcher tick plus one interval; it is what the line above already derives `late` from, so `due - interval` recovers the gap start exactly and the two lines cannot disagree. `.last_tick` is not a fallback here at all: it is the timestamp of the foreground catch-up that /kickoff and /architect both require immediately before arming, which makes it the one value guaranteed to be wrong at this point. THE SIBLING FIXTURES CANNOT CATCH THIS: both carry a `last_watcher_tick`, so neither ever reaches the fallback. This state is what the arm window actually looks like.",
+  "state": {
+    "observed": true,
+    "prs": [],
+    "last_tick": "2026-07-28T05:59:55Z",
+    "watch": {
+      "pid": 4242,
+      "interval_s": 60,
+      "armed_at": "2026-07-28T06:00:00Z",
+      "due": "2026-07-28T05:01:00Z"
+    }
+  },
+  "now": "2026-07-28T06:00:00Z",
+  "pid_alive": "no",
+  "expect": [
+    "watch=dead state=STATE pid=4242 interval=60s last_watcher_tick=never reason=no_process",
+    "note: RE-ARM from this state — do not reseed it. The next tick diffs against the stored observation and emits what accrued.",
+    "event=tick-overdue due=2026-07-28T05:01:00Z late=3540s interval=60s",
+    "event=unreconciled from=2026-07-28T05:00:00Z to=2026-07-28T06:00:00Z basis=state-diff"
+  ]
+}

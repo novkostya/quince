@@ -1426,7 +1426,19 @@ watch_report() {
 		  # names the wrong one — the exact defect quince#58 exists to remove, rebuilt inside its own
 		  # fix. `last_watcher_tick` is the WATCHER-S cadence, which is the thing that stopped, and
 		  # it is what `due` is derived from one line above; the two now agree by construction.
-		  | "event=unreconciled from=\($w3.last_watcher_tick // .last_tick // "unknown") to=\($t | todate) basis=state-diff" )
+		  # AND WHEN `last_watcher_tick` IS ABSENT, DERIVE THE GAP FROM `due` — never from `.last_tick`.
+		  # A fresh arm writes a new `.watch` with no watcher tick yet while a stale `due` survives, so
+		  # this expression is reached with exactly one usable field. Falling back to `.last_tick`
+		  # there reproduced the original defect in a narrower window: measured twice on this box, a
+		  # five-second `unreconciled` beside a 399s `tick-overdue`.
+		  #
+		  # `due` IS the previous watcher tick plus one interval — it is what the line above already
+		  # computes `late` from — so `due - interval` recovers the gap start exactly, and the two
+		  # lines cannot disagree. `.last_tick` is not a fallback at all here: it is the timestamp of
+		  # the foreground catch-up both skills require before arming, which is to say the one value
+		  # guaranteed to be wrong at this point.
+		  | ($w3.last_watcher_tick // (($w3.due | fromdate) - ($w3.interval_s // 60) | todate)) as $from
+		  | "event=unreconciled from=\($from) to=\($t | todate) basis=state-diff" )
 		' "$_st" || die "could not read watch state: $_st"
 
 	# The declared blocking set, and its AGE — printed only when there is one, so a state file that
