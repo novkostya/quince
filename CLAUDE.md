@@ -446,11 +446,27 @@ Entries stay **date-anchored and cite PR/issue numbers**, which GitHub allocates
 claim appears twice by design — as the H1 the generated index reads, and as the entry's own bold
 lead. Regenerate that index with `bin/journal-index` after every append.
 
+**The three tools live on two different branches, and that is easy to get wrong.** `bin/journal-index`
+is **on the `journal` branch** — it reads the entry tree, so it ships with it. `bin/dashboard-size`
+and `bin/pre-push-journal` are **on `main`**: the first guards `progress.md`, and the second is kept
+behind branch protection deliberately, because a control living on the unprotected branch could be
+rewritten by the identity it guards (`decisions/0007`).
+
 **A journal entry is ANNOTATED, never rewritten** (`decisions/0006`). An entry that turns out to be
 wrong is corrected by addition, with the original left standing: a citation is only worth something
 if the text it points at is the text that was there, and a quietly corrected entry destroys the
-evidence that anyone was misled. Nothing mechanically prevents a rewrite — what makes one
-*detectable* is that every box holds a clone, so a rewritten branch is contradicted by every copy.
+evidence that anyone was misled.
+
+**Nothing mechanically prevents a rewrite, and nothing reliably detects one either.** Every box holds
+a clone, so a rewritten branch *can* be contradicted by another copy — but only by a copy that is
+**current**, and nothing asserts currency. `preflight` checks that the private layer's clone **can**
+fetch, deliberately not that it **has** (`deploy/runner/preflight`, and quince#281 closing quince#220
+after two boxes ran materially different privacy gates for hours and neither could tell). A stale
+clone agrees with a rewrite as readily as a fresh one agrees with the truth.
+
+So clone replication is **evidence that may survive**, not an integrity control. Against what it
+replaced — branch protection, a required approval, linear history, every edit in a diff forever —
+it is weaker, and the rule rests on the discipline above rather than on the substrate.
 
 **THE PRIVACY GATE IS THE ONLY GUARD ON THAT BRANCH.** There is no pull request and therefore no
 reviewer. Run `make privacy-check REF=origin/journal...HEAD` before every append; `bin/pre-push-journal`
