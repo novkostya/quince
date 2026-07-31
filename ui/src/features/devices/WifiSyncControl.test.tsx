@@ -93,3 +93,47 @@ describe("WifiSyncControl", () => {
     expect(path).toBe(`/api/devices/${device().udid}/wifi-sync`);
   });
 });
+
+describe("disable confirmation", () => {
+  // The Operator hit this on hardware: tapped disable over Wi-Fi, the device was cut off mid-action
+  // and could only be recovered with a cable. A warning sentence was not enough.
+  it("does NOT post immediately when disabling would disconnect the device", () => {
+    const post = vi.fn();
+    render(
+      <WifiSyncControl
+        device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
+        post={post}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
+
+    expect(post).not.toHaveBeenCalled();
+    expect(screen.getByText(/turn off wi-fi sync\?/i)).toBeTruthy();
+  });
+
+  it("posts disable only after the confirmation is accepted", () => {
+    const post = vi.fn().mockResolvedValue({ op_id: "op-4" });
+    render(
+      <WifiSyncControl
+        device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
+        post={post}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
+    // The dialog's own button, not the trigger — getAllByRole picks both, the last is the dialog's.
+    const buttons = screen.getAllByRole("button", { name: /turn off wi-fi sync/i });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
+  });
+
+  // Scoped to the destructive case. Over USB nothing is severed, so a confirmation would be
+  // ceremony — and ceremony on a harmless action is how people learn to click through real ones.
+  it("does NOT confirm when the device is on USB, because nothing gets cut off", () => {
+    const post = vi.fn().mockResolvedValue({ op_id: "op-5" });
+    render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
+
+    expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
+  });
+});
