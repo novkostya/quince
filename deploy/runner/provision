@@ -89,6 +89,7 @@ _bot_token="${QUINCE_BOT_TOKEN_FILE:-/root/.config/quince/quince-bot.token}"
 _arch_token="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
 _coder_key="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
 _review_key="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
+_analyst_key="${QUINCE_ANALYST_KEY_FILE:-/root/.config/quince/quince-analyst.pem}"
 if [ "$ROLE" = arch ]; then
 	_other_role=implementer
 	_own_creds="$_arch_token $_review_key" _other_creds="$_bot_token $_coder_key"
@@ -107,6 +108,44 @@ _present() {
 }
 _have_own=$(_present "$_own_creds")
 _have_other=$(_present "$_other_creds")
+
+# THE THIRD SEAT, WHICH THIS SCRIPT CANNOT PROVISION AND MUST NOT PASS OVER (quince#375).
+#
+# This guard is quince#234's — *a seat is a set of credentials, not one token* — and quince#375 added
+# a credential to a set nothing here knew about. `--role` accepts `implementer` and `arch` only, so
+# the analyst key belongs to NEITHER `_own_creds` nor `_other_creds`, and the two-way comparison below
+# is blind to it: a box holding `quince-coder.pem` AND `quince-analyst.pem` — two seats, one box —
+# passes the both-seats refusal cleanly. That is the exact state that refusal exists to catch, reached
+# by a credential arriving rather than by the check being wrong, which is the third time this file has
+# recorded that shape (quince#203, quince#204, quince#234).
+#
+# IT REFUSES RATHER THAN CLASSIFYING, and the distinction is the honest part. The two messages below
+# are actionable because each names a remedy: re-run with the right `--role`, or remove a credential.
+# Neither remedy exists here. There is no `--role supervisor` — `preflight` accepts that role and this
+# script does not, so the supervisor box has never been provisioned by it — so telling somebody to
+# re-run would send them to an argument that is refused twenty lines above, and telling them to remove
+# the analyst key would be telling them to un-do quince#375's ceremony.
+#
+# Placed BEFORE the two-way block so the analyst key can never be reported under another seat's name:
+# a "BOTH SEATS … (arch)" message naming `quince-analyst.pem` would send the reader to the wrong box.
+#
+# WHEN `--role supervisor` EXISTS, this becomes conditional rather than unconditional — the analyst key
+# is then that role's OWN credential and the refusal must fire only for the other two. Written as one
+# guard with one condition so that change is a line rather than an untangling.
+_have_analyst=$(_present "$_analyst_key")
+if [ -n "$_have_analyst" ]; then
+	printf 'provision: this box holds the ANALYST KEY, which is the SUPERVISOR seat: %s\n' "$_have_analyst" >&2
+	printf 'provision: refusing BEFORE touching anything — and NOT because holding it is wrong. It is\n' >&2
+	printf '    that seat OWN identity, ruled on quince#375. What is wrong is that this script cannot\n' >&2
+	printf '    provision the seat: it accepts --role implementer and --role arch, and there is no\n' >&2
+	printf '    --role supervisor at all.\n' >&2
+	printf '    So neither remedy this guard usually offers applies here. Do NOT re-run with another\n' >&2
+	printf '    --role: that would configure a %s box on the supervisor machine. Do NOT remove the\n' "$ROLE" >&2
+	printf '    key: that would undo the ceremony quince#375 performed.\n' >&2
+	printf '    The supervisor box is provisioned BY HAND today. Giving it a role here is quince#375.\n' >&2
+	exit 2
+fi
+
 if [ -n "$_have_other" ] && [ -n "$_have_own" ]; then
 	printf 'provision: this box holds BOTH SEATS: %s (role %s) and %s (%s).\n' \
 		"$_have_own" "$ROLE" "$_have_other" "$_other_role" >&2
