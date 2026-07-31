@@ -750,12 +750,32 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
 ## The private layer
 
 `local/` is gitignored: lab topology, the privacy pattern list, and personal transcripts.
-It lives in the **private `quince-local` repository**, and **both session hosts hold a full
+It lives in the **private `quince-local` repository**, and **the two WORKING boxes hold a full
 clone of it** — `deploy/runner/provision` places it and `preflight` refuses to start a box
 that cannot reach it (quince#44, ruled 2026-07-27). This paragraph used to say the layer
 existed *"only on the Operator's machines"*; that stopped being true the moment work moved
 onto the boxes, and a document describing a narrower reality than the one that exists is the
 defect class this project keeps filing.
+
+**There are THREE seats and the third deliberately does NOT hold it** — Operator ruling
+2026-08-01, relayed at [quince#375](https://github.com/novkostya/quince/issues/375#issuecomment-5147380898).
+This sentence said *"both session hosts"* while the supervisor box existed, which was accurate
+only because that seat could not publish. quince#375 gave it `contents: write`, and the question
+of whether it must therefore carry the layer was ruled **no**.
+
+**The reasoning matters more than the outcome, because the obvious answer was the other one.**
+Requiring the layer would make `privacy-check` **runnable** on that box without making it **run**:
+nothing invokes the gate on a push except `bin/pre-push-journal`. And the hook needs the pattern
+list, so on a box that lacks one it **refuses the push** — fail-closed, which is the direction this
+project wants. So the hook alone closes the exposure, and requiring the layer would have bought a
+satisfied checklist item plus a third complete copy of the private record on the box that already
+holds root ssh into the other two — `pr.6`'s concentration concern, paid for nothing.
+
+**What that ruling makes load-bearing: quince#308 is the control, not provisioning hygiene.**
+`refs/heads/journal` has no pull request and therefore no reviewer, and the paragraph above says
+the privacy gate is the only guard on it. Until `provision` places the hook on **every** box, that
+guard is closed in design and open in practice. The analyst's pull-request path was never the
+exposure — a PR has a reviewer, and the reviewer sweeps.
 
 **`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
 defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
