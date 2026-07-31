@@ -61,9 +61,18 @@ ABSENT_TOKEN="$TMP/no-such.token"
 #
 # Exported rather than added to PF_UNSET: unsetting is what caused the fallback. Individual cases
 # override these per invocation, which is how the fixtures already work.
+#
+# TWO PATHS WERE STILL MISSING FROM "EVERY", AND THE WORD IS THE POINT (quince#375). The supervisor
+# arm reads FIVE credential paths and this list pinned three, so `QUINCE_ARCH_TOKEN_FILE` was still
+# falling back to `/root/.config/quince/quince-arch.token` — the exact defect the paragraph above
+# describes, surviving inside its own fix, and invisible for the same reason: it fails only on a box
+# where that file exists, which is the arch box, which is not where this suite is usually run.
+# `QUINCE_ANALYST_KEY_FILE` joins them because the supervisor arm is now an allowlist keyed on it.
 export QUINCE_BOT_TOKEN_FILE="$ABSENT_TOKEN"
 export QUINCE_CODER_KEY_FILE="$ABSENT_TOKEN"
 export QUINCE_REVIEW_KEY_FILE="$ABSENT_TOKEN"
+export QUINCE_ARCH_TOKEN_FILE="$ABSENT_TOKEN"
+export QUINCE_ANALYST_KEY_FILE="$ABSENT_TOKEN"
 
 # Synthetic private layers (quince#44). Never the Operator's — these hold obvious nonsense, so a
 # fixture can neither read the real list nor accidentally match real content.
@@ -297,6 +306,63 @@ expect "arch WITH a coder App key is refused" 1 "IMPLEMENTER CREDENTIAL is prese
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "QUINCE_CODER_KEY_FILE=$GOOD_TOKEN"
 expect "arch with NEITHER implementer credential passes" 0 "no implementer credential present" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" "QUINCE_CODER_KEY_FILE=$ABSENT_TOKEN"
+
+# --- THE SUPERVISOR ARM, WHICH THIS SUITE HAD NEVER DRIVEN (quince#375) -----------------------
+#
+# THE COVERAGE GAP IS THE FINDING, and it is worth more than any single case below. `supervisor` is
+# one of the three roles `preflight` accepts, its arm is a pure credential check, and until now the
+# string did not appear in this file once. The implementer and arch arms are covered in both
+# directions; the third was covered in neither — quince#103's rule again, one role over: *checking
+# one direction of a two-directional property is not a check*, and here it was zero of two.
+#
+# It matters now because the arm stopped being a clean denylist. "Absence of every credential" is a
+# sentence anyone can verify by reading it; "absence of every credential except one" is a list, and a
+# list is what needs a suite. So the weakening quince#375 accepts is exactly what makes these cases
+# load-bearing rather than tidy.
+#
+# ALL FOUR REFUSALS ARE DRIVEN SEPARATELY. A loop over one variable would pass against an arm that
+# checked only the first path in its list, which is a plausible way to get this wrong and an
+# invisible one — the box would start while holding another seat's identity.
+expect "supervisor WITH a bot token is refused" 1 "OTHER SEAT'S FORGE CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_BOT_TOKEN_FILE=$GOOD_TOKEN"
+expect "supervisor WITH a coder App key is refused" 1 "OTHER SEAT'S FORGE CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_CODER_KEY_FILE=$GOOD_TOKEN"
+expect "supervisor WITH a reviewer App key is refused" 1 "OTHER SEAT'S FORGE CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_REVIEW_KEY_FILE=$GOOD_TOKEN"
+expect "supervisor WITH an architect token is refused" 1 "OTHER SEAT'S FORGE CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_ARCH_TOKEN_FILE=$GOOD_TOKEN"
+
+# THE ALLOWLIST'S POSITIVE HALF — the case the whole change exists for, and the one a denylist with
+# an exception bolted on would get wrong. Without it, an arm that refused the analyst key too would
+# pass every assertion above.
+expect "supervisor WITH the analyst key alone STARTS" 0 "exactly one identity" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_ANALYST_KEY_FILE=$GOOD_TOKEN"
+
+# AND THE PAIR THAT MAKES IT AN ALLOWLIST RATHER THAN A PERMISSION. The analyst key present does not
+# license anything else: with another seat's credential beside it the box must still refuse, or
+# "exactly one identity" is a claim nothing enforces.
+expect "the analyst key does not license a SECOND identity" 1 "OTHER SEAT'S FORGE CREDENTIAL is present" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_ANALYST_KEY_FILE=$GOOD_TOKEN" "QUINCE_REVIEW_KEY_FILE=$GOOD_TOKEN"
+
+# A TOKEN IN THE ENVIRONMENT IS A CREDENTIAL, and the arm has said so since a box passed while
+# holding `GH_TOKEN=…` — a fully working credential, since that variable is exactly how the wrappers
+# hand one to `gh`. Driven here because the allowlist rewrite touched the block it lives in, and an
+# untested neighbour is how a rewrite loses a check nobody was asserting.
+expect "supervisor with GH_TOKEN in the environment is refused" 1 "in the environment" -- \
+	QUINCE_RUNNER_ROLE=supervisor GH_TOKEN=ghp_notarealtoken
+
+# THE BOOTSTRAP CASE: no analyst key yet is a NOTE, not a refusal — the arch arm's posture for its
+# reviewer key, for the same reason. A box provisioned before the App existed is a correct box that
+# predates a change, and refusing to start it would strand the seat the Operator talks to.
+expect "supervisor with NO credential at all still starts, and says what is lost" 0 "cannot act under its own name" -- \
+	QUINCE_RUNNER_ROLE=supervisor
+
+# THE UNRULED GAP IS ASSERTED AS AN ANNOUNCEMENT, deliberately (quince#375). The private-layer arm
+# still exempts this seat, and its justification — "it commits nothing" — is withdrawn now the seat
+# can publish. The behaviour is unchanged pending a ruling, so what is pinned is that the box SAYS
+# so: an exemption that has quietly become a gap must not read as a property.
+expect "the private-layer exemption announces itself as an unruled gap" 0 "unruled gap" -- \
+	QUINCE_RUNNER_ROLE=supervisor
 
 # An unknown role refuses rather than guessing which identity rules apply — guessing would pick
 # one of two opposite assertions.
