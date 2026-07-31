@@ -7,6 +7,36 @@
 >
 > Wire casing: `snake_case` JSON everywhere. Times: RFC 3339 UTC strings. IDs: ULIDs.
 
+**BREAKING IS CHEAP HERE, AND THE CORRECT MODEL BEATS THE COMPATIBLE ONE.** Operator ruling,
+2026-08-01 (quince#378): *"I am the only user atm and I see no reason to accumulate
+backward-compatibility garbage."* The project is **pre-release with one operator**, and **the only
+consumer of this API is the in-repo UI, shipped from the same commit** — a fact this document
+already relies on elsewhere when it suits an argument (§`Op.kind`, the `wifi_sync` enum extension).
+So when a change is between *the right shape* and *the shape that does not break a client*, take the
+right shape. There is no client to break, and a compatibility path added now is one nothing will be
+brave enough to remove in two years.
+
+**Read the paragraph above this one accordingly.** *"Field additions are non-breaking; renames/
+removals are breaking and need Operator sign-off"* still describes the **classification** and the
+**sign-off**, and both stand — but it must not be read as a preference for additive changes. It was,
+twice in one review: `qn.6c`'s gaps 1 and 3 were both first recommended on compatibility grounds, one
+of them proposing a permanent implicit fallback to avoid editing a single YAML file on a single
+machine. The Operator overruled it, and the architect's dissent is retracted on the record
+(quince#378).
+
+**What this does NOT license.** It is not an argument against migrations, against `PROPOSED (gap)`,
+or against Operator sign-off — a breaking change is still a **cross-track event** that lands here
+first and still needs the ruling. It is cheaper, not free, and *"the UI ships from the same commit"*
+is the whole of why. **The clause expires when that stops being true**: the first external consumer,
+published API, or independently-deployed client retires it, and whoever adds one owns deleting this
+paragraph.
+
+**One worked example, so the line is not read as "always break".** `qn.6c` gap 1 keeps
+`Version.backend` — and that is *not* the compatibility reflex. A version can outlive its storage
+once remove-a-storage exists, leaving `storage_id` dangling and the backend unrecoverable by join, so
+the field is not derivable in all futures. It is a distinct fact, kept on modelling grounds. **The
+test is whether the field earns its place, not whether removing it would break someone.**
+
 ## 1. REST API (`/api`)
 
 Auth (endpoints ruled in qn.1, Operator 2026-07-19):
