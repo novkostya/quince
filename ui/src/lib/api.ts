@@ -15,15 +15,69 @@ export class APIError extends Error {
   }
 }
 
-// UnauthorizedError is thrown on any 401 so callers can drop to the login screen.
+// UnauthorizedError is thrown on any 401. It carries the SERVER's code and message rather than a
+// fixed string: a 401 is not one thing. An expired session is `unauthorized`/"authentication
+// required" from the guard middleware; a wrong password at the login form is
+// `bad_password`/"incorrect password". Hard-coding the first meant the login form told users their
+// password was fine and their session was not (quince#356).
 export class UnauthorizedError extends APIError {
-  constructor() {
-    super(401, "unauthorized", "authentication required");
+  constructor(code = "unauthorized", message = "authentication required", details?: unknown) {
+    super(401, code, message, details);
     this.name = "UnauthorizedError";
   }
 }
 
+// onUnauthorized is called when a 401 means THE SESSION IS GONE — not when a credential a user just
+// typed was wrong. The app wires it at boot to re-read auth status, which drops the route guard to
+// the login screen (main.tsx).
+//
+// A CALLBACK rather than an import, for two reasons. `lib/auth.ts` imports this module, so importing
+// it back is a cycle; and the API client has no business knowing about react-query or the router. It
+// reports the fact and lets the app decide what that means.
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
+// The two endpoints where a 401 is about the CREDENTIAL IN THE REQUEST, not about the session: they
+// are the ones you can reach without a session at all (the server's authExempt set). A 401 here means
+// "that password was wrong", and dropping to the login screen because you are already on it — or
+// worse, wiping a half-typed setup — would be nonsense.
+const CREDENTIAL_ENDPOINTS = new Set(["/api/auth/login", "/api/auth/setup"]);
+
 type Method = "GET" | "POST" | "PUT" | "DELETE";
+
+// parseErrorBody pulls {error:{code,message}} out of a response, falling back honestly when the body
+// is absent or not JSON. Shared by the 401 branch and the general error branch so the two cannot
+// drift — the 401 path skipping this is exactly what discarded the server's words.
+async function parseErrorBody(
+  resp: Response,
+  fallbackCode: string,
+  fallbackMessage: string,
+): Promise<{ code: string; message: string; details: unknown }> {
+  let code = fallbackCode;
+  let message = fallbackMessage;
+  let details: unknown;
+  try {
+    const parsed: unknown = await resp.json();
+    details = parsed;
+    if (parsed && typeof parsed === "object" && "error" in parsed) {
+      const err = (parsed as { error?: { code?: string; message?: string } }).error;
+      if (err?.code) code = err.code;
+      if (err?.message) message = err.message;
+    }
+  } catch {
+    // non-JSON or empty error body; keep the fallbacks
+  }
+  return { code, message, details };
+}
+
+async function unauthorized(resp: Response, path: string): Promise<UnauthorizedError> {
+  const { code, message, details } = await parseErrorBody(resp, "unauthorized", "authentication required");
+  if (!CREDENTIAL_ENDPOINTS.has(path)) onUnauthorized?.();
+  return new UnauthorizedError(code, message, details);
+}
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
@@ -38,24 +92,11 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   }
 
   const resp = await fetch(path, init);
-  if (resp.status === 401) throw new UnauthorizedError();
+  if (resp.status === 401) throw await unauthorized(resp, path);
   if (resp.status === 204) return undefined as T;
 
   if (!resp.ok) {
-    let code = "error";
-    let message = `HTTP ${resp.status}`;
-    let details: unknown;
-    try {
-      const parsed: unknown = await resp.json();
-      details = parsed;
-      if (parsed && typeof parsed === "object" && "error" in parsed) {
-        const err = (parsed as { error?: { code?: string; message?: string } }).error;
-        if (err?.code) code = err.code;
-        if (err?.message) message = err.message;
-      }
-    } catch {
-      // non-JSON error body; keep defaults
-    }
+    const { code, message, details } = await parseErrorBody(resp, "error", `HTTP ${resp.status}`);
     throw new APIError(resp.status, code, message, details);
   }
 
@@ -66,7 +107,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 // handling as request<T>, but returns the raw text rather than parsing JSON.
 async function requestText(path: string): Promise<string> {
   const resp = await fetch(path, { method: "GET", credentials: "same-origin" });
-  if (resp.status === 401) throw new UnauthorizedError();
+  if (resp.status === 401) throw await unauthorized(resp, path);
   if (!resp.ok) throw new APIError(resp.status, "error", `HTTP ${resp.status}`);
   return resp.text();
 }
