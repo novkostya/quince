@@ -465,14 +465,22 @@ evidence that anyone was misled.
 
 **Nothing mechanically prevents a rewrite, and nothing reliably detects one either.** Every box holds
 a clone, so a rewritten branch *can* be contradicted by another copy — but only by a copy that is
-**current**, and nothing asserts currency. `preflight` checks that the private layer's clone **can**
-fetch, deliberately not that it **has** (`deploy/runner/preflight`, and quince#281 closing quince#220
-after two boxes ran materially different privacy gates for hours and neither could tell). A stale
-clone agrees with a rewrite as readily as a fresh one agrees with the truth.
+**current**, and **nothing names which commit a journal clone holds.** `preflight` asserts the private
+layer's clone **can** fetch, deliberately not that it **has** (quince#121). A stale clone agrees with a
+rewrite exactly as readily as a fresh one agrees with the truth.
+
+**The precedent is the argument, and it runs the other way from what it looks like.** When this
+project actually needed clone freshness to be *detectable* — quince#220, two boxes running materially
+different privacy gates for hours with neither able to tell — replication did not supply it. Somebody
+had to build a mechanism: quince#281 made `privacy-check` print `pattern source <commit> <date>`, so a
+reader can now see **which list** a sweep used. That is the point. Currency became checkable for the
+pattern list because a tool was written to check it, not because clones exist.
 
 So clone replication is **evidence that may survive**, not an integrity control. Against what it
-replaced — branch protection, a required approval, linear history, every edit in a diff forever —
-it is weaker, and the rule rests on the discipline above rather than on the substrate.
+replaced — branch protection, a required approval, linear history, every edit in a diff forever — it
+is weaker, and the rule rests on the discipline above rather than on the substrate. The journal branch
+has no equivalent of quince#281 and until it does, *"somebody might still hold a copy that disagrees"*
+is the honest statement of its backing.
 
 **THE PRIVACY GATE IS THE ONLY GUARD ON THAT BRANCH.** There is no pull request and therefore no
 reviewer. Run `make privacy-check REF=origin/journal...HEAD` before every append; `bin/pre-push-journal`
