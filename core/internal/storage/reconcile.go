@@ -145,7 +145,31 @@ func (m *Manager) recomputeLatest(udid string) error {
 		return nil
 	}
 	sort.Slice(present, func(i, j int) bool { return present[i].CreatedAt.After(present[j].CreatedAt) })
-	return m.reg.PromoteLatest(udid, present[0].ID)
+
+	// PER STORAGE, not per device (Operator ruling 2026-08-01, quince#378). One promotion per
+	// group, so a device with versions on two storages ends with two `is_latest` rows — one each —
+	// and `browse_root` resolves for both. Promoting once across all of a device's rows would leave
+	// every storage but the winner with its newest version flagged false, whose browse_root then
+	// points at a `versions/<ts>/` dir that does not exist.
+	//
+	// Unattributed rows (storage_id NULL) form their own group and get their own latest. That is
+	// what keeps a pre-qn.6c device resolvable before the attribution sweep has reached it —
+	// excluding them would leave it with no latest at all, which is the same defect inverted.
+	promoted := map[string]bool{}
+	for _, r := range present {
+		key := "\x00" // the NULL group; cannot collide with a ULID
+		if r.StorageID != nil {
+			key = *r.StorageID
+		}
+		if promoted[key] {
+			continue // `present` is newest-first, so the first of each group IS that group's latest
+		}
+		promoted[key] = true
+		if err := m.reg.PromoteLatest(udid, r.ID, r.StorageID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // reconcileUDIDs is the union of udids with registry rows and on-disk device dirs.

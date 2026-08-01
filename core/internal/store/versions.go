@@ -32,7 +32,7 @@ type VersionRow struct {
 }
 
 // InsertVersion records a committed (or adopted) version. It does NOT enforce single-latest;
-// call PromoteLatest after a commit to make this row the sole latest for its udid.
+// call PromoteLatest after a commit to make this row the sole latest for its (udid, storage).
 func (s *Store) InsertVersion(v VersionRow) error {
 	_, err := s.db.Exec(`INSERT INTO versions
 		(id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted, is_latest,
@@ -45,12 +45,24 @@ func (s *Store) InsertVersion(v VersionRow) error {
 	return err
 }
 
-// PromoteLatest makes id the sole is_latest=1 row for its udid (single UPDATE, so a crash
-// can't leave two latests). Called at the end of a commit's registry phase.
-func (s *Store) PromoteLatest(udid, id string) error {
+// PromoteLatest makes id the sole is_latest=1 row for its `(udid, storage)` (single UPDATE, so a
+// crash can't leave two latests within a group). Called at the end of a commit's registry phase.
+//
+// SCOPED TO THE STORAGE, not just the device — Operator ruling 2026-08-01 (quince#378).
+// `Version.is_latest` means "the newest committed version of this device ON ITS STORAGE", so a
+// device backed up to two storages has two rows flagged, one each. Without the storage clause,
+// committing to storage B demoted storage A's latest, and `browse_root` then resolved A's newest
+// version to a `versions/<ts>/` directory that does not exist — its artifact is still in `latest/`.
+//
+// `storage_id IS ?` rather than `= ?`, because SQL `=` never matches NULL and unattributed rows
+// must still get a latest AMONG THEMSELVES. Excluding them was considered and rejected: a device
+// whose rows are all NULL would then have NO latest at all, which produces the same unresolvable
+// `browse_root` by the opposite route. `IS ?` fails safe — every group always has exactly one.
+func (s *Store) PromoteLatest(udid, id string, storageID *string) error {
 	_, err := s.db.Exec(
-		`UPDATE versions SET is_latest = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE udid = ?`,
-		id, udid)
+		`UPDATE versions SET is_latest = CASE WHEN id = ? THEN 1 ELSE 0 END
+		 WHERE udid = ? AND storage_id IS ?`,
+		id, udid, nullStr(storageID))
 	return err
 }
 

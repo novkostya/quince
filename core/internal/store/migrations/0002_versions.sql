@@ -12,7 +12,7 @@ CREATE TABLE versions (
     job_id                TEXT,                      -- NULL = adopted (found on disk, no job)
     kind                  TEXT NOT NULL DEFAULT 'unknown',   -- full | incremental | unknown
     encrypted             INTEGER NOT NULL DEFAULT 0,        -- 0/1
-    is_latest             INTEGER NOT NULL DEFAULT 0,        -- 0/1; at most one per udid
+    is_latest             INTEGER NOT NULL DEFAULT 0,        -- 0/1; at most one per (udid, storage_id)
     structure_verified_at TEXT,                      -- set at commit
     content_verified_at   TEXT,                      -- set on a later unlock (qn.8)
     logical_bytes         INTEGER NOT NULL DEFAULT 0,

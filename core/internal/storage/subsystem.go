@@ -14,7 +14,7 @@ import (
 // Registry is the version-persistence slice the subsystem needs (*store.Store satisfies it).
 type Registry interface {
 	InsertVersion(store.VersionRow) error
-	PromoteLatest(udid, id string) error
+	PromoteLatest(udid, id string, storageID *string) error
 	ListVersions(udid string) ([]store.VersionRow, error)
 	GetVersion(id string) (store.VersionRow, bool, error)
 	DeleteVersion(id string) error
@@ -216,7 +216,7 @@ func (m *Manager) registerCommitted(c Committed) error {
 	if err := m.reg.InsertVersion(row); err != nil {
 		return err
 	}
-	return m.reg.PromoteLatest(c.UDID, c.VersionID)
+	return m.reg.PromoteLatest(c.UDID, c.VersionID, m.storageIDPtr())
 }
 
 // Discard drops a failed job's work (design §4). Returns the human note (dirty-working on zfs).
