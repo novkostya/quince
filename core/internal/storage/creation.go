@@ -61,15 +61,15 @@ type StorageState struct {
 	Verified bool
 }
 
-// knownStorage is the DB half ResolveStorage consults. Defined here, consumer-side, so the
+// KnownStorage is the DB half ResolveStorage consults. Defined here, consumer-side, so the
 // storage package does not depend on the store package's row type.
-type knownStorage struct {
+type KnownStorage struct {
 	Known     bool
 	StorageID string
 }
 
 // StorageLookup answers "has quince created this storage before?" for a config entry name.
-type StorageLookup func(name string) (knownStorage, error)
+type StorageLookup func(name string) (KnownStorage, error)
 
 // ResolveStorage decides what a declared storage is, and is the rung's load-bearing rule.
 //

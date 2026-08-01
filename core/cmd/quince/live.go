@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -36,7 +37,7 @@ type liveStack struct {
 // (amendment 1: a commit that rolled forward is visible to the job reconciler) — BEFORE returning,
 // so the caller serves / drives only a reconciled system. Shared by `serve` and `backup`.
 func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *config.Service,
-	st *store.Store, eventBus *bus.Bus, log *slog.Logger) *liveStack {
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*liveStack, error) {
 	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
@@ -70,7 +71,10 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	log.Info("device ops ready (pair/encryption/enrichment)")
 
 	// Storage subsystem (qn.5): resolve the backend + reconcile before anything serves.
-	storageMgr := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	storageMgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	if err != nil {
+		return nil, err
+	}
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
 
@@ -135,7 +139,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.jobControl = eng
 	ls.engine = eng
 	log.Info("backup engine ready")
-	return ls
+	return ls, nil
 }
 
 // buildStorage resolves the qn.5 backend and returns a reconciled *storage.Manager. It is the
@@ -144,7 +148,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 // muxer supervisor / device registry / enrichment goroutines the full stack spins up. Reconcile runs
 // before returning (same as serve) so adopted/missing versions are reflected.
 func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Service,
-	st *store.Store, eventBus *bus.Bus, log *slog.Logger) *storage.Manager {
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*storage.Manager, error) {
 	scfg := cfgSvc.Current().Storage
 	root, name := defaultStorage(scfg)
 	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
@@ -152,6 +156,59 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
 		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
 	}, log)
+
+	// qn.6c 3c: resolve the storage's IDENTITY before serving. Select tells us what the path looks
+	// like NOW; ResolveStorage decides what that means given the marker on disk and whether quince
+	// has created this storage before. The probe result is handed in rather than re-taken, and on
+	// every refusing path it is DISCARDED — which is the point: a probed backend must never become
+	// a known storage's backend behind the marker's back.
+	state, err := storage.ResolveStorage(name, root,
+		func(string) string { return backendName },
+		func(n string) (storage.KnownStorage, error) {
+			row, ok, err := st.GetStorage(n)
+			if err != nil || !ok || row.StorageID == nil {
+				return storage.KnownStorage{}, err
+			}
+			return storage.KnownStorage{Known: true, StorageID: *row.StorageID}, nil
+		},
+		time.Now, version.String(), id.New)
+	if err != nil {
+		return nil, fmt.Errorf("storage %q: %w", name, err)
+	}
+	if !state.Resolution.OK() {
+		// REFUSE. A quince that serves while its storage is not what it thinks it is can write
+		// backups to the wrong filesystem, and the missing-medium case looks exactly like an empty
+		// directory. The Reason carries observation, consequence and remedy (preflight's idiom).
+		return nil, fmt.Errorf("%s (%s)", state.Reason, state.Resolution)
+	}
+	if state.Resolution == storage.ResolutionCreated {
+		// LOUD and user-visible, deliberately: this is the one path where quince decides a place
+		// is a new storage, and the residual it cannot rule out is a first declaration whose
+		// medium was absent. A user must be able to contradict it.
+		log.Warn("storage CREATED — quince had not seen this storage before and has claimed it",
+			"storage", name, "path", root, "backend", state.Backend, "storage_id", state.StorageID,
+			"note", "if this path should already hold backups, stop and check the medium is mounted")
+	}
+	if !state.Verified {
+		log.Warn("storage opened UNVERIFIED — nothing confirmed the medium matches its marker",
+			"storage", name, "path", root, "backend", state.Backend, "reason", state.Reason)
+	}
+
+	now := time.Now().UTC()
+	created := now
+	if state.Resolution == storage.ResolutionCreated {
+		if err := st.UpsertStorage(store.StorageRow{
+			Name: name, StorageID: &state.StorageID, Backend: &state.Backend,
+			Path: root, CreatedAt: &created, SeenAt: now,
+		}); err != nil {
+			return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
+		}
+	} else if err := st.UpsertStorage(store.StorageRow{
+		Name: name, StorageID: &state.StorageID, Backend: &state.Backend, Path: root, SeenAt: now,
+	}); err != nil {
+		return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
+	}
+
 	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, root,
 		storage.RetentionPolicy{
 			KeepRecent: scfg.Retention.KeepRecent,
@@ -161,8 +218,55 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	if err := storageMgr.Reconcile(ctx); err != nil {
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
-	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName, "reason", reason)
-	return storageMgr
+
+	// Attribute versions that predate qn.6c. Fills only NULLs, so it never rewrites where a
+	// committed backup is recorded as living; running it every startup is therefore safe.
+	attributeVersions(st, state.StorageID, log)
+
+	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName,
+		"reason", reason, "storage_id", state.StorageID, "resolution", state.Resolution,
+		"verified", state.Verified)
+	return storageMgr, nil
+}
+
+// attributeVersions fills storage_id on versions that have none, and reports what remains.
+//
+// `null` means NOT YET ATTRIBUTED and is TRANSITIONAL (contracts §2). This is what makes it
+// transitional in fact rather than only in the documentation — and the leftover count is logged
+// rather than swallowed, because a nullable-with-meaning field whose meaning is "temporary" decays
+// into a permanent unknown unless something keeps saying otherwise.
+//
+// Single-storage this rung: every unattributed version belongs to the one declared storage. When a
+// device can have versions on several, attribution stops being a whole-table sweep and becomes a
+// per-(device, storage) question — which is why this is deliberately a small, replaceable function.
+func attributeVersions(st *store.Store, storageID string, log *slog.Logger) {
+	udids, err := st.UDIDsWithVersions()
+	if err != nil {
+		log.Error("storage: could not list devices for version attribution", "error", err)
+		return
+	}
+	var total int64
+	for _, u := range udids {
+		n, err := st.AttributeVersions(u, storageID)
+		if err != nil {
+			log.Error("storage: attributing versions failed", "udid", u, "error", err)
+			return
+		}
+		total += n
+	}
+	remaining, err := st.CountUnattributedVersions()
+	if err != nil {
+		log.Error("storage: could not count unattributed versions", "error", err)
+		return
+	}
+	if total > 0 {
+		log.Info("storage: attributed versions to their storage", "count", total, "storage_id", storageID)
+	}
+	if remaining > 0 {
+		// Not an error here — but it must never be silent, because this is the state that is
+		// supposed to disappear.
+		log.Warn("storage: versions still carry no storage_id", "count", remaining)
+	}
 }
 
 // defaultStorage returns the root and name of the storage a backup goes to when none is named.

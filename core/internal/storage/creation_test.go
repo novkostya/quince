@@ -10,10 +10,10 @@ import (
 
 func fixedNow() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 
-func unknownLookup(string) (knownStorage, error) { return knownStorage{}, nil }
+func unknownLookup(string) (KnownStorage, error) { return KnownStorage{}, nil }
 
 func knownLookup(id string) StorageLookup {
-	return func(string) (knownStorage, error) { return knownStorage{Known: true, StorageID: id}, nil }
+	return func(string) (KnownStorage, error) { return KnownStorage{Known: true, StorageID: id}, nil }
 }
 
 func probeAs(b string) func(string) string { return func(string) string { return b } }

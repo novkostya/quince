@@ -169,7 +169,10 @@ func serve(args []string) error {
 		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5
 		// storage + qn.4a backup engine), with startup reconciliation run in-order BEFORE serving
 		// (storage → job rows). Shared verbatim with the `backup` CLI.
-		ls := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+		ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+		if err != nil {
+			return err
+		}
 		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
 		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
