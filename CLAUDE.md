@@ -387,11 +387,33 @@ placed its key on the supervisor box (done). The mechanism is quince#375's PR 1,
 
 | | | |
 | --- | --- | --- |
-| **1a** | `bin/gh-analyst`, refusing beside every other seat's credential, covered by `bin/wrapper-boundary-test` | quince#377, open |
-| **1b** | the other four wrappers refusing beside the **analyst** key — added to the checklist after review, because a box holding `quince-analyst.pem` beside `quince-review.pem` can author as one and approve as the other | not open |
-| **1c** | `preflight`'s supervisor arm becomes an allowlist — **the live gap above** | not open |
+| **1a** | `bin/gh-analyst`, refusing beside every other seat's credential, covered by `bin/wrapper-boundary-test` | quince#377, **merged** |
+| **1b** | the other four wrappers refusing beside the **analyst** key — added to the checklist after review, because a box holding `quince-analyst.pem` beside `quince-review.pem` can author as one and approve as the other | quince#387, **merged** (was quince#384, auto-closed — quince#388) |
+| **1c** | `preflight`'s supervisor arm becomes an allowlist | quince#380, **merged** |
 | **1d** | `SEAT_PATTERN` admits `analyst<N>` | quince#379, **merged** |
-| **1e** | `deploy/runner/provision` knows the analyst credential | not open |
+| **1e** | `deploy/runner/provision` knows the analyst credential | quince#383, **merged — and PARTIAL** |
+
+**1e is merged and incomplete, which neither "merged" nor "open" says on its own.** `provision` learned
+the credential — it names `quince-analyst` — but `provision:27` is still
+`case "$ROLE" in implementer|arch)`, so **there is no `--role supervisor` and that box cannot be
+provisioned at all.** The file says so itself. The ruling on whether to add the role is open on
+quince#375 and is the last thing outstanding from this whole block.
+
+**THIS TABLE WAS STALE IN FOUR OF FIVE ROWS INSIDE THE PULL REQUEST THAT FIXED THE HEADING ABOVE IT**
+(quince#409 review, `quince-analyst`). The generalisation in that PR — *the heading is the only part
+describing the whole, so it is stale by default after every flip* — was **one element short**: a
+**status table is a second part describing the whole**, with exactly the same property and no better
+defence. quince#408's gate should look for both. Row 1c also carried a pointer to *"the live gap
+above"*, aimed at a paragraph the same diff rewrote — a dangling reference created by its own fix.
+
+**And "everything below IS in force" was true of `main` and false of the machine.** Measured by the
+analyst on the supervisor box: the launchpad was at `df44c59`, running **pre-quince#380** `preflight`
+— the version that prints *"no forge credential present"* about a box holding an authoring credential.
+The fix existed on `main` and **had no route there**, because `provision` refuses that role and
+nothing else deploys `preflight` to it. The launchpad has since been fast-forwarded by hand to
+`68c1a90`; `preflight` runs at service start, so **the running supervisor still asserts the old text
+until something restarts it.** Canon current, file current, process stale — three states where this
+project usually tracks one, and the distinction is 1e's missing `--role supervisor` in another guise.
 
 The original clause said *"a second PR flips this block from proposed to actual"*, and this is that
 edit. Its reasoning still holds and is why the block was not written earlier: **writing canon before
