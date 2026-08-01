@@ -139,7 +139,24 @@ endif
 GO_TEST_ARGS ?= ./...
 # `origin` is make's own answer to "did the caller set this, or is it my default?" — which is exactly
 # the question, and it needs no sentinel value that a legitimate argument could collide with.
-GO_TEST_ARGS_OVERRIDDEN := $(filter command line,$(origin GO_TEST_ARGS))
+#
+# ALL THREE SETTING FORMS, and the missing one was worse than the bug this fixes. `make gates FOO=x`
+# reports `command line`, but `FOO=x make gates` reports `environment` — and `?=` honours an
+# environment value. So the first version of this guard let the environment form through: the ladder
+# ran a one-test Go leg, refused nothing, printed no PARTIAL RUN banner because the same variable
+# gates it, and reported green. Caught in review on quince#434. `VAR=x make target` is the ordinary
+# shell idiom and survives in an exported profile where an argument cannot, so it is the likelier
+# form, not the exotic one.
+#
+# `filter` splits on whitespace, so these four words cover `command line`, `environment`, and
+# `environment override` (the `make -e` form) while leaving `file` — what `?=` sets here — and
+# `default` unmatched.
+#
+# THE TRADE, ON THE RECORD because somebody will hit it: an exported GO_TEST_ARGS in a shell profile
+# or a CI environment now makes `make gates` a parse-time ERROR rather than a silently filtered
+# ladder. That is the right direction — refuse rather than quietly do less (quince#41) — and it is a
+# decision rather than an accident.
+GO_TEST_ARGS_OVERRIDDEN := $(filter command line environment override,$(origin GO_TEST_ARGS))
 
 # ONLY `gates-go` can honour it, so every other goal REFUSES rather than accepting and ignoring — the
 # quince#41 precedent, where `privacy-check` was made to refuse instead of exiting 0 having swept
