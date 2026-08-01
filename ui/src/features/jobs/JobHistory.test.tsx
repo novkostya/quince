@@ -18,6 +18,7 @@ function job(overrides: Partial<Job>): Job {
     intent_id: "J1",
     attempt: 1,
     version_id: null,
+    storage_id: null,
     ...overrides,
   };
 }

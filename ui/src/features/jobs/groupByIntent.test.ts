@@ -24,6 +24,7 @@ function mkJob(over: Partial<Job>): Job {
     intent_id: "i1",
     attempt: 1,
     version_id: null,
+    storage_id: null,
     ...over,
   };
 }

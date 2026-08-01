@@ -71,6 +71,11 @@ export interface Job {
   retry_of: string | null;
   intent_id: string;
   attempt: number;
+  // storage_id = the RESOLVED concrete storage this backup was aimed at (qn.6c story 6b),
+  // never the word "default". null for jobs that ran before qn.6c, meaning quince did not
+  // record where this went — REQUIRED and nullable, not optional: the server has no
+  // omitempty, so a `?` would model an omission that cannot happen.
+  storage_id: string | null;
   version_id: string | null;
 }
 
