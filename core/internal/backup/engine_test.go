@@ -38,9 +38,27 @@ type harness struct {
 	dir string
 }
 
+// testLivenessDisabled makes the sampler's zero-activity backstop unreachable within a test's
+// lifetime. The story tests run the REAL engine sampler against a subprocess fake that writes the
+// work tree on wall-clock time (fake_idevicebackup2_test.go), so a short backstop races host
+// scheduling: a contended CI runner that starves the fake for one window forges a connection_lost on
+// a HEALTHY run (quince#412/#413 — TestStoryPreflightEncryptionRelaxed took main red on exactly
+// this). The backstop's THRESHOLD semantics — staging, the kill at the boundary, churn resetting the
+// clock, the passcode-pause freeze — are proven deterministically against an INJECTED clock in
+// sampler_test.go, where they cannot flake. The engine story tests prove wiring, not the threshold.
+// A literal fake clock in the engine cannot replace this: the fake is a separate PROCESS writing the
+// tree in real time, so e.now() cannot be synchronised with it.
+const testLivenessDisabled = time.Hour
+
+// testLivenessFires is the short backstop armed only for a permanent-hang fixture (wifi-torn-session,
+// hang_after_last), where the kill MUST fire. A hang never churns the tree, so idle accrues
+// monotonically and the kill is guaranteed — contention can only delay it, never forge or suppress
+// it — so this window cannot flake in either direction. Armed by p.Hang in newHarness, one place.
+const testLivenessFires = 250 * time.Millisecond
+
 func testCfg() Config {
 	return Config{
-		LivenessTimeout:      250 * time.Millisecond,
+		LivenessTimeout:      testLivenessDisabled,
 		SampleInterval:       8 * time.Millisecond,
 		WaitForDeviceTimeout: 2 * time.Second,
 		ProgressThrottle:     time.Millisecond,
@@ -77,6 +95,15 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 		Now:       func() time.Time { return time.Now().UTC() },
 		FreeSpace: func(string) (uint64, error) { return 100 << 30, nil },
 		Tool:      ToolConfig{Bin: os.Args[0], ArgPrefix: fakeArgPrefix(), Env: fakeToolEnv(p)},
+	}
+	// A permanent hang is the ONLY fixture that must trip the zero-activity backstop; arm a short one
+	// for it. Every other fixture is a healthy or churning run, and for those the backstop stays
+	// DISABLED (testCfg → testLivenessDisabled) so a contended runner starving the subprocess fake's
+	// tree-churn cannot forge a connection_lost on a passing run (quince#412/#413). Keyed on p.Hang,
+	// in one place, so the false-kill class is closed for every present and future non-hang test —
+	// not sprinkled per test, where it can be forgotten. Set before mods so an explicit mod still wins.
+	if p.Hang {
+		o.Config.LivenessTimeout = testLivenessFires
 	}
 	for _, m := range mods {
 		m(&o, dev)
@@ -713,9 +740,11 @@ func TestStoryFullUSBSuccess(t *testing.T) {
 	}
 }
 
-// Story 3: the passcode prompt surfaces the waiting_for_passcode phase and the liveness clock
-// PAUSES across the wait — a 300 ms silent no-churn gap survives a 150 ms timeout only because of
-// the pause, so reaching succeeded proves it.
+// Story 3: the passcode prompt surfaces the waiting_for_passcode phase and the job completes across
+// the wait. The engine backstop is DISABLED here (testLivenessDisabled); that the passcode pause
+// FREEZES the liveness clock is proven deterministically in sampler_test.go
+// (TestSamplerPauseFreezesTheClock). This story proves the phase is surfaced and the silent wait does
+// not break the run.
 func TestStoryWaitingForPasscode(t *testing.T) {
 	m := loadMeta(t, "waiting-for-passcode")
 	h := newHarness(t, m.params(t), m.Transport)
@@ -749,8 +778,11 @@ func TestStoryWifiTornSession(t *testing.T) {
 	}
 }
 
-// Story 5: a multi-minute silence where the tree still churns is NOT a stall — the job survives a
-// 400 ms churning stall under a 150 ms timeout and completes.
+// Story 5: a mid-run silence where the tree still churns does not break the job — it survives the
+// 400 ms churning stall and completes. That churn RESETS the backstop clock (so a churning silence
+// longer than the window is not a stall) is proven deterministically in sampler_test.go
+// (TestSamplerRidesOutLegitimatePause); here the engine backstop is disabled, so this proves the
+// wiring carries a stalling-but-alive run to success.
 func TestStorySilentStallSurvives(t *testing.T) {
 	m := loadMeta(t, "silent-stall")
 	h := newHarness(t, m.params(t), m.Transport)
