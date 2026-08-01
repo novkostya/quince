@@ -194,7 +194,7 @@ func (m *Manager) seedKind(udid string) string {
 	// version lives, and "somewhere" is not "here".
 	if rows, err := m.reg.ListVersions(udid); err == nil {
 		for _, r := range rows {
-			if r.Missing || r.StorageID == nil || *r.StorageID != m.storageID {
+			if r.Missing || !m.owns(r.StorageID) {
 				continue
 			}
 			return "incremental"

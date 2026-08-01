@@ -515,3 +515,27 @@ func TestSeedKindIsIncrementalWhenThisStorageAlreadyHasAVersion(t *testing.T) {
 		t.Errorf("a device with a version on THIS storage is incremental, got %q", got)
 	}
 }
+
+// The case my own first version got wrong, which is why membership is ONE helper.
+//
+// I hand-wrote the condition here instead of calling owns, and wrote `r.StorageID == nil` as
+// "not ours" unconditionally. At storageID "" — the pre-qn.6c world, and what every existing test
+// Manager is — that turned every unattributed row into "not ours" and reported `full` for a device
+// that plainly has versions. The commit message for the very change warned that getting membership
+// subtly different at each site is how these bugs arise; it arose in that commit.
+func TestSeedKindTreatsUnattributedRowsAsOwnedByAnUnattributedManager(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{}) // storageID "" by construction
+
+	const udid = "00008140-000A1B2C3D4E5F60"
+	if err := st.InsertVersion(store.VersionRow{
+		ID: "01VNULL1", UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), // StorageID nil — pre-qn.6c
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if got := m.seedKind(udid); got != "incremental" {
+		t.Fatalf("an unattributed Manager owns unattributed rows, so this device HAS a version "+
+			"here and the next backup is incremental; got %q", got)
+	}
+}
