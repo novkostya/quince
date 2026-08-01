@@ -97,6 +97,13 @@ func (m *Manager) slotFor(storageID *string) (Slot, bool) {
 
 // owns reports whether a version row belongs to the storage this Manager speaks for.
 //
+// STORY 5: this asks "is this row the DEFAULT slot's", which is the right question for one slot and
+// the wrong one for several — a row on slots[1] comes back not-owned, reconcileDevice skips it, and
+// nothing fails, because Scan never looked at that root either. Consistent today and silently wrong
+// the moment buildStorage loops config.storages. It is the same shape as the `m.backups` reads this
+// change is fixing, so the slice that adds the second slot must rewrite this to ask "does ANY slot
+// own it, and which" (quince#433 review).
+//
 // It is GROUP MEMBERSHIP, not equality, and the NULL group is a real group — the same shape the
 // is_latest ruling settled (quince#378): an unattributed Manager owns the unattributed rows, and
 // an attributed one does not. Written once because three call sites need it and getting it subtly
@@ -431,13 +438,20 @@ func (m *Manager) toWire(r store.VersionRow) wire.Version {
 	// A version attributed to no configured storage yields "" rather than a guessed path: the
 	// field is a non-nullable string, and an empty one is visibly wrong where a plausible-looking
 	// wrong path is not.
-	root := ""
+	//
+	// The EMPTINESS HAS TO BE BUILT HERE, not by passing "" down. browseRoot composes with
+	// filepath.Join, which DROPS empty elements — so an empty root does not produce an empty path,
+	// it produces a RELATIVE one ("<udid>/latest"), well-formed and right in every part except the
+	// one that says which disk. That is more misleading than the wrong-absolute-path case this
+	// resolver exists to prevent, because a wrong absolute path is at least somewhere real
+	// (quince#433 review).
+	browse := ""
 	if slot, ok := m.slotFor(r.StorageID); ok {
-		root = slot.Root
+		browse = browseRoot(slot.Root, r.UDID, r.Backend, r.ZFSSnapshot, r.IsLatest, r.CreatedAt)
 	}
 	v := wire.Version{
 		ID: r.ID, UDID: r.UDID, Backend: r.Backend, ZFSSnapshot: r.ZFSSnapshot,
-		BrowseRoot: browseRoot(root, r.UDID, r.Backend, r.ZFSSnapshot, r.IsLatest, r.CreatedAt),
+		BrowseRoot: browse,
 		CreatedAt:  fmtRFC(r.CreatedAt), JobID: r.JobID, Kind: r.Kind, Encrypted: r.Encrypted,
 		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes, PhysicalBytes: r.PhysicalBytes,
 		Missing: r.Missing, // crossed to the wire so the UI renders a gone artifact dead (qn.6a (cr))
