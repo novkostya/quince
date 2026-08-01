@@ -162,3 +162,38 @@ func TestRecheckUsesTheRefresherAndIsPerStorage(t *testing.T) {
 		t.Error("an unknown storage id must not resolve — that is the 404")
 	}
 }
+
+// THE RACE TEST (quince#445 review). It must hammer the SAME slot the recheck rewrites — the
+// review's own first probe passed while racing a recheck of `shuttle` against a read of slot 0, so
+// the two never touched the same memory and it proved nothing. A green race probe that never
+// overlapped is the same class as a mutation that never applied.
+//
+// Run under `-race`, which the Go gate does.
+func TestRecheckDoesNotRaceReadsOfTheSameSlot(t *testing.T) {
+	m, _ := twoStorageManager(t)
+	target := m.slots[0].StorageID // the DEFAULT — the slot every read path touches
+
+	m.SetRefresher(func(name string) (Slot, bool) {
+		return Slot{
+			StorageID: target, Name: name, Root: "/backups",
+			Reachable: true, BackendName: BackendCopy, Backend: m.slots[0].Backend,
+		}, true
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			m.RecheckStorage(target)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		// Every reader shape that touches the slot list, including the one the review's probe
+		// caught: BackendName reads the default slot's field while the recheck rewrites it.
+		_ = m.BackendName()
+		_ = m.Storages("")
+		_, _ = m.slotFor(&target)
+		_ = m.defaultSlot()
+	}
+	<-done
+}

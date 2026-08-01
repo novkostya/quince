@@ -19,8 +19,9 @@ func (m *Manager) SetRefresher(f Refresher) { m.refresh = f }
 // backup here be full" — the (device, storage) pair fact that story 8 owes the user BEFORE tens of
 // gigabytes move.
 func (m *Manager) Storages(udid string) []wire.Storage {
-	out := make([]wire.Storage, 0, len(m.slots))
-	for i, s := range m.slots {
+	slots := m.slotsSnapshot()
+	out := make([]wire.Storage, 0, len(slots))
+	for i, s := range slots {
 		out = append(out, m.storageToWire(s, i == 0, udid))
 	}
 	return out
@@ -80,14 +81,20 @@ func (s Slot) hasVersionFor(m *Manager, udid string) bool {
 // directory, writes no marker and selects no backend, so G5b — which forbids re-probing a bare
 // mountpoint back into a new empty storage — is untouched. The two operations share a word and
 // nothing else.
+// THE LOCK IS NEVER HELD ACROSS THE RE-PROBE. `m.refresh` does filesystem work — a stat on a path
+// that may be a dead network mount — and holding a write lock across it would stall every read of
+// `slots`, which includes the render and backup paths (quince#445 review).
 func (m *Manager) RecheckStorage(id string) (wire.Storage, bool) {
-	idx := -1
+	m.mu.RLock()
+	idx, name := -1, ""
 	for i, s := range m.slots {
 		if s.StorageID == id {
-			idx = i
+			idx, name = i, s.Name
 			break
 		}
 	}
+	m.mu.RUnlock()
+
 	if idx < 0 {
 		return wire.Storage{}, false
 	}
@@ -95,15 +102,36 @@ func (m *Manager) RecheckStorage(id string) (wire.Storage, bool) {
 		// Nothing wired a re-probe, so the honest answer is the state we hold — reported as-is
 		// rather than dressed up as a fresh reading.
 		m.log.Warn("storage: recheck requested but no refresher is wired — returning the last known state",
-			"storage", m.slots[idx].Name)
-		return m.storageToWire(m.slots[idx], idx == 0, ""), true
+			"storage", name)
+		return m.renderSlot(idx), true
 	}
-	if s, ok := m.refresh(m.slots[idx].Name); ok {
-		m.slots[idx] = s
-		m.log.Info("storage rechecked", "storage", s.Name, "reachable", s.Reachable,
-			"code", s.UnreachableCode)
+
+	fresh, ok := m.refresh(name) // OUTSIDE the lock: filesystem work
+	if ok {
+		m.mu.Lock()
+		// Re-find by id rather than trusting idx across the unlocked window. Nothing else mutates
+		// the list today, and a position captured before an unlocked gap is precisely the assumption
+		// that stops holding the moment something does.
+		for i, s := range m.slots {
+			if s.StorageID == id {
+				m.slots[i] = fresh
+				idx = i
+				break
+			}
+		}
+		m.mu.Unlock()
+		m.log.Info("storage rechecked", "storage", fresh.Name, "reachable", fresh.Reachable,
+			"code", fresh.UnreachableCode)
 	}
-	return m.storageToWire(m.slots[idx], idx == 0, ""), true
+	return m.renderSlot(idx), true
+}
+
+// renderSlot renders one slot by index under the read lock.
+func (m *Manager) renderSlot(idx int) wire.Storage {
+	m.mu.RLock()
+	s := m.slots[idx]
+	m.mu.RUnlock()
+	return m.storageToWire(s, idx == 0, "")
 }
 
 // Recheck satisfies httpapi.StorageReader.
