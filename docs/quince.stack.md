@@ -576,6 +576,47 @@ doc-comments, and the full transparent-editor UX land with qn.6 (the release gat
 onboarding anyway). The contract (file-first, no secrets, no UI-only state) binds from
 day one.
 
+**RULED (was `PROPOSED (gap)`): a value quince only RENDERS is not a setting, and D12 does not reach it.**
+Operator ruling, 2026-08-02, on quince#470. Raised by `docs/specs/public-demo/public-demo.md`.
+
+**D12 gains a third category, named explicitly: *reported deployment facts*** — values quince renders
+and never acts on. `/api/health`'s `version` is what the category already contains; it has been there
+since qn.0 and never needed a D12 exception, because it was never a setting.
+
+**The test that separates the categories is: does any code branch on this value?** If yes it is a
+setting and both of D12's bins apply. If no — the process only reports it — D12 does not reach it.
+That test is why this is a reclassification rather than an exception: *"anything awkward becomes a
+`QUINCE_` var"* has no boundary, and *"does any code branch on it"* has one that is checkable by grep.
+
+**Applied to the case that raised it:** the public-demo reset is an externally scheduled restart —
+**quince runs no timer** — so nothing in the codebase can branch on the interval. It is somebody
+else's schedule, rendered. Carried in env, read at startup beside the existing bootstrap config, and
+surfaced read-only. There is no `PUT`, so a visitor cannot edit the promise, and no read-only-in-UI
+affordance is needed: the UI already renders reported values non-editably and always has.
+
+**The counter-argument was weighed and overruled, and it is kept because the reasoning that lost is
+what makes a ruling checkable later** (`decisions/0006`). The precedent offered was inexact: `version`
+is a *build-time* constant baked in by ldflags, and `muxers[].managed` is *derived* from a setting
+that does exist (`devices.manage_muxer`), whereas the reset interval is neither — it varies per
+deployment without a rebuild and has nothing behind it to be derived from. `version` is also
+comfortable precisely because nothing could sensibly edit it, where an interval is something an
+operator genuinely chooses. **The ruling was taken knowing that.** What survives it is the branch test
+rather than the analogy: membership is decided by *reported, never acted on*, not by resembling
+`version` in how the value arrives. The interval is the first member of its shape and the test admits
+it cleanly.
+
+**Two options are now closed.** A `config.yml` key — editable by every visitor in a mode where
+everyone is authenticated, so the UI would state a promise the visitor had just falsified. And
+stating no interval at all — which keeps the reset *announced*, the actual `no silent caps or
+fallbacks` requirement, but drops the reassurance and was not the answer taken.
+
+**Not ruled here:** the env var's exact name and read site (rung-local); whether any *existing* value
+should be reclassified under the new category (`version` and `muxers[].managed` are cited as
+precedent, not migrated — nothing changes about how they work); and the interval's actual value, which
+the Operator left open deliberately — *decide it when the instance exists*.
+
+**Story 6 of that spec is unblocked. The other six never were.**
+
 ## D13. Wi-Fi is a first-class transport — and the product model is ASSISTED backup
 
 **Decision.** Wi-Fi backup is not an experimental extra; it is **the product's primary
