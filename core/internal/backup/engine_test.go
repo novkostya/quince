@@ -83,8 +83,8 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	backend, name, _ := storage.Select(context.Background(),
 		storage.Options{Backend: storage.BackendCopy, Backups: backups, AppVersion: "test"}, log)
-	mgr := storage.NewManager(backend, name, st, st, b, backups, "",
-		storage.RetentionPolicy{KeepRecent: 10}, id.New, log)
+	mgr := storage.NewManager([]storage.Slot{{Name: "test", Root: backups, Backend: backend, BackendName: name}},
+		st, st, b, storage.RetentionPolicy{KeepRecent: 10}, id.New, log)
 
 	dev := newFakeDevices()
 	dev.set(testUDID, transport, "on")

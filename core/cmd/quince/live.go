@@ -242,7 +242,16 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
 	}
 
-	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, root, state.StorageID,
+	// ONE SLOT, DELIBERATELY. The Manager can hold many; `buildStorage` still resolves exactly the
+	// default storage, because looping `storage.storages` means deciding what happens when one of N
+	// is unreachable — and story 5 already rules that: unreachable is a STATE, shown and not
+	// errored, and must never block backups to the others. Refusing the whole process because one
+	// removable disk is unplugged would contradict it. That loop lands with story 5, which owns
+	// the semantics; this change is the mechanism it will use.
+	storageMgr := storage.NewManager([]storage.Slot{{
+		StorageID: state.StorageID, Name: name, Root: root,
+		Backend: stBackend, BackendName: backendName,
+	}}, st, st, eventBus,
 		storage.RetentionPolicy{
 			KeepRecent: scfg.Retention.KeepRecent,
 			KeepDaily:  scfg.Retention.KeepDaily,

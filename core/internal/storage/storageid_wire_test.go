@@ -17,7 +17,7 @@ import (
 // unchanged.
 
 func TestVersionStorageIDSerialisesNullWhenUnattributed(t *testing.T) {
-	m := &Manager{backups: "/backups"}
+	m := &Manager{slots: []Slot{{Root: "/backups"}}}
 	row := store.VersionRow{
 		ID: "01J0V0000000000000000000", UDID: "00008140-000A1B2C3D4E5F60",
 		Backend: BackendZFS, Kind: "full",
@@ -43,7 +43,7 @@ func TestVersionStorageIDSerialisesNullWhenUnattributed(t *testing.T) {
 }
 
 func TestVersionStorageIDPassesThroughWhenAttributed(t *testing.T) {
-	m := &Manager{backups: "/backups"}
+	m := &Manager{slots: []Slot{{Root: "/backups"}}}
 	id := "01JQZX000000000000000000"
 	row := store.VersionRow{
 		ID: "01J0V0000000000000000000", UDID: "00008140-000A1B2C3D4E5F60",
@@ -69,7 +69,7 @@ func TestVersionStorageIDPassesThroughWhenAttributed(t *testing.T) {
 // reads it from the version's own row, so a later refactor that "helpfully" resolves it through
 // the storage fails here rather than silently on a version whose storage is gone.
 func TestVersionBackendComesFromTheVersionNotItsStorage(t *testing.T) {
-	m := &Manager{backups: "/backups"}
+	m := &Manager{slots: []Slot{{Root: "/backups"}}}
 	id := "01JQZX000000000000000000"
 	row := store.VersionRow{
 		ID: "01J0V0000000000000000000", UDID: "00008140-000A1B2C3D4E5F60",

@@ -91,8 +91,8 @@ func TestLabGate12(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	m := NewManager(backend, name, st, st, bus.New(), backups, "",
-		RetentionPolicy{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12}, id.New, log)
+	m := NewManager([]Slot{{Name: "lab", Root: backups, Backend: backend, BackendName: name}},
+		st, st, bus.New(), RetentionPolicy{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12}, id.New, log)
 
 	// (a) Provision + commit an encrypted tree in working/. If QUINCE_LAB_TREE points at a
 	// pre-produced idevicebackup2 tree, seed working/ from it (reflink → copy fallback) — this
