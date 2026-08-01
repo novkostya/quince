@@ -370,7 +370,7 @@ func TestAdoptAttributesTheVersionToTheStorageItWasScannedFrom(t *testing.T) {
 	m.slots[0].StorageID = testStorageID
 
 	const vid, udid = "01JV0000000000000000000003", "00008140-000A1B2C3D4E5F60"
-	m.adopt(udid, Artifact{
+	m.adopt(m.slots[0], udid, Artifact{
 		UDID: udid, Backend: BackendCopy, IsLatest: true,
 		Marker: Marker{
 			VersionID: vid, UDID: udid, Kind: "full", Encrypted: true,

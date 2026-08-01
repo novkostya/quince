@@ -15,8 +15,27 @@ import (
 // crash; then per device (2) adopt on-disk versions with no registry row, (3) mark rows whose
 // artifact vanished as `missing` (never drop), (4) recompute the single latest, (5) sweep
 // orphaned work — only after the above. Safe to run at every startup.
+// STORY 5b: it runs PER STORAGE. Each usable slot rolls forward its own journals and reconciles
+// each device against its own root — an unusable one is skipped, because a scan of a root that is
+// not there cannot conclude anything, and concluding "artifact missing" from it would mark a
+// perfectly good backup as gone the first time somebody unplugged a disk.
 func (m *Manager) Reconcile(ctx context.Context) error {
-	journals, err := m.defaultSlot().Backend.PendingJournals()
+	for _, s := range m.slots {
+		if !s.Usable() {
+			m.log.Info("reconcile: skipping an unreachable storage — its versions keep their last "+
+				"known state rather than being judged by a root that is not there",
+				"storage", s.Name, "code", s.UnreachableCode)
+			continue
+		}
+		if err := m.reconcileSlot(ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) reconcileSlot(ctx context.Context, s Slot) error {
+	journals, err := s.Backend.PendingJournals()
 	if err != nil {
 		return err
 	}
@@ -24,7 +43,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		committed, ok, err := m.defaultSlot().Backend.ResumeCommit(j)
+		committed, ok, err := s.Backend.ResumeCommit(j)
 		if err != nil {
 			m.log.Error("reconcile: roll-forward failed — left in place, not unwound",
 				"udid", j.UDID, "version", j.VersionID, "phase", j.Phase, "error", err)
@@ -49,15 +68,16 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := m.reconcileDevice(udid); err != nil {
-			m.log.Error("reconcile: device reconciliation failed", "udid", udid, "error", err)
+		if err := m.reconcileDevice(s, udid); err != nil {
+			m.log.Error("reconcile: device reconciliation failed",
+				"udid", udid, "storage", s.Name, "error", err)
 		}
 	}
 	return nil
 }
 
-func (m *Manager) reconcileDevice(udid string) error {
-	arts, err := m.defaultSlot().Backend.Scan(udid)
+func (m *Manager) reconcileDevice(s Slot, udid string) error {
+	arts, err := s.Backend.Scan(udid)
 	if err != nil {
 		return err
 	}
@@ -82,7 +102,18 @@ func (m *Manager) reconcileDevice(udid string) error {
 	for _, r := range rows {
 		byID[r.ID] = r
 	}
-	mine := m.storageIDPtr()
+	// THE ID COMES FROM THE SLOT WHOSE Scan PRODUCED `onDisk`, PASSED IN — not looked up.
+	//
+	// quince#440's review asked for this as a signature rather than a guard, and that is why: while
+	// this read `m.storageIDPtr()` it resolved the DEFAULT slot's id against whatever root had just
+	// been scanned. Identical with one slot, and with the loop above it would attribute EVERY
+	// storage's artifacts to the default — quince#439 exactly, reintroduced by the slice after the
+	// one that fixed it. A check could be forgotten; a parameter cannot.
+	var mine *string
+	if s.StorageID != "" {
+		id := s.StorageID
+		mine = &id
+	}
 	if mine != nil {
 		for id, r := range byID {
 			if r.StorageID != nil {
@@ -120,7 +151,7 @@ func (m *Manager) reconcileDevice(udid string) error {
 	inReg := map[string]store.VersionRow{}
 	var skipped int
 	for _, r := range byID {
-		if m.owns(r.StorageID) {
+		if s.owns(r.StorageID) {
 			inReg[r.ID] = r
 		} else {
 			skipped++
@@ -147,7 +178,7 @@ func (m *Manager) reconcileDevice(udid string) error {
 					"id", id, "udid", udid, "attributed_to", derefID(other.StorageID))
 				continue
 			}
-			m.adopt(udid, a)
+			m.adopt(s, udid, a)
 			continue
 		}
 		if r.Missing {
@@ -171,12 +202,12 @@ func (m *Manager) reconcileDevice(udid string) error {
 		return err
 	}
 	// Orphaned work is swept only after reconciliation has completed for the device.
-	return m.defaultSlot().Backend.SweepWork(udid)
+	return s.Backend.SweepWork(udid)
 }
 
 // adopt registers an on-disk version discovered without a row as ADOPTED (job_id null →
 // protected from retention until the user says otherwise; contracts §2).
-func (m *Manager) adopt(udid string, a Artifact) {
+func (m *Manager) adopt(s Slot, udid string, a Artifact) {
 	created, _ := parseRFC(a.Marker.CreatedAt)
 	row := store.VersionRow{
 		ID: a.Marker.VersionID, UDID: udid, Backend: a.Backend, ZFSSnapshot: a.ZFSSnapshot,
@@ -184,7 +215,7 @@ func (m *Manager) adopt(udid string, a Artifact) {
 		IsLatest: a.IsLatest, LogicalBytes: a.PhysicalBytes, PhysicalBytes: a.PhysicalBytes,
 		// Attributed to the storage it was SCANNED FROM. An adopted version is found by walking a
 		// specific root, so which storage it lives on is known here and never needs guessing.
-		StorageID: m.storageIDPtr(),
+		StorageID: slotIDPtr(s),
 	}
 	if sv, err := parseRFC(a.Marker.StructureVerifiedAt); err == nil {
 		row.StructureVerifiedAt = &sv
@@ -249,7 +280,21 @@ func (m *Manager) reconcileUDIDs() []string {
 			set[r.UDID] = struct{}{}
 		}
 	}
-	if entries, err := os.ReadDir(m.defaultSlot().Root); err == nil {
+	// EVERY USABLE ROOT, not just the default's (story 5b). A device whose backups live only on
+	// storage B has no row until it is adopted and no directory under A — so reading one root means
+	// it is never reconciled and never adopted, which is the bug that hides a whole disk's worth of
+	// backups from the UI.
+	//
+	// Unusable roots are skipped rather than read: an absent path yields no entries, and treating
+	// that as "no devices here" is only correct by accident.
+	for _, s := range m.slots {
+		if !s.Usable() {
+			continue
+		}
+		entries, err := os.ReadDir(s.Root)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
 			if e.IsDir() && validUDID(e.Name()) {
 				set[e.Name()] = struct{}{}
@@ -271,4 +316,15 @@ func derefID(s *string) string {
 		return "none"
 	}
 	return *s
+}
+
+// slotIDPtr renders a slot's storage id as the nullable the registry stores, so an unattributed
+// storage inserts NULL rather than "" — the two are different states and "" is not one of them
+// (contracts §2: null = not yet attributed).
+func slotIDPtr(s Slot) *string {
+	if s.StorageID == "" {
+		return nil
+	}
+	id := s.StorageID
+	return &id
 }

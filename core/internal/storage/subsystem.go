@@ -118,12 +118,24 @@ func (m *Manager) slotFor(storageID *string) (Slot, bool) {
 //	                                   answer, and marking it missing would invent a fact
 //	set          equal          YES
 //	set          different      no     another storage's version; not ours to judge
-func (m *Manager) owns(rowStorageID *string) bool {
+//
+// STORY 5b made this a SLOT method rather than a Manager one: "does this row belong to the storage
+// I am currently reconciling" has no answer at the Manager level once there is more than one, and
+// the version that resolved through `defaultSlot()` was the marker quince#433 left here.
+func (s Slot) owns(rowStorageID *string) bool {
 	if rowStorageID == nil {
-		return m.defaultSlot().StorageID == ""
+		return s.StorageID == ""
 	}
-	return *rowStorageID == m.defaultSlot().StorageID
+	return *rowStorageID == s.StorageID
 }
+
+// owns asks the DEFAULT slot.
+//
+// STORY 5c: the one remaining caller is `seedKind`, which asks "does this device already have a
+// version HERE" for a backup that has not named a storage yet — so the default is the right slot
+// today, and the JOB's slot the moment `POST /api/jobs` carries `storage_id`. Kept as a named
+// wrapper rather than inlined so that a grep for `defaultSlot()` finds it.
+func (m *Manager) owns(rowStorageID *string) bool { return m.defaultSlot().owns(rowStorageID) }
 
 // storageIDPtr returns the Manager's storage id as the nullable the registry stores, so an
 // unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
@@ -190,14 +202,39 @@ func (m *Manager) Versions(udid string) []wire.Version {
 }
 
 // Seed provisions the device area (idempotent) and returns the idevicebackup2 TARGET — the
+// jobSlot is the storage a NEW backup writes to, and it enforces the invariant that makes serving
+// with a disk missing honest: A STORAGE WHOSE RESOLUTION DID NOT SUCCEED NEVER ACCEPTS A JOB
+// (Operator ruling 2026-08-01, quince#435).
+//
+// Refusing here rather than at the API boundary is deliberate — this is the last point before
+// anything touches a path, and a guard that lives where the write happens cannot be bypassed by a
+// caller that forgot it. `missing_medium` is the case that proves the invariant is not optional: a
+// readable path with no marker is exactly where a write would land on the wrong filesystem.
+//
+// STORY 5c: the slot is the DEFAULT because a job cannot yet name one. When `POST /api/jobs`
+// carries `storage_id`, this takes the job's storage and the refusal becomes the ruled 409 —
+// "refused with a reason naming the default", never redirected to whichever storage is reachable.
+func (m *Manager) jobSlot() (Slot, error) {
+	s := m.defaultSlot()
+	if !s.Usable() {
+		return Slot{}, fmt.Errorf(
+			"storage %q is not reachable (%s): %s", s.Name, s.UnreachableCode, s.UnreachableReason)
+	}
+	return s, nil
+}
+
 // per-device working/ parent, seeded so the tool's own <target>/<UDID> convention lands the tree in
 // working/<udid> with no symlink (qn.5b). A dirty working/ is resumed; else it is seeded from
 // latest/ via the backend's safe strategy.
 func (m *Manager) Seed(udid, jobID string) (string, error) {
-	if err := m.defaultSlot().Backend.Provision(udid); err != nil {
+	s, err := m.jobSlot()
+	if err != nil {
 		return "", err
 	}
-	return m.defaultSlot().Backend.WorkDir(udid, jobID)
+	if err := s.Backend.Provision(udid); err != nil {
+		return "", err
+	}
+	return s.Backend.WorkDir(udid, jobID)
 }
 
 // PrepareWork + SeedWork are Seed split into two phases for the qn.6b gated seed (candidate C):
@@ -205,14 +242,22 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 // SeedWork does the slow clone while idevicebackup2 is paused at its --gate. Seed = PrepareWork +
 // (if seedPending) SeedWork.
 func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
-	if err := m.defaultSlot().Backend.Provision(udid); err != nil {
+	s, err := m.jobSlot()
+	if err != nil {
 		return "", false, err
 	}
-	return m.defaultSlot().Backend.PrepareWork(udid, jobID)
+	if err := s.Backend.Provision(udid); err != nil {
+		return "", false, err
+	}
+	return s.Backend.PrepareWork(udid, jobID)
 }
 
 func (m *Manager) SeedWork(udid, jobID string) error {
-	return m.defaultSlot().Backend.SeedWork(udid, jobID)
+	s, err := m.jobSlot()
+	if err != nil {
+		return err
+	}
+	return s.Backend.SeedWork(udid, jobID)
 }
 
 // seedKind returns the AUTHORITATIVE full|incremental kind for the in-flight job from the work
@@ -311,7 +356,27 @@ func (m *Manager) deleteVersion(id, event string) (int, error) {
 		return http.StatusNotFound, fmt.Errorf("no such version")
 	}
 	if !row.Missing {
-		if err := m.defaultSlot().Backend.DeleteArtifact(m.artifact(row)); err != nil {
+		// THE VERSION'S OWN STORAGE DELETES IT, never the default (story 5b).
+		//
+		// This read `m.defaultSlot().Backend` — the same defect as the browse_root one quince#433
+		// fixed, except DESTRUCTIVE. A backend resolves paths against its own root, so deleting
+		// storage B's version through storage A's backend either fails to find it, or removes
+		// whatever sits at the corresponding path under A. It could not fire while one storage was
+		// declared; it becomes live with the loop this slice adds, which is why it is fixed here
+		// rather than filed.
+		slot, ok := m.slotFor(row.StorageID)
+		if !ok {
+			return http.StatusConflict, fmt.Errorf(
+				"this version is not attributed to any configured storage, so quince cannot say " +
+					"which disk its data is on — refusing to delete rather than guessing")
+		}
+		if !slot.Usable() {
+			return http.StatusConflict, fmt.Errorf(
+				"the storage holding this version is not reachable (%s) — plug it in and try again; "+
+					"quince will not remove the registry row while its artifact cannot be removed too",
+				slot.UnreachableCode)
+		}
+		if err := slot.Backend.DeleteArtifact(m.artifact(row)); err != nil {
 			return http.StatusInternalServerError, err
 		}
 	}
