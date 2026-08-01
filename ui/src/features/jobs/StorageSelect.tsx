@@ -74,13 +74,19 @@ export function StorageSelect({
         </select>
       </label>
 
-      {/* The reason for an unreachable CHOSEN storage. Shown rather than thrown: the daemon's own
-          sentence names which path and which marker, which no client-side copy could. */}
-      {chosen && !chosen.reachable && chosen.unreachable_reason ? (
-        <span className="text-xs text-warn" data-testid="storage-unreachable">
-          {chosen.unreachable_reason}
-        </span>
-      ) : null}
+      {/* THE REASON FOR EVERY UNREACHABLE STORAGE, not just a chosen one — because a disabled
+          option CANNOT BE CHOSEN. Showing it on selection was unreachable code: the user saw
+          "not connected" and could never learn which path or why. Found by driving G8 against
+          the real API rather than against props (qn.6c story 9).
+
+          The daemon's own sentence, because it names the path and the marker. */}
+      {storages
+        .filter((s) => !s.reachable && s.unreachable_reason)
+        .map((s) => (
+          <span key={s.id} className="text-xs text-warn" data-testid="storage-unreachable">
+            {s.name}: {s.unreachable_reason}
+          </span>
+        ))}
 
       {/* THE COST, STATED BEFORE IT IS PAID (story 8). Attached to the option that carries it, not
           to the page: it is a fact about this device and this storage. */}
