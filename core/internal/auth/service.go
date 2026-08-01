@@ -1,6 +1,6 @@
 // Package auth implements the single-admin authentication and web-security primitives
 // (design §6): argon2id password (first-run set-password with a one-shot 409 guard),
-// cookie sessions with rotation-on-login and idle/absolute timeouts, per-IP login rate
+// cookie sessions with per-client rotation-on-login and idle/absolute timeouts, per-IP login rate
 // limiting, and double-submit CSRF. Admin-session timeouts are hardcoded this rung —
 // schema v0 has no key for them (sessions.ttl_minutes is the vault-unlock TTL); a future
 // `auth:` config section is noted for qn.6.
@@ -123,7 +123,10 @@ func (s *Service) SetPassword(password string) error {
 
 // Login verifies the password (rate-limited first) and, on success, rotates to a fresh
 // session and returns it plus a new CSRF token. clientIP is used for rate limiting + audit.
-func (s *Service) Login(password, clientIP string) (store.AuthSession, string, error) {
+//
+// priorSessionID is the session the CALLING client already holds, or "" if it holds none —
+// it is the only session this login supersedes. Other devices keep theirs (quince#373).
+func (s *Service) Login(password, clientIP, priorSessionID string) (store.AuthSession, string, error) {
 	now := s.now()
 	if !s.limiter.allow(clientIP, now) {
 		return store.AuthSession{}, "", ErrRateLimited
@@ -143,9 +146,23 @@ func (s *Service) Login(password, clientIP string) (store.AuthSession, string, e
 		s.audit("login_failed", clientIP)
 		return store.AuthSession{}, "", ErrBadPassword
 	}
-	// Rotation: a fresh login supersedes any prior session (single admin) — defeats fixation.
-	if err := s.store.DeleteAllAuthSessions(); err != nil {
-		return store.AuthSession{}, "", err
+	// Rotation is PER CLIENT: the caller's own prior session is superseded, and every OTHER
+	// device's session is left alone (Operator ruling, quince#373).
+	//
+	// What defeats fixation is the fresh id minted immediately below — an id planted in the
+	// victim's browser beforehand is not the id they end up holding, and it never becomes
+	// authenticated. Deleting OTHER sessions adds nothing to that: it is a separate "one
+	// concurrent session" policy that was carrying fixation's justification, while costing
+	// something canon promises — ui.design.md calls the iPhone a first-class client, and a
+	// second first-class client that evicts the first is not one. The Operator hit it in real
+	// use: driving the app from an iPad signed the desktop out.
+	//
+	// priorSessionID is "" for a client arriving without a session cookie (the ordinary first
+	// login), and then nothing is deleted rather than the delete being widened.
+	if priorSessionID != "" {
+		if err := s.store.DeleteAuthSession(priorSessionID); err != nil {
+			return store.AuthSession{}, "", err
+		}
 	}
 	sess := store.AuthSession{
 		ID:         id.Token(32),

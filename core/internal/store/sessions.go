@@ -59,9 +59,12 @@ func (s *Store) DeleteAuthSession(id string) error {
 	return err
 }
 
-// DeleteAllAuthSessions clears every session — used to rotate on login (single admin: a
-// fresh login supersedes any prior session, defeating fixation).
-func (s *Store) DeleteAllAuthSessions() error {
-	_, err := s.db.Exec(`DELETE FROM sessions_auth`)
-	return err
-}
+// DeleteAllAuthSessions is DELIBERATELY ABSENT. It existed to rotate on login by evicting every
+// other device, and the Operator ruled that policy out (quince#373): a login now supersedes only
+// the caller's own session, through DeleteAuthSession above.
+//
+// Removed rather than left unused, because a "clear every session" primitive sitting beside the
+// per-client one is a footgun — it reads like the rotation helper and would silently restore the
+// behaviour that was ruled against. A future deliberate "sign out other devices" action (option 3
+// on that issue) should re-add it with its own caller and its own control, which is the point: the
+// eviction becomes something the user chooses rather than a side effect of logging in.

@@ -87,7 +87,7 @@ func TestSetPasswordThenLoginRotates(t *testing.T) {
 	if err := svc.SetPassword("test"); err != nil {
 		t.Fatalf("set password: %v", err)
 	}
-	s1, csrf, err := svc.Login("test", "10.0.0.1")
+	s1, csrf, err := svc.Login("test", "10.0.0.1", "")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -97,7 +97,9 @@ func TestSetPasswordThenLoginRotates(t *testing.T) {
 	if _, err := svc.Authenticate(s1.ID); err != nil {
 		t.Fatalf("authenticate s1: %v", err)
 	}
-	s2, _, err := svc.Login("test", "10.0.0.1")
+	// The SAME client logs in again — it presents the session it already holds, so that one is
+	// superseded. This is the rotation the fixation defence is named for.
+	s2, _, err := svc.Login("test", "10.0.0.1", s1.ID)
 	if err != nil {
 		t.Fatalf("second login: %v", err)
 	}
@@ -105,7 +107,64 @@ func TestSetPasswordThenLoginRotates(t *testing.T) {
 		t.Fatal("session id not rotated")
 	}
 	if _, err := svc.Authenticate(s1.ID); err == nil {
-		t.Fatal("old session still valid after rotation")
+		t.Fatal("the caller's own old session still valid after rotation")
+	}
+}
+
+// TestASecondDeviceDoesNotEvictTheFirst is the quince#373 fix, and it is the assertion the old
+// policy could not make: quince is multi-device (ui.design.md — the iPhone is a first-class
+// client), so logging in on a phone must leave the desktop signed in. The Operator reported the
+// opposite from real use — "whenever I do anything on one device it logs me out on another".
+//
+// The discriminator against TestSetPasswordThenLoginRotates above is the LAST ARGUMENT: a second
+// device arrives with no session cookie of its own (""), so there is nothing of its own to
+// supersede, and nothing of anybody else's may be touched.
+func TestASecondDeviceDoesNotEvictTheFirst(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	if err := svc.SetPassword("test"); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
+	desktop, _, err := svc.Login("test", "10.0.0.1", "")
+	if err != nil {
+		t.Fatalf("desktop login: %v", err)
+	}
+	phone, _, err := svc.Login("test", "10.0.0.2", "") // a different client, no cookie of its own
+	if err != nil {
+		t.Fatalf("phone login: %v", err)
+	}
+	if phone.ID == desktop.ID {
+		t.Fatal("the two devices share a session id")
+	}
+	if _, err := svc.Authenticate(desktop.ID); err != nil {
+		t.Fatalf("the desktop was signed out by the phone logging in: %v "+
+			"(quince#373 — rotation is per client, not global)", err)
+	}
+	if _, err := svc.Authenticate(phone.ID); err != nil {
+		t.Fatalf("authenticate phone: %v", err)
+	}
+}
+
+// A login presenting a session id that is not in the table (stale cookie, already expired, or
+// simply wrong) must still succeed and must not disturb anyone else. The delete is best-effort
+// cleanup of the caller's own row, not a precondition.
+func TestLoginWithAStaleCookieStillSucceeds(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	if err := svc.SetPassword("test"); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
+	other, _, err := svc.Login("test", "10.0.0.1", "")
+	if err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	fresh, _, err := svc.Login("test", "10.0.0.2", "no-such-session-id")
+	if err != nil {
+		t.Fatalf("login with a stale cookie: %v", err)
+	}
+	if _, err := svc.Authenticate(fresh.ID); err != nil {
+		t.Fatalf("authenticate the new session: %v", err)
+	}
+	if _, err := svc.Authenticate(other.ID); err != nil {
+		t.Fatalf("an unrelated session died for a stale cookie: %v", err)
 	}
 }
 
@@ -114,7 +173,7 @@ func TestLoginWritesAuditRow(t *testing.T) {
 	if err := svc.SetPassword("test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := svc.Login("test", "10.0.0.1"); err != nil {
+	if _, _, err := svc.Login("test", "10.0.0.1", ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := svc.store.ListAudit(10)
@@ -145,7 +204,7 @@ func TestSetPasswordTwiceIs409(t *testing.T) {
 func TestLoginBadPassword(t *testing.T) {
 	svc, _ := newTestAuth(t)
 	_ = svc.SetPassword("test")
-	if _, _, err := svc.Login("nope", "10.0.0.1"); err != ErrBadPassword {
+	if _, _, err := svc.Login("nope", "10.0.0.1", ""); err != ErrBadPassword {
 		t.Fatalf("want ErrBadPassword, got %v", err)
 	}
 }
@@ -154,11 +213,11 @@ func TestLoginRateLimited(t *testing.T) {
 	svc, _ := newTestAuth(t) // limiter max = 3
 	_ = svc.SetPassword("test")
 	for i := 0; i < 3; i++ {
-		if _, _, err := svc.Login("wrong", "1.2.3.4"); err != ErrBadPassword {
+		if _, _, err := svc.Login("wrong", "1.2.3.4", ""); err != ErrBadPassword {
 			t.Fatalf("attempt %d: want ErrBadPassword, got %v", i, err)
 		}
 	}
-	if _, _, err := svc.Login("wrong", "1.2.3.4"); err != ErrRateLimited {
+	if _, _, err := svc.Login("wrong", "1.2.3.4", ""); err != ErrRateLimited {
 		t.Fatalf("4th attempt: want ErrRateLimited, got %v", err)
 	}
 }
@@ -172,7 +231,7 @@ func TestStatusTriState(t *testing.T) {
 	if st, _ := svc.Status(""); st != StateNeedsLogin {
 		t.Fatalf("want needs_login, got %q", st)
 	}
-	sess, _, _ := svc.Login("test", "10.0.0.1")
+	sess, _, _ := svc.Login("test", "10.0.0.1", "")
 	if st, _ := svc.Status(sess.ID); st != StateAuthenticated {
 		t.Fatalf("want authenticated, got %q", st)
 	}
@@ -185,7 +244,7 @@ func TestSessionIdleExpiry(t *testing.T) {
 	svc, clock := newTestAuth(t)
 	svc.idleTimeout = 30 * time.Minute
 	_ = svc.SetPassword("test")
-	sess, _, _ := svc.Login("test", "10.0.0.1")
+	sess, _, _ := svc.Login("test", "10.0.0.1", "")
 	*clock = clock.Add(31 * time.Minute)
 	if _, err := svc.Authenticate(sess.ID); err != ErrSessionExpired {
 		t.Fatalf("want ErrSessionExpired, got %v", err)
