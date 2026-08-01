@@ -193,3 +193,23 @@ export interface ConfigFieldError {
   path: string;
   message: string;
 }
+
+// Storage is one declared backup location (contracts §1 GET /api/storages, qn.6c).
+//
+// `unreachable_code` and `unreachable_reason` are REQUIRED and NULLABLE, never optional: the server
+// has no `omitempty` on them, so a `?` here would model an omission that cannot happen and let a
+// stale client read "absent" as "reachable". Same reasoning as `Version.storage_id`.
+export interface Storage {
+  id: string;
+  name: string;
+  path: string;
+  backend: "zfs" | "reflink" | "hardlink" | "copy" | "unknown";
+  default: boolean;
+  reachable: boolean;
+  // The code is what to branch on; the reason is what to show. The daemon's sentence carries what
+  // the client cannot know — which path, which marker.
+  unreachable_code: "path_unreachable" | "missing_medium" | "backend_mismatch" | null;
+  unreachable_reason: string | null;
+  // Present only when the list was fetched with `?udid=`. null means "not asked", NOT "no".
+  will_be_full: boolean | null;
+}
