@@ -29,6 +29,9 @@ func TestResolveCreatesWhenPathIsNewAndUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
+	if !st.Verified {
+		t.Error("creation probes and freezes, so it is verified by construction")
+	}
 	if st.Resolution != ResolutionCreated || !st.Resolution.OK() {
 		t.Fatalf("want created, got %q (%s)", st.Resolution, st.Reason)
 	}
@@ -58,6 +61,50 @@ func TestResolveOpensWhenTheMarkerAgrees(t *testing.T) {
 	}
 	if st.Resolution != ResolutionOpened || st.StorageID != "01JOLD000000000000000000" {
 		t.Fatalf("want opened with the existing id, got %+v", st)
+	}
+	if !st.Verified {
+		t.Error("a probe that agreed with the marker must be reported as verified")
+	}
+}
+
+// An UNPROBEABLE storage that already has a marker opens on the marker alone — and must say so.
+//
+// The asymmetry with the creation path is deliberate: an undetermined backend REFUSES to create
+// (that guess would be frozen forever) but does not refuse to open (opening freezes nothing, and
+// refusing every backup because a probe hiccuped is worse than the problem). What must not happen
+// is ResolutionOpened being read as evidence a comparison ran, since Mismatch declines to call an
+// empty probe a disagreement. Found at review (quince#410); the doc claimed a check that had been
+// skipped.
+//
+// Same shape as quince#363's wifi_sync_unconfirmed vs wifi_sync_not_applied: "could not check" is
+// its own fact, not a flavour of a verified outcome.
+func TestResolveOpensUnverifiedWhenTheProbeCannotDetermineABackend(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteStorageMarker(root, StorageMarker{
+		StorageID: "01JOLD000000000000000000", Backend: BackendZFS, CreatedAt: "2026-07-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	st, err := ResolveStorage("pool", root, probeAs(""), knownLookup("01JOLD000000000000000000"),
+		fixedNow, "test", idGen("x"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if st.Resolution != ResolutionOpened || !st.Resolution.OK() {
+		t.Fatalf("an unprobeable existing storage must still open, got %q", st.Resolution)
+	}
+	if st.Verified {
+		t.Error("nothing was compared, so Verified must be false")
+	}
+	if st.Backend != BackendZFS {
+		t.Errorf("the backend must come from the marker, got %q", st.Backend)
+	}
+	// The state is recorded rather than silent: a caller about to move tens of gigabytes can see
+	// that nothing confirmed the medium.
+	for _, want := range []string{"could not be probed", "UNVERIFIED"} {
+		if !strings.Contains(st.Reason, want) {
+			t.Errorf("an unverified open must say so; missing %q in: %s", want, st.Reason)
+		}
 	}
 }
 
@@ -106,6 +153,9 @@ func TestResolveCreatesOnAFirstDeclarationEvenIfTheMediumIsAbsent(t *testing.T) 
 		fixedNow, "test", idGen("01JFIRST0000000000000000"))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
+	}
+	if !st.Verified {
+		t.Error("creation probes and freezes, so it is verified by construction")
 	}
 	if st.Resolution != ResolutionCreated {
 		t.Fatalf("documented residual: a first declaration creates; got %q", st.Resolution)
