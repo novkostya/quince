@@ -238,6 +238,45 @@ func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job 
 	return j
 }
 
+// waitSettled waits for the terminal row AND for the engine to RELEASE the job, which is strictly
+// later. Use it whenever the assertion is about something the engine does AFTER the terminal row.
+//
+// THE PROBLEM IT SOLVES (quince#427). `waitTerminal` returns on the FIRST terminal observation, and
+// the engine keeps working past that point: `succeed` writes the terminal row and only then calls
+// `AnnounceBackup`, and `run` discards the work dir and frees the per-UDID slot on its way out. So a
+// test that waits for terminal and immediately reads the announce is racing the engine — it usually
+// wins, and on a loaded runner it does not.
+//
+// That is the same shape as quince#178, which hid for four days: EVERY wait in this package returns
+// on the first terminal observation, so anything written afterwards is invisible to all of them.
+// There the late write was a bug; here it is legitimate work the test simply did not wait for. One
+// helper rather than an announce-specific one, because the next assertion of this shape — a discard,
+// a version row, a second event — gets it for free.
+//
+// RELEASE, NOT A SLEEP, and that is the point. `defer e.release(lj)` is the FIRST line of `run`, so
+// it fires after every other effect that function has; observing the release is therefore a
+// deterministic "everything this job triggers has happened" rather than a guess at how long that
+// takes. A settle window would pass almost always and reintroduce exactly the wall-clock dependency
+// this package keeps paying for. `drain` already leans on the same signal for the same reason.
+//
+// It does NOT mean the job is quiescent for a NEW job on the same UDID — that is the single-flight
+// window `startWhenReleased` documents, and it is a different question.
+func waitSettled(t *testing.T, e *Engine, id string, d time.Duration) wire.Job {
+	t.Helper()
+	final := waitTerminal(t, e, id, d)
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if !engineOwns(e, id) {
+			return final
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("job %s reached %s, but the engine still owns it %v later — its run goroutine has not "+
+		"returned, so anything it does after the terminal row (the announce, the discard) may not "+
+		"have happened yet: %s", id, final.State, d, describe(e, id))
+	return wire.Job{}
+}
+
 // awaitTerminal is waitTerminal's loop with the t.Fatalf lifted out, so the message it WOULD have
 // printed can be asserted by a test instead of ending one. That split is not tidiness: the loop is
 // what decides WHICH mechanism string reaches the formatter, and a test that calls the formatter
@@ -933,7 +972,11 @@ func TestSucceededCommitAnnouncesTheDevice(t *testing.T) {
 	h := newHarness(t, m.params(t), m.Transport, func(o *Options, _ *fakeDevices) { o.Announcer = ann })
 
 	job := h.start(t, m.Transport, "")
-	final := waitTerminal(t, h.eng, job.ID, 20*time.Second)
+	// waitSettled, not waitTerminal: the announce happens AFTER the terminal row is written, so a
+	// test that returns on the first terminal observation is racing it (quince#427). Waiting for the
+	// release also keeps "exactly one" a real claim — every announce this job will ever make has
+	// already been made, so a duplicate would be visible here rather than arriving after the read.
+	final := waitSettled(t, h.eng, job.ID, 20*time.Second)
 	if final.State != StateSucceeded {
 		t.Fatalf("state=%s error=%v; want succeeded", final.State, final.Error)
 	}
@@ -953,7 +996,12 @@ func TestFailedJobAnnouncesNothing(t *testing.T) {
 	})
 
 	job := h.start(t, m.Transport, "")
-	if final := waitTerminal(t, h.eng, job.ID, 5*time.Second); final.State != StateFailed {
+	// The NEGATIVE assertion needs waitSettled more than the positive one does, and this is the half
+	// quince#427 called "the weaker guarantee". Reading `seen()` at the terminal row proves nothing:
+	// an announce that is merely LATE looks identical to one that never comes, so the old form passed
+	// whether the behaviour held or not. Waiting for the release means the run goroutine has returned
+	// and no announce can still be in flight — so "nothing" is now a fact rather than a head start.
+	if final := waitSettled(t, h.eng, job.ID, 5*time.Second); final.State != StateFailed {
 		t.Fatalf("state=%s; want failed", final.State)
 	}
 	if got := ann.seen(); len(got) != 0 {
