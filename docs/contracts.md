@@ -674,7 +674,10 @@ storage:
       backend: auto         # OPTIONAL override of storage.backend for THIS storage.
                             # Omit it: `auto` probes the path, which is how a namespace
                             # backend (reflink|hardlink|copy) is meant to be chosen.
-      zfs: {}               # OPTIONAL override of storage.zfs for THIS storage.
+      zfs: {}               # OPTIONAL override of storage.zfs for THIS storage. To opt OUT of a
+                            # global `backend: zfs` you need BOTH this and `backend: auto` —
+                            # `zfs: {}` alone leaves the global backend applying with no parent
+                            # dataset, which quince REFUSES to serve rather than half-build.
                             # ABSENT inherits the global block; an explicitly EMPTY one
                             # declares "I am NOT zfs" on a stand whose global block is
                             # set — without it a second storage could never opt out.

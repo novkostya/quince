@@ -116,3 +116,43 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// A ZFS BACKEND WITH NO PARENT DATASET is incoherent, and it is what my own first guidance on
+// quince#458 produced: `zfs: {}` to opt out, while the global `backend: zfs` still applied. Select
+// would build a zfs backend with nothing to create datasets under.
+func TestZFSWithNoParentDatasetIsRefused(t *testing.T) {
+	c := StorageConfig{
+		Backend: "zfs",
+		ZFS:     ZFSConfig{ParentDataset: "rpool/quince"},
+		Storages: entries(
+			StorageEntry{Name: "local", Path: "/backups", Default: true},
+			StorageEntry{Name: "shuttle", Path: "/usb", ZFS: &ZFSConfig{}},
+		),
+	}
+	bad := CheckStorageBackends(c)
+	if len(bad) != 1 {
+		t.Fatalf("`zfs: {}` without a backend override must be refused, got %v", bad)
+	}
+	// The refusal must name the REMEDY, because the config looks deliberate — the user wrote
+	// `zfs: {}` on purpose and needs to know it is not sufficient on its own.
+	for _, want := range []string{"shuttle", "backend: auto", "opt OUT"} {
+		if !contains(bad[0], want) {
+			t.Errorf("the refusal must contain %q: %q", want, bad[0])
+		}
+	}
+}
+
+// And the CORRECT opt-out is accepted: both keys, which is what the docs must show.
+func TestTheCorrectOptOutIsAccepted(t *testing.T) {
+	c := StorageConfig{
+		Backend: "zfs",
+		ZFS:     ZFSConfig{ParentDataset: "rpool/quince"},
+		Storages: entries(
+			StorageEntry{Name: "local", Path: "/backups", Default: true},
+			StorageEntry{Name: "shuttle", Path: "/usb", Backend: "auto", ZFS: &ZFSConfig{}},
+		),
+	}
+	if bad := CheckStorageBackends(c); len(bad) != 0 {
+		t.Errorf("`backend: auto` + `zfs: {}` is the supported opt-out, got %v", bad)
+	}
+}
