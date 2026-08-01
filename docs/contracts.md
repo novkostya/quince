@@ -345,6 +345,13 @@ Job: {
 
 Version: {
   "id": "...", "udid": "...", "backend": "zfs" | "reflink" | "hardlink" | "copy",
+  // HOW THIS VERSION WAS MADE — not what its storage uses now. Those are different facts
+  // (qn.6c gap 1, Operator ruling 2026-08-01) and `Storage.backend` carries the second.
+  // They agree permanently, because a storage's backend is immutable once chosen (design §5).
+  // Kept on MODELLING grounds rather than compatibility: a version can OUTLIVE its storage —
+  // once remove-a-storage exists, detach-and-forget leaves `storage_id` dangling and the backend
+  // unrecoverable by join, so this is not derivable in all futures. It is a fact about the
+  // version, not a cached copy of the storage's.
   // zfs: a version IS a snapshot; browse_root goes through .zfs (read-only by nature).
   // namespace backends (reflink/hardlink/copy): a version is an immutable dir.
   "zfs_snapshot": "rpool/.../<udid>@quince-2026-07-18T02-30-01J..." | null,   // zfs backend only
@@ -442,23 +449,42 @@ Version: { ..., "storage_id": "01J..." }   // a field addition — non-breaking 
                                            // own header rule
 ```
 
-**The open decision is `Version.backend`:**
+**`Version.backend` — RULED (was the open half of this gap): KEEP IT, AND IT MEANS SOMETHING
+DIFFERENT FROM `Storage.backend`.** Operator ruling 2026-08-01, relayed on quince#378.
 
-- **(a) Keep it, denormalized.** It is already on the wire, clients render it, and it remains a
-  true statement about the version (a version made on a zfs storage *is* a snapshot). The modeling
-  error is fixed where it actually bites — `versions.storage_id` in the DB, backend read from the
-  storage — and the wire keeps a convenience copy.
-- **(b) Remove it; clients join through `Storage`.** Cleaner, and breaking.
+> **`Version.backend` is *how this version was made*. `Storage.backend` is *what this storage uses
+> now*.**
 
-**The rung recommends (a), with its cost stated rather than hidden:** it leaves the epic's symptom
-visible on the wire on purpose. A later rung that wants (b) pays a breaking change then, rather
-than this rung paying it now for a field nothing is yet confused by.
+Two distinct facts that agree permanently, because a storage's backend is immutable by design §5's
+own rule — chosen at the creation moment, recorded in `quince-storage.json`, never re-selected.
+
+**This is NOT the compatibility reflex, and it was checked rather than assumed.** The same review
+retired an implicit env-var fallback precisely because *"keep it for compatibility"* is how
+permanent cruft arrives, so *"keep `Version.backend`"* deserved the same scrutiny. It survives on a
+different footing: **a version can outlive its storage.** Remove-a-storage is out of `qn.6c` but
+coming, and *detach-and-forget* is one of its candidate semantics — once the storage row is gone,
+`storage_id` dangles and the backend is **not recoverable by join**. The field is therefore not
+derivable in all futures, which makes it a genuine fact about the version rather than a cached copy
+of somebody else's. **The test is whether the field earns its place, not whether removing it would
+break someone** — the header's worked example, and this is the case it was written from.
+
+**The proposal offered (a) "keep it, denormalized" and (b) "remove it, breaking", and the ruling is
+neither.** (a) framed the field as a convenience copy carrying an implied future breaking removal;
+the redefinition makes it a **distinct, permanently true field that never needs removing**. So the
+epic's *"`Version.backend` is the symptom"* framing turns out not to apply to the wire at all — only
+to the DB, where `versions.storage_id` fixes it.
 
 `Version.browse_root` also stops being universally `/backups/<udid>/…` once roots are plural. That
 is a **documentation** change and not a shape change — it is already computed per request from the
 root, so only the literals above go stale.
 
-Spec: `docs/specs/qn.6c/qn.6c.md`, gap 1. **Not built until ruled.**
+**The OTHER half of this gap — `Version.storage_id` and the `Storage` object — is NOT flipped
+here.** It lands with the `0006_storage` migration that creates the column, in its own PR, and is
+**ruled nullable** (`null` = *not yet attributed*). Split on the architect's direction so the
+redefinition does not wait on the migration: a reviewer of either PR should not go looking for the
+other half in the same diff.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 1.
 
 ## 3. WebSocket (`/api/ws`)
 
