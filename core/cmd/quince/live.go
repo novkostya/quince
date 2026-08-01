@@ -83,7 +83,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// QUINCE_BACKUPS. Read from the same place buildStorage read it so the two cannot drift —
 	// a preflight that measures free space on a different filesystem than the one being written
 	// to is a check that passes for the wrong reason.
-	engineBackupsRoot, _ := defaultStorage(cfgSvc.Current().Storage)
+	engineBackupsRoot := defaultStorageRoot(cfgSvc.Current().Storage)
 
 	// Device.last_backup derives from the committed versions (qn.4c finding (v)): the version
 	// registry is the source of truth for "has this device been backed up", so a device shows its
@@ -150,108 +150,47 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Service,
 	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*storage.Manager, error) {
 	scfg := cfgSvc.Current().Storage
-	root, name := defaultStorage(scfg)
+	entries := declaredStorages(scfg)
+	if len(entries) == 0 {
+		// Unreachable past config.CheckStorages, which refuses to serve on an absent or empty list.
+		// Asserted rather than assumed: the ONE surviving hard refusal is "no storages declared"
+		// (quince#435), so if it ever gets here the guard upstream has stopped working.
+		return nil, fmt.Errorf("no storages declared — config.CheckStorages should have refused first")
+	}
 
-	// THE GUARD RUNS BEFORE ANYTHING TOUCHES THE PATH (quince#415).
+	// EVERY DECLARED STORAGE IS RESOLVED, AND ONE THAT CANNOT BE OPENED IS LISTED RATHER THAN FATAL
+	// (Operator ruling 2026-08-01, quince#435).
 	//
-	// This used to call storage.Select first and hand ResolveStorage the already-probed backend.
-	// That defeated the guard, because Select → probeNamespace does `os.MkdirAll(backups)`: a
-	// declared path that did not exist was CREATED by the probe, so by the time ResolveStorage
-	// looked, the path was reachable, markerless and unknown — a textbook creation moment, at a
-	// path the user had typo'd. quince invented a directory beside the real root and sent backups
-	// there. The check was downstream of the thing that made it pass.
+	// This used to resolve exactly the default and return an error on any resolution that was not
+	// OK, which exited the process. Right when one storage could be declared; wrong for several —
+	// one unplugged disk would refuse to start a daemon whose other storages are fine. The ruling's
+	// argument is that refusing makes the page that would EXPLAIN the problem unreachable, so the
+	// user gets a dead daemon and a log line instead of a screen naming the disk to plug in.
 	//
-	// So the probe is now LAZY: it is a closure ResolveStorage calls only on the paths where a
-	// backend is actually needed (comparing against an existing marker, or freezing one at a
-	// genuine creation). A refusal never reaches it, which is what makes "the guard is first" a
-	// property of the code rather than of the order two statements happen to be written in.
+	// The one hard refusal that survives is the empty list above: that is a CONFIGURATION error
+	// nothing at runtime fixes, where an absent disk is a state the user fixes by plugging it in.
+	slots := make([]storage.Slot, 0, len(entries))
+	for _, e := range entries {
+		slots = append(slots, resolveSlot(ctx, e, scfg, st, log))
+	}
+
+	// THE INTERIM SURFACE, UNTIL 5c PUTS IT ON THE WIRE (quince#378).
 	//
-	// NOBODY CREATES A STORAGE ROOT. A declared path must already exist — the refusal text has
-	// said so since story 1 ("The path must already exist and hold your backups if you have any")
-	// and this is what makes that true rather than aspirational. probeNamespace's MkdirAll
-	// survives, but with this ordering it can only ever run against a directory that is already
-	// there, so it cannot conjure a storage.
-	var (
-		stBackend   storage.Backend
-		backendName string
-		reason      string
-		probed      bool
-	)
-	probe := func(string) string {
-		if !probed {
-			stBackend, backendName, reason = storage.Select(ctx, storage.Options{
-				Backend: scfg.Backend, Backups: root, AppVersion: version.String(),
-				ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-				ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
-			}, log)
-			probed = true
+	// Between this change and `GET /api/storages` there is a window where quince serves with a
+	// storage missing and nothing on the wire mentions it — a degraded mode not surfaced, which is
+	// worse than the refusal this replaces, because that at least named the disk. A log line is a
+	// poor UI and a real one, and it is worth keeping permanently after 5c: a daemon that starts
+	// without a declared disk should say so in its startup output whether or not anyone is looking
+	// at a browser.
+	for _, s := range slots {
+		if !s.Usable() {
+			log.Warn("storage UNREACHABLE — serving without it; backups to it will be refused",
+				"storage", s.Name, "path", s.Root, "code", s.UnreachableCode,
+				"reason", s.UnreachableReason)
 		}
-		return backendName
 	}
 
-	state, err := storage.ResolveStorage(name, root, probe,
-		func(n string) (storage.KnownStorage, error) {
-			row, ok, err := st.GetStorage(n)
-			if err != nil || !ok || row.StorageID == nil {
-				return storage.KnownStorage{}, err
-			}
-			return storage.KnownStorage{Known: true, StorageID: *row.StorageID}, nil
-		},
-		time.Now, version.String(), id.New)
-	if err != nil {
-		return nil, fmt.Errorf("storage %q: %w", name, err)
-	}
-	if !state.Resolution.OK() {
-		// REFUSE. A quince that serves while its storage is not what it thinks it is can write
-		// backups to the wrong filesystem, and the missing-medium case looks exactly like an empty
-		// directory. The Reason carries observation, consequence and remedy (preflight's idiom).
-		return nil, fmt.Errorf("%s (%s)", state.Reason, state.Resolution)
-	}
-	// Every resolution that says OK has been through the probe — comparing against a marker, or
-	// freezing one at creation. Asserted rather than assumed: a nil backend here would be a nil
-	// dereference several calls later, in code that would look unrelated to this ordering.
-	if stBackend == nil {
-		return nil, fmt.Errorf("storage %q resolved %s without a backend — the lazy probe was not "+
-			"reached on a path that requires it (quince#415's ordering is wrong)", name, state.Resolution)
-	}
-	if state.Resolution == storage.ResolutionCreated {
-		// LOUD and user-visible, deliberately: this is the one path where quince decides a place
-		// is a new storage, and the residual it cannot rule out is a first declaration whose
-		// medium was absent. A user must be able to contradict it.
-		log.Warn("storage CREATED — quince had not seen this storage before and has claimed it",
-			"storage", name, "path", root, "backend", state.Backend, "storage_id", state.StorageID,
-			"note", "if this path should already hold backups, stop and check the medium is mounted")
-	}
-	if !state.Verified {
-		log.Warn("storage opened UNVERIFIED — nothing confirmed the medium matches its marker",
-			"storage", name, "path", root, "backend", state.Backend, "reason", state.Reason)
-	}
-
-	now := time.Now().UTC()
-	created := now
-	if state.Resolution == storage.ResolutionCreated {
-		if err := st.UpsertStorage(store.StorageRow{
-			Name: name, StorageID: &state.StorageID, Backend: &state.Backend,
-			Path: root, CreatedAt: &created, SeenAt: now,
-		}); err != nil {
-			return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
-		}
-	} else if err := st.UpsertStorage(store.StorageRow{
-		Name: name, StorageID: &state.StorageID, Backend: &state.Backend, Path: root, SeenAt: now,
-	}); err != nil {
-		return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
-	}
-
-	// ONE SLOT, DELIBERATELY. The Manager can hold many; `buildStorage` still resolves exactly the
-	// default storage, because looping `storage.storages` means deciding what happens when one of N
-	// is unreachable — and story 5 already rules that: unreachable is a STATE, shown and not
-	// errored, and must never block backups to the others. Refusing the whole process because one
-	// removable disk is unplugged would contradict it. That loop lands with story 5, which owns
-	// the semantics; this change is the mechanism it will use.
-	storageMgr := storage.NewManager([]storage.Slot{{
-		StorageID: state.StorageID, Name: name, Root: root,
-		Backend: stBackend, BackendName: backendName,
-	}}, st, st, eventBus,
+	storageMgr := storage.NewManager(slots, st, st, eventBus,
 		storage.RetentionPolicy{
 			KeepRecent: scfg.Retention.KeepRecent,
 			KeepDaily:  scfg.Retention.KeepDaily,
@@ -268,10 +207,148 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 
 	reportUnattributed(st, log)
 
-	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName,
-		"reason", reason, "storage_id", state.StorageID, "resolution", state.Resolution,
-		"verified", state.Verified)
+	for _, s := range slots {
+		log.Info("storage ready", "storage", s.Name, "path", s.Root, "backend", s.BackendName,
+			"storage_id", s.StorageID, "reachable", s.Reachable)
+	}
 	return storageMgr, nil
+}
+
+// resolveSlot resolves ONE declared storage into a Slot, reachable or not.
+//
+// It never returns an error: every failure mode is a state on the Slot, per quince#435. The caller
+// gets a storage it can list and refuse jobs for, rather than a reason to exit.
+func resolveSlot(ctx context.Context, e config.StorageEntry, scfg config.StorageConfig,
+	st *store.Store, log *slog.Logger) storage.Slot {
+	// THE GUARD RUNS BEFORE ANYTHING TOUCHES THE PATH (quince#415).
+	//
+	// This used to call storage.Select first and hand ResolveStorage the already-probed backend.
+	// That defeated the guard, because Select → probeNamespace does `os.MkdirAll(backups)`: a
+	// declared path that did not exist was CREATED by the probe, so by the time ResolveStorage
+	// looked, the path was reachable, markerless and unknown — a textbook creation moment, at a
+	// path the user had typo'd.
+	//
+	// So the probe is LAZY: a closure ResolveStorage calls only on the paths where a backend is
+	// actually needed. A refusal never reaches it, which is what makes "the guard is first" a
+	// property of the code rather than of the order two statements happen to be written in.
+	//
+	// NOBODY CREATES A STORAGE ROOT. A declared path must already exist.
+	var (
+		stBackend   storage.Backend
+		backendName string
+		probed      bool
+	)
+	probe := func(string) string {
+		if !probed {
+			stBackend, backendName, _ = storage.Select(ctx, storage.Options{
+				Backend: scfg.Backend, Backups: e.Path, AppVersion: version.String(),
+				ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
+				ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
+			}, log)
+			probed = true
+		}
+		return backendName
+	}
+
+	state, err := storage.ResolveStorage(e.Name, e.Path, probe,
+		func(n string) (storage.KnownStorage, error) {
+			row, ok, err := st.GetStorage(n)
+			if err != nil || !ok || row.StorageID == nil {
+				return storage.KnownStorage{}, err
+			}
+			return storage.KnownStorage{Known: true, StorageID: *row.StorageID}, nil
+		},
+		time.Now, version.String(), id.New)
+	if err != nil {
+		return storage.Slot{
+			Name: e.Name, Root: e.Path, Reachable: false,
+			UnreachableCode: "path_unreachable", UnreachableReason: err.Error(),
+		}
+	}
+	if !state.Resolution.OK() {
+		// A STATE, NOT AN EXIT. The Reason carries observation, consequence and remedy (preflight's
+		// idiom), and it is the only thing that can tell a user WHICH disk — so it is kept verbatim
+		// rather than replaced with a category.
+		return storage.Slot{
+			StorageID: state.StorageID, Name: e.Name, Root: e.Path, Reachable: false,
+			UnreachableCode: string(state.Resolution), UnreachableReason: state.Reason,
+		}
+	}
+	if stBackend == nil {
+		// Every resolution that says OK has been through the probe. A nil backend here would be a
+		// nil dereference several calls later, in code that would look unrelated to this ordering.
+		return storage.Slot{
+			StorageID: state.StorageID, Name: e.Name, Root: e.Path, Reachable: false,
+			UnreachableCode: "backend_mismatch",
+			UnreachableReason: fmt.Sprintf("resolved %s without a backend — the lazy probe was not "+
+				"reached on a path that requires it (quince#415's ordering is wrong)", state.Resolution),
+		}
+	}
+
+	if state.Resolution == storage.ResolutionCreated {
+		// LOUD and user-visible, deliberately: this is the one path where quince decides a place is
+		// a new storage, and the residual it cannot rule out is a first declaration whose medium was
+		// absent. A user must be able to contradict it.
+		log.Warn("storage CREATED — quince had not seen this storage before and has claimed it",
+			"storage", e.Name, "path", e.Path, "backend", state.Backend, "storage_id", state.StorageID,
+			"note", "if this path should already hold backups, stop and check the medium is mounted")
+	}
+	if !state.Verified {
+		log.Warn("storage opened UNVERIFIED — nothing confirmed the medium matches its marker",
+			"storage", e.Name, "path", e.Path, "backend", state.Backend, "reason", state.Reason)
+	}
+
+	now := time.Now().UTC()
+	row := store.StorageRow{
+		Name: e.Name, StorageID: &state.StorageID, Backend: &state.Backend, Path: e.Path, SeenAt: now,
+	}
+	if state.Resolution == storage.ResolutionCreated {
+		created := now
+		row.CreatedAt = &created
+	}
+	if err := st.UpsertStorage(row); err != nil {
+		// Recording it failed, so quince cannot vouch for this storage's identity next startup.
+		// Listing it unreachable is the honest answer; writing to a storage whose row did not
+		// persist is how an identity silently forks.
+		log.Error("storage: recording it failed", "storage", e.Name, "error", err)
+		return storage.Slot{
+			StorageID: state.StorageID, Name: e.Name, Root: e.Path, Reachable: false,
+			UnreachableCode:   "path_unreachable",
+			UnreachableReason: "quince could not record this storage's identity: " + err.Error(),
+		}
+	}
+
+	return storage.Slot{
+		StorageID: state.StorageID, Name: e.Name, Root: e.Path,
+		Backend: stBackend, BackendName: backendName, Reachable: true,
+	}
+}
+
+// declaredStorages returns every declared storage, DEFAULT FIRST.
+//
+// Order is the contract the Manager reads: `slots[0]` is the storage a backup goes to when none is
+// named. It replaced `defaultStorage`, which returned only the default's root and name — a shape
+// that could not express "and the others".
+//
+// Callers reach here only past config.CheckStorages, which refuses to serve on an absent or empty
+// list, so there is nothing to guess through and no fallback.
+func declaredStorages(scfg config.StorageConfig) []config.StorageEntry {
+	if scfg.Storages == nil {
+		return nil
+	}
+	entries := *scfg.Storages
+	out := make([]config.StorageEntry, 0, len(entries))
+	for _, s := range entries {
+		if s.Default {
+			out = append(out, s)
+		}
+	}
+	for _, s := range entries {
+		if !s.Default {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // reportUnattributed says how many versions still carry a NULL storage_id, after reconciliation
@@ -299,30 +376,15 @@ func reportUnattributed(st *store.Store, log *slog.Logger) {
 	}
 }
 
-// defaultStorage returns the root and name of the storage a backup goes to when none is named.
+// defaultStorageRoot is the root of the storage a backup goes to when none is named.
 //
-// qn.6c STORY 1 ONLY: the root now comes from `storage.storages` instead of the retired
-// QUINCE_BACKUPS, and quince still holds exactly ONE backend. Holding one per storage is story 3
-// and a separate PR on purpose — this change moves where the root comes FROM, that one changes how
-// MANY there are, and bundling them would put a signature ripple across ~32 test call sites into
-// the same diff as the retirement.
-//
-// Callers reach here only past config.CheckStorages, which refuses to serve on an absent or empty
-// list, so there is nothing to guess through and no fallback: the empty return is what an
-// unreachable-by-construction case should look like. storage.Select then surfaces an unusable root
-// loudly rather than inventing one.
-func defaultStorage(scfg config.StorageConfig) (root, name string) {
-	if scfg.Storages == nil {
-		return "", ""
+// The engine's A3 free-space preflight measures THIS filesystem, so it must read the default the
+// same way buildStorage orders its slots — a preflight that measures a different filesystem than
+// the one being written to is a check that passes for the wrong reason. Empty when nothing is
+// declared, which config.CheckStorages has already refused.
+func defaultStorageRoot(scfg config.StorageConfig) string {
+	if e := declaredStorages(scfg); len(e) > 0 {
+		return e[0].Path
 	}
-	entries := *scfg.Storages
-	for _, s := range entries {
-		if s.Default {
-			return s.Path, s.Name
-		}
-	}
-	if len(entries) > 0 {
-		return entries[0].Path, entries[0].Name
-	}
-	return "", ""
+	return ""
 }
