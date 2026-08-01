@@ -32,37 +32,67 @@ type Auditor interface {
 // publishes version.* events, runs startup reconciliation, and enforces retention. It serves
 // httpapi.VersionReader (Versions) + the version-delete admin path structurally.
 type Manager struct {
-	backend     Backend
-	backendName string
-	reg         Registry
-	audit       Auditor
-	bus         *bus.Bus
-	backups     string
-	// storageID is the UUID of the storage this Manager writes to. Attributed onto every version
-	// it commits or adopts, so `versions.storage_id` records where a backup lives at the moment it
-	// is made rather than being reconstructed later.
-	storageID string
-	log       *slog.Logger
-	newID     func() string
-	now       func() time.Time
-	policy    RetentionPolicy
+	// slots is every storage this Manager speaks for, in declaration order. slots[0] is the
+	// DEFAULT — the storage a backup goes to when none is named (contracts §1).
+	//
+	// qn.6c story 3: this replaced a single `backend` + `backups` pair. Every per-storage
+	// operation now has to say WHICH storage, which is the point — the four reads that took
+	// `m.backups` were exactly the places that could not, and would have resolved a version on
+	// storage B against storage A's root.
+	slots  []Slot
+	reg    Registry
+	audit  Auditor
+	bus    *bus.Bus
+	log    *slog.Logger
+	newID  func() string
+	now    func() time.Time
+	policy RetentionPolicy
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).
 //
-// storageID is the UUID of the storage this Manager writes to — the value from its
-// quince-storage.json (design §5). It is what a committed or adopted version is attributed to, so
-// that `versions.storage_id` is a fact recorded WHEN the version is made rather than guessed
-// afterwards. Empty is tolerated (tests, and any caller with no resolved storage) and simply means
-// rows are inserted unattributed, which is the pre-qn.6c state.
-func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bus.Bus,
-	backups, storageID string, policy RetentionPolicy, newID func() string, log *slog.Logger) *Manager {
+// slots is every storage this Manager speaks for, in declaration order; slots[0] is the DEFAULT.
+// It must be non-empty — `config.CheckStorages` refuses to serve without a declared storage, so a
+// Manager with no slots is a programming error rather than a state to degrade through, and the
+// panic says so rather than producing an index-out-of-range three calls later.
+func NewManager(slots []Slot, reg Registry, audit Auditor, b *bus.Bus,
+	policy RetentionPolicy, newID func() string, log *slog.Logger) *Manager {
+	if len(slots) == 0 {
+		panic("storage: NewManager needs at least one Slot — config.CheckStorages should have refused first")
+	}
 	return &Manager{
-		backend: backend, backendName: name, reg: reg, audit: audit, bus: b,
-		backups: backups, storageID: storageID,
+		slots: slots, reg: reg, audit: audit, bus: b,
 		log: log, newID: newID, now: func() time.Time { return time.Now().UTC() },
 		policy: policy,
 	}
+}
+
+// defaultSlot is the storage a backup goes to when none is named. Declaration order decides it,
+// and `config.CheckStorages` guarantees the list is non-empty before a Manager is ever built.
+func (m *Manager) defaultSlot() Slot { return m.slots[0] }
+
+// slotFor resolves the storage a VERSION lives on, from its storage_id.
+//
+// This is the resolver the four `m.backups` reads needed and did not have. A version on storage B
+// resolved against storage A's root produces a browse_root that does not exist and a Verify that
+// fails on a perfectly good backup — so "which root" must come from the ROW, never from whichever
+// storage the Manager happens to list first.
+//
+// A nil storage_id resolves to the UNATTRIBUTED slot if one exists (the pre-qn.6c world, where
+// there is one storage and no marker yet), and otherwise fails. Guessing a root for a version
+// whose storage quince does not know is the same class of invention as claiming an unmounted
+// mountpoint: it would answer confidently and be wrong wherever it mattered.
+func (m *Manager) slotFor(storageID *string) (Slot, bool) {
+	want := ""
+	if storageID != nil {
+		want = *storageID
+	}
+	for _, s := range m.slots {
+		if s.StorageID == want {
+			return s, true
+		}
+	}
+	return Slot{}, false
 }
 
 // owns reports whether a version row belongs to the storage this Manager speaks for.
@@ -82,24 +112,24 @@ func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bu
 //	set          different      no     another storage's version; not ours to judge
 func (m *Manager) owns(rowStorageID *string) bool {
 	if rowStorageID == nil {
-		return m.storageID == ""
+		return m.defaultSlot().StorageID == ""
 	}
-	return *rowStorageID == m.storageID
+	return *rowStorageID == m.defaultSlot().StorageID
 }
 
 // storageIDPtr returns the Manager's storage id as the nullable the registry stores, so an
 // unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
 // "" is not one of them (contracts §2: null = not yet attributed).
 func (m *Manager) storageIDPtr() *string {
-	if m.storageID == "" {
+	if m.defaultSlot().StorageID == "" {
 		return nil
 	}
-	s := m.storageID
+	s := m.defaultSlot().StorageID
 	return &s
 }
 
 // BackendName reports the resolved backend (for /api/health + onboarding).
-func (m *Manager) BackendName() string { return m.backendName }
+func (m *Manager) BackendName() string { return m.defaultSlot().BackendName }
 
 // KnownUDIDs returns the distinct UDIDs that have any committed version — the offline-device set the
 // device registry unions with live presence so a powered-off device that has backups is still listed
@@ -156,10 +186,10 @@ func (m *Manager) Versions(udid string) []wire.Version {
 // working/<udid> with no symlink (qn.5b). A dirty working/ is resumed; else it is seeded from
 // latest/ via the backend's safe strategy.
 func (m *Manager) Seed(udid, jobID string) (string, error) {
-	if err := m.backend.Provision(udid); err != nil {
+	if err := m.defaultSlot().Backend.Provision(udid); err != nil {
 		return "", err
 	}
-	return m.backend.WorkDir(udid, jobID)
+	return m.defaultSlot().Backend.WorkDir(udid, jobID)
 }
 
 // PrepareWork + SeedWork are Seed split into two phases for the qn.6b gated seed (candidate C):
@@ -167,14 +197,14 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 // SeedWork does the slow clone while idevicebackup2 is paused at its --gate. Seed = PrepareWork +
 // (if seedPending) SeedWork.
 func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
-	if err := m.backend.Provision(udid); err != nil {
+	if err := m.defaultSlot().Backend.Provision(udid); err != nil {
 		return "", false, err
 	}
-	return m.backend.PrepareWork(udid, jobID)
+	return m.defaultSlot().Backend.PrepareWork(udid, jobID)
 }
 
 func (m *Manager) SeedWork(udid, jobID string) error {
-	return m.backend.SeedWork(udid, jobID)
+	return m.defaultSlot().Backend.SeedWork(udid, jobID)
 }
 
 // seedKind returns the AUTHORITATIVE full|incremental kind for the in-flight job from the work
@@ -182,7 +212,7 @@ func (m *Manager) SeedWork(udid, jobID string) error {
 // the sentinel is missing it infers from whether the device already has a committed version, never
 // from Status.plist.IsFullBackup (which the lab proved lies).
 func (m *Manager) seedKind(udid string) string {
-	if w, ok, err := readWorkState(m.backups, udid); err == nil && ok {
+	if w, ok, err := readWorkState(m.defaultSlot().Root, udid); err == nil && ok {
 		return w.kindOf()
 	}
 	// SCOPED TO THIS STORAGE, and this is the line story 8's claim rests on. "Does this device
@@ -209,13 +239,13 @@ func (m *Manager) seedKind(udid string) string {
 // verification failure returns an error WITHOUT committing (state honesty — a version exists only
 // after verify+commit).
 func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
-	tree := m.backend.TreePath(udid, jobID)
+	tree := m.defaultSlot().Backend.TreePath(udid, jobID)
 	vr := Verify(tree, m.seedKind(udid))
 	if !vr.OK {
 		return wire.Version{}, fmt.Errorf("storage: structural verification failed: %s", vr.Detail)
 	}
 	req := CommitReq{UDID: udid, JobID: jobID, VersionID: m.newID(), CreatedAt: m.now(), Verify: vr}
-	committed, err := m.backend.Commit(req)
+	committed, err := m.defaultSlot().Backend.Commit(req)
 	if err != nil {
 		return wire.Version{}, err
 	}
@@ -251,7 +281,7 @@ func (m *Manager) registerCommitted(c Committed) error {
 
 // Discard drops a failed job's work (design §4). Returns the human note (dirty-working on zfs).
 func (m *Manager) Discard(udid, jobID string) (string, error) {
-	note, err := m.backend.Discard(udid, jobID)
+	note, err := m.defaultSlot().Backend.Discard(udid, jobID)
 	if note != "" {
 		m.log.Info("storage: job discarded", "udid", udid, "job", jobID, "note", note)
 	}
@@ -273,7 +303,7 @@ func (m *Manager) deleteVersion(id, event string) (int, error) {
 		return http.StatusNotFound, fmt.Errorf("no such version")
 	}
 	if !row.Missing {
-		if err := m.backend.DeleteArtifact(m.artifact(row)); err != nil {
+		if err := m.defaultSlot().Backend.DeleteArtifact(m.artifact(row)); err != nil {
 			return http.StatusInternalServerError, err
 		}
 	}
@@ -302,7 +332,9 @@ func (m *Manager) Prune(udid string) error {
 }
 
 // RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).
-func (m *Manager) RepairWorkingCopy(udid string) error { return m.backend.RepairWorkingCopy(udid) }
+func (m *Manager) RepairWorkingCopy(udid string) error {
+	return m.defaultSlot().Backend.RepairWorkingCopy(udid)
+}
 
 // VerifyWork is the passwordless structural-verification exposed to the backup engine (qn.4a/qn.5b):
 // it resolves the job's working tree (working/<udid>) internally and returns primitives, so the
@@ -310,7 +342,7 @@ func (m *Manager) RepairWorkingCopy(udid string) error { return m.backend.Repair
 // (finding #9(a)). The engine calls this for the `verifying` state; CommitJob re-runs it (cheap,
 // quiescent tree).
 func (m *Manager) VerifyWork(udid, jobID string) (ok bool, detail, kind string, encrypted bool) {
-	tree := m.backend.TreePath(udid, jobID)
+	tree := m.defaultSlot().Backend.TreePath(udid, jobID)
 	r := Verify(tree, m.seedKind(udid))
 	return r.OK, r.Detail, r.Kind, r.Encrypted
 }
@@ -344,7 +376,15 @@ func (m *Manager) VerifyVersion(id string) (VerifyReport, bool) {
 		rep.Detail = "version artifact is missing on disk"
 		return rep, true
 	}
-	tree := browseRoot(m.backups, row.UDID, row.Backend, row.ZFSSnapshot, row.IsLatest, row.CreatedAt)
+	// The root comes from THE VERSION'S storage, not from whichever the Manager lists first.
+	// Verifying storage B's version against storage A's root reports a perfectly good backup as
+	// broken — the state-honesty failure this resolver exists to prevent.
+	slot, ok := m.slotFor(row.StorageID)
+	if !ok {
+		rep.Detail = "version is not attributed to any configured storage — cannot locate its tree"
+		return rep, true
+	}
+	tree := browseRoot(slot.Root, row.UDID, row.Backend, row.ZFSSnapshot, row.IsLatest, row.CreatedAt)
 	r := Verify(tree, row.Kind)
 	rep.OK, rep.Detail, rep.Kind, rep.Encrypted, rep.TreePath = r.OK, r.Detail, r.Kind, r.Encrypted, tree
 	return rep, true
@@ -384,9 +424,20 @@ func (m *Manager) VersionForJob(udid, jobID string) (string, bool) {
 // --- mapping helpers ---
 
 func (m *Manager) toWire(r store.VersionRow) wire.Version {
+	// browse_root resolves under THE VERSION'S OWN storage root — the sentence story 4's spec
+	// promised and that this function could not honour while it held one root. A version on
+	// storage B rendered against storage A's root hands the UI a path that does not exist.
+	//
+	// A version attributed to no configured storage yields "" rather than a guessed path: the
+	// field is a non-nullable string, and an empty one is visibly wrong where a plausible-looking
+	// wrong path is not.
+	root := ""
+	if slot, ok := m.slotFor(r.StorageID); ok {
+		root = slot.Root
+	}
 	v := wire.Version{
 		ID: r.ID, UDID: r.UDID, Backend: r.Backend, ZFSSnapshot: r.ZFSSnapshot,
-		BrowseRoot: browseRoot(m.backups, r.UDID, r.Backend, r.ZFSSnapshot, r.IsLatest, r.CreatedAt),
+		BrowseRoot: browseRoot(root, r.UDID, r.Backend, r.ZFSSnapshot, r.IsLatest, r.CreatedAt),
 		CreatedAt:  fmtRFC(r.CreatedAt), JobID: r.JobID, Kind: r.Kind, Encrypted: r.Encrypted,
 		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes, PhysicalBytes: r.PhysicalBytes,
 		Missing: r.Missing, // crossed to the wire so the UI renders a gone artifact dead (qn.6a (cr))

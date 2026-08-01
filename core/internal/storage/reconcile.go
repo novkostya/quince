@@ -16,7 +16,7 @@ import (
 // artifact vanished as `missing` (never drop), (4) recompute the single latest, (5) sweep
 // orphaned work — only after the above. Safe to run at every startup.
 func (m *Manager) Reconcile(ctx context.Context) error {
-	journals, err := m.backend.PendingJournals()
+	journals, err := m.defaultSlot().Backend.PendingJournals()
 	if err != nil {
 		return err
 	}
@@ -24,7 +24,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		committed, ok, err := m.backend.ResumeCommit(j)
+		committed, ok, err := m.defaultSlot().Backend.ResumeCommit(j)
 		if err != nil {
 			m.log.Error("reconcile: roll-forward failed — left in place, not unwound",
 				"udid", j.UDID, "version", j.VersionID, "phase", j.Phase, "error", err)
@@ -57,7 +57,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 }
 
 func (m *Manager) reconcileDevice(udid string) error {
-	arts, err := m.backend.Scan(udid)
+	arts, err := m.defaultSlot().Backend.Scan(udid)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (m *Manager) reconcileDevice(udid string) error {
 		return err
 	}
 	// Orphaned work is swept only after reconciliation has completed for the device.
-	return m.backend.SweepWork(udid)
+	return m.defaultSlot().Backend.SweepWork(udid)
 }
 
 // adopt registers an on-disk version discovered without a row as ADOPTED (job_id null →
@@ -200,7 +200,7 @@ func (m *Manager) reconcileUDIDs() []string {
 			set[r.UDID] = struct{}{}
 		}
 	}
-	if entries, err := os.ReadDir(m.backups); err == nil {
+	if entries, err := os.ReadDir(m.defaultSlot().Root); err == nil {
 		for _, e := range entries {
 			if e.IsDir() && validUDID(e.Name()) {
 				set[e.Name()] = struct{}{}

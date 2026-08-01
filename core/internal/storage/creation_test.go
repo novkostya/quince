@@ -292,7 +292,7 @@ func TestResolveRefusesToCreateWithAnUndeterminedBackend(t *testing.T) {
 // is what removes the need to guess later.
 
 func TestManagerAttributesItsStorageID(t *testing.T) {
-	m := &Manager{storageID: "01JSTORAGE0000000000000000"}
+	m := &Manager{slots: []Slot{{StorageID: testStorageID}}}
 	got := m.storageIDPtr()
 	if got == nil || *got != "01JSTORAGE0000000000000000" {
 		t.Fatalf("want the manager's storage id, got %v", got)
@@ -303,7 +303,7 @@ func TestManagerAttributesItsStorageID(t *testing.T) {
 // is not one of them: contracts §2 says null means NOT YET ATTRIBUTED, and an empty string would
 // be a value that no consumer has a rule for.
 func TestManagerWithNoStorageIDAttributesNullNotEmptyString(t *testing.T) {
-	m := &Manager{}
+	m := &Manager{slots: []Slot{{}}}
 	if got := m.storageIDPtr(); got != nil {
 		t.Fatalf("an unattributed Manager must yield nil, got %q", *got)
 	}
@@ -318,7 +318,7 @@ const testStorageID = "01JSTORAGE0000000000000000"
 
 func TestRegisterCommittedAttributesTheVersionToItsStorage(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
-	m.storageID = testStorageID
+	m.slots[0].StorageID = testStorageID
 
 	const vid, udid = "01JV0000000000000000000001", "00008140-000A1B2C3D4E5F60"
 	if err := m.registerCommitted(Committed{
@@ -367,7 +367,7 @@ func TestRegisterCommittedWithNoStorageWritesNullNotEmptyString(t *testing.T) {
 // SCANNED FROM, which is known at that point and never needs guessing later.
 func TestAdoptAttributesTheVersionToTheStorageItWasScannedFrom(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
-	m.storageID = testStorageID
+	m.slots[0].StorageID = testStorageID
 
 	const vid, udid = "01JV0000000000000000000003", "00008140-000A1B2C3D4E5F60"
 	m.adopt(udid, Artifact{
@@ -454,8 +454,8 @@ func TestOwnsIsGroupMembershipNotEquality(t *testing.T) {
 	sid := "01JSTORAGE-A"
 	other := "01JSTORAGE-B"
 
-	unattributed := &Manager{}
-	attributed := &Manager{storageID: sid}
+	unattributed := &Manager{slots: []Slot{{}}}
+	attributed := &Manager{slots: []Slot{{StorageID: sid}}}
 
 	// The NULL group is a real group: an unattributed Manager owns unattributed rows.
 	if !unattributed.owns(nil) {
@@ -481,7 +481,7 @@ func TestOwnsIsGroupMembershipNotEquality(t *testing.T) {
 // this answer being per-storage.
 func TestSeedKindIsFullForAFirstBackupToThisStorage(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
-	m.storageID = "01JSTORAGE-B" // a storage this device has never been backed up to
+	m.slots[0].StorageID = "01JSTORAGE-B" // a storage this device has never been backed up to
 
 	const udid = "00008140-000A1B2C3D4E5F60"
 	onStorageA := "01JSTORAGE-A"
@@ -501,7 +501,7 @@ func TestSeedKindIsFullForAFirstBackupToThisStorage(t *testing.T) {
 func TestSeedKindIsIncrementalWhenThisStorageAlreadyHasAVersion(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
 	sid := "01JSTORAGE-A"
-	m.storageID = sid
+	m.slots[0].StorageID = sid
 
 	const udid = "00008140-000A1B2C3D4E5F60"
 	if err := st.InsertVersion(store.VersionRow{
@@ -565,7 +565,7 @@ func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T
 	}
 
 	// After ResolveStorage, the Manager carries an id while the row does not.
-	m.storageID = sid
+	m.slots[0].StorageID = sid
 	row, _, err := st.GetVersion("01VOLD1")
 	if err != nil {
 		t.Fatal(err)
