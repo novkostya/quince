@@ -284,9 +284,13 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   registers, so GitHub can attach your approval to a commit you never read (stale-review dismissal
   covers pushes *after* an approval, not pushes racing one):
   ```sh
-  # NOTE THE HEAD BEFORE YOU APPROVE and use that value here. `reviews[].commit.oid` is NOT a
+  # NOTE THE HEAD BEFORE YOU READ THE DIFF and use that value here — the same oid you passed to
+  # `--commit-id` when casting the verdict (`/review-pr` §6). `reviews[].commit.oid` is NOT a
   # reliable source for it — see "the recorded binding MOVES" below.
-  OLD=<the full 40-char oid you noted before casting the verdict>
+  #
+  # BEFORE YOU READ, not before you submit: taking it at submission time pins to a head that may
+  # already have moved while you were reading, which is the race this whole section exists for.
+  OLD=<the full 40-char oid you noted before reading the diff>
   NEW=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
   git fetch origin "$OLD" "$NEW"                 # both, by full oid
   git range-diff "origin/main...$OLD" "origin/main...$NEW"    # THREE-DOT, whole branch
