@@ -53,6 +53,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
 		deps.Ops = UnavailableDeviceOps{}
 	}
+	if deps.Storages == nil { // no storage subsystem wired → an empty list, not a 503 (qn.6c)
+		deps.Storages = UnavailableStorages{}
+	}
 	if deps.VersionAdmin == nil { // no storage subsystem wired → refuse honestly (503)
 		deps.VersionAdmin = UnavailableVersionAdmin{}
 	}
@@ -84,6 +87,8 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/jobs/{id}", deps.handleJob())
 	apiMux.HandleFunc("POST /api/jobs/{id}/cancel", deps.handleJobCancel())
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
+	apiMux.HandleFunc("GET /api/storages", deps.handleStorages())
+	apiMux.HandleFunc("POST /api/storages/{id}/recheck", deps.handleStorageRecheck())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

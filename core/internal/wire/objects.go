@@ -185,3 +185,50 @@ type AuthStatus struct {
 	State     string `json:"state"` // needs_setup | needs_login | authenticated
 	CSRFToken string `json:"csrf_token"`
 }
+
+// Storage is one declared backup location (contracts §1 GET /api/storages, qn.6c).
+//
+// Ruled 2026-07-31 (the object) and 2026-08-01 (the split cause). It is DEVICE-INDEPENDENT: "will
+// the next backup be full" is a property of a (device, storage) PAIR, not of a storage, so it
+// appears only when `?udid=` is passed and the storage-cards rung that follows can keep asking for
+// a plain list.
+type Storage struct {
+	ID      string `json:"id"`      // the UUID from quince-storage.json; stable across replug
+	Name    string `json:"name"`    // from config.yml; the label the UI shows
+	Path    string `json:"path"`    //
+	Backend string `json:"backend"` // zfs | reflink | hardlink | copy | unknown
+
+	// Backend is "unknown" when the storage has never been reached: the backend is chosen by
+	// probing a filesystem, so a storage that was never opened has no answer. That is distinct
+	// from a guess, which is why the enum carries the value rather than the field going empty.
+
+	Default   bool `json:"default"`   // exactly one storage is default
+	Reachable bool `json:"reachable"` //
+
+	// UnreachableCode is the machine-readable cause and UnreachableReason the daemon's sentence.
+	// BOTH ARE NULL WHEN REACHABLE AND NEVER ABSENT — the same ruling as Version.storage_id: a
+	// present null is a fact, an absent key is a version-skew question.
+	//
+	// Two fields rather than one because prose cannot be branched on and an enum cannot be shown,
+	// and because `missing_medium` and `path_unreachable` call for different user actions — *plug
+	// the disk in* versus *this path is readable but it is not your backup medium*. A client
+	// mapping the code to its own copy cannot include what the daemon knows and it does not:
+	// which path, which marker.
+	UnreachableCode   *string `json:"unreachable_code"`   // path_unreachable | missing_medium | backend_mismatch
+	UnreachableReason *string `json:"unreachable_reason"` //
+
+	// WillBeFull answers "will the next backup to this storage be a full transfer" for ONE device,
+	// and is null unless `?udid=` was passed. Story 8 states the cost before it is paid: the first
+	// backup to a new storage is always full, and the server owns that answer because only it knows
+	// whether a (device, storage) pair has a prior version.
+	WillBeFull *bool `json:"will_be_full"`
+}
+
+// StoragesResponse is GET /api/storages. StorageResponse is POST /api/storages/{id}/recheck.
+type StoragesResponse struct {
+	Storages []Storage `json:"storages"`
+}
+
+type StorageResponse struct {
+	Storage Storage `json:"storage"`
+}

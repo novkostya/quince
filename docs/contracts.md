@@ -178,7 +178,7 @@ POST /api/jobs/{id}/cancel                              → 202 Job
 GET  /api/jobs/{id}/log                                 → text/plain (full so-far; live tail is WS)
 ```
 
-**PROPOSED (gap): a storage collection, and a job that names one — `qn.6c`, quince#378.**
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): a storage collection, and a job that names one — `qn.6c`, quince#378.** The READ half — `GET /api/storages`, the `Storage` object and `POST /api/storages/{id}/recheck` — ships in story 5c. `POST /api/jobs {storage_id}` is ruled and NOT yet built; it lands with story 6.
 Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Additive:
 
 ```
@@ -444,8 +444,14 @@ backend is really its **storage's** backend. `qn.6c` fixes the model; this propo
 much of that reaches the wire.
 
 **Two halves have left this proposal and are RULED below: `Version.backend` and
-`Version.storage_id`.** What remains open is the **`Storage` object itself**, `GET /api/storages`,
-and **the job's** `storage_id` on `POST /api/jobs`.
+`Version.storage_id`.** The **`Storage` object** and **`GET /api/storages`** are now ruled AND built
+as well (story 5c), together with `POST /api/storages/{id}/recheck`. What remains **ruled but
+unbuilt** is **the job's** `storage_id` on `POST /api/jobs`, which lands with story 6.
+
+This sentence listed the `Storage` object and `GET /api/storages` as *open* until 2026-08-01 — after
+the ruling that decided them — and was found while preparing a ruling on a question it made look
+unresolved. **Ruled-and-unbuilt is work to do; unruled is a thread to stop**, and prose that
+conflates the two costs a round trip to the seat that has already answered.
 
 **`PROPOSED (gap)` is a load-bearing marker meaning *nothing may be built on this yet*, not a
 title**, so a heading naming a half that has been decided tells a reader searching for open
@@ -484,7 +490,8 @@ Storage: {
                                //   backend_mismatch  the marker and the probe disagree (remount)
   "will_be_full": true         // this device's next backup here is a FULL transfer, because
                                // incremental is scoped to (device, storage) and there is no prior
-                               // version on this one. See the open sub-question in §1.
+                               // version on this one. Present ONLY when `?udid=` is passed —
+                               // the list is device-independent by ruling (2026-07-31).
 }
 
 Version: { ..., "storage_id": "01J..." | null }
