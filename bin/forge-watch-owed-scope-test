@@ -173,5 +173,35 @@ fi
 ) || fail=$((fail + 1))
 pass=$((pass + 1))
 
+
+# --- 7. NEITHER PAGE LIMIT IS SILENT (quince#426 review) --------------------------------------
+# A full page is an answer that MAY be partial, and it arrives as a `200` — the failure that looks
+# like success. Driven with the limits lowered to 1 via the environment, so the suite does not have
+# to fabricate a hundred PRs to reach the condition; that the limits are overridable at all is what
+# makes the check testable rather than reasoned about.
+#
+# The two caps fail in DIFFERENT directions and the assertions say so: the per-repo one over-reports
+# (unattributable -> OWED), the seat-wide one can UNDERSTATE, which is the direction that matters.
+one_pr 800 r1/mine
+OWED_PRLIST_LIMIT=1 bin/forge-watch owed --author @me --gh "$WORK/gh" >"$WORK/out" 2>"$WORK/err" || true
+if grep -q 'FULL page' "$WORK/err"; then
+	ok "a full pr-list page is REPORTED as possibly truncated, not assumed complete"
+else
+	bad "pr list hit its cap silently: $(head -2 "$WORK/err")"
+fi
+OWED_SEARCH_LIMIT=1 bin/forge-watch owed --author @me --gh "$WORK/gh" >"$WORK/out" 2>"$WORK/err" || true
+if grep -q 'may understate what is owed' "$WORK/err"; then
+	ok "a full SEARCH page says it may UNDERSTATE — the unsafe direction, named"
+else
+	bad "the seat-wide search hit its cap silently: $(head -2 "$WORK/err")"
+fi
+# The control: below the caps, neither notice appears. A warning that always fires is one people
+# learn to skim, which is the same defect as a cap that never fires.
+bin/forge-watch owed --author @me --gh "$WORK/gh" >"$WORK/out" 2>"$WORK/err" || true
+if grep -q 'FULL page\|may understate' "$WORK/err"; then
+	bad "a truncation notice fired on a queue well under both caps"
+else
+	ok "no truncation notice when nothing was truncated (the control)"
+fi
 printf '%s: %d passed, %d failed\n' "$(basename "$0")" "$pass" "$fail"
 [ "$fail" -eq 0 ]
