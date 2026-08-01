@@ -247,6 +247,12 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// BEFORE ANYTHING TOUCHES THE PATH (story 7). Provision creates directories, so a check
+	// after it would be a check downstream of the thing that makes it pass — the same ordering
+	// defect quince#415 fixed for the creation guard.
+	if err := s.preflight(); err != nil {
+		return "", err
+	}
 	if err := s.Backend.Provision(udid); err != nil {
 		return "", err
 	}
@@ -260,6 +266,9 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
 	s, err := m.jobSlot(jobID)
 	if err != nil {
+		return "", false, err
+	}
+	if err := s.preflight(); err != nil {
 		return "", false, err
 	}
 	if err := s.Backend.Provision(udid); err != nil {

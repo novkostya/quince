@@ -44,6 +44,7 @@ func newNSManager(t *testing.T, strategy clonetree.Strategy, policy RetentionPol
 		clonetree.Reflink: BackendReflink, clonetree.Hardlink: BackendHardlink, clonetree.Copy: BackendCopy,
 	}[strategy]
 	be := newNamespaceBackend(name, strategy, backups, "test", testLogger())
+	seedStorageMarker(t, backups, "", name)
 	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: name, Reachable: true}},
 		st, st, bus.New(), policy, seqID(), testLogger())
 	m.now = monotonicClock()
@@ -150,6 +151,7 @@ func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, seed string) (
 	cli := newZFSCLI(parent, mode, "hook-placeholder", "zfs")
 	cli.run = f.run
 	be := newZFSBackend(context.Background(), cli, backups, seed, "test", testLogger())
+	seedStorageMarker(t, backups, "", BackendZFS)
 	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: BackendZFS, Reachable: true}},
 		st, st, bus.New(), policy, seqID(), testLogger())
 	m.now = monotonicClock()
@@ -173,5 +175,20 @@ func commitGoodTree(t *testing.T, m *Manager, udid string) {
 	goodEncryptedFull(t, seedTree(t, m, udid, "job-"+udid))
 	if _, err := m.CommitJob(udid, "job-"+udid); err != nil {
 		t.Fatalf("commit: %v", err)
+	}
+}
+
+// seedStorageMarker writes the marker a REAL storage always has, so fixtures match production.
+//
+// Story 7's pre-backup check reads it before every job, and a fixture without one is not a
+// simplification — it is a storage in a state buildStorage never produces. Writing it here keeps
+// the check honest rather than teaching it to tolerate an absence that cannot happen.
+func seedStorageMarker(t *testing.T, root, storageID, backend string) {
+	t.Helper()
+	if err := WriteStorageMarker(root, StorageMarker{
+		StorageID: storageID, Backend: backend,
+		CreatedAt: "2026-08-01T00:00:00Z", AppVersion: "test",
+	}); err != nil {
+		t.Fatalf("seed storage marker: %v", err)
 	}
 }

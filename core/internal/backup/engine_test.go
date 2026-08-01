@@ -83,6 +83,13 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	backend, name, _ := storage.Select(context.Background(),
 		storage.Options{Backend: storage.BackendCopy, Backups: backups, AppVersion: "test"}, log)
+	// The marker a REAL storage always has — story 7 reads it before every job, and a fixture
+	// without one is a state buildStorage never produces.
+	if err := storage.WriteStorageMarker(backups, storage.StorageMarker{
+		Backend: name, CreatedAt: "2026-08-01T00:00:00Z", AppVersion: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mgr := storage.NewManager([]storage.Slot{{Name: "test", Root: backups, Backend: backend, BackendName: name, Reachable: true}},
 		st, st, b, storage.RetentionPolicy{KeepRecent: 10}, id.New, log)
 
