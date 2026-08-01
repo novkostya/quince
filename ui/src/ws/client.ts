@@ -1,8 +1,9 @@
-import type { WSEnvelope } from "@/lib/types";
+import type { AuthStatus, WSEnvelope } from "@/lib/types";
 import { refreshAll } from "@/lib/refresh";
 import { useConnectionStore } from "@/stores/connection";
 import { queryClient } from "@/lib/queryClient";
 import { authStatusKey } from "@/lib/auth";
+import { api, notifyUnauthorized } from "@/lib/api";
 import { dispatch } from "./dispatch";
 
 const BASE_DELAY = 500;
@@ -49,9 +50,40 @@ function open(): void {
 
   ws.onclose = () => {
     socket = null;
+    if (!stopped) void reportIfSessionLost();
     scheduleReconnect();
   };
   ws.onerror = () => ws.close();
+}
+
+// A CLOSED SOCKET IS NOT EVIDENCE OF A NETWORK FAULT, and the badge said it was. The server rejects
+// an unauthenticated upgrade with a 401 BEFORE upgrading (core/internal/ws/handler.go), and the
+// browser WebSocket API does not expose the handshake status to script: all you get is onerror then
+// onclose with code 1006, which is exactly what an unreachable daemon looks like. So an idle tab
+// whose session had expired sat on "reconnecting…" — blaming the network for a logged-out session,
+// serving stale data that looked current — and nothing redirected, because the API client's 401
+// handling can only see a request nobody was making (quince#374).
+//
+// SO ASK THE ONE ENDPOINT THAT CAN ANSWER instead of inferring from a close code. /api/auth/status
+// is auth-exempt and answers 200, which separates the two cases outright:
+//
+//   answers, not authenticated  -> the session is gone: report it, and the route guard redirects
+//   answers, authenticated      -> only the socket is down: keep backing off, unchanged
+//   does not answer             -> the SERVER is down: keep backing off, and DO NOT redirect
+//
+// That third line is why this ASKS rather than simply invalidating the auth query on failure.
+// `RequireAuth` treats an errored status as `needs_login` (guards.tsx), so a blind invalidation
+// would throw the user to the login screen every time the daemon restarted — trading this defect
+// for a worse one. The retry loop itself is not the bug and is left alone: an unreachable server
+// SHOULD back off and retry forever.
+async function reportIfSessionLost(): Promise<void> {
+  let status: AuthStatus;
+  try {
+    status = await api.get<AuthStatus>("/api/auth/status");
+  } catch {
+    return; // no answer: an unreachable server proves nothing about the session
+  }
+  if (status.state !== "authenticated") notifyUnauthorized();
 }
 
 function scheduleReconnect(): void {

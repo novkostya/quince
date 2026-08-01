@@ -40,6 +40,15 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
   onUnauthorized = fn;
 }
 
+// notifyUnauthorized reports a lost session discovered somewhere OTHER than an API response — today
+// the WebSocket handshake, which the browser rejects before script can read its 401 (quince#374).
+// It exists so there is still exactly ONE place that decides what a lost session means: the caller
+// reports the fact, `main.tsx` owns the consequence. A second redirect path would be a second thing
+// to keep in step with this one.
+export function notifyUnauthorized(): void {
+  onUnauthorized?.();
+}
+
 // The two endpoints where a 401 is about the CREDENTIAL IN THE REQUEST, not about the session: they
 // are the ones you can reach without a session at all (the server's authExempt set). A 401 here means
 // "that password was wrong", and dropping to the login screen because you are already on it — or
