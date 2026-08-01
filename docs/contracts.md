@@ -678,9 +678,8 @@ storage:
                             # global `backend: zfs` you need BOTH this and `backend: auto` —
                             # `zfs: {}` alone leaves the global backend applying with no parent
                             # dataset, which quince REFUSES to serve rather than half-build.
-                            # ABSENT inherits the global block; an explicitly EMPTY one
-                            # declares "I am NOT zfs" on a stand whose global block is
-                            # set — without it a second storage could never opt out.
+                            # ABSENT inherits the global block. An explicitly EMPTY one
+                            # opts OUT — but only together with `backend: auto` above.
   backend: auto             # auto | zfs | reflink | hardlink | copy
                             # THE DEFAULT every entry inherits, no longer a global that
                             # overrides them. It said "per-storage zfs settings only start
