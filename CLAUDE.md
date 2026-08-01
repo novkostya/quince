@@ -130,9 +130,16 @@ repo is not a message bus, and no human is an RPC layer.
 
      **UNLESS THE `DIRTY` IS A STACKED ORPHAN, IN WHICH CASE IT IS NOT A CONFLICT AND THE AUTHOR IS
      THE ONE ACTOR WHO MUST NOT TOUCH IT** (quince#400). If the PR's base branch was another PR's
-     head and that base has just merged, the forge reports `DIRTY` and **the PR is already closed** —
-     GitHub closes a dependent rather than retargeting it. Nothing is owed to a resolver, because
-     there are no lines to choose between.
+     head and **that base has merged AND its branch was deleted**, the forge reports `DIRTY` and
+     **the PR is already closed** — GitHub closes a dependent whose base branch is gone rather than
+     retargeting it. Nothing is owed to a resolver, because there are no lines to choose between.
+     **The deletion is the trigger, not the merge** — `gh pr merge --rebase` without
+     `--delete-branch` leaves the base standing and the dependent open, which is why §6's guard is
+     written against `--delete-branch` specifically. Stated precisely because the only measurement
+     confounds them: quince#384 closed one second after quince#377 merged with `--rebase
+     --delete-branch`, a single act. Canon behaves as though deletion is the cause because that is
+     what §6 guards; nobody has separated them experimentally, and the instruction below is correct
+     either way (quince#402 review).
      **The author's natural next action destroys it**: rebasing onto the new `main` is correct for a
      stacked branch whose base landed, and it force-pushes the head, after which no seat can reopen
      the PR — `state cannot be changed. The <head> branch was force-pushed or recreated`. Routing
