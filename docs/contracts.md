@@ -413,17 +413,27 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
              "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "..." }
 ```
 
-**PROPOSED (gap): a `Storage` object, and `Version.storage_id` — `qn.6c`, quince#378.** The
+**PROPOSED (gap): a `Storage` object, and how a job picks one — `qn.6c`, quince#378.** The
 multi-storage epic names `Version.backend` as *the symptom* of a modeling error: a version's
 backend is really its **storage's** backend. `qn.6c` fixes the model; this proposal is about how
 much of that reaches the wire.
 
-**`Version.backend` is NO LONGER part of this proposal — it is RULED, below.** The heading is
-narrowed deliberately: `PROPOSED (gap)` is a load-bearing marker meaning *nothing may be built on
-this yet*, not a title, so a heading naming a half that has been decided tells a reader searching
-for open questions the opposite of the truth. What remains open here is the `Storage` object,
-`GET /api/storages`, the job's `storage_id`, and `Version.storage_id` — all of which land with the
-`0006_storage` migration.
+**Two halves have left this proposal and are RULED below: `Version.backend` and
+`Version.storage_id`.** What remains open is the **`Storage` object itself**, `GET /api/storages`,
+and **the job's** `storage_id` on `POST /api/jobs`.
+
+**`PROPOSED (gap)` is a load-bearing marker meaning *nothing may be built on this yet*, not a
+title**, so a heading naming a half that has been decided tells a reader searching for open
+questions the opposite of the truth. **This heading has now been narrowed twice, and the second
+time it was wrong for a day** — quince#403 narrowed it off `Version.backend`; quince#405 then ruled
+and shipped `Version.storage_id` on the wire, added the `RULED NULLABLE` note below, and **left
+this heading and the sentence above still listing it as open.** The architect reviewed that PR,
+having blocked the previous one for this exact defect, and merged it without re-reading the
+heading (quince#407).
+
+**The lesson is mechanical, not moral: the PR that flips a half must narrow the heading in the
+same diff**, because nothing else will notice. A gap block shrinks one half at a time, and the
+heading is the only part that describes the whole.
 
 ```jsonc
 Storage: {
