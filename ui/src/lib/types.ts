@@ -99,8 +99,13 @@ export interface Version {
   // that is TRANSITIONAL — unlike job_id, whose null (= adopted) is permanent and correct. Do not
   // render it as "no storage" and do not substitute a default: it means the server has not worked
   // out which storage this is yet, and it stops meaning that once the storage has an identity
-  // marker. Optional here because a version predating the field simply omits it.
-  storage_id?: string | null;
+  // marker.
+  //
+  // REQUIRED, not optional: the Go field carries no `omitempty`, so the key is ALWAYS emitted and
+  // nil marshals to null. Writing `?` here would model an omission the server never performs and
+  // give consumers THREE states (string | null | undefined) where the wire has two — one state
+  // wearing two representations, which is the same confusion this field's null exists to avoid.
+  storage_id: string | null;
 }
 
 export interface Op {
@@ -145,10 +150,19 @@ export interface StorageEntry {
 export interface Config {
   backup: { transport: string; require_encryption: boolean };
   storage: {
-    // qn.6c: required server-side — quince refuses to start without at least one. Optional here
-    // because a document round-tripped through the UI must be able to represent a server that has
-    // none, rather than the client inventing an empty list and PUTting it back as if declared.
-    storages?: StorageEntry[];
+    // qn.6c: required server-side — quince refuses to serve, and refuses a PUT, without at least
+    // one. REQUIRED and NULLABLE here to match the Go shape exactly: the field carries no
+    // `omitempty`, so the key is always emitted and a nil list marshals to null.
+    //
+    // null is reachable: `--demo` never runs the storage requirement, so a demo config genuinely
+    // serves null. That is the state the type must let a client see — a document round-tripped
+    // through the UI has to be able to represent a server that has none, rather than the client
+    // inventing an empty list and PUTting it back as if declared.
+    //
+    // (Was `storages?:`. Same defect the review caught on `Version.storage_id` in this PR —
+    // modelling an omission the server never performs — found by checking whether I had made it
+    // twice. I had.)
+    storages: StorageEntry[] | null;
     backend: string;
     zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
     retention: { keep_recent: number; keep_daily: number; keep_weekly: number };
