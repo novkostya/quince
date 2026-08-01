@@ -168,6 +168,15 @@ func serve(args []string) error {
 		if req := config.CheckStorages(cfgSvc.Current(), os.Environ()); !req.OK() {
 			return req.Explain(os.Stderr, cfgPath)
 		}
+		// TWO STORAGES THAT ARE ONE STORAGE cannot be served (quince#458). A zfs collision is
+		// not a degraded mode to surface — every per-storage guarantee this rung added is void
+		// beneath it, so it joins the one class of hard refusal rather than becoming a warning.
+		if bad := config.CheckStorageBackends(cfgSvc.Current().Storage); len(bad) > 0 {
+			for _, m := range bad {
+				fmt.Fprintf(os.Stderr, "quince: %s\n", m)
+			}
+			return fmt.Errorf("storage configuration in %s cannot be served", cfgPath)
+		}
 		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5
 		// storage + qn.4a backup engine), with startup reconciliation run in-order BEFORE serving
 		// (storage → job rows). Shared verbatim with the `backup` CLI.

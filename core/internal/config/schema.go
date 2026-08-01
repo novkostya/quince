@@ -46,14 +46,52 @@ type StorageConfig struct {
 
 // StorageEntry is one declared storage under `storage.storages:` (qn.6c story 1).
 //
-// There is deliberately NO backend field: a storage's backend is discovered and frozen at its
-// creation moment and recorded in quince-storage.json (design §5), never declared here. Declaring
-// it would invite an edit that disagrees with the medium, which is the remount case the identity
-// marker exists to refuse.
+// THIS USED TO SAY "there is deliberately NO backend field", and its argument was right about the
+// wrong half (quince#458). A storage's NAMESPACE backend — reflink | hardlink | copy — really is
+// discovered: `probeNamespace` probes each path, so every storage finds its own without anyone
+// declaring anything, and a per-entry declaration would invite an edit that disagrees with the
+// medium.
+//
+// zfs is not like that. Interface fact 4: **zfs intent is declared config-side and NEVER probed.**
+// So while `storage.backend`/`storage.zfs` were the only place to declare it, one global
+// declaration applied to EVERY storage — a second storage on a USB disk got a zfs backend whose
+// parent dataset pointed at another pool. The old rule prevented a per-entry edit that disagrees
+// with ONE medium, at the price of a global one that disagrees with all but one.
+//
+// Both fields are OPTIONAL OVERRIDES; empty inherits the global. A single-storage config is
+// unchanged, and discovery still does the work wherever nothing is declared.
 type StorageEntry struct {
 	Name    string `yaml:"name" json:"name"`
 	Path    string `yaml:"path" json:"path"`
 	Default bool   `yaml:"default" json:"default"`
+
+	// Backend overrides `storage.backend` for THIS storage. "" = inherit. Prefer leaving it unset:
+	// `auto` probes the path, which is how a namespace backend is meant to be chosen.
+	Backend string `yaml:"backend" json:"backend"`
+
+	// ZFS overrides `storage.zfs` for THIS storage. nil = inherit the global block.
+	//
+	// A POINTER, because absent and empty differ: absent inherits, and an explicitly empty `zfs: {}`
+	// is how a storage says "I am NOT zfs" on a stand whose global block is set. Without that a
+	// second storage could never opt out of a global zfs declaration, which is quince#458 exactly.
+	ZFS *ZFSConfig `yaml:"zfs" json:"zfs"`
+}
+
+// BackendFor returns the backend declaration that applies to one entry.
+func (c StorageConfig) BackendFor(e StorageEntry) string {
+	if e.Backend != "" {
+		return e.Backend
+	}
+	return c.Backend
+}
+
+// ZFSFor returns the zfs settings that apply to one entry: its own block when present, else the
+// global one. An entry with `zfs: {}` gets the empty block, which is how it declares it is not zfs.
+func (c StorageConfig) ZFSFor(e StorageEntry) ZFSConfig {
+	if e.ZFS != nil {
+		return *e.ZFS
+	}
+	return c.ZFS
 }
 
 // ZFSConfig is `storage.zfs:`.
