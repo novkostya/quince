@@ -535,7 +535,7 @@ selects nothing, so it cannot cause that failure.
 their text — they are rulings — and this table is the definition they are read against. New text
 says **"never re-select a backend"** where it means the creation probe.
 
-### PROPOSED (gap): the re-probe surface does not exist in the contract
+### RULED and BUILT (was `PROPOSED (gap)`): the re-probe surface
 
 *"Plug the disk in and press the button"* is the ruled behaviour. **There is no button.** Nothing in
 contracts §1 re-checks a storage's reachability; the nearest neighbour is `POST
@@ -560,9 +560,9 @@ choice should be arguable rather than assumed:
   is `missing_medium` / `backend_mismatch` and stays refused. The one thing this endpoint must not
   do is the thing G5b forbids.
 
-**Not built until ruled.**
+**RULED as recommended (Operator, 2026-08-01) and BUILT in story 5c.** `POST /api/storages/{id}/recheck` → `200 {storage}` | `404`. It is the reachability check and never the backend-selection probe, so G5b stands untouched.
 
-### PROPOSED (gap): `unreachable_reason` — a code, prose, or both
+### RULED and BUILT (was `PROPOSED (gap)`): `unreachable_code` + `unreachable_reason`
 
 Gap 2's ruled shape carries `"unreachable_reason": null`, and the 2026-08-01 ruling requires
 `missing_medium` and `unreachable` to be **distinguishable by text**. Prose alone cannot be
@@ -580,7 +580,7 @@ where invented copy would otherwise appear. **Both fields are null when `reachab
 absent, for the reason `Version.storage_id` is null-not-omitted: a present null is a fact, an absent
 key is a version-skew question.
 
-**Not built until ruled.**
+**RULED as recommended (Operator, 2026-08-01) and BUILT in story 5c.** Both fields, code authoritative, both null when reachable and never absent. The enum value for an unreachable path is `path_unreachable`.
 
 ---
 

@@ -438,8 +438,18 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
              "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "..." }
 ```
 
-**PROPOSED (gap): a `Storage` object, and how a job picks one — `qn.6c`, quince#378.** The
-multi-storage epic names `Version.backend` as *the symptom* of a modeling error: a version's
+**RULED (was `PROPOSED (gap)`): a `Storage` object, and how a job picks one — `qn.6c`, quince#378.**
+**Nothing in this block is unruled.** The `Storage` object and `GET /api/storages` are ruled AND
+BUILT (story 5c); `POST /api/jobs {storage_id}` is ruled and **not yet built**, landing with story 6
+— which is *work to do*, not *a thread to stop*.
+
+The heading said `PROPOSED (gap)` until 2026-08-01 while its own body already read *"now ruled AND
+built"* — the sixth instance of this defect in one day, and the third caught by a reviewer reading a
+block rather than its heading. The mechanism is worth naming: **a diff that edits the body does not
+force anyone to look at the heading**, and the heading is the part describing the whole. That is
+quince#408's argument, made by a PR that had been asked in terms to clear exactly this marker.
+
+The multi-storage epic names `Version.backend` as *the symptom* of a modeling error: a version's
 backend is really its **storage's** backend. `qn.6c` fixes the model; this proposal is about how
 much of that reaches the wire.
 

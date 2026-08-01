@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/bus"
@@ -53,6 +54,16 @@ type Manager struct {
 	// operation now has to say WHICH storage, which is the point — the four reads that took
 	// `m.backups` were exactly the places that could not, and would have resolved a version on
 	// storage B against storage A's root.
+	//
+	// GUARDED BY mu. `RecheckStorage` rewrites one slot from an HTTP handler goroutine while the
+	// backup, commit, reconcile and render paths read them. That is a genuine race and not a stale
+	// read: `Slot` holds a Backend INTERFACE, so a torn value is an itab/data mismatch — a segfault,
+	// not a wrong answer — and `Usable()`'s nil check does not help, because the check and the
+	// dereference are separate reads of a value being written between them. Proven under `-race`
+	// (quince#445 review), and reachable in production: *plug the disk in and press the button* is
+	// something a user does WHILE a backup runs to another storage, which is the case the ruling
+	// allowing serve-with-one-unreachable exists for.
+	mu      sync.RWMutex
 	slots   []Slot
 	reg     Registry
 	audit   Auditor
@@ -84,7 +95,11 @@ func NewManager(slots []Slot, reg Registry, audit Auditor, b *bus.Bus,
 
 // defaultSlot is the storage a backup goes to when none is named. Declaration order decides it,
 // and `config.CheckStorages` guarantees the list is non-empty before a Manager is ever built.
-func (m *Manager) defaultSlot() Slot { return m.slots[0] }
+func (m *Manager) defaultSlot() Slot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.slots[0]
+}
 
 // slotFor resolves the storage a VERSION lives on, from its storage_id.
 //
@@ -98,6 +113,8 @@ func (m *Manager) defaultSlot() Slot { return m.slots[0] }
 // whose storage quince does not know is the same class of invention as claiming an unmounted
 // mountpoint: it would answer confidently and be wrong wherever it mattered.
 func (m *Manager) slotFor(storageID *string) (Slot, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	want := ""
 	if storageID != nil {
 		want = *storageID
@@ -567,4 +584,18 @@ func (m *Manager) appendAudit(event, detail string) {
 	}); err != nil {
 		m.log.Warn("storage: audit append failed", "event", event, "error", err)
 	}
+}
+
+// slotsSnapshot copies the slot list under the read lock.
+//
+// Callers that iterate — Reconcile, reconcileUDIDs, Storages — take a copy rather than holding the
+// lock across their bodies, because those bodies do filesystem and database work. A read lock held
+// across I/O does not block other readers but does block the recheck writer for the duration, which
+// turns "press the button" into "press the button and wait for a scan".
+func (m *Manager) slotsSnapshot() []Slot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Slot, len(m.slots))
+	copy(out, m.slots)
+	return out
 }

@@ -20,7 +20,7 @@ import (
 // not there cannot conclude anything, and concluding "artifact missing" from it would mark a
 // perfectly good backup as gone the first time somebody unplugged a disk.
 func (m *Manager) Reconcile(ctx context.Context) error {
-	for _, s := range m.slots {
+	for _, s := range m.slotsSnapshot() {
 		if !s.Usable() {
 			m.log.Info("reconcile: skipping an unreachable storage — its versions keep their last "+
 				"known state rather than being judged by a root that is not there",
@@ -287,7 +287,7 @@ func (m *Manager) reconcileUDIDs() []string {
 	//
 	// Unusable roots are skipped rather than read: an absent path yields no entries, and treating
 	// that as "no devices here" is only correct by accident.
-	for _, s := range m.slots {
+	for _, s := range m.slotsSnapshot() {
 		if !s.Usable() {
 			continue
 		}
