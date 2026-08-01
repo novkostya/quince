@@ -263,8 +263,10 @@ func TestBoundJobResolvesToItsOwnStorage(t *testing.T) {
 		t.Errorf("a bound job must resolve to its own storage, got %q want %q", got.Root, second)
 	}
 
-	// And an UNBOUND job still resolves to the default — correct today because nothing binds yet,
-	// which is a property of POST /api/jobs rather than of this function.
+	// And an UNBOUND job still resolves to the default. That is a job from BEFORE the choice existed —
+	// a retry of a pre-qn.6c row, or one whose binding was lost across a restart — not a job whose
+	// storage was forgotten. The engine binds every new job (engine.go), so this arm is the legacy
+	// path rather than the common one.
 	unbound, err := m.jobSlot("job-none")
 	if err != nil {
 		t.Fatal(err)
@@ -343,5 +345,60 @@ func TestResolveChoiceRefusesRatherThanRedirectingWhenTheDefaultIsUnreachable(t 
 	}
 	if !strings.Contains(reason, "internal") {
 		t.Errorf("the refusal must NAME the default, so the user knows which disk to reconnect: %q", reason)
+	}
+}
+
+// THE ROW SIDE (quince#447 review). Every other binding test asserts `jobSlot` — where the TREE
+// goes — and none asserted where the ROW says it went. That gap is exactly why a backup could write
+// to B and be recorded on A with a green suite.
+//
+// The consequence was not a stale field but active destruction: browse_root resolved to a path that
+// does not exist, Verify called a good backup broken, and A's next reconciliation marked the row
+// `missing` while B's correctly left it alone — a confidently wrong row the NULL-filling sweep never
+// touches.
+func TestCommitRecordsTheVersionOnTheJOBsStorage(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, generousPolicy())
+	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
+
+	second := t.TempDir()
+	const secondID = "01JSTORAGESECOND00000000"
+	m.slots = append(m.slots, Slot{
+		StorageID: secondID, Name: "shuttle", Root: second, Reachable: true,
+		Backend:     newNamespaceBackend(BackendCopy, clonetree.Copy, second, "test", testLogger()),
+		BackendName: BackendCopy,
+	})
+
+	const jobID = "01JOBONSECOND00000000000"
+	if err := m.BindJobStorage(jobID, secondID); err != nil {
+		t.Fatal(err)
+	}
+	s, err := m.jobSlot(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const vid = "01VCOMMITTED000000000000"
+	jid := jobID
+	if err := m.registerCommitted(s, Committed{
+		VersionID: vid, UDID: testUDID, Backend: BackendCopy, Kind: "full", JobID: &jid,
+		CreatedAt: time.Now().UTC(), StructureVerifiedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	row, ok, err := st.GetVersion(vid)
+	if err != nil || !ok {
+		t.Fatalf("version not recorded: %v", err)
+	}
+	if row.StorageID == nil || *row.StorageID != secondID {
+		t.Fatalf("the row must record the storage the TREE was written to, got %v want %q",
+			row.StorageID, secondID)
+	}
+
+	// And is_latest must land in THAT storage's group. Promoting in the default's group would leave
+	// the second storage's newest version never becoming its latest, so its browse_root has nothing
+	// to resolve to — the same defect on the is_latest ruling.
+	if !row.IsLatest {
+		t.Error("the committed version must be latest in its own storage's group")
 	}
 }

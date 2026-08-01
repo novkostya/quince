@@ -321,7 +321,7 @@ func TestRegisterCommittedAttributesTheVersionToItsStorage(t *testing.T) {
 	m.slots[0].StorageID = testStorageID
 
 	const vid, udid = "01JV0000000000000000000001", "00008140-000A1B2C3D4E5F60"
-	if err := m.registerCommitted(Committed{
+	if err := m.registerCommitted(m.slots[0], Committed{
 		VersionID: vid, UDID: udid, Backend: BackendCopy, Kind: "full",
 		CreatedAt: time.Now().UTC(), StructureVerifiedAt: time.Now().UTC(),
 	}); err != nil {
@@ -347,7 +347,7 @@ func TestRegisterCommittedWithNoStorageWritesNullNotEmptyString(t *testing.T) {
 	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{}) // storageID "" by construction
 
 	const vid, udid = "01JV0000000000000000000002", "00008140-000A1B2C3D4E5F60"
-	if err := m.registerCommitted(Committed{
+	if err := m.registerCommitted(m.slots[0], Committed{
 		VersionID: vid, UDID: udid, Backend: BackendCopy, Kind: "full",
 		CreatedAt: time.Now().UTC(), StructureVerifiedAt: time.Now().UTC(),
 	}); err != nil {
