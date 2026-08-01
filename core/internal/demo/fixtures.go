@@ -29,9 +29,55 @@ const (
 	tJobStart   = "2026-07-18T09:14:02Z"
 )
 
+// demoDevice is the demo provider's counterpart to the registry's deviceShellLocked: the three
+// contract ENUM fields land on the literal "unknown" when a construction site leaves them empty,
+// never on Go's "" zero value — which is not in the contract enum at all (contracts §2 types all
+// three as on|off|unknown, paired as yes|no|unknown).
+//
+// It exists because forgetting one is the easy mistake and it fails SILENTLY: four of five demo
+// devices shipped `wifi_sync: ""`, the UI's `!== "unknown"` guards let it through, and a badge
+// rendered with no value while WifiSyncControl treated the device as `off` and offered to turn ON
+// a flag quince had never read (quince#361). The registry has defended this invariant since qn.3
+// and the demo provider simply did not go through it — so this is the same guard, at the second
+// door, rather than a new rule.
+//
+// Defaulting to "unknown" is the honest failure: it means "quince has not read this", which is
+// exactly true of a field nobody set, and the UI already knows to show nothing rather than guess.
+func demoDevice(d wire.Device) wire.Device {
+	if d.Paired == "" {
+		d.Paired = "unknown"
+	}
+	if d.BackupEncryption == "" {
+		d.BackupEncryption = "unknown"
+	}
+	if d.WifiSync == "" {
+		d.WifiSync = "unknown"
+	}
+	return d
+}
+
+// padDevice builds studio-ipad. ONE builder, because it is constructed twice — once in the static
+// seed and once per deviceChurn re-attach — and the two copies DRIFTED: the churn copy omitted
+// WifiSync, so the seeded "off" survived only until the first churn tick reattached the pad with
+// "" (quince#361). Two constructions of one device is the defect; a shared builder is the fix.
+func padDevice(wifiSeen, lastSeen string) wire.Device {
+	return demoDevice(wire.Device{
+		UDID:             udidPad,
+		Name:             "studio-ipad",
+		Model:            "iPad13,4",
+		IOSVersion:       "18.5",
+		Transports:       wire.Transports{WiFi: strptr(wifiSeen)}, // Wi-Fi only
+		Paired:           "yes",
+		BackupEncryption: "off", // exercises the unencrypted-device warning path
+		WifiSync:         "off", // the case qn.7 exists for: paired, but Wi-Fi sync never ticked
+		LastSeen:         lastSeen,
+		LastBackup:       nil, // never backed up
+	})
+}
+
 // seed populates the deterministic fixture world. Called once by NewProvider.
 func (p *Provider) seed() {
-	phone := wire.Device{
+	phone := demoDevice(wire.Device{
 		UDID:             udidPhone,
 		Name:             "family-iphone",
 		Model:            "iPhone17,2",
@@ -42,19 +88,8 @@ func (p *Provider) seed() {
 		WifiSync:         "on", // set up already — the state a working Wi-Fi device is in
 		LastSeen:         tPhoneSeen,
 		LastBackup:       &wire.LastBackup{At: tBackupA, JobID: strptr(jobID), Status: "succeeded"},
-	}
-	pad := wire.Device{
-		UDID:             udidPad,
-		Name:             "studio-ipad",
-		Model:            "iPad13,4",
-		IOSVersion:       "18.5",
-		Transports:       wire.Transports{WiFi: strptr(tPadWiFi)}, // Wi-Fi only
-		Paired:           "yes",
-		BackupEncryption: "off", // exercises the unencrypted-device warning path
-		WifiSync:         "off", // the case qn.7 exists for: paired, but Wi-Fi sync never ticked
-		LastSeen:         tPadSeen,
-		LastBackup:       nil, // never backed up
-	}
+	})
+	pad := padDevice(tPadWiFi, tPadSeen)
 	p.devices[phone.UDID] = phone
 	p.devices[pad.UDID] = pad
 	p.order = []string{phone.UDID, pad.UDID}
