@@ -113,6 +113,9 @@ func (m *Manager) adopt(udid string, a Artifact) {
 		ID: a.Marker.VersionID, UDID: udid, Backend: a.Backend, ZFSSnapshot: a.ZFSSnapshot,
 		CreatedAt: created, JobID: nil, Kind: a.Marker.Kind, Encrypted: a.Marker.Encrypted,
 		IsLatest: a.IsLatest, LogicalBytes: a.PhysicalBytes, PhysicalBytes: a.PhysicalBytes,
+		// Attributed to the storage it was SCANNED FROM. An adopted version is found by walking a
+		// specific root, so which storage it lives on is known here and never needs guessing.
+		StorageID: m.storageIDPtr(),
 	}
 	if sv, err := parseRFC(a.Marker.StructureVerifiedAt); err == nil {
 		row.StructureVerifiedAt = &sv

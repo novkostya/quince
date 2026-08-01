@@ -276,3 +276,32 @@ func TestResolveRefusesToCreateWithAnUndeterminedBackend(t *testing.T) {
 		t.Error("no marker may be written when the backend is unknown")
 	}
 }
+
+// --- attribution at commit and adopt (qn.6c story 3, first slice) ---
+//
+// `versions.storage_id` must record where a backup lives AT THE MOMENT IT IS MADE. Before this,
+// registerCommitted and adopt built their rows without it, so a freshly committed version was
+// inserted NULL and only picked up by the next startup sweep — the wire said "not yet attributed"
+// about a version quince had just written itself, until a restart.
+//
+// The sweep is also the thing that stops being safe once there is more than one storage: it
+// attributes every unattributed row to whichever storage ran it. Recording the fact at the source
+// is what removes the need to guess later.
+
+func TestManagerAttributesItsStorageID(t *testing.T) {
+	m := &Manager{storageID: "01JSTORAGE0000000000000000"}
+	got := m.storageIDPtr()
+	if got == nil || *got != "01JSTORAGE0000000000000000" {
+		t.Fatalf("want the manager's storage id, got %v", got)
+	}
+}
+
+// An unconfigured Manager must insert NULL, not "". They are different states on the wire and ""
+// is not one of them: contracts §2 says null means NOT YET ATTRIBUTED, and an empty string would
+// be a value that no consumer has a rule for.
+func TestManagerWithNoStorageIDAttributesNullNotEmptyString(t *testing.T) {
+	m := &Manager{}
+	if got := m.storageIDPtr(); got != nil {
+		t.Fatalf("an unattributed Manager must yield nil, got %q", *got)
+	}
+}
