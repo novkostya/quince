@@ -128,6 +128,22 @@ repo is not a message bus, and no human is an RPC layer.
      and then approves its own resolution has broken `approver ≠ author` by following this rule,
      which is why `never` would be wrong here.
 
+     **UNLESS THE `DIRTY` IS A STACKED ORPHAN, IN WHICH CASE IT IS NOT A CONFLICT AND THE AUTHOR IS
+     THE ONE ACTOR WHO MUST NOT TOUCH IT** (quince#400). If the PR's base branch was another PR's
+     head and that base has just merged, the forge reports `DIRTY` and **the PR is already closed** —
+     GitHub closes a dependent rather than retargeting it. Nothing is owed to a resolver, because
+     there are no lines to choose between.
+     **The author's natural next action destroys it**: rebasing onto the new `main` is correct for a
+     stacked branch whose base landed, and it force-pushes the head, after which no seat can reopen
+     the PR — `state cannot be changed. The <head> branch was force-pushed or recreated`. Routing
+     this row's default at a stacked orphan hands the problem to the one actor whose correct-looking
+     response is fatal, inside a window of minutes.
+     **Check `state` before treating any `DIRTY` as a conflict.** If it is `CLOSED`, this is §1's
+     stacking case, the recovery is *recreate the base ref → reopen → retarget* in that order, and it
+     is the **merging seat's**, because the merging seat caused it. `approver ≠ author` is untouched:
+     reopening a PR chooses no lines and casts no verdict, which is why the carve-out that would be
+     wrong for a real conflict is right here.
+
    **`--rebase` is mandatory, not stylistic.** `update-branch` defaults to updating with a *merge
    commit*, and `required_linear_history: true` on this repo means protection then rejects the
    result. A session told not to ask anyone, reaching for the obvious command, gets the wrong one.
