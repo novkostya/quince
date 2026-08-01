@@ -135,12 +135,16 @@ func CheckStorageBackends(c StorageConfig) []string {
 			// under. It is reachable the obvious way — an entry writes `zfs: {}` to say "I am not
 			// zfs" while the GLOBAL `backend: zfs` still applies to it, which is the first thing
 			// anyone tries and what my own first guidance on quince#458 told the Operator to do.
-			// TWO CAUSES, TWO REMEDIES. An entry with its own `zfs: {}` needs `backend: auto`
-			// beside it; an entry INHERITING a global block that has a hook and no parent needs
-			// the global fixed. Naming the wrong one on a refusal that stops the daemon sends the
-			// operator to a key they never wrote (quince#461 review).
+			//
+			// THREE CAUSES, THREE REMEDIES (quince#468). The binary split conflated an entry that
+			// wrote `zfs: {}` to opt OUT with one whose OWN block is incoherent — a hook and no
+			// parent — and sent the second to `backend: auto`, which would not fix it.
 			remedy := "set `storage.zfs.parent_dataset`"
-			if e.ZFS != nil {
+			switch {
+			case e.ZFS != nil && *e.ZFS != (ZFSConfig{}):
+				remedy = "this storage has its own `zfs:` block with no `parent_dataset` — set one " +
+					"there, or use `zfs: {}` with `backend: auto` to make it a non-zfs storage"
+			case e.ZFS != nil:
 				remedy = "an entry that sets `zfs: {}` to opt OUT must also set `backend: auto` " +
 					"(or a namespace backend), because the global `backend: zfs` still applies to it"
 			}
