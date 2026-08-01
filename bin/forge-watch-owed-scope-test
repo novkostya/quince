@@ -71,6 +71,11 @@ case "$1 $2" in
 	done
 	cat "$SEARCH_FILE" ;;
 "pr list") cat "$PRLIST_FILE" ;;
+# `api rate_limit` is the auth probe `require_gh` makes before using this command (quince#429), and
+# it must be answered here rather than falling through to the strict arm below. That arm is what
+# CAUGHT the probe when it was added — of the stubs in this repository, the strict one behaved best,
+# and it is worth keeping strict rather than loosening it to tolerate future calls.
+"api rate_limit") printf '5000\n' ;;
 *) printf 'stub gh: unexpected call: %s\n' "$*" >&2; exit 3 ;;
 esac
 STUB

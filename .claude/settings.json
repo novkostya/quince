@@ -148,6 +148,7 @@
       "Bash(make suite-coverage-test)",
       "Bash(make gates-sh-exit-test)",
       "Bash(make forge-watch-stderr-test)",
+      "Bash(make forge-watch-gh-auth-test)",
       "Bash(make forge-watch-counters-test)",
       "Bash(make closing-refs-check-test)",
       "Bash(make forge-watch-owed-scope-test)",
