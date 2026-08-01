@@ -192,3 +192,31 @@ func TestTheRefusalNamesTheRemEDYForTheCauseItFound(t *testing.T) {
 		t.Errorf("the ENTRY cause must point at the entry's own remedy: %v", bad)
 	}
 }
+
+// THE THIRD CAUSE (quince#468). An entry with its OWN zfs block that is incoherent — a hook and no
+// parent — is not opting out, so `backend: auto` would not fix it: the entry would still be zfs,
+// still with no parent. The binary split sent it there anyway.
+func TestAnEntryWithItsOwnIncoherentZFSBlockGetsItsOwnRemedy(t *testing.T) {
+	c := StorageConfig{
+		Backend: "auto",
+		Storages: entries(
+			StorageEntry{Name: "local", Path: "/backups", Default: true,
+				ZFS: &ZFSConfig{HookCmd: "ssh host helper"}}, // own block, hook, NO parent
+		),
+	}
+	bad := CheckStorageBackends(c)
+	if len(bad) != 1 {
+		t.Fatalf("an entry's own incoherent zfs block must be refused, got %v", bad)
+	}
+	if !contains(bad[0], "its own `zfs:` block") {
+		t.Errorf("the remedy must point at the entry's OWN block: %q", bad[0])
+	}
+	// And must NOT be the opt-out advice, which would leave it zfs with no parent.
+	if contains(bad[0], "to opt OUT must also set") {
+		t.Errorf("this entry is not opting out — `backend: auto` would not fix it: %q", bad[0])
+	}
+	// Nor the global advice: it has its own block, so `storage.zfs.parent_dataset` is not its key.
+	if contains(bad[0], "set `storage.zfs.parent_dataset` —") {
+		t.Errorf("it has its own block; the global key is not the remedy: %q", bad[0])
+	}
+}
