@@ -233,13 +233,16 @@ func demoResolveTransport(dev wire.Device, requested string) (transport string, 
 // exercisable) at Run() time — kept OUT of the static seed so golden contract tests are unaffected.
 func (p *Provider) seedOnDemandDevice() {
 	now := wire.Now()
-	dev := wire.Device{
+	dev := demoDevice(wire.Device{
 		UDID: udidSpare, Name: "spare-iphone", Model: "iPhone16,1", IOSVersion: "26.0.1",
 		Transports:       wire.Transports{USB: &now, WiFi: &now},
 		Paired:           "yes",
 		BackupEncryption: "on",
-		LastSeen:         now,
-	}
+		// off while present on USB: the one state in which "Turn on Wi-Fi sync" is ENABLED.
+		// studio-ipad is also off but Wi-Fi-only, where the same control is disabled-with-reason.
+		WifiSync: "off",
+		LastSeen: now,
+	})
 	failedID := id.New()
 	failed := wire.Job{
 		ID: failedID, UDID: udidSpare, Kind: "backup", Transport: "wifi", State: "connection_lost",
@@ -248,23 +251,31 @@ func (p *Provider) seedOnDemandDevice() {
 		Error:    &wire.JobError{Code: "device_disconnected", Message: "the device left Wi-Fi mid-backup — reconnect and retry"},
 		IntentID: failedID, Attempt: 1,
 	}
-	unpaired := wire.Device{
+	unpaired := demoDevice(wire.Device{
 		UDID: udidUnpaired, Name: "new-iphone", Model: "iPhone16,2", IOSVersion: "26.0.1",
 		Transports:       wire.Transports{USB: &now}, // USB only (pairing needs a cable)
 		Paired:           "no",
 		BackupEncryption: "unknown",
-		LastSeen:         now,
-	}
+		// Not paired, so the wireless_lockdown flag was never read — "unknown" is the literally
+		// true value, and it is what makes the UI hide the control instead of guessing a direction.
+		WifiSync: "unknown",
+		LastSeen: now,
+	})
 	// An OFFLINE device: no transports, but it has backups (a live one + a DEAD one) and a last-seen
 	// in the past — proves the qn.6a offline card + the "artifact gone — remove?" dead-version row.
-	offline := wire.Device{
+	offline := demoDevice(wire.Device{
 		UDID: udidOffline, Name: "attic-ipad", Model: "iPad13,4", IOSVersion: "18.5",
 		Transports:       wire.Transports{}, // powered off — no transport
 		Paired:           "yes",
 		BackupEncryption: "on",
-		LastSeen:         "2026-07-18T09:15:00Z",
-		LastBackup:       &wire.LastBackup{At: "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Status: "succeeded"},
-	}
+		// ON while absent: the state quince#358 exists for — "a device that is not there cannot be
+		// turned off" — which had NO demo coverage, so that fix could not be QA'd on a dev deploy
+		// at all (quince#361, which is how this was found). WifiSyncControl renders it
+		// disabled-with-a-reason rather than offering an op that would reach nothing.
+		WifiSync:   "on",
+		LastSeen:   "2026-07-18T09:15:00Z",
+		LastBackup: &wire.LastBackup{At: "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Status: "succeeded"},
+	})
 	liveVerID, deadVerID := id.New(), id.New()
 	liveVer := wire.Version{
 		ID: liveVerID, UDID: udidOffline, Backend: "zfs",

@@ -76,11 +76,10 @@ func (p *Provider) deviceChurn(ctx context.Context) {
 		} else {
 			now := wire.Now()
 			p.mu.Lock()
-			pad := wire.Device{
-				UDID: udidPad, Name: "studio-ipad", Model: "iPad13,4", IOSVersion: "18.5",
-				Transports: wire.Transports{WiFi: &now}, Paired: "yes",
-				BackupEncryption: "off", LastSeen: now,
-			}
+			// The SHARED builder, not a second copy of the pad — the copy that used to live here
+			// omitted WifiSync, so the seeded "off" lasted only until the first churn tick
+			// reattached the pad carrying "" (quince#361).
+			pad := padDevice(now, now)
 			p.devices[udidPad] = pad
 			p.order = append(removeUDID(p.order, udidPad), udidPad) // re-add pad without dropping the others
 			p.mu.Unlock()
