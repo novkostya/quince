@@ -167,11 +167,15 @@ func TestSpecArgvReachesTheChild(t *testing.T) {
 	defer cancel()
 	go s.Run(ctx)
 
-	waitUntil(t, func() bool { _, err := os.Stat(recorded); return err == nil }, 3*time.Second, "child to record its argv")
-	b, err := os.ReadFile(recorded)
-	if err != nil {
-		t.Fatalf("read argv: %v", err)
-	}
+	// Wait for CONTENT, not existence: the assertion is about what the child recorded, and a
+	// file that exists can still be empty (quince#399). The helper writes atomically, so any
+	// non-empty read here is a complete one.
+	var b []byte
+	waitUntil(t, func() bool {
+		read, err := os.ReadFile(recorded)
+		b = read
+		return err == nil && len(read) > 0
+	}, 3*time.Second, "child to record its argv")
 	if !strings.Contains(string(b), "--disable-usb") {
 		t.Fatalf("child argv = %q; want it to carry --disable-usb", string(b))
 	}
@@ -454,7 +458,13 @@ func TestHelperProcess(t *testing.T) {
 		}
 	}
 	if p := os.Getenv("MUXSUP_HELPER_ARGV"); p != "" {
-		_ = os.WriteFile(p, []byte(strings.Join(os.Args, " ")), 0o644)
+		// Write via a same-dir temp + rename, so the recorder never exposes a created-but-empty
+		// file: os.WriteFile is OpenFile(O_CREATE|O_TRUNC) followed by Write, and a reader that
+		// lands between the two sees "" (quince#399). Same reason config.AtomicWrite exists.
+		tmp := p + ".tmp"
+		if err := os.WriteFile(tmp, []byte(strings.Join(os.Args, " ")), 0o644); err == nil {
+			_ = os.Rename(tmp, p)
+		}
 	}
 	switch os.Getenv("MUXSUP_HELPER_MODE") {
 	case "crash":
