@@ -65,7 +65,9 @@ func (d Deps) handleAuthLogin() http.HandlerFunc {
 // issueSessionResponse logs in with password and, on success, sets cookies and returns the
 // authenticated status. Shared by setup (post-set) and login.
 func (d Deps) issueSessionResponse(w http.ResponseWriter, r *http.Request, password string) {
-	sess, csrf, err := d.Auth.Login(password, clientIP(r))
+	// The caller's own session cookie, so login supersedes THIS client's prior session and no
+	// other device's (quince#373). Empty on a first login, which is the ordinary case.
+	sess, csrf, err := d.Auth.Login(password, clientIP(r), sessionCookieValue(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrRateLimited):

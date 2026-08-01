@@ -31,7 +31,7 @@ func setup(t *testing.T) (*bus.Bus, func(string) error, string) {
 	if err := svc.SetPassword("test"); err != nil {
 		t.Fatal(err)
 	}
-	sess, _, err := svc.Login("test", "1.1.1.1")
+	sess, _, err := svc.Login("test", "1.1.1.1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -407,6 +407,14 @@ non-negotiable:
   (`HttpOnly` + `Secure` + `SameSite=Strict`; `Secure` relaxed only for loopback-http and
   `--demo`, so local/e2e over plain http still work — never in production), session
   rotation on login, rate-limited login, idle timeout. All API and WS behind it.
+  **Rotation is PER CLIENT, and quince is multi-device**: a login supersedes the authenticating
+  client's own prior session and leaves every other device's alone (Operator ruling, quince#373).
+  Fixation is defeated by minting a fresh session id, never by evicting anybody — so "one
+  concurrent session" would be a *separate* policy, and it is deliberately not the one taken:
+  `ui.design.md` calls the iPhone a first-class client, and a second first-class client that
+  evicts the first is not one. This line read only "session rotation on login" until 2026-08-01,
+  which is ambiguous between the two readings; the code took the evicting one while quoting
+  fixation as its reason, and the Operator found it by being signed out of a desktop by an iPad.
 - **Web baseline**: CSRF protection on mutating endpoints; strict WS `Origin`
   validation; CSP + frame denial; reverse-proxy trust headers only from configured
   addresses; path-traversal-safe file serving (malicious filenames inside backups are
