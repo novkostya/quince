@@ -25,6 +25,7 @@ function ver(over: Partial<Version> = {}): Version {
     logical_bytes: 42_500_000_000,
     physical_bytes: 260_000_000,
     missing: false,
+    storage_id: null,
     ...over,
   };
 }

@@ -169,5 +169,6 @@ function ver(id: string, udid: string) {
     logical_bytes: 100,
     physical_bytes: 10,
     missing: false,
+    storage_id: null,
   };
 }
