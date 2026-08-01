@@ -539,3 +539,53 @@ func TestSeedKindTreatsUnattributedRowsAsOwnedByAnUnattributedManager(t *testing
 			"here and the next backup is incremental; got %q", got)
 	}
 }
+
+// THE FIRST-STARTUP-AFTER-UPGRADE CASE, which is what makes the attribution sweep's position
+// load-bearing rather than incidental (quince#422 review).
+//
+// A pre-qn.6c row has storage_id NULL. Once ResolveStorage has created the marker the Manager is
+// ATTRIBUTED, so it does not own that row — and on the first startup after upgrade that is EVERY
+// row, while their artifacts sit on disk under this very root. If reconciliation runs before the
+// sweep it sees an empty registry view, treats every artifact as unadopted, and tries to re-adopt
+// the lot.
+//
+// This asserts the property directly: an attributed Manager must not consider a NULL row its own,
+// AND the same rows must become its own once attributed. The ordering in buildStorage is what
+// turns the second state into the one reconciliation actually meets.
+func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
+	sid := "01JSTORAGE-A"
+
+	const udid = "00008140-000A1B2C3D4E5F60"
+	if err := st.InsertVersion(store.VersionRow{
+		ID: "01VOLD1", UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), // NULL storage_id — the pre-qn.6c row
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// After ResolveStorage, the Manager carries an id while the row does not.
+	m.storageID = sid
+	row, _, err := st.GetVersion("01VOLD1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.owns(row.StorageID) {
+		t.Fatal("precondition: an attributed Manager must NOT own a NULL row — that is the whole hazard")
+	}
+
+	// The sweep is what closes it, which is why it must run FIRST.
+	if _, err := st.AttributeVersions(udid, sid); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	row, _, err = st.GetVersion("01VOLD1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.owns(row.StorageID) {
+		t.Error("after the sweep the row must be owned, or reconciliation will try to re-adopt its artifact")
+	}
+	if n, err := st.CountUnattributedVersions(); err != nil || n != 0 {
+		t.Errorf("the sweep must leave nothing unattributed; %d remain (%v)", n, err)
+	}
+}

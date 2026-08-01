@@ -248,13 +248,27 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 			KeepDaily:  scfg.Retention.KeepDaily,
 			KeepWeekly: scfg.Retention.KeepWeekly,
 		}, id.New, log)
+	// ATTRIBUTION RUNS BEFORE RECONCILIATION, AND THE ORDER IS LOAD-BEARING (quince#422 review).
+	//
+	// Reconciliation asks "is this version's artifact on disk under MY root", and can only ask it
+	// of versions it knows belong to this storage. A pre-qn.6c row has storage_id NULL, so an
+	// attributed Manager does not own it — and on the FIRST startup after upgrade that is every
+	// row, while their artifacts sit on disk under this very root. Reconciling first therefore
+	// finds an empty registry view, treats every artifact as unadopted, and tries to re-adopt the
+	// lot: `UNIQUE constraint failed: versions.id`, once per version, every startup until the
+	// sweep happens to run.
+	//
+	// The sweep fills those NULLs, so running it first is what makes the ownership filter true
+	// rather than merely intended. I asserted this ordering in a comment on the filter before the
+	// code did it; the comment was right about what SHOULD happen and wrong about what did.
+	//
+	// Fills only NULLs, so it never rewrites where a committed backup is recorded as living, and
+	// is therefore safe to run at every startup.
+	attributeVersions(st, state.StorageID, log)
+
 	if err := storageMgr.Reconcile(ctx); err != nil {
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
-
-	// Attribute versions that predate qn.6c. Fills only NULLs, so it never rewrites where a
-	// committed backup is recorded as living; running it every startup is therefore safe.
-	attributeVersions(st, state.StorageID, log)
 
 	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName,
 		"reason", reason, "storage_id", state.StorageID, "resolution", state.Resolution,
