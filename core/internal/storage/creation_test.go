@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novkostya/quince/core/internal/storage/clonetree"
 )
 
 func fixedNow() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
@@ -303,5 +305,83 @@ func TestManagerWithNoStorageIDAttributesNullNotEmptyString(t *testing.T) {
 	m := &Manager{}
 	if got := m.storageIDPtr(); got != nil {
 		t.Fatalf("an unattributed Manager must yield nil, got %q", *got)
+	}
+}
+
+// The two tests above exercise the HELPER. These exercise the CALL SITES, which is where the
+// regression would actually be (quince#417 review): deleting `StorageID: m.storageIDPtr()` from
+// registerCommitted or adopt left both helper tests green, because neither went through a row's
+// birth. A getter returning a field is not the claim this change makes.
+
+const testStorageID = "01JSTORAGE0000000000000000"
+
+func TestRegisterCommittedAttributesTheVersionToItsStorage(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
+	m.storageID = testStorageID
+
+	const vid, udid = "01JV0000000000000000000001", "00008140-000A1B2C3D4E5F60"
+	if err := m.registerCommitted(Committed{
+		VersionID: vid, UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), StructureVerifiedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("registerCommitted: %v", err)
+	}
+
+	row, ok, err := st.GetVersion(vid)
+	if err != nil || !ok {
+		t.Fatalf("committed version missing: ok=%v err=%v", ok, err)
+	}
+	if row.StorageID == nil {
+		t.Fatal("a version committed by a Manager with a storage must NOT be stored unattributed")
+	}
+	if *row.StorageID != testStorageID {
+		t.Errorf("storage_id = %q, want %q", *row.StorageID, testStorageID)
+	}
+}
+
+// The other direction, and the one a future refactor is most likely to get wrong: a Manager with
+// no storage must write NULL, not "". contracts §2 has no rule for an empty storage_id, so it
+// would be a value that reads as "attributed" while naming nothing.
+func TestRegisterCommittedWithNoStorageWritesNullNotEmptyString(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{}) // storageID "" by construction
+
+	const vid, udid = "01JV0000000000000000000002", "00008140-000A1B2C3D4E5F60"
+	if err := m.registerCommitted(Committed{
+		VersionID: vid, UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), StructureVerifiedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("registerCommitted: %v", err)
+	}
+
+	row, _, err := st.GetVersion(vid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.StorageID != nil {
+		t.Fatalf("want NULL for an unattributed Manager, got %q", *row.StorageID)
+	}
+}
+
+// adopt is the second birth site: a version found on disk is attributed to the root it was
+// SCANNED FROM, which is known at that point and never needs guessing later.
+func TestAdoptAttributesTheVersionToTheStorageItWasScannedFrom(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
+	m.storageID = testStorageID
+
+	const vid, udid = "01JV0000000000000000000003", "00008140-000A1B2C3D4E5F60"
+	m.adopt(udid, Artifact{
+		UDID: udid, Backend: BackendCopy, IsLatest: true,
+		Marker: Marker{
+			VersionID: vid, UDID: udid, Kind: "full", Encrypted: true,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+
+	row, ok, err := st.GetVersion(vid)
+	if err != nil || !ok {
+		t.Fatalf("adopted version missing: ok=%v err=%v", ok, err)
+	}
+	if row.StorageID == nil || *row.StorageID != testStorageID {
+		t.Fatalf("an adopted version must carry the storage it was scanned from, got %v", row.StorageID)
 	}
 }
