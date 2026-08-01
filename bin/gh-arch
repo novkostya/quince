@@ -73,6 +73,25 @@ if [ -f "${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}" ]; th
 	exit 1
 fi
 
+
+# A CREDENTIAL IS NOT A SET OF PATHNAMES (quince#385). Every check above names a FILE, and a forge
+# credential in the ENVIRONMENT crosses all of them without one of them speaking — `GH_TOKEN` is
+# exactly how a wrapper hands a token to `gh`, so a value already sitting there is a working
+# credential belonging to somebody else.
+#
+# `deploy/runner/preflight`'s supervisor arm learned this by passing a box with `GH_TOKEN=ghp_…` set.
+# The wrappers did not carry it, and the asymmetry ran the wrong way: `preflight` gates whether the
+# box STARTS, this gates EVERY ACTION it takes.
+#
+# DUPLICATED RATHER THAN SOURCED, following quince#316's ruling rather than re-litigating it.
+for _envvar in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+	eval "_envval=\${$_envvar:-}"
+	[ -n "$_envval" ] || continue
+	printf '%s: a FORGE CREDENTIAL is present in the environment: $%s.\n' "gh-arch" "$_envvar" >&2
+	printf '%s: that variable is how a wrapper hands a token to gh, so a value already in it is\n' "gh-arch" >&2
+	printf '%s: somebody else s working credential. Unset it, and run this on a one-identity box.\n' "gh-arch" >&2
+	exit 1
+done
 if ! command -v gh >/dev/null 2>&1; then
 	printf 'gh-arch: gh is not installed\n' >&2
 	exit 1
