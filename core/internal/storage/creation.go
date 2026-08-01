@@ -42,7 +42,12 @@ type StorageState struct {
 	Resolution Resolution
 	StorageID  string // set when Resolution.OK()
 	Backend    string // set when Resolution.OK()
-	Reason     string // always set when !OK — observation, consequence, remedy
+	// Reason is prose for a human: observation, consequence, remedy (preflight's idiom).
+	//
+	// ALWAYS set when !OK. ALSO set on the one OK path worth saying out loud — an unverified open
+	// (OK() && !Verified), where quince proceeds on the marker alone. So a non-empty Reason does
+	// NOT imply a refusal: read Resolution and Verified for that.
+	Reason string
 	// Verified reports whether the backend comparison ACTUALLY RAN.
 	//
 	// It exists because "checked and agrees" and "could not check" are different facts, and
