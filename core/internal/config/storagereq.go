@@ -129,7 +129,20 @@ func CheckStorageBackends(c StorageConfig) []string {
 		z := c.ZFSFor(e)
 		isZFS := c.BackendFor(e) == "zfs" ||
 			(c.BackendFor(e) == "auto" && (z.ParentDataset != "" || z.HookCmd != ""))
-		if !isZFS || z.ParentDataset == "" {
+		if isZFS && z.ParentDataset == "" {
+			// A ZFS BACKEND WITH NO PARENT DATASET is not a degraded mode, it is an incoherent
+			// declaration: `Select` would build a zfs backend with nothing to create datasets
+			// under. It is reachable the obvious way — an entry writes `zfs: {}` to say "I am not
+			// zfs" while the GLOBAL `backend: zfs` still applies to it, which is the first thing
+			// anyone tries and what my own first guidance on quince#458 told the Operator to do.
+			out = append(out, fmt.Sprintf(
+				"storage %q resolves to the zfs backend but has no `zfs.parent_dataset` — an entry "+
+					"that sets `zfs: {}` to opt OUT must also set `backend: auto` (or a namespace "+
+					"backend), because the global `backend: zfs` still applies to it otherwise",
+				e.Name))
+			continue
+		}
+		if !isZFS {
 			continue
 		}
 		if first, dup := seen[z.ParentDataset]; dup {
