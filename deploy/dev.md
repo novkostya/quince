@@ -137,10 +137,17 @@ an intermittent failure.
 it actually ran, because the expensive failure here is not the wasted time — it is writing *"I ran
 just this test"* into PR evidence when something else happened (quince#368).
 
-**Only `gates-go` honours it; every other target REFUSES rather than ignoring it.** In particular
-`make gates GO_TEST_ARGS=…` is a parse-time error: the ladder's Go leg would run a filtered suite
-while the ladder reported itself green, which is a stronger claim than anything that ran. Same
-reasoning as `privacy-check` refusing rather than exiting 0 having swept nothing (quince#41).
+**Only `gates-go` honours it; every other target REFUSES rather than ignoring it.** Both
+`make gates GO_TEST_ARGS=…` **and** `GO_TEST_ARGS=… make gates` are parse-time errors: the ladder's
+Go leg would run a filtered suite while the ladder reported itself green, which is a stronger claim
+than anything that ran. Same reasoning as `privacy-check` refusing rather than exiting 0 having swept
+nothing (quince#41).
+
+**Both invocation forms, deliberately** — `make target VAR=x` and `VAR=x make target` are different
+to `make` (`$(origin)` reports `command line` versus `environment`) and the first version of this
+guard caught only the first, which let the ladder run filtered with no banner and no refusal. **The
+trade:** an exported `GO_TEST_ARGS` in a shell profile or CI environment makes `make gates` an error
+rather than a silently filtered ladder. That is the intended direction, not an oversight.
 
 **`make` accepts any variable you invent**, declared or not — which is what kept this silent. A
 misspelling (`GO_TESTARGS=…`) is still accepted and still does nothing, and no guard here can catch
