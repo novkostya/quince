@@ -258,10 +258,11 @@ func resolveSlot(ctx context.Context, e config.StorageEntry, scfg config.Storage
 	)
 	probe := func(string) string {
 		if !probed {
+			ez := scfg.ZFSFor(e)
 			stBackend, backendName, _ = storage.Select(ctx, storage.Options{
-				Backend: scfg.Backend, Backups: e.Path, AppVersion: version.String(),
-				ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-				ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
+				Backend: scfg.BackendFor(e), Backups: e.Path, AppVersion: version.String(),
+				ZFSParent: ez.ParentDataset, ZFSMode: ez.Mode,
+				ZFSHookCmd: ez.HookCmd, ZFSSeed: ez.Seed,
 			}, log)
 			probed = true
 		}

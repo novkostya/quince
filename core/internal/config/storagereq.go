@@ -106,3 +106,41 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	}
 	return fmt.Errorf("no storage declared: storage.storages in %s is empty", configPath)
 }
+
+// CheckStorageBackends refuses configurations where two storages would write to the same place
+// (qn.6c, quince#458).
+//
+// zfs is the case that needs it: a zfs backend creates `<parent_dataset>/<udid>`, so two storages
+// inheriting one global `storage.zfs` block would create THE SAME dataset for a device and each
+// believe it owned it. That is not a degraded mode to surface — it is two storages that are one
+// storage, and every guarantee this rung added about per-storage attribution is void beneath it.
+//
+// Namespace backends need no equivalent: they are rooted at their own paths, which
+// `CheckStorages` already requires to be distinct.
+//
+// Returns one message per collision, empty when the config is coherent.
+func CheckStorageBackends(c StorageConfig) []string {
+	if c.Storages == nil {
+		return nil
+	}
+	seen := map[string]string{} // parent dataset → the storage that claimed it
+	var out []string
+	for _, e := range *c.Storages {
+		z := c.ZFSFor(e)
+		isZFS := c.BackendFor(e) == "zfs" ||
+			(c.BackendFor(e) == "auto" && (z.ParentDataset != "" || z.HookCmd != ""))
+		if !isZFS || z.ParentDataset == "" {
+			continue
+		}
+		if first, dup := seen[z.ParentDataset]; dup {
+			out = append(out, fmt.Sprintf(
+				"storages %q and %q are both zfs on parent dataset %q — they would create the same "+
+					"dataset per device and each believe it owned it. Give one of them its own "+
+					"`zfs.parent_dataset`, or `zfs: {}` to make it a non-zfs storage",
+				first, e.Name, z.ParentDataset))
+			continue
+		}
+		seen[z.ParentDataset] = e.Name
+	}
+	return out
+}

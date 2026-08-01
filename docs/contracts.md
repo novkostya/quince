@@ -671,16 +671,22 @@ storage:
     - name: local           # stable identity across replug, where a PATH is not; keys the DB row
       path: /backups        # absolute; unique across entries
       default: true         # EXACTLY ONE — the storage a backup goes to when none is named
-                            # NOTE: no `backend` key. A storage's backend is discovered and frozen
-                            # at its creation moment and recorded in quince-storage.json (design
-                            # §5), never declared — a declared one could disagree with the medium,
-                            # which is the remount case the identity marker exists to refuse.
+      backend: auto         # OPTIONAL override of storage.backend for THIS storage.
+                            # Omit it: `auto` probes the path, which is how a namespace
+                            # backend (reflink|hardlink|copy) is meant to be chosen.
+      zfs: {}               # OPTIONAL override of storage.zfs for THIS storage.
+                            # ABSENT inherits the global block; an explicitly EMPTY one
+                            # declares "I am NOT zfs" on a stand whose global block is
+                            # set — without it a second storage could never opt out.
   backend: auto             # auto | zfs | reflink | hardlink | copy
-                            # GLOBAL this rung: every declared storage inherits it. Per-storage
-                            # zfs settings only start mattering when a second zfs storage exists,
-                            # which qn.6c cannot create (gap 3, second half, ruled as recommended).
-                            # auto: zfs when storage.zfs is configured, else probe
-                            # reflink → hardlink → copy on the storage's filesystem
+                            # THE DEFAULT every entry inherits, no longer a global that
+                            # overrides them. It said "per-storage zfs settings only start
+                            # mattering when a second zfs storage exists, which qn.6c
+                            # cannot create" — true, and the breaking case is one zfs
+                            # storage beside a NON-zfs one, which qn.6c creates trivially
+                            # (quince#458, Operator ruling 2026-08-02).
+                            # auto: zfs when the applicable zfs block is configured,
+                            # else probe reflink → hardlink → copy on that path.
   zfs:
     parent_dataset: ""      # e.g. rpool/userdata/iphone-backup; one child dataset per device
     mode: exec              # exec (delegated) | hook
@@ -763,6 +769,26 @@ does not share it.
 storage subsystem, so the refusal sits inside the live branch. A check placed before it would
 refuse every demo and every `ui-e2e` run over a subsystem they do not use.
 
-**Second half, ruled as recommended:** `backend`, `zfs` and `retention` stay **global**; a declared
-entry inherits them. A **restart** is required to pick up a `storages:` change — D12 permits that
-only if the spec says why, and `docs/specs/qn.6c/qn.6c.md` says why.
+**Second half — OVERRULED 2026-08-02 (quince#458).** It read *"ruled as recommended: `backend`, `zfs`
+and `retention` stay global; a declared entry inherits them"*, and `backend` and `zfs` are now
+**per-entry overrides with the global as the inherited default**. `retention` stays global.
+
+**The recommendation's own reasoning is what fails.** It argued that per-storage zfs settings *"only
+start mattering when a second zfs storage exists, which this rung cannot create"* — true, and it
+addresses the wrong configuration. The breaking one is **one zfs storage beside a non-zfs one**,
+which this rung creates trivially, and which is the first thing an operator tries: a USB disk
+alongside a zfs default. It got a zfs backend whose parent dataset pointed at another pool.
+
+**Interface fact 4 had already required otherwise** — *"a per-storage backend therefore needs
+per-storage zfs settings **or an explicit rule that only one storage may be zfs**"* — and neither was
+built. The word *ruled* in this sentence was also wrong: the spec's `RULED` block on gap 3 settles
+`(b)`, the `QUINCE_BACKUPS` retirement, and is silent on this half. **A recommendation was
+implemented as a ruling, and this line is how it came to look decided.**
+
+**One hard refusal follows**, because it is not a degraded mode to surface: two storages sharing a
+zfs `parent_dataset` would create the same `<parent>/<udid>` per device and each believe it owned it,
+which voids every per-storage guarantee this rung adds. quince refuses to serve and names both
+storages and the remedy.
+
+A **restart** is still required to pick up a `storages:` change — D12 permits that only if the spec
+says why, and `docs/specs/qn.6c/qn.6c.md` says why.
