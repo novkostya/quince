@@ -215,6 +215,51 @@ func TestResolveRefusesAnUnreachablePath(t *testing.T) {
 	}
 }
 
+// G5c — the sibling to G5b, for the case G5b structurally cannot reach (quince#415).
+//
+// G5b tests "marker removed, path still readable" — the unplugged disk. This tests a path that DOES
+// NOT EXIST at the moment of decision, which is the ordinary typo in a hand-edited config.yml. The
+// bug it guards was worse than G5b's: quince invented the directory beside the real root, wrote a
+// valid marker, reported `created verified=true`, and sent backups there while the real storage sat
+// untouched — signalled only by a CREATED warning identical to a legitimate first run.
+//
+// THE PROBE MUST NOT BE REACHED, and counting its calls is what pins the ordering rather than the
+// symptom: `probeNamespace` does os.MkdirAll, so ANY arrangement where a probe runs before this
+// decision re-creates the bug by a new route. A stricter reachable() alone would not.
+//
+// And `writes nothing`, asserted on the PARENT — a refusal that still left the directory behind
+// would have done half the damage.
+func TestResolveNeverCreatesTheStorageRootItWasPointedAt(t *testing.T) {
+	parent := t.TempDir()
+	missing := filepath.Join(parent, "typoo")
+
+	probed := 0
+	probe := func(string) string { probed++; return BackendCopy }
+
+	st, err := ResolveStorage("local", missing, probe, unknownLookup,
+		fixedNow, "test", idGen("01JWRONG00000000000000000"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if st.Resolution.OK() {
+		t.Fatalf("a path that does not exist must never resolve OK, got %q", st.Resolution)
+	}
+	if probed != 0 {
+		t.Errorf("the guard must run BEFORE anything touches the path; probe called %d time(s)", probed)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Errorf("quince created the storage root it was pointed at: %v", err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("a refusal must leave NOTHING behind; parent holds %d entr(ies)", len(entries))
+	}
+}
+
 // An unknown probe must not become a created storage with a guessed backend: the backend is frozen
 // forever at this moment, so guessing here is guessing permanently.
 func TestResolveRefusesToCreateWithAnUndeterminedBackend(t *testing.T) {

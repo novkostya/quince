@@ -151,19 +151,45 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*storage.Manager, error) {
 	scfg := cfgSvc.Current().Storage
 	root, name := defaultStorage(scfg)
-	stBackend, backendName, reason := storage.Select(ctx, storage.Options{
-		Backend: scfg.Backend, Backups: root, AppVersion: version.String(),
-		ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
-		ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
-	}, log)
 
-	// qn.6c 3c: resolve the storage's IDENTITY before serving. Select tells us what the path looks
-	// like NOW; ResolveStorage decides what that means given the marker on disk and whether quince
-	// has created this storage before. The probe result is handed in rather than re-taken, and on
-	// every refusing path it is DISCARDED — which is the point: a probed backend must never become
-	// a known storage's backend behind the marker's back.
-	state, err := storage.ResolveStorage(name, root,
-		func(string) string { return backendName },
+	// THE GUARD RUNS BEFORE ANYTHING TOUCHES THE PATH (quince#415).
+	//
+	// This used to call storage.Select first and hand ResolveStorage the already-probed backend.
+	// That defeated the guard, because Select → probeNamespace does `os.MkdirAll(backups)`: a
+	// declared path that did not exist was CREATED by the probe, so by the time ResolveStorage
+	// looked, the path was reachable, markerless and unknown — a textbook creation moment, at a
+	// path the user had typo'd. quince invented a directory beside the real root and sent backups
+	// there. The check was downstream of the thing that made it pass.
+	//
+	// So the probe is now LAZY: it is a closure ResolveStorage calls only on the paths where a
+	// backend is actually needed (comparing against an existing marker, or freezing one at a
+	// genuine creation). A refusal never reaches it, which is what makes "the guard is first" a
+	// property of the code rather than of the order two statements happen to be written in.
+	//
+	// NOBODY CREATES A STORAGE ROOT. A declared path must already exist — the refusal text has
+	// said so since story 1 ("The path must already exist and hold your backups if you have any")
+	// and this is what makes that true rather than aspirational. probeNamespace's MkdirAll
+	// survives, but with this ordering it can only ever run against a directory that is already
+	// there, so it cannot conjure a storage.
+	var (
+		stBackend   storage.Backend
+		backendName string
+		reason      string
+		probed      bool
+	)
+	probe := func(string) string {
+		if !probed {
+			stBackend, backendName, reason = storage.Select(ctx, storage.Options{
+				Backend: scfg.Backend, Backups: root, AppVersion: version.String(),
+				ZFSParent: scfg.ZFS.ParentDataset, ZFSMode: scfg.ZFS.Mode,
+				ZFSHookCmd: scfg.ZFS.HookCmd, ZFSSeed: scfg.ZFS.Seed,
+			}, log)
+			probed = true
+		}
+		return backendName
+	}
+
+	state, err := storage.ResolveStorage(name, root, probe,
 		func(n string) (storage.KnownStorage, error) {
 			row, ok, err := st.GetStorage(n)
 			if err != nil || !ok || row.StorageID == nil {
@@ -180,6 +206,13 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		// backups to the wrong filesystem, and the missing-medium case looks exactly like an empty
 		// directory. The Reason carries observation, consequence and remedy (preflight's idiom).
 		return nil, fmt.Errorf("%s (%s)", state.Reason, state.Resolution)
+	}
+	// Every resolution that says OK has been through the probe — comparing against a marker, or
+	// freezing one at creation. Asserted rather than assumed: a nil backend here would be a nil
+	// dereference several calls later, in code that would look unrelated to this ordering.
+	if stBackend == nil {
+		return nil, fmt.Errorf("storage %q resolved %s without a backend — the lazy probe was not "+
+			"reached on a path that requires it (quince#415's ordering is wrong)", name, state.Resolution)
 	}
 	if state.Resolution == storage.ResolutionCreated {
 		// LOUD and user-visible, deliberately: this is the one path where quince decides a place
