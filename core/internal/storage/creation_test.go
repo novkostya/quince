@@ -458,20 +458,20 @@ func TestOwnsIsGroupMembershipNotEquality(t *testing.T) {
 	attributed := &Manager{slots: []Slot{{StorageID: sid}}}
 
 	// The NULL group is a real group: an unattributed Manager owns unattributed rows.
-	if !unattributed.owns(nil) {
+	if !unattributed.slots[0].owns(nil) {
 		t.Error("an unattributed Manager must own unattributed rows — that is the pre-qn.6c world")
 	}
-	if unattributed.owns(&sid) {
+	if unattributed.slots[0].owns(&sid) {
 		t.Error("an unattributed Manager must not claim a row that knows where it lives")
 	}
 	// An attributed Manager must NOT claim a row whose storage is unknown.
-	if attributed.owns(nil) {
+	if attributed.slots[0].owns(nil) {
 		t.Error("a NULL row is not this storage's — quince does not know where it lives")
 	}
-	if !attributed.owns(&sid) {
+	if !attributed.slots[0].owns(&sid) {
 		t.Error("a row on this storage is owned")
 	}
-	if attributed.owns(&other) {
+	if attributed.slots[0].owns(&other) {
 		t.Error("another storage's row is not ours to judge")
 	}
 }
@@ -492,7 +492,7 @@ func TestSeedKindIsFullForAFirstBackupToThisStorage(t *testing.T) {
 		t.Fatalf("seed a version on the OTHER storage: %v", err)
 	}
 
-	if got := m.seedKind(udid); got != "full" {
+	if got := m.seedKind(m.slots[0], udid); got != "full" {
 		t.Fatalf("a first backup to a new storage is FULL, got %q — this is story 8's claim", got)
 	}
 }
@@ -511,7 +511,7 @@ func TestSeedKindIsIncrementalWhenThisStorageAlreadyHasAVersion(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if got := m.seedKind(udid); got != "incremental" {
+	if got := m.seedKind(m.slots[0], udid); got != "incremental" {
 		t.Errorf("a device with a version on THIS storage is incremental, got %q", got)
 	}
 }
@@ -534,7 +534,7 @@ func TestSeedKindTreatsUnattributedRowsAsOwnedByAnUnattributedManager(t *testing
 		t.Fatalf("seed: %v", err)
 	}
 
-	if got := m.seedKind(udid); got != "incremental" {
+	if got := m.seedKind(m.slots[0], udid); got != "incremental" {
 		t.Fatalf("an unattributed Manager owns unattributed rows, so this device HAS a version "+
 			"here and the next backup is incremental; got %q", got)
 	}
@@ -570,7 +570,7 @@ func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.owns(row.StorageID) {
+	if m.slots[0].owns(row.StorageID) {
 		t.Fatal("precondition: an attributed Manager must NOT own a NULL row — that is the whole hazard")
 	}
 
@@ -582,7 +582,7 @@ func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !m.owns(row.StorageID) {
+	if !m.slots[0].owns(row.StorageID) {
 		t.Error("after attribution the row must be owned, or reconciliation cannot check its artifact")
 	}
 	if n, err := st.CountUnattributedVersions(); err != nil || n != 0 {

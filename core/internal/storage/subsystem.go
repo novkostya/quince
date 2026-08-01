@@ -12,30 +12,28 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
-// THE WRITE PATH RESOLVES THE JOB'S STORAGE; WHAT CANNOT IS LISTED HERE (stories 5b, 6a).
+// THE WRITE PATH RESOLVES THE JOB'S STORAGE; WHAT CANNOT IS LISTED HERE (stories 5b, 6).
 //
-// Seed, PrepareWork, SeedWork, CommitJob, Discard and VerifyWork go through `jobSlot(jobID)`, which
-// honours the per-job binding — so once `POST /api/jobs` carries `storage_id` (story 6b) they land
-// on the storage the user chose, with no further change here.
+// Seed, PrepareWork, SeedWork, CommitJob, Discard, VerifyWork, registerCommitted and seedKind all
+// take the job's slot — resolved from the jobID they already carry, or passed in. `POST /api/jobs`
+// carries `storage_id` as of story 6b, so a backup lands on the storage the user chose.
 //
-// STILL DEFAULT-SCOPED, each for a stated reason rather than by inheritance:
+// STILL DEFAULT-SCOPED, and each is now a STANDING fact rather than a deadline:
 //
 //	RepairWorkingCopy   device-scoped — no jobID to resolve, and the working copy it repairs
-//	                    belongs to whichever job last wrote it
-//	seedKind            asks "does this device already have a version HERE" for a backup not yet
-//	                    bound; becomes the job's slot with 6b
-//	BackendName         health + onboarding report the default's backend, which is the question
-//	                    being asked
-//	storageIDPtr        the id a NEW version is recorded under, on the commit path
+//	                    belongs to whichever job last wrote it. WRONG for a job on a non-default
+//	                    storage; it needs a different key, not a different slot (unfixed).
+//	BackendName         health + onboarding report the DEFAULT's backend, which is the question
+//	                    being asked — correct rather than pending.
 //
-// The first three are correct today because a backup cannot name a storage yet, so the default IS
-// every job's storage — a property of `POST /api/jobs` rather than of this package, which is why it
-// is stated once here rather than defended at each site.
+// THIS LIST HAS BEEN WRONG TWICE, IN THE DIFF THAT MADE IT WRONG. It carried `storageIDPtr` as a
+// commit-path site after the commit path stopped using it, and it promised "seedKind becomes the
+// job's slot with 6b" in the PR that shipped 6b without changing seedKind — a promise whose
+// deadline was the diff it sat in (quince#447 review, twice). Both cost a review round.
 //
-// One sentence in one place rather than eight markers to keep in sync (quince#441 review). The READ
-// path is already per-storage: `slotFor` resolves a version's own slot, reconciliation takes its
-// Slot as a parameter, and `deleteVersion` deletes through the storage the version actually lives
-// on.
+// The rule it now lives under: A "BECOMES X WITH STORY N" LINE IS A BUG THE MOMENT STORY N IS IN
+// THE SAME DIFF. If it cannot be true when the diff lands, it is not a note — it is an unfinished
+// change wearing one.
 
 // Registry is the version-persistence slice the subsystem needs (*store.Store satisfies it).
 type Registry interface {
@@ -175,14 +173,6 @@ func (s Slot) owns(rowStorageID *string) bool {
 	return *rowStorageID == s.StorageID
 }
 
-// owns asks the DEFAULT slot.
-//
-// STORY 5c: the one remaining caller is `seedKind`, which asks "does this device already have a
-// version HERE" for a backup that has not named a storage yet — so the default is the right slot
-// today, and the JOB's slot the moment `POST /api/jobs` carries `storage_id`. Kept as a named
-// wrapper rather than inlined so that a grep for `defaultSlot()` finds it.
-func (m *Manager) owns(rowStorageID *string) bool { return m.defaultSlot().owns(rowStorageID) }
-
 // storageIDPtr returns the Manager's storage id as the nullable the registry stores, so an
 // unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
 // "" is not one of them (contracts §2: null = not yet attributed).
@@ -290,8 +280,8 @@ func (m *Manager) SeedWork(udid, jobID string) error {
 // sentinel (whether working/ was seeded from an existing latest/ — finding #9(a), (cj)/(ck)); if
 // the sentinel is missing it infers from whether the device already has a committed version, never
 // from Status.plist.IsFullBackup (which the lab proved lies).
-func (m *Manager) seedKind(udid string) string {
-	if w, ok, err := readWorkState(m.defaultSlot().Root, udid); err == nil && ok {
+func (m *Manager) seedKind(s Slot, udid string) string {
+	if w, ok, err := readWorkState(s.Root, udid); err == nil && ok {
 		return w.kindOf()
 	}
 	// SCOPED TO THIS STORAGE, and this is the line story 8's claim rests on. "Does this device
@@ -303,7 +293,7 @@ func (m *Manager) seedKind(udid string) string {
 	// version lives, and "somewhere" is not "here".
 	if rows, err := m.reg.ListVersions(udid); err == nil {
 		for _, r := range rows {
-			if r.Missing || !m.owns(r.StorageID) {
+			if r.Missing || !s.owns(r.StorageID) {
 				continue
 			}
 			return "incremental"
@@ -323,7 +313,7 @@ func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
 		return wire.Version{}, err
 	}
 	tree := s.Backend.TreePath(udid, jobID)
-	vr := Verify(tree, m.seedKind(udid))
+	vr := Verify(tree, m.seedKind(s, udid))
 	if !vr.OK {
 		return wire.Version{}, fmt.Errorf("storage: structural verification failed: %s", vr.Detail)
 	}
@@ -463,7 +453,7 @@ func (m *Manager) VerifyWork(udid, jobID string) (ok bool, detail, kind string, 
 		return false, err.Error(), "", false
 	}
 	tree := s.Backend.TreePath(udid, jobID)
-	r := Verify(tree, m.seedKind(udid))
+	r := Verify(tree, m.seedKind(s, udid))
 	return r.OK, r.Detail, r.Kind, r.Encrypted
 }
 
