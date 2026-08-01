@@ -413,10 +413,17 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
              "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "..." }
 ```
 
-**PROPOSED (gap): `Storage` as an object, and what happens to `Version.backend` — `qn.6c`,
-quince#378.** The multi-storage epic names `Version.backend` as *the symptom* of a modeling
-error: a version's backend is really its **storage's** backend. `qn.6c` fixes the model; this
-proposal is about how much of that reaches the wire.
+**PROPOSED (gap): a `Storage` object, and `Version.storage_id` — `qn.6c`, quince#378.** The
+multi-storage epic names `Version.backend` as *the symptom* of a modeling error: a version's
+backend is really its **storage's** backend. `qn.6c` fixes the model; this proposal is about how
+much of that reaches the wire.
+
+**`Version.backend` is NO LONGER part of this proposal — it is RULED, below.** The heading is
+narrowed deliberately: `PROPOSED (gap)` is a load-bearing marker meaning *nothing may be built on
+this yet*, not a title, so a heading naming a half that has been decided tells a reader searching
+for open questions the opposite of the truth. What remains open here is the `Storage` object,
+`GET /api/storages`, the job's `storage_id`, and `Version.storage_id` — all of which land with the
+`0006_storage` migration.
 
 ```jsonc
 Storage: {
@@ -449,8 +456,8 @@ Version: { ..., "storage_id": "01J..." }   // a field addition — non-breaking 
                                            // own header rule
 ```
 
-**`Version.backend` — RULED (was the open half of this gap): KEEP IT, AND IT MEANS SOMETHING
-DIFFERENT FROM `Storage.backend`.** Operator ruling 2026-08-01, relayed on quince#378.
+**RULED (was `PROPOSED (gap)`): `Version.backend` is KEPT, and it means something DIFFERENT from
+`Storage.backend` — `qn.6c`, Operator ruling 2026-08-01, relayed on quince#378.**
 
 > **`Version.backend` is *how this version was made*. `Storage.backend` is *what this storage uses
 > now*.**
