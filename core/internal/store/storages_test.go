@@ -163,3 +163,100 @@ func TestCountUnattributedReachesZero(t *testing.T) {
 		t.Errorf("the transitional null must be able to reach zero; %d remain", n)
 	}
 }
+
+// --- is_latest is per (udid, storage) — Operator ruling 2026-08-01, quince#378 ---
+
+func insertVer(t *testing.T, st *Store, id, udid string, storageID *string, at time.Time) {
+	t.Helper()
+	if err := st.InsertVersion(VersionRow{
+		ID: id, UDID: udid, Backend: "copy", Kind: "full", CreatedAt: at, StorageID: storageID,
+	}); err != nil {
+		t.Fatalf("insert %s: %v", id, err)
+	}
+}
+
+func latestIDs(t *testing.T, st *Store, udid string) []string {
+	t.Helper()
+	rows, err := st.ListVersions(udid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, r := range rows {
+		if r.IsLatest {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+// THE ASSERTION THE RULING EXISTS TO PROTECT: one device, two storages, BOTH flagged latest.
+//
+// The architect expected this could not be written until the registry lands. It can at this layer
+// — what needs the registry is the browse_root half, which is asserted with story 3's G1. This is
+// the half that pins the SQL, and it is the half that would silently regress.
+func TestPromoteLatestIsScopedToTheStorage(t *testing.T) {
+	st := openTemp(t)
+	a, b := "01JSTORAGE-A", "01JSTORAGE-B"
+	base := ts(t)
+
+	insertVer(t, st, "01VA1", "DEV", &a, base)
+	insertVer(t, st, "01VB1", "DEV", &b, base.Add(time.Hour)) // newer, different storage
+
+	if err := st.PromoteLatest("DEV", "01VA1", &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PromoteLatest("DEV", "01VB1", &b); err != nil {
+		t.Fatal(err)
+	}
+
+	got := latestIDs(t, st, "DEV")
+	if len(got) != 2 {
+		t.Fatalf("a device on two storages must have TWO latest rows, one each; got %v", got)
+	}
+
+	// And the load-bearing negative: promoting on B must NOT demote A. Before the storage clause
+	// this is exactly what happened, and A's newest version then resolved browse_root to a
+	// versions/<ts>/ directory that does not exist.
+	if err := st.PromoteLatest("DEV", "01VB1", &b); err != nil {
+		t.Fatal(err)
+	}
+	if got := latestIDs(t, st, "DEV"); len(got) != 2 {
+		t.Errorf("promoting on storage B demoted storage A's latest; got %v", got)
+	}
+}
+
+// The NULL group, which the ruling settled toward `IS ?` rather than exclusion: a pre-qn.6c row
+// must still get a latest AMONG ITS OWN GROUP. Excluding NULLs would leave such a device with no
+// latest at all — the same unresolvable browse_root, reached from the other side.
+func TestPromoteLatestGivesUnattributedRowsTheirOwnLatest(t *testing.T) {
+	st := openTemp(t)
+	attributed := "01JSTORAGE-A"
+	base := ts(t)
+
+	insertVer(t, st, "01VNULL1", "DEV", nil, base)
+	insertVer(t, st, "01VNULL2", "DEV", nil, base.Add(time.Hour))
+	insertVer(t, st, "01VATTR1", "DEV", &attributed, base.Add(2*time.Hour))
+
+	if err := st.PromoteLatest("DEV", "01VNULL2", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PromoteLatest("DEV", "01VATTR1", &attributed); err != nil {
+		t.Fatal(err)
+	}
+
+	got := latestIDs(t, st, "DEV")
+	if len(got) != 2 {
+		t.Fatalf("the NULL group and the attributed group each get a latest; got %v", got)
+	}
+
+	// `storage_id = ?` never matches NULL, so a naive fix would silently promote nothing here and
+	// leave the device with no resolvable newest version at all.
+	v, _, err := st.GetVersion("01VNULL2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.IsLatest {
+		t.Error("an unattributed row must be promotable within the NULL group (IS, not =)")
+	}
+}

@@ -379,6 +379,20 @@ Version: {
   // because "incremental" imports a false fragile-chain mental model.
   "encrypted": true,        // unencrypted versions are permanently badged incomplete
   "is_latest": true,
+  // PER (DEVICE, STORAGE) — Operator ruling 2026-08-01 (quince#378). "the newest committed
+  // version of this device ON ITS STORAGE". A device backed up to two storages has TWO
+  // versions with is_latest: true, one each; a consumer that assumed at most one per device is
+  // wrong. No field changed shape — what changed is what the field MEANS, which is why it
+  // needed a ruling rather than a patch.
+  //
+  // Scoped because browse_root READS it: a single global latest would leave every storage but
+  // the winner with its newest version flagged false, resolving browse_root to a versions/<ts>/
+  // directory that does not exist — the artifact is still in latest/. A replug would silently
+  // change which version the UI calls latest on the internal pool.
+  //
+  // Unattributed rows (storage_id null) form their own group and get their own latest. Excluding
+  // them was considered and REJECTED: a device whose rows are all null would then have no latest
+  // at all, which is the same unresolvable browse_root reached from the other side.
   "structure_verified_at": "..." | null,   // set at commit (structural verification)
   "content_verified_at": "..." | null,     // set by verify_canary on a later unlock
   "logical_bytes": 42400000000, "physical_bytes": 3400000000,  // best-effort

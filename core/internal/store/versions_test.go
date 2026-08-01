@@ -89,7 +89,7 @@ func TestPromoteLatestIsExclusive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := st.PromoteLatest("U", "01C"); err != nil {
+	if err := st.PromoteLatest("U", "01C", nil); err != nil {
 		t.Fatal(err)
 	}
 	vs, _ := st.ListVersions("U")
