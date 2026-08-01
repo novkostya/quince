@@ -733,7 +733,8 @@ relay on quince#378.
 | 4a | gap 1's **`backend` redefinition** — contracts §2 only, no code | — | no |
 | 4b | story 4's **DB half** — migration `0006`, `versions.storage_id` nullable, the `storages` table (G6). No wire, no contracts | — | no |
 | 4c | story 4's **wire half** — `Version.storage_id`; flips the rest of gap 1 in contracts §2. **After 4a** | — | no |
-| 3b | story 2, second half — the marker **as a lifecycle decision**: the creation moment, missing-medium, the unmounted-mountpoint refusal; flips design §5 (G5b, and the no-permanent-nulls gate). **After 4b** — it needs the `storages` table | — | no |
+| 3b | story 2, second half — the creation-moment **rule** and its gates: `ResolveStorage`, missing-medium, the unmounted-mountpoint refusal (G5b), the `storages` table access layer and the no-permanent-nulls helpers. **Built and UNWIRED**; design §5 is NOT flipped here. **After 4b** — it needs the `storages` table | — | no |
+| 3c | the **wiring** — `buildStorage` resolves each declared storage through `ResolveStorage`, refuses on a bad resolution, records the row and attributes versions; **flips design §5** | — | no |
 | 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
 | 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
 | 7 | story 9 — the selector (G8) | — | no |
