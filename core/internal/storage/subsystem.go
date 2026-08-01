@@ -334,6 +334,10 @@ func (m *Manager) toWire(r store.VersionRow) wire.Version {
 		CreatedAt:  fmtRFC(r.CreatedAt), JobID: r.JobID, Kind: r.Kind, Encrypted: r.Encrypted,
 		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes, PhysicalBytes: r.PhysicalBytes,
 		Missing: r.Missing, // crossed to the wire so the UI renders a gone artifact dead (qn.6a (cr))
+		// nil until this version's storage has an identity marker (qn.6c). PASSED THROUGH rather
+		// than defaulted: substituting a value here would turn "not yet attributed" into a claim,
+		// which is the state-honesty failure the nullable ruling exists to avoid.
+		StorageID: r.StorageID,
 	}
 	if r.StructureVerifiedAt != nil {
 		s := fmtRFC(*r.StructureVerifiedAt)

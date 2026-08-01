@@ -95,6 +95,12 @@ export interface Version {
   // isn't silently shrunk. Rendered explicitly dead — no size, no Unlock, an "artifact gone — remove?"
   // action on DELETE (qn.6a (cr)). Older servers omit the key → undefined is treated as false.
   missing?: boolean;
+  // storage_id = which storage this version lives on (qn.6c). null means NOT YET ATTRIBUTED, and
+  // that is TRANSITIONAL — unlike job_id, whose null (= adopted) is permanent and correct. Do not
+  // render it as "no storage" and do not substitute a default: it means the server has not worked
+  // out which storage this is yet, and it stops meaning that once the storage has an identity
+  // marker. Optional here because a version predating the field simply omits it.
+  storage_id?: string | null;
 }
 
 export interface Op {

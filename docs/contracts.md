@@ -452,8 +452,19 @@ Storage: {
                                // version on this one. See the open sub-question in §1.
 }
 
-Version: { ..., "storage_id": "01J..." }   // a field addition — non-breaking by this document's
-                                           // own header rule
+Version: { ..., "storage_id": "01J..." | null }
+  // RULED NULLABLE — Operator, 2026-08-01 (quince#378). null = NOT YET ATTRIBUTED.
+  //
+  // TRANSITIONAL, and that is the difference from `job_id`, whose null (= adopted) is permanent
+  // and CORRECT. This one should disappear: a version committed before qn.6c has no storage id
+  // because the value is a UUID from its storage's quince-storage.json, written at the storage's
+  // creation moment. Migration 0006 deliberately does not fabricate one — backfilling an invented
+  // identity onto data that cannot be regenerated is the class the data-at-rest limit governs.
+  //
+  // A client must NOT read null as "no storage" or substitute a default. It means the server has
+  // not worked out which storage this is yet, and it stops meaning that once the storage has a
+  // marker. A gate asserts none remains null past that point, because a nullable-with-meaning
+  // field whose meaning is "temporary" decays into a permanent unknown unless something says so.
 ```
 
 **RULED (was `PROPOSED (gap)`): `Version.backend` is KEPT, and it means something DIFFERENT from

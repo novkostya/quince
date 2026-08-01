@@ -104,6 +104,17 @@ type Version struct {
 	// (cr)(a)/(cv)). The UI renders such a version explicitly dead (no size claim, no Unlock, an
 	// "artifact gone — remove?" action on DELETE), never omitting it.
 	Missing bool `json:"missing"`
+	// StorageID is which storage this version lives on (qn.6c gap 1, contracts §2).
+	//
+	// NULL MEANS *NOT YET ATTRIBUTED*, and that is TRANSITIONAL — unlike JobID, whose null
+	// (= adopted) is permanent and correct. A version committed before qn.6c has no storage id
+	// because the value is a UUID from its storage's quince-storage.json, written at the
+	// storage's creation moment; migration 0006 deliberately does not fabricate one.
+	//
+	// A client must not read null as "no storage" or substitute a default: it means quince has
+	// not yet worked out which storage this is, and it stops meaning that once the storage has a
+	// marker. Operator ruling 2026-08-01, quince#378.
+	StorageID *string `json:"storage_id"`
 }
 
 // Op is a pair/encryption operation whose narration streams over op.updated (contracts §2).
