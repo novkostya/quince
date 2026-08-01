@@ -211,3 +211,85 @@ func TestAttributionUsesTheScannedSlotNotTheDefault(t *testing.T) {
 			"reached the attribution", *row.StorageID, secondID)
 	}
 }
+
+// qn.6c story 6a — a job's storage is bound at start and resolved from the jobID every write-path
+// method already carries.
+
+// The binding REFUSES rather than falling back. A job bound to a storage that is not declared, or
+// not usable, must not quietly become a job against the default: that writes a backup to a disk the
+// user did not choose.
+func TestBindJobStorageRefusesUnknownAndUnreachable(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	m.slots[0].StorageID = "01JSTORAGEOK000000000000"
+	m.slots = append(m.slots, unreachableSlot("shuttle", "missing_medium"))
+	m.slots[1].StorageID = "01JSTORAGEGONE0000000000"
+
+	if err := m.BindJobStorage("job-1", "01JSTORAGENOSUCH00000000"); err == nil {
+		t.Error("binding a job to an undeclared storage must refuse")
+	}
+	err := m.BindJobStorage("job-2", "01JSTORAGEGONE0000000000")
+	if err == nil {
+		t.Fatal("binding a job to an unreachable storage must refuse")
+	}
+	if !strings.Contains(err.Error(), "shuttle") || !strings.Contains(err.Error(), "missing_medium") {
+		t.Errorf("the refusal must name the storage and the code, got %q", err)
+	}
+	if err := m.BindJobStorage("job-3", "01JSTORAGEOK000000000000"); err != nil {
+		t.Errorf("binding to a usable storage must succeed, got %v", err)
+	}
+}
+
+// A BOUND job writes to its own storage, not the default. This is the whole point of the seam: once
+// 6b lets a request name a storage, every write-path method must land on that one.
+func TestBoundJobResolvesToItsOwnStorage(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
+
+	second := t.TempDir()
+	m.slots = append(m.slots, Slot{
+		StorageID: "01JSTORAGESECOND00000000", Name: "shuttle", Root: second, Reachable: true,
+		Backend:     newNamespaceBackend(BackendCopy, clonetree.Copy, second, "test", testLogger()),
+		BackendName: BackendCopy,
+	})
+
+	if err := m.BindJobStorage("job-1", "01JSTORAGESECOND00000000"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.jobSlot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Root != second {
+		t.Errorf("a bound job must resolve to its own storage, got %q want %q", got.Root, second)
+	}
+
+	// And an UNBOUND job still resolves to the default — correct today because nothing binds yet,
+	// which is a property of POST /api/jobs rather than of this function.
+	unbound, err := m.jobSlot("job-none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unbound.StorageID != "01JSTORAGEDEFAULT0000000" {
+		t.Errorf("an unbound job must resolve to the default, got %q", unbound.StorageID)
+	}
+}
+
+// A binding whose storage is no longer declared REFUSES rather than retargeting. The job was
+// started against a specific disk; silently writing it elsewhere is how a backup lands somewhere
+// nobody chose.
+func TestABindingToADisappearedStorageRefuses(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
+	m.mu.Lock()
+	m.jobStorage = map[string]string{"job-1": "01JSTORAGEVANISHED000000"}
+	m.mu.Unlock()
+
+	if _, err := m.jobSlot("job-1"); err == nil {
+		t.Fatal("a binding to a storage that is no longer declared must refuse")
+	}
+	// Unbinding clears it, so a retry after reconfiguration behaves as a fresh job.
+	m.UnbindJob("job-1")
+	if _, err := m.jobSlot("job-1"); err != nil {
+		t.Errorf("after unbinding, the job must fall back to the default: %v", err)
+	}
+}

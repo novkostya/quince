@@ -12,13 +12,25 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
-// THE WRITE PATH IS DEFAULT-SCOPED UNTIL THE JOB CARRIES `storage_id` (story 6).
+// THE WRITE PATH RESOLVES THE JOB'S STORAGE; WHAT CANNOT IS LISTED HERE (stories 5b, 6a).
 //
-// Seed, PrepareWork, SeedWork, Commit, Discard, RepairWorkingCopy, registerCommitted, seedKind and
-// storageIDPtr all resolve through `defaultSlot()`, and every one is correct TODAY for the same
-// single reason: a backup cannot name a storage yet, so the default IS the job's storage. What
-// makes them correct is a property of `POST /api/jobs`, not of this package — which is why they are
-// recorded here rather than defended one by one.
+// Seed, PrepareWork, SeedWork, CommitJob, Discard and VerifyWork go through `jobSlot(jobID)`, which
+// honours the per-job binding — so once `POST /api/jobs` carries `storage_id` (story 6b) they land
+// on the storage the user chose, with no further change here.
+//
+// STILL DEFAULT-SCOPED, each for a stated reason rather than by inheritance:
+//
+//	RepairWorkingCopy   device-scoped — no jobID to resolve, and the working copy it repairs
+//	                    belongs to whichever job last wrote it
+//	seedKind            asks "does this device already have a version HERE" for a backup not yet
+//	                    bound; becomes the job's slot with 6b
+//	BackendName         health + onboarding report the default's backend, which is the question
+//	                    being asked
+//	storageIDPtr        the id a NEW version is recorded under, on the commit path
+//
+// The first three are correct today because a backup cannot name a storage yet, so the default IS
+// every job's storage — a property of `POST /api/jobs` rather than of this package, which is why it
+// is stated once here rather than defended at each site.
 //
 // One sentence in one place rather than eight markers to keep in sync (quince#441 review). The READ
 // path is already per-storage: `slotFor` resolves a version's own slot, reconciliation takes its
@@ -73,6 +85,9 @@ type Manager struct {
 	now     func() time.Time
 	policy  RetentionPolicy
 	refresh Refresher
+
+	// jobStorage maps jobID → storageID for jobs in flight. Guarded by mu.
+	jobStorage map[string]string
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).
@@ -233,32 +248,12 @@ func (m *Manager) Versions(udid string) []wire.Version {
 }
 
 // Seed provisions the device area (idempotent) and returns the idevicebackup2 TARGET — the
-// jobSlot is the storage a NEW backup writes to, and it enforces the invariant that makes serving
-// with a disk missing honest: A STORAGE WHOSE RESOLUTION DID NOT SUCCEED NEVER ACCEPTS A JOB
-// (Operator ruling 2026-08-01, quince#435).
-//
-// Refusing here rather than at the API boundary is deliberate — this is the last point before
-// anything touches a path, and a guard that lives where the write happens cannot be bypassed by a
-// caller that forgot it. `missing_medium` is the case that proves the invariant is not optional: a
-// readable path with no marker is exactly where a write would land on the wrong filesystem.
-//
-// STORY 5c: the slot is the DEFAULT because a job cannot yet name one. When `POST /api/jobs`
-// carries `storage_id`, this takes the job's storage and the refusal becomes the ruled 409 —
-// "refused with a reason naming the default", never redirected to whichever storage is reachable.
-func (m *Manager) jobSlot() (Slot, error) {
-	s := m.defaultSlot()
-	if !s.Usable() {
-		return Slot{}, fmt.Errorf(
-			"storage %q is not reachable (%s): %s", s.Name, s.UnreachableCode, s.UnreachableReason)
-	}
-	return s, nil
-}
 
 // per-device working/ parent, seeded so the tool's own <target>/<UDID> convention lands the tree in
 // working/<udid> with no symlink (qn.5b). A dirty working/ is resumed; else it is seeded from
 // latest/ via the backend's safe strategy.
 func (m *Manager) Seed(udid, jobID string) (string, error) {
-	s, err := m.jobSlot()
+	s, err := m.jobSlot(jobID)
 	if err != nil {
 		return "", err
 	}
@@ -273,7 +268,7 @@ func (m *Manager) Seed(udid, jobID string) (string, error) {
 // SeedWork does the slow clone while idevicebackup2 is paused at its --gate. Seed = PrepareWork +
 // (if seedPending) SeedWork.
 func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
-	s, err := m.jobSlot()
+	s, err := m.jobSlot(jobID)
 	if err != nil {
 		return "", false, err
 	}
@@ -284,7 +279,7 @@ func (m *Manager) PrepareWork(udid, jobID string) (string, bool, error) {
 }
 
 func (m *Manager) SeedWork(udid, jobID string) error {
-	s, err := m.jobSlot()
+	s, err := m.jobSlot(jobID)
 	if err != nil {
 		return err
 	}
@@ -323,13 +318,17 @@ func (m *Manager) seedKind(udid string) string {
 // verification failure returns an error WITHOUT committing (state honesty — a version exists only
 // after verify+commit).
 func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
-	tree := m.defaultSlot().Backend.TreePath(udid, jobID)
+	s, err := m.jobSlot(jobID)
+	if err != nil {
+		return wire.Version{}, err
+	}
+	tree := s.Backend.TreePath(udid, jobID)
 	vr := Verify(tree, m.seedKind(udid))
 	if !vr.OK {
 		return wire.Version{}, fmt.Errorf("storage: structural verification failed: %s", vr.Detail)
 	}
 	req := CommitReq{UDID: udid, JobID: jobID, VersionID: m.newID(), CreatedAt: m.now(), Verify: vr}
-	committed, err := m.defaultSlot().Backend.Commit(req)
+	committed, err := s.Backend.Commit(req)
 	if err != nil {
 		return wire.Version{}, err
 	}
@@ -365,7 +364,11 @@ func (m *Manager) registerCommitted(c Committed) error {
 
 // Discard drops a failed job's work (design §4). Returns the human note (dirty-working on zfs).
 func (m *Manager) Discard(udid, jobID string) (string, error) {
-	note, err := m.defaultSlot().Backend.Discard(udid, jobID)
+	s, err := m.jobSlot(jobID)
+	if err != nil {
+		return "", err
+	}
+	note, err := s.Backend.Discard(udid, jobID)
 	if note != "" {
 		m.log.Info("storage: job discarded", "udid", udid, "job", jobID, "note", note)
 	}
@@ -446,7 +449,11 @@ func (m *Manager) RepairWorkingCopy(udid string) error {
 // (finding #9(a)). The engine calls this for the `verifying` state; CommitJob re-runs it (cheap,
 // quiescent tree).
 func (m *Manager) VerifyWork(udid, jobID string) (ok bool, detail, kind string, encrypted bool) {
-	tree := m.defaultSlot().Backend.TreePath(udid, jobID)
+	s, err := m.jobSlot(jobID)
+	if err != nil {
+		return false, err.Error(), "", false
+	}
+	tree := s.Backend.TreePath(udid, jobID)
 	r := Verify(tree, m.seedKind(udid))
 	return r.OK, r.Detail, r.Kind, r.Encrypted
 }
