@@ -205,7 +205,18 @@ Open inside this proposal: whether the *"this will be a full transfer"* claim (s
 §2) makes `GET /api/storages` device-scoped via `?udid=`, or is carried elsewhere. Both work; they
 differ in whether a storage list is a device-independent resource.
 
-Spec: `docs/specs/qn.6c/qn.6c.md`, gap 2. **Not built until ruled.**
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 2. **RULED 2026-07-31 — as recommended, with the `?udid=`
+sub-question settled. NOT YET BUILT: this block is flipped to its ruled form by the slice that
+implements it (slice 5).** This sentence read *"Not built until ruled"* until 2026-08-01, which
+stopped being true the moment the ruling landed and would have told a session to stop on a question
+that is decided — the same inverted-marker defect quince#408 gates for. The distinction that matters
+to a reader: **ruled-and-unbuilt** is work to do, where **unruled** is a thread to stop.
+
+**Two surfaces this proposal does NOT cover** and which story 5 needs, both proposed in the spec and
+neither built: a **re-probe endpoint** — the 2026-08-01 ruling makes reachability changeable without
+a restart, *plug the disk in and press the button*, and there is no button in this contract — and
+the **shape of `unreachable_reason`**, now that `missing_medium` and `unreachable` must be
+distinguishable by it.
 
 ### Config
 
