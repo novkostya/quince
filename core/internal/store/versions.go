@@ -24,6 +24,11 @@ type VersionRow struct {
 	LogicalBytes        int64
 	PhysicalBytes       int64
 	Missing             bool
+	// StorageID is which storage this version lives on. nil = NOT YET ATTRIBUTED (qn.6c,
+	// migration 0006). Unlike JobID, whose nil (= adopted) is permanent and correct, this one
+	// is TRANSITIONAL: a pre-qn.6c version starts nil and is attributed once its storage has a
+	// quince-storage.json marker. Treat a lingering nil as a defect, not a steady state.
+	StorageID *string
 }
 
 // InsertVersion records a committed (or adopted) version. It does NOT enforce single-latest;
@@ -31,12 +36,12 @@ type VersionRow struct {
 func (s *Store) InsertVersion(v VersionRow) error {
 	_, err := s.db.Exec(`INSERT INTO versions
 		(id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted, is_latest,
-		 structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing, storage_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.UDID, v.Backend, nullStr(v.ZFSSnapshot), fmtTime(v.CreatedAt), nullStr(v.JobID),
 		v.Kind, boolInt(v.Encrypted), boolInt(v.IsLatest),
 		nullTime(v.StructureVerifiedAt), nullTime(v.ContentVerifiedAt),
-		v.LogicalBytes, v.PhysicalBytes, boolInt(v.Missing))
+		v.LogicalBytes, v.PhysicalBytes, boolInt(v.Missing), nullStr(v.StorageID))
 	return err
 }
 
@@ -57,7 +62,8 @@ func (s *Store) ListVersions(udid string) ([]VersionRow, error) {
 		err  error
 	)
 	const sel = `SELECT id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted,
-		is_latest, structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing
+		is_latest, structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing,
+		storage_id
 		FROM versions`
 	if udid == "" {
 		rows, err = s.db.Query(sel + ` ORDER BY created_at DESC, id DESC`)
@@ -106,7 +112,7 @@ func (s *Store) UDIDsWithVersions() ([]string, error) {
 func (s *Store) GetVersion(id string) (VersionRow, bool, error) {
 	row := s.db.QueryRow(`SELECT id, udid, backend, zfs_snapshot, created_at, job_id, kind,
 		encrypted, is_latest, structure_verified_at, content_verified_at, logical_bytes,
-		physical_bytes, missing FROM versions WHERE id = ?`, id)
+		physical_bytes, missing, storage_id FROM versions WHERE id = ?`, id)
 	v, err := scanVersion(row)
 	if err == sql.ErrNoRows {
 		return VersionRow{}, false, nil
@@ -153,9 +159,10 @@ func scanVersion(sc rowScanner) (VersionRow, error) {
 		sVer    sql.NullString
 		cVer    sql.NullString
 		missing int
+		storage sql.NullString
 	)
 	if err := sc.Scan(&v.ID, &v.UDID, &v.Backend, &snap, &created, &job, &v.Kind, &enc, &latest,
-		&sVer, &cVer, &v.LogicalBytes, &v.PhysicalBytes, &missing); err != nil {
+		&sVer, &cVer, &v.LogicalBytes, &v.PhysicalBytes, &missing, &storage); err != nil {
 		return VersionRow{}, err
 	}
 	v.ZFSSnapshot = strPtrOrNil(snap)
@@ -163,6 +170,7 @@ func scanVersion(sc rowScanner) (VersionRow, error) {
 	v.Encrypted = enc != 0
 	v.IsLatest = latest != 0
 	v.Missing = missing != 0
+	v.StorageID = strPtrOrNil(storage)
 	t, err := parseTime(created)
 	if err != nil {
 		return VersionRow{}, err
