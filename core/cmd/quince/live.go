@@ -257,27 +257,16 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 			KeepDaily:  scfg.Retention.KeepDaily,
 			KeepWeekly: scfg.Retention.KeepWeekly,
 		}, id.New, log)
-	// ATTRIBUTION RUNS BEFORE RECONCILIATION, AND THE ORDER IS LOAD-BEARING (quince#422 review).
-	//
-	// Reconciliation asks "is this version's artifact on disk under MY root", and can only ask it
-	// of versions it knows belong to this storage. A pre-qn.6c row has storage_id NULL, so an
-	// attributed Manager does not own it — and on the FIRST startup after upgrade that is every
-	// row, while their artifacts sit on disk under this very root. Reconciling first therefore
-	// finds an empty registry view, treats every artifact as unadopted, and tries to re-adopt the
-	// lot: `UNIQUE constraint failed: versions.id`, once per version, every startup until the
-	// sweep happens to run.
-	//
-	// The sweep fills those NULLs, so running it first is what makes the ownership filter true
-	// rather than merely intended. I asserted this ordering in a comment on the filter before the
-	// code did it; the comment was right about what SHOULD happen and wrong about what did.
-	//
-	// Fills only NULLs, so it never rewrites where a committed backup is recorded as living, and
-	// is therefore safe to run at every startup.
-	attributeVersions(st, state.StorageID, log)
 
+	// Attribution happens INSIDE Reconcile now, per storage, from what Scan found (quince#439).
+	// A loud comment about statement order stood here until then, protecting the sweep that had
+	// to run first. That call is DELETED, not merely moved, so there is no ordering left to
+	// protect — the hazard is structurally gone rather than unlikely.
 	if err := storageMgr.Reconcile(ctx); err != nil {
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
+
+	reportUnattributed(st, log)
 
 	log.Info("storage subsystem ready", "storage", name, "path", root, "backend", backendName,
 		"reason", reason, "storage_id", state.StorageID, "resolution", state.Resolution,
@@ -285,43 +274,28 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	return storageMgr, nil
 }
 
-// attributeVersions fills storage_id on versions that have none, and reports what remains.
+// reportUnattributed says how many versions still carry a NULL storage_id, after reconciliation
+// has had its chance to fill them.
 //
-// `null` means NOT YET ATTRIBUTED and is TRANSITIONAL (contracts §2). This is what makes it
-// transitional in fact rather than only in the documentation — and the leftover count is logged
-// rather than swallowed, because a nullable-with-meaning field whose meaning is "temporary" decays
-// into a permanent unknown unless something keeps saying otherwise.
+// This is what survives of the `attributeVersions` sweep quince#439 deleted. The FILLING moved into
+// reconciliation, where `Scan` has just walked a root and "which storage" is observed rather than
+// guessed; the COUNTING stayed here, because it answers a different question and the nullability
+// ruling made it mandatory: `null` means "not yet attributed" and is TRANSITIONAL, and a
+// nullable-with-meaning field whose meaning is "temporary" decays into a permanent unknown unless
+// something asserts otherwise.
 //
-// Single-storage this rung: every unattributed version belongs to the one declared storage. When a
-// device can have versions on several, attribution stops being a whole-table sweep and becomes a
-// per-(device, storage) question — which is why this is deliberately a small, replaceable function.
-func attributeVersions(st *store.Store, storageID string, log *slog.Logger) {
-	udids, err := st.UDIDsWithVersions()
-	if err != nil {
-		log.Error("storage: could not list devices for version attribution", "error", err)
-		return
-	}
-	var total int64
-	for _, u := range udids {
-		n, err := st.AttributeVersions(u, storageID)
-		if err != nil {
-			log.Error("storage: attributing versions failed", "udid", u, "error", err)
-			return
-		}
-		total += n
-	}
+// A non-zero count is NOT an error. It is the honest state for a version whose artifact is gone, or
+// sits on a disk nobody declared — quince does not know where it is, and says so rather than
+// picking. It must never be silent, though, because this is the state that is supposed to shrink.
+func reportUnattributed(st *store.Store, log *slog.Logger) {
 	remaining, err := st.CountUnattributedVersions()
 	if err != nil {
 		log.Error("storage: could not count unattributed versions", "error", err)
 		return
 	}
-	if total > 0 {
-		log.Info("storage: attributed versions to their storage", "count", total, "storage_id", storageID)
-	}
 	if remaining > 0 {
-		// Not an error here — but it must never be silent, because this is the state that is
-		// supposed to disappear.
-		log.Warn("storage: versions still carry no storage_id", "count", remaining)
+		log.Warn("storage: versions still carry no storage_id — their artifacts were not found "+
+			"under any reachable declared storage", "count", remaining)
 	}
 }
 

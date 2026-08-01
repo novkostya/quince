@@ -20,6 +20,7 @@ type Registry interface {
 	DeleteVersion(id string) error
 	MarkVersionMissing(id string, missing bool) error
 	UDIDsWithVersions() ([]string, error)
+	AttributeVersion(id, storageID string) error
 }
 
 // Auditor records the version-delete audit rows (*store.Store satisfies it). Detail never

@@ -574,16 +574,16 @@ func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T
 		t.Fatal("precondition: an attributed Manager must NOT own a NULL row — that is the whole hazard")
 	}
 
-	// The sweep is what closes it, which is why it must run FIRST.
-	if _, err := st.AttributeVersions(udid, sid); err != nil {
-		t.Fatalf("sweep: %v", err)
+	// Attribution is what closes it — now done during reconciliation, from what Scan found.
+	if err := st.AttributeVersion("01VOLD1", sid); err != nil {
+		t.Fatalf("attribute: %v", err)
 	}
 	row, _, err = st.GetVersion("01VOLD1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !m.owns(row.StorageID) {
-		t.Error("after the sweep the row must be owned, or reconciliation will try to re-adopt its artifact")
+		t.Error("after attribution the row must be owned, or reconciliation cannot check its artifact")
 	}
 	if n, err := st.CountUnattributedVersions(); err != nil || n != 0 {
 		t.Errorf("the sweep must leave nothing unattributed; %d remain (%v)", n, err)

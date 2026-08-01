@@ -69,20 +69,57 @@ func (m *Manager) reconcileDevice(udid string) error {
 	if err != nil {
 		return err
 	}
+	// ATTRIBUTION HAPPENS HERE, BECAUSE HERE IS WHERE "WHICH STORAGE" IS KNOWN (quince#439).
+	//
+	// `Scan` has just walked THIS root. A row with a NULL storage_id whose artifact is in that scan
+	// lives on this storage — observed, not guessed. The sweep this replaced took one storage id and
+	// filled every NULL for the device, which is unanswerable before the artifacts are located: with
+	// several storages declared it recorded existing backups on whichever was passed.
+	//
+	// Fills only NULLs and never rewrites, so it is safe on every startup, and a storage that is
+	// unreachable today simply attributes its versions at a later one.
+	byID := map[string]store.VersionRow{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	mine := m.storageIDPtr()
+	if mine != nil {
+		for id, r := range byID {
+			if r.StorageID != nil {
+				continue
+			}
+			if _, here := onDisk[id]; !here {
+				// NOT ON THIS ROOT, so this scan learns nothing about it. It stays NULL — which is
+				// the honest record for a version whose artifact is gone or on a disk nobody
+				// declared. Inventing an identity for data that cannot be regenerated is what
+				// migration 0006 already refuses, and this is not an exception to it.
+				continue
+			}
+			if err := m.reg.AttributeVersion(id, *mine); err != nil {
+				m.log.Error("reconcile: attributing a version to this storage failed",
+					"id", id, "udid", udid, "error", err)
+				continue
+			}
+			r.StorageID = mine
+			byID[id] = r
+			m.log.Info("reconcile: attributed a previously unattributed version to this storage",
+				"id", id, "udid", udid, "storage_id", *mine)
+		}
+	}
+
 	// SCOPED TO THIS STORAGE. `Scan` walked one root, so it can only answer for one storage's
 	// versions — and the loop below concludes "not on disk ⇒ missing" from it. Comparing this
 	// backend's scan against ALL of a device's rows means storage B's pass marks storage A's
 	// versions missing, then A's pass marks B's, and the last writer wins (quince#378 survey).
 	//
 	// Membership is `owns` — the NULL group is a real group (same shape as the is_latest ruling):
-	// an UNATTRIBUTED Manager owns the unattributed rows, an attributed one does not. For an
-	// attributed Manager a NULL row is SKIPPED rather than assumed to be ours, because quince
-	// does not know where that version lives, so this scan cannot conclude anything about it —
-	// marking it missing for being absent from THIS root would invent a fact. The attribution
-	// sweep runs before reconciliation precisely so that set is empty in practice.
+	// an UNATTRIBUTED Manager owns the unattributed rows, an attributed one does not. A NULL row
+	// that survived the attribution pass above is one whose artifact is NOT here, so skipping it is
+	// the honest answer rather than a deferral: marking it missing for being absent from a root it
+	// was never on would invent a fact.
 	inReg := map[string]store.VersionRow{}
 	var skipped int
-	for _, r := range rows {
+	for _, r := range byID {
 		if m.owns(r.StorageID) {
 			inReg[r.ID] = r
 		} else {
@@ -90,14 +127,26 @@ func (m *Manager) reconcileDevice(udid string) error {
 		}
 	}
 	if skipped > 0 {
-		m.log.Warn("reconcile: versions with no storage attribution were skipped — their artifacts "+
-			"cannot be checked against any one root", "udid", udid, "count", skipped)
+		m.log.Warn("reconcile: versions belonging to another storage, or to none, were skipped — "+
+			"their artifacts cannot be checked against this root", "udid", udid, "count", skipped)
 	}
 
-	// Adopt on-disk versions with no row; clear `missing` where an artifact reappeared.
+	// Adopt on-disk versions with NO ROW AT ALL; clear `missing` where an artifact reappeared.
 	for id, a := range onDisk {
 		r, ok := inReg[id]
 		if !ok {
+			// THE PREDICATE IS "no row at all", NOT "no row I own" (quince#428). A row that exists
+			// but belongs elsewhere must not be adopted — inserting it would fail on the primary key
+			// at best, and duplicate a committed version's identity at worst.
+			if other, exists := byID[id]; exists {
+				// The artifact is under THIS root and the row says it lives on another storage.
+				// Genuinely ambiguous input — a bind mount, or a replica — so say so rather than
+				// pick. First scan wins, which is the existing attribution, left untouched.
+				m.log.Warn("reconcile: an artifact for a version attributed to ANOTHER storage is "+
+					"present under this root — leaving the existing attribution alone",
+					"id", id, "udid", udid, "attributed_to", derefID(other.StorageID))
+				continue
+			}
 			m.adopt(udid, a)
 			continue
 		}
@@ -213,4 +262,13 @@ func (m *Manager) reconcileUDIDs() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// derefID renders a nullable storage id for a log line, so an unattributed row reads as "none"
+// rather than as a pointer address.
+func derefID(s *string) string {
+	if s == nil {
+		return "none"
+	}
+	return *s
 }
