@@ -393,7 +393,63 @@ exists to answer. Excluding it keeps that fork open; including it would decide i
 disk's bare mountpoint — quince **refuses, exits 1, and writes nothing**, naming the medium as the
 cause and the remedy. That last case is the bug this block exists to prevent.
 
+**That third measurement is a record of what was driven, and the REFUSAL half of it is superseded**
+by the ruling in the next block (2026-08-01). A missing medium no longer stops the daemon: it is
+served as `reachable: false` with a reason. What survives unchanged, and is the part that mattered,
+is that quince **writes nothing** to such a path and it **never accepts a job** — the bare
+mountpoint is still never treated as an empty new storage. Kept rather than rewritten because it
+records a real run against the real image; read it as *what the one-storage build did*, not as
+current behaviour.
+
 Spec: `docs/specs/qn.6c/qn.6c.md`, gap 4.
+
+**RULED (was `PROPOSED (gap)`): an unreachable storage is a LISTED STATE, not a refusal to serve.**
+Operator ruling, 2026-08-01, on quince#435 — relayed by architect session `arch1`. It supersedes the
+refusal half of the measurement above, which was ruled when exactly one storage could be declared.
+
+**quince serves in every case, with reachability as data.** A storage that cannot be reached now is
+listed `reachable: false` with a reason; it does not stop the daemon, and it does not block a backup
+to any other storage.
+
+- **The DEFAULT storage unreachable, others fine → serve.** A job naming no `storage_id` is
+  **refused with a reason naming the default** — never silently redirected to whichever storage
+  happens to be reachable. A fallback there would write a backup to a disk the user did not choose,
+  which is *no silent fallbacks* at its most expensive.
+- **EVERY declared storage unreachable → serve.** Refusing to start makes the page that would
+  *explain* the problem unreachable, so the user gets a dead daemon and a log line instead of a
+  screen naming the disk to plug in. A quince that can do nothing but explain itself beats one that
+  cannot do that either.
+- **`missing_medium` and `unreachable` get the SAME behaviour and DIFFERENT text.** Both serve, both
+  are `reachable: false`; the reason string distinguishes them, because they call for different user
+  actions — *plug the disk in* versus *this path is readable but it is not your backup medium*.
+  `missing_medium` remains the more alarming of the two and its reason says why.
+- **Reachability may change WITHOUT a restart** — re-probe on demand; *plug the disk in and press the
+  button*. The storage **list** still needs a restart (rung decision 1, untouched).
+
+**The one hard refusal that survives is a config declaring NO storages at all** — a configuration
+error nothing at runtime fixes, whose remedy is editing a file. That is G7, unchanged.
+
+**The invariant that makes serving safe, and it is not optional: a storage whose `Resolution` is not
+`OK()` NEVER accepts a job.** Serving is honest only while nothing can write to a storage quince
+could not verify. `missing_medium` is the case that proves it — a readable path with no marker is
+exactly where a write would land on the wrong filesystem.
+
+**Two consequences the ruling implies rather than states.** First, **`Resolution` stops being a
+startup-time fact and becomes a current one**: anywhere it is cached, the cache is a claim about the
+past — the same class as `preflight`'s *reach is presence, not freshness*. Where the probe happens is
+to be decided deliberately rather than left to settle. Second, **the `(Slot, bool)` seam from
+quince#433 is what absorbs this**, and both its call sites already refuse honestly; story 5 adds a
+second *reason* for `!ok` — declared but not reachable now, versus not configured at all — which
+callers distinguish in their **message**, not in their control flow.
+
+**Not decided here:** the wire shape of `GET /api/storages` — field names, and whether the reason is
+a code or prose. That is contracts territory and belongs in the story 5 spec, reviewed before code.
+This ruling settles **behaviour**, not wire format.
+
+**The four sub-questions that made it rulable are kept** — the default unreachable, all unreachable,
+whether `missing_medium` diverges from `unreachable`, and whether reachability changes without a
+restart — because the ruling reads better with the argument it was taken against than as a bare
+verdict. Spec: `docs/specs/qn.6c/qn.6c.md`, story 5.
 
 ## 6. Security model
 

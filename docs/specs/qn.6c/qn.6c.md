@@ -709,7 +709,31 @@ beyond the four declared above.
 3. **Not a gap, recorded so a later rung does not rediscover it:** epic point 7's continuous
    reconciliation becomes *buildable* the moment story 5 lands, because *unreachable* and
    *artifact gone* stop being one state. It is deliberately not built here.
-4. **The creation residual, left open on purpose.** The very first startup after declaring a
+4. **RULED, not open — an unreachable storage is a LISTED STATE, not a refusal to serve.**
+   Operator ruling 2026-08-01 on quince#435; the full text is the RULED block in design §5. Raised
+   because story 5's first sentence *is* this question while the merged `buildStorage` answered it
+   the other way — `Resolution.OK()` admits only `created` and `opened`, so `unreachable` and
+   `missing_medium` both stopped the daemon. Right for one declared storage, wrong for several.
+
+   **quince serves in every case**, with reachability as data. The default unreachable → serve, and
+   a job naming no `storage_id` is **refused with a reason naming the default**, never redirected.
+   All storages unreachable → serve. `missing_medium` and `unreachable` get the **same behaviour
+   and different text**. Reachability may change **without a restart** (re-probe on demand); the
+   storage *list* still needs one, per decision 1. The one surviving hard refusal is a config
+   declaring **no storages at all** — G7, unchanged.
+
+   **The invariant that makes serving safe: a storage whose `Resolution` is not `OK()` never
+   accepts a job.**
+
+   **Slices 5, 6 and 7 are unblocked.** Two implications to carry rather than rediscover:
+   `Resolution` is now a *current* fact, so anywhere it is cached the cache is a claim about the
+   past; and `slotFor`'s `(Slot, bool)` seam gains a second *reason* for `!ok` — declared but not
+   reachable now, versus not configured — to be distinguished in the message, not the control flow.
+
+   **Still not decided:** the wire shape of `GET /api/storages` (field names; reason as code or
+   prose). Contracts territory, and it belongs in the story 5 spec reviewed before code.
+
+5. **The creation residual, left open on purpose.** The very first startup after declaring a
    storage whose medium is absent has neither a marker nor a `storages` row, so it is
    indistinguishable from a genuine creation. Carried by a **written requirement** — *declare a
    storage with its medium present* — plus the loud creation event, rather than by a mechanism.
