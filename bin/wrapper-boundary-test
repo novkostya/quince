@@ -735,5 +735,76 @@ for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-bot bin/gh-analyst; do
 	fi
 done
 
+# --- A VERDICT WITHOUT `--commit-id` IS REFUSED (quince#110) --------------------------------------
+#
+# `gh pr review` has no `--commit-id`, and the REST endpoint defaults it to "the most recent commit in
+# the pull request" — so every verdict this project has cast was bound to head-at-submission rather
+# than to what the reviewer read. `bin/gh-review` now casts verdicts through the API and REQUIRES it.
+#
+# DRIVEN WITH NO CREDENTIAL AND NO `gh` ON PATH, which is the point of where the check sits: the
+# validation is above the dependency loop and above the mint, so a missing oid is caught without a
+# network round-trip — and a suite can reach it at all. Below the mint it would need a live key.
+rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+out=$(run bin/gh-review pr review 42 --repo o/r --approve)
+case "$out" in
+*"REFUSING to cast a verdict without --commit-id"*)
+	ok "bin/gh-review: a verdict with no --commit-id is refused"
+	;;
+*"is not installed"*)
+	bad "bin/gh-review: the dependency refusal spoke first — the check is below the mint and unreachable"
+	;;
+*)
+	bad "bin/gh-review: a verdict with no --commit-id was not refused, so GitHub would bind it to head"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# THE REFUSAL MUST NAME THE REMEDY. A verdict path that refuses without saying how to get the oid
+# sends the reviewer to `--help`, which does not have it — that is how this defect survived.
+case "$out" in
+*"--json headRefOid"*)
+	ok "bin/gh-review: the refusal names the command that produces the oid"
+	;;
+*)
+	bad "bin/gh-review: the refusal does not say how to obtain the oid"
+	;;
+esac
+
+# THE NEGATIVE CONTROL. With the oid supplied, validation must PASS and fall through to the ordinary
+# dependency refusal — otherwise the case above would pass against a wrapper that refuses EVERY
+# verdict, which would be worse than the defect it fixes.
+out=$(run bin/gh-review pr review 42 --repo o/r --approve --commit-id 0123456789012345678901234567890123456789)
+case "$out" in
+*"is not installed"*)
+	ok "bin/gh-review: with the oid supplied the verdict path proceeds — it does not refuse everything"
+	;;
+*"REFUSING to cast a verdict"*)
+	bad "bin/gh-review: refused a verdict that DID carry --commit-id"
+	;;
+*)
+	bad "bin/gh-review: inconclusive with --commit-id supplied"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+# AND THE BOUNDARY STILL OUTRANKS IT (quince#157). A box holding the implementer identity must be told
+# THAT, not that it forgot a flag: the first refusal is an instruction to STOP, the second an
+# instruction to retype the command.
+printf 'an implementer app key\n' >"$CKEY"
+out=$(run bin/gh-review pr review 42 --repo o/r --approve)
+case "$out" in
+*"IMPLEMENTER APP KEY is present"*)
+	ok "bin/gh-review: the identity boundary outranks the missing-oid refusal"
+	;;
+*"REFUSING to cast a verdict"*)
+	bad "bin/gh-review: a usage refusal outranked the boundary — the wrong repair is the one it invites"
+	;;
+*)
+	bad "bin/gh-review: neither refusal recognised with a coder key and no oid"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+rm -f "$CKEY"
+
 printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -132,6 +132,79 @@ if [ $# -eq 0 ]; then
 	exit 2
 fi
 
+# A VERDICT NEVER GOES THROUGH THE PORCELAIN (quince#110, ruled 2026-07-30).
+#
+# `gh pr review` has no `--commit-id`, and the REST endpoint it calls documents the default:
+# "The SHA of the commit that needs a review. … Defaults to the most recent commit in the pull
+# request when you do not specify a value." So every verdict this project has ever cast was bound to
+# WHATEVER HEAD EXISTED AT THE INSTANT OF SUBMISSION, not to what the reviewer read.
+#
+# The race is invisible from the reviewer's side: the diff view stays rendered from the commit you
+# opened, so you approve a page showing A while the verdict attaches to B. Measured on quince#183 —
+# author amended at 22:00:08Z, the approval registered at 22:00:25Z against a commit seventeen
+# seconds old that the reviewer had never seen.
+#
+# MEASURED FOR THIS CHANGE, on a throwaway PR that was closed and whose branch was deleted:
+#   - the API accepts an explicit NON-HEAD commit_id and records it, with no error;
+#   - an EXPLICITLY SET commit_id SURVIVES `gh pr update-branch --rebase`, where an auto-defaulted
+#     one is re-pointed to the new head. That second result is why this closes two defects rather
+#     than one: the merging seat's own rebase can no longer silently move what a verdict covers.
+#
+# IT IS A DECLARATION, NOT A COMPARE-AND-SWAP. The docs describe no error when commit_id is not head,
+# and the probe found none. So this does not refuse a mis-timed approval — it records honestly what
+# was approved, which is the property `/architect` §4's staleness check needs in order to mean
+# anything. Before this, that check compared commit_id against the head it had been defaulted from.
+#
+# THE OID IS REQUIRED AND THERE IS NO DEFAULT, deliberately. Resolving head here would pass a
+# commit_id that is once again "whatever is head now", narrowing the window rather than closing it —
+# the shape the ruling declined as item 3, "strictly worse … dead weight beside (1)".
+#
+# PARSED AND REFUSED HERE, ABOVE THE DEPENDENCY LOOP AND THE MINT, for two reasons. A missing oid is
+# a usage error and needs no network round-trip to detect — and putting it below the mint would make
+# the refusal unreachable to any hermetic suite, since reaching it would require a live key. The
+# ordering also matches quince#157: a refusal that must not be repaired away speaks before one that
+# invites installing a package.
+_gr_verdict=no
+case "${1:-}/${2:-}" in
+pr/review) _gr_verdict=yes ;;
+esac
+if [ "$_gr_verdict" = yes ]; then
+	_gr_commit="" _gr_pr="" _gr_event="" _gr_body="" _gr_repo="${QUINCE_REPO:-}"
+	shift 2
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--commit-id) _gr_commit="${2:?--commit-id needs an oid}"; shift 2 ;;
+		-a | --approve) _gr_event=APPROVE; shift ;;
+		-r | --request-changes) _gr_event=REQUEST_CHANGES; shift ;;
+		-c | --comment) _gr_event=COMMENT; shift ;;
+		-b | --body) _gr_body="${2:?--body needs a value}"; shift 2 ;;
+		-F | --body-file) _gr_body=$(cat "${2:?--body-file needs a path}"); shift 2 ;;
+		-R | --repo) _gr_repo="${2:?--repo needs owner/name}"; shift 2 ;;
+		-*)
+			die "unrecognised flag '$1' on the verdict path." \
+				"Verdicts go through the REST API here rather than \`gh pr review\`, so this accepts" \
+				"that command's flags and no others. If gh grows one this needs, add it here." ;;
+		*) _gr_pr="$1"; shift ;;
+		esac
+	done
+	[ -n "$_gr_pr" ] || die "no pull request number." \
+		"usage: gh-review pr review <n> --repo owner/name --approve --commit-id <oid> [--body-file <f>]"
+	[ -n "$_gr_repo" ] || die "no repository." "Pass --repo owner/name, or set QUINCE_REPO."
+	[ -n "$_gr_event" ] || die "no verdict." "One of --approve, --request-changes, --comment is required."
+	[ -n "$_gr_commit" ] || die \
+		"REFUSING to cast a verdict without --commit-id (quince#110)." \
+		"Without it GitHub binds the review to whatever head exists at the instant of submission —" \
+		"not to what you read — and the diff view does not change under you, so nothing says so." \
+		"Pass the FULL 40-char oid you actually reviewed:" \
+		"  gh-review pr review $_gr_pr --repo $_gr_repo --approve --commit-id <oid> --body-file <f>" \
+		"Read it BEFORE you review: gh pr view $_gr_pr --json headRefOid -q .headRefOid" \
+		"There is no default on purpose — resolving head here would re-create the race it closes."
+	# An empty `body` field is not the same as an absent one, so it is only sent when non-empty.
+	set -- api -X POST "repos/$_gr_repo/pulls/$_gr_pr/reviews" \
+		-f "event=$_gr_event" -f "commit_id=$_gr_commit"
+	[ -z "$_gr_body" ] || set -- "$@" -f "body=$_gr_body"
+fi
+
 for tool in gh openssl curl jq; do
 	command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed" \
 		"this wrapper needs gh, openssl, curl and jq. On Alpine: apk add openssl curl jq." \
@@ -213,6 +286,19 @@ export GH_TOKEN
 # MISSED wake and the one direction this subsystem must not fail in. The exit status is passed
 # through unchanged either way; the ledger never affects what the caller sees.
 _ledger="$(dirname "$0")/forge-ledger"
+
+# THE VERDICT PATH RECORDS BY HAND, because `classify` reads argv and argv is now `api -X POST …`,
+# which classifies as nothing (quince#110). Suppression is keyed on repo+number+subject+kind and this
+# act is still a review — so without this an architect approving through the fixed path would be woken
+# by its own verdict: quince#242's defect arriving through a changed CALL SHAPE rather than a new verb.
+if [ "$_gr_verdict" = yes ]; then
+	gh "$@" && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ] && [ -x "$_ledger" ]; then
+		"$_ledger" record pr review "$_gr_pr" --repo "$_gr_repo" || :
+	fi
+	exit "$_rc"
+fi
+
 if [ -x "$_ledger" ] && "$_ledger" classify "$@" >/dev/null 2>&1; then
 	gh "$@" && _rc=0 || _rc=$?
 	if [ "$_rc" -eq 0 ]; then "$_ledger" record "$@" || :; fi
