@@ -1,7 +1,9 @@
 package store
 
 import (
+	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,8 +35,21 @@ func TestMigrateCreatesTablesAndIsIdempotent(t *testing.T) {
 	if err := st.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 5 {
-		t.Fatalf("schema_migrations rows = %d, want 5", applied)
+	// Counted from the embedded set rather than hard-coded. The claim worth making is "every
+	// migration on disk was applied exactly once"; a literal restates the count in a second place,
+	// so adding one fails a test that has no opinion about it — as 0006_storage did.
+	files, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".sql") {
+			want++
+		}
+	}
+	if applied != want {
+		t.Fatalf("schema_migrations rows = %d, want %d (one per embedded .sql)", applied, want)
 	}
 }
 
