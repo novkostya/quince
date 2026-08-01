@@ -844,13 +844,37 @@ func (e *Engine) warnDiskLow(lj *liveJob, low *diskLowInfo) {
 
 // --- transitions ---
 
+// THE PER-JOB WRITE ORDER IS THE LOCK'S JOB, AND THE LOCK MUST SPAN THE WRITE (quince#178).
+//
+// Both writers below used to snapshot the row under lj.mu, RELEASE the lock, and only then hit
+// SQLite. That makes the order of the two DB writes independent of the order of the two mutations,
+// so a sampler goroutine descheduled between its snapshot and its write lands a STALE row on top of
+// a terminal one:
+//
+//	sampler   lock; set liveness; copy row {backing_up}; unlock ......... descheduled .......
+//	run       lock; set state=failed; copy row {failed}; unlock; WRITE {failed}; release
+//	sampler   ... resumes ...................................................  WRITE {backing_up}
+//
+// The job is then over — the engine no longer owns it — while the stored row says `backing_up`
+// and `waiting_for_passcode`. It is user-visible and it is a state-honesty violation: quince goes
+// on telling somebody to enter a passcode for a backup that already failed, and only startup
+// reconciliation ever corrects it. It also produced quince#178's ~8% CI flake, because whether the
+// test observed the terminal row before the stale write overwrote it was a coin toss.
+//
+// Holding lj.mu across mutate → persist → emit makes each job's writes total-ordered, so the last
+// write is always the last mutation. The mutex is per job, so this serialises a job against ITSELF
+// (its sampler versus its run goroutine) and never against another job. Bus.Publish is non-blocking
+// — it drops into a full subscriber buffer rather than waiting — and re-enters nothing here, so the
+// emit is safe under the lock too, and keeping it there is what stops a stale EVENT racing a fresh
+// one the same way.
+
 // transition mutates, persists (BEFORE the event — crash-safe), and emits immediately: for state
 // changes, which must never be dropped.
 func (e *Engine) transition(lj *liveJob, mutate func(*store.JobRow)) {
 	lj.mu.Lock()
+	defer lj.mu.Unlock()
 	mutate(&lj.row)
 	row := lj.row
-	lj.mu.Unlock()
 	if err := e.st.UpdateJob(row); err != nil {
 		e.log.Error("backup: persist transition failed", "job", row.ID, "state", row.State, "error", err)
 	}
@@ -861,15 +885,14 @@ func (e *Engine) transition(lj *liveJob, mutate func(*store.JobRow)) {
 // in-memory row keeps the latest, and the next state transition persists it in full.
 func (e *Engine) progress(lj *liveJob, mutate func(*store.JobRow)) {
 	lj.mu.Lock()
+	defer lj.mu.Unlock()
 	mutate(&lj.row)
 	now := e.now()
 	if now.Sub(lj.lastEmit) < e.cfg.ProgressThrottle {
-		lj.mu.Unlock()
 		return
 	}
 	lj.lastEmit = now
 	row := lj.row
-	lj.mu.Unlock()
 	if err := e.st.UpdateJob(row); err != nil {
 		e.log.Error("backup: persist progress failed", "job", row.ID, "error", err)
 	}
