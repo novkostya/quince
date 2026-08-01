@@ -39,7 +39,11 @@ func withStorage(fn func(mgr *storage.Manager) error) error {
 	eventBus := bus.New()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	return fn(buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log))
+	mgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	if err != nil {
+		return err
+	}
+	return fn(mgr)
 }
 
 // versionsCmd implements `quince versions verify`. It re-runs the passwordless STRUCTURAL

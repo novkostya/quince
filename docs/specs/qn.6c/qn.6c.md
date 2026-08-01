@@ -734,7 +734,7 @@ relay on quince#378.
 | 4b | story 4's **DB half** — migration `0006`, `versions.storage_id` nullable, the `storages` table (G6). No wire, no contracts | — | no |
 | 4c | story 4's **wire half** — `Version.storage_id`; flips the rest of gap 1 in contracts §2. **After 4a** | — | no |
 | 3b | story 2, second half — the creation-moment **rule** and its gates: `ResolveStorage`, missing-medium, the unmounted-mountpoint refusal (G5b), the `storages` table access layer and the no-permanent-nulls helpers. **Built and UNWIRED**; design §5 is NOT flipped here. **After 4b** — it needs the `storages` table | — | no |
-| 3c | the **wiring** — `buildStorage` resolves each declared storage through `ResolveStorage`, refuses on a bad resolution, records the row and attributes versions; **flips design §5** | — | no |
+| 3c | the **wiring** — `buildStorage` resolves the declared storage through `ResolveStorage`, **refuses to serve** on a bad resolution, records the `storages` row and attributes pre-`qn.6c` versions; **flips design §5**. Driven against the real image: created → opened → refused-on-absent-medium (exit 1, nothing written) | — | no |
 | 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
 | 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
 | 7 | story 9 — the selector (G8) | — | no |

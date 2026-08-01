@@ -305,8 +305,10 @@ keep N recent + M dailies + K weeklies (config; generous defaults; deletion alwa
 requires confirmed UI action or explicit policy opt-in), acting on quince-created
 versions only.
 
-**PROPOSED (gap): `quince-storage.json`, and when a config-declared storage gets probed —
-`qn.6c`, quince#378.**
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): `quince-storage.json`, and the creation moment a
+config-declared storage does not have — `qn.6c`, Operator ruling 2026-07-31, relayed on
+quince#378.** Accepted as proposed; built across quince#398 (the marker as an artifact), quince#410
+(the rule) and the PR carrying this edit (the wiring).
 
 At `qn.6c` there are several roots. A removable disk's **path** changes on replug, so a storage
 identified by its path cannot answer *"is this the same storage?"* — hence a marker at the storage
@@ -386,7 +388,12 @@ offsite is a **replication** of a storage, not a storage. If the marker rides al
 claims its source's UUID and two places assert one identity — precisely the question the file
 exists to answer. Excluding it keeps that fork open; including it would decide it silently.
 
-Spec: `docs/specs/qn.6c/qn.6c.md`, gap 4. **Not built until ruled.**
+**Driven, not only tested.** Against the real image: a fresh root is CREATED (marker written,
+`verified: true`); a restart OPENS the same `storage_id`; and with the marker removed — an unplugged
+disk's bare mountpoint — quince **refuses, exits 1, and writes nothing**, naming the medium as the
+cause and the remedy. That last case is the bug this block exists to prevent.
+
+Spec: `docs/specs/qn.6c/qn.6c.md`, gap 4.
 
 ## 6. Security model
 

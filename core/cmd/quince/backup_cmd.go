@@ -42,7 +42,10 @@ func backupCmd(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ls := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	if err != nil {
+		return err
+	}
 	if code := backup.DriveToCompletion(ctx, ls.engine, eventBus, udid, transport, os.Stdout); code != 0 {
 		return errors.New("backup did not complete successfully")
 	}
