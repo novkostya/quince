@@ -13,10 +13,20 @@ import "strings"
 // qn.5b: the per-job staging is now working/<udid> (the old per-job work/<job> is gone), so only
 // working/ (the mutable in-progress tree) and versions/ (local-only namespace history) are excluded
 // — latest/ is the sole synced payload, and the atomic exchange means a walk never sees it missing.
+// qn.6c: the storage IDENTITY marker is excluded too, and the reason is not size or noise. Offsite
+// is a REPLICATION of a storage, not a storage (the multi-storage epic's point 3). If
+// quince-storage.json rides along, the replica carries its SOURCE's UUID and two places assert one
+// identity — precisely the question the marker exists to answer. Excluding it keeps that fork open;
+// including it would decide it silently.
+//
+// It needs its OWN rule because both existing rules match at `/<subdir>/*/…` and the marker sits at
+// `/<subdir>/…`, one level shallower. Measured before it was written: without this line
+// PathExcluded returns false for the marker, so it would have been synced (quince#378).
 func AnchoredFilterRules(subdir string) []string {
 	return []string{
 		"- /" + subdir + "/*/working/**",
 		"- /" + subdir + "/*/versions/**",
+		"- /" + subdir + "/" + StorageMarkerName,
 	}
 }
 
