@@ -174,11 +174,35 @@ defect in a docs PR exactly as a failing test is in a code PR.
 
 ## 6. Submit the verdict
 
+**Note the head oid BEFORE you read the diff**, and pass it as `--commit-id`. It is the same value
+`/architect` §4 calls `OLD` — one oid, noted once, used for both the verdict and the staleness check:
+
 ```sh
-gh pr review <n> --repo novkostya/quince --approve         -b "<what you ran + what you checked>"
-gh pr review <n> --repo novkostya/quince --request-changes -b "<blocking findings, numbered>"
-gh pr review <n> --repo novkostya/quince --comment         -b "<observations, no verdict>"
+OID=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
+
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --approve         -b "<what you ran + what you checked>"
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --request-changes -b "<blocking findings, numbered>"
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --comment         -b "<observations, no verdict>"
 ```
+
+**`--commit-id` is REQUIRED and `bin/gh-review` refuses without it** (quince#110). `gh pr review` has
+no such flag, and the REST endpoint it calls defaults the field to *"the most recent commit in the pull
+request"* — so a verdict cast the old way binds to **whatever head exists at the instant of
+submission**, not to what you read. The race is invisible from your side: the diff view stays rendered
+from the commit you opened. Measured on quince#183 — author amended at `22:00:08Z`, the approval
+registered at `22:00:25Z` against a commit seventeen seconds old the reviewer had never seen.
+
+**Read the oid BEFORE the diff, not after.** Taking it afterwards re-creates the race the flag closes:
+you would be pinning to a head that may already have moved while you read.
+
+**It is a declaration, not a compare-and-swap.** A non-head oid is accepted with no error — so this
+does not *refuse* a mis-timed verdict, it *records honestly* what was reviewed. That is what makes §4's
+staleness comparison mean anything: before this it compared `commit_id` against the head it had been
+defaulted from.
+
+**And the pin survives a rebase**, where an auto-defaulted one does not: `gh pr update-branch --rebase`
+re-points an auto-set `commit_id` to the new head, and `/architect` §5 makes that rebase the merging
+seat's standing duty. An explicit one stays put. Both measured (quince#110).
 
 The body states **what you ran**, not just what you think. If you could not run the gates
 (no container runtime in this session), say that in the body and use `--comment`: an

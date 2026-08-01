@@ -377,8 +377,15 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   three seats (quince#47), so an unlinked "the Operator ruled X" is not a citation; it is a claim
   about a record the reader must go and fail to verify.
 
-Verdicts are real GitHub reviews (`gh pr review --approve` / `--request-changes`), and the body
-states **what you ran**, not only what you think.
+Verdicts are real GitHub reviews cast through **`bin/gh-review pr review … --commit-id "$OID"`**, and
+the body states **what you ran**, not only what you think.
+
+**`--commit-id` is required and the wrapper refuses without it** (quince#110). `gh pr review` has no
+such flag and the REST endpoint defaults the field to head, so a verdict cast the old way binds to
+whatever head exists *at the instant of submission* rather than to what you read — invisibly, because
+the diff view does not change under you. `$OID` is the head you noted **before** reading, which is the
+same value §4 calls `OLD`: one oid, noted once, used for the verdict and for the staleness check.
+`/review-pr` §6 carries the full form.
 
 ## 5. Land what is ready
 
