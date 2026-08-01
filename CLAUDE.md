@@ -254,10 +254,31 @@ repo is not a message bus, and no human is an RPC layer.
 - The architect reviews/approves/merges as the repo owner; the Operator is admin of last
   resort and the approver for architect-authored docs.
 
-**PROPOSED (gap): a third forge identity for the supervisor seat — `quince-analyst`.** Filed under
-the gap protocol because it touches the authority model, which canon says is not a rung-local
-decision. **Nothing below is in force.** Ruling wanted from the Operator; the architect is asked to
-review it as a design.
+**RULED (was `PROPOSED (gap)`): a third forge identity for the supervisor seat — `quince-analyst`
+EXISTS AND IS IN DAILY USE.** Ruled by the Operator 2026-07-31 (quince#375), built the same day, and
+**everything below IS in force.** App id `4449080`, installed on five repositories with
+`contents: write` + `pull_requests: write` + `issues: write` + `metadata: read`; the mechanism landed
+as quince#377, #379, #380, #383 and #387. Filed under the gap protocol originally because it touches
+the authority model, which canon says is not a rung-local decision — and that routing was correct.
+
+**This heading said `PROPOSED (gap)` and *"Nothing below is in force"* for a day after the identity
+was ruled, built, and posting under its own name** — including in the comment that reported it
+(quince#407). quince#382 rewrote the body lead to *"RULED … WIDER than it asked for, and partly
+built"* and left the heading and that sentence standing three lines above, so the block contradicted
+itself within four lines.
+
+**It is the severest of three instances of one defect, because it inverts the marker rather than
+narrowing it.** `PROPOSED (gap)` means *stop that thread until it is ruled*; a session grepping for
+what it must not build on was told this identity was undecided while it held write access to five
+repositories. The other two — `contracts.md`'s gap-1 heading, twice — merely overstated what remained
+open.
+
+**Three instances, two seats, three days, every one caught by reading.** The architect left one and
+then caused a second while reviewing the fix for the first; the analyst authored this block and then
+reviewed quince#382 without checking its own heading survived. **The rule that follows is mechanical
+because care is what failed: the PR that flips a half must narrow the heading in the same diff**, and
+a heading saying `PROPOSED (gap)` above a body saying `RULED` is the gate-able signature of this bug
+(quince#408).
 
 **The gap.** The supervisor seat produces exactly two kinds of forge artifact — an issue, or a
 comment on one — and has no identity to sign them with. Everything it filed on 2026-07-29/30
