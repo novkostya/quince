@@ -150,6 +150,7 @@
       "Bash(make forge-watch-stderr-test)",
       "Bash(make forge-watch-counters-test)",
       "Bash(make closing-refs-check-test)",
+      "Bash(make forge-watch-owed-scope-test)",
       "Bash(make forge-watch-role-test)",
       "Bash(make forge-watch-selfcaused-test)",
       "Bash(make forge-watch-actor-test)",

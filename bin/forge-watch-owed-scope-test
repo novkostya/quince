@@ -1,0 +1,177 @@
+#!/bin/sh
+# forge-watch-owed-scope-test — `owed --author` is scoped by BRANCH, and a branch nobody can
+# attribute is OWED rather than clear (Operator ruling, quince#227, 2026-07-31).
+#
+# WHY THIS SUITE EXISTS SEPARATELY from forge-watch-ownership-test: that one pins `wake_filter`,
+# which decides what WAKES a live watch. This pins `owed`, which decides whether a turn may END.
+# They ask the same question of the same primitive (`branch_seat`) and they fail in OPPOSITE
+# directions on the same input:
+#
+#   wake_filter  unknown branch -> wakes        cost of being wrong: one spurious wake
+#   owed         unknown branch -> OWED         cost of being wrong: a session ends with an open
+#                                               PR and NO WATCH RUNNING
+#
+# The second is why the ruling exists at all. `CLAUDE.md` records that five of six PRs open on one
+# afternoon carried no runner prefix, so a prefix filter built the obvious way — unknown means not
+# mine, therefore clear — would have converted a noisy-but-safe guard into a silent one. The
+# unknown-branch assertion below is the one a later refactor would quietly remove, so it is pinned
+# first and by name.
+#
+# Synthetic and hermetic: a stub `gh` returning a fixed queue, no network, no credential.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=owed-scope-test-session
+
+# Pin every credential path into $WORK so the suite cannot read the real store — the trap
+# forge-watch-ownership-test records having been bitten by, where the result depended on which seat
+# ran it.
+export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE"
+
+# THE STUB MIRRORS THE REAL API'S SHAPE, AND THAT IS THE POINT OF THIS BLOCK.
+#
+# `gh search prs` has NO branch field — 19 available fields and `headRefName` is not one. The first
+# version of this fix asked the search for `headRefName`, and every assertion in this suite passed,
+# because the stub answered whatever it was asked. It failed on the first live call. So the stub now
+# answers the two calls SEPARATELY and refuses any field the real endpoint does not have: a stub
+# more permissive than the thing it stands for tests nothing.
+#
+# stub_gh <search-json> <prlist-json>
+stub_gh() {
+	printf '%s\n' "$1" >"$WORK/search.json"
+	printf '%s\n' "$2" >"$WORK/prlist.json"
+	cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+# `search prs` — repository/number only, as the real endpoint allows.
+# `pr list`    — number/headRefName, which is where the branch actually lives.
+case "$1 $2" in
+"search prs")
+	for a in "$@"; do
+		case "$a" in
+		*headRefName*) printf 'Unknown JSON field: "headRefName"\n' >&2; exit 1 ;;
+		esac
+	done
+	cat "$SEARCH_FILE" ;;
+"pr list") cat "$PRLIST_FILE" ;;
+*) printf 'stub gh: unexpected call: %s\n' "$*" >&2; exit 3 ;;
+esac
+STUB
+	chmod +x "$WORK/gh"
+}
+export SEARCH_FILE="$WORK/search.json" PRLIST_FILE="$WORK/prlist.json"
+
+# one_pr <number> <branch> — the two answers for a single-PR queue in novkostya/quince.
+one_pr() {
+	stub_gh "[{\"repository\":{\"nameWithOwner\":\"novkostya/quince\"},\"number\":$1}]" \
+		"[{\"number\":$1,\"headRefName\":\"$2\"}]"
+}
+
+# owed_out — run `owed --author @me` against the stub, capturing stdout+stderr and the exit code.
+owed_out() {
+	bin/forge-watch owed --author @me --gh "$WORK/gh" >"$WORK/out" 2>"$WORK/err" && printf 0 || printf '%s' $?
+}
+
+bin/forge-watch runner set r1 >/dev/null 2>&1 ||
+	{ printf 'FATAL: could not declare runner r1\n'; exit 1; }
+
+# --- 1. another seat's branch alone: NOT owed -------------------------------------------------
+one_pr 700 r7/some-other-work
+rc=$(owed_out)
+if [ "$rc" = 0 ] && grep -q 'nothing owed' "$WORK/out"; then
+	ok "another runner's PR alone is NOT owed — the whole point of quince#227"
+else
+	bad "another runner's PR still reported owed (rc=$rc): $(head -2 "$WORK/out" "$WORK/err")"
+fi
+if grep -q 'excluded as another seat' "$WORK/err"; then
+	ok "the exclusion is REPORTED, not silent — a cap this project surfaces"
+else
+	bad "dropped a PR from the owed set and said nothing about it"
+fi
+
+# --- 2. THE BINDING CONSTRAINT: an unattributable branch is OWED ------------------------------
+# `journal/x` has a prefix that is not a seat name; `topic-only` has no prefix at all. Neither can
+# be attributed, and cannot-tell must resolve toward OWED. Reporting clear here is the failure the
+# ruling exists to forbid: the session stops with an open PR and nothing watching it.
+for b in journal/retire-something topic-only-no-prefix analyst/propose-identity; do
+	one_pr 701 "$b"
+	rc=$(owed_out)
+	if [ "$rc" != 0 ] && grep -q 'OWED' "$WORK/out"; then
+		ok "unattributable branch '$b' is OWED, never clear (the binding constraint)"
+	else
+		bad "unattributable branch '$b' reported CLEAR (rc=$rc) — a session would stop unwatched"
+	fi
+done
+
+# --- 3. my own branch is owed ------------------------------------------------------------------
+one_pr 702 r1/my-own-work
+rc=$(owed_out)
+if [ "$rc" != 0 ] && grep -q 'OWED' "$WORK/out"; then
+	ok "my own prefixed branch is owed"
+else
+	bad "my own branch was not owed (rc=$rc) — the filter dropped the case it exists to keep"
+fi
+
+# --- 4. mixed: mine survives another seat's ----------------------------------------------------
+stub_gh '[{"repository":{"nameWithOwner":"novkostya/quince"},"number":706},
+          {"repository":{"nameWithOwner":"novkostya/quince"},"number":707}]' \
+        '[{"number":706,"headRefName":"r7/theirs"},{"number":707,"headRefName":"r1/mine"}]'
+rc=$(owed_out)
+if [ "$rc" != 0 ] && grep -q 'OWED' "$WORK/out"; then
+	ok "a mixed queue still owes a watch for MY PR"
+else
+	bad "mixed queue reported clear (rc=$rc) — mine was dropped with theirs"
+fi
+
+# --- 5. a repo nobody declared still counts ----------------------------------------------------
+# The seat-wide query is deliberately asked of the whole forge rather than the declared set, and
+# scoping by branch must not quietly reintroduce a set filter.
+stub_gh '[{"repository":{"nameWithOwner":"novkostya/undeclared-repo"},"number":704}]' '[{"number":704,"headRefName":"r1/mine"}]'
+rc=$(owed_out)
+if [ "$rc" != 0 ] && grep -q 'undeclared-repo' "$WORK/out"; then
+	ok "my PR in an undeclared repository is still owed"
+else
+	bad "an undeclared repository was dropped (rc=$rc) — scoping became a set filter"
+fi
+
+# --- 6. no runner declared: REFUSE, which is stronger than either answer -----------------------
+# An undeclared session cannot attribute any branch, so it must not answer the question at all —
+# and `owed` already refused here before this change, via require_runner. Pinned because scoping
+# introduced a SECOND reason the answer depends on the runner name, and a later refactor that made
+# `owed_scope_to_runner` tolerant of an empty name could quietly turn this refusal into a "clear".
+#
+# Note this is a REFUSAL (a message naming what could not be determined), not a report of nothing
+# owed. The distinction is the one the whole tool is built on: "I could not look" and "nothing is
+# owed" are different sentences.
+(
+	export QUINCE_SESSION_ID=owed-scope-test-undeclared
+	one_pr 705 r7/theirs
+	if bin/forge-watch owed --author @me --gh "$WORK/gh" >"$WORK/out2" 2>"$WORK/err2"; then rc2=0; else rc2=$?; fi
+	if [ "$rc2" != 0 ] && grep -q 'no runner name' "$WORK/err2" && ! grep -q 'nothing owed' "$WORK/out2"; then
+		printf '  ok   an UNDECLARED session REFUSES rather than reporting clear\n'
+	else
+		printf '  FAIL undeclared session did not refuse (rc=%s): %s\n' "$rc2" "$(head -1 "$WORK/out2" "$WORK/err2" | tr '\n' ' ')"
+		exit 1
+	fi
+) || fail=$((fail + 1))
+pass=$((pass + 1))
+
+printf '%s: %d passed, %d failed\n' "$(basename "$0")" "$pass" "$fail"
+[ "$fail" -eq 0 ]
