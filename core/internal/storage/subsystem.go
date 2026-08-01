@@ -65,6 +65,28 @@ func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bu
 	}
 }
 
+// owns reports whether a version row belongs to the storage this Manager speaks for.
+//
+// It is GROUP MEMBERSHIP, not equality, and the NULL group is a real group — the same shape the
+// is_latest ruling settled (quince#378): an unattributed Manager owns the unattributed rows, and
+// an attributed one does not. Written once because three call sites need it and getting it subtly
+// different in each is how the cross-storage bugs arise in the first place:
+//
+//	m.storageID  row.StorageID  owns   why
+//	""           nil            YES    both unattributed — the pre-qn.6c world, one storage
+//	""           set            no     the row knows where it lives; this Manager does not
+//	set          nil            no     quince does not know where that version is, so this scan
+//	                                   cannot conclude anything about it — skipping is the honest
+//	                                   answer, and marking it missing would invent a fact
+//	set          equal          YES
+//	set          different      no     another storage's version; not ours to judge
+func (m *Manager) owns(rowStorageID *string) bool {
+	if rowStorageID == nil {
+		return m.storageID == ""
+	}
+	return *rowStorageID == m.storageID
+}
+
 // storageIDPtr returns the Manager's storage id as the nullable the registry stores, so an
 // unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
 // "" is not one of them (contracts §2: null = not yet attributed).
@@ -163,11 +185,19 @@ func (m *Manager) seedKind(udid string) string {
 	if w, ok, err := readWorkState(m.backups, udid); err == nil && ok {
 		return w.kindOf()
 	}
+	// SCOPED TO THIS STORAGE, and this is the line story 8's claim rests on. "Does this device
+	// already have a version" asked across ALL storages reports `incremental` for a FIRST backup to
+	// a NEW storage — which is a full transfer. Saying otherwise corrupts Version.kind AND
+	// pre-empts the warning the user is owed before tens of gigabytes move.
+	//
+	// A NULL storage_id is not evidence about this storage: quince does not know where that
+	// version lives, and "somewhere" is not "here".
 	if rows, err := m.reg.ListVersions(udid); err == nil {
 		for _, r := range rows {
-			if !r.Missing {
-				return "incremental"
+			if r.Missing || r.StorageID == nil || *r.StorageID != m.storageID {
+				continue
 			}
+			return "incremental"
 		}
 	}
 	return "full"

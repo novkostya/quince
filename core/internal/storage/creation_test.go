@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
+	"github.com/novkostya/quince/core/internal/store"
 )
 
 func fixedNow() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
@@ -444,5 +445,73 @@ func TestBrowseRootPointsAtAMissingDirIfTheNewestVersionIsDemoted(t *testing.T) 
 	}
 	if !strings.Contains(demoted, "/versions/") {
 		t.Errorf("the demoted path should be under versions/: %q", demoted)
+	}
+}
+
+// --- storage-scoped reconciliation and seed kind (qn.6c story 3) ---
+
+func TestOwnsIsGroupMembershipNotEquality(t *testing.T) {
+	sid := "01JSTORAGE-A"
+	other := "01JSTORAGE-B"
+
+	unattributed := &Manager{}
+	attributed := &Manager{storageID: sid}
+
+	// The NULL group is a real group: an unattributed Manager owns unattributed rows.
+	if !unattributed.owns(nil) {
+		t.Error("an unattributed Manager must own unattributed rows — that is the pre-qn.6c world")
+	}
+	if unattributed.owns(&sid) {
+		t.Error("an unattributed Manager must not claim a row that knows where it lives")
+	}
+	// An attributed Manager must NOT claim a row whose storage is unknown.
+	if attributed.owns(nil) {
+		t.Error("a NULL row is not this storage's — quince does not know where it lives")
+	}
+	if !attributed.owns(&sid) {
+		t.Error("a row on this storage is owned")
+	}
+	if attributed.owns(&other) {
+		t.Error("another storage's row is not ours to judge")
+	}
+}
+
+// seedKind must not report `incremental` for a first backup to a NEW storage. That is a FULL
+// transfer, and story 8's whole claim — telling the user before tens of gigabytes move — rests on
+// this answer being per-storage.
+func TestSeedKindIsFullForAFirstBackupToThisStorage(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
+	m.storageID = "01JSTORAGE-B" // a storage this device has never been backed up to
+
+	const udid = "00008140-000A1B2C3D4E5F60"
+	onStorageA := "01JSTORAGE-A"
+	if err := st.InsertVersion(store.VersionRow{
+		ID: "01VA1", UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), StorageID: &onStorageA,
+	}); err != nil {
+		t.Fatalf("seed a version on the OTHER storage: %v", err)
+	}
+
+	if got := m.seedKind(udid); got != "full" {
+		t.Fatalf("a first backup to a new storage is FULL, got %q — this is story 8's claim", got)
+	}
+}
+
+// The control: a device that DOES have a version on this storage is incremental.
+func TestSeedKindIsIncrementalWhenThisStorageAlreadyHasAVersion(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, RetentionPolicy{})
+	sid := "01JSTORAGE-A"
+	m.storageID = sid
+
+	const udid = "00008140-000A1B2C3D4E5F60"
+	if err := st.InsertVersion(store.VersionRow{
+		ID: "01VA1", UDID: udid, Backend: BackendCopy, Kind: "full",
+		CreatedAt: time.Now().UTC(), StorageID: &sid,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if got := m.seedKind(udid); got != "incremental" {
+		t.Errorf("a device with a version on THIS storage is incremental, got %q", got)
 	}
 }
