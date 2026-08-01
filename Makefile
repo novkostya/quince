@@ -128,6 +128,34 @@ ifeq ($(strip $(SCOPED_GATES)),)
 $(error gate-scope returned no gates — refusing to run an empty ladder. Is bin/gate-scope present and executable?)
 endif
 
+# GO_TEST_ARGS — what `gates-go` hands `go test`. The default is the whole tree, which is what the
+# gate MEANS; an override is a targeted debugging run and says so in the output.
+#
+# It was accepted and IGNORED until quince#368: the recipe hardcoded `./...`, so
+# `make gates-go GO_TEST_ARGS="-run TestX ./internal/foo"` ran every test in every package, and
+# `-count=1` could not bust the test cache. Both failures are silent, because `make` accepts a
+# variable nothing reads. The wasted time was the smaller cost — the larger one is that "I ran just
+# this test" reached PR evidence and was not true, and nothing in the output contradicted it.
+GO_TEST_ARGS ?= ./...
+# `origin` is make's own answer to "did the caller set this, or is it my default?" — which is exactly
+# the question, and it needs no sentinel value that a legitimate argument could collide with.
+GO_TEST_ARGS_OVERRIDDEN := $(filter command line,$(origin GO_TEST_ARGS))
+
+# ONLY `gates-go` can honour it, so every other goal REFUSES rather than accepting and ignoring — the
+# quince#41 precedent, where `privacy-check` was made to refuse instead of exiting 0 having swept
+# nothing, on exactly this reasoning: a control that silently does less than it was asked is worse
+# than one that fails.
+#
+# The dangerous goal is `gates`. Its Go leg would run a FILTERED suite while the ladder reported
+# itself green — a stronger claim than anything that actually ran, and the same "ladder that quietly
+# shrinks" hazard the SCOPED_GATES guard above exists for. Parse-time, so it fires before any
+# container starts rather than after the Go leg has already passed on a subset.
+ifneq ($(GO_TEST_ARGS_OVERRIDDEN),)
+ifneq ($(filter-out gates-go,$(MAKECMDGOALS)),)
+$(error GO_TEST_ARGS is honoured only by `gates-go`, and cannot be honoured by: $(filter-out gates-go,$(MAKECMDGOALS)). Refusing rather than ignoring it (quince#368). For a targeted run: make gates-go GO_TEST_ARGS="-run TestX ./internal/foo/...")
+endif
+endif
+
 # Build-args threaded into every image build so the Dockerfile and the gates agree.
 BUILD_ARGS := \
 	--build-arg GO_IMAGE=$(GO_IMAGE) \
@@ -613,7 +641,8 @@ provision-guard-test: ## provision's identity guard in every credential state (q
 	@deploy/runner/provision-guard-test
 
 .PHONY: gates-go
-gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
+gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
+	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || printf 'gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n' '$(GO_TEST_ARGS)'
 	$(RUN) -w /src/core \
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
 	  -e CGO_ENABLED=1 $(TC_GO) sh -euc '\
@@ -621,7 +650,7 @@ gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race
 	    if [ -n "$$unformatted" ]; then echo "gofmt needs to run on:"; echo "$$unformatted"; exit 1; fi; \
 	    go vet ./...; \
 	    golangci-lint run; \
-	    go test -race -cover ./...'
+	    go test -race -cover $(GO_TEST_ARGS)'
 
 .PHONY: fmt
 fmt: tc-go ## Go: gofmt -w (auto-format) + go mod tidy (run after editing core)

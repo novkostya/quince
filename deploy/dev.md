@@ -121,6 +121,31 @@ First run builds the toolchain images (a few minutes); afterwards, named cache v
 (`quince-go-build`, `quince-go-mod`, `quince-pnpm-store`, `quince-uv-cache`) keep runs
 fast. `make clean` drops those volumes and the local images.
 
+### Targeting one Go test
+
+`gates-go` takes `GO_TEST_ARGS`, handed to `go test` verbatim. Everything else about the gate —
+`gofmt`, `go vet`, `golangci-lint` — still runs, so this narrows the test leg only:
+
+```sh
+make gates-go GO_TEST_ARGS="-count=1 -run TestSomething ./internal/deviceops/..."
+```
+
+`-count=1` is what busts the test cache; without it a re-run prints `(cached)` and cannot re-provoke
+an intermittent failure.
+
+**A targeted run announces itself and is not a gate.** It prints a `PARTIAL RUN` banner naming what
+it actually ran, because the expensive failure here is not the wasted time — it is writing *"I ran
+just this test"* into PR evidence when something else happened (quince#368).
+
+**Only `gates-go` honours it; every other target REFUSES rather than ignoring it.** In particular
+`make gates GO_TEST_ARGS=…` is a parse-time error: the ladder's Go leg would run a filtered suite
+while the ladder reported itself green, which is a stronger claim than anything that ran. Same
+reasoning as `privacy-check` refusing rather than exiting 0 having swept nothing (quince#41).
+
+**`make` accepts any variable you invent**, declared or not — which is what kept this silent. A
+misspelling (`GO_TESTARGS=…`) is still accepted and still does nothing, and no guard here can catch
+that; the refusal above only covers the correctly-spelled name on a target that cannot honour it.
+
 ## Repo layout
 
 | Path | What |
