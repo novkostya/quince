@@ -24,12 +24,32 @@ of them proposing a permanent implicit fallback to avoid editing a single YAML f
 machine. The Operator overruled it, and the architect's dissent is retracted on the record
 (quince#378).
 
+**IT APPLIES TO INTERFACE SHAPE, NOT TO PERSISTED STATE, AND THAT IS THE LOAD-BEARING LIMIT.** The
+premise is *the only consumer ships from the same commit*. **A `quince-version.json` written last
+month has no commit to ship with.** Neither does a `versions/<ts>/` directory, a `@quince-*` snapshot,
+or a SQLite row behind a committed backup. For **data at rest the premise is simply false** — a
+breaking change there is a **migration against data that cannot be regenerated**, and *never mutate a
+committed version* is a hard rule sitting on the other side of it. Wire shape, config surface and
+error codes are cheap to break; the things a backup is made of are not.
+
+**This matters right now rather than in the abstract.** `qn.6c` — the rung that produced this ruling —
+**is a data-model change**: multi-storage in the DB (`0006_storage`) plus `quince-storage.json` on
+disk. A session designing that migration while reading *"breaking is cheap here"* is reading a true
+statement in a context where its premise does not hold. Gap 4's *"written into a root that already
+holds committed versions"* is exactly the class this limit governs.
+
 **What this does NOT license.** It is not an argument against migrations, against `PROPOSED (gap)`,
 or against Operator sign-off — a breaking change is still a **cross-track event** that lands here
 first and still needs the ruling. It is cheaper, not free, and *"the UI ships from the same commit"*
 is the whole of why. **The clause expires when that stops being true**: the first external consumer,
 published API, or independently-deployed client retires it, and whoever adds one owns deleting this
 paragraph.
+
+**That "not an argument against migrations" sentence was too weak and is kept only as the record of
+why** — it framed the limit as **process** (*still do the migration*) when the real point is that the
+cheapness argument's **premise does not reach data at rest at all**. Doing the migration carefully is
+the consequence; the premise failing is the reason. Caught by the supervisor seat on review, after the
+paragraph had already been approved by the architect.
 
 **One worked example, so the line is not read as "always break".** `qn.6c` gap 1 keeps
 `Version.backend` — and that is *not* the compatibility reflex. A version can outlive its storage
