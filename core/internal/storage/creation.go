@@ -16,7 +16,9 @@ const (
 	// marker, so this IS its creation moment: the backend was probed and frozen, and the marker
 	// written. Loud and user-visible by design (see ResolveStorage).
 	ResolutionCreated Resolution = "created"
-	// ResolutionOpened — the marker was read and agrees with what was probed. The ordinary case.
+	// ResolutionOpened — the marker was read and did NOT DISAGREE with the probe. The ordinary
+	// case. Note the wording: whether the comparison actually ran is StorageState.Verified, not
+	// this value, because a probe that cannot determine a backend is not a disagreement.
 	ResolutionOpened Resolution = "opened"
 	// ResolutionMissingMedium — the path is reachable and has NO marker, for a storage the DB
 	// already knows. An unplugged disk's bare mountpoint. REFUSED, never re-created.
@@ -41,6 +43,22 @@ type StorageState struct {
 	StorageID  string // set when Resolution.OK()
 	Backend    string // set when Resolution.OK()
 	Reason     string // always set when !OK — observation, consequence, remedy
+	// Verified reports whether the backend comparison ACTUALLY RAN.
+	//
+	// It exists because "checked and agrees" and "could not check" are different facts, and
+	// Resolution alone cannot carry both: a probe that returns nothing is not a disagreement
+	// (Mismatch declines to manufacture one), so an unprobeable storage that already has a marker
+	// opens on the strength of the marker alone. That is the right BEHAVIOUR — opening freezes
+	// nothing, and refusing every backup because a probe hiccuped is worse than the problem — but
+	// ResolutionOpened must not be read as evidence a comparison happened.
+	//
+	// This is quince#363's shape one layer down: that ruling split `wifi_sync_unconfirmed`
+	// (accepted, and the read-back could not RUN) from `wifi_sync_not_applied` (accepted, and the
+	// state is UNCHANGED), because conflating "unverifiable" with a verified outcome reported a
+	// write that had worked as one that had not. Same distinction, same reason.
+	//
+	// false + OK() means: proceed, but nothing confirmed the medium is what the marker says.
+	Verified bool
 }
 
 // knownStorage is the DB half ResolveStorage consults. Defined here, consumer-side, so the
@@ -88,11 +106,20 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 	switch {
 	case err == nil:
 		// A marker exists. Compare rather than re-select: the backend was chosen once.
-		if bad, why := marker.Mismatch(probe(path)); bad {
+		probed := probe(path)
+		if bad, why := marker.Mismatch(probed); bad {
 			st.Resolution, st.Reason = ResolutionBackendMismatch, "storage "+name+": "+why
 			return st, nil
 		}
 		st.Resolution, st.StorageID, st.Backend = ResolutionOpened, marker.StorageID, marker.Backend
+		// Verified only if the probe produced something to compare AGAINST. An empty probe is
+		// declined as a mismatch (deliberately — see Mismatch), so without this the caller would
+		// be told a comparison succeeded when none ran.
+		st.Verified = probed != ""
+		if !st.Verified {
+			st.Reason = fmt.Sprintf("storage %q: opened on its %s alone — the backend could not be probed at %q, so nothing confirmed the medium is still %s. Proceeding, because opening freezes nothing; recorded as UNVERIFIED rather than reported as agreement.",
+				name, StorageMarkerName, path, marker.Backend)
+		}
 		return st, nil
 
 	case errors.Is(err, ErrStorageMarkerCorrupt):
@@ -133,7 +160,10 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 	if err := WriteStorageMarker(path, m); err != nil {
 		return st, fmt.Errorf("storage %q: writing %s: %w", name, StorageMarkerName, err)
 	}
-	st.Resolution, st.StorageID, st.Backend = ResolutionCreated, m.StorageID, m.Backend
+	// Verified: creation just probed and froze the result, so the marker and the medium agree by
+	// construction. The refusal above is why — a creation with an undetermined backend never gets
+	// this far, because that guess would be permanent.
+	st.Resolution, st.StorageID, st.Backend, st.Verified = ResolutionCreated, m.StorageID, m.Backend, true
 	return st, nil
 }
 
