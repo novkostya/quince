@@ -263,7 +263,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
-                   forge-watch-owed-scope-test
+                   forge-watch-owed-scope-test forge-watch-gh-auth-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -330,7 +330,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/forge-watch-role-test bin/forge-ledger bin/forge-watch-selfcaused-test \
                    bin/forge-watch-actor-test bin/forge-watch-postmerge-test \
                    bin/loop-drift bin/loop-drift-test \
-                   bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test
+                   bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test bin/forge-watch-gh-auth-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -467,6 +467,10 @@ forge-watch-stderr-test: ## The liveness probe must not leak raw shell errors (q
 .PHONY: forge-watch-owed-scope-test
 forge-watch-owed-scope-test: ## owed is scoped by branch, and an unattributable branch is OWED (quince#227)
 	@bin/forge-watch-owed-scope-test
+
+.PHONY: forge-watch-gh-auth-test
+forge-watch-gh-auth-test: ## require_gh must check gh can AUTHENTICATE, not just exist (quince#429)
+	@bin/forge-watch-gh-auth-test
 
 .PHONY: forge-watch-role-test
 forge-watch-role-test: ## Branch-ownership suppression is role-dependent (quince#292)

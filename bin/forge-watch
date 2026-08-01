@@ -1845,6 +1845,15 @@ if [ "\$1" = issue ] && [ "\$2" = list ]; then
 	if [ -s "$_tmp/payload.issuelist" ]; then cat "$_tmp/payload.issuelist"; else printf '[]\n'; fi
 	exit 0
 fi
+# \`api rate_limit\` is the AUTH PROBE \`require_gh\` makes once per invocation (quince#429), and it must
+# be answered WITHOUT consuming a payload. Every payload queue here is a cursor that advances per call,
+# so without this arm the probe eats the fixture's first PR observation and the run reports
+# \`watch-idle\` where the fixture expects an event — which is exactly how quince#429's guard first
+# broke \`unresolved-commit-author-is-unknown.json\`, a fixture that has nothing to do with auth.
+# Same shape, and same reason, as the two arms around it.
+if [ "\$1" = api ] && printf '%s' "\$*" | grep -q rate_limit; then
+	printf '5000\\n'; exit 0
+fi
 if [ "\$1" = api ] && printf '%s' "\$*" | grep -q defaultBranchRef; then
 	c=\$(cat "$_tmp/calls.trunk" 2>/dev/null || echo 0); c=\$((c + 1))
 	printf '%s\\n' "\$c" >"$_tmp/calls.trunk"
@@ -2803,6 +2812,29 @@ require_gh() {
 	# that most needs this. Default is plain `gh`, which is also what a stranger's clone has.
 	command -v "$1" >/dev/null 2>&1 || [ -x "$1" ] ||
 		die "gh command not found: $1 (set --gh or FORGE_GH)"
+
+	# EXISTENCE IS THE ONE THING BARE `gh` ALWAYS SATISFIES (quince#429), so the check above passes
+	# precisely in the case that hurts: a session drops `--gh` from the documented invocation, the arm
+	# succeeds, `status` reports the watch LIVE, and every tick emits `fetch-failed` into a background
+	# task's output — which is where nobody looks, because the whole point of arming is not to have to.
+	# Measured on the architect box: ~40 minutes blind, during which one PR was opened and another
+	# answered by a push, both learned about only by running a tick by hand.
+	#
+	# So ask the chosen command for something cheap and AUTHENTICATED, and fail at ARM time where a
+	# session is still watching. `rate_limit` is the right probe: it requires a credential, it does not
+	# consume quota, and it asserts nothing about WHICH identity — this tool must not pick one, which is
+	# why the default stays plain `gh`.
+	#
+	# ONCE PER ARM, NOT PER TICK. `watch` calls this during argument parsing and its loop does not call
+	# it again, so the cost is one round-trip when a session arms, hand-runs a tick, or asks `owed` —
+	# never inside the loop.
+	#
+	# THE HERMETIC SUITES ARE UNAFFECTED, and that was measured before this was written rather than
+	# hoped: their stub `gh` scripts fall through to emitting the queue JSON for an unrecognised argv
+	# and exit **0**, so the probe passes. Real unauthenticated `gh` on a session box exits **4**. The
+	# two are cleanly separated, which is what makes this safe to put in a shared helper.
+	_rg_why=$("$1" api rate_limit -q '.rate.remaining' 2>&1) ||
+		die "the gh command '$1' exists but cannot authenticate, so a watch armed with it would arm cleanly and see nothing (quince#429). It reported — $(printf '%s' "$_rg_why" | head -n 2 | tr '\n' ' ') Pass the wrapper your seat actually uses: --gh \"\$PWD/bin/gh-coder\" on the implementer box, bin/gh-arch or bin/gh-review on the architect box, bin/gh-analyst on the supervisor box. Bare 'gh' stays the default because this tool must not pick an identity for you — and on a session box it is deliberately unauthenticated."
 }
 
 # ---------------------------------------------------------------------------

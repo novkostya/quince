@@ -1,0 +1,169 @@
+#!/bin/sh
+# forge-watch-gh-auth-test — `require_gh` must check that the gh command can AUTHENTICATE, not merely
+# that it exists (quince#429).
+#
+# THE DEFECT. `require_gh` tested `command -v "$1"`, and **existence is the one thing bare `gh` always
+# satisfies**. So a session that drops `--gh` from the documented invocation gets:
+#
+#   - an arm that SUCCEEDS,
+#   - `status` reporting the watch LIVE,
+#   - and `fetch-failed` on every tick, emitted into a background task's output — which is exactly
+#     where nobody looks, because the whole point of arming is not to have to.
+#
+# Measured on the architect box: ~40 minutes blind. During the window one PR was opened and another
+# was answered by a push, and both were learned about only by running a tick BY HAND.
+#
+# WHAT IT DRIVES. The check is one line, but its correctness is entirely about WHICH FAILURES IT
+# SEPARATES, and that cannot be read off the source:
+#
+#   a gh that exits non-zero on an authenticated call   -> must REFUSE (the defect)
+#   a gh that answers it                                -> must PASS   (or every suite breaks)
+#   no gh at all                                        -> must still refuse, with the OLD message
+#
+# The third is the negative control that matters most: a check bolted on top of the existence test
+# could silently replace it, and every case above would still pass.
+#
+# WHY THE HERMETIC SUITES SURVIVE THIS AT ALL, since a probe in a shared helper looks like it should
+# break all of them: their stub `gh` scripts fall through to emitting the queue JSON for an
+# unrecognised argv and exit 0, so the probe passes. Real unauthenticated `gh` exits 4. Measured before
+# the guard was written, not after — and asserted below, so the assumption cannot rot silently.
+#
+# Synthetic and hermetic: stub `gh` scripts in a temp dir. No network, no credential, no real gh.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export XDG_STATE_HOME="$WORK/state"
+export QUINCE_SESSION_ID=gh-auth-test
+REPO=novkostya/quince
+
+# Pin every credential path away from the real store, so this suite's result cannot depend on which
+# seat runs it — the defect quince#375 fixed in two other suites.
+export QUINCE_CODER_KEY_FILE="$WORK/absent.pem"
+export QUINCE_ARCH_TOKEN_FILE="$WORK/absent.token"
+export QUINCE_BOT_TOKEN_FILE="$WORK/absent.token"
+export QUINCE_REVIEW_KEY_FILE="$WORK/absent.pem"
+export QUINCE_ANALYST_KEY_FILE="$WORK/absent.pem"
+
+./bin/forge-watch runner set r1 >/dev/null 2>&1 || {
+	printf '  FAIL could not declare a runner name\n'
+	exit 1
+}
+
+# An UNAUTHENTICATED gh: it exists, and it fails the authenticated call the way the real one does.
+# The message is the real `gh` text, so the assertion about the refusal QUOTING it is meaningful.
+cat >"$WORK/gh-unauth" <<'STUB'
+#!/bin/sh
+printf 'To get started with GitHub CLI, please run:  gh auth login\n' >&2
+exit 4
+STUB
+chmod +x "$WORK/gh-unauth"
+
+# An AUTHENTICATED gh: answers the probe, and anything else with an empty queue so a tick can finish.
+cat >"$WORK/gh-ok" <<'STUB'
+#!/bin/sh
+case "$*" in
+*rate_limit*) printf '5000\n'; exit 0 ;;
+esac
+printf '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\n'
+exit 0
+STUB
+chmod +x "$WORK/gh-ok"
+
+# --- 1. THE DEFECT: an unauthenticated gh must be refused, by `watch` and by `tick` ---------------
+# Both verbs, because `require_gh` is shared and a fix applied to one call site would leave the other
+# arming cleanly — which is the shape this whole issue is about.
+#
+# EACH VERB GETS ITS OWN ARGV: `--max-wait` is a `watch` flag and `tick` rejects it as an unknown
+# option — which the first draft of this suite hit, reporting a FAIL that was its own harness rather
+# than the tool. A shared argument list across two verbs with different grammars tests the grammar.
+for verb in watch tick; do
+	case "$verb" in
+	watch) set -- --no-issues --interval 1 --max-wait 2 ;;
+	tick) set -- --no-issues ;;
+	esac
+	out=$(./bin/forge-watch "$verb" --repo "$REPO" --gh "$WORK/gh-unauth" "$@" 2>&1 || true)
+	case "$out" in
+	*"cannot authenticate"*)
+		ok "$verb: an unauthenticated gh is refused"
+		;;
+	*)
+		bad "$verb: armed with a gh that cannot authenticate — it would see nothing (quince#429)"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# --- 2. THE REFUSAL QUOTES THE COMMAND'S OWN MESSAGE ---------------------------------------------
+# Not a second implementation of the reasoning: `gh` already says what is wrong, and re-deriving it
+# here is how two answers diverge (quince#86). It is also what tells a reader this is an auth problem
+# rather than a network one.
+out=$(./bin/forge-watch tick --repo "$REPO" --gh "$WORK/gh-unauth" --no-issues 2>&1 || true)
+case "$out" in
+*"gh auth login"*)
+	ok "the refusal quotes the command's own reason rather than re-deriving one"
+	;;
+*)
+	bad "the refusal does not carry gh's message — an auth failure reads like a network failure"
+	;;
+esac
+
+# --- 3. IT NAMES A WRAPPER, because the remedy is the flag the session dropped --------------------
+# A refusal that says "cannot authenticate" and stops sends a reader to `gh auth login` on a box where
+# logging in is exactly what must not happen: the seat credentials are read at point of use so they
+# cannot leak into an ambient session.
+case "$out" in
+*--gh*bin/gh-*)
+	ok "the refusal names --gh and a seat wrapper, which is the actual remedy"
+	;;
+*)
+	bad "the refusal does not name the remedy, so the obvious next move is 'gh auth login'"
+	;;
+esac
+
+# --- 4. THE NEGATIVE CONTROL: a working gh must NOT be refused -----------------------------------
+# Without this the suite would pass against a `require_gh` that refuses everything, which is worse
+# than the defect. It is also the assertion that pins WHY the hermetic suites survive the new probe.
+out=$(./bin/forge-watch tick --repo "$REPO" --gh "$WORK/gh-ok" --no-issues 2>&1 || true)
+case "$out" in
+*"cannot authenticate"*)
+	bad "a gh that answers the probe was refused — every forge-watch suite would break"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+*)
+	ok "a gh that answers the probe is accepted (the control for every other suite)"
+	;;
+esac
+
+# --- 5. THE EXISTENCE CHECK SURVIVES, with its own message ---------------------------------------
+# The new probe sits AFTER the old check and must not replace it. A missing command cannot be probed
+# at all, so conflating the two would report "cannot authenticate" for a typo in a path — sending the
+# reader to look at credentials when the answer is a filename.
+out=$(./bin/forge-watch tick --repo "$REPO" --gh "$WORK/no-such-gh" --no-issues 2>&1 || true)
+case "$out" in
+*"gh command not found"*)
+	ok "a MISSING gh still gets the existence refusal, not the auth one"
+	;;
+*"cannot authenticate"*)
+	bad "a missing command was reported as an auth failure — the checks were merged, not layered"
+	;;
+*)
+	bad "a missing gh produced neither refusal"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
+
+printf '\nforge-watch-gh-auth-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
