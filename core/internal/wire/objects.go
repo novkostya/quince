@@ -59,9 +59,13 @@ type Job struct {
 	FinishedAt *string     `json:"finished_at"` // null until the job terminates
 	Error      *JobError   `json:"error"`       // null unless failed/connection_lost
 	RetryOf    *string     `json:"retry_of"`    // null unless this is a manual retry
-	IntentID   string      `json:"intent_id"`   // == id for a first attempt
-	Attempt    int         `json:"attempt"`     // 1-based position within the intent
-	VersionID  *string     `json:"version_id"`  // set on succeeded
+	// StorageID is the RESOLVED concrete storage this backup was aimed at — never the word
+	// "default", exactly as `transport` stores the resolved usb/wifi and never "auto" (qn.6c).
+	// null for jobs that ran before qn.6c, meaning quince did not record where this went.
+	StorageID *string `json:"storage_id"`
+	IntentID  string  `json:"intent_id"`  // == id for a first attempt
+	Attempt   int     `json:"attempt"`    // 1-based position within the intent
+	VersionID *string `json:"version_id"` // set on succeeded
 }
 
 // JobProgress is the throttled progress + liveness snapshot for a running job.

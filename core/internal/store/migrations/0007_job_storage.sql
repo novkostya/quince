@@ -1,0 +1,16 @@
+-- qn.6c story 6b: which storage a backup was written to.
+--
+-- ADDITIVE and NULLABLE, for the same reason 0006 was: a job row is data at rest, and the
+-- "breaking is cheap here" clause explicitly does not reach it. Every job that ran before this
+-- column existed has storage_id NULL, and NULL means "quince did not record where this went" —
+-- honest, and distinct from any storage id.
+--
+-- NOT backfilled. Before qn.6c there was exactly one storage, so a backfill to the default would
+-- even be defensible — and it would still be a guess written into the record of a completed backup.
+-- The version rows carry the authoritative answer (versions.storage_id, attributed from the scan),
+-- so nothing needs this column to locate data; it records what the JOB was aimed at, which is a
+-- different fact and one nobody observed for old rows.
+--
+-- The resolved CONCRETE storage, never the word "default" — exactly as `transport` stores the
+-- resolved usb/wifi and never "auto" (contracts §2, ruled 2026-07-31).
+ALTER TABLE jobs ADD COLUMN storage_id TEXT;

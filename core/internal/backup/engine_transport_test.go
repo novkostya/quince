@@ -72,7 +72,7 @@ func TestAutoResolvesToWifiAndWifiSucceeds(t *testing.T) {
 func TestAutoWhenAbsentRefusesWithNoJob(t *testing.T) {
 	h := newHarness(t, fakeParams{}, TransportUSB)
 	h.dev.remove(testUDID)
-	_, status, reason := h.eng.StartBackup(testUDID, TransportAuto, "")
+	_, status, reason := h.eng.StartBackup(testUDID, TransportAuto, "", "")
 	if status != 422 {
 		t.Fatalf("auto with an absent device = %d, want 422", status)
 	}
@@ -89,7 +89,7 @@ func TestAutoWhenAbsentRefusesWithNoJob(t *testing.T) {
 func TestExplicitTransportDoesNotRequirePresenceAtStart(t *testing.T) {
 	h := newHarness(t, fakeParams{}, TransportUSB)
 	h.dev.remove(testUDID)
-	job, status, reason := h.eng.StartBackup(testUDID, TransportUSB, "")
+	job, status, reason := h.eng.StartBackup(testUDID, TransportUSB, "", "")
 	if status != 202 {
 		t.Fatalf("explicit usb with an absent device = %d (%s), want 202 (it waits)", status, reason)
 	}

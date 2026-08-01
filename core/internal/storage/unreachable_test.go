@@ -293,3 +293,55 @@ func TestABindingToADisappearedStorageRefuses(t *testing.T) {
 		t.Errorf("after unbinding, the job must fall back to the default: %v", err)
 	}
 }
+
+// qn.6c story 6b — POST /api/jobs {storage_id}. Ruled 2026-07-31: omitted → default, unknown →
+// 404, unreachable → 409 (a state conflict the user can act on, never a 422 and never a queue).
+func TestResolveChoice(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
+	m.slots[0].Name = "internal"
+	m.slots = append(m.slots, unreachableSlot("shuttle", "missing_medium"))
+	m.slots[1].StorageID = "01JSTORAGEGONE0000000000"
+
+	// Omitted → the default, and the CONCRETE id, never the word "default".
+	got, status, _ := m.ResolveChoice("")
+	if status != 0 || got != "01JSTORAGEDEFAULT0000000" {
+		t.Errorf("omitted storage_id must resolve to the default's concrete id, got %q (%d)", got, status)
+	}
+
+	if _, status, _ := m.ResolveChoice("01JSTORAGENOSUCH00000000"); status != 404 {
+		t.Errorf("an unknown storage must be 404 (matching unknown-device), got %d", status)
+	}
+
+	_, status, reason := m.ResolveChoice("01JSTORAGEGONE0000000000")
+	if status != 409 {
+		t.Errorf("an unreachable storage must be 409 — a state conflict, not a malformed request; got %d", status)
+	}
+	if !strings.Contains(reason, "shuttle") || !strings.Contains(reason, "missing_medium") {
+		t.Errorf("the 409 must name the storage and the code so the user knows which disk: %q", reason)
+	}
+}
+
+// The DEFAULT being unreachable is REFUSED WITH A REASON NAMING IT, never redirected to whichever
+// storage happens to be reachable. A fallback there would write a backup to a disk the user did not
+// choose — "no silent fallbacks" at its most expensive (Operator ruling 2026-08-01).
+func TestResolveChoiceRefusesRatherThanRedirectingWhenTheDefaultIsUnreachable(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	reachable := m.slots[0] // keep a usable one in the list
+	m.slots[0] = unreachableSlot("internal", "missing_medium")
+	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
+	reachable.StorageID = "01JSTORAGEOTHER000000000"
+	reachable.Name = "shuttle"
+	m.slots = append(m.slots, reachable)
+
+	got, status, reason := m.ResolveChoice("")
+	if status != 409 {
+		t.Fatalf("an unreachable default must refuse, got %d (%q)", status, got)
+	}
+	if got != "" {
+		t.Errorf("it must not resolve to another storage — got %q, which the user did not choose", got)
+	}
+	if !strings.Contains(reason, "internal") {
+		t.Errorf("the refusal must NAME the default, so the user knows which disk to reconnect: %q", reason)
+	}
+}

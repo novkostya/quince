@@ -184,7 +184,8 @@ func jobToWire(r store.JobRow) wire.Job {
 			BytesTotal: r.BytesTotal, FilesReceived: r.FilesReceived, Liveness: r.Liveness,
 		},
 		StartedAt: fmtRFC(r.StartedAt), RetryOf: r.RetryOf, IntentID: r.IntentID,
-		Attempt: r.Attempt, VersionID: r.VersionID,
+		StorageID: r.StorageID,
+		Attempt:   r.Attempt, VersionID: r.VersionID,
 	}
 	if r.FinishedAt != nil {
 		s := fmtRFC(*r.FinishedAt)
