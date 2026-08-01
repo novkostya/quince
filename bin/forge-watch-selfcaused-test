@@ -77,6 +77,7 @@ case "$turn" in
 3) reviews='[{"state":"APPROVED","submittedAt":"2026-07-30T11:00:00Z","author":{"login":"quince-coder"}},
              {"state":"APPROVED","submittedAt":"2026-07-30T11:05:00Z","author":{"login":"someone-else"}}]' ;;
 4) state=MERGED; merged=\"2026-07-30T11:10:00Z\" ;;
+5) state=CLOSED; reviews='[{"state":"APPROVED","submittedAt":"2026-07-30T11:00:00Z","author":{"login":"quince-coder"}}]' ;;
 esac
 # PR 502 IS ALWAYS OPEN AND NEVER CHANGES, and it is not padding. Without it, turn 4 merges the only
 # PR in the queue and the tick emits `event=queue-empty` — which is wake-worthy, and which woke the
@@ -219,6 +220,48 @@ if grep -q 'event=merged pr=501' "$WORK/out" && grep -q 'watch-idle' "$WORK/out"
 	ok "a merge this runner performed does not wake it (presence, no count)"
 else
 	bad "woke on its own merge"
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (6b) `event=closed` IS A NEW EVENT AND THEREFORE A NEW WAY FOR quince#242's DEFECT TO ARRIVE
+# (quince#390). A session that closes its own pull request must not be woken by it, and nothing gave
+# the ledger a `pr close` verb until now — the same hole as (6), reached through a new EVENT rather
+# than a new verb, which is how it will keep being reached.
+#
+# `approvals=1` travels with the event and must NOT break the match: the awk keys on
+# repo+number+subject+kind and ignores every other field, so a discriminator added to the line cannot
+# quietly stop suppression working. Asserted rather than assumed, because that is exactly the kind of
+# coupling that breaks silently.
+#
+# THE EXTRA SEEDING TICK IS LOAD-BEARING. Turn 5 carries the APPROVED review so that `approvals=1` is
+# non-trivial, and `baseline` settles on turn 1, which has none — so going straight from 1 to 5 emits
+# an unrecorded `event=review` ALONGSIDE the close, and the runner wakes on the review while the close
+# is suppressed exactly as intended. The first draft of this case did that and read as "woke on its
+# own close"; the suppression note in the output said `1 self-caused event(s) suppressed` the whole
+# time. Seeding turn 2 first puts the review in the previous observation, so turn 5 adds only the
+# close and the assertion is about one event.
+baseline
+run_watch 2 4
+record close
+run_watch 5 4
+if grep -q 'event=closed pr=501 approvals=1' "$WORK/out" && grep -q 'watch-idle' "$WORK/out"; then
+	ok "a close this runner performed does not wake it, and approvals= does not break the match"
+else
+	bad "woke on its own close, or the event did not carry approvals="
+	sed -n '1,8p' "$WORK/out"
+fi
+
+# (6c) THE NEGATIVE CONTROL FOR (6b), and the direction that matters: SOMEBODY ELSE's close must still
+# wake this runner. Without it (6b) would pass against a build that suppressed every close, or that
+# never emitted the event at all — and a missed wake is the expensive direction. An approved PR
+# closing with nobody's name on it is precisely what quince#390 was filed for.
+baseline
+run_watch 2 4
+run_watch 5 6
+if grep -q 'event=closed pr=501 approvals=1' "$WORK/out" && grep -q 'EXITING on the event' "$WORK/out"; then
+	ok "a close this runner did NOT perform wakes it — the event exists and is wake-worthy"
+else
+	bad "a close nobody recorded failed to wake — the event is missing or wrongly suppressed"
 	sed -n '1,8p' "$WORK/out"
 fi
 

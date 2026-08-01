@@ -539,7 +539,12 @@ step() {
 		[.[] | select(.number as $n | ($old | map(.number) | index($n)) | not)] | .[]
 		| "event=opened pr=\(.number)"'
 
-	# merged / closed: present before, now MERGED or gone.
+	# merged: present before, now MERGED.
+	#
+	# THIS COMMENT SAID "merged / closed" AND THE CODE ONLY EVER DID MERGED (quince#390). The jq below
+	# selects `state == "MERGED"` and nothing else; the sole `CLOSED` test in this file is on the ISSUE
+	# channel. A comment describing behaviour the code does not implement is this project's most-filed
+	# defect class, and it was sitting in the watcher. The closed arm is directly below.
 	#
 	# NO `count=` HERE, DELIBERATELY, and this is the line to read before adding one for symmetry
 	# with `event=review` below: a PR merges ONCE, so the cardinality is inherently 1 and the field
@@ -550,6 +555,38 @@ step() {
 		[.[] | select(.state == "MERGED")
 		     | select(.number as $n | ($old | map(select(.state == "MERGED") | .number) | index($n)) | not)]
 		| .[] | "event=merged pr=\(.number)"'
+
+	# CLOSED WITHOUT MERGING — the arm the comment above promised and the code never had (quince#390).
+	#
+	# WHAT IT COST. quince#377 merged with `--delete-branch` and GitHub auto-closed quince#384, which
+	# was stacked on it, in the SAME SECOND — `reviewDecision` still `APPROVED`, no notification. No
+	# event named it. What the watch delivered instead was `event=updated pr=384 actor=unattributed`
+	# from the unenumerated backstop (because `updatedAt` moves on close) alongside
+	# `event=mergeability pr=384 status=DIRTY`, which reads as an ordinary conflict and is precisely
+	# the shape canon tells the merging seat to LEAVE TO THE AUTHOR. So it was not silence: it was the
+	# one fact that mattered missing while two other events pointed elsewhere, which is worse. The
+	# author found it 15 minutes later, by which time a force-push had made the PR unrecoverable.
+	#
+	# `MERGED` AND `CLOSED` ARE DISJOINT in this API — a merged PR reports `MERGED`, never `CLOSED` —
+	# so this cannot double-fire with the arm above, and the merged fixtures are its negative control.
+	#
+	# IT DOES NOT RE-EMIT ON REOPEN, and that was the trap worth checking rather than assuming. The
+	# shape is the merged arm's: emit when the number is absent from the OLD observation's CLOSED set.
+	# A reopen removes it from that set, so a SECOND close emits again — correct, because a second
+	# closure is a second event, unlike a merge which happens once and is why that arm carries no
+	# `count=`.
+	#
+	# `approvals=` IS THE DISCRIMINATOR, and it is the whole reason this event is worth more than the
+	# backstop it replaces: an approved PR leaving the queue is a different urgency from a draft nobody
+	# read, and quince#384 was the former. It is a COUNT OF APPROVING REVIEW NODES, deliberately not
+	# `reviewDecision` — the fetch query does not request that field, and adding it is a separate
+	# change with its own cost. So a PR approved and later changes-requested still counts 1 here. Named
+	# `approvals=` rather than `approved=` for exactly that reason: a count cannot be misread as a
+	# verdict.
+	printf '%s' "$_now_prs" | jq -r --argjson old "$_prev_prs" '
+		[.[] | select(.state == "CLOSED")
+		     | select(.number as $n | ($old | map(select(.state == "CLOSED") | .number) | index($n)) | not)]
+		| .[] | "event=closed pr=\(.number) approvals=\([(.reviews // [])[] | select(.state == "APPROVED")] | length)"'
 
 	# reviews: a verdict that was not there before. The verdict travels with the event, because
 	# "there is a review" is not the information a caller needs.
@@ -3038,6 +3075,10 @@ selfcaused_filter() { # <events-file> <default-repo> <suppressed-count-out>
 			kind = ""; subj = ""
 			if ($0 ~ /(^| )event=review( |$)/)              { kind = "review";          subj = "pr" }
 			else if ($0 ~ /(^| )event=merged( |$)/)         { kind = "merged";          subj = "pr" }
+			# `event=closed` is PR-only and distinct from `event=issue-closed` (quince#390). The
+			# boundary in the pattern is what keeps them apart: ` event=issue-closed ` does not match
+			# ` event=closed `, so the two arms cannot shadow each other whatever order they sit in.
+			else if ($0 ~ /(^| )event=closed( |$)/)         { kind = "closed";          subj = "pr" }
 			else if ($0 ~ /(^| )event=issue-closed( |$)/)   { kind = "issue-closed";    subj = "issue" }
 			else if ($0 ~ /(^| )event=issue-reopened( |$)/) { kind = "issue-reopened";  subj = "issue" }
 			if (kind == "") { print; next }
@@ -3054,7 +3095,9 @@ selfcaused_filter() { # <events-file> <default-repo> <suppressed-count-out>
 			# A review line with no count= is one this build cannot account for — an event from a
 			# state file written before step 1. Unaccountable wakes. The issue state changes carry
 			# no count= and never have: one close is one event, so the default of 1 is exact rather
-			# than assumed, and requiring a count there would suppress nothing forever.
+			# than assumed, and requiring a count there would suppress nothing forever. `event=closed`
+			# (quince#390) is in that same group and for the same reason — one closure is one event —
+			# which is why the `kind == "review"` guard below is deliberately not widened to it.
 			if (kind == "review" && sawcount == 0) { print; next }
 			k = repo SUBSEP num SUBSEP subj SUBSEP kind
 			if (have[k] >= c) { have[k] -= c; sup++; next }

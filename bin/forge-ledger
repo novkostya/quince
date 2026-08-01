@@ -98,6 +98,15 @@ classify() {
 	case "$_cl_subject/$_cl_verb" in
 	pr/review) printf 'pr review\n' ;;
 	pr/merge) printf 'pr merged\n' ;;
+	# `pr close` joins them with `event=closed` (quince#390). Without it a session that closes its own
+	# pull request is woken by its own act — quince#242's defect arriving through a new EVENT rather
+	# than a new verb, which is the way it will keep arriving.
+	#
+	# `pr reopen` is deliberately ABSENT. Nothing emits an event for a reopen, so a row recorded for
+	# one would never be consumed: it would sit in the ledger and swallow the NEXT close on that
+	# number — somebody else's — which is a MISSED wake and the one direction this subsystem must not
+	# fail in. The same reasoning the record path already applies to a FAILED command.
+	pr/close) printf 'pr closed\n' ;;
 	issue/close) printf 'issue issue-closed\n' ;;
 	issue/reopen) printf 'issue issue-reopened\n' ;;
 	*) return 1 ;;

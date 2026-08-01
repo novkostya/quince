@@ -1,0 +1,38 @@
+{
+  "note": "RECORDED SHAPE, REAL INCIDENT (quince#390). On 2026-07-31 quince#377 merged with --delete-branch and GitHub auto-closed quince#384 — stacked on its base branch — in the SAME SECOND, with reviewDecision still APPROVED. No event named it. What the watch actually delivered was `event=updated … actor=unattributed` from the unenumerated backstop, because updatedAt moves on close, alongside `event=mergeability … status=DIRTY`, which reads as an ordinary conflict and is exactly the shape canon tells the merging seat to leave to the author. So the failure was NOT silence: the one fact that mattered was absent while two other events pointed elsewhere, which is worse, and it survived 15 minutes with two seats looking at the PR. The numbers here are 377/384 because this pair is the incident rather than an illustration; the timestamps are the real ones. PR 377 merging is the NEGATIVE CONTROL in the same tick — MERGED and CLOSED are disjoint in this API, so a build that emitted `closed` for a merge would fail here rather than in some other file. `approvals=1` on 384 is the discriminator the whole event exists for: an approved PR leaving the queue is a different urgency from a draft nobody read. AND `event=updated pr=384 … actor=unattributed` IS EXPECTED ALONGSIDE, deliberately: that backstop line is the whole of what this incident produced BEFORE this arm existed, so pinning it here is what stops a future change from concluding the backstop is now redundant and removing it. Two lines about one act is the correct outcome — one names the act, the other is the generic touch — and the fixture would be weaker if it hid the second. Two expectations in the first draft of this file were WRONG rather than the code: it also predicted `event=mergeability pr=384 status=DIRTY`, which the mergeability arm does not emit for a PR that has left OPEN, and it omitted the backstop line. Recorded because a fixture written from what the author expected, rather than from what the tool did, is how an expectation gets enshrined as a contract.",
+  "before": {
+    "observed": true,
+    "prs": [
+      { "number": 377, "state": "OPEN", "updatedAt": "2026-07-31T21:00:00Z",
+        "merge_state": "CLEAN",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [{"at":"2026-07-31T21:00:00Z","actor":"quince-review","kind":"review"}] },
+      { "number": 384, "state": "OPEN", "updatedAt": "2026-07-31T20:48:44Z",
+        "merge_state": "UNSTABLE",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [{"at":"2026-07-31T20:48:44Z","actor":"quince-review","kind":"review"}] }
+    ]
+  },
+  "after": {
+    "observed": true,
+    "prs": [
+      { "number": 377, "state": "MERGED", "updatedAt": "2026-07-31T21:05:47Z",
+        "merge_state": "UNKNOWN",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [
+          {"at":"2026-07-31T21:00:00Z","actor":"quince-review","kind":"review"},
+          {"at":"2026-07-31T21:05:47Z","actor":"app/quince-review","kind":"merge"}
+        ] },
+      { "number": 384, "state": "CLOSED", "updatedAt": "2026-07-31T21:05:47Z",
+        "merge_state": "DIRTY",
+        "checks": [{"name":"gates","conclusion":"SUCCESS"}], "reviews": [{"state":"APPROVED"}],
+        "activity": [{"at":"2026-07-31T20:48:44Z","actor":"quince-review","kind":"review"}] }
+    ]
+  },
+  "expect_events": [
+    "event=updated pr=377 at=2026-07-31T21:05:47Z actor=app/quince-review kind=merge",
+    "event=merged pr=377",
+    "event=closed pr=384 approvals=1",
+    "event=updated pr=384 at=2026-07-31T21:05:47Z actor=unattributed"
+  ]
+}
