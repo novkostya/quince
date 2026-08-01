@@ -1,4 +1,5 @@
-import type { Storage } from "@/lib/types";
+import * as React from "react";
+import type { StoragesState } from "./useStorages";
 
 // StorageSelect is the "where does this backup go" control on Back up now (qn.6c story 9).
 //
@@ -6,24 +7,51 @@ import type { Storage } from "@/lib/types";
 // the question does not exist, and a select with a single option is a control that teaches the user
 // there is a decision when there is not.
 //
+// A FAILED LOAD IS NOT THE SAME AS NO CHOICE, and rendering them identically is the defect the
+// review caught (quince#452): the user with two disks would find the control simply gone, press the
+// button, and have the backup go to the default with nothing saying so. Failure gets its own line —
+// shown, not thrown, the same shape as `Storage.unreachable_reason`.
+//
 // An UNREACHABLE storage is listed and DISABLED, with its reason shown. Hiding it would be the
 // wrong kind of tidy: the user plugged that disk in once, and a list it silently vanishes from is a
 // list they cannot trust. Disabled-with-a-reason is the honest shape — and it is why the ruling
 // made quince serve rather than refuse when a disk is out.
 export function StorageSelect({
-  storages,
+  state,
   value,
   onChange,
   disabled,
 }: {
-  storages: Storage[];
+  state: StoragesState;
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
-  if (storages.length < 2) return null;
+  const storages = state.status === "loaded" ? state.storages : [];
+  const exact = storages.find((s) => s.id === value);
+  const chosen = exact ?? storages.find((s) => s.default);
 
-  const chosen = storages.find((s) => s.id === value) ?? storages.find((s) => s.default);
+  // TELL THE PARENT WHEN THE FALLBACK FIRES (quince#452 review). If `value` names a storage that is
+  // no longer declared — a config edit plus a restart while this page is open — the select would
+  // DISPLAY the default while the parent still held the stale id, and the button would submit the
+  // stale one. The server refuses that clearly, so it fails safe; but the screen and the request
+  // must not disagree in the meantime.
+  //
+  // Computed BEFORE the early returns because a hook cannot be called after one — the list is empty
+  // in every non-loaded state, so the effect is inert there rather than conditional.
+  React.useEffect(() => {
+    if (!exact && chosen && value !== "") onChange(chosen.id);
+  }, [exact, chosen, value, onChange]);
+
+  if (state.status === "failed") {
+    return (
+      <span className="text-xs text-warn" data-testid="storages-failed">
+        couldn&rsquo;t load storages — this backup will go to the default
+      </span>
+    );
+  }
+  if (state.status === "loading") return null;
+  if (storages.length < 2) return null;
 
   return (
     <div className="flex flex-col gap-1">
