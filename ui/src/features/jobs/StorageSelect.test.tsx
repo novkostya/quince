@@ -52,8 +52,18 @@ describe("StorageSelect", () => {
 
   // The daemon's own sentence, shown rather than replaced with client copy: it names which path and
   // which marker, which no client-side string could.
-  it("shows the daemon's reason for the chosen unreachable storage", () => {
-    render(<StorageSelect state={{ status: "loaded", storages: [storage({}), shuttle] }} value="01JB" onChange={() => {}} />);
+  // WITHOUT selecting it. A disabled option cannot be chosen, so a reason that only appeared
+  // on selection was unreachable code — the user saw "not connected" and could never learn
+  // which path or why. Caught by G8 driving the real API; this pins it at the unit level.
+  it("shows the daemon's reason for an unreachable storage without it being chosen", () => {
+    // value is the DEFAULT, not the unreachable one.
+    render(
+      <StorageSelect
+        state={{ status: "loaded", storages: [storage({}), shuttle] }}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
     expect(screen.getByTestId("storage-unreachable")).toHaveTextContent(
       /carries no quince storage marker/,
     );
