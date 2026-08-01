@@ -503,6 +503,87 @@ Three decisions inside this one gap:
 
 ---
 
+## Story 5's contract surface — specified before code, per the 2026-08-01 ruling
+
+The ruling on quince#435 settled **behaviour** and said explicitly that the wire shape was not
+decided and belonged here. Three things follow, and the first is a defect the ruling introduced.
+
+### "probe" now means two different operations, and a CI gate forbids one of them
+
+The 2026-07-31 rulings say, twice, that a missing medium must **"never re-probe, never re-create"**,
+and **G5b asserts it**: *"it must NOT re-probe, must NOT write a second marker, and must NOT accept
+a backup."* The 2026-08-01 ruling says **"reachability may change without a restart (re-probe on
+demand)"**. Read with one meaning of the word, the second repeals the first and G5b becomes
+unbuildable.
+
+They are different operations and the spec needs two words:
+
+| | **backend selection probe** | **reachability check** |
+| --- | --- | --- |
+| asks | *which backend does this filesystem support?* | *is this storage present right now?* |
+| when | **once**, at the creation moment | any time, on demand |
+| writes | the marker | **nothing** |
+| cost | filesystem feature detection | a stat |
+| on a bare mountpoint | **FORBIDDEN** — it is what would let an unplugged disk be re-selected and re-created | **required** — it is how the answer becomes `missing_medium` |
+
+**G5b stands unchanged and is not weakened.** What it forbids is the *selection* probe, and the
+reason survives the new ruling intact: re-selecting a backend for a path whose marker is gone is
+what turns an unplugged disk into a new empty storage. The reachability check writes nothing and
+selects nothing, so it cannot cause that failure.
+
+**Proposed wording change, so no later session has to rediscover this:** the two RULED blocks keep
+their text — they are rulings — and this table is the definition they are read against. New text
+says **"never re-select a backend"** where it means the creation probe.
+
+### PROPOSED (gap): the re-probe surface does not exist in the contract
+
+*"Plug the disk in and press the button"* is the ruled behaviour. **There is no button.** Nothing in
+contracts §1 re-checks a storage's reachability; the nearest neighbour is `POST
+/api/devices/rescan`, which is about muxers.
+
+```
+POST /api/storages/{id}/recheck   → 200 {storage: Storage} | 404 unknown storage
+```
+
+Recommended over the alternatives, with the reasons, because this is a contract surface and the
+choice should be arguable rather than assumed:
+
+- **against re-checking inside `GET /api/storages`** — it would make a list read do filesystem I/O
+  per storage on every poll, and the UI polls. A read that can be slow and can change state is the
+  wrong shape.
+- **against a global `POST /api/storages/recheck`** — the user plugged in *one* disk. Per-storage
+  keeps the action's blast radius equal to the user's intent, and the response carries the one
+  object that changed.
+- **`200` rather than `202`** — the check is a stat, not a job. A `202` would imply something to
+  poll, and this rung has no queue by ruling.
+- **it never creates or selects.** An unreachable storage that becomes reachable is `opened`, or it
+  is `missing_medium` / `backend_mismatch` and stays refused. The one thing this endpoint must not
+  do is the thing G5b forbids.
+
+**Not built until ruled.**
+
+### PROPOSED (gap): `unreachable_reason` — a code, prose, or both
+
+Gap 2's ruled shape carries `"unreachable_reason": null`, and the 2026-08-01 ruling requires
+`missing_medium` and `unreachable` to be **distinguishable by text**. Prose alone cannot be
+branched on; a code alone cannot be shown. Recommended: **both, with the code authoritative.**
+
+```jsonc
+"reachable": false,
+"unreachable_code": "missing_medium" | "unreachable" | "backend_mismatch",
+"unreachable_reason": "the path is readable but carries no quince storage marker …"
+```
+
+The alternative — one field the UI maps to copy — was considered and is rejected on this project's
+own precedent: the muxer surface already ships state plus human detail, and the log/UI split is
+where invented copy would otherwise appear. **Both fields are null when `reachable` is true**, never
+absent, for the reason `Version.storage_id` is null-not-omitted: a present null is a fact, an absent
+key is a version-skew question.
+
+**Not built until ruled.**
+
+---
+
 ## Stories
 
 Each is independently checkable.
