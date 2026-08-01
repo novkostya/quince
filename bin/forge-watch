@@ -3878,6 +3878,26 @@ owed_classify() {
 # NOT SILENT. Dropping PRs from the owed set is a cap, and this project's rule is that a cap is
 # surfaced — so the count and the seat are printed to stderr, leaving stdout the repo list its caller
 # parses.
+# THE TWO PAGE LIMITS, AS CONSTANTS, BECAUSE THE FLAG AND THE CHECK MUST NOT DRIFT (quince#227
+# follow-up). Each is used twice — once as the `--limit` argument and once as the value a full page
+# is compared against — and a literal in both places is a bug waiting for somebody to raise one of
+# them. Raising either now keeps its own truncation notice honest automatically.
+#
+# NEITHER CAP IS SILENT ANY MORE, and the two fail in DIFFERENT directions, which is why they get
+# different sentences rather than one shared one:
+#
+#   pr list  (per repo)   a PR past the cut has no branch row -> unattributable -> reported OWED.
+#                         Noisy, recoverable, and it still says so.
+#   search   (seat-wide)  a PR past the cut is never seen at all, so it cannot be reported as
+#                         anything. This one can UNDERSTATE what is owed, which is the direction
+#                         this whole guard exists to prevent, so it says that in as many words.
+#
+# The per-repo cap was caught in review on quince#426; the search cap is the same class and predates
+# it. Both were `200 OK` answers that were true and incomplete — the failure mode that looks like
+# success, and the reason `privacy-check` had to carve `exit 2` out of `clean` (quince#41).
+OWED_SEARCH_LIMIT=${OWED_SEARCH_LIMIT:-50}
+OWED_PRLIST_LIMIT=${OWED_PRLIST_LIMIT:-100}
+
 # TWO CALLS, BECAUSE `search prs` CANNOT ANSWER THIS. It has no branch field — measured against the
 # live forge, which lists 19 available fields and no `headRefName` among them. So the search says
 # WHICH PRs this seat has open, and a `pr list` per repository says what branch each one is on.
@@ -3897,15 +3917,21 @@ owed_scope_to_runner() { # <search-json-file> <gh-cmd> -> repo names on stdout
 	fi
 	: >"$_osr_f.branches"
 	_osr_blind=0
+	_osr_capped=
 	cut -f1 "$_osr_f.mine" | sort -u >"$_osr_f.repos"
 	while read -r _osr_repo; do
 		[ -n "$_osr_repo" ] || continue
 		# A repo we cannot read leaves its PRs with NO branch, which lands them in the unattributable
 		# arm below and reports them OWED. Counted so the refusal is visible rather than inferred.
-		if "$_osr_gh" pr list --repo "$_osr_repo" --state open --limit 100 \
+		if "$_osr_gh" pr list --repo "$_osr_repo" --state open --limit "$OWED_PRLIST_LIMIT" \
 			--json number,headRefName >"$_osr_f.raw" 2>/dev/null; then
 			jq -r --arg r "$_osr_repo" '.[] | "\($r)\t\(.number)\t\(.headRefName // "")"' \
 				"$_osr_f.raw" >>"$_osr_f.branches" 2>/dev/null || _osr_blind=$((_osr_blind + 1))
+			# A FULL PAGE IS AN ANSWER THAT MAY BE PARTIAL. `_osr_blind` covers a repo that REFUSED,
+			# and refusal is the failure people design for because it announces itself; a truthful
+			# short answer arrives as a `200` and looks exactly like success.
+			[ "$(jq 'length' "$_osr_f.raw" 2>/dev/null || printf 0)" != "$OWED_PRLIST_LIMIT" ] ||
+				_osr_capped="$_osr_capped $_osr_repo"
 		else
 			_osr_blind=$((_osr_blind + 1))
 		fi
@@ -3934,6 +3960,10 @@ owed_scope_to_runner() { # <search-json-file> <gh-cmd> -> repo names on stdout
 		printf 'forge-watch: %d repositor(y/ies) would not list their PRs, so their branches are unknown and were counted as OWED.\n' \
 			"$_osr_blind" >&2
 	fi
+	if [ -n "$_osr_capped" ]; then
+		printf 'forge-watch: pr list returned a FULL page (%s) for:%s — the branch list may be truncated, so any PR past the cut is unattributable and counted as OWED.\n' \
+			"$OWED_PRLIST_LIMIT" "$_osr_capped" >&2
+	fi
 	sort -u "$_osr_f.keep"
 	rm -f "$_osr_f.mine" "$_osr_f.repos" "$_osr_f.branches" "$_osr_f.keep" "$_osr_f.raw"
 }
@@ -3951,13 +3981,21 @@ owed_repos() {
 		# Asked of the forge as a whole rather than of the declared set: a PR opened in a repository
 		# nobody declared still obligates the session that opened it, and reading the set here would
 		# quietly excuse exactly that case.
-		if ! "$_or_gh" search prs --author "$_or_author" --state open --limit 50 \
+		if ! "$_or_gh" search prs --author "$_or_author" --state open --limit "$OWED_SEARCH_LIMIT" \
 			--json repository,number >"$_or_tmp" 2>"$_or_tmp.err"; then
 			_or_why=$(head -1 "$_or_tmp.err" 2>/dev/null | cut -c1-120)
 			rm -f "$_or_tmp" "$_or_tmp.err"
 			die "could not ask the forge which PRs $_or_author has open: ${_or_why:-no_stderr_from_gh}
     REFUSING to answer. \"I could not look\" and \"nothing is owed\" are different sentences, and
     this tool exists because they were once printed identically."
+		fi
+		# The SEAT-WIDE cap, which predates the branch scoping and is the same class as the per-repo
+		# one below it. A truncated search drops PRs before anything can be attributed, so unlike the
+		# per-repo cut those PRs are not reported OWED — they are not reported at all, which is the
+		# unsafe direction and the reason this one is worth saying out loud rather than counting.
+		if [ "$(jq 'length' "$_or_tmp" 2>/dev/null || printf 0)" = "$OWED_SEARCH_LIMIT" ]; then
+			printf 'forge-watch: the PR search returned a FULL page (%s) — the seat may have MORE open PRs than this, and any beyond the cut were never seen. This answer may understate what is owed.\n' \
+				"$OWED_SEARCH_LIMIT" >&2
 		fi
 		owed_scope_to_runner "$_or_tmp" "$_or_gh"
 	else
