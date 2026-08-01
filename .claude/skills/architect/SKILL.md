@@ -284,13 +284,56 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   registers, so GitHub can attach your approval to a commit you never read (stale-review dismissal
   covers pushes *after* an approval, not pushes racing one):
   ```sh
-  OLD=$(gh pr view <n> --repo novkostya/quince --json reviews \
-          -q '[.reviews[] | select(.state=="APPROVED")] | last | .commit.oid')   # FULL 40-char oid
+  # NOTE THE HEAD BEFORE YOU APPROVE and use that value here. `reviews[].commit.oid` is NOT a
+  # reliable source for it — see "the recorded binding MOVES" below.
+  OLD=<the full 40-char oid you noted before casting the verdict>
   NEW=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
   git fetch origin "$OLD" "$NEW"                 # both, by full oid
-  git range-diff "$OLD~1..$OLD" "$NEW~1..$NEW"
+  git range-diff "origin/main...$OLD" "origin/main...$NEW"    # THREE-DOT, whole branch
   ```
   Identical → the approval stands. Different → re-review before it lands.
+
+  **THREE-DOT AND WHOLE-BRANCH, because the old `"$OLD~1..$OLD" "$NEW~1..$NEW"` form was TIP-ONLY**
+  (quince#110). `OLD~1..OLD` is exactly one commit, so a three-commit branch got one third of a
+  check — and the output is indistinguishable from a full one: a single `1: … = 1: …` line, which
+  reads as *"the branch is unchanged"* rather than *"the last commit is unchanged."* Demonstrated
+  with a middle commit deliberately altered and the tip left alone:
+
+  ```
+  tip-only    1: 9e86c2f = 1: 5676f6e commit 3          <- clean, and WRONG
+  three-dot   1: 8a95539 = 1: 8a95539 commit 1
+              2: c185493 < -: ------- commit 2          <- the tampered commit, caught
+              -: ------- > 2: 6d3828b commit 2
+              3: 9e86c2f = 3: 5676f6e commit 3
+  ```
+
+  Three merges on 2026-07-31 — quince#377, #383 and #386, three commits each — were verified
+  tip-only and reported as verified. Re-run in full afterwards they were pure replays throughout,
+  so nothing was lost: that is luck plus a well-behaved `update-branch --rebase`, not evidence the
+  check worked.
+
+  The three-dot form asks *"how do these two branches differ from their bases"*, which is the actual
+  question, and it handles the two bases being different commits — which they always are across a
+  rebase. On a single-commit branch it degrades to exactly the old behaviour, so nothing is lost.
+  Commits dropping out of the old range are **diagnostic, not noise**: that is what a rebase onto a
+  newer `main` looks like.
+
+  **THE RECORDED BINDING MOVES, so `reviews[].commit.oid` cannot be trusted as `OLD`** (quince#110).
+  `gh pr update-branch --rebase` rewrites it — same review id, same `submitted_at`, different
+  `commit_id` — and §5 makes that rebase the merging seat's standing duty on every `BEHIND` branch,
+  which `strict: true` makes the steady state. Then `OLD == NEW`, `range-diff` compares a commit
+  against itself, and the seat gets a clean `=` from a check that had nothing to compare. Still
+  observable on merged PRs:
+
+  ```
+  quince#377   approved_at_oid 533c2711…   headRefOid 533c2711…   <- identical
+  quince#383   approved_at_oid be61e18d…   headRefOid be61e18d…   <- identical
+  ```
+
+  It is **not** vacuous in every case: if the *author* force-pushes, `commit_id` stays on the old
+  commit and the comparison works — that is the case the recipe was built from. What it cannot see
+  is the merging seat's own rebase. **Until the wrapper passes `commit_id` explicitly (quince#110's
+  ruled fix), noting the oid by hand before approving is the only reliable `OLD`.**
 
   **Use the FULL 40-character oid and fetch it first, and that is the whole of quince#243.** After a
   force-push the approved head is no longer any branch's tip, but the object is still on the forge
@@ -377,7 +420,12 @@ failure.
 dismiss the approval — on quince#216 it did not — so §4's stale-review rule applies with full force:
 `range-diff` **against the full 40-character oid, fetched first** (§4 says why the abbreviation is
 what fails), or compare the old and new patches directly, and confirm the rebase was a pure replay
-before merging. Never ask for a *push* to clear a red check: that moves the head off the tree you
+before merging.
+
+**AND THIS REBASE IS THE ONE §4's CHECK CANNOT SEE UNAIDED** (quince#110). Doing it rewrites the
+review's recorded `commit_id`, so `reviews[].commit.oid` comes back equal to the new head and the
+comparison is against itself. **Note the head oid BEFORE you approve** — §4's `OLD` — or the check
+you run after rebasing is vacuous exactly when you most need it. Never ask for a *push* to clear a red check: that moves the head off the tree you
 reviewed for no gain the rebase does not already give you.
 
 ## 6. Arm the loop — the MECHANISM, not only the properties
