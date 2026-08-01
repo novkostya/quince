@@ -49,6 +49,7 @@ function job(state: Job["state"], percent: number | null): Job {
     intent_id: "J1",
     attempt: 1,
     version_id: null,
+    storage_id: null,
   };
 }
 

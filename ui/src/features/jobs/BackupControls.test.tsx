@@ -33,6 +33,7 @@ function runningJob(): Job {
     intent_id: "J1",
     attempt: 1,
     version_id: null,
+    storage_id: null,
   };
 }
 
