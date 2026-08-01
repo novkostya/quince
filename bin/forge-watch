@@ -3837,6 +3837,107 @@ owed_classify() {
 	done
 }
 
+# owed_scope_to_runner — the PRs THIS RUNNER owes a watch over, from the seat-wide answer the forge
+# gave (Operator ruling, quince#227, 2026-07-31).
+#
+# `--author @me` resolves to the SEAT, and since decisions/0014 the implementer seat is one GitHub
+# App shared by every concurrent session on the box. So the forge cannot tell `r1` from `r7`: both
+# author as `quince-coder[bot]`, and `owed` was reporting a watch owed over PRs the asking session
+# did not open and cannot act on. Measured three times — r2 (quince#227), r5, and r1 — each costing a
+# session a blocked `Stop` on somebody else's work.
+#
+# Ownership is carried by the BRANCH, not the login, which is the ruling already recorded at :955 and
+# already implemented for events by `wake_filter` (quince#174/#330). This asks the same question of
+# the same primitive — `branch_seat` — so the two answers cannot drift.
+#
+# THE TWO DIRECTIONS, because the ruling turns on them and they are opposite:
+#
+#   another seat's branch (`r7/…` when I am r1)  -> DROPPED. Not mine; the session that opened it
+#                                                   owes the watch, and it is the one that can act.
+#   mine, OR unattributable (`journal/x`, `analyst/…`, a bare topic name)
+#                                                -> KEPT, i.e. reported OWED.
+#
+# The second is the binding constraint and it is the whole ruling. An unprefixed branch means CANNOT
+# TELL, and cannot-tell must resolve toward reporting owed. `wake_filter` fails OPEN on the same
+# input — an unknown branch wakes, costing one spurious wake — but `owed` fails in the opposite
+# direction: reporting clear ends a session with an open PR and NO WATCH RUNNING, which is the silent
+# clean result (quince#41's shape) landing on the guard whose only job is preventing an unwatched
+# turn. Noise is recoverable; silence is not.
+#
+# So the win is deliberately narrow: cross-runner blocking stops only for CORRECTLY NAMED branches.
+# An unprefixed PR still blocks every session, which is an argument for the naming convention rather
+# than a defect here.
+#
+# NO RUNNER NAME -> NO FILTERING, and it is a BACKSTOP rather than the live path. Both callers
+# already refuse before reaching here — the `--hook` arm answers with "could not be determined and
+# was NOT checked", and the direct arm dies in `require_runner` — so an undeclared session never
+# gets a filtered answer OR a clear one, which is stronger than either. This keeps the seat-wide set
+# anyway if a third caller ever arrives, because the one thing that must not happen is a session
+# that cannot attribute anything being told nothing is owed.
+#
+# NOT SILENT. Dropping PRs from the owed set is a cap, and this project's rule is that a cap is
+# surfaced — so the count and the seat are printed to stderr, leaving stdout the repo list its caller
+# parses.
+# TWO CALLS, BECAUSE `search prs` CANNOT ANSWER THIS. It has no branch field — measured against the
+# live forge, which lists 19 available fields and no `headRefName` among them. So the search says
+# WHICH PRs this seat has open, and a `pr list` per repository says what branch each one is on.
+# Discovered by running it: the first version asked `search prs` for `headRefName` and every test
+# passed, because a stub is more permissive than the API it stands in for.
+owed_scope_to_runner() { # <search-json-file> <gh-cmd> -> repo names on stdout
+	_osr_f=$1
+	_osr_gh=$2
+	_osr_me=$(runner_name)
+	# repo + number for every PR the SEAT has open. Numbers matter: a `pr list` returns everybody's
+	# PRs, and only these are the seat's.
+	jq -r '.[] | "\(.repository.nameWithOwner)\t\(.number)"' "$_osr_f" | sort -u >"$_osr_f.mine"
+	if [ -z "$_osr_me" ]; then
+		cut -f1 "$_osr_f.mine" | sort -u
+		rm -f "$_osr_f.mine"
+		return 0
+	fi
+	: >"$_osr_f.branches"
+	_osr_blind=0
+	cut -f1 "$_osr_f.mine" | sort -u >"$_osr_f.repos"
+	while read -r _osr_repo; do
+		[ -n "$_osr_repo" ] || continue
+		# A repo we cannot read leaves its PRs with NO branch, which lands them in the unattributable
+		# arm below and reports them OWED. Counted so the refusal is visible rather than inferred.
+		if "$_osr_gh" pr list --repo "$_osr_repo" --state open --limit 100 \
+			--json number,headRefName >"$_osr_f.raw" 2>/dev/null; then
+			jq -r --arg r "$_osr_repo" '.[] | "\($r)\t\(.number)\t\(.headRefName // "")"' \
+				"$_osr_f.raw" >>"$_osr_f.branches" 2>/dev/null || _osr_blind=$((_osr_blind + 1))
+		else
+			_osr_blind=$((_osr_blind + 1))
+		fi
+	done <"$_osr_f.repos"
+	: >"$_osr_f.keep"
+	_osr_dropped=0
+	while IFS="$(printf '\t')" read -r _osr_repo _osr_num; do
+		[ -n "$_osr_repo" ] || continue
+		_osr_branch=$(awk -F'\t' -v r="$_osr_repo" -v n="$_osr_num" \
+			'$1 == r && $2 == n { print $3; exit }' "$_osr_f.branches")
+		# branch_seat is the SINGLE expression of "which seat owns this branch" (quince#330). Calling
+		# it — rather than re-inlining its regex the way wake_filter's awk has to — is why this cannot
+		# drift from the filter that decides wakes.
+		_osr_seat=$(branch_seat "$_osr_branch" 2>/dev/null) || _osr_seat=''
+		if [ -n "$_osr_seat" ] && [ "$_osr_seat" != "$_osr_me" ]; then
+			_osr_dropped=$((_osr_dropped + 1))
+			continue
+		fi
+		printf '%s\n' "$_osr_repo" >>"$_osr_f.keep"
+	done <"$_osr_f.mine"
+	if [ "$_osr_dropped" -gt 0 ]; then
+		printf 'forge-watch: owed is scoped to %s — %d open PR(s) excluded as another seat'\''s (quince#227).\n' \
+			"$_osr_me" "$_osr_dropped" >&2
+	fi
+	if [ "$_osr_blind" -gt 0 ]; then
+		printf 'forge-watch: %d repositor(y/ies) would not list their PRs, so their branches are unknown and were counted as OWED.\n' \
+			"$_osr_blind" >&2
+	fi
+	sort -u "$_osr_f.keep"
+	rm -f "$_osr_f.mine" "$_osr_f.repos" "$_osr_f.branches" "$_osr_f.keep" "$_osr_f.raw"
+}
+
 owed_repos() {
 	# Which repositories obligate a watch right now. The two halves of the loop answer this
 	# differently, and the difference is the one in .claude/forge-set's own header: the implementer
@@ -3851,14 +3952,14 @@ owed_repos() {
 		# nobody declared still obligates the session that opened it, and reading the set here would
 		# quietly excuse exactly that case.
 		if ! "$_or_gh" search prs --author "$_or_author" --state open --limit 50 \
-			--json repository >"$_or_tmp" 2>"$_or_tmp.err"; then
+			--json repository,number >"$_or_tmp" 2>"$_or_tmp.err"; then
 			_or_why=$(head -1 "$_or_tmp.err" 2>/dev/null | cut -c1-120)
 			rm -f "$_or_tmp" "$_or_tmp.err"
 			die "could not ask the forge which PRs $_or_author has open: ${_or_why:-no_stderr_from_gh}
     REFUSING to answer. \"I could not look\" and \"nothing is owed\" are different sentences, and
     this tool exists because they were once printed identically."
 		fi
-		jq -r '.[].repository.nameWithOwner' "$_or_tmp" | sort -u
+		owed_scope_to_runner "$_or_tmp" "$_or_gh"
 	else
 		# THE WHOLE DECLARED SET, unconditionally — no queue query at all (quince#71).
 		#
@@ -4562,7 +4663,7 @@ The loop must exit when it finds something; a loop that cannot exit cannot wake 
 	owed_repos "$_ghcmd" "$_mode" "$_author" >"$_or"
 	owed_classify <"$_or" >"$_or.tab"
 	if [ ! -s "$_or.tab" ]; then
-		printf 'forge-watch: nothing owed — no open PRs authored by this session, so no watch is owed for them.\n    (This branch is the IMPLEMENTER half only. The reviewer half always owes a watch on its declared set,\n     queue or no queue — quince#71.)\n'
+		printf 'forge-watch: nothing owed — no open PRs carrying this runner'\''s branch prefix, so no watch is owed for them.\n    Scoped by BRANCH, not by author: the implementer seat is one App shared by every session on this box,\n    so authorship alone cannot tell them apart (quince#227). A branch nobody can attribute counts as OWED.\n    (This branch is the IMPLEMENTER half only. The reviewer half always owes a watch on its declared set,\n     queue or no queue — quince#71.)\n'
 		rm -f "$_or" "$_or.tab"
 		exit 0
 	fi
