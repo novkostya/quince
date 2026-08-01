@@ -385,3 +385,64 @@ func TestAdoptAttributesTheVersionToTheStorageItWasScannedFrom(t *testing.T) {
 		t.Fatalf("an adopted version must carry the storage it was scanned from, got %v", row.StorageID)
 	}
 }
+
+// --- the CONSEQUENCE of per-(device, storage) is_latest, not just the flag ---
+//
+// The tests in internal/store prove the flag is scoped correctly. This proves what the scoping is
+// FOR (quince#418 review): browse_root resolves through is_latest, so a device's newest version on
+// each storage must resolve to that storage's own `latest/`.
+//
+// I deferred this to G1 claiming it needed the registry. It does not — browseRoot is a pure
+// function that takes the root as a parameter, so two calls with two roots assert the whole thing
+// today. The end-to-end version (through toWire, two Managers) is still G1's; this is the cheap
+// one that pins the failure a user would actually meet.
+func TestBrowseRootResolvesPerStorageWhenEachHasItsOwnLatest(t *testing.T) {
+	const udid = "00008140-000A1B2C3D4E5F60"
+	rootA, rootB := "/srv/pool", "/mnt/usb"
+	createdA := time.Date(2026, 7, 20, 3, 30, 0, 0, time.UTC)
+	createdB := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+
+	// Under the ruling BOTH are latest — one per storage — so each resolves to its own latest/.
+	gotA := browseRoot(rootA, udid, BackendCopy, nil, true, createdA)
+	gotB := browseRoot(rootB, udid, BackendCopy, nil, true, createdB)
+
+	if want := latestDir(rootA, udid); gotA != want {
+		t.Errorf("storage A: browse_root = %q, want %q", gotA, want)
+	}
+	if want := latestDir(rootB, udid); gotB != want {
+		t.Errorf("storage B: browse_root = %q, want %q", gotB, want)
+	}
+	if gotA == gotB {
+		t.Fatal("two storages must not resolve to the same browse_root")
+	}
+}
+
+// THE FAILURE THE RULING EXISTS TO PREVENT, pinned as a negative.
+//
+// Under a single global latest, committing to storage B demotes storage A's newest version. This
+// shows what that does: A's version — whose artifact is still sitting in latest/ — resolves to a
+// versions/<ts>/ directory instead. The wire would hand the UI a path that does not exist, and
+// Verify would report a perfectly good version as broken.
+func TestBrowseRootPointsAtAMissingDirIfTheNewestVersionIsDemoted(t *testing.T) {
+	const udid = "00008140-000A1B2C3D4E5F60"
+	root := "/srv/pool"
+	created := time.Date(2026, 7, 20, 3, 30, 0, 0, time.UTC)
+
+	asLatest := browseRoot(root, udid, BackendCopy, nil, true, created)
+	demoted := browseRoot(root, udid, BackendCopy, nil, false, created)
+
+	if asLatest == demoted {
+		t.Fatal("precondition: is_latest must change where browse_root points")
+	}
+	if want := latestDir(root, udid); asLatest != want {
+		t.Errorf("latest resolves to %q, want %q", asLatest, want)
+	}
+	// The demoted path is under versions/, which for the NEWEST version is a directory that does
+	// not exist — its content has not been rotated out of latest/.
+	if want := nsVersionDir(root, udid, created); demoted != want {
+		t.Errorf("demoted resolves to %q, want %q", demoted, want)
+	}
+	if !strings.Contains(demoted, "/versions/") {
+		t.Errorf("the demoted path should be under versions/: %q", demoted)
+	}
+}
