@@ -45,12 +45,14 @@ moment?*
 **In scope:**
 
 - `core/internal/config` — a `storage.storages` list in the schema, its validation, and the
-  synthesis of an implicit storage from `QUINCE_BACKUPS` when the list is empty.
+  REFUSAL to start when it is absent or empty. `QUINCE_BACKUPS` is retired — there is no implicit
+  storage and no fallback (gap 3, ruled).
 - `core/internal/storage` — a storage **registry** holding one `Backend` per storage rather
   than one globally; `quince-storage.json` (a new `storageMarker`, modelled on `marker.go`); the
   pre-backup reachability + backend check; one new anchored offsite exclude rule.
-- `core/internal/store` — migration `0006_storage`: a `storages` table and `versions.storage_id`,
-  backfilled.
+- `core/internal/store` — migration `0006_storage`: a `storages` table and `versions.storage_id`.
+  **Purely additive, and NOT backfilled** — `null` means *not yet attributed* (ruled), because the
+  value is a marker UUID that does not exist until the creation moment.
 - `core/internal/backup` — the engine resolves a storage for a job and records it.
 - `core/internal/httpapi` + `core/internal/wire` — `GET /api/storages`, `storage_id` on `POST
   /api/jobs`, `Storage` and `Version.storage_id` on the wire.
@@ -526,8 +528,16 @@ Each is independently checkable.
    storage; `Manager` resolves per `(device, storage)`. `layout.go` is unchanged — a diff
    touching it is a finding against this story.
 4. **Versions know where they live.** Migration `0006_storage` adds a `storages` table and
-   `versions.storage_id`, backfilling every existing row to the implicit storage. `Version.storage_id`
-   crosses to the wire; `browse_root` resolves under the version's own storage root.
+   `versions.storage_id` — **purely additive, no row rewritten**. `storage_id` is **nullable**, and
+   `null` means *not yet attributed*: the value is a UUID from the storage's `quince-storage.json`,
+   which does not exist until the creation moment (story 2's second half), so there is nothing
+   truthful to backfill with. `Version.storage_id` crosses to the wire; `browse_root` resolves under
+   the version's own storage root.
+
+   *(Rewritten twice. It first said "backfilling every existing row to **the implicit storage**",
+   which gap 3's ruling falsified — there is no implicit storage — and the nullability ruling
+   falsified again: there is no backfill at all. Both corrections are recorded rather than quietly
+   applied, because this line described a migration nobody could write.)*
 5. **Unreachable is a state, not an error.** `GET /api/storages` lists an unreachable storage with
    `reachable: false` and a reason, and a backup to a *different* storage is unaffected.
 6. **A backup names a storage.** `POST /api/jobs {storage_id?}` — resolved to `default` when
@@ -561,7 +571,7 @@ Beyond `make gates`.
 | **G4** | 2 | `PathExcluded("<subdir>/quince-storage.json", AnchoredFilterRules("<subdir>"))` is true, and the two existing rules still behave — the D5a anchoring hazard is re-proven, not trusted. | CI |
 | **G5** | 5 | An unreachable storage (a root made unreadable mid-run) is **listed** with a reason, and a backup to another storage completes. Nothing queues. | CI |
 | **G5b** | 2, 7 | **The unmounted-mountpoint gate.** A storage is created at a fixture root; the root is then emptied to simulate the medium being absent (marker gone, path still readable, DB row present). quince must report **missing medium** and **refuse** — it must NOT re-probe, must NOT write a second marker, and must NOT accept a backup. Asserted on all three, because the failure this guards is silent and its symptom is a full system disk. | CI |
-| **G6** | 4 | A pre-`0006` DB fixture opens; every existing version resolves to the implicit storage; `browse_root` is unchanged for every one of them. | CI |
+| **G6** | 4 | A pre-`0006` database **holding a committed version** is migrated, and **every pre-existing field comes back byte-for-byte** with `storage_id` **NULL** — not `""`, not fabricated. Plus additive-only (every prior column same name/type/notnull/default, exactly one new) and idempotency. **The property is "the migration ran and the data is untouched", not "the migration ran"** — contracts' cheapness clause does not reach data at rest, so this is the gate that limit exists for. Ran against the staging stand's **real** database on a copy, 19 versions, all fields and `missing` flags identical. *(Was "every existing version resolves to **the implicit storage**" — falsified by gap 3's ruling, which retired it, and by the nullability ruling, which removed the backfill the line assumed.)* | CI |
 | **G7** | 1 | **REPLACED by gap 3's ruling — it now asserts the opposite of what it did.** A `config.yml` with **no `storages:` key REFUSES TO START**, names the missing key, and prints what to write. Asserted on all three: the refusal, the key named, and the remedy printed. **The refusal is the whole of the safety here.** The old G7 asserted an implicit storage synthesized from `QUINCE_BACKUPS` and byte-identical behaviour to `main`; the ruling retires that env var, so the old gate is not merely wrong, it is **unwritable**. The one outcome this must never have is a **silent zero-storage start that looks healthy** — an instance that comes up, shows no error, and quietly cannot back anything up. | CI |
 | **G7b** | 1 | `QUINCE_BACKUPS` is **gone**, not merely unused: set it to a valid path, start with a declared `storages:` list pointing elsewhere, and assert every version lands under the **declared** root. A retired variable that is still silently honoured somewhere is the failure this gate exists to catch. | CI |
 | **G8** | 9 | The selector renders both storages, disables the unreachable one with its reason, and shows the full-transfer warning on the storage that has no prior version. | ui-e2e |
@@ -720,8 +730,10 @@ relay on quince#378.
 | 1b | this amendment — the rulings recorded, G7 inverted, *Sequencing* corrected, story 1 rewritten | — | no |
 | 2 | stories 1 + 3 — the **declared** config list, the registry, the **loud refusal**, the upgrade note; flips contracts §6 (G7, G7b) | — | no |
 | 3a | story 2, first half — the marker **as an artifact**: round-trip, checksum and backend-mismatch refusals, the offsite exclude (G3, G4) | — | no |
-| 4 | story 4 — migration `0006`, `Version.storage_id` **and the `backend` redefinition**; flips contracts §2 (G6) | — | no |
-| 3b | story 2, second half — the marker **as a lifecycle decision**: the creation moment, missing-medium, the unmounted-mountpoint refusal; flips design §5 (G5b). **After PR 4** | — | no |
+| 4a | gap 1's **`backend` redefinition** — contracts §2 only, no code | — | no |
+| 4b | story 4's **DB half** — migration `0006`, `versions.storage_id` nullable, the `storages` table (G6). No wire, no contracts | — | no |
+| 4c | story 4's **wire half** — `Version.storage_id`; flips the rest of gap 1 in contracts §2. **After 4a** | — | no |
+| 3b | story 2, second half — the marker **as a lifecycle decision**: the creation moment, missing-medium, the unmounted-mountpoint refusal; flips design §5 (G5b, and the no-permanent-nulls gate). **After 4b** — it needs the `storages` table | — | no |
 | 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
 | 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
 | 7 | story 9 — the selector (G8) | — | no |
