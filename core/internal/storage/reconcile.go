@@ -69,9 +69,29 @@ func (m *Manager) reconcileDevice(udid string) error {
 	if err != nil {
 		return err
 	}
+	// SCOPED TO THIS STORAGE. `Scan` walked one root, so it can only answer for one storage's
+	// versions — and the loop below concludes "not on disk ⇒ missing" from it. Comparing this
+	// backend's scan against ALL of a device's rows means storage B's pass marks storage A's
+	// versions missing, then A's pass marks B's, and the last writer wins (quince#378 survey).
+	//
+	// Membership is `owns` — the NULL group is a real group (same shape as the is_latest ruling):
+	// an UNATTRIBUTED Manager owns the unattributed rows, an attributed one does not. For an
+	// attributed Manager a NULL row is SKIPPED rather than assumed to be ours, because quince
+	// does not know where that version lives, so this scan cannot conclude anything about it —
+	// marking it missing for being absent from THIS root would invent a fact. The attribution
+	// sweep runs before reconciliation precisely so that set is empty in practice.
 	inReg := map[string]store.VersionRow{}
+	var skipped int
 	for _, r := range rows {
-		inReg[r.ID] = r
+		if m.owns(r.StorageID) {
+			inReg[r.ID] = r
+		} else {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		m.log.Warn("reconcile: versions with no storage attribution were skipped — their artifacts "+
+			"cannot be checked against any one root", "udid", udid, "count", skipped)
 	}
 
 	// Adopt on-disk versions with no row; clear `missing` where an artifact reappeared.
