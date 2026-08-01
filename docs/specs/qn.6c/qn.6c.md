@@ -719,13 +719,28 @@ relay on quince#378.
 | — | **rulings** — no code PR opened before this | **done** 2026-07-31 | — |
 | 1b | this amendment — the rulings recorded, G7 inverted, *Sequencing* corrected, story 1 rewritten | — | no |
 | 2 | stories 1 + 3 — the **declared** config list, the registry, the **loud refusal**, the upgrade note; flips contracts §6 (G7, G7b) | — | no |
-| 3 | story 2 — the identity marker and the offsite rule; flips design §5 (G3, G4, G5b) | — | no |
+| 3a | story 2, first half — the marker **as an artifact**: round-trip, checksum and backend-mismatch refusals, the offsite exclude (G3, G4) | — | no |
 | 4 | story 4 — migration `0006`, `Version.storage_id` **and the `backend` redefinition**; flips contracts §2 (G6) | — | no |
+| 3b | story 2, second half — the marker **as a lifecycle decision**: the creation moment, missing-medium, the unmounted-mountpoint refusal; flips design §5 (G5b). **After PR 4** | — | no |
 | 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
 | 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
 | 7 | story 9 — the selector (G8) | — | no |
 | 8 | story 10 — the acceptance case (G1) | — | no |
 | 9 | G9 written back into this spec | — | **yes** |
+
+**Story 2 is split because it stopped being one claim, not to route around a review queue**
+(ruled on quince#378 after the ordering was reported). The **gap-4 fix made at spec review** — an
+absent marker for a storage the DB already knows is a *missing medium* — gave the creation rule a
+dependency on the `storages` table, which story 4 creates. That inverted the dependency through
+the slice: PR 3 needed what PR 4 built.
+
+It also separated two claims that had been one. **The marker as an artifact** (format, checksum,
+mismatch refusals, the offsite exclude — G3, G4) needs no table and no lifecycle. **The marker as a
+lifecycle decision** (*when is a creation moment*, missing-medium, G5b) is the part that needs the
+row. Before the fix, (2) was "write it on first sight" and rode along with (1); after it, they are
+separable claims about separable code, so the split is the slicing catching up rather than a
+workaround. **Swapping 3 and 4 would not have unblocked anything either** — story 4 flips
+contracts §2, so it needs the code owner exactly as story 2's design §5 flip does.
 
 **PR 1b exists because the ruling falsified parts of a spec that was already merged**, and a
 merged spec asserting what the Operator overruled is the defect class this project files most.
