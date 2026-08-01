@@ -91,7 +91,7 @@ func TestLabGate12(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	m := NewManager(backend, name, st, st, bus.New(), backups,
+	m := NewManager(backend, name, st, st, bus.New(), backups, "",
 		RetentionPolicy{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12}, id.New, log)
 
 	// (a) Provision + commit an encrypted tree in working/. If QUINCE_LAB_TREE points at a

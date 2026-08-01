@@ -242,7 +242,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		return nil, fmt.Errorf("storage %q: recording it: %w", name, err)
 	}
 
-	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, root,
+	storageMgr := storage.NewManager(stBackend, backendName, st, st, eventBus, root, state.StorageID,
 		storage.RetentionPolicy{
 			KeepRecent: scfg.Retention.KeepRecent,
 			KeepDaily:  scfg.Retention.KeepDaily,

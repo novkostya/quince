@@ -38,20 +38,42 @@ type Manager struct {
 	audit       Auditor
 	bus         *bus.Bus
 	backups     string
-	log         *slog.Logger
-	newID       func() string
-	now         func() time.Time
-	policy      RetentionPolicy
+	// storageID is the UUID of the storage this Manager writes to. Attributed onto every version
+	// it commits or adopts, so `versions.storage_id` records where a backup lives at the moment it
+	// is made rather than being reconstructed later.
+	storageID string
+	log       *slog.Logger
+	newID     func() string
+	now       func() time.Time
+	policy    RetentionPolicy
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).
+//
+// storageID is the UUID of the storage this Manager writes to — the value from its
+// quince-storage.json (design §5). It is what a committed or adopted version is attributed to, so
+// that `versions.storage_id` is a fact recorded WHEN the version is made rather than guessed
+// afterwards. Empty is tolerated (tests, and any caller with no resolved storage) and simply means
+// rows are inserted unattributed, which is the pre-qn.6c state.
 func NewManager(backend Backend, name string, reg Registry, audit Auditor, b *bus.Bus,
-	backups string, policy RetentionPolicy, newID func() string, log *slog.Logger) *Manager {
+	backups, storageID string, policy RetentionPolicy, newID func() string, log *slog.Logger) *Manager {
 	return &Manager{
 		backend: backend, backendName: name, reg: reg, audit: audit, bus: b,
-		backups: backups, log: log, newID: newID, now: func() time.Time { return time.Now().UTC() },
+		backups: backups, storageID: storageID,
+		log: log, newID: newID, now: func() time.Time { return time.Now().UTC() },
 		policy: policy,
 	}
+}
+
+// storageIDPtr returns the Manager's storage id as the nullable the registry stores, so an
+// unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
+// "" is not one of them (contracts §2: null = not yet attributed).
+func (m *Manager) storageIDPtr() *string {
+	if m.storageID == "" {
+		return nil
+	}
+	s := m.storageID
+	return &s
 }
 
 // BackendName reports the resolved backend (for /api/health + onboarding).
@@ -186,6 +208,10 @@ func (m *Manager) registerCommitted(c Committed) error {
 		ID: c.VersionID, UDID: c.UDID, Backend: c.Backend, ZFSSnapshot: c.ZFSSnapshot,
 		CreatedAt: c.CreatedAt, JobID: c.JobID, Kind: c.Kind, Encrypted: c.Encrypted,
 		IsLatest: true, StructureVerifiedAt: &sv, LogicalBytes: c.LogicalBytes, PhysicalBytes: c.PhysicalBytes,
+		// Attributed AT COMMIT. Before this, a freshly committed version was inserted NULL and
+		// only picked up by the next startup sweep — so between a backup and a restart the wire
+		// said "not yet attributed" about a version quince had just written itself.
+		StorageID: m.storageIDPtr(),
 	}
 	if err := m.reg.InsertVersion(row); err != nil {
 		return err
