@@ -108,32 +108,29 @@ func seedVersion(t *testing.T, st *Store, id, udid string) {
 	}
 }
 
-func TestAttributeVersionsFillsOnlyNulls(t *testing.T) {
+func TestAttributeVersionFillsOnlyNulls(t *testing.T) {
 	st := openTemp(t)
 	seedVersion(t, st, "01JV1", "DEV-A")
 	seedVersion(t, st, "01JV2", "DEV-A")
-	seedVersion(t, st, "01JV3", "DEV-B")
 
-	if n, err := st.CountUnattributedVersions(); err != nil || n != 3 {
-		t.Fatalf("precondition: want 3 unattributed, got %d (%v)", n, err)
+	if n, err := st.CountUnattributedVersions(); err != nil || n != 2 {
+		t.Fatalf("precondition: want 2 unattributed, got %d (%v)", n, err)
 	}
 
-	n, err := st.AttributeVersions("DEV-A", "01JSTORAGE-A")
-	if err != nil {
+	if err := st.AttributeVersion("01JV1", "01JSTORAGE-A"); err != nil {
 		t.Fatalf("attribute: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("want 2 rows attributed, got %d", n)
+
+	// ONE row, not the device's. The (udid, storageID) form this replaced could not be correct for
+	// several storages: it had to choose before the artifacts were located (quince#439).
+	if v, _, err := st.GetVersion("01JV2"); err != nil || v.StorageID != nil {
+		t.Errorf("attributing one version must not touch its sibling: %v (%v)", v.StorageID, err)
 	}
 
-	// Re-running must be a no-op: an already-attributed version is a fact about where a committed
-	// backup lives, and this runs on every startup.
-	again, err := st.AttributeVersions("DEV-A", "01JSTORAGE-DIFFERENT")
-	if err != nil {
+	// Re-attributing must be a no-op: where a committed backup lives is not a startup scan's to
+	// move, and this runs on every startup.
+	if err := st.AttributeVersion("01JV1", "01JSTORAGE-DIFFERENT"); err != nil {
 		t.Fatalf("re-attribute: %v", err)
-	}
-	if again != 0 {
-		t.Errorf("attribution must never overwrite; %d rows were rewritten", again)
 	}
 	v, _, err := st.GetVersion("01JV1")
 	if err != nil {
@@ -143,7 +140,6 @@ func TestAttributeVersionsFillsOnlyNulls(t *testing.T) {
 		t.Errorf("an attributed version was reattributed: %v", v.StorageID)
 	}
 
-	// DEV-B is untouched, so the count reflects real remaining work rather than going quiet.
 	if n, err := st.CountUnattributedVersions(); err != nil || n != 1 {
 		t.Errorf("want 1 still unattributed, got %d (%v)", n, err)
 	}
@@ -152,7 +148,7 @@ func TestAttributeVersionsFillsOnlyNulls(t *testing.T) {
 func TestCountUnattributedReachesZero(t *testing.T) {
 	st := openTemp(t)
 	seedVersion(t, st, "01JV1", "DEV-A")
-	if _, err := st.AttributeVersions("DEV-A", "01JSTORAGE-A"); err != nil {
+	if err := st.AttributeVersion("01JV1", "01JSTORAGE-A"); err != nil {
 		t.Fatal(err)
 	}
 	n, err := st.CountUnattributedVersions()

@@ -81,18 +81,23 @@ func (s *Store) ListStorages() ([]StorageRow, error) {
 	return out, rows.Err()
 }
 
-// AttributeVersions sets storage_id on every version for a udid that has none yet.
+// AttributeVersion sets storage_id on ONE version that has none yet.
 //
-// It only ever fills a NULL — an already-attributed version is left alone, so this can run on
-// every startup without rewriting history. That matters more than it looks: `storage_id` is a fact
-// about where a committed backup lives, and a committed backup is data that cannot be regenerated.
-func (s *Store) AttributeVersions(udid, storageID string) (int64, error) {
-	res, err := s.db.Exec(
-		`UPDATE versions SET storage_id = ? WHERE udid = ? AND storage_id IS NULL`, storageID, udid)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+// It replaced a `(udid, storageID)` form that filled every NULL row for a device with a single id
+// (quince#439). That signature could not be made correct once more than one storage is declared:
+// the caller had to pick a storage before knowing where each artifact was, and picking the default
+// silently recorded existing backups as living on a disk they are not on. The right moment to answer
+// "which storage" is while reconciling one, because `Scan` has just walked that root — so the
+// caller now names a VERSION, not a device.
+//
+// `storage_id IS NULL` in the WHERE is the whole guarantee: attribution FILLS, it never rewrites.
+// An already-attributed version records where a committed backup lives, and a committed backup is
+// data that cannot be regenerated — so moving it is not something a startup scan may do, even by
+// mistake.
+func (s *Store) AttributeVersion(id, storageID string) error {
+	_, err := s.db.Exec(
+		`UPDATE versions SET storage_id = ? WHERE id = ? AND storage_id IS NULL`, storageID, id)
+	return err
 }
 
 // CountUnattributedVersions reports how many version rows still carry a NULL storage_id.
