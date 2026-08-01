@@ -833,19 +833,37 @@ relay on quince#378.
 | --- | --- | --- | --- |
 | 1 | this spec + the four `PROPOSED (gap)` blocks in canon | **merged** (quince#381) | no |
 | — | **rulings** — no code PR opened before this | **done** 2026-07-31 | — |
-| 1b | this amendment — the rulings recorded, G7 inverted, *Sequencing* corrected, story 1 rewritten | — | no |
-| 2 | stories 1 + 3 — the **declared** config list, the registry, the **loud refusal**, the upgrade note; flips contracts §6 (G7, G7b) | — | no |
-| 3a | story 2, first half — the marker **as an artifact**: round-trip, checksum and backend-mismatch refusals, the offsite exclude (G3, G4) | — | no |
-| 4a | gap 1's **`backend` redefinition** — contracts §2 only, no code | — | no |
-| 4b | story 4's **DB half** — migration `0006`, `versions.storage_id` nullable, the `storages` table (G6). No wire, no contracts | — | no |
-| 4c | story 4's **wire half** — `Version.storage_id`; flips the rest of gap 1 in contracts §2. **After 4a** | — | no |
-| 3b | story 2, second half — the creation-moment **rule** and its gates: `ResolveStorage`, missing-medium, the unmounted-mountpoint refusal (G5b), the `storages` table access layer and the no-permanent-nulls helpers. **Built and UNWIRED**; design §5 is NOT flipped here. **After 4b** — it needs the `storages` table | — | no |
-| 3c | the **wiring** — `buildStorage` resolves the declared storage through `ResolveStorage`, **refuses to serve** on a bad resolution, records the `storages` row and attributes pre-`qn.6c` versions; **flips design §5**. Driven against the real image: created → opened → refused-on-absent-medium (exit 1, nothing written) | — | no |
-| 5 | stories 5 + 6 + 7 — the API, reachability, the pre-backup check; flips contracts §1 (G5) | — | no |
-| 6 | story 8 — the full-transfer claim, behind `?udid=` (G2) | — | no |
-| 7 | story 9 — the selector (G8) | — | no |
-| 8 | story 10 — the acceptance case (G1) | — | no |
-| 9 | G9 written back into this spec | — | **yes** |
+| 1b–3c | the planned slices through *the wiring* | **merged** | no |
+| — | **storage registry** — the Manager holds a SET of slots; every read says which | **merged** (quince#433) | no |
+| — | `browse_root` is EMPTY for an unresolvable storage, not relative | **merged** | no |
+| — | **RULED**: unreachable is a listed state, not a refusal (quince#435) | **merged** (quince#436) | no |
+| — | story 5's contract surface, and the probe/re-check split | **merged** (quince#438) | no |
+| 5a | attribution from the SCAN; `attributeVersions` deleted; folds in quince#428 | **merged** (quince#440) | no |
+| 5b | the loop — unreachable is a state, the never-accepts-a-job invariant | **merged** (quince#441) | no |
+| 5c | `GET /api/storages` + `POST /api/storages/{id}/recheck` | **merged** (quince#445) | no |
+| 6a+6b | a backup NAMES a storage — the job binding, `POST /api/jobs {storage_id}`, migration `0007` | **merged** (quince#447) | no |
+| 7 | the pre-backup check — missing medium, changed medium, backend mismatch | **merged** (quince#449) | no |
+| 8 | story 8 — the full-transfer claim (G2) | **merged** (quince#450) | no |
+| 10 | story 10 — the acceptance case (G1) | **merged** (quince#451) | no |
+| 9 | story 9 — the selector | **open** (quince#452) | no |
+| 9b | G8 — the selector driven against the real API | **open** (quince#453) | no |
+| — | `Job.storage_id` in the TS type | **open** (quince#456) | no |
+| 11 | **G9 written back into this spec** | **OWED** | **yes** |
+
+**The slicing diverged from this plan, and the divergences are the record worth keeping.** Slice 5
+was planned as one PR for stories 5+6+7 and became five, because each one's absence made the next
+actively wrong rather than merely unbuilt: attribution had to move off the single-id sweep before
+the loop could exist (quince#439), the loop had to exist before a job could name a storage, and the
+job had to name one before the pre-backup check had anything to check. That ordering test —
+*which one's absence makes the other wrong* — is the reusable part.
+
+Two slices were folded in rather than deferred: quince#428 landed inside 5a because
+attribution-during-reconciliation is impossible while `adopt`'s predicate is *no row I own*, and the
+`deleteVersion` cross-storage defect landed inside 5b because the loop is what makes it reachable.
+
+**One issue was opened by this rung and is NOT part of it:** quince#448 — `RepairWorkingCopy` is
+device-scoped and silently no-ops for a job on a non-default storage. It needs a contract decision
+about `POST /api/devices/{udid}/reset-working`, so it is filed rather than folded.
 
 **Story 2 is split because it stopped being one claim, not to route around a review queue**
 (ruled on quince#378 after the ordering was reported). The **gap-4 fix made at spec review** — an
