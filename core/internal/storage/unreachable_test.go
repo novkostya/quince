@@ -402,3 +402,52 @@ func TestCommitRecordsTheVersionOnTheJOBsStorage(t *testing.T) {
 		t.Error("the committed version must be latest in its own storage's group")
 	}
 }
+
+// THE HEADLINE CASE OF THE RUNG (quince#447 review): a device already backed up to the default, a
+// first backup to a NEWLY ADDED disk. That is a FULL transfer, and saying otherwise both corrupts
+// Version.kind and pre-empts the warning the user is owed before tens of gigabytes move.
+//
+// While seedKind read the DEFAULT's root and the DEFAULT's ownership it answered "incremental"
+// here — the exact sentence its own comment warns about. `kind` also feeds Verify, where `full` is
+// what triggers the blob-shard check, so a full encrypted backup to a new disk was verified with
+// that check skipped.
+func TestSeedKindIsFullForAFirstBackupToASECONDStorage(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, generousPolicy())
+	def := "01JSTORAGEDEFAULT0000000"
+	m.slots[0].StorageID = def
+
+	second := t.TempDir()
+	const secondID = "01JSTORAGESECOND00000000"
+	m.slots = append(m.slots, Slot{
+		StorageID: secondID, Name: "shuttle", Root: second, Reachable: true,
+		Backend:     newNamespaceBackend(BackendCopy, clonetree.Copy, second, "test", testLogger()),
+		BackendName: BackendCopy,
+	})
+
+	// The device HAS a version — on the default.
+	if err := st.InsertVersion(store.VersionRow{
+		ID: "01VONDEFAULT", UDID: testUDID, Backend: BackendCopy, CreatedAt: time.Now().UTC(),
+		JobID: strPtrLocal("j"), Kind: "full", StorageID: &def,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const jobID = "01JOBTOSECOND00000000000"
+	if err := m.BindJobStorage(jobID, secondID); err != nil {
+		t.Fatal(err)
+	}
+	s, err := m.jobSlot(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := m.seedKind(s, testUDID); got != "full" {
+		t.Fatalf("a first backup to a second storage is a FULL transfer, got %q — the user would be "+
+			"told this is incremental and the blob-shard check would be skipped", got)
+	}
+	// And the default still answers incremental for the same device, which is what makes this a
+	// per-(device, storage) question rather than a per-device one.
+	if got := m.seedKind(m.slots[0], testUDID); got != "incremental" {
+		t.Errorf("the default already holds a version for this device, want incremental, got %q", got)
+	}
+}
