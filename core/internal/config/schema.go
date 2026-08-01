@@ -28,9 +28,12 @@ type BackupConfig struct {
 //
 // qn.6c: Storages is FIRST because it is the only required key in this section and the only one
 // with no default — quince refuses to start without it (gap 3, ruled 2026-07-31: QUINCE_BACKUPS is
-// retired, so nothing conjures a storage any more). Backend/ZFS/Retention stay GLOBAL this rung and
-// every declared storage inherits them; per-storage zfs settings only start mattering when a second
-// zfs storage exists, which qn.6c cannot create.
+// retired, so nothing conjures a storage any more). Backend and ZFS are the INHERITED DEFAULT
+// for entries that declare neither, not a global that overrides them — quince#458, Operator
+// ruling 2026-08-02. Retention is still global. This comment said the globals stay global
+// "because per-storage zfs settings only start mattering when a second zfs storage exists,
+// which qn.6c cannot create"; true, and the breaking case is one zfs storage beside a NON-zfs
+// one, which qn.6c creates trivially.
 //
 // Storages is a POINTER so that an absent `storages:` key is distinguishable from `storages: []`.
 // Parse unmarshals over Default(), which makes absent and zero-value identical for every other
@@ -71,9 +74,12 @@ type StorageEntry struct {
 
 	// ZFS overrides `storage.zfs` for THIS storage. nil = inherit the global block.
 	//
-	// A POINTER, because absent and empty differ: absent inherits, and an explicitly empty `zfs: {}`
-	// is how a storage says "I am NOT zfs" on a stand whose global block is set. Without that a
-	// second storage could never opt out of a global zfs declaration, which is quince#458 exactly.
+	// A POINTER, because absent and empty differ: absent inherits, and an explicitly empty
+	// `zfs: {}` — TOGETHER WITH `backend: auto` — is how a storage opts out of a global zfs
+	// declaration. `zfs: {}` ALONE does not opt out and is REFUSED at startup: BackendFor
+	// still returns the global `backend: zfs`, which would build a zfs backend with no parent
+	// dataset. Without the pointer distinction a second storage could not opt out at all,
+	// which is quince#458.
 	ZFS *ZFSConfig `yaml:"zfs" json:"zfs"`
 }
 

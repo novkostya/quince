@@ -156,3 +156,39 @@ func TestTheCorrectOptOutIsAccepted(t *testing.T) {
 		t.Errorf("`backend: auto` + `zfs: {}` is the supported opt-out, got %v", bad)
 	}
 }
+
+// TWO CAUSES, TWO REMEDIES. The hook-only case has no entry-level `zfs: {}` at all — the
+// incoherence is a global block with a hook and no parent — so telling the operator to add
+// `backend: auto` to an entry sends them to a key they never wrote, on a refusal that stops the
+// daemon (quince#461 review).
+func TestTheRefusalNamesTheRemEDYForTheCauseItFound(t *testing.T) {
+	global := StorageConfig{
+		Backend:  "auto",
+		ZFS:      ZFSConfig{HookCmd: "ssh host quince-zfs-helper"}, // hook, NO parent
+		Storages: entries(StorageEntry{Name: "local", Path: "/backups", Default: true}),
+	}
+	bad := CheckStorageBackends(global)
+	if len(bad) != 1 {
+		t.Fatalf("a hook with no parent dataset must be refused, got %v", bad)
+	}
+	if !contains(bad[0], "storage.zfs.parent_dataset") {
+		t.Errorf("the GLOBAL cause must point at the global key: %q", bad[0])
+	}
+	if contains(bad[0], "backend: auto") {
+		t.Errorf("it must NOT tell the operator to edit an entry key they never wrote: %q", bad[0])
+	}
+
+	// And the entry-level cause still gets the entry-level remedy.
+	perEntry := StorageConfig{
+		Backend: "zfs",
+		ZFS:     ZFSConfig{ParentDataset: "rpool/quince"},
+		Storages: entries(
+			StorageEntry{Name: "local", Path: "/backups", Default: true},
+			StorageEntry{Name: "shuttle", Path: "/usb", ZFS: &ZFSConfig{}},
+		),
+	}
+	bad = CheckStorageBackends(perEntry)
+	if len(bad) != 1 || !contains(bad[0], "backend: auto") {
+		t.Errorf("the ENTRY cause must point at the entry's own remedy: %v", bad)
+	}
+}
