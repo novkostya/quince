@@ -53,7 +53,7 @@ func (m *Manager) reconcileSlot(ctx context.Context, s Slot) error {
 			continue
 		}
 		if _, exists, _ := m.reg.GetVersion(committed.VersionID); !exists {
-			if err := m.registerCommitted(committed); err != nil {
+			if err := m.registerCommitted(s, committed); err != nil {
 				m.log.Error("reconcile: register rolled-forward version failed", "version", committed.VersionID, "error", err)
 				continue
 			}

@@ -332,7 +332,7 @@ func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
 	if err != nil {
 		return wire.Version{}, err
 	}
-	if err := m.registerCommitted(committed); err != nil {
+	if err := m.registerCommitted(s, committed); err != nil {
 		return wire.Version{}, err
 	}
 	row, _, _ := m.reg.GetVersion(committed.VersionID)
@@ -345,7 +345,7 @@ func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
 }
 
 // registerCommitted rows a committed version and makes it the sole latest (registry_committed).
-func (m *Manager) registerCommitted(c Committed) error {
+func (m *Manager) registerCommitted(s Slot, c Committed) error {
 	sv := c.StructureVerifiedAt
 	row := store.VersionRow{
 		ID: c.VersionID, UDID: c.UDID, Backend: c.Backend, ZFSSnapshot: c.ZFSSnapshot,
@@ -354,12 +354,21 @@ func (m *Manager) registerCommitted(c Committed) error {
 		// Attributed AT COMMIT. Before this, a freshly committed version was inserted NULL and
 		// only picked up by the next startup sweep — so between a backup and a restart the wire
 		// said "not yet attributed" about a version quince had just written itself.
-		StorageID: m.storageIDPtr(),
+		//
+		// FROM THE SLOT THE TREE WAS WRITTEN TO, not from the default (quince#447 review). While
+		// this read `m.storageIDPtr()` a backup to a named non-default storage wrote its tree to B
+		// and recorded it on A — and reconciliation then made it worse rather than repairing it:
+		// browse_root resolved to a path that does not exist, Verify reported a good backup broken,
+		// and A's next scan marked the row `missing` while B's correctly left it alone. A confidently
+		// wrong row, which the NULL-filling sweep never touches.
+		StorageID: slotIDPtr(s),
 	}
 	if err := m.reg.InsertVersion(row); err != nil {
 		return err
 	}
-	return m.reg.PromoteLatest(c.UDID, c.VersionID, m.storageIDPtr())
+	// Promoted in the SAME group the row was recorded in — is_latest is per (device, storage), so
+	// promoting in the default's group would leave B's newest version never becoming B's latest.
+	return m.reg.PromoteLatest(c.UDID, c.VersionID, slotIDPtr(s))
 }
 
 // Discard drops a failed job's work (design §4). Returns the human note (dirty-working on zfs).
