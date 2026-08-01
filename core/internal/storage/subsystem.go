@@ -11,6 +11,19 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
+// THE WRITE PATH IS DEFAULT-SCOPED UNTIL THE JOB CARRIES `storage_id` (story 6).
+//
+// Seed, PrepareWork, SeedWork, Commit, Discard, RepairWorkingCopy, registerCommitted, seedKind and
+// storageIDPtr all resolve through `defaultSlot()`, and every one is correct TODAY for the same
+// single reason: a backup cannot name a storage yet, so the default IS the job's storage. What
+// makes them correct is a property of `POST /api/jobs`, not of this package — which is why they are
+// recorded here rather than defended one by one.
+//
+// One sentence in one place rather than eight markers to keep in sync (quince#441 review). The READ
+// path is already per-storage: `slotFor` resolves a version's own slot, reconciliation takes its
+// Slot as a parameter, and `deleteVersion` deletes through the storage the version actually lives
+// on.
+
 // Registry is the version-persistence slice the subsystem needs (*store.Store satisfies it).
 type Registry interface {
 	InsertVersion(store.VersionRow) error
@@ -40,14 +53,15 @@ type Manager struct {
 	// operation now has to say WHICH storage, which is the point — the four reads that took
 	// `m.backups` were exactly the places that could not, and would have resolved a version on
 	// storage B against storage A's root.
-	slots  []Slot
-	reg    Registry
-	audit  Auditor
-	bus    *bus.Bus
-	log    *slog.Logger
-	newID  func() string
-	now    func() time.Time
-	policy RetentionPolicy
+	slots   []Slot
+	reg     Registry
+	audit   Auditor
+	bus     *bus.Bus
+	log     *slog.Logger
+	newID   func() string
+	now     func() time.Time
+	policy  RetentionPolicy
+	refresh Refresher
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).

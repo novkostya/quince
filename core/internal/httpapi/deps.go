@@ -25,6 +25,7 @@ type Deps struct {
 	JobControl     JobControl
 	Versions       VersionReader
 	VersionAdmin   VersionAdmin
+	Storages       StorageReader
 	Muxer          MuxerControl
 	Ops            DeviceOps
 	WorkingReset   WorkingReset
@@ -181,3 +182,24 @@ func (Empty) Jobs(string, string, int) ([]wire.Job, string) { return []wire.Job{
 func (Empty) Job(string) (wire.Job, bool)                   { return wire.Job{}, false }
 func (Empty) JobLog(string) (string, bool)                  { return "", false }
 func (Empty) Versions(string) []wire.Version                { return []wire.Version{} }
+
+// StorageReader serves the storage REST surface (contracts §1 GET /api/storages, POST
+// /api/storages/{id}/recheck; qn.6c). Consumer-defined here in primitives + wire types only, so
+// httpapi imports no storage subsystem — the same pattern as VersionReader.
+//
+// Recheck is the reachability check, never the backend-selection probe: it creates nothing and
+// selects nothing, which is what keeps G5b intact (quince#438).
+type StorageReader interface {
+	Storages(udid string) []wire.Storage
+	Recheck(id string) (wire.Storage, bool)
+}
+
+// UnavailableStorages stands in when no storage subsystem is wired: an empty list rather than a
+// 503, because "quince knows about no storages" is a truthful answer a client can render, and the
+// demo/degraded paths already rely on reads degrading rather than failing.
+type UnavailableStorages struct{}
+
+func (UnavailableStorages) Storages(string) []wire.Storage { return nil }
+func (UnavailableStorages) Recheck(string) (wire.Storage, bool) {
+	return wire.Storage{}, false
+}

@@ -153,3 +153,62 @@ func (p *Provider) Delete(id string) (int, error) {
 
 func strptr(s string) *string   { return &s }
 func f64ptr(f float64) *float64 { return &f }
+
+// Storages serves the demo's fixture storage list (qn.6c story 5).
+//
+// TWO storages, one deliberately UNREACHABLE — the spec's fixture, and it is the interesting one:
+// a demo where everything is plugged in cannot show the state the rung exists to model, and the
+// selector in story 9 has to render a disabled option with a reason attached.
+//
+// `will_be_full` appears only when a udid is asked for, matching the ruled device-independence of
+// the list. The demo answers `true` for the shuttle because no version of any device lives there,
+// which is exactly the warning a user should see before choosing it.
+func (p *Provider) Storages(udid string) []wire.Storage {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	internalFull, shuttleFull := false, true
+	if udid != "" {
+		internalFull = true
+		for _, id := range p.verOrder {
+			if v, ok := p.versions[id]; ok && v.UDID == udid && !v.Missing {
+				internalFull = false
+				break
+			}
+		}
+	}
+	code, reason := "missing_medium", "the path is readable but carries no quince storage marker — "+
+		"if this is a removable disk, it is not mounted"
+
+	out := []wire.Storage{{
+		ID: demoStorageInternal, Name: "internal", Path: "/backups", Backend: "reflink",
+		Default: true, Reachable: true,
+	}, {
+		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/shuttle", Backend: "unknown",
+		Default: false, Reachable: false,
+		UnreachableCode: &code, UnreachableReason: &reason,
+	}}
+	if udid != "" {
+		out[0].WillBeFull = &internalFull
+		out[1].WillBeFull = &shuttleFull
+	}
+	return out
+}
+
+// Recheck re-probes one demo storage. The shuttle STAYS unreachable: a demo whose disk appears
+// because you pressed a button would teach the operator that the button fixes things, when what it
+// actually does is look again.
+func (p *Provider) Recheck(id string) (wire.Storage, bool) {
+	for _, s := range p.Storages("") {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return wire.Storage{}, false
+}
+
+// Stable fixture ids, so the e2e selector can address a storage by id rather than by position.
+const (
+	demoStorageInternal = "01JSTORAGEDEMOINTERNAL00"
+	demoStorageShuttle  = "01JSTORAGEDEMOSHUTTLE000"
+)

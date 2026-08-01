@@ -26,6 +26,7 @@ type liveStack struct {
 	jobControl   httpapi.JobControl
 	versions     httpapi.VersionReader
 	versionAdmin httpapi.VersionAdmin
+	storages     httpapi.StorageReader
 	muxer        httpapi.MuxerControl
 	ops          httpapi.DeviceOps
 	engine       *backup.Engine
@@ -77,6 +78,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	}
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
+	ls.storages = storageMgr
 
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
 	// committed to, which is now the DEFAULT declared storage rather than the retired
@@ -204,6 +206,22 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	if err := storageMgr.Reconcile(ctx); err != nil {
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
+
+	// THE RE-PROBE BEHIND POST /api/storages/{id}/recheck (quince#435: reachability may change
+	// without a restart; the storage LIST still needs one). It closes over the same resolver the
+	// startup loop used, so a recheck and a restart cannot disagree about what a storage is.
+	//
+	// It re-resolves by NAME, which is the identity the config carries and the one that survives
+	// a replug — the storage_id is what the marker says, and on an unreachable storage there is
+	// no marker to have said anything yet.
+	storageMgr.SetRefresher(func(name string) (storage.Slot, bool) {
+		for _, e := range declaredStorages(cfgSvc.Current().Storage) {
+			if e.Name == name {
+				return resolveSlot(ctx, e, cfgSvc.Current().Storage, st, log), true
+			}
+		}
+		return storage.Slot{}, false
+	})
 
 	reportUnattributed(st, log)
 

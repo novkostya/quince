@@ -145,6 +145,7 @@ func serve(args []string) error {
 	var jobControl httpapi.JobControl  // nil in demo → router serves 503 on the command surface
 	var versions httpapi.VersionReader // assigned in both branches (demo → provider, else → storage)
 	var versionAdmin httpapi.VersionAdmin
+	var storages httpapi.StorageReader // assigned in both branches (demo → provider, else → storage)
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	var ops httpapi.DeviceOps             // assigned in both branches below (demo → provider, else → manager)
 	var workingReset httpapi.WorkingReset // nil in demo → router serves 503 on the reset surface
@@ -153,6 +154,7 @@ func serve(args []string) error {
 		prov := demo.NewProvider(eventBus, log)
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
+		storages = prov
 		versionAdmin = prov
 		jobControl = prov // qn.4b: the demo command surface is live (scripts on-demand jobs, no hardware)
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
@@ -175,6 +177,7 @@ func serve(args []string) error {
 		}
 		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
+		storages = ls.storages
 		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
 			workingReset = ls.engine
 		}
@@ -186,6 +189,7 @@ func serve(args []string) error {
 			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
 			Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 			VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
+			Storages: storages,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
