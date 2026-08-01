@@ -1,12 +1,14 @@
 import * as React from "react";
 import type { Device, Job } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { StorageSelect } from "./StorageSelect";
+import { useStorages } from "./useStorages";
 import type { RequestTransport } from "./useBackup";
 
 interface BackupControlsProps {
   device: Device;
   activeJob?: Job;
-  start: (transport: RequestTransport, retryOf?: string) => Promise<boolean>;
+  start: (transport: RequestTransport, storageID?: string, retryOf?: string) => Promise<boolean>;
   cancel: (jobId: string) => Promise<boolean>;
   busy: boolean;
 }
@@ -24,6 +26,8 @@ interface BackupControlsProps {
 // structural, so the row cannot regain a text line without a type error (quince#325).
 export function BackupControls({ device, activeJob, start, cancel, busy }: BackupControlsProps) {
   const [transport, setTransport] = React.useState<RequestTransport>("auto");
+  const storages = useStorages(device.udid);
+  const [storageID, setStorageID] = React.useState<string>("");
 
   const onUSB = Boolean(device.transports.usb);
   const onWifi = Boolean(device.transports.wifi);
@@ -43,7 +47,7 @@ export function BackupControls({ device, activeJob, start, cancel, busy }: Backu
   return (
     <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => void start(transport)}
+          onClick={() => void start(transport, storageID || undefined)}
           disabled={!present || busy}
           title={present ? undefined : "Connect the device over USB or Wi-Fi to back it up"}
           data-testid="backup-now"
@@ -65,6 +69,12 @@ export function BackupControls({ device, activeJob, start, cancel, busy }: Backu
             </select>
           </label>
         ) : null}
+        <StorageSelect
+          storages={storages}
+          value={storageID}
+          onChange={setStorageID}
+          disabled={busy}
+        />
     </div>
   );
 }

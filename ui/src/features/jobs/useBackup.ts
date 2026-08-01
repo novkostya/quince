@@ -15,11 +15,14 @@ export function useBackup(udid: string) {
   const [error, setError] = React.useState<string | null>(null);
 
   const start = React.useCallback(
-    async (transport: RequestTransport, retryOf?: string): Promise<boolean> => {
+    async (transport: RequestTransport, storageID?: string, retryOf?: string): Promise<boolean> => {
       setBusy(true);
       setError(null);
       try {
         const body: Record<string, unknown> = { udid, transport };
+        // Omitted means "the default storage", which the server resolves — so an unchosen
+        // selector behaves exactly as this call did before the rung (contracts §1).
+        if (storageID) body.storage_id = storageID;
         if (retryOf) body.retry_of = retryOf;
         await api.post<Job>("/api/jobs", body);
         return true;

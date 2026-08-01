@@ -43,7 +43,10 @@ describe("BackupControls", () => {
     const start = vi.fn().mockResolvedValue(true);
     render(<BackupControls device={device({ usb: "t" })} start={start} cancel={ok} busy={false} />);
     fireEvent.click(screen.getByTestId("backup-now"));
-    expect(start).toHaveBeenCalledWith("auto");
+    // undefined storage = "the default", which the SERVER resolves. The selector sends nothing
+    // rather than pre-filling the default's id, so an untouched control behaves exactly as this
+    // call did before the rung (qn.6c story 9).
+    expect(start).toHaveBeenCalledWith("auto", undefined);
   });
 
   // The "and explains" half of this test moved to the status block below, which is where the
@@ -69,7 +72,7 @@ describe("BackupControls", () => {
     render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} />);
     fireEvent.change(screen.getByLabelText(/backup transport/i), { target: { value: "wifi" } });
     fireEvent.click(screen.getByTestId("backup-now"));
-    expect(start).toHaveBeenCalledWith("wifi");
+    expect(start).toHaveBeenCalledWith("wifi", undefined);
   });
 
   it("shows cancel for a running job", () => {
