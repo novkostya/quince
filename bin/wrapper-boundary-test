@@ -657,5 +657,83 @@ for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-analyst; do
 	fi
 done
 
+# --- A CREDENTIAL IN THE ENVIRONMENT CROSSES EVERY PATHNAME CHECK (quince#385) -------------------
+#
+# Every boundary check above names a FILE. `GH_TOKEN` is how each of these wrappers hands a token to
+# `gh`, so a value already in the environment is somebody else's WORKING credential and it crossed
+# all five wrappers without one of them speaking.
+#
+# `deploy/runner/preflight`'s supervisor arm already carried this lesson, having passed a box with
+# `GH_TOKEN=ghp_…` set — and the asymmetry ran the wrong way: `preflight` gates whether the box
+# STARTS, these gate EVERY ACTION it takes. `bin/gh-analyst` was the sharpest instance, because its
+# header claims "ANY other seat's credential here is a refusal" while implementing four pathnames.
+#
+# DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, like every part above: the ordering claim is half of it.
+for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot bin/gh-analyst; do
+	rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
+	out=$(PATH="$STUB" HOME="$WORK" GH_TOKEN=ghp_zzsyntheticzz \
+		QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" \
+		QUINCE_ARCH_TOKEN_FILE="$ATOK" QUINCE_CODER_KEY_FILE="$CKEY" \
+		QUINCE_ANALYST_KEY_FILE="$NKEY" "$PWD/$w" pr view 1 2>&1 || true)
+	case "$out" in
+	*"FORGE CREDENTIAL is present in the environment"*)
+		ok "$w: refuses a credential in the ENVIRONMENT, ahead of the missing dependencies"
+		;;
+	*"is not installed"*)
+		bad "$w: a token in the environment crossed the boundary — the dependency refusal spoke first"
+		;;
+	*)
+		bad "$w: GH_TOKEN in the environment is a working credential and nothing refused (quince#385)"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# THE NEGATIVE CONTROL. Without it, a wrapper that refused unconditionally would pass all five rows.
+# With NO environment token and no credential file, the dependency refusal must still speak.
+for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot bin/gh-analyst; do
+	out=$(run "$w" pr view 1)
+	case "$out" in
+	*"is not installed"*)
+		ok "$w: with no environment token, the dependency refusal still speaks"
+		;;
+	*)
+		bad "$w: the environment check fires with nothing set — it refuses unconditionally"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# AND THE OTHER THREE VARIABLES ARE NOT DEAD TEXT. `preflight` enumerates four; a wrapper that
+# checked only `GH_TOKEN` would pass every row above, because every row above sets `GH_TOKEN`.
+# Driven on one wrapper rather than all five: the loop is identical in each and the rows above
+# already prove each has one.
+for _v in GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+	out=$(env PATH="$STUB" HOME="$WORK" "$_v=ghp_zzsyntheticzz" \
+		QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" \
+		QUINCE_ARCH_TOKEN_FILE="$ATOK" QUINCE_CODER_KEY_FILE="$CKEY" \
+		QUINCE_ANALYST_KEY_FILE="$NKEY" "$PWD/bin/gh-coder" pr view 1 2>&1 || true)
+	case "$out" in
+	*"FORGE CREDENTIAL is present in the environment"*)
+		ok "bin/gh-coder: \$$_v is a credential too, not just GH_TOKEN"
+		;;
+	*)
+		bad "bin/gh-coder: \$$_v crossed the boundary — the enumeration is shorter than it looks"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# THE DETECTOR, the same shape as the ledger loop below and for the same reason (quince#316): a
+# SIXTH wrapper added without this check would be invisible, because the five neighbours are right.
+# It asserts PRESENCE, not behaviour — the rows above are the behaviour.
+for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-bot bin/gh-analyst; do
+	if grep -q 'GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN' "$w"; then
+		ok "$w enumerates the environment credentials"
+	else
+		bad "$w has no environment-credential check — a token in the env crosses it (quince#385)"
+	fi
+done
+
 printf '\nwrapper-boundary-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

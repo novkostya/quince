@@ -120,6 +120,28 @@ if [ -f "$BOT_TOKEN" ]; then
 		"(quince#232). Remove it, or run gh-bot on the implementer box."
 fi
 
+
+# A CREDENTIAL IS NOT A SET OF PATHNAMES (quince#385). Every check above names a FILE, and a forge
+# credential in the ENVIRONMENT crosses all of them without one of them speaking — `GH_TOKEN` is
+# exactly how this wrapper hands a token to `gh` fifty lines below, so a value already sitting there
+# is a working credential belonging to somebody else.
+#
+# `deploy/runner/preflight`'s supervisor arm learned this by passing a box with `GH_TOKEN=ghp_…` set,
+# and states the rule in as many words. The wrappers did not carry it — and the asymmetry ran the
+# wrong way, because `preflight` gates whether the box STARTS while this gates EVERY ACTION it takes.
+#
+# DUPLICATED RATHER THAN SOURCED, following quince#316's ruling rather than re-litigating it: a
+# shared block would put a load-time file dependency on the security path of a credential wrapper,
+# where a missing or tampered file is a new failure mode. `bin/wrapper-boundary-test` carries the
+# detector that fails when a wrapper is added without this, which is the same trade that ruling made.
+for _envvar in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+	eval "_envval=\${$_envvar:-}"
+	[ -n "$_envval" ] || continue
+	die "a FORGE CREDENTIAL is present in the environment: \$$_envvar." \
+		"That variable is how this wrapper hands a token to gh, so a value already in it is somebody" \
+		"else's working credential and would be used ahead of this seat's identity." \
+		"Unset it, and run this wrapper on a box that holds one identity."
+done
 if [ $# -eq 0 ]; then
 	printf 'usage: gh-analyst <gh arguments...>\n' >&2
 	printf '  runs gh as the quince-analyst App, minting a fresh installation token per call\n' >&2
