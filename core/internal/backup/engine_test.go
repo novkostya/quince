@@ -168,7 +168,7 @@ func (h *harness) liveJobIDs() []string { return liveJobIDs(h.eng) }
 
 func (h *harness) start(t *testing.T, transport, retryOf string) wire.Job {
 	t.Helper()
-	j, status, reason := h.eng.StartBackup(testUDID, transport, retryOf)
+	j, status, reason := h.eng.StartBackup(testUDID, transport, "", retryOf)
 	if status != 202 {
 		t.Fatalf("StartBackup: status=%d reason=%q", status, reason)
 	}
@@ -545,7 +545,7 @@ func startWhenReleased(t *testing.T, e *Engine, transport, retryOf string) (wire
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		job, status, reason := e.StartBackup(testUDID, transport, retryOf)
+		job, status, reason := e.StartBackup(testUDID, transport, "", retryOf)
 		if status != 409 || time.Now().After(deadline) {
 			return job, status, reason
 		}
@@ -859,14 +859,14 @@ func TestStorySingleFlight(t *testing.T) {
 	j1 := h.start(t, m.Transport, "")
 	waitState(t, h.eng, j1.ID, StateBackingUp, 2*time.Second)
 
-	_, s2, _ := h.eng.StartBackup(testUDID, m.Transport, "")
+	_, s2, _ := h.eng.StartBackup(testUDID, m.Transport, "", "")
 	if s2 != 409 {
 		t.Fatalf("second start for same UDID = %d, want 409", s2)
 	}
 
 	other := "00008110FFEEDDCCBBAA9988"
 	h.dev.set(other, m.Transport, "on")
-	_, s3, _ := h.eng.StartBackup(other, m.Transport, "")
+	_, s3, _ := h.eng.StartBackup(other, m.Transport, "", "")
 	if s3 != 202 {
 		t.Fatalf("different UDID = %d, want 202", s3)
 	}
@@ -1281,10 +1281,10 @@ func TestStoryCLIFailingBackupExitsNonzero(t *testing.T) {
 // RESOLUTION is covered by engine_transport_test.go (TestAutoResolves* / TestAutoWhenAbsent*).
 func TestStartBackupTransportGuards(t *testing.T) {
 	h := newHarness(t, fakeParams{}, TransportUSB)
-	if _, s, _ := h.eng.StartBackup(testUDID, "carrier-pigeon", ""); s != 422 {
+	if _, s, _ := h.eng.StartBackup(testUDID, "carrier-pigeon", "", ""); s != 422 {
 		t.Fatalf("bad transport = %d, want 422", s)
 	}
-	if _, s, _ := h.eng.StartBackup(testUDID, "", ""); s != 422 {
+	if _, s, _ := h.eng.StartBackup(testUDID, "", "", ""); s != 422 {
 		t.Fatalf("empty transport = %d, want 422", s)
 	}
 }

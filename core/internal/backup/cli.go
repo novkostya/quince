@@ -18,7 +18,7 @@ func DriveToCompletion(ctx context.Context, eng *Engine, b *bus.Bus, udid, trans
 	sub := b.Subscribe(256)
 	defer b.Unsubscribe(sub)
 
-	job, status, reason := eng.StartBackup(udid, transport, "")
+	job, status, reason := eng.StartBackup(udid, transport, "", "")
 	if status != 202 {
 		p("cannot start backup: %s (status %d)\n", reason, status)
 		return 1

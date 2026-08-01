@@ -60,7 +60,7 @@ func (UnavailableWorkingReset) ResetWorking(string) (int, string) {
 // the handler maps outcomes without cross-package sentinel errors (202 = accepted; 409 already
 // running; 422 bad/auto transport; 404 unknown device or job).
 type JobControl interface {
-	StartBackup(udid, transport, retryOf string) (job wire.Job, status int, reason string)
+	StartBackup(udid, transport, storageID, retryOf string) (job wire.Job, status int, reason string)
 	CancelJob(id string) (job wire.Job, status int, reason string)
 }
 
@@ -69,7 +69,7 @@ type JobControl interface {
 // honestly (no silent no-op), never fabricating a job.
 type UnavailableJobControl struct{}
 
-func (UnavailableJobControl) StartBackup(string, string, string) (wire.Job, int, string) {
+func (UnavailableJobControl) StartBackup(string, string, string, string) (wire.Job, int, string) {
 	return wire.Job{}, http.StatusServiceUnavailable,
 		"the backup engine is unavailable (running --demo, or no device backend is configured)"
 }

@@ -45,7 +45,7 @@ func terminal(s string) bool {
 func TestDemoJobControlStartAndSingleFlight(t *testing.T) {
 	p := newRunningProvider(t)
 
-	job, status, reason := p.StartBackup(udidSpare, "auto", "")
+	job, status, reason := p.StartBackup(udidSpare, "auto", "", "")
 	if status != 202 {
 		t.Fatalf("start = %d (%s)", status, reason)
 	}
@@ -53,7 +53,7 @@ func TestDemoJobControlStartAndSingleFlight(t *testing.T) {
 		t.Fatalf("auto resolved to %q, want usb", job.Transport)
 	}
 
-	if _, s, _ := p.StartBackup(udidSpare, "auto", ""); s != 409 {
+	if _, s, _ := p.StartBackup(udidSpare, "auto", "", ""); s != 409 {
 		t.Fatalf("concurrent start for the same device = %d, want 409", s)
 	}
 
@@ -62,10 +62,10 @@ func TestDemoJobControlStartAndSingleFlight(t *testing.T) {
 		t.Fatalf("job = %s version=%v, want succeeded with a version", final.State, final.VersionID)
 	}
 
-	if _, s, _ := p.StartBackup("no-such-udid", "auto", ""); s != 404 {
+	if _, s, _ := p.StartBackup("no-such-udid", "auto", "", ""); s != 404 {
 		t.Fatalf("unknown device = %d, want 404", s)
 	}
-	if _, s, _ := p.StartBackup(udidSpare, "carrier-pigeon", ""); s != 422 {
+	if _, s, _ := p.StartBackup(udidSpare, "carrier-pigeon", "", ""); s != 422 {
 		t.Fatalf("bad transport = %d, want 422", s)
 	}
 }
@@ -74,7 +74,7 @@ func TestDemoJobControlStartAndSingleFlight(t *testing.T) {
 func TestDemoJobControlCancel(t *testing.T) {
 	p := newRunningProvider(t)
 
-	job, status, _ := p.StartBackup(udidSpare, "usb", "")
+	job, status, _ := p.StartBackup(udidSpare, "usb", "", "")
 	if status != 202 {
 		t.Fatalf("start = %d", status)
 	}
@@ -106,7 +106,7 @@ func TestDemoJobControlRetryInheritsIntent(t *testing.T) {
 		t.Fatal("expected a seeded failed job for the spare device")
 	}
 
-	retry, s, reason := p.StartBackup(udidSpare, "auto", failed.ID)
+	retry, s, reason := p.StartBackup(udidSpare, "auto", "", failed.ID)
 	if s != 202 {
 		t.Fatalf("retry start = %d (%s)", s, reason)
 	}
@@ -127,7 +127,7 @@ func TestDemoAutoWhenAbsentRefuses(t *testing.T) {
 		UDID: "OFFLINEDEVICE0000000000000000", Name: "offline", Paired: "yes", BackupEncryption: "on",
 	}
 	p.mu.Unlock()
-	if _, s, _ := p.StartBackup("OFFLINEDEVICE0000000000000000", "auto", ""); s != 422 {
+	if _, s, _ := p.StartBackup("OFFLINEDEVICE0000000000000000", "auto", "", ""); s != 422 {
 		t.Fatalf("auto with an absent device = %d, want 422", s)
 	}
 }

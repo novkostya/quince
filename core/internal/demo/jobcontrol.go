@@ -55,7 +55,9 @@ func (p *Provider) endRun(udid string) {
 // StartBackup scripts an on-demand backup (contracts §1 POST /api/jobs). It mirrors the real
 // engine's outcomes: 404 unknown device, 422 bad transport or auto-when-absent, 409 already running,
 // 202 accepted. transport "auto" resolves against the fixture device's presence (design §4/(bp)).
-func (p *Provider) StartBackup(udid, transport, retryOf string) (wire.Job, int, string) {
+// storageID is accepted and IGNORED by the demo: it has fixture storages but no real write path,
+// so honouring the choice would be theatre. The real engine binds it (qn.6c story 6b).
+func (p *Provider) StartBackup(udid, transport, storageID, retryOf string) (wire.Job, int, string) {
 	p.mu.RLock()
 	dev, ok := p.devices[udid]
 	p.mu.RUnlock()

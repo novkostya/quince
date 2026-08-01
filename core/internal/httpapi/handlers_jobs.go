@@ -12,7 +12,8 @@ import "net/http"
 // retry chain).
 type jobCreateRequest struct {
 	UDID      string `json:"udid"`
-	Transport string `json:"transport"` // usb | wifi | auto (engine resolves auto → concrete)
+	Transport string `json:"transport"`  // usb | wifi | auto (engine resolves auto → concrete)
+	StorageID string `json:"storage_id"` // "" → the default storage (contracts §1, qn.6c)
 	RetryOf   string `json:"retry_of"`
 }
 
@@ -25,7 +26,7 @@ func (d Deps) handleJobCreate() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
 			return
 		}
-		job, status, reason := d.JobControl.StartBackup(req.UDID, req.Transport, req.RetryOf)
+		job, status, reason := d.JobControl.StartBackup(req.UDID, req.Transport, req.StorageID, req.RetryOf)
 		if status != http.StatusAccepted {
 			writeError(w, d.Log, status, statusCode(status), reason)
 			return

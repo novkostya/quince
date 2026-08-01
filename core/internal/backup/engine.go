@@ -32,6 +32,15 @@ func validUDID(u string) bool { return udidPattern.MatchString(u) }
 // satisfies both.
 type StorageForJob interface {
 	VersionForJob(udid, jobID string) (versionID string, ok bool)
+
+	// ResolveChoice maps a requested storage_id to the concrete storage a job will use, or an HTTP
+	// status and reason: "" → default, unknown → 404, unreachable → 409 (contracts §1).
+	ResolveChoice(storageID string) (concrete string, status int, reason string)
+
+	// BindJobStorage records which storage this job writes to, for the life of the job; UnbindJob
+	// drops it. Every write-path call then resolves that storage from the jobID it already carries.
+	BindJobStorage(jobID, storageID string) error
+	UnbindJob(jobID string)
 	RepairWorkingCopy(udid string) error
 }
 
@@ -135,11 +144,24 @@ func New(o Options) *Engine {
 // (design §4, decisions (bp)): prefer USB when present, else Wi-Fi; a device on NEITHER transport is
 // refused actionably. The Job stores the resolved CONCRETE transport (never "auto") — a guess would
 // persist a dishonest Job.transport (state honesty).
-func (e *Engine) StartBackup(udid, transport, retryOf string) (wire.Job, int, string) {
+func (e *Engine) StartBackup(udid, transport, storageID, retryOf string) (wire.Job, int, string) {
 	if !validUDID(udid) {
 		return wire.Job{}, http.StatusNotFound, "unknown device"
 	}
 	transport, status, reason := e.resolveTransport(udid, transport)
+	if status != 0 {
+		return wire.Job{}, status, reason
+	}
+
+	// THE STORAGE IS RESOLVED TO A CONCRETE ID BEFORE THE JOB ROW EXISTS, exactly as the transport
+	// is: "" → the default, unknown → 404, unreachable → 409. `Job.storage_id` then records where
+	// the backup was AIMED, never the word "default" — a Job storing the request rather than the
+	// resolution would be dishonest the same way a `Job.transport` of "auto" would be.
+	//
+	// Resolved BEFORE the busy check on purpose: an unknown storage is a bad request whatever the
+	// device happens to be doing, and answering 409 "already running" to it would hide a permanent
+	// problem behind a transient one.
+	concreteStorage, status, reason := e.versionQ.ResolveChoice(storageID)
 	if status != 0 {
 		return wire.Job{}, status, reason
 	}
@@ -153,6 +175,7 @@ func (e *Engine) StartBackup(udid, transport, retryOf string) (wire.Job, int, st
 	row := store.JobRow{
 		ID: id, UDID: udid, Kind: "backup", Transport: transport, State: StateQueued,
 		Phase: StateQueued, Liveness: LivenessActive, StartedAt: e.now(), IntentID: id, Attempt: 1,
+		StorageID: &concreteStorage,
 	}
 	if retryOf != "" {
 		prev, ok, err := e.st.GetJob(retryOf)
@@ -167,6 +190,13 @@ func (e *Engine) StartBackup(udid, transport, retryOf string) (wire.Job, int, st
 		row.RetryOf = &retryOf
 		row.IntentID = prev.IntentID
 		row.Attempt = prev.Attempt + 1
+	}
+	// BIND BEFORE THE ROW EXISTS ANYWHERE OBSERVABLE. Every write-path call resolves the job's
+	// storage from its jobID, so a job that is running but unbound would silently write to the
+	// default — the exact substitution ResolveChoice just refused to make.
+	if err := e.versionQ.BindJobStorage(id, concreteStorage); err != nil {
+		e.mu.Unlock()
+		return wire.Job{}, http.StatusConflict, err.Error()
 	}
 	if err := e.st.InsertJob(row); err != nil {
 		e.mu.Unlock()
@@ -966,6 +996,10 @@ func (e *Engine) release(lj *liveJob) {
 	e.mu.Lock()
 	delete(e.running, lj.row.UDID)
 	e.mu.Unlock()
+	// The storage binding lives exactly as long as the job does. Dropped here rather than at
+	// each terminal state, because release is the one path every ending job takes — success,
+	// failure, cancel and shutdown alike.
+	e.versionQ.UnbindJob(lj.row.ID)
 }
 
 func (e *Engine) killReasonOf(lj *liveJob) string {

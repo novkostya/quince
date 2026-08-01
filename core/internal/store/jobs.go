@@ -25,6 +25,7 @@ type JobRow struct {
 	ErrorCode     string     // "" = no error
 	ErrorMessage  string
 	RetryOf       *string // nil unless a manual retry
+	StorageID     *string // the RESOLVED concrete storage; nil for jobs from before qn.6c
 	IntentID      string
 	Attempt       int
 	VersionID     *string // set on succeeded
@@ -44,12 +45,12 @@ func (s *Store) InsertJob(j JobRow) error {
 	_, err := s.db.Exec(`INSERT INTO jobs
 		(id, udid, kind, transport, state, phase, percent, bytes_done, bytes_total, files_received,
 		 liveness, started_at, finished_at, error_code, error_message, retry_of, intent_id, attempt,
-		 version_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 version_id, storage_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, j.UDID, j.Kind, j.Transport, j.State, j.Phase, nullFloat(j.Percent),
 		j.BytesDone, j.BytesTotal, j.FilesReceived, j.Liveness, fmtTime(j.StartedAt),
 		nullTime(j.FinishedAt), nullEmpty(j.ErrorCode), nullEmpty(j.ErrorMessage),
-		nullStr(j.RetryOf), j.IntentID, j.Attempt, nullStr(j.VersionID))
+		nullStr(j.RetryOf), j.IntentID, j.Attempt, nullStr(j.VersionID), nullStr(j.StorageID))
 	return err
 }
 
@@ -148,7 +149,7 @@ func (s *Store) ListNonTerminalJobs() ([]JobRow, error) {
 
 const jobSelect = `SELECT id, udid, kind, transport, state, phase, percent, bytes_done,
 	bytes_total, files_received, liveness, started_at, finished_at, error_code, error_message,
-	retry_of, intent_id, attempt, version_id FROM jobs`
+	retry_of, intent_id, attempt, version_id, storage_id FROM jobs`
 
 func scanJob(sc rowScanner) (JobRow, error) {
 	var (
@@ -160,10 +161,11 @@ func scanJob(sc rowScanner) (JobRow, error) {
 		errMsg   sql.NullString
 		retryOf  sql.NullString
 		version  sql.NullString
+		storage  sql.NullString
 	)
 	if err := sc.Scan(&j.ID, &j.UDID, &j.Kind, &j.Transport, &j.State, &j.Phase, &percent,
 		&j.BytesDone, &j.BytesTotal, &j.FilesReceived, &j.Liveness, &started, &finished,
-		&errCode, &errMsg, &retryOf, &j.IntentID, &j.Attempt, &version); err != nil {
+		&errCode, &errMsg, &retryOf, &j.IntentID, &j.Attempt, &version, &storage); err != nil {
 		return JobRow{}, err
 	}
 	j.Percent = floatPtrOrNil(percent)
@@ -179,6 +181,7 @@ func scanJob(sc rowScanner) (JobRow, error) {
 	j.ErrorMessage = errMsg.String
 	j.RetryOf = strPtrOrNil(retryOf)
 	j.VersionID = strPtrOrNil(version)
+	j.StorageID = strPtrOrNil(storage)
 	return j, nil
 }
 

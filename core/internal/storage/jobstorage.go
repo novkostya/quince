@@ -92,3 +92,43 @@ func (m *Manager) jobSlot(jobID string) (Slot, error) {
 	}
 	return s, nil
 }
+
+// ResolveChoice maps a requested storage id to the CONCRETE one a job will use, or an HTTP status
+// and a reason (contracts §1 POST /api/jobs, ruled 2026-07-31).
+//
+//	""          → the DEFAULT storage. Keeps every request that does not care working unchanged,
+//	              which is what makes the field additive.
+//	unknown     → 404, matching unknown-device.
+//	unreachable → 409, NOT 422. It is a state conflict the user can act on — plug the disk in —
+//	              rather than a malformed request, the same reading POST /api/devices/{udid}/pair
+//	              already uses for "not present on USB". A 202-then-queue is explicitly refused:
+//	              queuing fights the assisted model.
+//
+// The DEFAULT being unreachable is refused with a reason NAMING it, never redirected to whichever
+// storage happens to be reachable — a fallback there would write a backup to a disk the user did
+// not choose (Operator ruling 2026-08-01).
+func (m *Manager) ResolveChoice(storageID string) (concrete string, status int, reason string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if storageID == "" {
+		s := m.slots[0]
+		if !s.Usable() {
+			return "", 409, fmt.Sprintf(
+				"the default storage %q is not reachable (%s): %s — choose another storage or "+
+					"reconnect this one", s.Name, s.UnreachableCode, s.UnreachableReason)
+		}
+		return s.StorageID, 0, ""
+	}
+	for _, s := range m.slots {
+		if s.StorageID != storageID {
+			continue
+		}
+		if !s.Usable() {
+			return "", 409, fmt.Sprintf("storage %q is not reachable (%s): %s",
+				s.Name, s.UnreachableCode, s.UnreachableReason)
+		}
+		return s.StorageID, 0, ""
+	}
+	return "", 404, "no storage with that id is declared"
+}

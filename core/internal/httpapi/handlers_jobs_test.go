@@ -22,7 +22,7 @@ type stubJobControl struct {
 	recUDID, recTransport, recRetryOf, recCancelID string
 }
 
-func (s *stubJobControl) StartBackup(udid, transport, retryOf string) (wire.Job, int, string) {
+func (s *stubJobControl) StartBackup(udid, transport, storageID, retryOf string) (wire.Job, int, string) {
 	s.recUDID, s.recTransport, s.recRetryOf = udid, transport, retryOf
 	return s.startJob, s.startStatus, s.startReason
 }
