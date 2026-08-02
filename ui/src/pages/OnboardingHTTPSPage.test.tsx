@@ -71,13 +71,40 @@ describe("the onboarding HTTPS check", () => {
   });
 
   // A failed check must not claim the connection is fine, and must not hide the options — the
-  // page is still useful without the server's answer, because the tiers are static.
+  // page is still useful without the server's answer, because the tiers are static prose.
+  //
+  // THE SECOND HALF OF THAT NAME WAS UNASSERTED IN THE FIRST VERSION, and the code did not do it:
+  // every tier lived inside the not-complete branch, so a failed check printed "the setup options
+  // below are still correct" above nothing. The test passed. It is the quince#556 shape — a name
+  // that documents a behaviour the body never checks — and a test name is documentation nobody
+  // runs: when it drifts from the body it does not fail, it reassures (review on quince#559).
   it("is honest when the check itself fails, and still shows the options", async () => {
     vi.spyOn(api, "get").mockRejectedValue(new Error("boom"));
     renderPage();
 
     expect(await screen.findByText(/Could not check this connection/i)).toBeInTheDocument();
     expect(screen.queryByText("Encrypted")).not.toBeInTheDocument();
+
+    // The half the name promises. All five, because the copy says "the setup options below".
+    for (const title of [
+      "Put something in front of quince",
+      "Give quince your own certificate",
+      "Plain HTTP on a network you trust",
+      "A certificate quince makes itself",
+      "An address quince manages for you",
+    ]) {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
+  });
+
+  // The other side of the same coin: a SUCCESSFUL check still offers nothing. Without this, a
+  // future fix to the error path could lift the tiers to always-render and quietly break G1.
+  it("still offers nothing when the check succeeds, even though the error path shows tiers", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ complete: true, detected: "tls" });
+    renderPage();
+
+    await screen.findByText("Encrypted");
+    expect(screen.queryByText("Put something in front of quince")).not.toBeInTheDocument();
   });
 
   // THE PRE-AUTH GUARANTEE, as far as a component test can carry it: the page asks for exactly
