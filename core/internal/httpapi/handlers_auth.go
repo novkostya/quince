@@ -65,8 +65,10 @@ func (d Deps) handleAuthSetup() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
 			return
 		}
-		if err := d.Auth.SetPassword(body.Password); err != nil {
+		if err := d.Auth.SetPassword(body.Password, d.Proxies.ClientIP(r)); err != nil {
 			switch {
+			case errors.Is(err, auth.ErrRateLimited):
+				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			case errors.Is(err, auth.ErrAlreadyConfigured):
 				writeError(w, d.Log, http.StatusConflict, "already_configured", "admin password is already set")
 			case errors.Is(err, auth.ErrWeakPassword):

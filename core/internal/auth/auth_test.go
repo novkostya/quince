@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -85,7 +86,7 @@ func TestLoginLimiterSweepsStaleBuckets(t *testing.T) {
 
 func TestSetPasswordThenLoginRotates(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatalf("set password: %v", err)
 	}
 	s1, csrf, err := svc.Login("test", "10.0.0.1", "")
@@ -122,7 +123,7 @@ func TestSetPasswordThenLoginRotates(t *testing.T) {
 // supersede, and nothing of anybody else's may be touched.
 func TestASecondDeviceDoesNotEvictTheFirst(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatalf("set password: %v", err)
 	}
 	desktop, _, err := svc.Login("test", "10.0.0.1", "")
@@ -150,7 +151,7 @@ func TestASecondDeviceDoesNotEvictTheFirst(t *testing.T) {
 // cleanup of the caller's own row, not a precondition.
 func TestLoginWithAStaleCookieStillSucceeds(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatalf("set password: %v", err)
 	}
 	other, _, err := svc.Login("test", "10.0.0.1", "")
@@ -171,7 +172,7 @@ func TestLoginWithAStaleCookieStillSucceeds(t *testing.T) {
 
 func TestLoginWritesAuditRow(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := svc.Login("test", "10.0.0.1", ""); err != nil {
@@ -194,17 +195,17 @@ func TestLoginWritesAuditRow(t *testing.T) {
 
 func TestSetPasswordTwiceIs409(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.SetPassword("other"); err != ErrAlreadyConfigured {
+	if err := svc.SetPassword("other", "1.2.3.4"); err != ErrAlreadyConfigured {
 		t.Fatalf("want ErrAlreadyConfigured, got %v", err)
 	}
 }
 
 func TestLoginBadPassword(t *testing.T) {
 	svc, _ := newTestAuth(t)
-	_ = svc.SetPassword("test")
+	_ = svc.SetPassword("test", "1.2.3.4")
 	if _, _, err := svc.Login("nope", "10.0.0.1", ""); err != ErrBadPassword {
 		t.Fatalf("want ErrBadPassword, got %v", err)
 	}
@@ -212,7 +213,11 @@ func TestLoginBadPassword(t *testing.T) {
 
 func TestLoginRateLimited(t *testing.T) {
 	svc, _ := newTestAuth(t) // limiter max = 3
-	_ = svc.SetPassword("test")
+	// The setup call bills a DIFFERENT client, because setup and login now SHARE the limiter
+	// (quince#463) and this test is about login's budget. Billing both to one address would have
+	// the setup consume a token and the third login trip the limit — a real consequence of the
+	// sharing, and not the one under test here.
+	_ = svc.SetPassword("test", "198.51.100.1")
 	for i := 0; i < 3; i++ {
 		if _, _, err := svc.Login("wrong", "1.2.3.4", ""); err != ErrBadPassword {
 			t.Fatalf("attempt %d: want ErrBadPassword, got %v", i, err)
@@ -228,7 +233,7 @@ func TestStatusTriState(t *testing.T) {
 	if st, _ := svc.Status(""); st != StateNeedsSetup {
 		t.Fatalf("want needs_setup, got %q", st)
 	}
-	_ = svc.SetPassword("test")
+	_ = svc.SetPassword("test", "1.2.3.4")
 	if st, _ := svc.Status(""); st != StateNeedsLogin {
 		t.Fatalf("want needs_login, got %q", st)
 	}
@@ -244,7 +249,7 @@ func TestStatusTriState(t *testing.T) {
 func TestSessionIdleExpiry(t *testing.T) {
 	svc, clock := newTestAuth(t)
 	svc.idleTimeout = 30 * time.Minute
-	_ = svc.SetPassword("test")
+	_ = svc.SetPassword("test", "1.2.3.4")
 	sess, _, _ := svc.Login("test", "10.0.0.1", "")
 	*clock = clock.Add(31 * time.Minute)
 	if _, err := svc.Authenticate(sess.ID); err != ErrSessionExpired {
@@ -417,15 +422,20 @@ func TestSetPasswordDoesNotDeriveWhenAlreadyConfigured(t *testing.T) {
 		return inner(pw, p)
 	}
 
-	if err := svc.SetPassword("first"); err != nil {
+	if err := svc.SetPassword("first", "1.2.3.4"); err != nil {
 		t.Fatalf("first-run setup: %v", err)
 	}
 	if derivations != 1 {
 		t.Fatalf("first-run setup derived %d time(s), want exactly 1", derivations)
 	}
 
+	// A DISTINCT client per probe: this test counts DERIVATIONS, and sharing one address would
+	// have the limiter (quince#463's other half) refuse the later probes before they reached the
+	// existence check. The count would then be right for a reason that has nothing to do with
+	// what is being asserted.
 	for i := 0; i < 5; i++ {
-		if err := svc.SetPassword("again"); !errors.Is(err, ErrAlreadyConfigured) {
+		ip := fmt.Sprintf("203.0.113.%d", i+1)
+		if err := svc.SetPassword("again", ip); !errors.Is(err, ErrAlreadyConfigured) {
 			t.Fatalf("setup #%d on a configured service: err=%v, want ErrAlreadyConfigured", i+2, err)
 		}
 	}
@@ -446,9 +456,14 @@ func TestSetPasswordFirstRunRaceStillHasExactlyOneWinner(t *testing.T) {
 	errs := make(chan error, racers)
 	start := make(chan struct{})
 	for i := 0; i < racers; i++ {
+		// A DISTINCT client per racer, because the race under test is the INSERT race and not the
+		// limiter. Sharing one address would have the limiter refuse most of them before they ever
+		// reached SetSettingIfAbsent — correct behaviour (quince#463), but it would make this test
+		// pass for the wrong reason and stop guarding what it exists to guard.
+		ip := fmt.Sprintf("198.51.100.%d", i+1)
 		go func() {
 			<-start
-			errs <- svc.SetPassword("concurrent")
+			errs <- svc.SetPassword("concurrent", ip)
 		}()
 	}
 	close(start)
@@ -469,5 +484,42 @@ func TestSetPasswordFirstRunRaceStillHasExactlyOneWinner(t *testing.T) {
 	}
 	if configured != racers-1 {
 		t.Fatalf("concurrent first-run setup: %d already-configured, want %d", configured, racers-1)
+	}
+}
+
+// TestSetPasswordIsRateLimited is quince#463's second half. quince#520 fixed the first — the 409
+// no longer derives — but an UNCONFIGURED instance still derives 64 MiB on every request, because
+// until somebody sets a password every request legitimately reaches the derivation. That window is
+// first-run: the one moment the route must stay open, and the one moment nobody is watching.
+//
+// Asserted on a FRESH service, so it exercises the expensive path rather than the cheap 409.
+func TestSetPasswordIsRateLimited(t *testing.T) {
+	svc, _ := newTestAuth(t) // limiter is 3 per minute in tests
+	var limited bool
+	for i := 0; i < 6; i++ {
+		// Deliberately WEAK so no attempt succeeds and the limiter is what stops us — a successful
+		// setup would end the loop for the wrong reason.
+		err := svc.SetPassword("", "203.0.113.5")
+		if errors.Is(err, ErrRateLimited) {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("setup was never rate-limited from one client — an unconfigured instance is still " +
+			"a 64 MiB amplifier (quince#463)")
+	}
+}
+
+// TestSetPasswordLimiterIsPerClient guards the half that makes sharing the login limiter safe. One
+// client exhausting its budget must not deny setup to a different client — which is only true
+// because quince#547 made the bucket per-visitor rather than per-proxy.
+func TestSetPasswordLimiterIsPerClient(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	for i := 0; i < 6; i++ {
+		_ = svc.SetPassword("", "203.0.113.5") // burn one client's budget
+	}
+	if err := svc.SetPassword("goodpassword", "198.51.100.9"); err != nil {
+		t.Fatalf("a DIFFERENT client was denied setup after another exhausted its budget: %v", err)
 	}
 }

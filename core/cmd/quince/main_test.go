@@ -81,7 +81,7 @@ func TestPublicDemoSetupIsAlreadyClosed(t *testing.T) {
 	if err := configureDemoAuth(svc, discardLog(), true); err != nil {
 		t.Fatalf("configureDemoAuth(public): %v", err)
 	}
-	if err := svc.SetPassword("attacker-chosen"); !errors.Is(err, auth.ErrAlreadyConfigured) {
+	if err := svc.SetPassword("attacker-chosen", "1.2.3.4"); !errors.Is(err, auth.ErrAlreadyConfigured) {
 		t.Fatalf("setup on a public demo: err=%v, want ErrAlreadyConfigured — the route is pre-auth", err)
 	}
 }
