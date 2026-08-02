@@ -12,7 +12,7 @@ the program doc.
 | 4 `--demo` unchanged | quince#524 | `TestPlainDemoIsUnchanged` |
 | 5 login screen states the password | quince#532 | `LoginPage demo copy` (vitest) |
 | 6 …and that it resets, how often | quince#572 | `TestResetIntervalIsReportedOnlyByTheModeThatResets` + `LoginPage reset notice` |
-| 7 a restart resets everything | quince#575 | `TestPublicDemoRestartResetsEverything` |
+| 7 a restart resets everything | quince#575 | `TestDemoRestartResetsEverything` (both modes) |
 
 **This header read `SPEC, unbuilt` until story 7.** It was written before any code existed and then
 left alone through three PRs that built six of the seven stories — so the document most likely to be
