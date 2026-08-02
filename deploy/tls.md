@@ -156,6 +156,16 @@ digital life. On a VPN that path is the tunnel. On a LAN it is everyone on the L
 
 quince says so at startup and in Settings, and will not let you turn the warning off.
 
+**And it forecloses notifications, for the same reason self-signed does.** Browsers only register
+service workers — and therefore only allow web push — on a **secure origin**, and plain HTTP to a
+LAN address is not one. Note that `http://localhost` *is* a secure context, so a developer testing
+locally will not notice this; a phone on the LAN will.
+
+quince does not send push **yet**. Saying so here is the point: this choice decides whether it ever
+can. The planned *"your backup is waiting for your passcode"* notification is the answer to Wi-Fi
+backup needing an on-device confirmation, and a deployment that picked plain HTTP will find the
+feature arrives and does nothing. **Better known while it is still a choice.**
+
 ### Self-signed certificates
 
 **quince does not generate one, and this is deliberate rather than unfinished.** A certificate you
