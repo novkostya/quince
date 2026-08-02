@@ -162,9 +162,9 @@ func TestLoadMissingFileIsDefaultsOK(t *testing.T) {
 	if !l.OK {
 		t.Fatalf("missing file should load defaults OK")
 	}
-	// reflect.DeepEqual rather than !=: Config stopped being comparable when
-	// server.trusted_proxies added the first slice-valued field (quince#464). A list is the right
-	// shape for CIDRs, so the test moves rather than the schema.
+	// reflect.DeepEqual rather than !=: Config carries a pointer-to-slice (storage), so == is not
+	// defined on it. Introduced by quince#547, which briefly added a second slice field to the
+	// schema; quince#549 removed that field again and this stays, because the pointer remains.
 	if !reflect.DeepEqual(l.Config, Default()) {
 		t.Errorf("missing file should yield defaults")
 	}
@@ -259,5 +259,58 @@ func TestAllowInsecureTransportIsSurfacedAsAWarning(t *testing.T) {
 	}
 	if !strings.Contains(l.Warnings[0].Message, "in clear") {
 		t.Errorf("the warning does not say what is unprotected: %q", l.Warnings[0].Message)
+	}
+}
+
+// TestBootstrapParsesTrustedProxies is quince#549: the trust list moved from `config.yml` to the
+// bootstrap env, because --public-demo deletes its config at startup and the deployment that most
+// needs a trust list could never carry one.
+func TestBootstrapParsesTrustedProxies(t *testing.T) {
+	for _, tc := range []struct {
+		name, env string
+		want      []string
+	}{
+		{"unset means trust NOTHING", "", nil},
+		{"empty means trust NOTHING", "QUINCE_TRUSTED_PROXIES=", nil},
+		{"whitespace only", "QUINCE_TRUSTED_PROXIES=   ", nil},
+		{"one entry", "QUINCE_TRUSTED_PROXIES=203.0.113.5", []string{"203.0.113.5"}},
+		{"several, spaced", "QUINCE_TRUSTED_PROXIES=203.0.113.5, 198.51.100.0/24 ", []string{"203.0.113.5", "198.51.100.0/24"}},
+		{"empty entries dropped", "QUINCE_TRUSTED_PROXIES=203.0.113.5,,", []string{"203.0.113.5"}},
+	} {
+		env := []string{"QUINCE_DATA=/d"}
+		if tc.env != "" {
+			env = append(env, tc.env)
+		}
+		b, warns := LoadBootstrap(env)
+		if len(warns) != 0 {
+			t.Errorf("%s: unexpected warnings %+v", tc.name, warns)
+		}
+		if !reflect.DeepEqual(b.TrustedProxies, tc.want) {
+			t.Errorf("%s: got %#v, want %#v", tc.name, b.TrustedProxies, tc.want)
+		}
+	}
+}
+
+// TestConfigHasNoServerSection is the deletion half of quince#549. `server.trusted_proxies` existed
+// for one afternoon and never shipped, so there is no migration and no shim — but a key that is
+// gone from the struct and still accepted by the parser would be silently ignored, which is the
+// failure the retirement of QUINCE_BACKUPS was designed to make loud.
+//
+// Asserted through the PARSER rather than by grepping the struct: what matters is that a user who
+// writes the old key is TOLD, not that a field is absent.
+func TestConfigHasNoServerSection(t *testing.T) {
+	_, warns, err := Parse([]byte("server:\n  trusted_proxies: [203.0.113.5]\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var named bool
+	for _, w := range warns {
+		if strings.HasPrefix(w.Path, "server") {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("the retired server: section parsed without a warning — a user moving to "+
+			"QUINCE_TRUSTED_PROXIES would be silently ignored; got %+v", warns)
 	}
 }

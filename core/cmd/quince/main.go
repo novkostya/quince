@@ -218,10 +218,16 @@ func serve(args []string) error {
 	// nobody and buckets on the peer address, which is byte-for-byte what every deployment does
 	// today. A malformed entry is WARNED and ignored rather than dropped silently: a proxy the
 	// operator believes is configured, and is not, is the exact silent degradation this fixes.
-	proxies, badProxies := httpapi.NewTrustedProxies(cfgSvc.Current().Server.TrustedProxies)
+	//
+	// FROM THE BOOTSTRAP ENV, not config.yml (Operator ruling 2026-08-02, quince#549). It was a
+	// config key for one afternoon and never shipped. Two reasons it cannot be one: `--public-demo`
+	// DELETES its config at startup, so the deployment that most needs a trust list could never
+	// carry one; and in that mode every visitor can `PUT /api/config`, so a file-based list would be
+	// editable by the population it protects against.
+	proxies, badProxies := httpapi.NewTrustedProxies(bootstrap.TrustedProxies)
 	for _, b := range badProxies {
-		log.Warn("server.trusted_proxies entry is not an IP or CIDR and is IGNORED",
-			"entry", b, "key", "server.trusted_proxies")
+		log.Warn("QUINCE_TRUSTED_PROXIES entry is not an IP or CIDR and is IGNORED",
+			"entry", b, "var", "QUINCE_TRUSTED_PROXIES")
 	}
 
 	handler := httpapi.NewRouter(httpapi.Deps{

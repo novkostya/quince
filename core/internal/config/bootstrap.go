@@ -13,6 +13,16 @@ type Bootstrap struct {
 	Data   string // QUINCE_DATA   — app state (DB, config.yml, logs)
 	Cache  string // QUINCE_CACHE  — derived caches + session scratch
 	Listen string // QUINCE_LISTEN — HTTP listen address
+	// TrustedProxies are the IPs/CIDRs whose X-Forwarded-* headers quince believes
+	// (QUINCE_TRUSTED_PROXIES, comma-separated). EMPTY is the shipping default and means
+	// trust none — byte-for-byte pre-quince#464 behaviour.
+	//
+	// ENV rather than config.yml, Operator ruling 2026-08-02 (quince#549). It was a
+	// config key for one afternoon and never shipped. Two reasons it cannot be one:
+	// --public-demo DELETES its config at startup, so the deployment that most needs a
+	// trust list could never carry one; and in that mode every visitor can PUT /api/config,
+	// so a file-based trust list is editable by the population it protects against.
+	TrustedProxies []string
 }
 
 // knownBootstrapVars is the exact set of env vars quince understands. Anything else with a
@@ -25,9 +35,10 @@ type Bootstrap struct {
 // var carried a built-in "/backups" default, so every deployment had a working storage while
 // declaring nothing — the implicit path the ruling removed.
 var knownBootstrapVars = map[string]struct{}{
-	"QUINCE_DATA":   {},
-	"QUINCE_CACHE":  {},
-	"QUINCE_LISTEN": {},
+	"QUINCE_DATA":            {},
+	"QUINCE_CACHE":           {},
+	"QUINCE_LISTEN":          {},
+	"QUINCE_TRUSTED_PROXIES": {},
 }
 
 // LoadBootstrap parses the bootstrap env from an os.Environ()-style slice ("KEY=VALUE").
@@ -65,9 +76,10 @@ func LoadBootstrap(environ []string) (Bootstrap, []Warning) {
 	// silent caps or fallbacks. The real mitigation for "8968 is not memorable" is that the
 	// listen address is a first-class setting, not that the number is a good one.
 	b := Bootstrap{
-		Data:   orDefault(vals["QUINCE_DATA"], "/data"),
-		Cache:  orDefault(vals["QUINCE_CACHE"], "/cache"),
-		Listen: orDefault(vals["QUINCE_LISTEN"], ":8968"),
+		Data:           orDefault(vals["QUINCE_DATA"], "/data"),
+		Cache:          orDefault(vals["QUINCE_CACHE"], "/cache"),
+		Listen:         orDefault(vals["QUINCE_LISTEN"], ":8968"),
+		TrustedProxies: splitList(vals["QUINCE_TRUSTED_PROXIES"]),
 	}
 	return b, warnings
 }
@@ -127,4 +139,19 @@ func orDefault(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// splitList parses a comma-separated env value into trimmed, non-empty entries. An unset or empty
+// var yields nil, which every consumer must read as "trust nothing" rather than "trust anything".
+func splitList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -716,7 +716,20 @@ app can run (unknown `QUINCE_*` vars are a startup warning, typo guard):
 ```
 QUINCE_DATA=/data   QUINCE_CACHE=/cache
 QUINCE_LISTEN=:8968
+QUINCE_TRUSTED_PROXIES=203.0.113.5,198.51.100.0/24   # default: empty = trust none
 ```
+
+**`QUINCE_TRUSTED_PROXIES`** lists the IPs/CIDRs whose `X-Forwarded-*` headers quince believes
+(design §6: *"reverse-proxy trust headers only from configured addresses"*). **Empty is the
+default and means trust none** — the login rate limiter buckets on the peer address, which is
+what a direct-LAN deployment wants and is byte-for-byte the pre-quince#464 behaviour.
+
+Set it when a reverse proxy terminates TLS in front. Without it every visitor arrives as the
+same peer, so **ten wrong password guesses deny login to everybody**, correct password included
+(quince#464). **Env rather than `config.yml`** — Operator ruling 2026-08-02, quince#549:
+`--public-demo` deletes its config at startup, so the deployment that most needs a trust list
+could never carry one; and in that mode every visitor can `PUT /api/config`, which would make a
+file-based list editable by the population it protects against.
 
 **`QUINCE_BACKUPS` was RETIRED at `qn.6c`** (gap 3, Operator ruling 2026-07-31 — quince#378).
 Backup locations are **declared**, in `storage:` below: no env var, no implicit storage,
@@ -866,15 +879,6 @@ automation:                 # assisted-backup policy (consumed from qn.12)
   reminder_cooldown_hours: 24
 ui:
   theme: system             # system | light | dark
-server:                     # how quince is REACHED, as distinct from how it backs anything up
-  trusted_proxies: []       # IPs/CIDRs whose X-Forwarded-* headers quince believes.
-                            # EMPTY (the default) = trust none = bucket on the peer address,
-                            # which is byte-for-byte pre-quince#464 behaviour, so no existing
-                            # deployment changes on upgrade. Set it when a reverse proxy is in
-                            # front: without it every visitor shares one login bucket and ten
-                            # wrong guesses deny login to EVERYBODY, correct password included.
-                            # Design §6 has required this since qn.1 — "reverse-proxy trust
-                            # headers only from configured addresses" — and it was unbuilt.
 ```
 
 Schema is versioned by presence/absence of keys (missing keys = defaults, written back
