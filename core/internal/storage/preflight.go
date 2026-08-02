@@ -6,8 +6,13 @@ import (
 	"os"
 )
 
-// PreflightStorage re-checks a job's storage IMMEDIATELY BEFORE anything is written to it
-// (qn.6c story 7).
+// preflight re-checks a slot's storage IMMEDIATELY BEFORE anything is written to it (qn.6c story 7).
+//
+// IT IS CALLED FROM Seed AND PrepareWork, each ahead of Provision — those two are the entry points,
+// and there is deliberately no exported wrapper. One used to exist (`PreflightStorage`, taking a
+// jobID and doing `jobSlot` + this) and nothing ever called it, so the doc comment introduced the
+// re-check by naming a method that never ran (quince#460). A caller that has a jobID rather than a
+// Slot resolves it with jobSlot first, exactly as those two do.
 //
 // `jobSlot` already refuses a storage that was unusable AT STARTUP. This asks the different and
 // later question: is it still the same storage, right now? Between startup and a backup a disk can
@@ -26,14 +31,6 @@ import (
 //	missing medium    the path is readable and the marker is GONE — an unplugged disk's bare
 //	                  mountpoint, which must never be treated as an empty new storage
 //	backend mismatch  the marker and the slot disagree about what this storage is
-func (m *Manager) PreflightStorage(jobID string) error {
-	s, err := m.jobSlot(jobID)
-	if err != nil {
-		return err // unreachable, or a binding that no longer resolves
-	}
-	return s.preflight()
-}
-
 func (s Slot) preflight() error {
 	marker, err := ReadStorageMarker(s.Root)
 	switch {
