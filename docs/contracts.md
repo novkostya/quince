@@ -296,6 +296,58 @@ a restart, *plug the disk in and press the button*, and there is no button in th
 the **shape of `unreachable_reason`**, now that `missing_medium` and `unreachable` must be
 distinguishable by it.
 
+**PROPOSED (gap): how a storage is FORGOTTEN — `qn.6d`, quince#443.**
+
+`qn.6d` makes a storage something a user can look at, and the counterpart of that is being able to
+remove one. **Forget is detach-and-forget: the declaration goes, the data on the disk does not.**
+That much is an Operator decision on quince#443 and is not what this block asks. What is open is
+**the shape**, and the restart behaviour is inside the shape rather than beside it.
+
+Two candidates, and they are not equivalent:
+
+- **`DELETE /api/storages/{id}` → 204 | 404 | 409.** Treats storage as a REST resource, which the
+  peer-entity frame argues for. But a `204` that leaves the resource in `GET /api/storages` until a
+  restart is an incoherent contract, so this shape **forces live deregistration** — the class
+  `qn.6c` declined in its rung-ruled decision 1, on a registry whose only runtime mutation today is
+  an in-place slot swap.
+- **A config mutation.** The storage list *is* `config.yml` since quince#506, so removing an entry
+  is an edit to a file the UI already edits (**D12**). It needs no second write path, and
+  *"Forgotten · restart quince to apply"* is the idiom `ConfigEditor` already ships rather than a
+  new excuse for one.
+
+**This rung recommends the config mutation, on measured evidence rather than taste.** An
+unreachable storage has an **empty** `id`: `st.StorageID` is set on only two of six resolutions, so
+both `unreachable` and `missing_medium` reach the wire with `"id": ""` (quince#570, measured
+2026-08-02). A user most wants to forget a storage that never came up — a typo'd path, a disk that
+is gone for good — and **`DELETE /api/storages/{id}` structurally cannot address one.** The config
+`name` can: it is the config's own key and the DB's primary key, and every declared storage has one
+whether or not quince ever reached it.
+
+Three sub-questions, each with a recommendation that is explicitly not a decision:
+
+1. **Through the existing `PUT /api/config`, or a narrow endpoint?** `PUT` works today and already
+   refuses to remove the last storage (`config.Service.Replace`, a `422` on path `storage`). But it
+   is a **full-document replace decoded into a zero-valued struct**, so a client that reconstructs
+   the list rather than splicing a fetched one silently drops `zfs:` and `retention:` from every
+   surviving entry. **Recommended: `DELETE /api/config/storage/{name}` → 200 {config, warnings,
+   source} | 404 | 422**, which splices server-side and cannot drop a sibling's keys. Still a config
+   mutation, not a resource delete.
+2. **Refusing the default.** Exactly one storage is `default`, and `qn.6c`'s G7 makes a
+   zero-storage config refuse to start — so an unguarded button could brick the instance.
+   Recommended **`422`** naming the storage and the remedy (*make another storage default first*).
+   On a single-storage install the only storage is the default, so this subsumes the last-storage
+   case the `Replace` floor already covers.
+3. **What the client is told about the restart.** Recommended: the response carries the same
+   `warnings` the config endpoints already return, and the UI surfaces it — never a silent success
+   over a card that then lingers with no explanation.
+
+**One consequence to settle either way**, because it is where a half-forgotten storage becomes
+observable: the `Refresher` closure reads the live config, so after a Forget `refresh(name)` returns
+`ok=false` and `POST /api/storages/{id}/recheck` reports the **stale** slot rather than saying the
+storage is gone.
+
+Spec: `docs/specs/qn.6d/qn.6d.md`, gap B. **Not built until this is decided.**
+
 ### Config
 
 ```
@@ -633,6 +685,58 @@ redefinition does not wait on the migration: a reviewer of either PR should not 
 other half in the same diff.
 
 Spec: `docs/specs/qn.6c/qn.6c.md`, gap 1.
+
+**PROPOSED (gap): `Storage` gains space and counts — `qn.6d`, quince#443.**
+
+`qn.6d` puts a storage card in front of a user choosing a disk, and **the object carries nothing to
+put on it**: today `Storage` is exactly `{id, name, path, backend, default, reachable,
+unreachable_code, unreachable_reason, will_be_full}`. A fill bar is new wire, not new rendering.
+Proposed, additive:
+
+```jsonc
+Storage: {
+  ...,
+  "filesystem_free_bytes":  1200000000000,  // statfs Bavail × Bsize on this storage's path
+  "filesystem_total_bytes": 3600000000000,  // null when the storage is unreachable, never 0
+  "backup_count":  14,                      // versions attributed to this storage
+  "device_count":  2,                       // distinct devices with a version here
+  "counts_as_of": "2026-08-02T18:20:00Z"    // when the counts were last true
+}
+```
+
+Four sub-questions, each with this rung's recommendation, and each explicitly a recommendation
+rather than a decision:
+
+1. **Naming, and whose number it is.** `free_bytes` on a `Storage` object *reads* as the storage's,
+   and it is not: `statfs` reports the **filesystem**. Two storages that are two directories on one
+   disk — `qn.6c`'s own G1 fixture — would each claim the same free space as if they had it to
+   themselves. **Recommended `filesystem_free_bytes` / `filesystem_total_bytes`**: ugly, and the
+   ugliness is doing work, because nothing else in the payload says why two storages report
+   identical figures. The alternative is a shorter name plus a rule that every client must restate
+   in its own copy, which is the thing a contract exists to avoid.
+2. **The freshness stamp.** Counts come from the DB and were true at last contact; an unreachable
+   storage's are stale by definition and the card has to say so. **Recommended `counts_as_of`,
+   always present**, so a client never infers staleness from `reachable`. Omitting it when reachable
+   would make the common case smaller and the unreachable case a special path in every client.
+3. **Capacity when the storage is unreachable.** **Recommended `null`, never `0`** — a zero is a
+   measurement and this is an absence. Same discipline `will_be_full` already follows. The counts
+   stay populated, because they are the DB's answer and the DB is reachable; that asymmetry is the
+   point of the stamp.
+4. **Device-independence.** **Recommended: the counts are properties of the storage**, so they
+   appear with or without `?udid=`, which continues to add only `will_be_full`. This keeps the ruled
+   device-independence of the list intact and lets a storage page fetch with no udid at all.
+
+**Two pieces of existing drift this block does not create and must not be read as endorsing**, both
+found while writing the `qn.6d` spec and both to be corrected by the PR that implements this:
+
+- **§1's code block is behind the built API.** It lists `GET /api/storages` and omits both the
+  `?udid=` form and `POST /api/storages/{id}/recheck`, which exist only in the prose above.
+- **§2 documents one field where the wire has two.** `unreachable_code` is built, shipped and
+  consumed by the TypeScript client, and appears nowhere in this section. Its declared values are
+  also wrong in a second way — see quince#569, which is a defect with its own decision and is
+  deliberately not folded in here.
+
+Spec: `docs/specs/qn.6d/qn.6d.md`, gap A. **Not built until this is decided.**
 
 ## 3. WebSocket (`/api/ws`)
 
