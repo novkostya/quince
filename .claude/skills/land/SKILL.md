@@ -66,6 +66,31 @@ merge waits on someone who can run it, naming the head they swept.
 
 ## 3. Merge
 
+**FIRST, CHECK FOR PRs STACKED ON THIS ONE** (quince#388). `--delete-branch` on the base of an open
+stacked PR **silently closes it** — one second later, no warning, nothing in the merge output — and
+`forge-watch` reports the dependent as `DIRTY`, which is the shape §5 of `CLAUDE.md` tells you to
+leave alone. One command, and it costs nothing when the answer is empty:
+
+```sh
+gh pr list -R novkostya/quince --json number,baseRefName \
+  -q '.[] | select(.baseRefName=="<this PR head branch>") | .number'
+```
+
+**If it returns anything, retarget those PRs to `main` FIRST** — `gh api -X PATCH
+repos/novkostya/quince/pulls/<n> -f base=main` — and only then merge. Retargeting is legal while the
+dependent is still open and **impossible one second after it is not**, which is the whole window.
+
+**It is irrecoverable the moment that author pushes**, which is their natural next action once the
+base lands: two `422`s close the door in sequence, and recreating the base ref only reveals the
+second one. The commits survive; the pull request and its verdict do not. Measured on quince#384,
+which was approved and had to be reopened as quince#387.
+
+Rung 1 of `CLAUDE.md` §*How work runs* says **sequence, do not stack**, so this should find nothing.
+It is here for when somebody stacked anyway, or when a stack predates that ruling — and **the
+merging seat is the one who cannot see it**, because a base branch that is not `main` is easy to
+miss in `pr view` output. Deleting the branch is not the defect and branch hygiene is worth keeping;
+doing it while a dependent is open is.
+
 ```sh
 gh pr merge <n> --repo novkostya/quince --rebase --delete-branch
 ```
