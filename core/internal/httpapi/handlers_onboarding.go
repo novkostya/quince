@@ -7,7 +7,7 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
-// GET /api/onboarding/step1 → {complete, detected}
+// GET /api/onboarding/https → {complete, detected}
 //
 // THE FIRST ONBOARDING SURFACE IN THE PRODUCT, and it sets the shape steps 2 and 3 inherit
 // (qn.6f slice 2, design §9). That is the argument for it being this narrow: it answers one
@@ -27,13 +27,13 @@ import (
 // It carries NO device, storage or version data — nothing an unauthenticated caller should
 // not see. What it discloses is whether the connection it arrived on is encrypted, which the
 // caller already knows, having made it.
-func (d Deps) handleOnboardingStep1() http.HandlerFunc {
+func (d Deps) handleOnboardingHTTPS() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, d.Log, http.StatusOK, step1(r))
+		writeJSON(w, d.Log, http.StatusOK, detectHTTPS(r))
 	}
 }
 
-// step1 is the detection, split out so the test states the request and reads the answer.
+// detectHTTPS is the detection, split out so the test states the request and reads the answer.
 //
 // DETECTION IS A STATE, NOT A BUTTON. `r.TLS != nil` or `X-Forwarded-Proto: https` and the
 // step is done — the top-tier user meets zero friction and is never asked to confirm
@@ -43,14 +43,14 @@ func (d Deps) handleOnboardingStep1() http.HandlerFunc {
 // is not "can you log in from this browser" — it is "can you reach quince from your phone",
 // and a developer on http://localhost cannot. Telling them the step is finished would be
 // exactly the false assurance this rung exists to remove, one layer up.
-func step1(r *http.Request) wire.OnboardingStep1 {
+func detectHTTPS(r *http.Request) wire.OnboardingHTTPS {
 	switch {
 	case r.TLS != nil:
-		return wire.OnboardingStep1{Complete: true, Detected: wire.Step1DetectedTLS}
+		return wire.OnboardingHTTPS{Complete: true, Detected: wire.HTTPSDetectedTLS}
 	case auth.SecureOrigin(r):
 		// SecureOrigin is true and r.TLS is nil, so it can only be the forwarded header.
-		return wire.OnboardingStep1{Complete: true, Detected: wire.Step1DetectedForwarded}
+		return wire.OnboardingHTTPS{Complete: true, Detected: wire.HTTPSDetectedForwarded}
 	default:
-		return wire.OnboardingStep1{Complete: false, Detected: wire.Step1DetectedNone}
+		return wire.OnboardingHTTPS{Complete: false, Detected: wire.HTTPSDetectedNone}
 	}
 }
