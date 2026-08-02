@@ -18,6 +18,57 @@
 # `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
 set -eu
 
+# INLINE `--body` IS REFUSED, and the reason is a measured leak rather than a style preference
+# (quince#518, 2026-08-02).
+#
+# A body written as `--body "…"` is a shell string, so backticks inside it are COMMAND
+# SUBSTITUTION. On this box that is not theoretical: `iostat` in backticked prose EXECUTED, and its
+# output — a PVE host's block-device map and guest count — was published to a public issue. Twice
+# more the same session, backticks silently ATE filenames out of sentences, which is the quiet
+# version of the same bug.
+#
+# AND IT IS THE ONE PATH THE PRIVACY GATE CANNOT COVER. `make privacy-check TEXT=<file>` needs a
+# file; `--body` has none. So the single text in that session that could not be swept is the one
+# that leaked — not because the gate failed, but because the invocation gave it nothing to read.
+#
+# THERE IS NO PATTERN REMEDY, which is why this lives here. The leaked strings were a hostname
+# canon deliberately publishes in seven files (a pattern for it would fail `privacy-check` on
+# `CLAUDE.md` forever), kernel-assigned device names, a core count and a version. **Unpatternable
+# by construction** — so a matcher was never going to catch this and a wrapper refusal is the whole
+# of the available control.
+#
+# `--body-file` and `--body-file -` both pass. Neither can substitute, and both give the sweep
+# something to point at.
+for _a in "$@"; do
+	case "$_a" in
+	--body | -b)
+		cat >&2 <<'EOM'
+gh-coder: REFUSING --body. Write the text to a file and pass --body-file.
+
+  Inline --body is a shell string, so backticks in it are COMMAND SUBSTITUTION. On 2026-08-02
+  that published a PVE host's device map to a public issue, and twice ate filenames out of
+  sentences (quince#518, quince#508).
+
+  It is also the one path `make privacy-check TEXT=<file>` cannot cover, because there is no
+  file to sweep. Use:
+
+      cat > "$HOME/scratch/<runner>/bodies/<name>.md" <<'EOF'
+      …
+      EOF
+      make privacy-check TEXT="$HOME/scratch/<runner>/bodies/<name>.md"
+      gh-coder <verb> --body-file "$HOME/scratch/<runner>/bodies/<name>.md"
+
+  A quoted heredoc delimiter ('EOF', not EOF) is what stops substitution inside the file too.
+EOM
+		exit 2
+		;;
+	--body=* | -b=*)
+		echo "gh-coder: REFUSING --body=… — same reason as --body; use --body-file (quince#518)." >&2
+		exit 2
+		;;
+	esac
+done
+
 # HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. Resolved from the passwd database
 # rather than assumed, so the same invocation works from a shell, from an OpenRC service (which gets
 # no HOME, and that is what took the arch box down after a reboot) and from cron.
@@ -180,6 +231,7 @@ GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
 
 unset GITHUB_TOKEN
 export GH_TOKEN
+
 
 # SELF-CAUSED LEDGER (quince#242). Two verbs — `pr review` and `pr merge` — produce forge events
 # that carry NO actor, because `forge-watch` computes them by diffing observations. Recording them
