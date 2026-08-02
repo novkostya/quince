@@ -229,3 +229,15 @@ export interface Storage {
   // Present only when the list was fetched with `?udid=`. null means "not asked", NOT "no".
   will_be_full: boolean | null;
 }
+
+// ServeMode is GET /api/health's `mode` — how this daemon is DEPLOYED, not who you are, which is
+// why it lives on health rather than on /api/auth/status (ruled 2026-08-02; auth/status is a frozen
+// contract and health explicitly is not). The login screen reads it to decide whether to print the
+// demo password, so it must be readable BEFORE login — health is authExempt, which it needs to be.
+export type ServeMode = "normal" | "demo" | "public_demo";
+
+export interface Health {
+  status: string;
+  version: string;
+  mode: ServeMode;
+}

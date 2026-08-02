@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import type { FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,11 +10,13 @@ export function PasswordForm({
   title,
   subtitle,
   cta,
+  notice,
   onSubmit,
 }: {
   title: string;
   subtitle: string;
   cta: string;
+  notice?: ReactNode;
   onSubmit: (password: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState("");
@@ -43,6 +46,7 @@ export function PasswordForm({
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-base font-semibold">{title}</h1>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
+        {notice}
         <div className="mt-4 flex flex-col gap-1">
           <Label htmlFor="password">Password</Label>
           <Input

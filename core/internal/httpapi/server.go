@@ -24,11 +24,28 @@ import (
 // aggregate object could not say which one was degraded. The singular `muxer` key is GONE (clean
 // break ruled (bz)) — two overlapping representations rot, /api/health is not a frozen contract,
 // and quince is its only consumer.
+//
+// qn.6 adds `mode`, which is how the LOGIN SCREEN learns it is a public demo and may print the
+// password (public-demo spec story 5). Health rather than `/api/auth/status`, ruled 2026-08-02:
+// auth/status is FROZEN in contracts §1 and health explicitly is not (above); health is already
+// `authExempt`, and story 5 needs the mode BEFORE login; and health already reports how this daemon
+// is DEPLOYED — muxer supervision, managed versus external — where auth/status answers who you are,
+// which a mode is not. The cost is one extra request on the login page.
+//
+// A MODE STRING, not a boolean: a third mode later must not need a second field.
 type HealthResponse struct {
 	Status  string        `json:"status"`
 	Version string        `json:"version"`
-	Muxers  []MuxerHealth `json:"muxers"` // never null → JSON []
+	Mode    string        `json:"mode"` // normal | demo | public_demo
+	Muxers  []MuxerHealth `json:"muxers"`
 }
+
+// Serving modes reported by GET /api/health (public-demo spec story 5).
+const (
+	ModeNormal     = "normal"      // the shipping product, real hardware
+	ModeDemo       = "demo"        // --demo: fixtures, first-run setup, Secure forced off
+	ModePublicDemo = "public_demo" // --public-demo: fixtures, password preset, Secure left alone
+)
 
 // MuxerHealth is one muxer daemon's slice of /api/health: which daemon, the transport it serves,
 // whether quince manages it, its state (running | degraded | starting | stopped | external), a
@@ -109,6 +126,13 @@ func NewRouter(deps Deps) http.Handler {
 
 func (d Deps) handleHealth() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// An unset Mode means nobody wired it — report `normal` rather than an empty string, so
+		// the UI never has to treat "" as a fourth case (no silent fallbacks: this is the
+		// SHIPPING mode, which is what an unwired router is).
+		mode := d.Mode
+		if mode == "" {
+			mode = ModeNormal
+		}
 		muxers := d.Muxer.MuxersHealth()
 		if muxers == nil {
 			muxers = []MuxerHealth{}
@@ -116,6 +140,7 @@ func (d Deps) handleHealth() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
 			Status:  "ok",
 			Version: d.Version,
+			Mode:    mode,
 			Muxers:  muxers,
 		})
 	}
