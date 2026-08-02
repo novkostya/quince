@@ -54,3 +54,48 @@ test("the storage selector shows both storages, the unreachable one disabled, an
   // claim a full transfer. A warning that is always on trains the user to ignore it.
   await expect(page.getByTestId("storage-will-be-full")).toHaveCount(0);
 });
+
+// quince#459 — the Operator's ruling was "plug the disk in and press the button", the endpoint
+// shipped in quince#445, and nothing pressed it. This drives the button against the REAL API,
+// which is the only thing that proves it is wired: a unit test asserts the component calls a
+// function I wrote, and the round trip is what the issue was actually about.
+//
+// The demo's `shuttle` is deliberately and permanently unreachable, so a successful press CANNOT
+// make it appear. That is the useful case rather than a limitation: it pins that a re-check which
+// changes nothing leaves the row saying exactly what it said before — not blanked, not cleared,
+// not silently "fine now".
+test("re-check reaches the daemon for one storage and leaves an unreachable row honest", async ({
+  page,
+}) => {
+  await authenticate(page);
+  await page.getByRole("link", { name: "spare-iphone" }).click();
+  await expect(page).toHaveURL(/\/devices\//);
+
+  await expect(page.getByTestId("storage-select")).toBeVisible();
+
+  // ONE button, on the one unreachable row — not one per storage.
+  const button = page.getByTestId("storage-recheck");
+  await expect(button).toHaveCount(1);
+
+  const recheck = page.waitForResponse(
+    (r) => /\/api\/storages\/[^/]+\/recheck$/.test(r.url()) && r.request().method() === "POST",
+  );
+  const reload = page.waitForResponse(
+    (r) => /\/api\/storages\?udid=/.test(r.url()) && r.request().method() === "GET",
+  );
+
+  await button.click();
+
+  // The press reaches the daemon, and it answers 200 for a storage that is declared.
+  expect((await recheck).status()).toBe(200);
+
+  // AND the device-scoped list is refetched rather than the 200 {storage} being spliced in.
+  // recheck is device-independent, so its will_be_full is null; splicing would drop the
+  // full-transfer warning at the moment a returning disk made it true.
+  expect((await reload).status()).toBe(200);
+
+  // The disk is still out, and the row still says so — with the daemon's own sentence.
+  await expect(page.getByTestId("storage-unreachable")).toContainText(/marker/);
+  await expect(page.getByTestId("storage-recheck-failed")).toHaveCount(0);
+  await expect(button).toBeEnabled();
+});

@@ -1,5 +1,6 @@
 import * as React from "react";
-import type { StoragesState } from "./useStorages";
+import { Button } from "@/components/ui/button";
+import type { Storages } from "./useStorages";
 
 // StorageSelect is the "where does this backup go" control on Back up now (qn.6c story 9).
 //
@@ -17,16 +18,17 @@ import type { StoragesState } from "./useStorages";
 // list they cannot trust. Disabled-with-a-reason is the honest shape — and it is why the ruling
 // made quince serve rather than refuse when a disk is out.
 export function StorageSelect({
-  state,
+  storages: sub,
   value,
   onChange,
   disabled,
 }: {
-  state: StoragesState;
+  storages: Storages;
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
+  const { state, recheck, rechecking } = sub;
   const storages = state.status === "loaded" ? state.storages : [];
   const exact = storages.find((s) => s.id === value);
   const chosen = exact ?? storages.find((s) => s.default);
@@ -79,12 +81,44 @@ export function StorageSelect({
           "not connected" and could never learn which path or why. Found by driving G8 against
           the real API rather than against props (qn.6c story 9).
 
-          The daemon's own sentence, because it names the path and the marker. */}
+          The daemon's own sentence, because it names the path and the marker.
+
+          RE-CHECK SITS HERE, ON THE UNREACHABLE ROW ONLY (quince#459). The Operator's ruling is
+          "plug the disk in and press the button", and this is where the sentence describing the
+          problem already is — the button lands next to its own reason rather than in a corner of
+          the page. A reachable storage gets none: the press would be a no-op the user cannot
+          interpret, and a control offered where there is nothing to fix teaches that pressing it
+          is how you make things happen. That is a UI-taste call, rung-local, not a contract one —
+          quince#459 flagged it as exactly that. */}
       {storages
         .filter((s) => !s.reachable && s.unreachable_reason)
         .map((s) => (
-          <span key={s.id} className="text-xs text-warn" data-testid="storage-unreachable">
-            {s.name}: {s.unreachable_reason}
+          <span
+            key={s.id}
+            className="flex flex-wrap items-center gap-2 text-xs text-warn"
+            data-testid="storage-unreachable"
+          >
+            <span>
+              {s.name}: {s.unreachable_reason}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs sm:h-6"
+              disabled={disabled || rechecking[s.id] === "pending"}
+              onClick={() => recheck(s.id)}
+              data-testid="storage-recheck"
+              aria-label={`Re-check ${s.name}`}
+            >
+              {rechecking[s.id] === "pending" ? "Checking…" : "Re-check"}
+            </Button>
+            {/* A FAILED PRESS IS SHOWN, NEVER SWALLOWED. Without this the button would look
+                identical whether the re-check ran and the disk is still out, or the request never
+                landed — and the user would keep pressing a control that is not reaching the
+                daemon. */}
+            {rechecking[s.id] === "failed" ? (
+              <span data-testid="storage-recheck-failed">couldn&rsquo;t re-check</span>
+            ) : null}
           </span>
         ))}
 

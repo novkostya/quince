@@ -3,6 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { StorageSelect } from "./StorageSelect";
 import type { Storage } from "@/lib/types";
 
+import type { Storages, StoragesState, RecheckState } from "./useStorages";
+
 function storage(over: Partial<Storage>): Storage {
   return {
     id: "01JA",
@@ -16,6 +18,13 @@ function storage(over: Partial<Storage>): Storage {
     will_be_full: null,
     ...over,
   };
+}
+
+// sub() wraps a bare state in the hook's return shape. The component now takes the whole
+// subscription — state plus recheck — because the button lives on the row that explains the
+// problem, and only the hook can reload the DEVICE-SCOPED list after a successful press.
+function sub(state: StoragesState, over: Partial<Storages> = {}): Storages {
+  return { state, recheck: () => {}, rechecking: {}, ...over };
 }
 
 const shuttle = storage({
@@ -34,7 +43,7 @@ describe("StorageSelect", () => {
   // a choice to make when there is not.
   it("renders nothing when there is only one storage", () => {
     const { container } = render(
-      <StorageSelect state={{ status: "loaded", storages: [storage({})] }} value="" onChange={() => {}} />,
+      <StorageSelect storages={sub({ status: "loaded", storages: [storage({})] })} value="" onChange={() => {}} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -43,7 +52,7 @@ describe("StorageSelect", () => {
   // vanishes from is a list they cannot trust — and serving-while-unreachable exists precisely so
   // the UI can say which disk is missing.
   it("lists an unreachable storage, disabled, rather than hiding it", () => {
-    render(<StorageSelect state={{ status: "loaded", storages: [storage({}), shuttle] }} value="" onChange={() => {}} />);
+    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), shuttle] })} value="" onChange={() => {}} />);
     const opt = screen.getByRole("option", { name: /shuttle/ }) as HTMLOptionElement;
     expect(opt).toBeInTheDocument();
     expect(opt.disabled).toBe(true);
@@ -59,7 +68,7 @@ describe("StorageSelect", () => {
     // value is the DEFAULT, not the unreachable one.
     render(
       <StorageSelect
-        state={{ status: "loaded", storages: [storage({}), shuttle] }}
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
         value="01JA"
         onChange={() => {}}
       />,
@@ -72,7 +81,7 @@ describe("StorageSelect", () => {
   // THE COST BEFORE IT IS PAID (story 8), attached to the option that carries it.
   it("warns that a first backup to this storage transfers everything", () => {
     const fresh = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: true });
-    render(<StorageSelect state={{ status: "loaded", storages: [storage({}), fresh] }} value="01JB" onChange={() => {}} />);
+    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), fresh] })} value="01JB" onChange={() => {}} />);
     expect(screen.getByTestId("storage-will-be-full")).toHaveTextContent(
       /transfers everything, not just what changed/,
     );
@@ -82,14 +91,14 @@ describe("StorageSelect", () => {
   // the pair, so a constant one would train the user to ignore it.
   it("does not warn when this storage already holds a backup for the device", () => {
     const seen = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: false });
-    render(<StorageSelect state={{ status: "loaded", storages: [storage({}), seen] }} value="01JB" onChange={() => {}} />);
+    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), seen] })} value="01JB" onChange={() => {}} />);
     expect(screen.queryByTestId("storage-will-be-full")).toBeNull();
   });
 
   it("reports the chosen storage's id", () => {
     const onChange = vi.fn();
     const other = storage({ id: "01JB", name: "shuttle", default: false });
-    render(<StorageSelect state={{ status: "loaded", storages: [storage({}), other] }} value="" onChange={onChange} />);
+    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), other] })} value="" onChange={onChange} />);
     fireEvent.change(screen.getByTestId("storage-select"), { target: { value: "01JB" } });
     expect(onChange).toHaveBeenCalledWith("01JB");
   });
@@ -100,7 +109,7 @@ describe("StorageSelect degradation", () => {
   // only one storage" — the control simply gone. A user with two disks would press the button and
   // have the backup go to the default with nothing saying so.
   it("says the load failed rather than rendering as no-choice", () => {
-    render(<StorageSelect state={{ status: "failed" }} value="" onChange={() => {}} />);
+    render(<StorageSelect storages={sub({ status: "failed" })} value="" onChange={() => {}} />);
     expect(screen.getByTestId("storages-failed")).toHaveTextContent(/go to the default/);
   });
 
@@ -109,7 +118,7 @@ describe("StorageSelect degradation", () => {
   it("renders nothing for a genuine single storage", () => {
     const { container } = render(
       <StorageSelect
-        state={{ status: "loaded", storages: [storage({})] }}
+        storages={sub({ status: "loaded", storages: [storage({})] })}
         value=""
         onChange={() => {}}
       />,
@@ -121,7 +130,7 @@ describe("StorageSelect degradation", () => {
   // about a request still in flight.
   it("renders nothing while loading", () => {
     const { container } = render(
-      <StorageSelect state={{ status: "loading" }} value="" onChange={() => {}} />,
+      <StorageSelect storages={sub({ status: "loading" })} value="" onChange={() => {}} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -133,7 +142,7 @@ describe("StorageSelect degradation", () => {
     const other = storage({ id: "01JB", name: "shuttle", default: false });
     render(
       <StorageSelect
-        state={{ status: "loaded", storages: [storage({}), other] }}
+        storages={sub({ status: "loaded", storages: [storage({}), other] })}
         value="01JGONE"
         onChange={onChange}
       />,
@@ -148,11 +157,122 @@ describe("StorageSelect degradation", () => {
     const other = storage({ id: "01JB", name: "shuttle", default: false });
     render(
       <StorageSelect
-        state={{ status: "loaded", storages: [storage({}), other] }}
+        storages={sub({ status: "loaded", storages: [storage({}), other] })}
         value=""
         onChange={onChange}
       />,
     );
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+// quince#459 — "plug the disk in and press the button" (Operator ruling, quince#435) shipped its
+// endpoint in quince#445 and its button nowhere. These pin the button to the row that names the
+// problem, and pin the two states a press can leave behind.
+describe("StorageSelect re-check", () => {
+  it("offers Re-check on the unreachable row, beside its reason", () => {
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("storage-unreachable");
+    expect(row).toHaveTextContent(/carries no quince storage marker/);
+    // Inside the SAME row as the reason — a button elsewhere on the page would not be "press it"
+    // for the disk the sentence is about.
+    expect(row.querySelector('[data-testid="storage-recheck"]')).not.toBeNull();
+  });
+
+  // The taste call, pinned so it cannot drift back silently: a reachable storage gets no button.
+  // The press would be a no-op the user cannot interpret, and a control offered where there is
+  // nothing to fix teaches that pressing it is how you make things happen.
+  it("offers no Re-check when every storage is reachable", () => {
+    const other = storage({ id: "01JB", name: "shuttle", default: false });
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), other] })}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("storage-recheck")).toBeNull();
+  });
+
+  it("asks the hook to re-check THAT storage", () => {
+    const recheck = vi.fn();
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { recheck })}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("storage-recheck"));
+    expect(recheck).toHaveBeenCalledWith("01JB");
+  });
+
+  // A second press while the first is in flight would queue a request the user did not ask for.
+  it("disables the button while its own re-check is pending", () => {
+    const pending: Record<string, RecheckState> = { "01JB": "pending" };
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: pending })}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    const btn = screen.getByTestId("storage-recheck") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/Checking/);
+  });
+
+  // A FAILED PRESS IS SHOWN. Without this the button looks identical whether the re-check ran and
+  // the disk is still out, or the request never landed — and the user keeps pressing a control
+  // that is not reaching the daemon. That is the no-silent-fallbacks rule on a button.
+  it("says so when the re-check itself could not be performed", () => {
+    const failed: Record<string, RecheckState> = { "01JB": "failed" };
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: failed })}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("storage-recheck-failed")).toHaveTextContent(/couldn’t re-check/);
+    // And the storage's OWN reason is still there: "we could not ask" does not replace "the disk
+    // is not there", which is still the last thing the daemon said.
+    expect(screen.getByTestId("storage-unreachable")).toHaveTextContent(
+      /carries no quince storage marker/,
+    );
+  });
+
+  // The button belongs to ONE row. The user plugged in one disk and pressed one button; a second
+  // unreachable storage showing "Checking…" would be a claim about something nobody touched.
+  it("keeps pending state to the storage that was pressed", () => {
+    const third = storage({
+      id: "01JC",
+      name: "nas",
+      default: false,
+      reachable: false,
+      unreachable_code: "path_unreachable",
+      unreachable_reason: "the path could not be read",
+    });
+    const pending: Record<string, RecheckState> = { "01JB": "pending" };
+    render(
+      <StorageSelect
+        storages={sub(
+          { status: "loaded", storages: [storage({}), shuttle, third] },
+          { rechecking: pending },
+        )}
+        value="01JA"
+        onChange={() => {}}
+      />,
+    );
+    const buttons = screen.getAllByTestId("storage-recheck") as HTMLButtonElement[];
+    expect(buttons).toHaveLength(2);
+    expect(buttons.filter((b) => b.disabled)).toHaveLength(1);
+    expect(buttons.filter((b) => /Checking/.test(b.textContent ?? ""))).toHaveLength(1);
   });
 });
