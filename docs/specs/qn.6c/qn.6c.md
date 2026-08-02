@@ -829,41 +829,54 @@ beyond the four declared above.
 Each code PR **flips its `PROPOSED (gap)` block in canon to decided text**, citing the ruling
 relay on quince#378.
 
-| PR | claim | state | hardware |
-| --- | --- | --- | --- |
-| 1 | this spec + the four `PROPOSED (gap)` blocks in canon | **merged** (quince#381) | no |
-| — | **rulings** — no code PR opened before this | **done** 2026-07-31 | — |
-| 1b–3c | the planned slices through *the wiring* | **merged** | no |
-| — | **storage registry** — the Manager holds a SET of slots; every read says which | **merged** (quince#433) | no |
-| — | `browse_root` is EMPTY for an unresolvable storage, not relative | **merged** | no |
-| — | **RULED**: unreachable is a listed state, not a refusal (quince#435) | **merged** (quince#436) | no |
-| — | story 5's contract surface, and the probe/re-check split | **merged** (quince#438) | no |
-| 5a | attribution from the SCAN; `attributeVersions` deleted; folds in quince#428 | **merged** (quince#440) | no |
-| 5b | the loop — unreachable is a state, the never-accepts-a-job invariant | **merged** (quince#441) | no |
-| 5c | `GET /api/storages` + `POST /api/storages/{id}/recheck` | **merged** (quince#445) | no |
-| 6a+6b | a backup NAMES a storage — the job binding, `POST /api/jobs {storage_id}`, migration `0007` | **merged** (quince#447) | no |
-| 7 | the pre-backup check — missing medium, changed medium, backend mismatch | **merged** (quince#449) | no |
-| 8 | story 8 — the full-transfer claim (G2) | **merged** (quince#450) | no |
-| 10 | story 10 — the acceptance case (G1) | **merged** (quince#451) | no |
-| 9 | story 9 — the selector | **open** (quince#452) | no |
-| 9b | G8 — the selector driven against the real API | **open** (quince#453) | no |
-| — | `Job.storage_id` in the TS type | **open** (quince#456) | no |
-| 11 | **G9 written back into this spec** | **OWED** | **yes** |
+| PR | claim | carried by |
+| --- | --- | --- |
+| 1 | this spec + the four `PROPOSED (gap)` blocks in canon | quince#381 |
+| — | **rulings** — no code PR opened before this | 2026-07-31 |
+| 1b–3c | the planned slices through *the wiring* | — |
+| — | **storage registry** — the Manager holds a SET of slots; every read says which | quince#433 |
+| — | `browse_root` is EMPTY for an unresolvable storage, not relative | quince#437 |
+| — | **RULED**: unreachable is a listed state, not a refusal (quince#435) | quince#436 |
+| — | story 5's contract surface, and the probe/re-check split | quince#438 |
+| 5a | attribution from the SCAN; `attributeVersions` deleted; folds in quince#428 | quince#440 |
+| 5b | the loop — unreachable is a state, the never-accepts-a-job invariant | quince#441 |
+| 5c | `GET /api/storages` + `POST /api/storages/{id}/recheck` | quince#445 |
+| 6a+6b | a backup NAMES a storage — the job binding, `POST /api/jobs {storage_id}`, migration `0007` | quince#447 |
+| 7 | the pre-backup check — missing medium, changed medium, backend mismatch | quince#449 |
+| 8 | story 8 — the full-transfer claim (G2) | quince#450 |
+| 10 | story 10 — the acceptance case (G1) | quince#451 |
+| 9 | story 9 — the selector | quince#452 |
+| 9b | G8 — the selector driven against the real API | quince#453 |
+| — | `Job.storage_id` in the TS type | quince#456 |
+| — | per-storage `backend` and `zfs` (quince#458) | quince#461 |
+| 11 | **G9 — a real device to two real storages** | **OWED** |
 
-**The slicing diverged from this plan, and the divergences are the record worth keeping.** Slice 5
-was planned as one PR for stories 5+6+7 and became five, because each one's absence made the next
-actively wrong rather than merely unbuilt: attribution had to move off the single-id sweep before
-the loop could exist (quince#439), the loop had to exist before a job could name a storage, and the
-job had to name one before the pre-backup check had anything to check. That ordering test —
-*which one's absence makes the other wrong* — is the reusable part.
+**THERE IS NO STATUS COLUMN, AND THAT IS THE POINT.** This table had one; it said `open` for three
+PRs that merged *while the table's own PR was in review* (quince#457). That is not a lapse to be more
+careful about — **a status column in a spec cannot be kept true**, because the spec lives in git and
+the status lives on the forge, so every merge invalidates it including merges during the update.
+quince#409's review said the same of a different table, as a warning; this was the demonstration.
+
+**A PR number is immutable, so it is what the table records.** A reader who wants status has the
+number and the forge. `OWED` survives on G9 alone precisely because it is *not* a forge state — it is
+a fact about hardware nobody has run.
+
+**The slicing diverged from the plan, and the divergences are the record worth keeping.** Slice 5 was
+planned as one PR for stories 5+6+7 and became five, because each one's absence made the next
+**actively wrong** rather than merely unbuilt: attribution had to move off the single-id sweep before
+the loop could exist (quince#439), the loop before a job could name a storage, and the job before the
+pre-backup check had anything to check. That ordering test — *which one's absence makes the other
+wrong*, not which is smaller — is the reusable part.
 
 Two slices were folded in rather than deferred: quince#428 landed inside 5a because
 attribution-during-reconciliation is impossible while `adopt`'s predicate is *no row I own*, and the
 `deleteVersion` cross-storage defect landed inside 5b because the loop is what makes it reachable.
 
-**One issue was opened by this rung and is NOT part of it:** quince#448 — `RepairWorkingCopy` is
-device-scoped and silently no-ops for a job on a non-default storage. It needs a contract decision
-about `POST /api/devices/{udid}/reset-working`, so it is filed rather than folded.
+**Two issues were opened by this rung and are NOT part of it:** quince#448 — `RepairWorkingCopy` is
+device-scoped and silently no-ops for a job on a non-default storage — and quince#458's residue,
+whether a marker written from a global declaration may ever be repaired. Both need contract
+decisions, so both are filed rather than folded.
+
 
 **Story 2 is split because it stopped being one claim, not to route around a review queue**
 (ruled on quince#378 after the ordering was reported). The **gap-4 fix made at spec review** — an
