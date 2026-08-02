@@ -1,0 +1,192 @@
+#!/bin/sh
+# gap-heading-check — a `PROPOSED (gap)` block whose own body says the question is `RULED`.
+#
+# THE DEFECT (quince#408). `PROPOSED (gap)` is a load-bearing marker, not a heading. `CLAUDE.md`
+# defines it as *file it as an open question, and stop that thread until it is ruled*, and sessions
+# grep for it to find what they must not build on. When the marker outlives its ruling it does not
+# merely mislead — it says STOP about work that is finished.
+#
+# Three instances in three days, across two seats, every one caught by a human reading:
+#
+#   1  contracts.md gap 1   `Version.backend` proposed, ruled by quince#403
+#   2  contracts.md gap 1   `Version.storage_id` proposed, ruled AND shipped by quince#405
+#   3  CLAUDE.md            "Nothing below is in force" about an identity holding write on 5 repos
+#
+# Two of the three were left by the seat that had most recently articulated the rule — instance 2 by
+# the reviewer who had blocked instance 1 hours earlier, instance 3 by the block's own author. The
+# rule is already in canon twice. CARE IS PRECISELY WHAT FAILED, which is the argument for a gate:
+# a gap block shrinks one half at a time, and the marker is the only part describing the whole, so
+# it is stale BY DEFAULT after every flip.
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT A LIVE MARKER IS, AND WHY THE OBVIOUS PREDICATE IS WRONG.
+#
+# quince#408 words the check as "a section whose heading contains `PROPOSED (gap)` and whose body
+# contains `RULED`". Implemented literally against this repository that is mostly FALSE POSITIVES,
+# because the CORRECTLY-FLIPPED form keeps the marker on the line:
+#
+#     **RULED (was `PROPOSED (gap)`): a `Storage` object, and how a job picks one.**
+#
+# Every properly-closed block looks like that — seven of them on `main` when this was written — so
+# the naive rule flags the good behaviour and the bad behaviour identically. Prose ABOUT the marker
+# does the same: `contracts.md` argues about `PROPOSED (gap)` in two places without proposing
+# anything.
+#
+# So a LIVE marker is one that OPENS its block, and that is TWO conditions, not one:
+#
+#   1. the line STARTS with it, modulo heading hashes, bold asterisks, blockquote markers, backticks
+#   2. it is immediately followed by a COLON — `PROPOSED (gap):`
+#
+# Condition 1 alone is not enough, and this was measured rather than reasoned: `contracts.md:466`
+# opens a paragraph with `` `PROPOSED (gap)` is a load-bearing marker meaning… `` — a line ARGUING
+# about the marker, which condition 1 accepts and which is the single most likely place for the word
+# `RULED` to appear nearby. It was a live false positive on `main`. The colon is what separates
+# declaring a gap from talking about one, and it costs the documents nothing because every real
+# instance already writes it.
+#
+# Together the two conditions separate all seven flipped blocks and both prose mentions from the
+# three real instances, with no new convention in the documents.
+#
+# These blocks are BOLD LEADS more often than `#` headings in this corpus, which the issue's wording
+# does not anticipate. Both are accepted.
+#
+# ------------------------------------------------------------------------------------------------
+# WHERE A BLOCK ENDS: the next markdown heading, the next live marker, or EOF. Bounding is what
+# stops an unrelated ruling further down the file being read as this block's own — the cheapest of
+# the three false-positive strategies quince#408 offers, and the only one that costs the documents
+# nothing.
+#
+# It is not sufficient on its own, so there is an OPT-OUT, and it is deliberately expensive to use:
+#
+#     <!-- gap-heading-check: ignore — why this block legitimately cites a ruling -->
+#
+# on a line inside the block. Same design as `bin/sh-lint-coverage`'s exclusion list: an exemption
+# costs somebody a written reason in a diff a reviewer sees, rather than being silent.
+#
+# `RULED` is matched as an UPPERCASE WORD. Lowercase `ruled` is ordinary prose all over these
+# documents ("ruled 2026-07-31", "the ruling", "unruled") and matching it would bury the signal.
+# `OVERRULED` does not match, because `-w` requires a word boundary — an overruled proposal is
+# equally decided, but it is not the shape that keeps recurring and widening the trigger to catch it
+# would be guessing at a defect nobody has filed.
+#
+# Three exit codes, the contract every gate in this repository uses (quince#41):
+#
+#   0  no live gap block claims its own question is ruled
+#   1  at least one does — it is telling sessions to stop working on finished work
+#   2  DID NOT RUN — bad arguments, or the file list could not be established
+#
+# A 2 is NEVER clean. A gate that fails open is absent exactly when the tree is unusual, which is
+# when a half-flipped block is most likely to exist.
+set -eu
+
+ME=$(basename "$0")
+
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME [<path>...]
+
+  With no arguments, checks every tracked *.md file in the repository.
+  With arguments, checks exactly those files (used by the suite).
+
+exit: 0 clean · 1 a live gap block whose body says RULED · 2 DID NOT RUN
+EOF
+}
+
+for a in "$@"; do
+	case $a in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	-*) die2 "unknown option $a — see --help" ;;
+	esac
+done
+
+# The live-marker test, in one place so the scanner and the block-bounding cannot disagree about
+# what opens a block. Leading heading hashes, blockquote markers, bold asterisks and backticks are
+# stripped; anything else before the marker means it is a citation.
+# BRE, so the parentheses are LITERAL and must NOT be backslash-escaped: `\(` is the grouping
+# operator, and `PROPOSED \(gap\)` matches "PROPOSEDgap", which occurs nowhere. Written that way
+# first, this gate reported `clean` over both real instances — the exact failure it exists to
+# prevent, arriving inside itself. Caught only by running it against them; `--help` and a clean tree
+# both looked fine.
+#
+# The backtick is ASSEMBLED rather than written, the same way `bin/closing-refs-check-test` does it:
+# a literal one inside single quotes reads as an unexpanded command substitution to shellcheck
+# (SC2016), and suppressing that warning across a file whose whole subject is literal markdown text
+# would be the wrong trade.
+TICK=$(printf '\140')
+LIVE_RE="^[ 	]*[>#*${TICK} ]*PROPOSED (gap)${TICK}*:"
+
+if [ "$#" -gt 0 ]; then
+	FILES=$(printf '%s\n' "$@")
+else
+	command -v git >/dev/null 2>&1 || die2 "git is not available and no paths were given"
+	git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die2 "not inside a git work tree"
+	FILES=$(git ls-files '*.md') || die2 "git ls-files failed"
+fi
+
+[ -n "$FILES" ] || die2 "no files to check"
+
+found=0
+scanned=0
+
+for f in $FILES; do
+	[ -f "$f" ] || die2 "$f does not exist"
+	scanned=$((scanned + 1))
+
+	# Every line that OPENS a gap block. No live marker in this file: nothing to bound.
+	starts=$(grep -n "$LIVE_RE" "$f" 2>/dev/null | cut -d: -f1) || starts=""
+	[ -n "$starts" ] || continue
+
+	total=$(wc -l <"$f")
+
+	for start in $starts; do
+		# The block ends at the next heading or the next live marker below it, whichever is
+		# first — not at the next blank line, because these blocks are multi-paragraph.
+		after=$((start + 1))
+		end=$total
+		if [ "$after" -le "$total" ]; then
+			rest=$(sed -n "${after},\$p" "$f")
+			off=$(printf '%s\n' "$rest" | grep -n -e '^#\{1,6\} ' -e "$LIVE_RE" | head -1 | cut -d: -f1) || off=""
+			[ -n "$off" ] && end=$((start + off - 1))
+		fi
+
+		body=$(sed -n "${start},${end}p" "$f")
+
+		# The opt-out, checked before the trigger so an exempted block costs nothing further.
+		if printf '%s\n' "$body" | grep -qF 'gap-heading-check: ignore'; then
+			continue
+		fi
+
+		# The marker line itself is excluded from the RULED search: a lead reading
+		# `PROPOSED (gap): ... whether X is RULED` is asking the question, not answering it.
+		hits=$(printf '%s\n' "$body" | tail -n +2 | grep -nw 'RULED' | head -3) || hits=""
+		[ -n "$hits" ] || continue
+
+		found=$((found + 1))
+		marker=$(sed -n "${start}p" "$f")
+		printf '%s: A LIVE %sPROPOSED (gap)%s BLOCK SAYS ITS OWN QUESTION IS RULED\n' "$ME" "$TICK" "$TICK"
+		printf '    %s:%s  %s\n' "$f" "$start" "$marker"
+		printf '%s\n' "$hits" | while IFS= read -r h; do
+			hn=${h%%:*}
+			printf '      → line %s: %s\n' "$((start + hn))" "${h#*:}"
+		done
+	done
+done
+
+if [ "$found" -gt 0 ]; then
+	cat <<EOF
+$ME: $found block(s). \`PROPOSED (gap)\` means "stop that thread until it is ruled" — a block that
+$ME: says STOP about a question its own body has answered sends the next session away from
+$ME: finished work. Narrow the marker to the half that is still open, or flip it to
+$ME: \`RULED (was \\\`PROPOSED (gap)\\\`)\` if nothing is left open.
+$ME: A block that legitimately cites a NEIGHBOURING ruling opts out, with a reason:
+$ME:     <!-- gap-heading-check: ignore — why this block cites a ruling that is not its own -->
+EOF
+	exit 1
+fi
+
+printf '%s: clean — %s file(s) scanned, no live gap block claims its own question is ruled\n' "$ME" "$scanned"

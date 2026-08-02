@@ -220,6 +220,10 @@ privacy-check: ## Sweep for Operator-private strings (REF=<range> whole-branch, 
 closing-refs-check: ## Find bare closing keywords that auto-close an issue (REF=<range>, TEXT=<file>); 0 none · 1 found · 2 DID NOT LOOK
 	@bin/closing-refs-check $(if $(REF),--ref $(REF)) $(if $(TEXT),--text $(TEXT))
 
+.PHONY: gap-heading-check
+gap-heading-check: ## Find a `PROPOSED (gap)` block whose own body says RULED; 0 none · 1 found · 2 DID NOT RUN
+	@bin/gap-heading-check
+
 .PHONY: privacy-check-test
 privacy-check-test: ## The privacy gate's own failure-path suite (synthetic — needs no private layer)
 	@deploy/privacy/privacy-check-test
@@ -308,7 +312,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
-                   forge-watch-owed-scope-test forge-watch-gh-auth-test
+                   forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -375,7 +379,8 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin
                    bin/forge-watch-role-test bin/forge-ledger bin/forge-watch-selfcaused-test \
                    bin/forge-watch-actor-test bin/forge-watch-postmerge-test \
                    bin/loop-drift bin/loop-drift-test \
-                   bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test bin/forge-watch-gh-auth-test
+                   bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test bin/forge-watch-gh-auth-test \
+                   bin/gap-heading-check bin/gap-heading-check-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -392,6 +397,11 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# The same totality argument aimed at the SUITES themselves (quince#246 review): every *-test
 	@# script is in SH_SUITES or named in SH_SUITES_EXCL. Host-side; reads the Makefile and git.
 	@bin/suite-coverage
+	@# A `PROPOSED (gap)` block whose own body says the question is RULED (quince#408). Host-side:
+	@# it reads `git ls-files '*.md'`. It runs in gates-sh rather than as a separate gate because
+	@# the marker means "stop that thread", so a stale one sends the NEXT session away from finished
+	@# work — a cost nobody pays at the moment it is created, which is what gates are for.
+	@bin/gap-heading-check
 	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
 	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
@@ -524,6 +534,10 @@ forge-watch-role-test: ## Branch-ownership suppression is role-dependent (quince
 .PHONY: closing-refs-check-test
 closing-refs-check-test: ## The closing-keyword gate's own refusals, all three exit codes (quince#293)
 	@bin/closing-refs-check-test
+
+.PHONY: gap-heading-check-test
+gap-heading-check-test: ## The gap-marker gate's refusals + quince#408's three instances as fixtures
+	@bin/gap-heading-check-test
 
 .PHONY: forge-watch-counters-test
 forge-watch-counters-test: ## The loop counts its own cycles, and the count survives (quince#282)

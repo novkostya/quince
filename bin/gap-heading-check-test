@@ -1,0 +1,222 @@
+#!/bin/sh
+# gap-heading-check-test — the gate's own failure paths, and quince#408's three instances as
+# fixtures.
+#
+# WHY THE FIXTURES ARE BUILT AT RUNTIME RATHER THAN COMMITTED. The gate's default scope is
+# `git ls-files '*.md'`, so a committed `.md` fixture carrying a live half-flipped block would be
+# read by the REAL gate run and fail it. The fixture would have to be excluded, and an exclusion
+# list is the thing this repository keeps learning to distrust. Temp files cost nothing and cannot
+# be scanned by accident.
+#
+# WHAT THE FIRST VERSION OF THE GATE GOT WRONG, both caught by running it rather than reading it,
+# and both asserted below so they cannot come back:
+#
+#   BRE parens  `PROPOSED \(gap\)` is a GROUP, matching "PROPOSEDgap" — which occurs nowhere. The
+#               gate reported `clean` over both contracts.md instances AND over a clean `main`,
+#               so nothing about its output looked wrong.
+#   no colon    requiring only that the line STARTS with the marker flagged `contracts.md:466`,
+#               a paragraph ARGUING about the marker — a live false positive on `main`.
+#
+# The three instances are reproduced in the shape they actually had, cited to the commit they were
+# extracted from, so a future reader can re-derive them.
+set -eu
+
+cd "$(dirname "$0")/.."
+CHECK="${GAP_HEADING_BIN:-$PWD/bin/gap-heading-check}"
+[ -x "$CHECK" ] || {
+	printf 'gap-heading-check-test: %s is not executable\n' "$CHECK" >&2
+	exit 2
+}
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# `$1` name, `$2` expected exit, `$3` expected substring (may be empty), rest: argv.
+expect() {
+	_n=$1 _want=$2 _sub=$3
+	shift 3
+	_out=$("$@" 2>&1) && _got=0 || _got=$?
+	if [ "$_got" -ne "$_want" ]; then
+		bad "$_n — wanted exit $_want, got $_got"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	if [ -n "$_sub" ] && ! printf '%s\n' "$_out" | grep -qF "$_sub"; then
+		bad "$_n — exit $_got was right, output lacked: $_sub"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	ok "$_n (exit $_got)"
+}
+
+# The marker is assembled rather than written literally, for the same reason
+# `closing-refs-check-test` assembles a bare issue reference: a suite about a marker is the file
+# most likely to become the next instance of it. `M` is a live marker lead, `C` a citation.
+TICK=$(printf '\140')
+M="PROPOSED (gap):"
+
+# --- 1. THE THREE INSTANCES (quince#408) -----------------------------------------------------
+
+# Instances 1 and 2 — `docs/contracts.md` gap 1, extracted from 783b313^. One marker, one half of
+# it ruled inside its own body. This is the shape that recurred: a gap block shrinks one half at a
+# time and the lead describes the whole.
+{
+	printf '## 2. Storages\n\n'
+	printf '**%s %sStorage%s as an object, and what happens to %sVersion.backend%s.**\n\n' "$M" "$TICK" "$TICK" "$TICK" "$TICK"
+	printf 'Options (a), (b) and (c) are set out below.\n\n'
+	printf '**%sVersion.backend%s — RULED (was the open half of this gap): KEEP IT.**\n' "$TICK" "$TICK"
+} >"$WORK/instance-1-2.md"
+expect "instance 1+2: contracts.md gap 1, one half ruled under a whole-block marker" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/instance-1-2.md"
+
+# Instance 3 — `CLAUDE.md:257`, extracted from 932b471^. The severest: it INVERTS the marker rather
+# than narrowing it, telling sessions an identity was undecided while it held write on 5 repos.
+{
+	printf '**%s a third forge identity for the supervisor seat.** Filed under the gap protocol.\n\n' "$M"
+	printf 'Nothing below is in force.\n\n'
+	printf '**The proposal — RULED on 2026-07-31, WIDER than it asked for, and partly built.**\n'
+} >"$WORK/instance-3.md"
+expect "instance 3: CLAUDE.md, marker inverted rather than narrowed" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/instance-3.md"
+
+# The report must NAME the file and the marker's line, because a gate that says only "something is
+# wrong" costs the reader the search this gate exists to save.
+out=$("$CHECK" "$WORK/instance-3.md" 2>&1 || true)
+if printf '%s\n' "$out" | grep -q 'instance-3.md:1' && printf '%s\n' "$out" | grep -qF 'line 5'; then
+	ok "the finding names the marker's line AND the offending RULED line"
+else
+	bad "the finding did not name both lines"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+fi
+
+# --- 2. THE TWO BUGS THE FIRST VERSION HAD ---------------------------------------------------
+
+# BRE parens. If the parentheses are ever escaped again, the marker matches nothing and every file
+# is clean — so this asserts a POSITIVE detection on the plainest possible input.
+{
+	printf '**%s something.**\n\nRULED already.\n' "$M"
+} >"$WORK/bre.md"
+expect "a plain live marker is detected at all (BRE parens are literal, never escaped)" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/bre.md"
+
+# The colon rule. A paragraph ARGUING about the marker is not a declaration, even though it starts
+# with it — `contracts.md:466`, which was a live false positive.
+{
+	printf '**%sPROPOSED (gap)%s is a load-bearing marker, not a heading.**\n\n' "$TICK" "$TICK"
+	printf 'It was RULED that this is so.\n'
+} >"$WORK/prose.md"
+expect "prose ABOUT the marker is not a declaration (contracts.md:466)" 0 "clean" \
+	"$CHECK" "$WORK/prose.md"
+
+# --- 3. THE FALSE POSITIVES THAT MATTER ------------------------------------------------------
+
+# The CORRECTLY-FLIPPED form keeps the marker on the line. If this ever fails, the gate is punishing
+# exactly the behaviour it is trying to produce — seven blocks on `main` are in this shape.
+{
+	printf '**RULED (was %sPROPOSED (gap)%s): a %sStorage%s object, and how a job picks one.**\n\n' "$TICK" "$TICK" "$TICK" "$TICK"
+	printf 'The READ half ships in story 5c. This is RULED and built.\n'
+} >"$WORK/flipped.md"
+expect "a correctly-flipped block is CLEAN, though it still carries the marker" 0 "clean" \
+	"$CHECK" "$WORK/flipped.md"
+
+# A mid-sentence citation.
+{
+	printf '**What this does NOT license.** It is not an argument against %sPROPOSED (gap)%s blocks.\n\n' "$TICK" "$TICK"
+	printf 'That was RULED long ago.\n'
+} >"$WORK/citation.md"
+expect "a mid-sentence citation of the marker is CLEAN" 0 "clean" \
+	"$CHECK" "$WORK/citation.md"
+
+# A genuinely open block with no ruling in it — the whole point is not to nag about these.
+{
+	printf '**%s whether storages may be removed.**\n\n' "$M"
+	printf 'Three options, none chosen. Awaiting the Operator.\n'
+} >"$WORK/open.md"
+expect "a genuinely OPEN gap block is CLEAN" 0 "clean" \
+	"$CHECK" "$WORK/open.md"
+
+# OVERRULED is a different word and must not trip the word match.
+{
+	printf '**%s whether to keep the env var.**\n\n' "$M"
+	printf 'The recommendation was OVERRULED, and the question of what replaces it is open.\n'
+} >"$WORK/overruled.md"
+expect "OVERRULED does not match the RULED word test" 0 "clean" \
+	"$CHECK" "$WORK/overruled.md"
+
+# Lowercase prose. `ruled`, `ruling` and `unruled` are ordinary words in these documents.
+{
+	printf '**%s whether X.** This is unruled; the ruling is owed and nothing is ruled yet.\n' "$M"
+} >"$WORK/lowercase.md"
+expect "lowercase prose (ruled / ruling / unruled) does not trip it" 0 "clean" \
+	"$CHECK" "$WORK/lowercase.md"
+
+# --- 4. BOUNDING ------------------------------------------------------------------------------
+
+# A ruling AFTER the block's section belongs to the next section, not to this one. Without bounding
+# every long file would report its first gap block against its last ruling.
+{
+	printf '**%s whether X.**\n\nStill open, nothing decided.\n\n' "$M"
+	printf '## Some other section\n\nThis half is RULED and has nothing to do with the block above.\n'
+} >"$WORK/bounded.md"
+expect "a RULED beyond the next heading is NOT attributed to the block" 0 "clean" \
+	"$CHECK" "$WORK/bounded.md"
+
+# Two markers in one file: the second bounds the first, and each is judged on its own body.
+{
+	printf '**%s the first question.**\n\nOpen, nothing decided here.\n\n' "$M"
+	printf '**%s the second question.**\n\nThis one is RULED.\n' "$M"
+} >"$WORK/two.md"
+out=$("$CHECK" "$WORK/two.md" 2>&1 || true)
+if printf '%s\n' "$out" | grep -qF 'two.md:5' && ! printf '%s\n' "$out" | grep -qF 'two.md:1'; then
+	ok "a second marker bounds the first; only the offending block is reported"
+else
+	bad "block bounding between two markers is wrong"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+fi
+
+# The marker LINE itself is not searched: a lead asking whether something is RULED is the question.
+{
+	printf '**%s whether the RULED half of gap 2 also applies here.**\n\nNothing decided.\n' "$M"
+} >"$WORK/self.md"
+expect "RULED on the marker line itself is the question, not an answer" 0 "clean" \
+	"$CHECK" "$WORK/self.md"
+
+# --- 5. THE OPT-OUT ---------------------------------------------------------------------------
+
+{
+	printf '**%s whether X.**\n\n' "$M"
+	printf '<!-- gap-heading-check: ignore — cites gap 2, which is not this block -->\n\n'
+	printf 'Gap 2 was RULED, which is context for this still-open question.\n'
+} >"$WORK/optout.md"
+expect "an opt-out with a written reason suppresses the finding" 0 "clean" \
+	"$CHECK" "$WORK/optout.md"
+
+# --- 6. THE EXIT CONTRACT ---------------------------------------------------------------------
+# 2 is DID NOT RUN and is never clean (quince#41). A gate that fails open is absent exactly when the
+# tree is unusual, which is when a half-flipped block is most likely.
+
+expect "an unknown option is DID NOT RUN, never clean" 2 "DID NOT RUN" \
+	"$CHECK" --nonsense
+expect "a path that does not exist is DID NOT RUN, never clean" 2 "DID NOT RUN" \
+	"$CHECK" "$WORK/absent.md"
+expect "--help is exit 0 and prints the exit contract" 0 "exit: 0 clean" \
+	"$CHECK" --help
+
+# The default scope must be the repository, and it must be CLEAN — this gate is committed alongside
+# canon it is asserting about, so a red here on `main` is a real finding rather than a test failure.
+expect "the repository's own tracked markdown is clean" 0 "clean" \
+	"$CHECK"
+
+printf '\ngap-heading-check-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
