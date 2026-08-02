@@ -43,6 +43,7 @@ type Service struct {
 	now             func() time.Time
 	limiter         *loginLimiter
 	params          argonParams
+	hash            func(string, argonParams) (string, error) // seam: tests count derivations
 	idleTimeout     time.Duration
 	absoluteTimeout time.Duration
 	minPasswordLen  int
@@ -57,6 +58,7 @@ func NewService(st *store.Store, log *slog.Logger) *Service {
 		now:             time.Now,
 		limiter:         newLoginLimiter(10, time.Minute),
 		params:          defaultArgonParams(),
+		hash:            hashPassword,
 		idleTimeout:     12 * time.Hour,      // single-user LAN: present but not aggressive
 		absoluteTimeout: 30 * 24 * time.Hour, // hard cap regardless of activity
 		minPasswordLen:  1,                   // non-empty only (test/demo use short passwords); strength policy deferred
@@ -107,10 +109,27 @@ func (s *Service) SetPassword(password string) error {
 	if len(password) < s.minPasswordLen {
 		return ErrWeakPassword
 	}
-	hash, err := hashPassword(password, s.params)
+	// ASK BEFORE DERIVING. argon2id is deliberately expensive — 64 MiB and ~85 ms with the
+	// production params — and on a configured instance the 409 below is already decided, so
+	// deriving first made POST /api/auth/setup a remote amplifier: ~100 bytes in, 64 MiB and
+	// ~85 ms out, on a route that is pre-auth and carries no rate limit because first-run setup
+	// must be reachable with no session. Measured before this check existed: 9 MB → 2063 MB RSS
+	// over 60 requests, tracking peak concurrency × the argon2 memory parameter (quince#463).
+	has, err := s.HasPassword()
 	if err != nil {
 		return err
 	}
+	if has {
+		return ErrAlreadyConfigured
+	}
+	hash, err := s.hash(password, s.params)
+	if err != nil {
+		return err
+	}
+	// SetSettingIfAbsent REMAINS the authority, and the check above is not a substitute for it:
+	// the two are not atomic together, so concurrent first-run setups both pass the check, both
+	// derive, and exactly one insert wins. That is the pre-existing behaviour and the reason this
+	// cannot be collapsed into a plain Set.
 	inserted, err := s.store.SetSettingIfAbsent(settingPasswordHash, hash)
 	if err != nil {
 		return err
