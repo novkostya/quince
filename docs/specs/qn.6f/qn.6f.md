@@ -21,7 +21,7 @@ Highest uncertainty in `qn.6`, and onboarding is 1 → 2 → 3.
 | --- | --- |
 | `core/cmd/quince/` | the listener; the startup refusal on a bad certificate |
 | `core/internal/config/` | the `tls:` section, its validation, and the **serve-path** certificate check |
-| `core/internal/tlsx/` (new) | `GetCertificate` + rotation; self-signed generation (slice 3 only) |
+| `core/internal/tlsx/` (new) | `GetCertificate` + rotation. ~~self-signed generation~~ — **slice 7, DROPPED 2026-08-02** |
 | `core/internal/httpapi/` | the step-1 endpoint and its detection — **pre-auth: a fifth `authExempt` route, BY EXACT PATH** (ruled 2026-08-02, design §6) |
 | `ui/src/` | the onboarding step-1 page; the `Config` TS type |
 | `docs/` | contracts §1 and §6; design §6 and §9 |
@@ -198,14 +198,31 @@ bytes on disk are a usable keypair is a serve-path question**, checked where it 
 **`--demo` is unaffected**, mirroring the storage precedent exactly: the check sits inside the live
 branch, so it refuses no demo and no `ui-e2e` run over a subsystem they do not use.
 
-### Self-signed generation writes to quince's OWN state directory
+### ~~Self-signed generation writes to quince's OWN state directory~~ — NOT BUILT
 
-Never beside a supplied certificate. The supplied path is `:ro` in the deployment this option
-exists for, and a generator that assumes its output directory is writable fails on exactly that
-deployment (G4). Output goes under the data dir — `Bootstrap.Data`, alongside `config.yml` and
-`quince.db` — with `0600` on the key.
+**RULED 2026-08-02 (quince#462): slice 7 is DROPPED — not deferred, not owed.** The architect
+executed the conditional this spec itself pre-authorised, on the corrected spike report; check 1 came
+back confirming the hypothesis.
 
-**Whether self-signed is built at all is conditional on check 1** (see *Still open*).
+**Chromium never consults the click-through at all.** `content/browser/service_worker/service_worker_loader_helpers.cc`
+admits exactly two escapes — the DevTools bypass and `--ignore-certificate-errors` — and
+`SSLHostStateDelegate`, where the user's *proceed* decision is stored, does not appear in the
+expression. Not a bug pending a fix: an absent code path, and it runs on update checks too. **So
+self-signed does not cost push sometimes; it forecloses it structurally.** Against
+bring-your-own-cert — same listener, same two config keys, a real certificate and a genuine secure
+context — the tier is dominated.
+
+**The design below is kept rather than deleted**, because it is what a future self-signed path would
+have to satisfy and it was reviewed: never beside a supplied certificate (that path is `:ro` in the
+deployment the option exists for, and a generator assuming a writable output directory fails on
+exactly it — G4); output under `Bootstrap.Data` alongside `config.yml` and `quince.db`; `0600` on
+the key.
+
+**One consequence is the Operator's and is NOT decided here:** quince#446 ruled a four-tier page with
+self-signed as a *"Not recommended"* row. If it is not built, that row must become something. The
+architect's recommendation is the shape the ruled page already contains — present, **disabled**,
+*not implemented*, pointing at an issue, exactly as the managed-address row does. **Slice 2 is not
+blocked on it**: the row's existence is ruled and only its state is in question.
 
 ### What does NOT change
 
@@ -281,8 +298,9 @@ Each is independently checkable. Slice membership in *PR slicing*, below.
    new one, no restart and no signal.
 7. **A wildcard certificate whose SAN does not equal the configured host is served**, not rejected.
 8. **The supplied certificate directory is never written to**, asserted with it mounted read-only.
-9. **Self-signed generation** writes to quince's own state directory, `0600` on the key.
-   *Conditional on check 1.*
+9. ~~**Self-signed generation** writes to quince's own state directory, `0600` on the key.~~
+   **DROPPED — ruled 2026-08-02** (quince#462); check 1 came back confirming that a click-through
+   certificate forecloses service workers. Struck rather than deleted: the story list is cited.
 10. **`deploy/` prose** for the reverse-proxy and `tailscale serve` setups the top tier links to,
     distinguishing `tailscale serve` (tier 1, zero build) from `tailscale cert` (tier 2, needs the
     listener).
@@ -318,6 +336,10 @@ that only covers "file missing" passes while the interesting cases still downgra
   (`*.example.invalid`, SAN deliberately unequal to the test host), a malformed PEM, and a
   mismatched key/cert pair. Generated in-test via `crypto/x509` so nothing expires in the
   repository and nothing looks like a real key in a diff.
+
+  **Slice 7's removal does not remove the self-signed FIXTURE.** quince no longer *mints* one; the
+  listener must still be tested against one, because a self-signed certificate is what a test
+  server has. The dropped slice was the product feature, not the test material.
 - **`.invalid` is used throughout** (RFC 2606), so no fixture can resolve to anything real.
 - **No private key of any kind is committed**, which is both the secrets rule and the reason
   generation-at-test-time is not merely convenient.
@@ -356,12 +378,15 @@ Every hard rule this rung touches *or comes near*, one line each. Near-misses in
 - **Docs are part of the diff.** Contracts §1 (the step-1 endpoint) and §6 (the `tls:` keys) change
   in the PR that implements them; design §6 and §9 likewise. Coverage is declared per PR with an
   explicit known-untested list.
-- **Never mutate a committed version.** *Near-miss, and it is a real one:* G4. Self-signed
-  generation writes into quince's state directory and **never** beside a supplied certificate,
-  because the supplied directory is `:ro` in the deployment that option exists for. No storage tree
-  is touched by this rung at all.
-- **Subprocesses.** None. Certificate generation is in-process `crypto/x509`; nothing shells out to
-  `openssl`. Named because reaching for `openssl` is the obvious wrong turn and it would put a key
+- **Never mutate a committed version.** *Near-miss, and it is a real one:* G4 — quince **never**
+  writes to the supplied certificate directory, which is `:ro` in the deployment bring-your-own-cert
+  exists for. **G4 survives slice 7's removal and is not weakened by it**: it constrains the
+  *listener*, which reads that directory on every handshake for rotation, not the generator that is
+  no longer built. No storage tree is touched by this rung at all.
+- **Subprocesses.** None. **Test** certificates are minted in-process with `crypto/x509`; nothing
+  shells out to `openssl`. This line used to be about the generator slice 7 would have shipped; it
+  still binds, because the fixtures need certificates whether or not the product mints any. Named
+  because reaching for `openssl` is the obvious wrong turn and it would put a key
   path in argv.
 - **Every bug found on hardware becomes a replay fixture.** None found yet; G7 is where one would
   come from.
@@ -393,9 +418,16 @@ decisions log.
 
 **Blocking, and none of it is this spec's to decide.**
 
-1. **Gap A — one listener or two** (contracts §6, this PR). Blocks slice 2.
-2. **Gap B — the default port** (contracts §6, this PR). Blocks slice 2's deploy half; the listener
-   can be built against the current default and the number changed once.
+1. ~~**Gap A — one listener or two** (contracts §6). Blocks slice 2.~~ **RULED 2026-08-02**
+   (quince#446): **one port, both protocols, routed by the first byte, VENDORED not `cmux`** — whose
+   newest published version predates the decision by five years. Plain HTTP gets a `301` to the same
+   host and port, **except when `sessions.allow_insecure_transport` is set, where the opt-in wins**.
+   Slice 2 may ship the redirect **unconditional**, since the flag arrives in slice 8 and cannot be
+   enabled before it is built.
+2. ~~**Gap B — the default port**~~ **RULED 2026-08-02: `8968`.** Verified against the live IANA
+   registry at the ruling — zero occurrences, mid-block in the 8955–8979 unassigned run, below the
+   32768 ephemeral floor, clear of Chromium's restricted list and the Prometheus band. **Gap A's
+   ruling removes the pair problem entirely**: one port means `8443` never enters the picture.
 3. ~~**The `secureCookie` gap** (design §6, quince#487). Blocks slice 4 entirely.~~ **RULED
    2026-08-02** (quince#446) — option (b). Slice 4 is unblocked; see *Contract and design changes*
    for what its PR owes. Struck rather than deleted: this list is cited, and a reader arriving from
@@ -404,16 +436,27 @@ decisions log.
 **Three live checks**, per *interface facts are looked up live*. Reported separately on quince#462
 rather than asserted here.
 
-1. **Does a click-through self-signed certificate block service-worker registration** in current
-   Safari/iOS and Chrome? **Decides whether slice 3 is built at all** — if it does, self-signed
-   ends in the same place as plain HTTP on push while costing a full-page interstitial, and
-   bring-your-own-cert dominates it.
-2. **Does iOS Safari persist a self-signed exception** across restarts — one tap ever, or one tap
-   per session? Decides how slice 3 is *presented* if it is built.
-3. **Let's Encrypt's current rate limits.** Bears on quince#406, not on this rung's code.
+1. ~~**Does a click-through self-signed certificate block service-worker registration?**~~
+   **RESOLVED 2026-08-02 — YES, in Chromium, and the answer dropped slice 7.** Read from shipping
+   `main`: the guard admits only the DevTools bypass and `--ignore-certificate-errors`, and
+   `SSLHostStateDelegate` — where the click-through is stored — is not in the expression at all.
+   Reported on quince#462; **cite the CORRECTED comment, which supersedes two wrong claims about
+   Apple's fatal/recoverable split in the original.**
+2. ~~**Does iOS Safari persist a self-signed exception** across restarts?~~ **MOOT.** It only ever
+   decided how slice 7 was *presented*, and slice 7 is not built. Genuinely unresolved when it was
+   dropped, and recorded as unresolved rather than quietly closed — **not building the tier retires
+   the question without a lab day**, which is worth more here than answering it.
+3. **Let's Encrypt's current rate limits.** Reported; bears on quince#406, never on this rung's code.
 
-**Neither check 1 nor check 2 can be settled from a session.** Both are browser behaviour on a real
-device. What is reportable is what primary sources state; the rest is owed to G7's hardware run.
+**A third finding came out of the spike and is NOT this rung's**: WebKit's `disableInLockdownMode`
+covers `ServiceWorkersEnabled`, `PushAPIEnabled` and `NotificationsEnabled`, so **`qn.12` push is
+unavailable to a Lockdown Mode user on a real certificate too.** Filed as quince#511 rather than left
+in a comment.
+
+**One claim in the spike is third-party and must not enter canon as measured:** that a Safari
+click-through does not cover the **WebSocket** upgrade. It is code-server's iPad documentation, not
+Apple's. **The slice-7 ruling deliberately does not rest on it** — it is recorded as why the
+asymmetry is total, not as a premise.
 
 ---
 
@@ -426,17 +469,22 @@ Each PR carries one reviewable claim.
 | **1** | *This spec.* Gaps A and B are a companion PR. | — | nothing |
 | **2** | Detection + the four-tier page + the disabled managed-address row. | 1, 2 | nothing |
 | **3** | The `tls:` config keys, their validation, and the TS type. | 3 | nothing |
-| **4** | The listener + `CheckTLS` + **G2** + **G3**. | 4, 5, 6 | **gap A** |
+| **4** | The listener + `CheckTLS` + **G2** + **G3**. One port, first-byte routed, vendored; the `301` unconditional. Flips gap A's block. | 4, 5, 6 | **nothing — RULED** |
 | **5** | Wildcard + read-only assertions. | 7, 8 | PR 4 |
-| **6** | The default port moves. | — | **gap B** |
-| **7** | Self-signed generation. | 9 | **check 1** |
-| **8** | Plain HTTP — the opt-in switch, and flipping the design §6 block in the same diff. | — | **nothing — RULED 2026-08-02** |
+| **6** | The default port moves to **`8968`**. Flips gap B's block. | — | **nothing — RULED** |
+| **7** | ~~Self-signed generation.~~ **DROPPED — ruled 2026-08-02**, check 1 confirmed. | ~~9~~ | — |
+| **8** | Plain HTTP — the opt-in switch, and the `301` exception that honours it. | — | **nothing — RULED** |
 | **9** | `deploy/` prose. | 10 | nothing |
 
-**PRs 1, 2, 3, 8 and 9 are unblocked.** The `secureCookie` gap block (quince#487) was filed *before*
-this spec precisely because it had the longest lead time of anything in the rung — and that paid off:
-it was **ruled within three hours of being filed**, so slice 8 joined the unblocked set before slice 4
-had started. Only gaps A and B (quince#491) and check 1 still gate anything.
+**NOTHING IN THIS RUNG IS BLOCKED ANY LONGER.** All three gaps were ruled on 2026-08-02, the day they
+were filed, and slice 7 is dropped rather than owed. **Filing the `secureCookie` gap before the spec
+— because an Operator ruling has the longest lead time of anything in a rung — is what started that**:
+it was ruled within three hours, and slice 8 joined the unblocked set before slice 4 existed.
+
+**Slices 4, 6 and 8 each flip a `PROPOSED (gap)` block in the same diff as their code**, heading
+narrowed, or `bin/gap-heading-check` fails `gates-sh`. `docs/contracts.md` is code-owner owned, so
+slices 4 and 6 need `@novkostya`'s approval as well as an architect review. **Slice 8's block is
+already flipped** (quince#507, merged) — it must not be flipped twice.
 
 **The unblocked piece worth doing FIRST is not in this table**, because it is not this rung's:
 **quince#497** — login over plain HTTP returns `200` with a cookie the browser discards, and the
