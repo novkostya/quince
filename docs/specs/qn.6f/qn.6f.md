@@ -202,10 +202,15 @@ block filed as quince#487 — no code until it is ruled.
 **The `secureCookie` gap is already filed** — `docs/quince.design.md` §6, PR quince#487. It gates
 slice 4 and nothing else in this rung.
 
-**Two more gaps are proposed by this spec**, written into `docs/contracts.md` §6 as part of the same
-PR. They are quince#446's open decisions 3 and 4. **Neither is this spec's to decide** — both change
-user-visible behaviour beyond the rung and both touch a contract surface, which is the gap
-protocol's definition of architectural.
+**Two more gaps are proposed by this rung**, written into `docs/contracts.md` §6 in a **companion
+PR**, not this one. They are quince#446's open decisions 3 and 4. **Neither is this spec's to
+decide** — both change user-visible behaviour beyond the rung and both touch a contract surface,
+which is the gap protocol's definition of architectural.
+
+*(They were planned for this PR. They are split out because each rests on a fact that must be read
+live rather than recalled — the IANA registry for gap B, `cmux`'s maintenance state for gap A — and
+holding a finished spec behind a lookup buys nothing. The split is a deviation from the plan posted
+on quince#462 and is recorded rather than quietly taken.)*
 
 - **Gap A — one listener or two, and what plain HTTP does** (contracts §6). The Operator's recorded
   *leaning* is a single port serving both protocols, routed by peeking the first byte. Budgeted at
@@ -381,7 +386,7 @@ Each PR carries one reviewable claim.
 
 | # | claim | stories | blocked on |
 | --- | --- | --- | --- |
-| **1** | *This spec.* Plus gaps A and B into contracts §6. | — | nothing |
+| **1** | *This spec.* Gaps A and B are a companion PR. | — | nothing |
 | **2** | Detection + the four-tier page + the disabled managed-address row. | 1, 2 | nothing |
 | **3** | The `tls:` config keys, their validation, and the TS type. | 3 | nothing |
 | **4** | The listener + `CheckTLS` + **G2** + **G3**. | 4, 5, 6 | **gap A** |
