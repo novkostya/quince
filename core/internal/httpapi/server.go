@@ -84,6 +84,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
+	apiMux.HandleFunc("GET /api/onboarding/step1", deps.handleOnboardingStep1())
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
