@@ -70,7 +70,7 @@ export function BackupControls({ device, activeJob, start, cancel, busy }: Backu
           </label>
         ) : null}
         <StorageSelect
-          state={storages}
+          storages={storages}
           value={storageID}
           onChange={setStorageID}
           disabled={busy}

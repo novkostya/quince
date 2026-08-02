@@ -13,6 +13,26 @@ export type StoragesState =
   | { status: "loaded"; storages: Storage[] }
   | { status: "failed" };
 
+// RecheckState is per-storage, not per-hook: the user plugged in ONE disk and pressed ONE button,
+// so a second row's pending spinner or error would be a lie about what they did. `failed` carries
+// no reason because a re-check that could not be performed has nothing to report ABOUT THE DISK —
+// the storage's own `unreachable_reason` is still the answer to "why is it not there".
+export type RecheckState = "idle" | "pending" | "failed";
+
+export interface Storages {
+  state: StoragesState;
+  // recheck asks the server to look at ONE storage again, then RELOADS THE DEVICE-SCOPED LIST.
+  //
+  // IT DELIBERATELY DOES NOT SPLICE THE 200 {storage} RESPONSE INTO THE LIST, and this is the
+  // whole subtlety of the endpoint. `POST /api/storages/{id}/recheck` is device-INDEPENDENT —
+  // `RecheckStorage(id)` takes no udid — so its `will_be_full` is always null. Splicing it would
+  // silently drop "First backup to X — this transfers everything" at exactly the moment the disk
+  // came back and that warning became true, which is story 8's claim disappearing on success.
+  // Re-fetching `?udid=` costs one request and keeps the pair fact the server owns.
+  recheck: (id: string) => void;
+  rechecking: Record<string, RecheckState>;
+}
+
 // useStorages fetches the declared storages for ONE device (contracts §1 GET /api/storages?udid=).
 //
 // Device-scoped on purpose: `will_be_full` is a fact about a (device, storage) PAIR, so the list is
@@ -23,26 +43,61 @@ export type StoragesState =
 // A failure does NOT take the backup button down with it: the caller renders the button either way.
 // It does surface, because "we could not load your storages, so this goes to the default" is
 // something the user can act on and silence is not.
-export function useStorages(udid: string): StoragesState {
+//
+// REACHABILITY CHANGES WITHOUT A RESTART and this hook used to have no way to notice (quince#459).
+// It refetched on `udid` alone, so a disk plugged in while Back up now was open stayed listed as
+// not connected until the page was remounted — the ruling behind the endpoint is "plug the disk in
+// and press the button", and there was no button.
+export function useStorages(udid: string): Storages {
   const [state, setState] = React.useState<StoragesState>({ status: "loading" });
+  const [rechecking, setRechecking] = React.useState<Record<string, RecheckState>>({});
+
+  // `live` guards every setState against a udid change or an unmount mid-flight. It is a ref rather
+  // than an effect-local because `recheck` is called from an event handler, outside any effect.
+  const live = React.useRef(true);
+  React.useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  const load = React.useCallback(async (forUdid: string) => {
+    try {
+      const r = await api.get<{ storages: Storage[] }>(
+        `/api/storages?udid=${encodeURIComponent(forUdid)}`,
+      );
+      if (live.current) setState({ status: "loaded", storages: r.storages ?? [] });
+    } catch {
+      if (live.current) setState({ status: "failed" });
+    }
+  }, []);
 
   React.useEffect(() => {
-    let live = true;
     setState({ status: "loading" });
-    void (async () => {
-      try {
-        const r = await api.get<{ storages: Storage[] }>(
-          `/api/storages?udid=${encodeURIComponent(udid)}`,
-        );
-        if (live) setState({ status: "loaded", storages: r.storages ?? [] });
-      } catch {
-        if (live) setState({ status: "failed" });
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [udid]);
+    setRechecking({});
+    void load(udid);
+  }, [udid, load]);
 
-  return state;
+  const recheck = React.useCallback(
+    (id: string) => {
+      setRechecking((m) => ({ ...m, [id]: "pending" }));
+      void (async () => {
+        try {
+          await api.post(`/api/storages/${encodeURIComponent(id)}/recheck`);
+        } catch {
+          // A 404 (the storage is no longer declared) and a dropped connection land here alike.
+          // Both mean "the press did nothing", which is what the row says — and neither is a
+          // reason to blank a list that is still the last thing the server told us.
+          if (live.current) setRechecking((m) => ({ ...m, [id]: "failed" }));
+          return;
+        }
+        await load(udid);
+        if (live.current) setRechecking((m) => ({ ...m, [id]: "idle" }));
+      })();
+    },
+    [udid, load],
+  );
+
+  return { state, recheck, rechecking };
 }
