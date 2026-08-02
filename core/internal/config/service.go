@@ -177,7 +177,28 @@ func Load(path string) Loaded {
 		}
 		return Loaded{Config: Default(), Warnings: warnings, Errors: errs, Source: src, OK: false}
 	}
-	return Loaded{Config: cfg, Warnings: warnings, Source: src, OK: true}
+	return Loaded{Config: cfg, Warnings: append(warnings, degradedModeWarnings(cfg)...), Source: src, OK: true}
+}
+
+// degradedModeWarnings surfaces settings that are VALID and deliberately weaker than the
+// security baseline. They are not errors — the user asked for them — but `no silent caps or
+// fallbacks` means a running quince keeps saying so, and a warning is the channel the UI
+// already renders in Settings.
+//
+// Only on the OK path, and that is the right place rather than an oversight: an invalid
+// config is discarded in favour of Default(), which has no degraded mode to report, so
+// warning there would name a setting that is not actually in force.
+func degradedModeWarnings(c Config) []Warning {
+	var out []Warning
+	if c.Sessions.AllowInsecureTransport {
+		out = append(out, Warning{
+			Path: "sessions.allow_insecure_transport",
+			Message: "ON — session and CSRF cookies are served without the Secure flag to " +
+				"plain-http clients, so they cross the network in clear and anyone who can read " +
+				"the path can sign in as you. Deliberate for a network you trust; turn it off if not.",
+		})
+	}
+	return out
 }
 
 // Service owns the live config and serves GET/PUT /api/config. It is safe for concurrent

@@ -791,6 +791,35 @@ tls:                        # qn.6f — the certificate quince serves ITSELF, fo
                             # the reason, in the shape the storage requirement already uses.
 sessions:
   ttl_minutes: 30
+  allow_insecure_transport: false
+                            # qn.6f — the user's own opt-in to plain http on a network they
+                            # trust. OFF by default. Operator ruling 2026-08-02, option (b);
+                            # design §6 carries the reasoning and the rejected alternatives.
+                            #
+                            # It RELAXES THE FALLBACK ONLY: `r.TLS != nil` and
+                            # `X-Forwarded-Proto: https` still force Secure, so *the header can
+                            # only ever upgrade* is preserved. Only the non-loopback-host branch
+                            # becomes conditional. Under `sessions:` and not `tls:` because it
+                            # governs the session and CSRF cookies, and applies precisely when
+                            # there is no TLS.
+                            #
+                            # "Trusted" is the user's BLANKET ASSERTION — one boolean, never a
+                            # host/CIDR allowlist: an allowlist changes which requests get a
+                            # usable cookie without changing who can read the wire, which reads
+                            # as security it does not provide.
+                            #
+                            # A DEGRADED MODE, so it is surfaced and never merely permitted: a
+                            # startup line on stderr, a config warning (this file's `warnings`,
+                            # rendered in Settings), and a non-dismissible in-app banner —
+                            # quince#539, NOT yet built. Applied at process start; schema v0 has
+                            # no live reload.
+                            #
+                            # It also disarms the `426 insecure_origin` refusal in §1, with no
+                            # second switch: the refusal is defined in terms of the Secure
+                            # decision, so relaxing that relaxes both together.
+                            #
+                            # NEVER send HSTS while this is reachable, or a user who enables it
+                            # is locked out with no in-browser recovery. quince sends none.
 automation:                 # assisted-backup policy (consumed from qn.12)
   staleness_days: 3         # last good backup older than this → backup_available push
   reminder_cooldown_hours: 24

@@ -124,8 +124,17 @@ export function ConfigEditor({ config }: { config: Config }) {
           type="number"
           min={1}
           value={draft.sessions.ttl_minutes}
+          // SPREAD THE SECTION, not only the document. `{ ...draft, sessions: {…} }` keeps every
+          // other section and REPLACES this one, so any key of `sessions:` this form does not
+          // render is dropped on save — and PUT is a full-document replace, so dropped means reset
+          // to the Go zero value. Editing the TTL would have switched `allow_insecure_transport`
+          // back off with nothing said. `tsc` caught it the moment that field became required,
+          // which is the quince#493 hazard catching itself exactly once.
           onChange={(e) =>
-            setDraft({ ...draft, sessions: { ttl_minutes: Number(e.target.value) } })
+            setDraft({
+              ...draft,
+              sessions: { ...draft.sessions, ttl_minutes: Number(e.target.value) },
+            })
           }
         />
       </Field>
@@ -133,7 +142,9 @@ export function ConfigEditor({ config }: { config: Config }) {
       <Field label="Theme" error={errFor("ui.theme")}>
         <Select
           value={draft.ui.theme}
-          onChange={(v) => setDraft({ ...draft, ui: { theme: v } })}
+          // Same shape as above. `ui:` has one key today so nothing is lost yet — which is
+          // precisely why it is worth fixing now rather than when it is a bug.
+          onChange={(v) => setDraft({ ...draft, ui: { ...draft.ui, theme: v } })}
           options={["system", "light", "dark"]}
         />
       </Field>

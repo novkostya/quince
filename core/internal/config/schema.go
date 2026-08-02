@@ -214,6 +214,28 @@ func (t TLSConfig) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
 // which has no config key in schema v0; see auth defaults).
 type SessionsConfig struct {
 	TTLMinutes int `yaml:"ttl_minutes" json:"ttl_minutes"`
+
+	// AllowInsecureTransport lets a user on a network they trust knowingly serve the session
+	// and CSRF cookies over plain http to a non-loopback host. Off by default. Operator
+	// ruling 2026-08-02, option (b) (qn.6f, quince#446; design §6 carries the whole thing).
+	//
+	// It lives under `sessions:` rather than in `tls:` because it governs the SESSION and
+	// CSRF cookies, and it applies precisely when there is no TLS to configure.
+	//
+	// IT RELAXES THE FALLBACK ONLY. `r.TLS != nil` and `X-Forwarded-Proto: https` keep
+	// returning Secure regardless — *the header can only ever upgrade* survives verbatim.
+	// Only the final !isLoopbackHost branch becomes conditional.
+	//
+	// THE CASE THAT MADE THIS RIGHT RATHER THAN LAZY IS A VPN. Over WireGuard or Tailscale
+	// the transport is already encrypted, so TLS inside the tunnel buys nothing and costs a
+	// certificate to manage — and quince still broke, for a reason with nothing to do with
+	// the threat model. Detection was REJECTED (option (c)): a baseline that switches itself
+	// off when the network makes it inconvenient is the thing the baseline exists to prevent.
+	//
+	// It is a DEGRADED MODE, so it is surfaced and never merely permitted — a startup log
+	// line, a config warning, and (owed, not in the PR that added this) a non-dismissible UI
+	// banner. Applied at process start: there is no live config reload in schema v0.
+	AllowInsecureTransport bool `yaml:"allow_insecure_transport" json:"allow_insecure_transport"`
 }
 
 // AutomationConfig is the `automation:` section (assisted-backup policy, consumed in qn.12).

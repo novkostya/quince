@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -223,5 +224,36 @@ func TestValidateDirsDoesNotProbeStorage(t *testing.T) {
 	good := t.TempDir()
 	if warns := ValidateDirs(Bootstrap{Data: good, Cache: good}); len(warns) != 0 {
 		t.Errorf("bootstrap dirs are data+cache only, got %+v", warns)
+	}
+}
+
+// A VALID config that is deliberately weaker than the baseline must keep saying so — that is
+// `no silent caps or fallbacks`, and a warning is the channel the UI renders in Settings.
+// The off case is asserted too: a warning that is always present is noise, and noise is how
+// a real one stops being read.
+func TestAllowInsecureTransportIsSurfacedAsAWarning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	const storage = "storage:\n  - path: /backups\n"
+
+	if err := os.WriteFile(path, []byte(storage), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if l := Load(path); !l.OK || len(l.Warnings) != 0 {
+		t.Fatalf("the default config warned: ok=%v warnings=%+v", l.OK, l.Warnings)
+	}
+
+	if err := os.WriteFile(path, []byte(storage+"sessions:\n  allow_insecure_transport: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := Load(path)
+	if !l.OK {
+		t.Fatalf("the opt-in must be VALID, not an error: %+v", l.Errors)
+	}
+	if len(l.Warnings) != 1 || l.Warnings[0].Path != "sessions.allow_insecure_transport" {
+		t.Fatalf("want one warning naming the setting, got %+v", l.Warnings)
+	}
+	if !strings.Contains(l.Warnings[0].Message, "in clear") {
+		t.Errorf("the warning does not say what is unprotected: %q", l.Warnings[0].Message)
 	}
 }

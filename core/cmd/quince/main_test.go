@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/store"
 )
 
@@ -251,4 +252,44 @@ func TestWriteTimeoutClearsOnHijack(t *testing.T) {
 		t.Fatalf("write on a hijacked conn %v after WriteTimeout=%v failed: %v — "+
 			"the deadline was NOT cleared on hijack, so WriteTimeout would break /api/ws", 3*writeTO, writeTO, err)
 	}
+}
+
+// applyInsecureTransportOptIn is a security relaxation, so the test asserts BOTH directions:
+// it takes effect and says so, and it stays silent and inert when off. A one-direction test
+// would pass against a function that always announced, which is the same defect as always
+// relaxing — noise that trains the reader to ignore the line.
+func TestInsecureTransportOptInAnnouncesItselfAndTakesEffect(t *testing.T) {
+	lan := httptest.NewRequest("GET", "http://quince.example:8968/api/health", nil)
+
+	t.Run("off: silent and Secure kept", func(t *testing.T) {
+		svc := newDemoAuth(t)
+		var out bytes.Buffer
+		applyInsecureTransportOptIn(svc, config.Default(), &out)
+
+		if out.Len() != 0 {
+			t.Errorf("the default config printed a degraded-mode warning:\n%s", out.String())
+		}
+		if !svc.Secure(lan) {
+			t.Error("Secure was relaxed without the opt-in")
+		}
+	})
+
+	t.Run("on: announced and Secure relaxed", func(t *testing.T) {
+		svc := newDemoAuth(t)
+		cfg := config.Default()
+		cfg.Sessions.AllowInsecureTransport = true
+		var out bytes.Buffer
+		applyInsecureTransportOptIn(svc, cfg, &out)
+
+		got := out.String()
+		if !strings.Contains(got, "sessions.allow_insecure_transport") {
+			t.Errorf("the announcement does not name the setting, so nobody can turn it off:\n%s", got)
+		}
+		if !strings.Contains(got, "in clear") {
+			t.Errorf("the announcement does not say what is unprotected:\n%s", got)
+		}
+		if svc.Secure(lan) {
+			t.Error("the opt-in was announced but did not take effect")
+		}
+	})
 }

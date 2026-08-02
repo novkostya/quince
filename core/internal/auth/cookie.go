@@ -64,9 +64,22 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 // Secure cookie the browser won't send (correct: canon requires HTTPS, we never silently
 // downgrade). X-Forwarded-Proto only ever upgrades to Secure, so trusting it cannot weaken
 // anything.
-func secureCookie(r *http.Request) bool {
+// allowInsecure is `sessions.allow_insecure_transport` — the off-by-default opt-in for a
+// user on a network they trust (qn.6f slice 8, Operator ruling 2026-08-02, option (b)).
+// It is a PARAMETER rather than a package variable so the rule stays a pure function of
+// its inputs and every test states the mode it is asserting about.
+//
+// NOTE WHERE IT SITS: strictly below secureOrigin and strictly above the host test. That
+// ordering is the ruling, not a preference — it relaxes the FALLBACK only, so a positive
+// signal still wins and *the header can only ever upgrade* is preserved verbatim. Moving
+// this branch above secureOrigin would let the flag strip Secure from a genuine HTTPS
+// session, which is a different and much worse setting than the one that was ruled.
+func secureCookie(r *http.Request, allowInsecure bool) bool {
 	if secureOrigin(r) {
 		return true
+	}
+	if allowInsecure {
+		return false
 	}
 	return !isLoopbackHost(r.Host)
 }

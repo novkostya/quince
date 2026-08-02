@@ -48,6 +48,9 @@ type Service struct {
 	absoluteTimeout time.Duration
 	minPasswordLen  int
 	insecureCookies bool // demo only: never set Secure, so cookies work over plain http
+	// allowInsecureTransport is the user's `sessions.allow_insecure_transport` opt-in. Not
+	// the same thing as insecureCookies above — see SetAllowInsecureTransport.
+	allowInsecureTransport bool
 }
 
 // NewService returns a Service with production defaults.
@@ -69,13 +72,23 @@ func NewService(st *store.Store, log *slog.Logger) *Service {
 // plain-http address the e2e app and screenshots run on). Never set in production.
 func (s *Service) SetInsecureCookies(v bool) { s.insecureCookies = v }
 
+// SetAllowInsecureTransport applies `sessions.allow_insecure_transport` (qn.6f slice 8).
+// Off by default, and DISTINCT from SetInsecureCookies even though both end in a cookie
+// without Secure: this one is the user's own declared choice for a network they trust, it
+// relaxes only the fallback, and it is surfaced as a degraded mode. Demo mode is a test
+// affordance that must never be set in production. Two reasons, two switches, and
+// collapsing them would make a production setting reachable from a demo flag.
+//
+// Applied at process start — schema v0 has no live config reload.
+func (s *Service) SetAllowInsecureTransport(v bool) { s.allowInsecureTransport = v }
+
 // Secure decides the Secure cookie flag for this request: the loopback-vs-https rule
-// (cookie.go), overridden off in demo mode.
+// (cookie.go) relaxed by the user's own opt-in, and overridden off entirely in demo mode.
 func (s *Service) Secure(r *http.Request) bool {
 	if s.insecureCookies {
 		return false
 	}
-	return secureCookie(r)
+	return secureCookie(r, s.allowInsecureTransport)
 }
 
 // CookieWillBeDiscarded reports whether a session cookie issued for THIS request would be

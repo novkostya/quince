@@ -16,6 +16,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -138,6 +139,11 @@ func serve(args []string) error {
 
 	cfgSvc := config.NewService(cfgPath, log)
 	authSvc := auth.NewService(st, log)
+	// The user's plain-http opt-in (qn.6f slice 8). Applied before either branch below,
+	// because it governs cookies and every mode issues those — it is not a property of the
+	// live stack. `--demo` then forces Secure off entirely, which is a superset of this
+	// rather than a conflict.
+	applyInsecureTransportOptIn(authSvc, cfgSvc.Current(), os.Stderr)
 	eventBus := bus.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -266,6 +272,34 @@ const demoPassword = "demo"
 // the price of sharing the branch — a mode-specific message inside shared code is wrong for one
 // mode — and the fix is to move the message to where the modes already differ, not to add a second
 // place where they differ.
+// applyInsecureTransportOptIn wires `sessions.allow_insecure_transport` into the auth
+// service and, when it is on, SAYS SO ON STDERR (qn.6f slice 8, Operator ruling
+// 2026-08-02).
+//
+// The announcement is the point, not a courtesy. This is a degraded mode: the session
+// cookie and the CSRF token cross the network in clear, so anyone who can read the path can
+// impersonate the admin of an application that shows a person's entire digital life. `No
+// silent caps or fallbacks` makes surfacing it mandatory, and a security relaxation that
+// took effect quietly would be indistinguishable from a bug.
+//
+// STDERR RATHER THAN THE LOGGER, deliberately: this must be legible in `docker logs` on a
+// box whose log level someone has turned down, and it is a startup fact rather than an
+// event. It joins CheckStorages' refusal in writing directly to the stream.
+//
+// It is ONE of the three channels the ruling names. The config warning is the second. The
+// third — a non-dismissible in-app banner — is NOT built here; quince#539.
+func applyInsecureTransportOptIn(authSvc *auth.Service, cfg config.Config, w io.Writer) {
+	if !cfg.Sessions.AllowInsecureTransport {
+		return
+	}
+	authSvc.SetAllowInsecureTransport(true)
+	_, _ = fmt.Fprint(w, "quince: sessions.allow_insecure_transport is ON — session and CSRF cookies\n"+
+		"quince: will be served WITHOUT the Secure flag to plain-http clients, so they cross\n"+
+		"quince: the network in clear and anyone who can read the path can sign in as you.\n"+
+		"quince: This is a deliberate setting for a network you trust (a VPN, or a LAN you\n"+
+		"quince: control). Turn it off in config.yml if you did not mean it.\n")
+}
+
 func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) error {
 	if !public {
 		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
