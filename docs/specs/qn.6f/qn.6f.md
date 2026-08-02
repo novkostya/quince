@@ -22,7 +22,7 @@ Highest uncertainty in `qn.6`, and onboarding is 1 → 2 → 3.
 | `core/cmd/quince/` | the listener; the startup refusal on a bad certificate |
 | `core/internal/config/` | the `tls:` section, its validation, and the **serve-path** certificate check |
 | `core/internal/tlsx/` (new) | `GetCertificate` + rotation; self-signed generation (slice 3 only) |
-| `core/internal/httpapi/` | the step-1 endpoint and its detection |
+| `core/internal/httpapi/` | the step-1 endpoint and its detection — **pre-auth: a fifth `authExempt` route, BY EXACT PATH** (ruled 2026-08-02, design §6) |
 | `ui/src/` | the onboarding step-1 page; the `Config` TS type |
 | `docs/` | contracts §1 and §6; design §6 and §9 |
 | `deploy/` | reverse-proxy and `tailscale serve` prose; compose and `Dockerfile` if the port moves |
@@ -107,6 +107,24 @@ onboarding since design §9 and stack D12 and it has never been built.
 
 **Step 1 is therefore the FIRST onboarding surface, and it sets the shape steps 2 and 3 inherit.**
 That is an argument for keeping this rung's endpoint narrow — see rung-ruled decision 3.
+
+**And it is PRE-AUTH — ruled 2026-08-02, design §6.** `authExempt` is exactly four routes today
+(`middleware.go:73-79`), so anything this rung adds is behind `authGuard` unless deliberately
+exempted. **This spec was silent on that and the silence was the defect**: the chicken-and-egg is
+that on plain HTTP to a LAN address, login returns `200`, the browser discards the `Secure` cookie,
+and the page explaining exactly that sits behind the door the defect locks.
+
+**Two constraints on the implementation, both from the ruling.** The exemption is **by exact path**
+— `authExempt` switches on `r.Method + " " + r.URL.Path` with no prefix support, so
+`/api/onboarding/*` would mean changing the matcher, not just the set. And **step 1 only**: every
+future onboarding step will cite this as precedent, and §9 already names steps 2 and 3.
+
+**Still open and this rung's to settle:** whether the exemption covers the UI route as well as the
+endpoint, and what the page renders to an unauthenticated visitor — the *"already encrypted ✓"*
+complete-state implies knowing whose step 1 it is.
+
+**quince#497 is not subsumed by this.** A user who reaches `/login` first never sees step 1 either
+way, so the login refusal naming the cause is still the only thing that helps them.
 
 **9. Go 1.25.0** (`core/go.mod`).
 

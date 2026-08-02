@@ -562,9 +562,19 @@ section; whether "trusted" is the user's blanket assertion (recommended — some
 has already made that judgement) or a declared host/CIDR allowlist (more machinery, and it changes
 nothing about who can read the wire); and whether the banner is dismissible (recommended: no).
 
-**PROPOSED (gap): is onboarding step 1 reachable WITHOUT a session — a fifth `authExempt` route?**
-`qn.6f`, quince#462. Found by an Operator question on that issue, 2026-08-02, not by the spec — which
-names the step-1 endpoint in its Boundary and never says which side of the auth guard it sits on.
+<!-- gap-heading-check: ignore — the decided text below belongs to the NEXT block (step 1
+     pre-auth), not to this one. This block LOST ITS TERMINATOR when that neighbour was flipped,
+     because a live open-gap marker is one of the three things that bounds a block; flipping the
+     block below removed the boundary, so this block's bounds now run past it to section 7.
+     This block's own question — may a user opt into plain HTTP — is decided on quince#446 but is
+     deliberately NOT flipped here: that ruling says it flips in the PR that implements it.
+     Remove this opt-out in that PR, when this block is flipped too. -->
+
+**RULED (was `PROPOSED (gap)`): onboarding step 1 IS reachable without a session — a fifth
+`authExempt` route, by exact path.** Operator, 2026-08-02, on quince#501: *"Of course it's pre-auth,
+that's the only viable option."* Option (a). Found by an Operator question on quince#462, not by the
+spec — which names the step-1 endpoint in its Boundary and did not say which side of the auth guard
+it sits on.
 
 **The chicken-and-egg.** On the deployment this rung exists for — a phone, fresh install, plain HTTP
 to a LAN address — the sequence is: `/setup` works (it is exempt), login returns `200`, the browser
@@ -580,23 +590,33 @@ case "GET /api/health", "GET /api/auth/status", "POST /api/auth/login", "POST /a
 Anything this rung adds is behind `authGuard` unless deliberately exempted. **Widening that set is a
 security-posture change, which is why this is a gap rather than a line in the rung's spec.**
 
-**Option (a) — step 1 is pre-auth, a fifth exempt route. RECOMMENDED, narrowly.** What it discloses
-is which transport tiers exist and whether *this* request arrived over a secure origin — no device
-data, no configuration, no secret. The precedent is already here: `needs_setup` deliberately puts
-first-run guidance ahead of a session. **The cost, stated:** it is one more pre-auth surface to keep
-honest forever, and every future onboarding step will cite it as precedent — which is an argument for
-exempting **step 1 only**, by exact path, rather than an `/api/onboarding/*` prefix.
+**What was ruled: step 1 is pre-auth, a fifth exempt route.** What it discloses is which transport
+tiers exist and whether *this* request arrived over a secure origin — no device data, no
+configuration, no secret. The precedent was already here: `needs_setup` deliberately puts first-run
+guidance ahead of a session.
 
-**Option (b) — step 1 stays behind auth**, and the login loop is answered where it happens
-(quince#497). Cheaper, changes no posture, and is needed under (a) anyway: a user who lands on
-`/login` first never sees step 1 regardless. **Its cost is that the rung's own remedy stays
-unreachable to the user who most needs it.**
+**BY EXACT PATH, and that is a constraint rather than a preference.** `authExempt` switches on
+`r.Method + " " + r.URL.Path` — exact strings, no prefixes — so a prefix exemption such as
+`/api/onboarding/*` would require changing the **matcher** as well as the set. The narrow form is the
+only shape the function has. (Measured by the reviewer on quince#501; the block originally argued for
+the narrow form on taste, and the code turns out to require it.)
 
-**These are not exclusive, and the recommendation is both.** quince#497 relaxes nothing and should
-land whatever is decided here; (a) is what makes step 1 do its job on first run.
+**The cost, recorded because it will bite later:** this is one more pre-auth surface to keep honest
+forever, and **every future onboarding step will cite it as precedent** — and steps 2 and 3 are
+already specified in §9, so that precedent has named claimants. Exempting step 1 only is what keeps
+the precedent from generalising by default.
 
-**Not decided here, and it is the rung's if (a) is ruled:** whether the exemption is the endpoint
-only or the UI route too, and what the page renders for a user who is not yet authenticated.
+**Option (b) — step 1 stays behind auth — was rejected**, and its cost is why: the rung's own remedy
+would stay unreachable to the user who most needs it.
+
+**quince#497 lands regardless, and the ruling does not subsume it.** A user who reaches `/login`
+first never sees step 1, whichever side of the guard it is on — so the login refusal that names the
+cause is still the only thing that helps them. It relaxes nothing and was never an alternative to
+this.
+
+**Still the rung's to settle, deliberately not decided here:** whether the exemption covers the UI
+route as well as the endpoint, and what the page renders to a visitor who is not yet authenticated —
+the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 1 it is.
 
 ## 7. Vault: lazy, session-scoped reading (Python today, swappable seam)
 
