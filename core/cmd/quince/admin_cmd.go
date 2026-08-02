@@ -94,16 +94,30 @@ func versionsCmd(args []string) error {
 // qn.5b per-job model the working copy is seeded from latest/ at job start, so the old "rebuild
 // working from the last snapshot" is no longer needed — discarding it is the honest action.) Never
 // automatic in v0.1; the UI surface is POST /api/devices/{udid}/reset-working.
+// AN ESCAPE HATCH THAT CANNOT EXPRESS WHAT THE API CAN IS A SECOND BUG WAITING (quince#448),
+// so `--storage <name>` mirrors the API's storage_id and omitting it resolves by dirty count
+// with the same refusal listing the candidates.
 func deviceCmd(args []string) error {
+	var storageName string
+	if len(args) == 4 && args[2] == "--storage" {
+		storageName, args = args[3], args[:2]
+	}
 	if len(args) != 2 || (args[0] != "reset-working" && args[0] != "repair-working-copy") {
-		return errors.New("usage: quince device reset-working <udid>")
+		return errors.New("usage: quince device reset-working <udid> [--storage <name>]")
 	}
 	udid := args[1]
 	return withStorage(func(mgr *storage.Manager) error {
-		if err := mgr.RepairWorkingCopy(udid); err != nil {
-			return fmt.Errorf("reset working copy for %s: %w", udid, err)
+		id, err := mgr.StorageIDByName(storageName)
+		if err != nil {
+			return err
 		}
-		fmt.Printf("working copy for device %s discarded — the next backup starts clean from the last version\n", udid)
+		status, reason := mgr.RepairWorking(udid, id)
+		if status != 202 {
+			// The API's refusal text verbatim — it already names the candidates and says to
+			// choose one, and rewording it for the terminal would let the two drift.
+			return errors.New(reason)
+		}
+		fmt.Println(reason)
 		return nil
 	})
 }

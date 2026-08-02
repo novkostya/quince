@@ -1301,7 +1301,7 @@ func TestStartBackupTransportGuards(t *testing.T) {
 func TestResetWorking(t *testing.T) {
 	t.Run("unknown device 404", func(t *testing.T) {
 		h := newHarness(t, fakeParams{}, TransportUSB)
-		if s, _ := h.eng.ResetWorking("SYNTHETIC-UDID-UNKNOWN-0009"); s != http.StatusNotFound {
+		if s, _ := h.eng.ResetWorking("SYNTHETIC-UDID-UNKNOWN-0009", ""); s != http.StatusNotFound {
 			t.Fatalf("reset unknown device = %d, want 404", s)
 		}
 	})
@@ -1312,7 +1312,7 @@ func TestResetWorking(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeTree(filepath.Join(wd, testUDID), fakeParams{Tree: "complete", Encrypted: true, Kind: "full"}, false)
-		if s, _ := h.eng.ResetWorking(testUDID); s != http.StatusAccepted {
+		if s, _ := h.eng.ResetWorking(testUDID, ""); s != http.StatusAccepted {
 			t.Fatalf("reset dirty working = %d, want 202", s)
 		}
 		if _, err := os.Stat(wd); !os.IsNotExist(err) {
@@ -1324,7 +1324,7 @@ func TestResetWorking(t *testing.T) {
 		h := newHarness(t, m.params(t), m.Transport)
 		j := h.start(t, m.Transport, "")
 		waitState(t, h.eng, j.ID, StateBackingUp, 2*time.Second)
-		if s, _ := h.eng.ResetWorking(testUDID); s != http.StatusConflict {
+		if s, _ := h.eng.ResetWorking(testUDID, ""); s != http.StatusConflict {
 			t.Fatalf("reset while a backup runs = %d, want 409", s)
 		}
 		h.eng.CancelJob(j.ID)

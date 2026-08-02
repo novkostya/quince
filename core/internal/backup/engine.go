@@ -41,7 +41,9 @@ type StorageForJob interface {
 	// drops it. Every write-path call then resolves that storage from the jobID it already carries.
 	BindJobStorage(jobID, storageID string) error
 	UnbindJob(jobID string)
-	RepairWorkingCopy(udid string) error
+	// RepairWorking discards a device's dirty working/ on ONE storage, resolving WHICH from an
+	// optional storage id — omitted resolves by dirty count (contracts §1, quince#448).
+	RepairWorking(udid, storageID string) (status int, reason string)
 }
 
 // Options wires the engine.
@@ -246,7 +248,7 @@ func (e *Engine) CancelJob(id string) (wire.Job, int, string) {
 // backup is running for the device — resetting mid-backup would yank the tree from under
 // idevicebackup2 — and 404s an unknown device. Idempotent: a device with no working/ is already
 // clean (→ 202). It NEVER touches a committed version (Reset only discards the mutable working/).
-func (e *Engine) ResetWorking(udid string) (int, string) {
+func (e *Engine) ResetWorking(udid, storageID string) (int, string) {
 	if !validUDID(udid) {
 		return http.StatusNotFound, "unknown device"
 	}
@@ -262,12 +264,10 @@ func (e *Engine) ResetWorking(udid string) (int, string) {
 	if e.versionQ == nil {
 		return http.StatusServiceUnavailable, "the storage subsystem is unavailable"
 	}
-	if err := e.versionQ.RepairWorkingCopy(udid); err != nil {
-		e.log.Error("backup: reset working failed", "udid", udid, "error", err)
-		return http.StatusInternalServerError, "reset failed: " + err.Error()
-	}
-	e.log.Info("backup: reset — discarded dirty working copy", "udid", udid)
-	return http.StatusAccepted, "working copy reset — the next backup starts clean from the last version"
+	// The storage subsystem owns WHICH storage, because it holds the slots. The engine keeps
+	// the checks that are its own — unknown device, backup running — in their existing order
+	// and wording (quince#448 ruling).
+	return e.versionQ.RepairWorking(udid, storageID)
 }
 
 // --- httpapi.JobReader ---

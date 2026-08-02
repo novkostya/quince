@@ -41,14 +41,14 @@ type Deps struct {
 // reset done / already clean; 409 a backup is running; 404 unknown device). Never touches a
 // committed version.
 type WorkingReset interface {
-	ResetWorking(udid string) (status int, reason string)
+	ResetWorking(udid, storageID string) (status int, reason string)
 }
 
 // UnavailableWorkingReset is the WorkingReset used when no backup engine is wired (--demo, or a
 // misconfigured deploy): reset reports 503 honestly (no silent no-op).
 type UnavailableWorkingReset struct{}
 
-func (UnavailableWorkingReset) ResetWorking(string) (int, string) {
+func (UnavailableWorkingReset) ResetWorking(string, string) (int, string) {
 	return http.StatusServiceUnavailable,
 		"the backup engine is unavailable (running --demo, or no device backend is configured)"
 }

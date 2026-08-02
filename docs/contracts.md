@@ -142,7 +142,7 @@ POST /api/devices/{udid}/wifi-sync
      // unconfirmed does NOT appear on the one path where an unreadable read-back is EXPECTED:
      // disabling over Wi-Fi severs the connection the read-back would use, so there the op
      // SUCCEEDS and the value becomes wifi_sync: "unknown" (ruled quince#363).
-POST /api/devices/{udid}/reset-working → 202 {note} | 404 | 409 | 503
+POST /api/devices/{udid}/reset-working {storage_id?} → 202 {note} | 404 | 409 | 503
      // qn.5b Reset (accepted contract proposal, decisions (co)): DISCARD the device's dirty
      // working/ so the next backup starts clean from latest/ — losing only the partial, NEVER a
      // committed version. Idempotent (a device with no working/ is already clean → 202). 409 while
@@ -150,7 +150,25 @@ POST /api/devices/{udid}/reset-working → 202 {note} | 404 | 409 | 503
      // 503 no backup engine wired (--demo). The backend op is RepairWorkingCopy (CLI:
      // `quince device reset-working <udid>`). The honest COMPANION of a kept-dirty working/: on
      // failure the partial is kept so a retry RESUMES (no re-transfer); Reset is the explicit
-     // discard. Audited (reset event, no secret); touches no version.* / latest surface.
+     // discard. Audited (reset event, no secret, NAMING THE STORAGE); touches no version.*
+     // / latest surface.
+     //
+     // qn.6c (Operator ruling 2026-08-02, quince#448): the endpoint is DEVICE-scoped and a
+     // device can now have a dirty working/ on more than one storage, so "reset this
+     // device's working copy" stopped having one answer. `storage_id` is OPTIONAL:
+     //   present, usable       reset exactly that one
+     //   present, unknown      404, matching unknown-device
+     //   present, unreachable  409, carrying that storage's own unreachable_reason —
+     //                         the job path's code, not a new one for a known condition
+     //   omitted, 0 dirty      202, already clean (unchanged)
+     //   omitted, exactly 1    reset it, and NAME it in the note
+     //   omitted, 2 or more    409, listing them, saying to name one
+     // REFUSE AND NAME RATHER THAN GUESS WELL: a dirty working/ is a resumable multi-hour
+     // partial, so "reset all" would discard a transfer on a disk the user was not
+     // thinking about — the same answer quince#435 gave a job that names no storage.
+     // "Dirty" is `working/<udid>` existing, INCLUDING a killed seed. Unreachable storages
+     // are NAMED as not-inspected, never silently skipped. CLI: `--storage <name>`.
+     // No deployment with one storage can reach the new refusal.
 GET  /api/ops/{op_id}                  → Op
      // pair/encryption return 202 {op_id}; the op's narration (e.g. "tap Trust on the
      // phone", "enter the passcode on the device") streams via `op.updated` WS events,
