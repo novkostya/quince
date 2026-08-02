@@ -174,7 +174,11 @@ func serve(args []string) error {
 		// branch would refuse every demo and every ui-e2e run over a subsystem they do not use.
 		// Placed before buildLiveStack so nothing is probed or reconciled on a config that cannot
 		// serve.
-		if req := config.CheckStorages(cfgSvc.Current(), os.Environ()); !req.OK() {
+		// THE LOAD'S WARNINGS ARE PASSED, and that is what lets the refusal tell a PARSE FAILURE
+		// from an absent key (quince#508). `Current()` alone cannot: a failed parse yields
+		// `Default()`, and its nil `Storage` reads identically to a file that declares nothing.
+		_, cfgWarnings, _ := cfgSvc.Snapshot()
+		if req := config.CheckStorages(cfgSvc.Current(), os.Environ(), cfgWarnings); !req.OK() {
 			return req.Explain(os.Stderr, cfgPath)
 		}
 		// TWO STORAGES THAT ARE ONE STORAGE cannot be served (quince#458). A zfs collision is

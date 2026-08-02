@@ -35,20 +35,56 @@ type StorageRequirement struct {
 	LegacyEnv bool
 	// LegacyEnvValue is that variable's value, echoed back so the remedy can suggest it.
 	LegacyEnvValue string
+
+	// Malformed is true when config.yml FAILED TO PARSE, so `Missing` is an artifact rather than
+	// an observation (quince#508).
+	//
+	// WITHOUT THIS, NIL DOES DOUBLE DUTY AND THE REFUSAL LIES. `Parse` returns `Default()` on a
+	// YAML error, `Default()` leaves `Storage` nil, and `CheckStorages` reads nil as *absent* — so
+	// a file whose `storage:` key is plainly there, in the wrong SHAPE, was told it had no such
+	// key. Measured against the staging stand's real pre-flatten config while rehearsing
+	// quince#506's upgrade.
+	//
+	// It matters because this IS the upgrade path. quince#473 retired the nested shape and
+	// `deploy/upgrading.md` tells operators to rewrite it, so the people who meet this message are
+	// exactly those who upgraded before editing — and it tells them to add a key they can see. The
+	// obvious reactions are both wrong: add a second `storage:` (a YAML duplicate-key error), or
+	// conclude the file is not being read.
+	Malformed bool
+	// MalformedDetail is the parser's own sentence, which names the line and the type. It is the
+	// thing the old message threw away while the information sat one log line above it.
+	MalformedDetail string
 }
 
 // OK reports whether the process may serve.
-func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty }
+func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty && !r.Malformed }
 
 // CheckStorages evaluates the requirement. environ is os.Environ()-style; it is read ONLY to
 // detect a retired variable for the explanation, never to resolve a path.
-func CheckStorages(c Config, environ []string) StorageRequirement {
+//
+// `warnings` are the load's own, and they are how a PARSE FAILURE reaches this decision
+// (quince#508). It cannot be inferred from the Config: a failed parse yields `Default()`, whose
+// nil `Storage` is indistinguishable from a file that genuinely declares nothing. Passing nil is
+// correct for a caller that did not load from disk — `Service.Replace` validates a document that
+// already parsed, so there is no parse failure it could be hiding.
+func CheckStorages(c Config, environ []string, warnings []Warning) StorageRequirement {
 	r := StorageRequirement{}
-	switch {
-	case c.Storage == nil:
-		r.Missing = true
-	case len(*c.Storage) == 0:
-		r.Empty = true
+	// THE PARSE FAILURE OUTRANKS EVERYTHING BELOW, because everything below is read off a Config
+	// that parsing did not produce. Reporting "no storage key" about `Default()` is reporting on a
+	// document nobody wrote.
+	for _, w := range warnings {
+		if detail, found := strings.CutPrefix(w.Message, "invalid YAML: "); found {
+			r.Malformed, r.MalformedDetail = true, detail
+			break
+		}
+	}
+	if !r.Malformed {
+		switch {
+		case c.Storage == nil:
+			r.Missing = true
+		case len(*c.Storage) == 0:
+			r.Empty = true
+		}
 	}
 	for _, kv := range environ {
 		if k, v, ok := strings.Cut(kv, "="); ok && k == "QUINCE_BACKUPS" {
@@ -69,9 +105,21 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	// to write the explanation must not replace the exit code that is the actual refusal.
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, "quince: "+format+"\n", a...) }
 
-	if r.Missing {
+	switch {
+	case r.Malformed:
+		// THE PARSER'S OWN SENTENCE, because it names the line and the type and nothing this
+		// function knows can improve on it (quince#508). Saying "no storage key" here — which is
+		// what nil-as-absent produced — tells the operator to add a key they can see in the file.
+		p("%s could not be parsed — quince cannot tell what storage you declared.", configPath)
+		p("")
+		p("    %s", r.MalformedDetail)
+		p("")
+		p("`storage:` CHANGED SHAPE in qn.6c: it IS the list now, with no `storages:` wrapper and")
+		p("no global `backend`, `zfs` or `retention`. If this file predates that, it parses as the")
+		p("old shape and fails here. deploy/upgrading.md has the before/after.")
+	case r.Missing:
 		p("no `storage:` key in %s — quince does not know where to keep backups.", configPath)
-	} else {
+	default:
 		p("`storage:` in %s declares no storages — quince does not know where to keep backups.", configPath)
 	}
 
@@ -99,7 +147,12 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	p("REFUSING to start. A quince that comes up with nowhere to put backups looks healthy and")
 	p("silently protects nothing, which is worse than one that did not start.")
 
-	if r.Missing {
+	switch {
+	case r.Malformed:
+		// The short error main() exits on must not say "no storage declared" either — that is the
+		// same false claim, one line shorter.
+		return fmt.Errorf("config could not be parsed: %s: %s", configPath, r.MalformedDetail)
+	case r.Missing:
 		return fmt.Errorf("no storage declared: %s has no storage: key", configPath)
 	}
 	return fmt.Errorf("no storage declared: storage: in %s is empty", configPath)

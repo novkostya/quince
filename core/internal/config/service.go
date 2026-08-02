@@ -238,7 +238,7 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, error) {
 	// user would discover backups were disabled at the next restart — an acceptance that is
 	// silent, which is what `no silent caps or fallbacks` forbids and what D12 makes reachable by
 	// making the UI the editing surface.
-	if req := CheckStorages(c, nil); !req.OK() {
+	if req := CheckStorages(c, nil, nil); !req.OK() {
 		msg := "at least one storage must be declared — saving this would leave quince unable to back anything up, and it would refuse to start"
 		if req.Empty {
 			msg = "the storage list is empty — " + msg
