@@ -35,6 +35,25 @@ if [ "${rc:-0}" -eq 2 ]; then ok "--body=… is refused too (the joined form)"; 
 "$here"/gh-coder pr create --repo x/y -b hi >/dev/null 2>&1 && rc=0 || rc=$?
 if [ "${rc:-0}" -eq 2 ]; then ok "-b, the short form, is refused"; else no "-b exit = ${rc:-0}, want 2"; fi
 
+# THE ATTACHED FORMS, which is where the first version of this guard had a hole. `gh` uses
+# pflag, which accepts `--body=…` and `-b…` as well as the separated forms — so a guard
+# matching only `--body` and `-b` stops the shape you happened to write and not the one
+# beside it, which is worse than no guard because it teaches that the path is closed.
+#
+# MEASURED, both directions: `--body=x` was ALREADY refused by the `--body=*` pattern; `-bx`
+# was NOT, and is the one that got through. Worth the two extra cases rather than the one,
+# so the next reader does not have to re-derive which forms pflag takes.
+"$here"/gh-coder issue comment 1 --repo x/y --body=hi >/dev/null 2>&1 && rc=0 || rc=$?
+if [ "${rc:-0}" -eq 2 ]; then ok "--body=… (attached long form)"; else no "--body=… exit = ${rc:-0}, want 2"; fi
+
+"$here"/gh-coder issue comment 1 --repo x/y -bhi >/dev/null 2>&1 && rc=0 || rc=$?
+if [ "${rc:-0}" -eq 2 ]; then ok "-b… (attached shorthand — the bypass)"; else no "-b… exit = ${rc:-0}, want 2"; fi
+
+# THE BOUNDARY, chosen rather than overlooked: a combined shorthand CLUSTER carrying `b` in a
+# non-leading position (`-Rb…`) still passes. Nobody writes a body that way, and covering it
+# means parsing clusters — more machinery than the risk earns. Recorded so the next reader
+# knows the line was drawn on purpose.
+
 # THE REFUSAL MUST NAME THE REPLACEMENT. A refusal that does not say what to do instead gets
 # worked around, which for this one means back to inline text somewhere else.
 out=$("$here"/gh-coder issue comment 1 --repo x/y --body "hi" 2>&1 || :)

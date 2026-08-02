@@ -62,8 +62,8 @@ gh-coder: REFUSING --body. Write the text to a file and pass --body-file.
 EOM
 		exit 2
 		;;
-	--body=* | -b=*)
-		echo "gh-coder: REFUSING --body=… — same reason as --body; use --body-file (quince#518)." >&2
+	--body=* | -b=* | -b?*)
+		echo "gh-coder: REFUSING an inline body (--body=… / -b…) — same reason as --body; use --body-file (quince#518)." >&2
 		exit 2
 		;;
 	esac
