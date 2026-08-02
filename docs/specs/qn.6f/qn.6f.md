@@ -119,9 +119,12 @@ and the page explaining exactly that sits behind the door the defect locks.
 `/api/onboarding/*` would mean changing the matcher, not just the set. And **step 1 only**: every
 future onboarding step will cite this as precedent, and §9 already names steps 2 and 3.
 
-**Still open and this rung's to settle:** whether the exemption covers the UI route as well as the
-endpoint, and what the page renders to an unauthenticated visitor — the *"already encrypted ✓"*
-complete-state implies knowing whose step 1 it is.
+**This rung's to settle, and SETTLED — rung-ruled decision 6.** It asked whether the exemption
+covers the UI route as well as the endpoint, and what the page renders to an unauthenticated
+visitor, worrying that the *"already encrypted ✓"* complete-state implies knowing whose step 1 it
+is. **The answers: yes it covers the route, the page renders identically to everyone, and there is
+no whose** — step 1 is a property of the deployment's transport rather than of a user. The full
+reasoning, including a consequence for first-run that nothing had recorded, is with the decision.
 
 **quince#497 is not subsumed by this.** A user who reaches `/login` first never sees step 1 either
 way, so the login refusal naming the cause is still the only thing that helps them.
@@ -422,6 +425,48 @@ decisions log.
 4. **Fixture certificates are generated at test time, never committed.** Nothing expires in the
    repository, and no artifact in a diff looks like a private key.
 5. **`crypto/x509` in-process, never `openssl(1)`.** No subprocess, and no key path in argv.
+6. **The step-1 UI ROUTE is pre-auth too, and the page renders the same thing to everyone.** This
+   is the question interface fact 8 left open for this rung. Settled below rather than in one
+   line, because half of it changes what first-run means.
+
+### Rung-ruled 6, in full: the step-1 page is outside every guard
+
+**Outside `RequireAuth`, outside `SetupGate`, outside `LoginGate`.** `ui/src/routes/router.tsx`
+has exactly those three shapes plus a catch-all that `Navigate`s to `/`, which is itself behind
+`RequireAuth` — so a route added anywhere but the top level bounces an unauthenticated visitor to
+`/login`.
+
+**Exempting the endpoint but not the route would have bought nothing.** `GET
+/api/onboarding/step1` has no human-visible surface of its own. The ruling that made it pre-auth
+(quince#501) was about the deadlock — *the page explaining why login fails must not sit behind
+login* — and the page is the half a user meets.
+
+**IT IS A PREREQUISITE OF SETUP, NOT A SUCCESSOR, AND THAT IS NEW.** Design §9 orders onboarding
+after first-run password setup. Since quince#530 that ordering is impossible over plain HTTP to a
+LAN address: `POST /api/auth/setup` answers `426 insecure_origin` **before storing the password**,
+so a fresh install cannot complete setup at all until the transport is fixed. **Step 1 must
+therefore be reachable with no password in existence**, which `SetupGate` would prevent. The `426`
+refusals are what turn this from a preference into a requirement, and nothing said so until now.
+
+**The page renders identically authenticated or not**, and the worry interface fact 8 records —
+*"the 'already encrypted ✓' complete-state implies knowing whose step 1 it is"* — dissolves on
+inspection: **there is no whose.** Step 1 is a property of the deployment's transport, not of a
+user or a session. Its only two inputs are the connection the visitor themselves opened and static
+prose about the four tiers, so `complete: true` tells them nothing they did not establish by
+connecting.
+
+**That argument is specific to step 1 and must be re-asked for steps 2 and 3**, which concern this
+quince's devices and storages and will not survive it.
+
+**What the page must not do**, stated because this is what would erode quietly: render any device,
+storage, version or job data; echo back a hostname the client did not send; or vary its content by
+session state. A future edit needing any of those means the exemption is wrong for that edit — not
+that the rule is negotiable.
+
+**Deliberately NOT settled:** whether an unauthenticated visitor on plain HTTP should be
+*redirected* to step 1 instead of `/login`, and whether the `426 insecure_origin` message should
+link to it. Both look right and both are about the login flow rather than this page, so they belong
+with whoever builds it and can see it working. Named rather than quietly left.
 
 ---
 
