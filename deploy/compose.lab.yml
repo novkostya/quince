@@ -22,9 +22,9 @@ services:
     container_name: quince
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8968:8968"
     environment:
-      QUINCE_LISTEN: ":8080"
+      QUINCE_LISTEN: ":8968"
       # QUINCE_DATA / QUINCE_CACHE default to /data /cache. Backup roots are NOT env:
       # qn.6c retired QUINCE_BACKUPS — declare storages under `storage:` in config.yml (a list).
     volumes:

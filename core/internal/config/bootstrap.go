@@ -50,10 +50,24 @@ func LoadBootstrap(environ []string) (Bootstrap, []Warning) {
 		vals[k] = v
 	}
 
+	// :8968 is IANA-unassigned, mid-block in the 8955–8979 run, below the 32768 ephemeral
+	// floor and off Chromium's restricted list — Operator ruling 2026-08-02 (qn.6f gap B,
+	// quince#446), measured against the live registry rather than chosen for looks.
+	//
+	// IT REPLACED :8080, AND THE REASON IS HOST NETWORKING. Under bridged networking a
+	// collision costs a remap and nothing more. Wi-Fi backup needs `network_mode: host` for
+	// mDNS, and there nothing can be remapped: anything already holding the port means
+	// quince does not start. `8080` is assigned (`http-alt`) and squatted by Synology's own
+	// stack, Tomcat, qBittorrent and UniFi among others, so it was close to the worst
+	// available choice for the deployment this project's primary transport requires.
+	//
+	// A bind failure stays a loud named error and never falls back to another port — no
+	// silent caps or fallbacks. The real mitigation for "8968 is not memorable" is that the
+	// listen address is a first-class setting, not that the number is a good one.
 	b := Bootstrap{
 		Data:   orDefault(vals["QUINCE_DATA"], "/data"),
 		Cache:  orDefault(vals["QUINCE_CACHE"], "/cache"),
-		Listen: orDefault(vals["QUINCE_LISTEN"], ":8080"),
+		Listen: orDefault(vals["QUINCE_LISTEN"], ":8968"),
 	}
 	return b, warnings
 }

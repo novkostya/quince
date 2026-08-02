@@ -1,6 +1,6 @@
 // Command quince is the core daemon. Subcommands:
 //
-//	quince serve [--demo|--public-demo] [--listen :8080]  # serve the UI + API (contracts.md)
+//	quince serve [--demo|--public-demo] [--listen :8968]  # serve the UI + API (contracts.md)
 //	quince backup <udid> [--transport usb|wifi|auto]   # drive one backup to completion (lab CLI)
 //	quince versions verify <id> | --udid <udid>        # re-run structural verification (qn.4b)
 //	quince device reset-working <udid>                 # discard the dirty working/ (qn.5b Reset)
@@ -75,7 +75,7 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "quince %s\n\nUsage:\n"+
-		"  quince serve [--demo|--public-demo] [--listen :8080]  serve the UI + API\n"+
+		"  quince serve [--demo|--public-demo] [--listen :8968]  serve the UI + API\n"+
 		"  quince backup <udid> [--transport usb|wifi|auto]   drive one backup to completion\n"+
 		"  quince versions verify <id> | --udid <udid>        re-run structural verification\n"+
 		"  quince device reset-working <udid>                 discard the dirty working/\n"+

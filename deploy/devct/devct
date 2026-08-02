@@ -293,7 +293,7 @@ create() {
 # ---------------------------------------------------------------------------
 
 DEMO_CONTAINER=quince-demo
-DEMO_PORT=8080
+DEMO_PORT=8968
 
 deploy() {
 	devct_need curl jq ssh
@@ -408,7 +408,7 @@ EOF
 	printf '\n%s is serving %s.\n\n' "$_d_name" "$_d_ref"
 	# The address first, because it is what the person running this actually uses: on the LAN it
 	# needs no setup, and it stays collision-free when several rungs run in parallel — each
-	# container has its own 8080. It is the one line that must never reach a PR.
+	# container has its own 8968. It is the one line that must never reach a PR.
 	printf 'Open it (this session only — never paste this into a PR):\n'
 	printf '  http://%s:%s/\n\n' "$_d_ip" "$DEMO_PORT"
 	printf 'For the PR (convention name — carries no site information):\n'
