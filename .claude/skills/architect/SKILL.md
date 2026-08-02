@@ -417,10 +417,16 @@ a property of `quince-bot`'s classic PAT, not of the seat, and the App it became
 `actions: write`. **Do not ask the author to re-run it** — that is the "never ask an identity for an
 action it cannot perform" failure, and this file was the thing telling you to.
 
-**Use `gh pr update-branch --rebase` instead.** It re-triggers the workflow on the new head *and*
-clears `BEHIND`, and it beats a re-run because it also revalidates against current `main`. Measured
-on quince#216. Yours to run as the merging seat — but responsibility, not exclusivity: an author may
-rebase its own PR too, and `CLAUDE.md` §5 says so.
+**Use `bin/gh-review pr update-branch --rebase` instead.** It re-triggers the workflow on the new
+head *and* clears `BEHIND`, and it beats a re-run because it also revalidates against current
+`main`. Measured on quince#216. Yours to run as the merging seat — but responsibility, not
+exclusivity: an author may rebase its own PR too, and `CLAUDE.md` §5 says so (from an implementer
+box that is `bin/gh-coder pr update-branch --rebase`, per `/kickoff` §1).
+
+**`gh-review`, not `gh-arch`, because it is a WRITE** — it moves the branch. The command *feels*
+mechanical, and §5 itself calls a `BEHIND` rebase *"tree-preserving, no decision in it"*; that is
+true of its effect on the **tree** and says nothing about which credential may perform it. Routing
+it to the read wrapper on the strength of that phrasing is the mistake this note exists to stop.
 
 **On a branch that is already current the rebase is a no-op.** Then it is `CLAUDE.md` §5's rung 3 —
 close and reopen, which re-triggers CI with no commit and no history. And rung 1 comes first,
