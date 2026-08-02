@@ -425,19 +425,22 @@ decisions log.
 4. **Fixture certificates are generated at test time, never committed.** Nothing expires in the
    repository, and no artifact in a diff looks like a private key.
 5. **`crypto/x509` in-process, never `openssl(1)`.** No subprocess, and no key path in argv.
-6. **The step-1 UI ROUTE is pre-auth too, and the page renders the same thing to everyone.** This
-   is the question interface fact 8 left open for this rung. Settled below rather than in one
-   line, because half of it changes what first-run means.
+6. **The `/onboarding/https` UI ROUTE is pre-auth too, and the page renders the same thing to
+   everyone.** This is the question interface fact 8 left open for this rung. Settled below rather
+   than in one line, because half of it changes what first-run means.
 
 ### Rung-ruled 6, in full: the step-1 page is outside every guard
 
-**Outside `RequireAuth`, outside `SetupGate`, outside `LoginGate`.** `ui/src/routes/router.tsx`
-has exactly those three shapes plus a catch-all that `Navigate`s to `/`, which is itself behind
-`RequireAuth` — so a route added anywhere but the top level bounces an unauthenticated visitor to
-`/login`.
+**The route is `/onboarding/https`**, partnering the endpoint, and it is a **top-level entry** in
+`ui/src/routes/router.tsx` — a sibling of `/setup` and `/login`, not a child of anything.
+
+**Outside `RequireAuth`, outside `SetupGate`, outside `LoginGate`.** `router.tsx` has exactly those
+three shapes plus a catch-all that `Navigate`s to `/`, which is itself behind `RequireAuth` — so a
+route added anywhere but the top level bounces an unauthenticated visitor to `/login`. Naming the
+literal path is what makes the rest of this decision checkable rather than a direction of travel.
 
 **Exempting the endpoint but not the route would have bought nothing.** `GET
-/api/onboarding/step1` has no human-visible surface of its own. The ruling that made it pre-auth
+/api/onboarding/https` has no human-visible surface of its own. The ruling that made it pre-auth
 (quince#501) was about the deadlock — *the page explaining why login fails must not sit behind
 login* — and the page is the half a user meets.
 
