@@ -216,13 +216,16 @@ func TestResetIntervalIsReportedOnlyByTheModeThatResets(t *testing.T) {
 	}
 }
 
-// demoBoot performs the STATE half of a `--public-demo` startup over `cache`, in the order serve()
-// does it: derive the throwaway paths, wipe whatever the last run left, open the store, preset the
-// password, build a fresh fixture provider. It returns the live pieces plus the two shutdown halves
+// demoBoot performs the STATE half of a demo startup over `cache`, in the order serve() does it:
+// derive the throwaway paths, wipe whatever the last run left, open the store, configure auth for
+// the mode, build a fresh fixture provider. It returns the live pieces plus the two shutdown halves
 // serve() defers — closing the store, and the cleanup that only runs on a GRACEFUL exit.
 //
 // Split that way deliberately: story 7's interesting case is the restart where cleanup never ran.
-func demoBoot(t *testing.T, cache string) (*auth.Service, *demo.Provider, string, func(), func()) {
+//
+// `public` is a parameter rather than a constant because the two modes fail DIFFERENTLY when the
+// startup wipe is missing, and only one of those failures is loud (see prepareDemoState).
+func demoBoot(t *testing.T, cache string, public bool) (*auth.Service, *demo.Provider, string, func(), func()) {
 	t.Helper()
 	// prepareDemoState, NOT a local copy of what it does: a test that reimplements the sequence it
 	// is asserting would keep passing with the startup wipe deleted from serve()'s path.
@@ -234,89 +237,126 @@ func demoBoot(t *testing.T, cache string) (*auth.Service, *demo.Provider, string
 	}
 	log := discardLog()
 	svc := auth.NewService(st, log)
-	if err := configureDemoAuth(svc, log, true); err != nil {
-		t.Fatalf("configureDemoAuth(public): %v", err)
+	if err := configureDemoAuth(svc, log, public); err != nil {
+		t.Fatalf("configureDemoAuth(public=%v): %v", public, err)
 	}
 	return svc, demo.NewProvider(bus.New(), log), cfgPath, func() { _ = st.Close() }, cleanup
 }
 
-// TestPublicDemoRestartResetsEverything is spec story 7, and it is the story that makes the mode
-// worth deploying at all: "versions deleted by a visitor are back, the config edit is gone, and the
+// TestDemoRestartResetsEverything is spec story 7, and it is the story that makes the mode worth
+// deploying at all: "versions deleted by a visitor are back, the config edit is gone, and the
 // instance is at needs_login again rather than needs_setup".
 //
-// THE KILLED CASE IS THE ONE THAT MATTERS, which is why this runs both. A public demo is reset by
+// THE KILLED CASE IS THE ONE THAT MATTERS, which is why every mode runs both. A demo is reset by
 // something outside the process restarting it (design D4), and a container stop is entitled to be a
 // SIGKILL — so the deferred cleanup is exactly what a real reset cannot rely on. State is wiped at
 // BOTH ends for that reason, and a test exercising only a graceful exit would pass just as happily
 // with the STARTUP wipe deleted, which is the half that actually carries the guarantee.
 //
-// `needs_login` rather than `needs_setup` is the subtlest of the three: a restart that wiped the DB
-// but skipped the preset would leave a PUBLIC instance on an open set-password form, where the
-// first visitor to arrive owns it.
-func TestPublicDemoRestartResetsEverything(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		graceful bool
+// BOTH MODES, because deleting that wipe fails them differently and only one failure is loud
+// (prepareDemoState records the measurement). `--public-demo` refuses to start, which nothing can
+// miss. `--demo` starts and silently inherits — and quietly loses e2e's first-run set-password
+// coverage, which is the more expensive of the two precisely because nothing announces it. The
+// first revision of this test gated only the loud one, which left the failure it named as costlier
+// as the one nothing caught (found in review, quince#575).
+//
+// TestPlainDemoIsUnchanged does NOT cover the plain arm: it builds a fresh service with no state
+// dir and no restart, so it asserts --demo starts at needs_setup on a CLEAN boot — exactly the case
+// a surviving DB is not.
+//
+// The auth assertion is the load-bearing one. `needs_login` vs `needs_setup` is the subtlest of the
+// three claims, and it is mode-specific in both directions: a public instance left on an open
+// set-password form is owned by the first visitor to arrive, and a plain one that comes up at
+// needs_login has silently deleted the coverage --demo exists to provide.
+func TestDemoRestartResetsEverything(t *testing.T) {
+	for _, mode := range []struct {
+		name        string
+		public      bool
+		wantRestart string
+		because     string
 	}{
-		{"graceful exit runs cleanup", true},
-		{"KILLED — cleanup never runs, so startup must wipe", false},
+		{"--public-demo", true, auth.StateNeedsLogin,
+			"a public instance left on an open set-password form is owned by the first visitor to arrive"},
+		{"--demo", false, auth.StateNeedsSetup,
+			"--demo exists to exercise first-run setup; coming up at needs_login deletes that coverage silently"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cache := t.TempDir()
-			svc, prov, cfgPath, closeDB, cleanup := demoBoot(t, cache)
+		for _, tc := range []struct {
+			name     string
+			graceful bool
+		}{
+			{"graceful exit runs cleanup", true},
+			{"KILLED — cleanup never runs, so startup must wipe", false},
+		} {
+			t.Run(mode.name+"/"+tc.name, func(t *testing.T) {
+				cache := t.TempDir()
+				svc, prov, cfgPath, closeDB, cleanup := demoBoot(t, cache, mode.public)
 
-			if got, err := svc.Status(""); err != nil || got != auth.StateNeedsLogin {
-				t.Fatalf("first boot: status = %q (err %v), want %q", got, err, auth.StateNeedsLogin)
-			}
-
-			// A visitor deletes every version.
-			before := prov.Versions("")
-			if len(before) == 0 {
-				t.Fatal("the demo fixture has no versions, so the story cannot be asserted at all")
-			}
-			for _, v := range before {
-				if status, err := prov.Delete(v.ID); err != nil || status != http.StatusAccepted {
-					t.Fatalf("delete %s: status %d, err %v", v.ID, status, err)
+				// Whatever the mode starts at, a visitor ends up logged in against a password. In
+				// --demo that means completing first-run setup, which is the state that must NOT
+				// survive; in --public-demo it is already preset.
+				if !mode.public {
+					if err := svc.SetPassword("demo", "startup"); err != nil {
+						t.Fatalf("first boot: complete first-run setup: %v", err)
+					}
 				}
-			}
-			if n := len(prov.Versions("")); n != 0 {
-				t.Fatalf("%d version(s) survived the delete — the mutation this test rests on did not happen", n)
-			}
+				if got, err := svc.Status(""); err != nil || got != auth.StateNeedsLogin {
+					t.Fatalf("first boot: status = %q (err %v), want %q — the mutation this test rests "+
+						"on did not happen", got, err, auth.StateNeedsLogin)
+				}
 
-			// A visitor edits the config.
-			if err := os.WriteFile(cfgPath, []byte("sessions:\n  ttl_minutes: 999\n"), 0o600); err != nil {
-				t.Fatalf("write config edit: %v", err)
-			}
+				// A visitor deletes every version.
+				before := prov.Versions("")
+				if len(before) == 0 {
+					t.Fatal("the demo fixture has no versions, so the story cannot be asserted at all")
+				}
+				for _, v := range before {
+					if status, err := prov.Delete(v.ID); err != nil || status != http.StatusAccepted {
+						t.Fatalf("delete %s: status %d, err %v", v.ID, status, err)
+					}
+				}
+				if n := len(prov.Versions("")); n != 0 {
+					t.Fatalf("%d version(s) survived the delete — the mutation this test rests on did not happen", n)
+				}
 
-			closeDB()
-			if tc.graceful {
-				cleanup()
-			}
+				// A visitor edits the config.
+				if err := os.WriteFile(cfgPath, []byte("sessions:\n  ttl_minutes: 999\n"), 0o600); err != nil {
+					t.Fatalf("write config edit: %v", err)
+				}
 
-			// --- the restart ---
-			svc2, prov2, cfgPath2, closeDB2, _ := demoBoot(t, cache)
-			defer closeDB2()
+				closeDB()
+				if tc.graceful {
+					cleanup()
+				}
 
-			if n := len(prov2.Versions("")); n != len(before) {
-				t.Errorf("after restart: %d version(s), want %d — a visitor's deletions outlived the reset",
-					n, len(before))
-			}
-			if _, err := os.Stat(cfgPath2); !os.IsNotExist(err) {
-				t.Errorf("after restart: %s still exists (stat err %v) — the config edit outlived the reset",
-					filepath.Base(cfgPath2), err)
-			}
-			got, err := svc2.Status("")
-			if err != nil {
-				t.Fatalf("after restart: status: %v", err)
-			}
-			if got == auth.StateNeedsSetup {
-				t.Fatalf("after restart: status = %q — a PUBLIC instance left on an open set-password "+
-					"form, where the first visitor to arrive owns it", got)
-			}
-			if got != auth.StateNeedsLogin {
-				t.Fatalf("after restart: status = %q, want %q", got, auth.StateNeedsLogin)
-			}
-		})
+				// --- the restart ---
+				svc2, prov2, cfgPath2, closeDB2, _ := demoBoot(t, cache, mode.public)
+				defer closeDB2()
+
+				// NOT EVIDENCE THAT THE RESET COVERS VERSIONS, and a later reader should not take it
+				// as such. Demo versions live in the provider's in-memory map, seeded by NewProvider,
+				// so a fresh provider has the full set whether or not removeDemoState ever ran. It
+				// mirrors production honestly — serve() builds a new provider per start, so a process
+				// restart genuinely is what restores them — but this assertion is carried by the
+				// restart itself, never by the wipe. The auth and config assertions are the ones that
+				// fail when the reset breaks (observed in review, quince#575).
+				if n := len(prov2.Versions("")); n != len(before) {
+					t.Errorf("after restart: %d version(s), want %d — a visitor's deletions outlived the restart",
+						n, len(before))
+				}
+				if _, err := os.Stat(cfgPath2); !os.IsNotExist(err) {
+					t.Errorf("after restart: %s still exists (stat err %v) — the config edit outlived the reset",
+						filepath.Base(cfgPath2), err)
+				}
+				got, err := svc2.Status("")
+				if err != nil {
+					t.Fatalf("after restart: status: %v", err)
+				}
+				if got != mode.wantRestart {
+					t.Fatalf("after restart in %s: status = %q, want %q — %s",
+						mode.name, got, mode.wantRestart, mode.because)
+				}
+			})
+		}
 	}
 }
 
