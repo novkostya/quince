@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 
 	"github.com/novkostya/quince/core/internal/auth"
@@ -186,13 +185,6 @@ func cookieValue(r *http.Request, name string) string {
 		return c.Value
 	}
 	return ""
-}
-
-func clientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
 }
 
 func sessionCookieValue(r *http.Request) string { return cookieValue(r, auth.SessionCookieName) }

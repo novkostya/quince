@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -161,7 +162,10 @@ func TestLoadMissingFileIsDefaultsOK(t *testing.T) {
 	if !l.OK {
 		t.Fatalf("missing file should load defaults OK")
 	}
-	if l.Config != Default() {
+	// reflect.DeepEqual rather than !=: Config stopped being comparable when
+	// server.trusted_proxies added the first slice-valued field (quince#464). A list is the right
+	// shape for CIDRs, so the test moves rather than the schema.
+	if !reflect.DeepEqual(l.Config, Default()) {
 		t.Errorf("missing file should yield defaults")
 	}
 }
