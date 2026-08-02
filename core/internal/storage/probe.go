@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -51,26 +52,44 @@ func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, s
 	name, reason := probeNamespace(opts.Backups)
 	if name == BackendCopy {
 		// A degraded mode — surface it loudly (hard rule: no silent caps/fallbacks).
-		log.Warn("storage backend selected: copy — /backups supports neither reflink nor hardlinks; "+
-			"versioning will use full copies (transient 2x space)", "reason", reason)
+		//
+		// THE PATH IS AN ATTRIBUTE, not text (quince#514). This sentence hardcoded `/backups` and is
+		// the highest-stakes of the five instances: it is the surfaced degraded mode, announcing a
+		// 2x transient space cost — and it announced it against a path that, with storage plural,
+		// may be a different and perfectly healthy disk. Found by the architect; the other four
+		// were inside probeNamespace and this one is not, so a fix scoped to that function would
+		// have left it standing.
+		log.Warn("storage backend selected: copy — this path supports neither reflink nor hardlinks; "+
+			"versioning will use full copies (transient 2x space)",
+			"storage_root", opts.Backups, "reason", reason)
 	} else {
-		log.Info("storage backend selected", "backend", name, "reason", reason)
+		log.Info("storage backend selected", "backend", name, "storage_root", opts.Backups, "reason", reason)
 	}
 	return newNamespaceBackend(name, strategyFor(name), opts.Backups, opts.AppVersion, log), name, reason
 }
 
-// probeNamespace tests /backups for reflink independence, then hardlink+inode identity, else copy.
+// probeNamespace tests a storage's OWN root for reflink independence, then hardlink+inode
+// identity, else copy.
+//
+// EVERY REASON NAMES THE PATH IT PROBED (quince#514). All four hardcoded the literal `/backups`
+// while taking the real root as a parameter — true while there was exactly one storage and always
+// `/backups`, and wrong the moment quince#473 made storage plural. Measured on the staging stand:
+// a second storage at `/backups-usb` reported *"probe passed on /backups"*, naming a DIFFERENT,
+// healthy disk two lines above it in the same startup log.
+//
+// A reason is a state-honesty artifact, not a debug string: it is what tells an operator why their
+// storage is on the backend it is on, and this rung made "which storage" the load-bearing question.
 func probeNamespace(backups string) (string, string) {
 	if err := os.MkdirAll(backups, 0o755); err != nil {
-		return BackendCopy, "cannot create /backups probe dir: " + err.Error()
+		return BackendCopy, fmt.Sprintf("cannot create probe dir at %s: %v", backups, err)
 	}
 	if clonetree.ReflinkProbe(backups) {
-		return BackendReflink, "FICLONE independence probe passed on /backups"
+		return BackendReflink, fmt.Sprintf("FICLONE independence probe passed on %s", backups)
 	}
 	if hardlinkProbe(backups) {
-		return BackendHardlink, "reflink unsupported; link()+inode-identity probe passed on /backups"
+		return BackendHardlink, fmt.Sprintf("reflink unsupported; link()+inode-identity probe passed on %s", backups)
 	}
-	return BackendCopy, "neither reflink nor hardlinks supported on /backups"
+	return BackendCopy, fmt.Sprintf("neither reflink nor hardlinks supported on %s", backups)
 }
 
 // hardlinkProbe creates a file, hardlinks it, and confirms both names share one inode.
