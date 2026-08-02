@@ -21,7 +21,6 @@ type Config struct {
 	Sessions   SessionsConfig   `yaml:"sessions" json:"sessions"`
 	Automation AutomationConfig `yaml:"automation" json:"automation"`
 	UI         UIConfig         `yaml:"ui" json:"ui"`
-	Server     ServerConfig     `yaml:"server" json:"server"`
 }
 
 // BackupConfig is the `backup:` section.
@@ -250,25 +249,6 @@ type UIConfig struct {
 	Theme string `yaml:"theme" json:"theme"` // system | light | dark
 }
 
-// ServerConfig is the `server:` section — how quince is REACHED, as distinct from how it backs
-// anything up. One key today (quince#464).
-type ServerConfig struct {
-	// TrustedProxies lists IPs/CIDRs whose `X-Forwarded-*` headers quince believes. EMPTY (the
-	// default) means trust none and use the peer address — exactly today's behaviour, so no
-	// existing deployment changes on upgrade and a direct-LAN quince is unaffected.
-	//
-	// It exists because the per-IP login limiter buckets on the peer address, and behind a reverse
-	// proxy every visitor IS the same peer. Ten wrong guesses then deny the login route to
-	// everybody, correct password included (measured, quince#464). Design §6 has required this
-	// since qn.1 — *"reverse-proxy trust headers only from configured addresses"* — and it was
-	// simply unbuilt.
-	//
-	// TRUSTING THE HEADER UNCONDITIONALLY WOULD BE WORSE THAN THE BUG: any client could then mint
-	// unlimited buckets by varying it, deleting the rate limit rather than fixing it. Hence a
-	// configured list and not a boolean.
-	TrustedProxies []string `yaml:"trusted_proxies" json:"trusted_proxies"`
-}
-
 // Default returns schema v0 with every documented default filled (contracts §6). Missing
 // keys in a loaded file fall back to these.
 //
@@ -297,12 +277,6 @@ func Default() Config {
 		},
 		UI: UIConfig{
 			Theme: "system",
-		},
-		Server: ServerConfig{
-			// Empty is the shipping default and it is byte-for-byte today's behaviour: trust no
-			// proxy, bucket on the peer address. quince is a LAN service reached directly, where
-			// that is correct and quince#464 does not bite.
-			TrustedProxies: []string{},
 		},
 	}
 }
