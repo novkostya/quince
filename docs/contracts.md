@@ -303,9 +303,13 @@ remove one. **Forget is detach-and-forget: the declaration goes, the data on the
 That much is an Operator decision on quince#443 and is not what this block asks. What is open is
 **the shape**, and the restart behaviour is inside the shape rather than beside it.
 
-Two candidates, and they are not equivalent:
+**The addressing key is already decided and is NOT part of this question.** Operator ruling on
+quince#570, 2026-08-02: **the API addresses a storage by its config `name`** — *"`POST
+/api/storages/{name}/recheck`, and `qn.6d`'s Forget the same. Not the marker UUID."* Both candidates
+below are therefore `{name}`-addressed, and what is open is **resource-delete versus config
+mutation**:
 
-- **`DELETE /api/storages/{id}` → 204 | 404 | 409.** Treats storage as a REST resource, which the
+- **`DELETE /api/storages/{name}` → 204 | 404 | 409.** Treats storage as a REST resource, which the
   peer-entity frame argues for. But a `204` that leaves the resource in `GET /api/storages` until a
   restart is an incoherent contract, so this shape **forces live deregistration** — the class
   `qn.6c` declined in its rung-ruled decision 1, on a registry whose only runtime mutation today is
@@ -315,13 +319,14 @@ Two candidates, and they are not equivalent:
   *"Forgotten · restart quince to apply"* is the idiom `ConfigEditor` already ships rather than a
   new excuse for one.
 
-**This rung recommends the config mutation, on measured evidence rather than taste.** An
-unreachable storage has an **empty** `id`: `st.StorageID` is set on only two of six resolutions, so
-both `unreachable` and `missing_medium` reach the wire with `"id": ""` (quince#570, measured
-2026-08-02). A user most wants to forget a storage that never came up — a typo'd path, a disk that
-is gone for good — and **`DELETE /api/storages/{id}` structurally cannot address one.** The config
-`name` can: it is the config's own key and the DB's primary key, and every declared storage has one
-whether or not quince ever reached it.
+**This rung recommends the config mutation, on the BEHAVIOUR arguments above.**
+
+**One piece of evidence was withdrawn rather than quietly dropped.** This block first led with a
+measurement — an unreachable storage has an **empty** `id`, so a delete-by-`id` cannot reach the
+storage a user most wants to forget (quince#570). The measurement stands and is why quince#570 was
+ruled the way it was. **It no longer discriminates between these two candidates**, because a
+`{name}`-addressed DELETE reaches an unreachable storage perfectly well. Left visible because a
+recommendation that silently changes its grounds is one nobody can check.
 
 Three sub-questions, each with a recommendation that is explicitly not a decision:
 

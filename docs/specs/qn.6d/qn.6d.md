@@ -142,8 +142,8 @@ goes, this is the seam where a half-forgotten storage becomes observable.
 **The re-probe path already picked one, and said why**, which is worth reading before gap B is
 decided — `live.go:209`: *"It re-resolves by NAME, which is the identity the config carries."*
 
-**9. An UNREACHABLE storage has an EMPTY id — measured, and it decides gap B.** A targeted
-`go test` against `ResolveStorage`, this checkout:
+**9. An UNREACHABLE storage has an EMPTY id — measured, and it produced a RULING that this rung now
+inherits.** A targeted `go test` against `ResolveStorage`, this checkout:
 
 ```
 unreachable    → resolution="unreachable"    storage_id=""
@@ -162,6 +162,21 @@ no union at all.
 **Both are latent today and stop being latent here**, because a storage card is the first surface
 that branches on the code to pick an icon and a remedy, and Forget is the first surface that must
 address a storage the user cannot reach.
+
+**quince#570's ADDRESSING half was ruled on 2026-08-02 at `20:02:51`, and it lands ON this rung
+rather than beside it.** *"The API addresses a storage by its config `name` … and `qn.6d`'s Forget
+the same. Not the marker UUID."* Three consequences this spec must carry, all from the ruling text:
+
+- **`POST /api/storages/{id}/recheck` becomes `POST /api/storages/{name}/recheck`** — an existing
+  route changes key. Not this rung's PR, but this rung's gap-A block is the one editing §1's listing,
+  so the two must not contradict each other.
+- **The cost is accepted, not discovered later, and belongs in `contracts.md` beside the route:**
+  renaming a storage changes its API address, and because `name` defaults to the path (quince#504),
+  **editing a path renames the storage implicitly.** The key is stable-by-configuration, never
+  stable-forever.
+- **`Storage.id` on the wire is EXPLICITLY NOT settled, and the ruling hands it to this rung** —
+  *"whether `id` should still be emitted at all, and what it means when empty, belongs with
+  `qn.6d`'s card work."* Carried as open question 6.
 
 **10. The demo provider FABRICATES storages, and that bounds what ui-e2e can prove.**
 `core/internal/demo/provider.go:157-214` returns two hand-built `wire.Storage` values — `internal`
@@ -341,7 +356,13 @@ quince#443 files these as two questions — the endpoint shape, and *"the sharpe
 the rung"*, whether the card lingers until a restart. **This spec argues they are one question, and
 that is the design judgement it contributes.** The shape decides the restart behaviour:
 
-- **`DELETE /api/storages/{id}`** treats storage as a REST resource, which the peer-entity frame
+**The ADDRESSING KEY is no longer part of this question** — Operator ruling on quince#570,
+2026-08-02 at `20:02:51`, six minutes before this spec's PR opened. **The API addresses a storage by
+its config `name`**, and *"`qn.6d`'s Forget the same. Not the marker UUID."* So both candidates
+below are written `{name}`, and what remains open is purely **resource-delete versus config
+mutation**:
+
+- **`DELETE /api/storages/{name}`** treats storage as a REST resource, which the peer-entity frame
   argues for. But a `DELETE` that returns `204` and leaves the resource in `GET /api/storages` until
   a restart is an incoherent contract, so this shape **forces** live deregistration — the class
   `qn.6c` declined (fact 4), on a registry whose only mutation is an in-place slot swap guarded by a
@@ -351,12 +372,24 @@ that is the design judgement it contributes.** The shape decides the restart beh
   `CheckStorages` floor that already implements half of G6 (fact 5), and makes *"Forgotten · restart
   quince to apply"* the same idiom `ConfigEditor` already ships rather than a new excuse.
 
-**Recommended: the config mutation, and the deciding evidence is quince#570 rather than taste.**
-Fact 9 measured that an unreachable storage has an **empty** `id`. A user most wants to forget a
-storage that never came up — a typo'd path, a disk that is gone for good — and **`DELETE
-/api/storages/{id}` structurally cannot address it.** The config `name` can, because it is the
-config's own key and the DB's primary key, and it exists for every declared storage whether or not
-quince ever reached it.
+**Recommended: the config mutation — on BEHAVIOUR, and no longer on addressing.**
+
+**The empty-`id` measurement is no longer load-bearing here, and saying so is the point.** An
+earlier draft of this section led with it: a delete-by-`id` cannot reach a storage that never came
+up, therefore the config `name` wins. **The ruling makes that argument moot rather than wrong** —
+the measurement is still true and still filed, but once the REST candidate is `DELETE
+/api/storages/{name}` it reaches an unreachable storage perfectly well, so the evidence stops
+discriminating between the two. Recorded rather than quietly deleted, because a recommendation that
+silently changes its grounds is one nobody can check.
+
+What survives is about **behaviour**, and it is independent of the key:
+
+1. A `204` whose effect appears at the next restart is not a different question from *what shape is
+   Forget* — it is that question answered badly. Making it coherent costs live deregistration.
+2. The storage list **is** `config.yml`, so removing an entry is an edit to a file the UI already
+   edits, needing no second write path to it.
+3. *"Forgotten · restart quince to apply"* is an idiom already in the product, not a new excuse
+   invented to cover a limitation.
 
 Sub-question the Operator is asked to settle either way: **whether Forget is expressible through
 the existing `PUT /api/config`** — which works today and which fact 6 makes hazardous for a partial
@@ -427,10 +460,17 @@ a mount.
 
 **No new transcripts.** This rung drives no device.
 
-**A demo fixture must not paper over a live defect again.** Fact 10 is the record of it happening:
-the fixture's hardcoded non-empty ids are why story6 passes over quince#570. Where this rung's
-fixture and the live path can diverge, the spec names it here rather than letting a green gate
-imply agreement.
+**A demo fixture must not paper over a live defect again — and this is now a REQUIREMENT rather
+than an observation.** Fact 10 is the record of it happening: the fixture's hardcoded non-empty ids
+are why story6 passes over quince#570. quince#570's ruling makes the remedy explicit and puts it in
+this rung rather than in a follow-up:
+
+> **The fixture must produce what the live resolver produces** for an unreachable storage —
+> including an empty `id` if that is what remains true after quince#569 lands.
+
+*"A fixture that fabricates a value the live code never produces makes its gate a lie."* So PR 3's
+fixture work is not merely *add the new fields*: the unreachable storage's `id` must match whatever
+open question 3 settles, and PR 7's e2e must not depend on a value the daemon cannot emit.
 
 ---
 
@@ -490,19 +530,30 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 1. **Gaps A and B** — open until the Operator rules. Tracked in the devlog `progress.md`
    open-questions list. **No code PR opens before both verdicts.**
-2. **quince#569 and quince#570 are OPEN and are in this rung's path.** Neither is fixed here (see
-   Boundary). Both need a contract decision, and quince#570's — *does the API address a storage by
-   marker UUID or by config name* — is **the same question gap B asks**, arriving from the other
-   side. If gap B rules for the config `name`, quince#570's API half is answered with it and only
-   the `ResolutionMissingMedium` field-carrying half remains.
-3. **`Progress` has no warn tone** (fact 13). Whether a nearly-full disk turns the bar amber, and at
+2. **quince#569 is OPEN. quince#570's ADDRESSING half is RULED and the dependency runs the OTHER
+   way from what this section first said.** An earlier draft had gap B's ruling answering quince#570;
+   it is the reverse — quince#570 was ruled on 2026-08-02 at `20:02:51`, six minutes before this
+   spec's PR opened, and **it constrains gap B** rather than waiting on it. Both candidates in gap B
+   are now `{name}`-addressed and the question narrows to *resource-delete versus config mutation*.
+   Neither issue is fixed here (see Boundary). What remains open on quince#570 is the
+   `ResolutionMissingMedium` field-carrying half and the `Storage.id` question below.
+3. **`Storage.id`'s fate is THIS rung's, by the ruling's own words** — *"whether `id` should still be
+   emitted at all, and what it means when empty, belongs with `qn.6d`'s card work."* Not decided in
+   this spec, because the card is where it becomes answerable: the card is the first surface that
+   must render a storage with no id. The options are keep-and-document-empty, drop it in favour of
+   `name`, or make it nullable. **Named here so PR 4 does not pick one by accident.**
+4. **quince#570's HTTP claim is still unreproduced, and the ruling asks for it.** The resolver
+   measurement is solid; *"the claim that the button cannot work is currently an inference from
+   `ServeMux` behaviour nobody has watched."* Owed against a running daemon with a genuinely
+   unmounted declared path — not by this PR, which builds nothing.
+5. **`Progress` has no warn tone** (fact 13). Whether a nearly-full disk turns the bar amber, and at
    what threshold, is deliberately **not** decided here: a threshold with no measurement behind it
    is a guess rendered as a warning, and the projection work that would justify one is out of scope.
    Recorded so a later rung finds the question named.
-4. **Not a gap, recorded so a later rung does not rediscover it:** once counts are per-storage, the
+6. **Not a gap, recorded so a later rung does not rediscover it:** once counts are per-storage, the
    estimated-full projection the epic wants needs only a periodic sample of the same numbers. This
    rung deliberately does not collect them.
-5. **The demo cannot produce two storages on one real filesystem**, which is why G1 is split. If a
+7. **The demo cannot produce two storages on one real filesystem**, which is why G1 is split. If a
    future rung gives the demo provider a real temp-dir-backed storage, G1a could move to ui-e2e;
    until then the split is the honest shape.
 
