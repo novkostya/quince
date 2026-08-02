@@ -98,8 +98,13 @@ export interface Version {
   physical_bytes: number;
   // missing = the artifact is GONE (reconciliation couldn't find it); the row survives so history
   // isn't silently shrunk. Rendered explicitly dead — no size, no Unlock, an "artifact gone — remove?"
-  // action on DELETE (qn.6a (cr)). Older servers omit the key → undefined is treated as false.
-  missing?: boolean;
+  // action on DELETE (qn.6a (cr)).
+  //
+  // REQUIRED, not optional — same rule as storage_id below: `wire.Version.Missing` is `bool` with
+  // no `omitempty`, so the server ALWAYS emits the key. The `?` here justified itself as version
+  // skew, a new client against an old server; the UI is EMBEDDED IN THE DAEMON, so client and
+  // server ship as one binary and that skew cannot occur in the direction described (quince#460).
+  missing: boolean;
   // storage_id = which storage this version lives on (qn.6c). null means NOT YET ATTRIBUTED, and
   // that is TRANSITIONAL — unlike job_id, whose null (= adopted) is permanent and correct. Do not
   // render it as "no storage" and do not substitute a default: it means the server has not worked
