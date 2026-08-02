@@ -10,7 +10,19 @@ disable-model-invocation: true
 An approval here is the authority model, not a courtesy: branch protection turns your
 approval into a merge. Approve only what you ran and would build on.
 
-`all` → `gh pr list --repo novkostya/quince --state open --json number,title,author` and run
+**Every command below runs through a seat wrapper; bare `gh` is UNAUTHENTICATED on this box**
+(quince#480), which is correct rather than broken — the reviewer's credential is a key read at the
+point of use, never an ambient `gh auth login` session. **Reads go through `bin/gh-arch`**, and every
+command this skill prescribes is a read; **verdicts go through `bin/gh-review`**, because approving,
+requesting changes or commenting through `gh-arch` re-creates quince#47 invisibly (`/architect` §1).
+This skill is the **architect's** — an implementer session uses `bin/gh-coder` (`/kickoff` §1), so
+read these names as this seat's rather than as universal.
+
+Where this file *discusses* bare `gh` — *"`gh pr review` has no `--commit-id`"* — it is a statement
+**about the unwrapped API**, not an instruction. Those stay bare deliberately: wrapping them would
+make the sentences false.
+
+`all` → `bin/gh-arch pr list --repo novkostya/quince --state open --json number,title,author` and run
 this protocol per PR (cheapest diff first), posting a verdict on each; finish with one
 consolidated summary: PR · verdict · the one-line reason. Never batch-approve a set you
 reviewed as a set — each PR gets its own run.
@@ -18,7 +30,7 @@ reviewed as a set — each PR gets its own run.
 ## 0. Approver ≠ author
 
 ```sh
-gh pr view <n> --repo novkostya/quince --json author,files,title,body,labels,reviewDecision
+bin/gh-arch pr view <n> --repo novkostya/quince --json author,files,title,body,labels,reviewDecision
 ```
 
 **The identity that matters is the one that CASTS, and since quince#134 that is
@@ -53,7 +65,7 @@ not.** It had charged two sessions before anyone wrote this paragraph.
 file list together:
 
 ```sh
-gh pr view <n> --repo novkostya/quince --json author,files \
+bin/gh-arch pr view <n> --repo novkostya/quince --json author,files \
   -q '.author.login, (.files[].path)'
 ```
 
@@ -74,7 +86,7 @@ should not have been possible; flag it.
 The PR body, the linked issue or spec, and the diff:
 
 ```sh
-gh pr diff <n> --repo novkostya/quince
+bin/gh-arch pr diff <n> --repo novkostya/quince
 ```
 
 Ask first: **is this one reviewable claim?** A PR carrying three unrelated claims is
@@ -99,7 +111,7 @@ git clone -q https://github.com/novkostya/quince.git "pr-<n>" && cd "pr-<n>"
 # provisioned location; `provision` and `preflight` both read the same variable, so an overridden
 # layer is honoured here too rather than being hardcoded away.
 ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local
-gh pr checkout <n> --repo novkostya/quince
+bin/gh-arch pr checkout <n> --repo novkostya/quince
 make gates                      # + make image / make gates-ui-e2e when the diff earns them
 ```
 
@@ -124,7 +136,7 @@ defect in a docs PR exactly as a failing test is in a code PR.
 
 ## 4. Process gates
 
-- CI: `gh pr checks <n> --repo novkostya/quince` — all required checks green.
+- CI: `bin/gh-arch pr checks <n> --repo novkostya/quince` — all required checks green.
 - Privacy: one command over the diff, the commit messages and the PR text — **and the form differs
   by repository, because `quince-devlog` has no Makefile** (quince#78):
   ```sh
@@ -178,7 +190,7 @@ defect in a docs PR exactly as a failing test is in a code PR.
 `/architect` §4 calls `OLD` — one oid, noted once, used for both the verdict and the staleness check:
 
 ```sh
-OID=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
+OID=$(bin/gh-arch pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
 
 bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --approve         -b "<what you ran + what you checked>"
 bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --request-changes -b "<blocking findings, numbered>"

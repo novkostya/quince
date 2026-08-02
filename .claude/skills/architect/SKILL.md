@@ -291,7 +291,7 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   # BEFORE YOU READ, not before you submit: taking it at submission time pins to a head that may
   # already have moved while you were reading, which is the race this whole section exists for.
   OLD=<the full 40-char oid you noted before reading the diff>
-  NEW=$(gh pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
+  NEW=$(bin/gh-arch pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
   git fetch origin "$OLD" "$NEW"                 # both, by full oid
   git range-diff "origin/main...$OLD" "origin/main...$NEW"    # THREE-DOT, whole branch
   ```
@@ -353,7 +353,7 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   **The fallback, when a head really is unreachable** — a deleted fork, or an object the forge has
   since collected — is to compare patches through the API, which needs no local object at all:
   ```sh
-  gh api repos/novkostya/quince/compare/"$OLD"..."$NEW"      # or …/commits/<oid> per side
+  bin/gh-arch api repos/novkostya/quince/compare/"$OLD"..."$NEW"      # or …/commits/<oid> per side
   ```
   Prefer `range-diff`: it is rebase-aware and tells you *which* commit changed, where a patch
   comparison only tells you *that* something did.
