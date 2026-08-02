@@ -1,7 +1,29 @@
 # public-demo — a publicly reachable demo instance
 
-**Status: SPEC, unbuilt.** Written after the surface review it was ruled to wait for
-(`surface-review.md`, quince#467). Reviewed before any code exists, per the program doc.
+**Status: BUILT — all seven stories, each with a named gate.** Written after the surface review it
+was ruled to wait for (`surface-review.md`, quince#467) and reviewed before any code existed, per
+the program doc.
+
+| story | built by | gate |
+| --- | --- | --- |
+| 1 starts at `needs_login` | quince#524 | `TestPublicDemoStartsAtNeedsLogin` |
+| 2 setup refuses `409` | quince#524 | `TestPublicDemoSetupIsAlreadyClosed` |
+| 3 `Secure` not forced off | quince#524 | `TestPublicDemoDoesNotForceSecureOff` |
+| 4 `--demo` unchanged | quince#524 | `TestPlainDemoIsUnchanged` |
+| 5 login screen states the password | quince#532 | `LoginPage demo copy` (vitest) |
+| 6 …and that it resets, how often | quince#572 | `TestResetIntervalIsReportedOnlyByTheModeThatResets` + `LoginPage reset notice` |
+| 7 a restart resets everything | _(this PR)_ | `TestPublicDemoRestartResetsEverything` |
+
+**This header read `SPEC, unbuilt` until story 7.** It was written before any code existed and then
+left alone through three PRs that built six of the seven stories — so the document most likely to be
+read as *what is the state of this mode* asserted that none of it was. Recorded rather than quietly
+corrected: a stale status line is this project's most-filed defect class, and it is cheap to fix only
+while somebody happens to notice.
+
+**Still owed, and neither blocks the stories above:** there is no `--public-demo` e2e fixture
+(quince#534), so stories 5 and 6 are covered by vitest rather than the browser gate the Gates section
+names; and nothing asserts that a deployment restarts on the interval it advertises, which is
+quince#494's to carry.
 
 ## Goal
 
