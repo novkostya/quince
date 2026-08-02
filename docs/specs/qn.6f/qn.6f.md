@@ -199,8 +199,24 @@ block filed as quince#487 — no code until it is ruled.
 
 ## Contract and design changes
 
-**The `secureCookie` gap is already filed** — `docs/quince.design.md` §6, PR quince#487. It gates
-slice 4 and nothing else in this rung.
+**The `secureCookie` gap is RULED** — Operator, 2026-08-02, relayed on quince#446 at `05:58:57Z`. The
+block landed in `docs/quince.design.md` §6 with quince#487, and the ruling is **option (b) as
+recommended**: an explicit, off-by-default switch relaxing the **fallback only**, `trusted` as the
+user's **blanket assertion** — one boolean, not a host/CIDR allowlist — and a **non-dismissible**
+banner. Option (c), quince detecting plain-HTTP LAN access and relaxing on its own, is **rejected as
+part of the ruling** rather than merely unchosen. It gated slice 4; it gates nothing now.
+
+**Slice 4's PR carries a constraint this spec did not anticipate.** The block must be flipped to
+decided text **and its heading narrowed in the same diff as the code** — `bin/gap-heading-check` fails
+`gates-sh` on a live `PROPOSED (gap):` lead whose body says `RULED`. And `docs/quince.design.md` is
+code-owner owned, so that PR needs `@novkostya`'s approval as well as an architect review.
+
+**One interaction with gap A is NOT settled and belongs to gap A's ruling.** If plain-HTTP
+connections get a `301` to `https://<same host>:<same port>`, then **with a certificate configured
+this opt-in is unreachable** — every plain connection is bounced before the cookie question arises.
+So the ruling governs the no-certificate case in practice, and the residue is exactly the deployment
+design §6 calls the one that inverts the obvious answer: a VPN user who has a certificate and would
+rather not terminate TLS inside an already-encrypted tunnel. **Gap A should say which wins.**
 
 **Two more gaps are proposed by this rung**, written into `docs/contracts.md` §6 in a **companion
 PR**, not this one. They are quince#446's open decisions 3 and 4. **Neither is this spec's to
@@ -362,7 +378,10 @@ decisions log.
 1. **Gap A — one listener or two** (contracts §6, this PR). Blocks slice 2.
 2. **Gap B — the default port** (contracts §6, this PR). Blocks slice 2's deploy half; the listener
    can be built against the current default and the number changed once.
-3. **The `secureCookie` gap** (design §6, quince#487). Blocks slice 4 entirely.
+3. ~~**The `secureCookie` gap** (design §6, quince#487). Blocks slice 4 entirely.~~ **RULED
+   2026-08-02** (quince#446) — option (b). Slice 4 is unblocked; see *Contract and design changes*
+   for what its PR owes. Struck rather than deleted: this list is cited, and a reader arriving from
+   a citation needs to see that it moved rather than find it missing.
 
 **Three live checks**, per *interface facts are looked up live*. Reported separately on quince#462
 rather than asserted here.
@@ -393,11 +412,19 @@ Each PR carries one reviewable claim.
 | **5** | Wildcard + read-only assertions. | 7, 8 | PR 4 |
 | **6** | The default port moves. | — | **gap B** |
 | **7** | Self-signed generation. | 9 | **check 1** |
-| **8** | Plain HTTP. | — | **quince#487's ruling** |
+| **8** | Plain HTTP — the opt-in switch, and flipping the design §6 block in the same diff. | — | **nothing — RULED 2026-08-02** |
 | **9** | `deploy/` prose. | 10 | nothing |
 
-**PRs 1, 2, 3 and 9 are unblocked today.** The `secureCookie` gap block (quince#487) was filed
-*before* this spec precisely because it has the longest lead time of anything in the rung.
+**PRs 1, 2, 3, 8 and 9 are unblocked.** The `secureCookie` gap block (quince#487) was filed *before*
+this spec precisely because it had the longest lead time of anything in the rung — and that paid off:
+it was **ruled within three hours of being filed**, so slice 8 joined the unblocked set before slice 4
+had started. Only gaps A and B (quince#491) and check 1 still gate anything.
+
+**The unblocked piece worth doing FIRST is not in this table**, because it is not this rung's:
+**quince#497** — login over plain HTTP returns `200` with a cookie the browser discards, and the
+server already knows at `handlers_auth.go:83`. The ruling separated it deliberately. It is smaller
+than any slice here, needs no listener and no ruling, and it is needed **under** the ruling too,
+since the opt-in is off by default and every user who has not set it still meets the loop.
 
 **PR 4 is the one to review hardest.** It is where a mistake fails in the direction where the user
 believes they are encrypted.
