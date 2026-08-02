@@ -825,6 +825,15 @@ automation:                 # assisted-backup policy (consumed from qn.12)
   reminder_cooldown_hours: 24
 ui:
   theme: system             # system | light | dark
+server:                     # how quince is REACHED, as distinct from how it backs anything up
+  trusted_proxies: []       # IPs/CIDRs whose X-Forwarded-* headers quince believes.
+                            # EMPTY (the default) = trust none = bucket on the peer address,
+                            # which is byte-for-byte pre-quince#464 behaviour, so no existing
+                            # deployment changes on upgrade. Set it when a reverse proxy is in
+                            # front: without it every visitor shares one login bucket and ten
+                            # wrong guesses deny login to EVERYBODY, correct password included.
+                            # Design §6 has required this since qn.1 — "reverse-proxy trust
+                            # headers only from configured addresses" — and it was unbuilt.
 ```
 
 Schema is versioned by presence/absence of keys (missing keys = defaults, written back
