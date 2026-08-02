@@ -74,8 +74,8 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 // signal still wins and *the header can only ever upgrade* is preserved verbatim. Moving
 // this branch above SecureOrigin would let the flag strip Secure from a genuine HTTPS
 // session, which is a different and much worse setting than the one that was ruled.
-func secureCookie(r *http.Request, allowInsecure bool) bool {
-	if SecureOrigin(r) {
+func secureCookie(r *http.Request, allowInsecure bool, trusted *TrustedProxies) bool {
+	if SecureOrigin(r, trusted) {
 		return true
 	}
 	if allowInsecure {
@@ -102,11 +102,30 @@ func secureCookie(r *http.Request, allowInsecure bool) bool {
 // It is a package function rather than a Service method on purpose: it is a pure function of
 // the request, with no dependency on demo mode or the plain-http opt-in. Service.Secure is
 // where those live, and conflating the two would make a POLICY answer look like a FACT.
-func SecureOrigin(r *http.Request) bool {
+// THE PROXY ARGUMENT IS GATED ON WHO IS SPEAKING (quince#555). `X-Forwarded-Proto` is believed only
+// from a peer in `trusted`, and only when `trusted` is CONFIGURED — an unset list means believe the
+// header from anyone, which is exactly today's behaviour, so no existing deployment changes.
+//
+// The old justification was *"X-Forwarded-Proto only ever upgrades to Secure, so trusting it cannot
+// weaken"*. True of the COOKIE, and false of the two consumers that now exist:
+//
+//   - `Service.CookieWillBeDiscarded` is `Secure(r) && !SecureOrigin(r)`, so it INVERTS. An injected
+//     header makes it report false while the browser still discards the cookie — suppressing the
+//     quince#497 login-loop warning in precisely the case that warning exists to name.
+//   - Onboarding step 1 reports `Complete` from this predicate (quince#554), so an injected header
+//     tells the operator their setup is finished when it is not.
+//
+// Both fail toward *everything is fine* on a connection that is not encrypted, which is why a header
+// that can only add `Secure` stopped being harmless.
+func SecureOrigin(r *http.Request, trusted *TrustedProxies) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	if !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return false
+	}
+	// Unset list → believe it, as before. Configured → only from a peer the operator named.
+	return !trusted.Configured() || trusted.TrustsPeer(r)
 }
 
 func isLoopbackHost(hostport string) bool {

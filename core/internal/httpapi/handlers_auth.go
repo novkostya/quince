@@ -103,7 +103,7 @@ func (d Deps) handleAuthLogin() http.HandlerFunc {
 func (d Deps) issueSessionResponse(w http.ResponseWriter, r *http.Request, password string) {
 	// The caller's own session cookie, so login supersedes THIS client's prior session and no
 	// other device's (quince#373). Empty on a first login, which is the ordinary case.
-	d.warnUnconfiguredProxy(r)
+	d.Proxies.WarnUnconfiguredProxy(d.Log, r)
 	sess, csrf, err := d.Auth.Login(password, d.Proxies.ClientIP(r), sessionCookieValue(r))
 	if err != nil {
 		switch {

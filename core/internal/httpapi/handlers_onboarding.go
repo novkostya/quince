@@ -29,7 +29,7 @@ import (
 // caller already knows, having made it.
 func (d Deps) handleOnboardingHTTPS() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, d.Log, http.StatusOK, detectHTTPS(r))
+		writeJSON(w, d.Log, http.StatusOK, detectHTTPS(r, d.Proxies))
 	}
 }
 
@@ -43,11 +43,11 @@ func (d Deps) handleOnboardingHTTPS() http.HandlerFunc {
 // is not "can you log in from this browser" — it is "can you reach quince from your phone",
 // and a developer on http://localhost cannot. Telling them the step is finished would be
 // exactly the false assurance this rung exists to remove, one layer up.
-func detectHTTPS(r *http.Request) wire.OnboardingHTTPS {
+func detectHTTPS(r *http.Request, trusted *auth.TrustedProxies) wire.OnboardingHTTPS {
 	switch {
 	case r.TLS != nil:
 		return wire.OnboardingHTTPS{Complete: true, Detected: wire.HTTPSDetectedTLS}
-	case auth.SecureOrigin(r):
+	case auth.SecureOrigin(r, trusted):
 		// SecureOrigin is true and r.TLS is nil, so it can only be the forwarded header.
 		return wire.OnboardingHTTPS{Complete: true, Detected: wire.HTTPSDetectedForwarded}
 	default:

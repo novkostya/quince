@@ -283,21 +283,21 @@ func TestCheckCSRF(t *testing.T) {
 // why secureCookie takes it as a parameter rather than reading a package variable.
 func TestSecureCookieRule(t *testing.T) {
 	loopback := httptest.NewRequest("GET", "http://localhost:8080/api/health", nil)
-	if secureCookie(loopback, false) {
+	if secureCookie(loopback, false, nil) {
 		t.Error("loopback http should not be Secure")
 	}
 	lan := httptest.NewRequest("GET", "http://10.20.30.40/api/health", nil)
-	if !secureCookie(lan, false) {
+	if !secureCookie(lan, false, nil) {
 		t.Error("non-loopback http should be Secure")
 	}
 	tlsReq := httptest.NewRequest("GET", "http://localhost/api/health", nil)
 	tlsReq.TLS = &tls.ConnectionState{}
-	if !secureCookie(tlsReq, false) {
+	if !secureCookie(tlsReq, false, nil) {
 		t.Error("TLS should be Secure")
 	}
 	proxied := httptest.NewRequest("GET", "http://localhost/api/health", nil)
 	proxied.Header.Set("X-Forwarded-Proto", "https")
-	if !secureCookie(proxied, false) {
+	if !secureCookie(proxied, false, nil) {
 		t.Error("X-Forwarded-Proto https should be Secure")
 	}
 }
@@ -340,7 +340,7 @@ func TestAllowInsecureTransportRelaxesOnlyTheFallback(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := secureCookie(tc.req, true); got != tc.want {
+			if got := secureCookie(tc.req, true, nil); got != tc.want {
 				t.Errorf("secureCookie(_, allowInsecure=true) = %v, want %v", got, tc.want)
 			}
 		})

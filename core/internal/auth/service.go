@@ -51,6 +51,9 @@ type Service struct {
 	// allowInsecureTransport is the user's `sessions.allow_insecure_transport` opt-in. Not
 	// the same thing as insecureCookies above — see SetAllowInsecureTransport.
 	allowInsecureTransport bool
+	// proxies gates X-Forwarded-Proto in SecureOrigin (quince#555). Nil behaves as "unset",
+	// which believes the header from anyone — today's behaviour, and the shipping default.
+	proxies *TrustedProxies
 }
 
 // NewService returns a Service with production defaults.
@@ -88,7 +91,7 @@ func (s *Service) Secure(r *http.Request) bool {
 	if s.insecureCookies {
 		return false
 	}
-	return secureCookie(r, s.allowInsecureTransport)
+	return secureCookie(r, s.allowInsecureTransport, s.proxies)
 }
 
 // CookieWillBeDiscarded reports whether a session cookie issued for THIS request would be
@@ -101,7 +104,7 @@ func (s *Service) Secure(r *http.Request) bool {
 // (or to demo mode) cannot leave this answer behind — and a second copy of a security
 // predicate is a thing that drifts.
 func (s *Service) CookieWillBeDiscarded(r *http.Request) bool {
-	return s.Secure(r) && !SecureOrigin(r)
+	return s.Secure(r) && !SecureOrigin(r, s.proxies)
 }
 
 // HasPassword reports whether the admin password has been set.
@@ -282,3 +285,8 @@ func (s *Service) audit(event, clientIP string) {
 		s.log.Error("audit append failed", "event", event, "error", err)
 	}
 }
+
+// SetTrustedProxies supplies the proxy trust list (quince#555). Applied at process start from
+// QUINCE_TRUSTED_PROXIES; nil or unset means believe X-Forwarded-Proto from anyone, which is the
+// pre-quince#555 behaviour and what every direct deployment does.
+func (s *Service) SetTrustedProxies(t *TrustedProxies) { s.proxies = t }
