@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APIError } from "@/lib/api";
 
 // Shared full-page password form for first-run setup and login.
 export function PasswordForm({
@@ -20,7 +22,10 @@ export function PasswordForm({
   onSubmit: (password: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // The CODE is kept alongside the message, not just the prose. `insecure_origin` is the one
+  // failure a user cannot act on from this form — no password will ever work over this
+  // connection — so it is the one that has to offer somewhere else to go.
+  const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
@@ -30,7 +35,11 @@ export function PasswordForm({
     try {
       await onSubmit(password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      if (err instanceof APIError) {
+        setError({ message: err.message, code: err.code });
+      } else {
+        setError({ message: err instanceof Error ? err.message : "Something went wrong" });
+      }
     } finally {
       setBusy(false);
     }
@@ -58,7 +67,30 @@ export function PasswordForm({
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        {error ? <div className="mt-2 text-sm text-danger">{error}</div> : null}
+        {error ? (
+          <div className="mt-2 text-sm text-danger">
+            {error.message}
+            {/* THE ONE ERROR THIS FORM CANNOT HELP WITH. Every other failure here has an action
+                the user can take in this box — retype the password, wait out the rate limit. An
+                insecure origin means NO password will ever work on this connection, so the only
+                useful thing the form can do is point somewhere else.
+
+                Keyed on the CODE, not on `window.location.protocol`, and that is the whole reason
+                it is correct: the server sends `insecure_origin` exactly when the cookie would be
+                discarded, which is NOT the same as "this is http". On `http://localhost`, in
+                `--demo`, and with `sessions.allow_insecure_transport` on, login works fine over
+                plain http and this link must not appear. A client-side scheme check would show it
+                to all three (quince#559 discussion). */}
+            {error.code === "insecure_origin" ? (
+              <>
+                {" "}
+                <Link to="/onboarding/https" className="underline underline-offset-2">
+                  How to fix this
+                </Link>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <Button type="submit" className="mt-4 w-full" disabled={busy || password.length === 0}>
           {busy ? "…" : cta}
         </Button>
