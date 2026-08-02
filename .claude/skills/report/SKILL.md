@@ -179,9 +179,9 @@ It builds the production image **on this box**, serves it in `--demo` mode, wait
 `/api/health` to actually answer, and prints what it verified. **One line goes in the PR:**
 
 - **the convention URL** — `http://quince-runner:<port>/`, which the tool prints ready to
-  paste. The port is ALLOCATED, not fixed: `demo` tries `8080` and increments until one
+  paste. The port is ALLOCATED, not fixed: `demo` tries `8968` and increments until one
   binds, because two runners serving demos on one box is the ordinary case (quince#45), so
-  do not write `8080` from memory — paste the line the tool printed.
+  do not write `8968` from memory — paste the line the tool printed.
 - the loopback address it fetched (`127.0.0.1:<port>`) — **never** in PR text. It is what
   this box verified, not something a reader can open.
 
