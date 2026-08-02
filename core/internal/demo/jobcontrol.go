@@ -68,6 +68,26 @@ func (p *Provider) StartBackup(udid, transport, storageID, retryOf string) (wire
 	if status != 0 {
 		return wire.Job{}, status, reason
 	}
+	// THE DEMO VALIDATES storage_id, and it did not until quince#452's retry regression showed
+	// why that matters. The live daemon answers 404 for an id it does not declare
+	// (`ResolveChoice`); the demo accepted anything and ignored it — so `story4`'s "retries a
+	// failed backup" passed while BOTH Retry buttons were sending a JOB id as the storage id, and
+	// the e2e that exercises retry could not see it by construction.
+	//
+	// A demo that accepts what the daemon refuses is not a lighter daemon, it is a different one,
+	// and every gate driven against it inherits the difference.
+	if storageID != "" {
+		known := false
+		for _, s := range p.Storages("") {
+			if s.ID == storageID {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return wire.Job{}, http.StatusNotFound, "no storage with that id is declared"
+		}
+	}
 
 	jid := id.New()
 	run, free := p.startRun(udid, jid)

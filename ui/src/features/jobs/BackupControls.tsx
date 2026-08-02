@@ -8,7 +8,7 @@ import type { RequestTransport } from "./useBackup";
 interface BackupControlsProps {
   device: Device;
   activeJob?: Job;
-  start: (transport: RequestTransport, storageID?: string, retryOf?: string) => Promise<boolean>;
+  start: (transport: RequestTransport, opts?: { storageID?: string; retryOf?: string }) => Promise<boolean>;
   cancel: (jobId: string) => Promise<boolean>;
   busy: boolean;
   storages: Storages;
@@ -76,7 +76,7 @@ export function BackupControls({
   return (
     <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => void start(transport, storageID || undefined)}
+          onClick={() => void start(transport, { storageID: storageID || undefined })}
           disabled={!present || busy}
           title={present ? undefined : "Connect the device over USB or Wi-Fi to back it up"}
           data-testid="backup-now"
