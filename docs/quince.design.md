@@ -461,7 +461,9 @@ non-negotiable:
   Push (later) requires a real cert — documented, not solved by us.
 - **Auth**: single admin password (argon2id hash in app DB), cookie sessions
   (`HttpOnly` + `Secure` + `SameSite=Strict`; `Secure` relaxed only for loopback-http and
-  `--demo`, so local/e2e over plain http still work — never in production), session
+  `--demo`, so local/e2e over plain http still work — never in production; **whether a user
+  may knowingly opt out of that on a trusted network is an open gap, proposed at the end of
+  this section**), session
   rotation on login, rate-limited login, idle timeout. All API and WS behind it.
   **Rotation is PER CLIENT, and quince is multi-device**: a login supersedes the authenticating
   client's own prior session and leaves every other device's alone (Operator ruling, quince#373).
@@ -501,6 +503,64 @@ non-negotiable:
 - **Committed versions are read-only** to the vault (ro bind of the version's `browse_root`).
 - **Subprocess hygiene**: argv arrays only; UDIDs and paths validated against strict
   patterns before use.
+
+**PROPOSED (gap): may a user on a trusted network opt into plain HTTP — that is, may `Secure`
+be relaxed for a NON-loopback host?** `qn.6f`, quince#462; the analysis is on quince#446, where
+three separate rulings say this block is required before any plain-HTTP code exists. Affects the
+**Auth** bullet above and `core/internal/auth/cookie.go`. Nothing is built on this until it is ruled.
+
+**The defect it answers.** `secureCookie` returns `true` for every non-loopback host, so over
+`http://` to a LAN address quince sets a `Secure` cookie on an insecure origin. The browser
+**rejects it outright** — never stored, never sent. Login succeeds, the next request is
+unauthenticated, and the user is returned to the login screen: **a loop with no error message.**
+Only loopback works, and a phone is not loopback — so the primary client of a Wi-Fi backup tool
+cannot log in at all.
+
+**The current behaviour is correct rather than accidental**, and the code comment says so: canon
+requires HTTPS and we never silently downgrade. **The question is not whether the rule is right.
+It is whether the user may knowingly turn it off** — which relaxes the baseline this section calls
+non-negotiable, and is therefore the Operator's, not a rung's.
+
+**The case that inverts the obvious answer: a VPN.** Over WireGuard or Tailscale the transport is
+*already* encrypted, and quince still breaks — for a reason with nothing to do with the threat
+model. Adding TLS inside an encrypted tunnel buys nothing and costs a certificate to manage, so
+**plain HTTP is the correct offer for a tunnelled deployment rather than the lazy one**. It also
+makes plain HTTP strictly better than a self-signed certificate *in that case*: the same encryption
+on the wire, minus the browser interstitial.
+
+**Option (a) — no, status quo.** HTTPS or loopback, nothing else; one rule, no exceptions. Its cost
+is not zero: a VPN user must terminate TLS inside a tunnel they already trust, and every LAN user
+meets an unexplained login loop rather than a refusal. A baseline enforced as a silent failure is
+itself a *no silent fallbacks* problem, in the direction where the user cannot tell what went wrong.
+
+**Option (c) — yes, detected**: quince notices plain-HTTP LAN access and relaxes on its own.
+**Rejected, and recorded only so the rejection is on the record.** A security baseline that switches
+itself off when the network makes it inconvenient is the thing the baseline exists to prevent.
+
+**Option (b) — an explicit, off-by-default, surfaced opt-in. RECOMMENDED**, and the shape is the
+part that needs ruling rather than the yes/no:
+
+1. **One config key, defaulting to off** — `sessions.allow_insecure_transport: false`. Under
+   `sessions:` rather than a `tls:` section, because it governs the session and CSRF cookies and it
+   applies precisely when there is *no* TLS. D12: in the file, editable in the UI, no secret.
+2. **It relaxes the FALLBACK only, never a positive signal.** `r.TLS != nil` and
+   `X-Forwarded-Proto: https` keep returning `true` regardless; only the final
+   `return !isLoopbackHost(r.Host)` becomes conditional. *The header can only ever upgrade* is
+   preserved verbatim.
+3. **It is a degraded mode, so it is surfaced** — a startup log line, a **non-dismissible** UI
+   banner naming what is unprotected, and visible in Settings. Not a one-time notice.
+4. **The honest cost, stated in the UI and not only here.** The session cookie and the CSRF token
+   cross the network in clear, so anyone who can read the path can impersonate the admin of an app
+   that — in this section's own opening words — *shows a person's entire digital life*. On a VPN
+   that path is the tunnel; on a LAN it is everyone on the LAN, and "LAN-only" is already recorded
+   here as context rather than a defense.
+5. **No HSTS while this is reachable.** Already true (quince sends none, `httpapi.securityHeaders`)
+   and it must stay true, or a user who enables this is locked out with no in-browser recovery.
+
+**What a ruling settles beyond yes/no**, any of which may be edited into it: the key's name and
+section; whether "trusted" is the user's blanket assertion (recommended — someone who sets the flag
+has already made that judgement) or a declared host/CIDR allowlist (more machinery, and it changes
+nothing about who can read the wire); and whether the banner is dismissible (recommended: no).
 
 ## 7. Vault: lazy, session-scoped reading (Python today, swappable seam)
 
