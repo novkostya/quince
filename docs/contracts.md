@@ -812,3 +812,118 @@ storages and the remedy.
 
 A **restart** is still required to pick up a `storages:` change — D12 permits that only if the spec
 says why, and `docs/specs/qn.6c/qn.6c.md` says why.
+
+**PROPOSED (gap): one listener or two, and what plain HTTP does once quince serves TLS?**
+`qn.6f`, quince#462 — quince#446's open decision 3, spec `docs/specs/qn.6f/qn.6f.md`. Nothing is
+built on this until it is decided.
+
+**The question.** With `tls.cert_file` set, does quince **(a)** add a second port for HTTPS and keep
+serving the app over http on `QUINCE_LISTEN`, **(b)** listen on two ports where the http one
+redirects or refuses, or **(c)** serve both protocols on the single port `QUINCE_LISTEN` already
+names, routed by inspecting the first byte of each connection?
+
+**It is not an implementation detail**, which is why it is here rather than in the spec. It decides
+the URL a user bookmarks, and serving the app on both a plain and a TLS origin is two origins with
+different cookie behaviour — the same `secureCookie` split that makes this rung necessary, now
+inside one deployment.
+
+**The deployment constraint that shapes it.** `deploy/compose.nas.yml` documents that Wi-Fi is
+quince's primary use case, that netmuxd finds devices only by mDNS, that multicast does not cross a
+bridged container network, and therefore that the answer is `network_mode: host` with the `ports:`
+block deleted. **On the deployment that matters there is no port forwarding at all** — so a second
+listener is a second host bind, and a second collision surface on a box where nothing can be
+remapped.
+
+**The Operator's leaning, recorded and not decided:** *"environment variable, single port for both
+http and https"* — option (c), with plain-HTTP connections getting a `301` to
+`https://<same host>:<same port>`.
+
+**What (c) buys beyond a saved port.** The onboarding URL never changes: open `http://host:PORT`,
+complete step 1, obtain a certificate, and the same URL keeps working, upgraded in place. There is
+no *"now go to a different port"* — the worst moment in any self-hosted first run — and no saved
+bookmark that starts returning a TLS error, which browsers render as *"sent an invalid response"*
+and a user cannot distinguish from the app being broken.
+
+**Budget it at ~150 lines, not ~30.** The byte-sniff is small. The working feature is a
+per-connection peek goroutine with a read deadline **cleared before hand-off** (or the HTTP server
+inherits it), two synthetic channel-backed listeners implementing `Accept`/`Close`/`Addr`, a `Conn`
+wrapper replaying the peeked byte on first `Read`, and shutdown coordination across two
+`http.Server`s over one real listener without double-closing.
+
+**The dependency question, measured live 2026-08-02 rather than recalled.**
+`github.com/soheilhy/cmux` is the obvious import and it is **dormant**: latest published version
+**v0.1.5, 2021-02-05** (module proxy), 2.8k stars, 26 open issues, 10 open PRs, not archived. Its
+only activity since February 2021 is one commit on **2026-06-08**, *"Modernize for current Go
+toolchains"* — **untagged, so no published version contains it**; taking it means pinning a
+pseudo-version. Nothing in `golang.org/x` multiplexes connections. `github.com/inetaf/tcpproxy` is
+genuinely maintained (2026-05-15) but is a *proxy* — it routes to backend addresses rather than
+yielding `net.Listener`s, so it is not a drop-in. **Go 1.26 adds nothing here**: `bytes.Buffer.Peek`
+is a buffer method, and the standard library still has no `net.Conn` peek, no protocol detection,
+and no listener-wrapping helper.
+
+**Recommended: (c), vendored rather than `cmux`.** One byte of discrimination — `0x16` is a TLS
+ClientHello, every HTTP request begins with an ASCII method letter — is a `bufio.Reader`, a
+`Peek(1)`, and a `Conn` whose `Read` drains the buffered reader first. cmux buys a general matcher
+framework and its own close semantics, in exchange for a dependency whose newest release predates
+this decision by five years.
+
+**A trap that belongs with the decision, because it is silent and permanent: never send HSTS while
+the certificate is self-signed.** HSTS instructs the browser to refuse untrusted connections to that
+origin, which removes the click-through exception the self-signed tier depends on and locks the user
+out with no in-browser recovery. quince sends none today — `httpapi.securityHeaders` is CSP,
+`X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`, measured — and must not start
+while any self-signed or plain-HTTP path is reachable.
+
+**PROPOSED (gap): the default listen port — `:8080` is close to the worst available choice, and it
+is free to change only until v0.1.** `qn.6f`, quince#462 — quince#446's open decision 4. Nothing is
+built on this until it is decided.
+
+**Why now.** The same argument the `QUINCE_BACKUPS` retirement above turned on: there is one
+instance, so changing the default is one edit today. After v0.1 it is in every README, every
+screenshot, every compose file anyone copies, and every user's bookmark.
+
+**The constraint that makes it load-bearing rather than cosmetic.** Under bridged networking a
+collision costs nothing — remap `8081:8080`. Under `network_mode: host`, which Wi-Fi requires,
+**nothing can be remapped**: if anything on the box already holds the port, quince fails to bind and
+does not start. `8080` is close to the worst available choice for that — Synology's own stack,
+Tomcat, qBittorrent, UniFi and a long tail of homelab software live there.
+
+**Measured live against the IANA registry, 2026-08-02** — `service-names-port-numbers.csv`,
+`Last-Modified: Thu, 23 Jul 2026 20:36:24 GMT`, 15,398 rows:
+
+- **`8080` is ASSIGNED**: `http-alt`, *"HTTP Alternate (see port 80)"*.
+- **`8443` is ASSIGNED**: `pcsync-https`. So the natural pair for a two-listener design is **two
+  assigned and heavily squatted ports**.
+- 1,582 of the 2,000 ports in 8000–9999 are unassigned for TCP; the large contiguous runs are
+  8475–8499, 8504–8553, 8616–8664, 8712–8731, 8810–8872 and 8955–8979.
+
+**Criteria, not a number** — "which ports are free" is exactly the sort of fact canon says to read
+live:
+
+1. **IANA-unassigned**, in the registered range 1024–49151.
+2. **Below 32768.** A session box's `/proc/sys/net/ipv4/ip_local_port_range` reads `32768 60999`, so
+   a listener above that can lose a race with an outbound socket's source port. Under host
+   networking that is a real failure mode. **This criterion was not in quince#446's list**, and it
+   removes a whole range.
+3. **Not on Chromium's restricted-port list** (`net/base/port_util.cc`). Nothing in 8000–9999 is
+   blocked; the nearest entry is **10080**, where a web UI would simply be unreachable in Chrome.
+4. **Avoid 9100–9999** — the Prometheus exporter allocation band, actively curated (wiki edited
+   2026-07-31).
+5. **Mid-block in a large unassigned run, clear of de-facto squatters.** IANA does not record
+   squatters, so this is a separate cross-check: Synology 5000/5001, Plex **32400 (officially
+   registered — the only one of these that bothered)**, Jellyfin 8096, Home Assistant 8123,
+   Portainer 9000/9443, Syncthing 8384, Immich 2283, Proxmox 8006, Sonarr 8989, Radarr 7878, UniFi
+   8443/8843/8880. **Several sit on IANA-unassigned ports, which is precisely why the registry alone
+   is not sufficient.**
+
+**Recommended: `8968`** — unassigned, mid-block in 8955–8979, nearest known neighbours 8983 (Solr,
+15 away) and 8989 (Sonarr, 21). Runners-up **`8517`** (block 8504–8553, nearest 8501 Streamlit) and
+**`8486`** (block 8475–8499; weakest of the three, because 8484 is two away).
+
+**What changing it costs:** `deploy/Dockerfile`'s `ENV QUINCE_LISTEN`, both compose files,
+`deploy/dev.md`, the e2e harness and the demo.
+
+**Two honest notes.** No unassigned port is memorable, so the real mitigation is that the listen
+address is already a first-class setting rather than a good number. And under host networking a bind
+failure must be a **loud named error, never a fallback to another port** — *no silent caps or
+fallbacks*.
