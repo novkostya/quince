@@ -211,9 +211,19 @@ func serve(args []string) error {
 		}
 	}
 
+	// quince#464: who may be believed about X-Forwarded-For. Empty — the shipping default — trusts
+	// nobody and buckets on the peer address, which is byte-for-byte what every deployment does
+	// today. A malformed entry is WARNED and ignored rather than dropped silently: a proxy the
+	// operator believes is configured, and is not, is the exact silent degradation this fixes.
+	proxies, badProxies := httpapi.NewTrustedProxies(cfgSvc.Current().Server.TrustedProxies)
+	for _, b := range badProxies {
+		log.Warn("server.trusted_proxies entry is not an IP or CIDR and is IGNORED",
+			"entry", b, "key", "server.trusted_proxies")
+	}
+
 	srv := newHTTPServer(listen, httpapi.NewRouter(httpapi.Deps{
 		Log: log, Version: version.String(), Mode: serveMode(demoMode, *publicDemo),
-		Config: cfgSvc, Auth: authSvc, Bus: eventBus,
+		Config: cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages,

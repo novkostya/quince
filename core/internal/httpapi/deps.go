@@ -31,6 +31,9 @@ type Deps struct {
 	Ops            DeviceOps
 	WorkingReset   WorkingReset
 	AllowedOrigins []string
+	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
+	// "trust nobody", which is the shipping default and today's behaviour.
+	Proxies *TrustedProxies
 }
 
 // WorkingReset drives POST /api/devices/{udid}/reset-working (qn.5b, contracts §1): discard a
