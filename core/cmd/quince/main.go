@@ -120,13 +120,7 @@ func serve(args []string) error {
 	cfgPath := bootstrap.ConfigPath()
 	var cleanup func()
 	if demoMode {
-		// Fresh throwaway state each run so the first-run set-password flow is exercised
-		// (rung-ruled reading of "--demo seeds password demo": demo starts at needs_setup;
-		// the canonical demo password is "demo", entered at setup).
-		dbPath = filepath.Join(bootstrap.Cache, "demo.db")
-		cfgPath = filepath.Join(bootstrap.Cache, "demo-config.yml")
-		removeDemoState(dbPath, cfgPath)
-		cleanup = func() { removeDemoState(dbPath, cfgPath) }
+		dbPath, cfgPath, cleanup = prepareDemoState(bootstrap.Cache)
 	}
 
 	st, err := store.Open(dbPath)
@@ -509,6 +503,51 @@ func configCmd(args []string) error {
 	}
 	fmt.Printf("config OK: %s\n", path)
 	return nil
+}
+
+// demoStatePaths is where a demo instance's throwaway state lives — under the CACHE dir, never the
+// data dir, which is what makes the whole lifecycle safe to delete twice a run.
+//
+// Extracted so spec story 7 can assert the restart cycle over a temp dir (quince#444). That is not
+// a test-only convenience: the location IS the story. Move these under the data dir and every
+// reset would still appear to work — `removeDemoState` deletes whatever it is handed — while
+// quietly wiping a real deployment's DB the first time somebody ran the binary with `--demo`.
+func demoStatePaths(cache string) (dbPath, cfgPath string) {
+	return filepath.Join(cache, "demo.db"), filepath.Join(cache, "demo-config.yml")
+}
+
+// prepareDemoState is a demo instance's whole state lifecycle: fresh throwaway paths, wiped on the
+// way IN, and a cleanup that wipes again on a graceful way out. It returns the paths so the caller
+// opens the store on them.
+//
+// WIPING AT STARTUP IS THE HALF THAT CARRIES THE GUARANTEE, and it is easy to read as belt-and-
+// braces beside the deferred cleanup. It is not. A public demo is reset by something OUTSIDE the
+// process restarting it (spec D4), and a container stop is entitled to be a SIGKILL — so the
+// deferred half is exactly what a real reset cannot rely on.
+//
+// Delete this line and graceful restarts still reset, while killed ones break DIFFERENTLY IN EACH
+// MODE — measured, not reasoned:
+//
+//   - `--public-demo` REFUSES TO START. The surviving DB still holds the password, so presetting it
+//     returns ErrAlreadyConfigured and serve() fails. Loud, and the demo is simply down.
+//   - `--demo` starts and silently inherits the previous run's DB and config — a visitor's damage
+//     included — and comes up at needs_login instead of needs_setup, which quietly deletes e2e's
+//     first-run set-password coverage.
+//
+// Neither is a reset. They are recorded separately because the loud one is the one a reader assumes
+// covers both, and it is the quiet one that costs coverage nobody notices losing.
+//
+// Fresh state each run also keeps `--demo` starting at needs_setup, so e2e keeps exercising the
+// first-run set-password flow (rung-ruled reading of "--demo seeds password demo"; the canonical
+// demo password is "demo", entered at setup).
+//
+// One function rather than three lines inlined in serve(), so spec story 7's test drives THIS
+// sequence rather than a copy of it — a test that reimplements the order it is asserting would pass
+// with the startup wipe deleted (quince#444).
+func prepareDemoState(cache string) (dbPath, cfgPath string, cleanup func()) {
+	dbPath, cfgPath = demoStatePaths(cache)
+	removeDemoState(dbPath, cfgPath)
+	return dbPath, cfgPath, func() { removeDemoState(dbPath, cfgPath) }
 }
 
 func removeDemoState(dbPath, cfgPath string) {
