@@ -131,7 +131,23 @@ func (s *Service) Status(sessionID string) (string, error) {
 // SetPassword sets the admin password on first run only. It returns ErrAlreadyConfigured
 // (→ 409) if a password already exists — setup succeeds exactly once, so it can never be
 // an unauthenticated password reset (Operator ruling).
-func (s *Service) SetPassword(password string) error {
+// It is RATE-LIMITED, and quince#520 changed why rather than removing the need. On a CONFIGURED
+// instance the 409 is now cheap — the existence check runs before the derivation, so a probe costs
+// a database read. On an UNCONFIGURED one it is not: until somebody sets a password every request
+// legitimately reaches the 64 MiB derivation, so a fresh instance is still the amplifier quince#463
+// measured at 9 MB → 2063 MB RSS over sixty requests of ~100 bytes.
+//
+// That window is exactly first-run — the one moment the route must stay open, and the one moment
+// nobody is watching the box.
+//
+// The LOGIN limiter, shared deliberately: they are the same resource (a pre-auth credential
+// endpoint) and the same attacker, and giving setup its own bucket would let one client spend both
+// budgets. Post-quince#547 the bucket is per-visitor rather than per-proxy, which is what makes
+// sharing safe — before that, one visitor exhausting it denied setup to everybody.
+func (s *Service) SetPassword(password, clientIP string) error {
+	if !s.limiter.allow(clientIP, s.now()) {
+		return ErrRateLimited
+	}
 	if len(password) < s.minPasswordLen {
 		return ErrWeakPassword
 	}

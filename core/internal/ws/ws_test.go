@@ -28,7 +28,7 @@ func setup(t *testing.T) (*bus.Bus, func(string) error, string) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	svc := auth.NewService(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := svc.SetPassword("test"); err != nil {
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
 	sess, _, err := svc.Login("test", "1.1.1.1", "")

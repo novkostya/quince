@@ -433,7 +433,7 @@ func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) err
 		log.Info("demo mode: serving fixture data — set the admin password to begin")
 		return nil
 	}
-	if err := authSvc.SetPassword(demoPassword); err != nil {
+	if err := authSvc.SetPassword(demoPassword, "startup"); err != nil {
 		return fmt.Errorf("preset the public-demo password: %w", err)
 	}
 	log.Info("public demo mode: serving fixture data — the password is preset and setup is closed; "+
