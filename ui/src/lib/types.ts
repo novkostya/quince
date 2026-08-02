@@ -257,3 +257,14 @@ export interface Health {
   version: string;
   mode: ServeMode;
 }
+
+// --- onboarding (qn.6f) ---
+
+// OnboardingHTTPS is GET /api/onboarding/https. `detected` is the EVIDENCE and `complete` the
+// VERDICT; both are sent although one is derivable, so a client deciding whether to show the
+// setup options never keeps its own list of which reasons count — that list is exactly what
+// goes stale when a fourth reason appears (contracts §1).
+export interface OnboardingHTTPS {
+  complete: boolean;
+  detected: "tls" | "forwarded_proto" | "none";
+}
