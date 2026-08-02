@@ -92,7 +92,8 @@ function Incomplete() {
       <p className="mt-3 text-sm text-muted">
         This connection is plain HTTP, so signing in from a phone or another computer will not
         work — the browser discards the session cookie and returns you to the login page without
-        an error. Pick one of these.
+        an error. Some features are also unavailable on an unencrypted connection, whatever you
+        do about signing in. Pick one of these.
       </p>
     </>
   );
@@ -159,6 +160,17 @@ function Tiers() {
                 is that your session cookie crosses the network in clear, so anyone who can read
                 the path can sign in as you.
               </p>
+              {/* THE SAME FORECLOSURE THE SELF-SIGNED ROW CARRIES, and it was missing here.
+                  Browsers only register service workers on a secure origin, and plain http to a
+                  LAN address is not one — so this option rules out push exactly as a
+                  click-through certificate does. Said now, while it is a choice, rather than
+                  discovered when the feature arrives and does not work. */}
+              <p className="mt-2">
+                It also rules out notifications. Browsers only allow web push on an encrypted
+                origin, so quince will never be able to tell you that a backup is waiting for your
+                passcode. That feature is not built yet — which is exactly why it is worth knowing
+                now, while this is still a choice.
+              </p>
             </>
           }
           docs="deploy/tls.md"
@@ -191,6 +203,29 @@ function Tiers() {
   );
 }
 
+// DocLink turns a repo path into something a reader can actually open. This page is read on a
+// phone more than anywhere else in quince, and a phone cannot open `deploy/tls.md` — printing a
+// filename at someone who is stuck is a dead end dressed as help.
+//
+// `blob/main` rather than a pinned commit or tag: the reader wants the CURRENT instructions for
+// the quince they are running, and a pinned link rots into describing an older one. The cost is
+// that a very old deployment may read newer docs, which is the better failure of the two.
+//
+// The first external link in the UI, so the styling is here rather than in a shared component —
+// one instance is not a pattern. If a second page needs it, that is when it moves.
+function DocLink({ path }: { path: string }) {
+  return (
+    <a
+      className="text-accent underline underline-offset-2"
+      href={`https://github.com/novkostya/quince/blob/main/${path}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {path}
+    </a>
+  );
+}
+
 function Tier({
   title,
   badge,
@@ -217,7 +252,11 @@ function Tier({
       <CardContent>
         <div className="text-sm text-muted" aria-disabled={disabled || undefined}>
           {body}
-          {docs ? <p className="mt-2 text-xs text-muted">See <code className="font-mono">{docs}</code>.</p> : null}
+          {docs ? (
+            <p className="mt-2 text-xs text-muted">
+              See <DocLink path={docs} />.
+            </p>
+          ) : null}
         </div>
       </CardContent>
     </Card>
