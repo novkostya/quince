@@ -59,7 +59,7 @@ landed on an open PR *during* the flush, which would have sat in a thread contra
 record. A session that asserts a clean boundary, flushes for ten minutes, and stops has asserted
 something that stopped being true while it was being useful.
 
-**Re-assert with `gh pr list`, never with `forge-watch tick`.** A tick consumes accrued events out
+**Re-assert with `<gh> pr list` — §1's per-seat read wrapper, not a bare `gh` — never with `forge-watch tick`.** A tick consumes accrued events out
 of a state file the successor may inherit — a retiring session reads the forge without writing to
 the watch state. That distinction is not obvious and was found only because one session's watchers
 were already stopped when it re-checked.
