@@ -68,6 +68,7 @@
       "Bash(make scratch-reap-test)",
       "Bash(make home-resolution-test)",
       "Bash(make wrapper-boundary-test)",
+      "Bash(make gh-coder-body-test)",
       "Bash(make pr-title-refs-test)",
       "Bash(make pr-title-check)",
       "Bash(make pr-title-check *)",
