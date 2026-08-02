@@ -562,6 +562,42 @@ section; whether "trusted" is the user's blanket assertion (recommended — some
 has already made that judgement) or a declared host/CIDR allowlist (more machinery, and it changes
 nothing about who can read the wire); and whether the banner is dismissible (recommended: no).
 
+**PROPOSED (gap): is onboarding step 1 reachable WITHOUT a session — a fifth `authExempt` route?**
+`qn.6f`, quince#462. Found by an Operator question on that issue, 2026-08-02, not by the spec — which
+names the step-1 endpoint in its Boundary and never says which side of the auth guard it sits on.
+
+**The chicken-and-egg.** On the deployment this rung exists for — a phone, fresh install, plain HTTP
+to a LAN address — the sequence is: `/setup` works (it is exempt), login returns `200`, the browser
+discards the `Secure` cookie, and the user is back at the login screen with no error. **Step 1 is the
+page that explains exactly this, and it is behind the door the defect locks.**
+
+**The exempt set is four routes and has been since `qn.1`** — measured at `core/internal/httpapi/middleware.go:73-79`:
+
+```go
+case "GET /api/health", "GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup":
+```
+
+Anything this rung adds is behind `authGuard` unless deliberately exempted. **Widening that set is a
+security-posture change, which is why this is a gap rather than a line in the rung's spec.**
+
+**Option (a) — step 1 is pre-auth, a fifth exempt route. RECOMMENDED, narrowly.** What it discloses
+is which transport tiers exist and whether *this* request arrived over a secure origin — no device
+data, no configuration, no secret. The precedent is already here: `needs_setup` deliberately puts
+first-run guidance ahead of a session. **The cost, stated:** it is one more pre-auth surface to keep
+honest forever, and every future onboarding step will cite it as precedent — which is an argument for
+exempting **step 1 only**, by exact path, rather than an `/api/onboarding/*` prefix.
+
+**Option (b) — step 1 stays behind auth**, and the login loop is answered where it happens
+(quince#497). Cheaper, changes no posture, and is needed under (a) anyway: a user who lands on
+`/login` first never sees step 1 regardless. **Its cost is that the rung's own remedy stays
+unreachable to the user who most needs it.**
+
+**These are not exclusive, and the recommendation is both.** quince#497 relaxes nothing and should
+land whatever is decided here; (a) is what makes step 1 do its job on first run.
+
+**Not decided here, and it is the rung's if (a) is ruled:** whether the exemption is the endpoint
+only or the UI route too, and what the page renders for a user who is not yet authenticated.
+
 ## 7. Vault: lazy, session-scoped reading (Python today, swappable seam)
 
 - **Lazy is the model** (Operator decision): backup content is read only inside an
