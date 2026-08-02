@@ -163,6 +163,24 @@ func (e *Engine) StartBackup(udid, transport, storageID, retryOf string) (wire.J
 	// Resolved BEFORE the busy check on purpose: an unknown storage is a bad request whatever the
 	// device happens to be doing, and answering 409 "already running" to it would hide a permanent
 	// problem behind a transient one.
+	// A RETRY INHERITS THE STORAGE IT IS RETRYING, and that is resolved BEFORE ResolveChoice runs
+	// (quince#521, found on the staging stand 2026-08-02).
+	//
+	// Without this, retrying a job that was writing to `shuttle` with no explicit `storage_id`
+	// resolved to the DEFAULT — so a failed backup to a second disk silently restarted onto the
+	// first. That is the substitution the comment below refuses at the binding layer, arriving one
+	// level up: `Job.storage_id` records where a backup was AIMED, and a retry aims at the same
+	// place or it is not a retry of that job.
+	//
+	// An EXPLICIT storage_id still wins — retargeting is a thing the caller may ask for, and only
+	// the silent version is wrong. An inherited storage that is now unreachable gets ResolveChoice's
+	// 409 naming it, never a fallback: the whole point is that the answer is never "somewhere else".
+	if storageID == "" && retryOf != "" {
+		if prev, ok, err := e.st.GetJob(retryOf); err == nil && ok && prev.StorageID != nil {
+			storageID = *prev.StorageID
+		}
+	}
+
 	concreteStorage, status, reason := e.versionQ.ResolveChoice(storageID)
 	if status != 0 {
 		return wire.Job{}, status, reason

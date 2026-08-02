@@ -1473,3 +1473,48 @@ func TestWaitTrackerGraceBudgetDoesNotBiteAJobThatMoves(t *testing.T) {
 func describeNothing(w *waitTracker) string {
 	return fmt.Sprintf("movedBy=%s gracePhase=%q graceSpent=%v", w.movedBy, w.gracePhase, w.graceSpent)
 }
+
+// A RETRY INHERITS THE STORAGE IT IS RETRYING (quince#521). Found on the staging stand: a failed
+// backup to the second storage, retried with no explicit `storage_id`, silently restarted onto the
+// DEFAULT — the same substitution `BindJobStorage` exists to refuse, arriving one level up.
+//
+// ONE SLOT IS ENOUGH TO CATCH IT, which is worth noting because two would have been the obvious
+// setup. The discriminator is a previous job bound to a storage this Manager does NOT declare:
+//
+//	with the bug   storage_id is ignored → resolves to the default → 202
+//	with the fix   the id is inherited → ResolveChoice does not know it → 404
+//
+// And the property it pins is the one that matters on its own terms: **a retry of a job whose
+// storage is gone REFUSES rather than quietly landing somewhere else.**
+func TestRetryInheritsTheStorageAndRefusesWhenItIsGone(t *testing.T) {
+	h := newHarness(t, fakeParams{}, TransportUSB)
+
+	prev := store.JobRow{
+		ID: "01PREVJOB", UDID: testUDID, Kind: "backup", Transport: TransportUSB,
+		State: StateFailed, Phase: StateFailed, Liveness: LivenessActive,
+		StartedAt: time.Now().UTC(), IntentID: "01PREVJOB", Attempt: 1,
+		StorageID: strPtr("01STORAGENOLONGERDECLARED"),
+	}
+	if err := h.st.InsertJob(prev); err != nil {
+		t.Fatalf("seed previous job: %v", err)
+	}
+
+	_, status, reason := h.eng.StartBackup(testUDID, TransportUSB, "", prev.ID)
+	if status != http.StatusNotFound {
+		t.Fatalf("retry = %d (%s) — want 404: the failed job's storage is not declared, and a "+
+			"retry must refuse rather than silently land on the default", status, reason)
+	}
+	if !strings.Contains(reason, "no storage with that id is declared") {
+		t.Errorf("reason = %q, want the daemon's own sentence about the storage", reason)
+	}
+}
+
+// THE OVERRIDE PATH — an explicit `storage_id` on a retry beating the inherited one — is NOT
+// tested here, and the reason is a property of this harness rather than an oversight: its single
+// slot carries an EMPTY StorageID, which is also the sentinel meaning "not specified". So
+// "explicitly the default" cannot be expressed against it, and any other explicit value is
+// undeclared and answers 404 whether the fix inherits or not — an assertion that cannot fail
+// differently is not a test. It is covered by the UI-side assertion that Retry sends `retryOf`
+// and no storage, and by the branch's own guard (`storageID == ""`), which cannot run when a
+// storage was named.
+func strPtr(s string) *string { return &s }
