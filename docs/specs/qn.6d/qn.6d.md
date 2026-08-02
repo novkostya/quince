@@ -31,7 +31,7 @@ ask of this rung — `name` optional, defaulting to the path — is **already di
 | `core/internal/demo/` | the fixture storages gain the new fields |
 | `ui/src/components/Sidebar.tsx` | `Devices` → `Home`; `HardDrive` is handed to storage |
 | `ui/src/features/storage/` (new) | the card, the details page, the Forget dialog |
-| `ui/src/routes/router.tsx` | `storage/:id` |
+| `ui/src/routes/router.tsx` | `storage/:name` |
 | `ui/src/features/settings/ConfigEditor.tsx` | reconcile the read-only line that already defers here |
 | `docs/` | contracts §1/§2; `ui.design.md` principle 4; `design.md` §8 |
 | `ui/e2e/` | `story7-storage.spec.ts` |
@@ -176,7 +176,7 @@ the same. Not the marker UUID."* Three consequences this spec must carry, all fr
   stable-forever.
 - **`Storage.id` on the wire is EXPLICITLY NOT settled, and the ruling hands it to this rung** —
   *"whether `id` should still be emitted at all, and what it means when empty, belongs with
-  `qn.6d`'s card work."* Carried as open question 6.
+  `qn.6d`'s card work."* Carried as open question 3.
 
 **10. The demo provider FABRICATES storages, and that bounds what ui-e2e can prove.**
 `core/internal/demo/provider.go:157-214` returns two hand-built `wire.Storage` values — `internal`
@@ -409,7 +409,7 @@ is still a config mutation, not a resource delete.
 3. **A `copy`-backend storage carries a caution pill** on its card.
 4. **An unreachable storage is listed, says why, and dates its counts** — never hidden, never
    presented as current.
-5. **A storage has a details page** at `storage/:id` with the marker rendered as a status header.
+5. **A storage has a details page** at `storage/:name` with the marker rendered as a status header.
 6. **The details page's device list, version list and `Back up now` are scoped to that storage.**
 7. **A device with no versions on this storage is shown there, with the full-transfer warning.**
 8. **Forget removes a storage from the declaration and deletes nothing on disk.**
@@ -504,8 +504,13 @@ Written before building. Every rule this rung touches **or comes near**, includi
 Rung-local: inside this rung's boundary, changing no contract surface, no storage lifecycle and no
 behaviour beyond this rung. Recorded here per the gap protocol.
 
-1. **The details page route is `storage/:id`, and `:id` is whatever gap B rules the identity to be.**
-   The route is written once, after the ruling. Naming it here so the two PRs do not each pick.
+1. **The details page route is `storage/:name`.** This read *"`storage/:id`, and `:id` is whatever
+   gap B rules the identity to be"* until quince#570 was ruled — **gap B no longer decides the
+   identity, so a decision that keeps deferring to it points at nothing.** The API addresses a
+   storage by its config `name`, so a route keyed on anything else would have to translate, and for
+   a storage that never came up there is nothing to translate *from*. Written here so PR 5 does not
+   re-derive it. Open question 3 is a different question — whether `Storage.id` is still *emitted* —
+   and does not reopen this one.
 2. **The card attributes free space to the filesystem in PROSE regardless of gap A's field names** —
    *"1.2 TB free on this filesystem"* when more than one storage shares one, plain *"1.2 TB free"*
    when it does not. The wording is rung-local; the **field names are not**, which is why they are
