@@ -218,11 +218,22 @@ deployment the option exists for, and a generator assuming a writable output dir
 exactly it — G4); output under `Bootstrap.Data` alongside `config.yml` and `quince.db`; `0600` on
 the key.
 
-**One consequence is the Operator's and is NOT decided here:** quince#446 ruled a four-tier page with
-self-signed as a *"Not recommended"* row. If it is not built, that row must become something. The
-architect's recommendation is the shape the ruled page already contains — present, **disabled**,
-*not implemented*, pointing at an issue, exactly as the managed-address row does. **Slice 2 is not
-blocked on it**: the row's existence is ruled and only its state is in question.
+**The page's self-signed row is RULED — it STAYS, disabled, *not implemented*.** Operator,
+2026-08-02 (quince#446, eleventh ruling), in the shape the ruled page already contains for the
+managed-address row. **Slice 2 builds it**, which makes slice 2 one item larger than *detection plus
+the page* implies.
+
+**Provisional by intent, and that is recorded rather than smoothed over.** The Operator's words:
+
+> *"OK let's do that for now (although I'm thinking of dropping it entirely, but it's cheap to drop
+> later)"*
+
+**So two instructions follow, and they point in opposite directions on purpose.** A session that
+meets this row and finds it pointless must **not** quietly remove it — it is there by ruling, its
+removal is under active consideration, and *"cheap to drop later"* is why it is still there rather
+than an oversight for a tidy reader to correct. Equally, **nobody builds toward it**: no config key,
+no generation path, no test beyond rendering. The row is a statement that the option exists and
+quince does not offer it.
 
 ### What does NOT change
 
@@ -239,9 +250,9 @@ block landed in `docs/quince.design.md` §6 with quince#487, and the ruling is *
 recommended**: an explicit, off-by-default switch relaxing the **fallback only**, `trusted` as the
 user's **blanket assertion** — one boolean, not a host/CIDR allowlist — and a **non-dismissible**
 banner. Option (c), quince detecting plain-HTTP LAN access and relaxing on its own, is **rejected as
-part of the ruling** rather than merely unchosen. It gated slice 4; it gates nothing now.
+part of the ruling** rather than merely unchosen. It gated slice 8; it gates nothing now.
 
-**Slice 4's PR carries a constraint this spec did not anticipate.** The block must be flipped to
+**Slice 8's PR carries a constraint this spec did not anticipate.** The block must be flipped to
 decided text **and its heading narrowed in the same diff as the code** — `bin/gap-heading-check` fails
 `gates-sh` on a live `PROPOSED (gap):` lead whose body says `RULED`. And `docs/quince.design.md` is
 code-owner owned, so that PR needs `@novkostya`'s approval as well as an architect review.
@@ -422,7 +433,7 @@ decisions log.
    (quince#446): **one port, both protocols, routed by the first byte, VENDORED not `cmux`** — whose
    newest published version predates the decision by five years. Plain HTTP gets a `301` to the same
    host and port, **except when `sessions.allow_insecure_transport` is set, where the opt-in wins**.
-   Slice 2 may ship the redirect **unconditional**, since the flag arrives in slice 8 and cannot be
+   Slice 4 may ship the redirect **unconditional**, since the flag arrives in slice 8 and cannot be
    enabled before it is built.
 2. ~~**Gap B — the default port**~~ **RULED 2026-08-02: `8968`.** Verified against the live IANA
    registry at the ruling — zero occurrences, mid-block in the 8955–8979 unassigned run, below the
@@ -467,7 +478,7 @@ Each PR carries one reviewable claim.
 | # | claim | stories | blocked on |
 | --- | --- | --- | --- |
 | **1** | *This spec.* Gaps A and B are a companion PR. | — | nothing |
-| **2** | Detection + the four-tier page + the disabled managed-address row. | 1, 2 | nothing |
+| **2** | Detection + the four-tier page + **two** disabled rows: managed-address *and* self-signed, both *not implemented*. | 1, 2 | nothing |
 | **3** | The `tls:` config keys, their validation, and the TS type. | 3 | nothing |
 | **4** | The listener + `CheckTLS` + **G2** + **G3**. One port, first-byte routed, vendored; the `301` unconditional. Flips gap A's block. | 4, 5, 6 | **nothing — RULED** |
 | **5** | Wildcard + read-only assertions. | 7, 8 | PR 4 |
