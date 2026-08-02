@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { BackupControls, BackupControlsStatus } from "./BackupControls";
 import type { Device, Job, Transports } from "@/lib/types";
+import type { Storages } from "./useStorages";
 
 function device(transports: Transports): Device {
   return {
@@ -37,12 +38,23 @@ function runningJob(): Job {
   };
 }
 
+
+// The storage subscription is LIFTED to the page now (quince#325's rule split the control from its
+// prose, so two components share one fetch). These tests do not exercise the storage surface, so
+// they pass an empty loaded list — which renders no control and no notices, exactly as a
+// single-storage install does.
+function noStorages(over: Partial<Storages> = {}): Storages {
+  return { state: { status: "loaded", storages: [] }, recheck: () => {}, rechecking: {}, reload: () => {}, ...over };
+}
+
+const storageProps = { storages: noStorages(), storageID: "", setStorageID: () => {} };
+const statusProps = { storages: noStorages(), storageID: "" };
 const ok = () => Promise.resolve(true);
 
 describe("BackupControls", () => {
   it("starts a backup over auto by default", () => {
     const start = vi.fn().mockResolvedValue(true);
-    render(<BackupControls device={device({ usb: "t" })} start={start} cancel={ok} busy={false} />);
+    render(<BackupControls device={device({ usb: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />);
     fireEvent.click(screen.getByTestId("backup-now"));
     // undefined storage = "the default", which the SERVER resolves. The selector sends nothing
     // rather than pre-filling the default's id, so an untouched control behaves exactly as this
@@ -53,24 +65,24 @@ describe("BackupControls", () => {
   // The "and explains" half of this test moved to the status block below, which is where the
   // sentence now renders. The button being disabled is still this component's claim.
   it("disables the button when the device is on no transport", () => {
-    render(<BackupControls device={device({})} start={ok} cancel={ok} busy={false} />);
+    render(<BackupControls device={device({})} start={ok} cancel={ok} busy={false} {...storageProps} />);
     expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("offers a transport override only when the device is on both transports", () => {
     const { rerender } = render(
-      <BackupControls device={device({ usb: "t" })} start={ok} cancel={ok} busy={false} />,
+      <BackupControls device={device({ usb: "t" })} start={ok} cancel={ok} busy={false} {...storageProps} />,
     );
     expect(screen.queryByLabelText(/backup transport/i)).toBeNull();
     rerender(
-      <BackupControls device={device({ usb: "t", wifi: "t" })} start={ok} cancel={ok} busy={false} />,
+      <BackupControls device={device({ usb: "t", wifi: "t" })} start={ok} cancel={ok} busy={false} {...storageProps} />,
     );
     expect(screen.getByLabelText(/backup transport/i)).toBeTruthy();
   });
 
   it("passes the selected transport when overridden", () => {
     const start = vi.fn().mockResolvedValue(true);
-    render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} />);
+    render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />);
     fireEvent.change(screen.getByLabelText(/backup transport/i), { target: { value: "wifi" } });
     fireEvent.click(screen.getByTestId("backup-now"));
     expect(start).toHaveBeenCalledWith("wifi", undefined);
@@ -85,6 +97,7 @@ describe("BackupControls", () => {
         start={ok}
         cancel={cancel}
         busy={false}
+        {...storageProps}
       />,
     );
     fireEvent.click(screen.getByTestId("cancel-backup"));
@@ -99,6 +112,7 @@ describe("BackupControls", () => {
         device={device({ wifi: "t" })}
         activeJob={runningJob()}
         error="a backup is already running for this device"
+        {...statusProps}
       />,
     );
     expect(screen.getByRole("alert").textContent).toContain("already running");
@@ -115,7 +129,7 @@ describe("BackupControls", () => {
 describe("BackupControls status placement", () => {
   it("keeps the offline reason OUT of the control row", () => {
     const { container } = render(
-      <BackupControls device={device({})} start={ok} cancel={ok} busy={false} />,
+      <BackupControls device={device({})} start={ok} cancel={ok} busy={false} {...storageProps} />,
     );
     expect(container.textContent).not.toMatch(/connect the device to back it up/i);
   });
@@ -126,7 +140,7 @@ describe("BackupControls status placement", () => {
 
   // The other direction: the lines must still be RENDERED somewhere, or this "fix" is a deletion.
   it("still renders both lines, in the block that sits below the row", () => {
-    render(<BackupControlsStatus device={device({})} error="nope" />);
+    render(<BackupControlsStatus device={device({})} error="nope" {...statusProps} />);
     expect(screen.getByText(/connect the device to back it up/i)).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toBe("nope");
   });
@@ -134,7 +148,7 @@ describe("BackupControls status placement", () => {
   // While a job runs, "why the button is disabled" is not a thing to say — the button is Cancel.
   it("drops the offline reason while a job is running, but keeps the refusal", () => {
     render(
-      <BackupControlsStatus device={device({})} activeJob={runningJob()} error="nope" />,
+      <BackupControlsStatus device={device({})} activeJob={runningJob()} error="nope" {...statusProps} />,
     );
     expect(screen.queryByText(/connect the device to back it up/i)).toBeNull();
     expect(screen.getByRole("alert").textContent).toBe("nope");

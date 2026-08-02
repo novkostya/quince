@@ -31,6 +31,17 @@ export interface Storages {
   // Re-fetching `?udid=` costs one request and keeps the pair fact the server owns.
   recheck: (id: string) => void;
   rechecking: Record<string, RecheckState>;
+
+  // reload refetches the device-scoped list. The caller drives it, because the event that
+  // invalidates this list is a JOB COMPLETING and this hook does not watch jobs.
+  //
+  // WITHOUT IT THE UI MAKES A FALSE STATEMENT, which is worse than the missing surfaces around it.
+  // `will_be_full` is a fact about a (device, storage) pair at a moment: true before the first
+  // backup to a storage, false forever after. The hook fetched on `udid` alone, so after a backup
+  // COMPLETED the page still read "First backup to shuttle — this transfers everything" about a
+  // cost that had just been paid. Reported from the staging stand during G9, minutes after the
+  // transfer it was describing finished (Operator, 2026-08-02).
+  reload: () => void;
 }
 
 // useStorages fetches the declared storages for ONE device (contracts §1 GET /api/storages?udid=).
@@ -99,5 +110,7 @@ export function useStorages(udid: string): Storages {
     [udid, load],
   );
 
-  return { state, recheck, rechecking };
+  const reload = React.useCallback(() => void load(udid), [load, udid]);
+
+  return { state, recheck, rechecking, reload };
 }

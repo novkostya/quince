@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
@@ -16,6 +16,7 @@ import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
 import { BackupControls, BackupControlsStatus } from "@/features/jobs/BackupControls";
+import { useStorages } from "@/features/jobs/useStorages";
 import { useBackup } from "@/features/jobs/useBackup";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,27 @@ export function DeviceDetailsPage() {
   );
   const activeJob = jobs.find((j) => isRunning(j.state));
   const backup = useBackup(udid);
+  // LIFTED HERE so the action row's control and the sentences beneath it share one fetch and one
+  // selection (quince#325's rule: the row holds controls, prose goes in the block below — which
+  // means the two halves live in different components and must not disagree).
+  const storages = useStorages(udid);
+  const [storageID, setStorageID] = useState<string>("");
+
+  // A FINISHED JOB INVALIDATES THE STORAGE LIST. `will_be_full` is true only until the first
+  // backup to a storage lands, so a page that fetched once keeps advertising a cost that has been
+  // paid — measured on the staging stand during G9, where "First backup to shuttle" was still on
+  // screen after the transfer it described had committed.
+  //
+  // Keyed on the job's IDENTITY going away rather than on a terminal state name: `isRunning` is
+  // already the one place that decides what "running" means, and re-deriving it here would be a
+  // second definition to keep in step.
+  const activeJobID = activeJob?.id ?? null;
+  const prevJobID = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevJobID.current && !activeJobID) storages.reload();
+    prevJobID.current = activeJobID;
+  }, [activeJobID, storages]);
+
   // A pair intent deep-linked from the dashboard card (router state) auto-opens the pair dialog on
   // arrival — qn.4b fix for (bq), keeping qn.3's narrated-flow-on-details decision.
   const location = useLocation();
@@ -115,6 +137,9 @@ export function DeviceDetailsPage() {
                   start={backup.start}
                   cancel={backup.cancel}
                   busy={backup.busy}
+                  storages={storages}
+                  storageID={storageID}
+                  setStorageID={setStorageID}
                 />
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
@@ -131,7 +156,13 @@ export function DeviceDetailsPage() {
               out by the overhang (quince#325). */}
           {device.paired === "yes" ? (
             <div className="mt-2 flex flex-col gap-1">
-              <BackupControlsStatus device={device} activeJob={activeJob} error={backup.error} />
+              <BackupControlsStatus
+                device={device}
+                activeJob={activeJob}
+                error={backup.error}
+                storages={storages}
+                storageID={storageID}
+              />
             </div>
           ) : null}
 
