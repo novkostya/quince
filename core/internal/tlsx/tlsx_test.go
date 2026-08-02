@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -434,40 +435,74 @@ func TestWildcardIsServedOverARealHandshake(t *testing.T) {
 // ASSERTED BY OBSERVATION, not by permissions, and that distinction is the honest part. The
 // spec says "with it mounted read-only", which is a BIND MOUNT in the deployment this exists
 // for; a unit test cannot bind-mount, and `chmod 0555` does not stop root, which is what CI
-// runs as. So the directory is made read-only AND its exact contents are compared before and
-// after a full load-plus-rotation-check-plus-handshake cycle. A test that only chmod'd would
-// pass while writing happily.
+// runs as. So the directory is made read-only AND its exact contents — including a hash of
+// every file — are compared across the cycle. A test that only chmod'd would pass while
+// writing happily.
+//
+// IT MUST GO THROUGH reload(), AND THE FIRST VERSION OF THIS TEST DID NOT. It loaded the pair,
+// chmod'd, and called GetCertificate five times — but `changed()` was false every time, because
+// nothing had touched the files since NewKeeper recorded their stamps, so `reload()` never ran
+// and the test proved that two `stat` calls do not write. True, and never in doubt. **The path
+// with the opportunity to write is `reload()`** — the only code here that OPENS and PARSES the
+// files — and it was the one path being skipped (review on quince#556).
+//
+// So the pair is ROTATED first, the snapshot taken after that write, and the handshakes then
+// go through a real re-read. The served leaf is asserted to have changed, which is what proves
+// `reload()` actually ran: without it a future edit to the stamp logic could quietly return
+// this test to the no-op it was.
 func TestCertificateDirectoryIsNeverWrittenTo(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile := writePair(t, dir, "readonly")
-
-	before := snapshotDir(t, dir)
 
 	k, err := NewKeeper(certFile, keyFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Rotate in place, so `changed()` will be true and GetCertificate must re-read. Minted in
+	// a SEPARATE directory so the snapshot below sees only the two files quince was given.
+	src := t.TempDir()
+	newCert, newKey := writePair(t, src, "rotated")
+	copyFile(t, newCert, certFile)
+	copyFile(t, newKey, keyFile)
+
+	// AFTER the rotation, so the test's own write is not what the comparison catches.
+	before := snapshotDir(t, dir)
+
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) // so t.TempDir can clean up
 
-	// Exercise every path that touches those files: the freshness check and the handshake
-	// hook, several times, as a live server would.
+	var served string
 	for range 5 {
-		if _, err := k.GetCertificate(&tls.ClientHelloInfo{ServerName: "quince.lan"}); err != nil {
+		cert, err := k.GetCertificate(&tls.ClientHelloInfo{ServerName: "quince.lan"})
+		if err != nil {
 			t.Fatalf("GetCertificate failed against a read-only directory: %v", err)
 		}
+		served = leafCN(t, cert)
+	}
+
+	// The guard on the guard: if this is still "readonly", `reload()` never ran and everything
+	// below is asserting about a code path the test did not reach.
+	if served != "rotated" {
+		t.Fatalf("served CN = %q after rotating to \"rotated\" — reload() did not run, so this "+
+			"test is back to proving that two stat calls do not write", served)
 	}
 
 	if after := snapshotDir(t, dir); after != before {
-		t.Errorf("the certificate directory CHANGED.\nbefore: %s\nafter:  %s", before, after)
+		t.Errorf("the certificate directory CHANGED across a re-read.\nbefore: %s\nafter:  %s", before, after)
 	}
 }
 
-// snapshotDir renders a directory's contents as a comparable string: every name, size and
-// modtime. Names alone would miss a rewrite in place, which is the write most likely to happen
-// by accident here — a "helpful" re-save of a parsed certificate.
+// snapshotDir renders a directory's contents as a comparable string: every name, size, modtime
+// and CONTENT HASH.
+//
+// The hash is what makes the claim self-evident rather than an argument. Name and size alone
+// would miss a same-length rewrite; modtime closes that in practice, because nothing in tlsx
+// calls os.Chtimes — but that is a claim about the code rather than about the files, and it is
+// the kind of claim that stops being true without anyone noticing. sha256 costs three lines and
+// needs no such argument (review on quince#556).
 func snapshotDir(t *testing.T, dir string) string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -480,7 +515,11 @@ func snapshotDir(t *testing.T, dir string) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprintf(&b, "%s:%d:%d|", e.Name(), fi.Size(), fi.ModTime().UnixNano())
+		content, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "%s:%d:%d:%x|", e.Name(), fi.Size(), fi.ModTime().UnixNano(), sha256.Sum256(content))
 	}
 	return b.String()
 }
