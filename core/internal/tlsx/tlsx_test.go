@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -313,4 +314,173 @@ func getBody(t *testing.T, c *http.Client, url string) string {
 		t.Fatalf("read body: %v", err)
 	}
 	return string(b)
+}
+
+// writeWildcard mints a certificate for `*.example.com` — the normal shape for the tier
+// bring-your-own-cert exists for, and one whose SAN matches nothing quince is configured with.
+func writeWildcard(t *testing.T, dir string) (certFile, keyFile string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "*.example.com"},
+		DNSNames:     []string{"*.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certFile = filepath.Join(dir, "wildcard.pem")
+	keyFile = filepath.Join(dir, "wildcard.key")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile
+}
+
+// G5 / story 7: a wildcard certificate whose SAN does not equal the host quince was reached on
+// is SERVED, not rejected.
+//
+// quince serves what it is given and validates neither CN nor SAN. That is not laxness — a
+// bind-mounted wildcard is the NORMAL case for the tier this option exists for, so a hostname
+// check would break exactly the deployment the Operator described (quince#446, BYO-cert
+// constraint 2). The test asks with an SNI that matches nothing, which is the strongest form
+// of the question.
+func TestWildcardCertificateIsServedRegardlessOfSNI(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeWildcard(t, dir)
+	k, err := NewKeeper(certFile, keyFile)
+	if err != nil {
+		t.Fatalf("a wildcard pair was REJECTED at load: %v", err)
+	}
+
+	for _, sni := range []string{"", "quince.lan", "totally.unrelated.invalid", "example.com"} {
+		name := sni
+		if name == "" {
+			name = "(no SNI)"
+		}
+		t.Run(name, func(t *testing.T) {
+			cert, err := k.GetCertificate(&tls.ClientHelloInfo{ServerName: sni})
+			if err != nil {
+				t.Fatalf("GetCertificate refused SNI %q: %v — quince must serve what it is given", sni, err)
+			}
+			if got := leafCN(t, cert); got != "*.example.com" {
+				t.Errorf("served CN = %q, want the wildcard", got)
+			}
+		})
+	}
+}
+
+// The same claim over a real handshake, because GetCertificate returning a certificate and the
+// TLS stack actually completing on a name that does not match are different facts. The client
+// skips verification, which is what a browser's click-through — or a correctly-named request
+// through a proxy — amounts to here: the point is that the SERVER does not refuse.
+func TestWildcardIsServedOverARealHandshake(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeWildcard(t, dir)
+	k, err := NewKeeper(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := NewMux(ln)
+	t.Cleanup(func() { _ = mux.Close() })
+
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "served") }),
+		ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig:         &tls.Config{GetCertificate: k.GetCertificate, MinVersion: tls.VersionTLS12},
+	}
+	go func() { _ = srv.ServeTLS(mux.TLS(), "", "") }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,           //nolint:gosec // the point is that the SERVER does not refuse
+			ServerName:         "nope.invalid", // matches nothing in the certificate
+		}},
+	}
+	if got := getBody(t, client, "https://"+ln.Addr().String()+"/"); got != "served" {
+		t.Errorf("got %q, want served", got)
+	}
+}
+
+// G4 / story 8: the supplied certificate directory is NEVER written to.
+//
+// This is the `never mutate` rule's near-miss for this rung, and it constrains the LISTENER
+// rather than the generator that slice 7 would have shipped — the listener re-reads that
+// directory on every handshake for rotation, so it is the thing with an opportunity to write.
+//
+// ASSERTED BY OBSERVATION, not by permissions, and that distinction is the honest part. The
+// spec says "with it mounted read-only", which is a BIND MOUNT in the deployment this exists
+// for; a unit test cannot bind-mount, and `chmod 0555` does not stop root, which is what CI
+// runs as. So the directory is made read-only AND its exact contents are compared before and
+// after a full load-plus-rotation-check-plus-handshake cycle. A test that only chmod'd would
+// pass while writing happily.
+func TestCertificateDirectoryIsNeverWrittenTo(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writePair(t, dir, "readonly")
+
+	before := snapshotDir(t, dir)
+
+	k, err := NewKeeper(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) // so t.TempDir can clean up
+
+	// Exercise every path that touches those files: the freshness check and the handshake
+	// hook, several times, as a live server would.
+	for range 5 {
+		if _, err := k.GetCertificate(&tls.ClientHelloInfo{ServerName: "quince.lan"}); err != nil {
+			t.Fatalf("GetCertificate failed against a read-only directory: %v", err)
+		}
+	}
+
+	if after := snapshotDir(t, dir); after != before {
+		t.Errorf("the certificate directory CHANGED.\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+// snapshotDir renders a directory's contents as a comparable string: every name, size and
+// modtime. Names alone would miss a rewrite in place, which is the write most likely to happen
+// by accident here — a "helpful" re-save of a parsed certificate.
+func snapshotDir(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "%s:%d:%d|", e.Name(), fi.Size(), fi.ModTime().UnixNano())
+	}
+	return b.String()
 }
