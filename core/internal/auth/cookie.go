@@ -62,8 +62,11 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 // while any LAN/production access is either HTTPS (direct or via a trusted proxy setting
 // X-Forwarded-Proto) and gets Secure, or plain-HTTP-to-a-non-loopback-host and gets a
 // Secure cookie the browser won't send (correct: canon requires HTTPS, we never silently
-// downgrade). X-Forwarded-Proto only ever upgrades to Secure, so trusting it cannot weaken
-// anything.
+// downgrade). X-Forwarded-Proto only ever upgrades to Secure — AND IS BELIEVED ONLY FROM A
+// TRUSTED PEER (quince#555); an unset list believes anyone, which is the default and the old
+// behaviour. See SecureOrigin below for why the unqualified form was wrong: it was true of the
+// COOKIE and false of the two consumers that invert the predicate.
+//
 // allowInsecure is `sessions.allow_insecure_transport` — the off-by-default opt-in for a
 // user on a network they trust (qn.6f slice 8, Operator ruling 2026-08-02, option (b)).
 // It is a PARAMETER rather than a package variable so the rule stays a pure function of
@@ -71,7 +74,8 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 //
 // NOTE WHERE IT SITS: strictly below SecureOrigin and strictly above the host test. That
 // ordering is the ruling, not a preference — it relaxes the FALLBACK only, so a positive
-// signal still wins and *the header can only ever upgrade* is preserved verbatim. Moving
+// signal still wins and *the header can only ever upgrade* holds, now qualified by who is
+// allowed to say it (quince#555). Moving
 // this branch above SecureOrigin would let the flag strip Secure from a genuine HTTPS
 // session, which is a different and much worse setting than the one that was ruled.
 func secureCookie(r *http.Request, allowInsecure bool, trusted *TrustedProxies) bool {

@@ -161,9 +161,16 @@ certificate real*. Neither fallback carries a "recommended" badge.
 ### Detection is the whole of the top tier, and it is a state rather than a button
 
 `r.TLS != nil` **or** `X-Forwarded-Proto: https` → step 1 is **complete**, no buttons. Otherwise the
-offers. The header can only ever *upgrade*, so trusting it cannot weaken anything —
-`auth.secureCookie` already trusts it on exactly that reasoning, and this reuses the predicate
-rather than re-deriving it.
+offers. The header can only ever *upgrade*, **and since quince#555 it is believed only from an
+address in `QUINCE_TRUSTED_PROXIES`** — an unset list believes anyone, which is the default and the
+old behaviour. This reuses `auth.SecureOrigin` rather than re-deriving it, which is the point: the
+gating arrived in one place and every consumer got it.
+
+*This paragraph said the header could be trusted unconditionally and that `auth.secureCookie`
+"already trusts it on exactly that reasoning". Both stopped being true when quince#567 landed. The
+justification was sound for the COOKIE and wrong for the two consumers that invert the predicate —
+the `426` refusal and this very check — which both fail toward "everything is fine" on an injected
+header.*
 
 **Consequence worth stating: the one configuration already in production use meets zero friction.**
 The Operator terminates TLS in a reverse proxy, so the running deployment never sees this page. That

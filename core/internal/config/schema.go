@@ -222,9 +222,16 @@ type SessionsConfig struct {
 	// It lives under `sessions:` rather than in `tls:` because it governs the SESSION and
 	// CSRF cookies, and it applies precisely when there is no TLS to configure.
 	//
-	// IT RELAXES THE FALLBACK ONLY. `r.TLS != nil` and `X-Forwarded-Proto: https` keep
-	// returning Secure regardless — *the header can only ever upgrade* survives verbatim.
-	// Only the final !isLoopbackHost branch becomes conditional.
+	// IT RELAXES THE FALLBACK ONLY. `r.TLS != nil` and a BELIEVED `X-Forwarded-Proto: https`
+	// keep returning Secure regardless; only the final !isLoopbackHost branch becomes
+	// conditional on this flag.
+	//
+	// "Believed" is load-bearing since quince#555: the header now counts only from an address
+	// in QUINCE_TRUSTED_PROXIES (an unset list believes anyone, which is the default and the
+	// old behaviour). This comment said *the header can only ever upgrade* survives verbatim,
+	// which was true of the COOKIE and false of the two consumers that invert the predicate —
+	// the quince#497 refusal and the onboarding check both read it and both fail toward
+	// "everything is fine" on an injected header.
 	//
 	// THE CASE THAT MADE THIS RIGHT RATHER THAN LAZY IS A VPN. Over WireGuard or Tailscale
 	// the transport is already encrypted, so TLS inside the tunnel buys nothing and costs a

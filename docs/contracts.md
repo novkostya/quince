@@ -850,10 +850,18 @@ sessions:
                             # trust. OFF by default. Operator ruling 2026-08-02, option (b);
                             # design §6 carries the reasoning and the rejected alternatives.
                             #
-                            # It RELAXES THE FALLBACK ONLY: `r.TLS != nil` and
+                            # It RELAXES THE FALLBACK ONLY: `r.TLS != nil` and a BELIEVED
                             # `X-Forwarded-Proto: https` still force Secure, so *the header can
                             # only ever upgrade* is preserved. Only the non-loopback-host branch
-                            # becomes conditional. Under `sessions:` and not `tls:` because it
+                            # becomes conditional on this flag.
+                            #
+                            # "BELIEVED" since quince#555: the header counts only from an address
+                            # in QUINCE_TRUSTED_PROXIES — an UNSET list believes anyone, which is
+                            # the default and the old behaviour. The unconditional phrasing was
+                            # true of the COOKIE and false of the two consumers that invert the
+                            # predicate: the 426 refusal and the onboarding check both fail
+                            # toward "everything is fine" on an injected header.
+                            # Under `sessions:` and not `tls:` because it
                             # governs the session and CSRF cookies, and applies precisely when
                             # there is no TLS.
                             #

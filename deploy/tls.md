@@ -55,9 +55,18 @@ proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 proxy_set_header Host              $host;
 ```
 
-**`X-Forwarded-Proto` can only ever upgrade.** quince treats it as evidence the origin is secure and
-never as evidence it is not, so a proxy that omits it produces the login loop rather than a silent
-downgrade. If step 1 will not complete behind your proxy, that header is the first thing to check.
+**`X-Forwarded-Proto` can only ever upgrade — and only from a proxy you have named.** quince treats
+it as evidence the origin is secure and never as evidence it is not, so a proxy that omits it
+produces the login loop rather than a silent downgrade. If step 1 will not complete behind your
+proxy, that header is the first thing to check.
+
+**Since quince#555 the header is believed only from an address in `QUINCE_TRUSTED_PROXIES`** — with
+one deliberate exception: **an unset list believes anyone**, which is the shipping default and
+byte-for-byte the old behaviour, so no existing deployment changed. Once you set the list, a peer
+that is not on it is no longer believed. That matters because two things now read this signal and
+both *invert* it — the `426` refusal reports "your cookie is fine" and the onboarding check reports
+"complete" — so an injected header would have told you the setup was finished on an unencrypted
+connection.
 
 **`X-Forwarded-For` is different and must be configured.** quince believes it only from addresses
 listed in **`QUINCE_TRUSTED_PROXIES`** — a bootstrap environment variable, comma-separated, and

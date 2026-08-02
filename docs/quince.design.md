@@ -569,10 +569,14 @@ below and with every recommendation taken:
 1. **One config key, defaulting to off** — `sessions.allow_insecure_transport: false`. Under
    `sessions:` rather than a `tls:` section, because it governs the session and CSRF cookies and it
    applies precisely when there is *no* TLS. D12: in the file, editable in the UI, no secret.
-2. **It relaxes the FALLBACK only, never a positive signal.** `r.TLS != nil` and
+2. **It relaxes the FALLBACK only, never a positive signal.** `r.TLS != nil` and a **believed**
    `X-Forwarded-Proto: https` keep returning `true` regardless; only the final
-   `return !isLoopbackHost(r.Host)` becomes conditional. *The header can only ever upgrade* is
-   preserved verbatim.
+   `return !isLoopbackHost(r.Host)` becomes conditional on this flag. *The header can only ever
+   upgrade* is preserved — **but since quince#555 it upgrades only from an address in
+   `QUINCE_TRUSTED_PROXIES`**, an unset list believing anyone, as before. The old unconditional
+   phrasing was true of the **cookie** and false of the two consumers that invert the predicate:
+   the `426` refusal and the onboarding check both read it, and both fail toward *everything is
+   fine* on an injected header.
 3. **It is a degraded mode, so it is surfaced** — a startup log line, a **non-dismissible** UI
    banner naming what is unprotected, and visible in Settings. Not a one-time notice.
 4. **The honest cost, stated in the UI and not only here.** The session cookie and the CSRF token
