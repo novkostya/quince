@@ -295,6 +295,52 @@ func TestSecureCookieRule(t *testing.T) {
 	}
 }
 
+// CookieWillBeDiscarded is true for ONE of the four cases secureCookie distinguishes: the
+// cookie is marked Secure and the origin is not one the browser calls secure. That case is
+// quince#497's login loop. The table exists for the other rows — they all reach `Secure` by
+// different routes and every one of them must stay false, or the refusal starts turning
+// away logins that would have worked.
+func TestCookieWillBeDiscarded(t *testing.T) {
+	tlsReq := httptest.NewRequest("GET", "http://quince.example/api/health", nil)
+	tlsReq.TLS = &tls.ConnectionState{}
+	proxied := httptest.NewRequest("GET", "http://quince.example/api/health", nil)
+	proxied.Header.Set("X-Forwarded-Proto", "https")
+
+	tests := []struct {
+		name string
+		req  *http.Request
+		demo bool
+		want bool
+	}{
+		{
+			name: "plain http to a non-loopback host",
+			req:  httptest.NewRequest("GET", "http://quince.example:8080/api/health", nil),
+			want: true, // Secure is set and the browser drops it — the loop
+		},
+		{
+			name: "plain http to loopback",
+			req:  httptest.NewRequest("GET", "http://localhost:8080/api/health", nil),
+			want: false, // Secure is never set, so nothing is discarded
+		},
+		{name: "direct tls", req: tlsReq, want: false},
+		{name: "tls terminated at a trusted proxy", req: proxied, want: false},
+		{
+			name: "demo mode on the loop-producing origin",
+			req:  httptest.NewRequest("GET", "http://quince.example:8080/api/health", nil),
+			demo: true,
+			want: false, // demo forces Secure off, so the cookie survives
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{insecureCookies: tc.demo}
+			if got := s.CookieWillBeDiscarded(tc.req); got != tc.want {
+				t.Errorf("CookieWillBeDiscarded = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSetPasswordDoesNotDeriveWhenAlreadyConfigured is the regression guard for quince#463:
 // POST /api/auth/setup is pre-auth and un-rate-limited by design (first-run setup must be
 // reachable with no session), so a derivation on a path whose 409 is already decided is a
