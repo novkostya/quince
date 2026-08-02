@@ -26,7 +26,7 @@ services:
     environment:
       QUINCE_LISTEN: ":8080"
       # QUINCE_DATA / QUINCE_CACHE default to /data /cache. Backup roots are NOT env:
-      # qn.6c retired QUINCE_BACKUPS — declare them under storage.storages in config.yml.
+      # qn.6c retired QUINCE_BACKUPS — declare storages under `storage:` in config.yml (a list).
     volumes:
       - ./data:/data # app DB, config.yml, pairing records (persistent)
       - ./cache:/cache # session scratch + derived caches (disposable)

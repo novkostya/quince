@@ -173,7 +173,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	// nothing at runtime fixes, where an absent disk is a state the user fixes by plugging it in.
 	slots := make([]storage.Slot, 0, len(entries))
 	for _, e := range entries {
-		slots = append(slots, resolveSlot(ctx, e, scfg, st, log))
+		slots = append(slots, resolveSlot(ctx, e, st, log))
 	}
 
 	// THE INTERIM SURFACE, UNTIL 5c PUTS IT ON THE WIRE (quince#378).
@@ -192,12 +192,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		}
 	}
 
-	storageMgr := storage.NewManager(slots, st, st, eventBus,
-		storage.RetentionPolicy{
-			KeepRecent: scfg.Retention.KeepRecent,
-			KeepDaily:  scfg.Retention.KeepDaily,
-			KeepWeekly: scfg.Retention.KeepWeekly,
-		}, id.New, log)
+	storageMgr := storage.NewManager(slots, st, st, eventBus, id.New, log)
 
 	// Attribution happens INSIDE Reconcile now, per storage, from what Scan found (quince#439).
 	// A loud comment about statement order stood here until then, protecting the sweep that had
@@ -217,7 +212,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	storageMgr.SetRefresher(func(name string) (storage.Slot, bool) {
 		for _, e := range declaredStorages(cfgSvc.Current().Storage) {
 			if e.Name == name {
-				return resolveSlot(ctx, e, cfgSvc.Current().Storage, st, log), true
+				return resolveSlot(ctx, e, st, log), true
 			}
 		}
 		return storage.Slot{}, false
@@ -236,8 +231,18 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 //
 // It never returns an error: every failure mode is a state on the Slot, per quince#435. The caller
 // gets a storage it can list and refuse jobs for, rather than a reason to exit.
-func resolveSlot(ctx context.Context, e config.StorageEntry, scfg config.StorageConfig,
-	st *store.Store, log *slog.Logger) storage.Slot {
+// scfg is GONE from this signature, and its absence is the flattening in one line (quince#473):
+// an entry used to need the global block beside it to resolve a backend, and now carries
+// everything that decides one.
+func resolveSlot(ctx context.Context, e config.StorageEntry,
+	st *store.Store, log *slog.Logger) (slot storage.Slot) {
+	// RETENTION IS STAMPED ON EVERY RETURN PATH, via a named return, and that is deliberate rather
+	// than tidy (quince#473). This function has six exits and five of them are UNREACHABLE states —
+	// and an unreachable storage's policy still matters, because versions already attributed to it
+	// are prunable the moment it comes back. Setting it at each `return storage.Slot{...}` would be
+	// five places to forget it in a function whose whole shape is "every failure is a state".
+	defer func() { slot.Retention = retentionOf(e) }()
+
 	// THE GUARD RUNS BEFORE ANYTHING TOUCHES THE PATH (quince#415).
 	//
 	// This used to call storage.Select first and hand ResolveStorage the already-probed backend.
@@ -258,9 +263,9 @@ func resolveSlot(ctx context.Context, e config.StorageEntry, scfg config.Storage
 	)
 	probe := func(string) string {
 		if !probed {
-			ez := scfg.ZFSFor(e)
+			ez := e.ZFS
 			stBackend, backendName, _ = storage.Select(ctx, storage.Options{
-				Backend: scfg.BackendFor(e), Backups: e.Path, AppVersion: version.String(),
+				Backend: e.Backend, Backups: e.Path, AppVersion: version.String(),
 				ZFSParent: ez.ParentDataset, ZFSMode: ez.Mode,
 				ZFSHookCmd: ez.HookCmd, ZFSSeed: ez.Seed,
 			}, log)
@@ -351,11 +356,11 @@ func resolveSlot(ctx context.Context, e config.StorageEntry, scfg config.Storage
 //
 // Callers reach here only past config.CheckStorages, which refuses to serve on an absent or empty
 // list, so there is nothing to guess through and no fallback.
-func declaredStorages(scfg config.StorageConfig) []config.StorageEntry {
-	if scfg.Storages == nil {
+func declaredStorages(scfg *[]config.StorageEntry) []config.StorageEntry {
+	if scfg == nil {
 		return nil
 	}
-	entries := *scfg.Storages
+	entries := *scfg
 	out := make([]config.StorageEntry, 0, len(entries))
 	for _, s := range entries {
 		if s.Default {
@@ -401,9 +406,23 @@ func reportUnattributed(st *store.Store, log *slog.Logger) {
 // same way buildStorage orders its slots — a preflight that measures a different filesystem than
 // the one being written to is a check that passes for the wrong reason. Empty when nothing is
 // declared, which config.CheckStorages has already refused.
-func defaultStorageRoot(scfg config.StorageConfig) string {
+func defaultStorageRoot(scfg *[]config.StorageEntry) string {
 	if e := declaredStorages(scfg); len(e) > 0 {
 		return e[0].Path
 	}
 	return ""
+}
+
+// retentionOf is one storage's keep policy. Entries come from Parse, which fills an absent
+// `retention:` with the code defaults, so the nil branch is a guard against a hand-built entry
+// rather than a config path — and it returns the same defaults rather than a zero policy, because
+// a zero policy means "keep nothing" and would silently delete a user's history.
+func retentionOf(e config.StorageEntry) storage.RetentionPolicy {
+	r := config.DefaultRetention()
+	if e.Retention != nil {
+		r = *e.Retention
+	}
+	return storage.RetentionPolicy{
+		KeepRecent: r.KeepRecent, KeepDaily: r.KeepDaily, KeepWeekly: r.KeepWeekly,
+	}
 }

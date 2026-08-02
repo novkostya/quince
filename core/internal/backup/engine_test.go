@@ -90,8 +90,8 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 	}); err != nil {
 		t.Fatal(err)
 	}
-	mgr := storage.NewManager([]storage.Slot{{Name: "test", Root: backups, Backend: backend, BackendName: name, Reachable: true}},
-		st, st, b, storage.RetentionPolicy{KeepRecent: 10}, id.New, log)
+	mgr := storage.NewManager([]storage.Slot{{Name: "test", Root: backups, Backend: backend, BackendName: name, Reachable: true, Retention: storage.RetentionPolicy{KeepRecent: 10}}},
+		st, st, b, id.New, log)
 
 	dev := newFakeDevices()
 	dev.set(testUDID, transport, "on")

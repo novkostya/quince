@@ -19,6 +19,15 @@ type Slot struct {
 	Backend     Backend
 	BackendName string
 
+	// Retention is THIS storage's keep policy (qn.6c, quince#473). It moved onto the slot when
+	// `storage:` flattened and the global `storage.retention:` block stopped existing — a list has
+	// nowhere to put a global.
+	//
+	// Prune groups a device's versions by storage and applies each one's policy, so `keep_recent:
+	// 10` means ten on THAT disk. A single policy across storages would have made a second disk
+	// silently change what the first one keeps.
+	Retention RetentionPolicy
+
 	// Reachable is false for a storage quince could not open at startup — the disk is out, or the
 	// path is readable but is not the backup medium. That is a STATE, not a refusal to serve
 	// (Operator ruling 2026-08-01, quince#435).

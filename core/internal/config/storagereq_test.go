@@ -14,7 +14,7 @@ import (
 func withStorages(entries ...StorageEntry) Config {
 	c := Default()
 	e := entries
-	c.Storage.Storages = &e
+	c.Storage = ResolveStorages(&e)
 	return c
 }
 
@@ -22,7 +22,7 @@ func TestCheckStoragesRefusesWhenKeyAbsent(t *testing.T) {
 	c := Default() // Default() leaves Storages nil — there is no default storage to have
 	req := CheckStorages(c, nil)
 	if req.OK() {
-		t.Fatal("a config with no storage.storages key must NOT be allowed to serve")
+		t.Fatal("a config with no storage: key must NOT be allowed to serve")
 	}
 	if !req.Missing || req.Empty {
 		t.Errorf("absent key must read as Missing, not Empty: %+v", req)
@@ -32,7 +32,7 @@ func TestCheckStoragesRefusesWhenKeyAbsent(t *testing.T) {
 func TestCheckStoragesRefusesWhenListEmpty(t *testing.T) {
 	req := CheckStorages(withStorages(), nil)
 	if req.OK() {
-		t.Fatal("an empty storage.storages list must NOT be allowed to serve")
+		t.Fatal("an empty storage: list must NOT be allowed to serve")
 	}
 	if req.Missing || !req.Empty {
 		t.Errorf("present-but-empty must read as Empty, not Missing: %+v", req)
@@ -86,10 +86,10 @@ func TestExplainNamesTheKeyAndPrintsTheRemedy(t *testing.T) {
 	}
 	out := sb.String()
 	for _, want := range []string{
-		"storage.storages",  // the key
+		"storage:",          // the key
 		"/data/config.yml",  // where to put it
-		"storages:",         // the remedy, as YAML the user can paste
-		"default: true",     // including the bit that is easy to omit
+		"- path:",           // the remedy, as YAML the user can paste
+		"`name` defaults",   // and the short form the 2026-08-01 ruling made possible
 		"REFUSING to start", // and why refusing beats starting
 	} {
 		if !strings.Contains(out, want) {

@@ -67,8 +67,8 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}
-			if len(errs) != 1 || errs[0].Path != "storage.storages" {
-				t.Fatalf("saving a config with no storage must be a 422 at storage.storages, got %+v", errs)
+			if len(errs) != 1 || errs[0].Path != "storage" {
+				t.Fatalf("saving a config with no storage must be a 422 at storage:, got %+v", errs)
 			}
 			if _, statErr := os.Stat(path); statErr == nil {
 				t.Error("a refused save must write NOTHING; config.yml exists")
@@ -96,7 +96,7 @@ func TestValidateRequiresExactlyOneDefault(t *testing.T) {
 		StorageEntry{Name: "a", Path: "/a"},
 		StorageEntry{Name: "b", Path: "/b"},
 	))
-	if len(none) != 1 || none[0].Path != "storage.storages" {
+	if len(none) != 1 || none[0].Path != "storage" {
 		t.Errorf("a list with no default must be rejected, got %+v", none)
 	}
 
@@ -104,11 +104,17 @@ func TestValidateRequiresExactlyOneDefault(t *testing.T) {
 		StorageEntry{Name: "a", Path: "/a", Default: true},
 		StorageEntry{Name: "b", Path: "/b", Default: true},
 	))
-	if len(two) != 1 || two[0].Path != "storage.storages" {
+	if len(two) != 1 || two[0].Path != "storage" {
 		t.Errorf("a list with two defaults must be rejected, got %+v", two)
 	}
 }
 
+// An EMPTY NAME IS NO LONGER AN ERROR — it defaults to the path (quince#504, ruled 2026-08-01).
+// This test asserted the opposite until the flattening, which is the ruling arriving: entry 0
+// below has no name and is accepted, and only the genuinely malformed paths are reported.
+//
+// The one case where an empty name still surfaces is an entry whose PATH is also empty, and there
+// the path's own error is the report. Naming both would be two errors for one mistake.
 func TestValidateRejectsEmptyAndRelativeFields(t *testing.T) {
 	errs := Validate(withStorages(
 		StorageEntry{Name: "", Path: "/a", Default: true},
@@ -117,13 +123,15 @@ func TestValidateRejectsEmptyAndRelativeFields(t *testing.T) {
 	))
 	got := strings.Join(errPaths(errs), " ")
 	for _, want := range []string{
-		"storage.storages[0].name",
-		"storage.storages[1].path",
-		"storage.storages[2].path",
+		"storage[1].path",
+		"storage[2].path",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want an error at %s; got %v", want, got)
 		}
+	}
+	if strings.Contains(got, "storage[0]") {
+		t.Errorf("an unnamed storage with a good path must be accepted; got %v", got)
 	}
 }
 
@@ -135,7 +143,7 @@ func TestValidateRejectsDuplicateNamesAndPaths(t *testing.T) {
 		StorageEntry{Name: "same", Path: "/a", Default: true},
 		StorageEntry{Name: "same", Path: "/b"},
 	))
-	if len(dupName) != 1 || dupName[0].Path != "storage.storages[1].name" {
+	if len(dupName) != 1 || dupName[0].Path != "storage[1].name" {
 		t.Errorf("duplicate names must be rejected, got %+v", dupName)
 	}
 
@@ -144,7 +152,7 @@ func TestValidateRejectsDuplicateNamesAndPaths(t *testing.T) {
 		StorageEntry{Name: "a", Path: "/b", Default: true},
 		StorageEntry{Name: "b", Path: "/b/"},
 	))
-	if len(dupPath) != 1 || dupPath[0].Path != "storage.storages[1].path" {
+	if len(dupPath) != 1 || dupPath[0].Path != "storage[1].path" {
 		t.Errorf("duplicate paths must be rejected after cleaning, got %+v", dupPath)
 	}
 }
@@ -156,10 +164,9 @@ func TestValidateRejectsDuplicateNamesAndPaths(t *testing.T) {
 func TestUnknownKeysReachesInsideStorageEntries(t *testing.T) {
 	raw := []byte(`
 storage:
-  storages:
-    - name: pool
-      pathh: /backups
-      default: true
+  - name: pool
+    pathh: /backups
+    default: true
 `)
 	_, warns, err := Parse(raw)
 	if err != nil {
@@ -167,7 +174,7 @@ storage:
 	}
 	var found bool
 	for _, w := range warns {
-		if w.Path == "storage.storages[0].pathh" {
+		if w.Path == "storage[0].pathh" {
 			found = true
 		}
 	}
@@ -177,19 +184,19 @@ storage:
 }
 
 func TestParseDistinguishesAbsentStoragesFromEmpty(t *testing.T) {
-	absent, _, err := Parse([]byte("storage:\n  backend: auto\n"))
+	absent, _, err := Parse([]byte("backup:\n  transport: auto\n"))
 	if err != nil {
 		t.Fatalf("parse absent: %v", err)
 	}
-	if absent.Storage.Storages != nil {
-		t.Errorf("an absent storages key must stay nil, got %+v", absent.Storage.Storages)
+	if absent.Storage != nil {
+		t.Errorf("an absent storages key must stay nil, got %+v", absent.Storage)
 	}
 
-	empty, _, err := Parse([]byte("storage:\n  storages: []\n"))
+	empty, _, err := Parse([]byte("storage: []\n"))
 	if err != nil {
 		t.Fatalf("parse empty: %v", err)
 	}
-	if empty.Storage.Storages == nil || len(*empty.Storage.Storages) != 0 {
-		t.Errorf("an explicit empty list must be non-nil and empty, got %+v", empty.Storage.Storages)
+	if empty.Storage == nil || len(*empty.Storage) != 0 {
+		t.Errorf("an explicit empty list must be non-nil and empty, got %+v", empty.Storage)
 	}
 }
