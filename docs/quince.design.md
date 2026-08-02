@@ -513,7 +513,7 @@ nothing further — this block is already decided text.
 **Flipped ahead of its implementing PR, deliberately.** The rung process flips a block in the PR that
 builds it, and this one is early because **gap A's ruling depends on it**: the redirect exception
 below is written in terms of this setting, and a session reading canon to decide what it may build
-would otherwise meet a `PROPOSED (gap)` marker for the thing slice 2 must honour (quince#446,
+would otherwise meet a `PROPOSED (gap)` marker for the thing slice 4 must honour (quince#446,
 2026-08-02).
 
 **The defect it answers.** `secureCookie` returns `true` for every non-loopback host, so over
@@ -582,10 +582,15 @@ off-by-default, surfaced opt-in would make this setting undeclarable whenever a 
 which is most of the deployments that would want it.
 
 **Sequencing, so nobody writes a condition on a key that does not exist yet:** the flag arrives in
-slice 8, the listener in slice 2. **Slice 2 may ship the redirect unconditional**, because until
-slice 8 there is no flag to honour and therefore no user it can wrong. Slice 8 adds the exception
-when it adds the key. There is no window between the two — the setting cannot be enabled before it
-is built.
+**slice 8**, the listener and its redirect in **slice 4**. **Slice 4 may ship the redirect
+unconditional**, because until slice 8 there is no flag to honour and therefore no user it can
+wrong. Slice 8 adds the exception when it adds the key. There is no window between the two — the
+setting cannot be enabled before it is built.
+
+*(These numbers are the `docs/specs/qn.6f/qn.6f.md` PR-slicing table's. They read `slice 2` until
+2026-08-02 — wrong, and wrong in the direction that misdirects: slice 2 is the page and has no
+listener, so it could not ship a redirect to anything. Corrected with quince#513, which found the
+same defect in three more places.)*
 
 **RULED (was `PROPOSED (gap)`): onboarding step 1 IS reachable without a session — a fifth
 `authExempt` route, by exact path.** Operator, 2026-08-02, on quince#501: *"Of course it's pre-auth,
