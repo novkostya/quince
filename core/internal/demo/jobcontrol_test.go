@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -129,5 +130,41 @@ func TestDemoAutoWhenAbsentRefuses(t *testing.T) {
 	p.mu.Unlock()
 	if _, s, _ := p.StartBackup("OFFLINEDEVICE0000000000000000", "auto", "", ""); s != 422 {
 		t.Fatalf("auto with an absent device = %d, want 422", s)
+	}
+}
+
+// quince#452's retry regression, at the layer that let it through. The demo ignored `storage_id`,
+// so an e2e driving Retry could not tell a job id from a storage id — and both Retry buttons sent
+// a job id for a day without a red gate anywhere.
+func TestDemoRefusesAnUndeclaredStorageID(t *testing.T) {
+	p := newRunningProvider(t)
+
+	// A JOB id in the storage_id slot is exactly the regression's shape.
+	_, status, reason := p.StartBackup(udidSpare, "auto", "01JOBIDNOTASTORAGE", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 — the demo must refuse what the daemon refuses", status)
+	}
+	if reason != "no storage with that id is declared" {
+		t.Errorf("reason = %q, want the daemon's own sentence", reason)
+	}
+}
+
+// And a DECLARED storage is still accepted, so the guard cannot pass by refusing everything.
+func TestDemoAcceptsADeclaredStorageID(t *testing.T) {
+	p := newRunningProvider(t)
+	storages := p.Storages("")
+	if len(storages) == 0 {
+		t.Fatal("the demo fixture declares no storages")
+	}
+	if _, status, reason := p.StartBackup(udidSpare, "auto", storages[0].ID, ""); status != http.StatusAccepted {
+		t.Fatalf("status = %d (%s), want 202 for a declared storage", status, reason)
+	}
+}
+
+// An OMITTED storage_id still means "the default", which is what an unchosen selector sends.
+func TestDemoAcceptsAnOmittedStorageID(t *testing.T) {
+	p := newRunningProvider(t)
+	if _, status, reason := p.StartBackup(udidSpare, "auto", "", ""); status != http.StatusAccepted {
+		t.Fatalf("status = %d (%s), want 202 when no storage is named", status, reason)
 	}
 }

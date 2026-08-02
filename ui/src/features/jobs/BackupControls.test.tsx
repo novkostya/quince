@@ -59,7 +59,7 @@ describe("BackupControls", () => {
     // undefined storage = "the default", which the SERVER resolves. The selector sends nothing
     // rather than pre-filling the default's id, so an untouched control behaves exactly as this
     // call did before the rung (qn.6c story 9).
-    expect(start).toHaveBeenCalledWith("auto", undefined);
+    expect(start).toHaveBeenCalledWith("auto", { storageID: undefined });
   });
 
   // The "and explains" half of this test moved to the status block below, which is where the
@@ -85,7 +85,7 @@ describe("BackupControls", () => {
     render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />);
     fireEvent.change(screen.getByLabelText(/backup transport/i), { target: { value: "wifi" } });
     fireEvent.click(screen.getByTestId("backup-now"));
-    expect(start).toHaveBeenCalledWith("wifi", undefined);
+    expect(start).toHaveBeenCalledWith("wifi", { storageID: undefined });
   });
 
   it("shows cancel for a running job", () => {
@@ -152,5 +152,32 @@ describe("BackupControls status placement", () => {
     );
     expect(screen.queryByText(/connect the device to back it up/i)).toBeNull();
     expect(screen.getByRole("alert").textContent).toBe("nope");
+  });
+});
+
+// quince#452's retry regression: `start(transport, storageID?, retryOf?)` had `storageID` inserted
+// in the MIDDLE of a two-argument signature, and the two Retry call sites still read
+// `start("auto", job.id)` — sending a JOB id as the storage id. Both parameters were optional
+// `string`, so every call site typechecked and the compiler had nothing to say.
+//
+// The signature now takes a NAMED OBJECT, which makes the same mistake a compile error. These
+// assert the wire-level consequence: a retry must name `retryOf` and must NOT name a storage.
+describe("retry names the job, not a storage", () => {
+  it("sends retryOf and no storage id", () => {
+    const start = vi.fn().mockResolvedValue(true);
+    render(
+      <BackupControls
+        device={device({ wifi: "t" })}
+        start={start}
+        cancel={ok}
+        busy={false}
+        {...storageProps}
+      />,
+    );
+    // The control's own start still carries a storage and no retry…
+    fireEvent.click(screen.getByTestId("backup-now"));
+    const [, opts] = start.mock.calls[0] as [string, { storageID?: string; retryOf?: string }];
+    expect(opts).not.toHaveProperty("retryOf");
+    expect(opts.storageID).toBeUndefined();
   });
 });

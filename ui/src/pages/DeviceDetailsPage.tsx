@@ -193,7 +193,7 @@ export function DeviceDetailsPage() {
           <div className="mt-8">
             <h2 className="text-sm font-semibold text-muted">Backup history</h2>
             <div className="mt-3">
-              <JobHistory jobs={jobs} onRetry={(latest) => void backup.start("auto", latest.id)} />
+              <JobHistory jobs={jobs} onRetry={(latest) => void backup.start("auto", { retryOf: latest.id })} />
             </div>
           </div>
 

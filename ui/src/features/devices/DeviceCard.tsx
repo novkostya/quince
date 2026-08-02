@@ -158,7 +158,7 @@ export function DeviceCard({ device }: { device: Device }) {
               <span className="text-xs text-danger">Last attempt needs attention</span>
               <Button
                 size="sm"
-                onClick={() => void start("auto", attention.id)}
+                onClick={() => void start("auto", { retryOf: attention.id })}
                 disabled={busy}
                 data-testid="card-retry"
               >
