@@ -106,33 +106,28 @@ not be reachable from the public internet until they are closed.
 | quince#464 | **The one that breaks the demo's only purpose**: behind a proxy, ten wrong guesses deny login to *every* visitor, and a demo nobody can log into is not a demo. **Ruled 2026-08-02, unbuilt** — trust `X-Forwarded-For` only from configured proxy addresses, empty default preserving today's behaviour exactly. A reverse proxy is where this first bites, so it lands with or before this mode. |
 | quince#466 | idle keep-alives never expire on a host where connection-holding is the cheapest attack. |
 
-## PROPOSED (gap): where the reset interval is configured, and who owns the restart
+## RULED (was `PROPOSED (gap)`): the interval is a reported deployment fact, carried in env
 
-**Architectural, so it is proposed rather than decided — filed as quince#470.** D4 puts the restart outside the process and
-D5 makes the interval a configured value — which leaves one thing this spec cannot settle within canon:
-**where that value lives.**
+**Operator ruling, 2026-08-02, on quince#470; the decision and the reasoning that lost are in
+`docs/quince.stack.md` under D12, and are deliberately NOT repeated here.**
 
-D12 says every setting lives in `config.yml`, is editable in the UI, and needs no restart unless the
-spec says why. An interval describing an *externally scheduled restart* fits that badly in both
-directions: the UI would be offering to edit a number that changes nothing (the timer is elsewhere),
-and the value would be trivially editable by any visitor, since in this mode every visitor can write
-config.
+**It is not a setting.** D12 governs settings; a value quince only renders and never branches on is a
+*reported deployment fact*, outside D12's scope. The test is **does any code branch on this value** —
+nothing branches on the interval, because D4 puts the restart outside the process and quince runs no
+timer. Carried in env, read at startup, surfaced read-only. There is no `PUT`, so the
+visitor-edits-the-promise problem does not arise.
 
-**The candidates are enumerated in `docs/quince.stack.md` under D12, and deliberately NOT repeated
-here.** That block is what a ruling will be taken against; this section carries only what is
-spec-local.
+**Story 6 is unblocked. The other six never were.** D5 stands unchanged and is now the ruling's own
+shape: the mode takes the interval as a value it is told and asserts nothing about what it should be.
+The Operator left the *value* open deliberately — *decide it when the instance exists* — and this
+ruling is about where it lives, not what it is.
 
-An earlier draft listed them in both places and the two sets **diverged within the hour**, while both
-PRs were still open — canon gained a possibility this spec did not have. Two documents enumerating one
-option set guarantees that, and a builder reads the spec. So the enumeration lives in exactly one
-place, and this is not it.
+**Still open, and rung-local:** the env var's exact name and where it is read.
 
-**What is spec-local:** story 6 is the only story that depends on the ruling, and **the other six are
-independent of it** — the mode starting at `needs_login`, setup refusing, `Secure` staying on,
-`--demo` unchanged, the login screen stating the password, and the restart resetting everything can
-all be built while this is open.
-
-**Not built on while pending**, per the gap protocol.
+*(The enumeration of candidates was never repeated here, and this section is not the place to start.
+An earlier draft listed them in both this spec and canon, and the two sets diverged within the hour
+while both PRs were open — canon gained a possibility the spec did not have. One option set, one home,
+and a builder reads the spec.)*
 
 ## Rule check
 
@@ -146,20 +141,22 @@ Written before building, covering every rule this touches *or comes near*.
 - **No silent caps or fallbacks.** Near-miss, and it is the sharpest one here. **The reset is a silent
   destructive fallback unless the UI says it is coming** — a visitor mid-click who is signed out and
   finds their edits gone has hit exactly the degraded mode this rule forbids leaving unsurfaced. That
-  is why story 6 exists, and why the third option in the gap above is the weakest of the three.
-- **Config tidiness (D12).** Directly touched, and the PROPOSED gap above is the honest statement of
-  where this spec cannot comply without a ruling. Not resolved by asserting it complies.
+  is why story 6 exists — and why *state no interval at all*, which the ruling did not take, is the
+  option this rule argues hardest against.
+- **Config tidiness (D12).** Directly touched, and now RULED: the interval is a *reported deployment
+  fact*, outside D12's scope, because nothing branches on it. The spec raised it as a gap rather than
+  asserting compliance, and canon carries the category as a result.
 - **Secrets discipline.** `demo` is a published password by ruling, not a secret. It reaches
   `SetPassword` in process, never via argv or env. `test` is untouched.
 - **Never mutate a committed version.** Not touched — the mode wires no storage backend, and
   `versionAdmin` is the demo provider operating on in-memory fixtures.
 - **Docs are part of the diff.** This spec is the diff. It contradicts no canon; where it diverges from
-  D12 it says so as a gap rather than editing D12.
+  D12 it raised a gap rather than editing D12 — which is how D12 gained its third category.
 - **Interface facts looked up live.** None pinned here. The build will re-check `Secure`-flag behaviour
   against the running server rather than against `cookie.go`'s comment.
 - **Don't improvise architecture.** The interval's home is the one architectural question this spec
-  reaches, and it is proposed, not decided. Everything else is either ruled on quince#444 or
-  rung-local.
+  reached; it was proposed rather than decided here, and has since been ruled. Everything else is
+  either ruled on quince#444 or rung-local.
 - **Coverage.** The build declares `go test -cover` plus a known-untested list. Named already as
   expected debt: the compose/timer wiring is deploy configuration and will not be covered by Go tests;
   it is proven by story 7's manual observation on a dev deploy.
