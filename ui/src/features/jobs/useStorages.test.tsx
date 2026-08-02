@@ -118,3 +118,29 @@ describe("useStorages recheck", () => {
     await waitFor(() => expect(result.current.rechecking["01JB"]).toBeUndefined());
   });
 });
+
+// A FINISHED JOB INVALIDATES THIS LIST, and the hook cannot see jobs — so `reload` exists for the
+// page to call. Without it the UI keeps advertising a cost that has been paid, which is the one
+// defect in this family that makes the UI say something FALSE rather than say too little.
+describe("useStorages reload", () => {
+  it("refetches the device-scoped list on demand", async () => {
+    get
+      .mockResolvedValueOnce({ storages: [storage({ reachable: true, will_be_full: true })] })
+      .mockResolvedValueOnce({ storages: [storage({ reachable: true, will_be_full: false })] });
+
+    const { result } = renderHook(() => useStorages("DEV-1"));
+    await waitFor(() => {
+      const s = result.current.state;
+      expect(s.status === "loaded" && s.storages[0].will_be_full).toBe(true);
+    });
+
+    act(() => result.current.reload());
+
+    await waitFor(() => {
+      const s = result.current.state;
+      expect(s.status === "loaded" && s.storages[0].will_be_full).toBe(false);
+    });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenLastCalledWith("/api/storages?udid=DEV-1");
+  });
+});

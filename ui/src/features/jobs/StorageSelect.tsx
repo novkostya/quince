@@ -1,22 +1,21 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import type { Storages } from "./useStorages";
-
-// StorageSelect is the "where does this backup go" control on Back up now (qn.6c story 9).
+// StorageSelect is the "where does this backup go" CONTROL on Back up now (qn.6c story 9).
 //
-// It renders ONLY when there is a real choice — more than one declared storage. With one storage
-// the question does not exist, and a select with a single option is a control that teaches the user
-// there is a decision when there is not.
+// IT RENDERS ONLY THE CONTROL. Every sentence it used to emit — the full-transfer warning, the
+// unreachable reasons, the failed-load line — now lives in StorageNotices, below the action row.
 //
-// A FAILED LOAD IS NOT THE SAME AS NO CHOICE, and rendering them identically is the defect the
-// review caught (quince#452): the user with two disks would find the control simply gone, press the
-// button, and have the backup go to the default with nothing saying so. Failure gets its own line —
-// shown, not thrown, the same shape as `Storage.unreachable_reason`.
+// THAT SPLIT IS quince#325's DEFECT, WHICH THIS COMPONENT REINTRODUCED. A flex item is as wide as
+// its widest child, and this control is an item in the page's action row. "First backup to shuttle
+// — this transfers everything, not just what changed." is far wider than a `<select>`, so the
+// column took the sentence's width and pushed `Manage encryption` out by the overhang — the exact
+// gap quince#325 fixed for "Connect the device to back it up." and documented on
+// BackupControlsStatus fifteen lines from here. Reported from a screenshot of the staging stand
+// during G9, which is the second time the same lesson arrived the same way.
 //
-// An UNREACHABLE storage is listed and DISABLED, with its reason shown. Hiding it would be the
-// wrong kind of tidy: the user plugged that disk in once, and a list it silently vanishes from is a
-// list they cannot trust. Disabled-with-a-reason is the honest shape — and it is why the ruling
-// made quince serve rather than refuse when a disk is out.
+// So the rule the comment on BackupControlsStatus states is now STRUCTURAL for this row: the row
+// holds controls, prose goes below it. A sentence added back here will re-break the layout.
 export function StorageSelect({
   storages: sub,
   value,
@@ -28,7 +27,7 @@ export function StorageSelect({
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
-  const { state, recheck, rechecking } = sub;
+  const { state } = sub;
   const storages = state.status === "loaded" ? state.storages : [];
   const exact = storages.find((s) => s.id === value);
   const chosen = exact ?? storages.find((s) => s.default);
@@ -45,55 +44,73 @@ export function StorageSelect({
     if (!exact && chosen && value !== "") onChange(chosen.id);
   }, [exact, chosen, value, onChange]);
 
-  if (state.status === "failed") {
-    return (
-      <span className="text-xs text-warn" data-testid="storages-failed">
-        couldn&rsquo;t load storages — this backup will go to the default
-      </span>
-    );
-  }
-  if (state.status === "loading") return null;
+  if (state.status !== "loaded") return null;
   if (storages.length < 2) return null;
 
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs text-muted">
-        to{" "}
-        <select
-          className="rounded-md border border-line bg-card px-1.5 py-1 text-xs text-fg"
-          value={chosen?.id ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          aria-label="Backup storage"
-          data-testid="storage-select"
-        >
-          {storages.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.reachable}>
-              {s.name}
-              {s.reachable ? ` (${s.backend})` : " — not connected"}
-            </option>
-          ))}
-        </select>
-      </label>
+    <label className="text-xs text-muted">
+      to{" "}
+      <select
+        className="rounded-md border border-line bg-card px-1.5 py-1 text-xs text-fg"
+        value={chosen?.id ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-label="Backup storage"
+        data-testid="storage-select"
+      >
+        {storages.map((s) => (
+          <option key={s.id} value={s.id} disabled={!s.reachable}>
+            {s.name}
+            {s.reachable ? ` (${s.backend})` : " — not connected"}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
+// StorageNotices is everything StorageSelect used to say, rendered BELOW the action row where a
+// full sentence is free to be a full line (quince#325's rule, applied to this rung's sentences).
+//
+// It renders for a single storage too, unlike the control: the full-transfer cost and an
+// unreachable disk are facts worth stating whether or not there is a choice to make. The CONTROL
+// is what a single storage does not need — the question does not exist — and that is a different
+// question from whether the user should be told what this backup will cost.
+export function StorageNotices({
+  storages: sub,
+  value,
+}: {
+  storages: Storages;
+  value: string;
+}) {
+  const { state, recheck, rechecking } = sub;
+  const storages = state.status === "loaded" ? state.storages : [];
+  const exact = storages.find((s) => s.id === value);
+  const chosen = exact ?? storages.find((s) => s.default);
+
+  if (state.status === "failed") {
+    return (
+      <p className="text-xs text-warn" data-testid="storages-failed">
+        couldn&rsquo;t load storages — this backup will go to the default
+      </p>
+    );
+  }
+  if (state.status === "loading") return null;
+
+  return (
+    <>
       {/* THE REASON FOR EVERY UNREACHABLE STORAGE, not just a chosen one — because a disabled
           option CANNOT BE CHOSEN. Showing it on selection was unreachable code: the user saw
-          "not connected" and could never learn which path or why. Found by driving G8 against
-          the real API rather than against props (qn.6c story 9).
+          "not connected" and could never learn which path or why (qn.6c story 9).
 
-          The daemon's own sentence, because it names the path and the marker.
-
-          RE-CHECK SITS HERE, ON THE UNREACHABLE ROW ONLY (quince#459). The Operator's ruling is
-          "plug the disk in and press the button", and this is where the sentence describing the
-          problem already is — the button lands next to its own reason rather than in a corner of
-          the page. A reachable storage gets none: the press would be a no-op the user cannot
-          interpret, and a control offered where there is nothing to fix teaches that pressing it
-          is how you make things happen. That is a UI-taste call, rung-local, not a contract one —
-          quince#459 flagged it as exactly that. */}
+          RE-CHECK sits on that row, and only there (quince#459): the Operator's ruling is "plug
+          the disk in and press the button", and this is where the sentence describing the problem
+          already is. A reachable storage gets none — the press would be a no-op the user cannot
+          interpret. */}
       {storages
         .filter((s) => !s.reachable && s.unreachable_reason)
         .map((s) => (
-          <span
+          <p
             key={s.id}
             className="flex flex-wrap items-center gap-2 text-xs text-warn"
             data-testid="storage-unreachable"
@@ -105,30 +122,26 @@ export function StorageSelect({
               variant="outline"
               size="sm"
               className="h-6 px-2 text-xs sm:h-6"
-              disabled={disabled || rechecking[s.id] === "pending"}
+              disabled={rechecking[s.id] === "pending"}
               onClick={() => recheck(s.id)}
               data-testid="storage-recheck"
               aria-label={`Re-check ${s.name}`}
             >
               {rechecking[s.id] === "pending" ? "Checking…" : "Re-check"}
             </Button>
-            {/* A FAILED PRESS IS SHOWN, NEVER SWALLOWED. Without this the button would look
-                identical whether the re-check ran and the disk is still out, or the request never
-                landed — and the user would keep pressing a control that is not reaching the
-                daemon. */}
             {rechecking[s.id] === "failed" ? (
               <span data-testid="storage-recheck-failed">couldn&rsquo;t re-check</span>
             ) : null}
-          </span>
+          </p>
         ))}
 
-      {/* THE COST, STATED BEFORE IT IS PAID (story 8). Attached to the option that carries it, not
-          to the page: it is a fact about this device and this storage. */}
+      {/* THE COST, STATED BEFORE IT IS PAID (story 8). Proven on hardware during G9 — the staging
+          stand's first backup to a second disk showed this line before the transfer started. */}
       {chosen?.reachable && chosen.will_be_full ? (
-        <span className="text-xs text-warn" data-testid="storage-will-be-full">
+        <p className="text-xs text-warn" data-testid="storage-will-be-full">
           First backup to {chosen.name} — this transfers everything, not just what changed.
-        </span>
+        </p>
       ) : null}
-    </div>
+    </>
   );
 }

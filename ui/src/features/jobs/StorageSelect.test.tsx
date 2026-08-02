@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { StorageSelect } from "./StorageSelect";
+import { StorageSelect, StorageNotices } from "./StorageSelect";
 import type { Storage } from "@/lib/types";
 
 import type { Storages, StoragesState, RecheckState } from "./useStorages";
@@ -24,7 +24,7 @@ function storage(over: Partial<Storage>): Storage {
 // subscription — state plus recheck — because the button lives on the row that explains the
 // problem, and only the hook can reload the DEVICE-SCOPED list after a successful press.
 function sub(state: StoragesState, over: Partial<Storages> = {}): Storages {
-  return { state, recheck: () => {}, rechecking: {}, ...over };
+  return { state, recheck: () => {}, rechecking: {}, reload: () => {}, ...over };
 }
 
 const shuttle = storage({
@@ -67,10 +67,9 @@ describe("StorageSelect", () => {
   it("shows the daemon's reason for an unreachable storage without it being chosen", () => {
     // value is the DEFAULT, not the unreachable one.
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     expect(screen.getByTestId("storage-unreachable")).toHaveTextContent(
@@ -81,7 +80,7 @@ describe("StorageSelect", () => {
   // THE COST BEFORE IT IS PAID (story 8), attached to the option that carries it.
   it("warns that a first backup to this storage transfers everything", () => {
     const fresh = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: true });
-    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), fresh] })} value="01JB" onChange={() => {}} />);
+    render(<StorageNotices storages={sub({ status: "loaded", storages: [storage({}), fresh] })} value="01JB" />);
     expect(screen.getByTestId("storage-will-be-full")).toHaveTextContent(
       /transfers everything, not just what changed/,
     );
@@ -91,7 +90,7 @@ describe("StorageSelect", () => {
   // the pair, so a constant one would train the user to ignore it.
   it("does not warn when this storage already holds a backup for the device", () => {
     const seen = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: false });
-    render(<StorageSelect storages={sub({ status: "loaded", storages: [storage({}), seen] })} value="01JB" onChange={() => {}} />);
+    render(<StorageNotices storages={sub({ status: "loaded", storages: [storage({}), seen] })} value="01JB" />);
     expect(screen.queryByTestId("storage-will-be-full")).toBeNull();
   });
 
@@ -109,7 +108,7 @@ describe("StorageSelect degradation", () => {
   // only one storage" — the control simply gone. A user with two disks would press the button and
   // have the backup go to the default with nothing saying so.
   it("says the load failed rather than rendering as no-choice", () => {
-    render(<StorageSelect storages={sub({ status: "failed" })} value="" onChange={() => {}} />);
+    render(<StorageNotices storages={sub({ status: "failed" })} value="" />);
     expect(screen.getByTestId("storages-failed")).toHaveTextContent(/go to the default/);
   });
 
@@ -172,10 +171,9 @@ describe("StorageSelect degradation", () => {
 describe("StorageSelect re-check", () => {
   it("offers Re-check on the unreachable row, beside its reason", () => {
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     const row = screen.getByTestId("storage-unreachable");
@@ -191,10 +189,9 @@ describe("StorageSelect re-check", () => {
   it("offers no Re-check when every storage is reachable", () => {
     const other = storage({ id: "01JB", name: "shuttle", default: false });
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), other] })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     expect(screen.queryByTestId("storage-recheck")).toBeNull();
@@ -203,10 +200,9 @@ describe("StorageSelect re-check", () => {
   it("asks the hook to re-check THAT storage", () => {
     const recheck = vi.fn();
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { recheck })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     fireEvent.click(screen.getByTestId("storage-recheck"));
@@ -217,10 +213,9 @@ describe("StorageSelect re-check", () => {
   it("disables the button while its own re-check is pending", () => {
     const pending: Record<string, RecheckState> = { "01JB": "pending" };
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: pending })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     const btn = screen.getByTestId("storage-recheck") as HTMLButtonElement;
@@ -234,10 +229,9 @@ describe("StorageSelect re-check", () => {
   it("says so when the re-check itself could not be performed", () => {
     const failed: Record<string, RecheckState> = { "01JB": "failed" };
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: failed })}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     expect(screen.getByTestId("storage-recheck-failed")).toHaveTextContent(/couldn’t re-check/);
@@ -261,18 +255,60 @@ describe("StorageSelect re-check", () => {
     });
     const pending: Record<string, RecheckState> = { "01JB": "pending" };
     render(
-      <StorageSelect
+      <StorageNotices
         storages={sub(
           { status: "loaded", storages: [storage({}), shuttle, third] },
           { rechecking: pending },
         )}
         value="01JA"
-        onChange={() => {}}
       />,
     );
     const buttons = screen.getAllByTestId("storage-recheck") as HTMLButtonElement[];
     expect(buttons).toHaveLength(2);
     expect(buttons.filter((b) => b.disabled)).toHaveLength(1);
     expect(buttons.filter((b) => /Checking/.test(b.textContent ?? ""))).toHaveLength(1);
+  });
+});
+
+// THE THREE THINGS THE G9 RUN REPORTED, pinned. All three were found by the Operator watching a
+// real transfer on the staging stand, and none of them is a layout preference — each is the UI
+// saying less than it knows, or saying something untrue.
+describe("StorageSelect after G9", () => {
+  // 1. THE CONTROL EMITS NO PROSE. quince#325 established that a flex item is as wide as its
+  // widest child, so a sentence in the action row sets the column's width and pushes the next
+  // button out. StorageSelect reintroduced exactly that with the full-transfer warning; keeping
+  // the control prose-free is what makes the fix structural rather than a width tweak.
+  it("renders only the control — no sentence can widen the action row", () => {
+    const fresh = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: true });
+    const { container } = render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), fresh, shuttle] })}
+        value="01JB"
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("storage-select")).toBeInTheDocument();
+    // Not one of the sentences, though this state would have produced two of them before.
+    expect(container.querySelector('[data-testid="storage-will-be-full"]')).toBeNull();
+    expect(container.querySelector('[data-testid="storage-unreachable"]')).toBeNull();
+    expect(container.querySelector('[data-testid="storages-failed"]')).toBeNull();
+  });
+
+  // 2. THE NOTICES RENDER FOR A SINGLE STORAGE TOO. The control correctly hides when there is no
+  // choice; the COST is not a choice. A user with one storage still deserves to know their next
+  // backup transfers everything.
+  it("states the cost even when there is only one storage and no control", () => {
+    const only = storage({ will_be_full: true });
+    render(<StorageNotices storages={sub({ status: "loaded", storages: [only] })} value="" />);
+    expect(screen.getByTestId("storage-will-be-full")).toHaveTextContent(/transfers everything/);
+  });
+
+  // 3. AND IT MUST GO AWAY ONCE PAID. `will_be_full` false is the server saying the cost has been
+  // met; rendering the warning anyway is the UI asserting something untrue, which is worse than
+  // the two omissions above. On hardware this survived the transfer it described.
+  it("drops the warning once the server says the cost has been paid", () => {
+    const paid = storage({ will_be_full: false });
+    render(<StorageNotices storages={sub({ status: "loaded", storages: [paid] })} value="" />);
+    expect(screen.queryByTestId("storage-will-be-full")).toBeNull();
   });
 });
