@@ -76,6 +76,32 @@ POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session 
 POST /api/auth/logout            → 204, clears the cookie.
 ```
 
+Onboarding (qn.6f; design §9 has the three steps):
+
+```
+GET  /api/onboarding/step1 → {complete: bool, detected: "tls" | "forwarded_proto" | "none"}
+     // PRE-AUTH — the fifth exempt route, and the only onboarding one, BY EXACT PATH.
+     // complete = this origin is already encrypted, so the step needs no action.
+```
+
+**This is the FIRST onboarding surface in the product**, and its shape is precedent for steps 2 and
+3 — which is the argument for it being this narrow. `detected` is the **evidence** and `complete`
+the **verdict**; both are sent although one is derivable from the other, so a client deciding
+whether to show the setup options never keeps its own list of which reasons count. That list is
+exactly what goes stale when a fourth reason appears.
+
+**Pre-auth is an Operator ruling** (2026-08-02, quince#501), and the chicken-and-egg is the whole
+rung: over plain http to a LAN address the browser discards the session cookie, so the page
+explaining that cannot sit behind the door the defect locks.
+
+**By EXACT PATH, step 1 only.** `authExempt` matches on method-plus-path with no prefix support, so
+an `/api/onboarding/*` exemption would mean changing the matcher and silently exempting every future
+step. `GET /api/onboarding/step2` is not exempt, and neither is `POST` to step 1.
+
+**Loopback is NOT complete**, though a session cookie works perfectly there. The step asks whether a
+*phone* can reach quince; a browser on `http://localhost` cannot answer that on its behalf, and
+saying otherwise would be the same false assurance one layer up that this rung exists to remove.
+
 **`426 insecure_origin` on both credential endpoints.** When the session cookie a request
 would earn is marked `Secure` while the origin is one the browser does not consider secure
 — plain http to a non-loopback host, outside `--demo` — the endpoint refuses rather than

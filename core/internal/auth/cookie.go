@@ -69,13 +69,13 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 // It is a PARAMETER rather than a package variable so the rule stays a pure function of
 // its inputs and every test states the mode it is asserting about.
 //
-// NOTE WHERE IT SITS: strictly below secureOrigin and strictly above the host test. That
+// NOTE WHERE IT SITS: strictly below SecureOrigin and strictly above the host test. That
 // ordering is the ruling, not a preference — it relaxes the FALLBACK only, so a positive
 // signal still wins and *the header can only ever upgrade* is preserved verbatim. Moving
-// this branch above secureOrigin would let the flag strip Secure from a genuine HTTPS
+// this branch above SecureOrigin would let the flag strip Secure from a genuine HTTPS
 // session, which is a different and much worse setting than the one that was ruled.
 func secureCookie(r *http.Request, allowInsecure bool) bool {
-	if secureOrigin(r) {
+	if SecureOrigin(r) {
 		return true
 	}
 	if allowInsecure {
@@ -84,14 +84,25 @@ func secureCookie(r *http.Request, allowInsecure bool) bool {
 	return !isLoopbackHost(r.Host)
 }
 
-// secureOrigin reports whether the browser reached us over an origin IT considers secure —
+// SecureOrigin reports whether the browser reached us over an origin IT considers secure —
 // TLS terminated here, or terminated by a proxy we trust to say so.
 //
 // It is the half of secureCookie that describes the CONNECTION rather than the policy. The
 // remaining !isLoopbackHost branch is a deliberate choice to mark the cookie Secure on a
 // plain-http LAN address even though the browser will then discard it, and separating the
 // two is what lets Service.CookieWillBeDiscarded name exactly that case (quince#497).
-func secureOrigin(r *http.Request) bool {
+//
+// EXPORTED because onboarding step 1 asks the same question (qn.6f slice 2): "is this origin
+// already encrypted, so the step is complete with no buttons?" is exactly this predicate.
+// Exporting it beats re-deriving `r.TLS != nil || X-Forwarded-Proto` in httpapi, which would
+// be a second copy of a security predicate — the thing quince#497's design note refused to
+// do for the loopback test, for the same reason: copies drift, and this one decides both
+// whether a cookie survives and whether a user is told their setup is finished.
+//
+// It is a package function rather than a Service method on purpose: it is a pure function of
+// the request, with no dependency on demo mode or the plain-http opt-in. Service.Secure is
+// where those live, and conflating the two would make a POLICY answer look like a FACT.
+func SecureOrigin(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
