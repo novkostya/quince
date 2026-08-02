@@ -13,6 +13,18 @@ import { useOnboardingHTTPS } from "@/lib/onboarding";
 export function OnboardingHTTPSPage() {
   const q = useOnboardingHTTPS();
 
+  // THE TIERS RENDER FOR BOTH `not complete` AND `check failed`, and they live here rather than
+  // inside a branch for that reason. They are static prose: correct whether or not the server
+  // answered, which is exactly why the error copy promises them.
+  //
+  // They were nested inside the not-complete branch in the first version, so a failed check said
+  // "the setup options below are still correct" above nothing at all — to the one audience this
+  // page has, somebody whose deployment is already half-broken (review on quince#559).
+  //
+  // `Complete` still offers nothing. That is G1 and it stays: an already-secure origin meets zero
+  // friction and is never asked to confirm what quince can see for itself.
+  const showTiers = q.isError || (q.data !== undefined && !q.data.complete);
+
   return (
     <div className="min-h-dvh bg-bg pb-10 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
       <div className="mx-auto w-full max-w-2xl">
@@ -22,18 +34,31 @@ export function OnboardingHTTPSPage() {
         {q.isPending ? (
           <p className="mt-1 text-sm text-muted">Checking this connection…</p>
         ) : q.isError ? (
-          // Honest rather than reassuring: we do not know, and we say which half is missing.
-          <p className="mt-1 text-sm text-danger">
-            Could not check this connection. quince may not be reachable — the setup options below
-            are still correct.
-          </p>
+          <CheckFailed />
         ) : q.data.complete ? (
           <Complete detected={q.data.detected} />
         ) : (
           <Incomplete />
         )}
+
+        {showTiers ? <Tiers /> : null}
       </div>
     </div>
+  );
+}
+
+// Honest rather than reassuring: quince does not know, and says which half is missing.
+function CheckFailed() {
+  return (
+    <>
+      <div className="mt-3 flex items-center gap-2">
+        <Badge tone="warn">Unknown</Badge>
+      </div>
+      <p className="mt-3 text-sm text-danger">
+        Could not check this connection — quince did not answer. The setup options below do not
+        depend on that answer and are still correct.
+      </p>
+    </>
   );
 }
 
@@ -69,7 +94,15 @@ function Incomplete() {
         work — the browser discards the session cookie and returns you to the login page without
         an error. Pick one of these.
       </p>
+    </>
+  );
+}
 
+// Tiers is the static half of the page: five options that do not depend on what the check
+// returned. Rendered for a failed check as well as an unencrypted one.
+function Tiers() {
+  return (
+    <>
       <div className="mt-6 flex flex-col gap-4">
         <Tier
           title="Put something in front of quince"
