@@ -657,11 +657,31 @@ Beyond `make gates`.
 | **G7** | 1 | **REPLACED by gap 3's ruling — it now asserts the opposite of what it did.** A `config.yml` with **no `storages:` key REFUSES TO START**, names the missing key, and prints what to write. Asserted on all three: the refusal, the key named, and the remedy printed. **The refusal is the whole of the safety here.** The old G7 asserted an implicit storage synthesized from `QUINCE_BACKUPS` and byte-identical behaviour to `main`; the ruling retires that env var, so the old gate is not merely wrong, it is **unwritable**. The one outcome this must never have is a **silent zero-storage start that looks healthy** — an instance that comes up, shows no error, and quietly cannot back anything up. | CI |
 | **G7b** | 1 | `QUINCE_BACKUPS` is **gone**, not merely unused: set it to a valid path, start with a declared `storages:` list pointing elsewhere, and assert every version lands under the **declared** root. A retired variable that is still silently honoured somewhere is the failure this gate exists to catch. | CI |
 | **G8** | 9 | The selector renders both storages, disables the unreachable one with its reason, and shows the full-transfer warning on the storage that has no prior version. | ui-e2e |
-| **G9** | 10 | **OWED — hardware, Operator, a lab day.** A real device backed up to two real storages, the second a genuine full transfer of tens of gigabytes over the real transport. G1 proves the mechanism; only hardware proves the cost. | lab |
+| **G9** | 10 | **PASSED on hardware 2026-08-02 — placement. Retention leg OWED.** A real device backed up to two real storages, the second a genuine full transfer over the real transport, and the first left untouched. Ran on the staging stand: a 3.7 GB iPad over Wi-Fi to a zfs storage and an ext4 USB disk whose `hardlink` backend was **probed**, not declared — `shuttle` took 94,027 files from empty with the daemon's own marker reading `kind: "full"`, while `local` kept 94,027 files and the same five `@quince-*` snapshots. **STILL OWED: per-storage retention has never pruned** — the two storages carry different policies (10/30/12 and 3/7/4) and the second holds too few versions to fire, so `Prune`'s per-storage grouping is a deletion path that has only ever run in a unit test. Four backups to the second storage discharge it; no lab day. | lab |
 | **G10** | all | `make privacy-check REF=origin/main...HEAD TEXT=<body>` over diff, commit messages and PR text. Storage **paths** are this rung's sharpest privacy surface — see *Rule check*. | host |
+**G9's scale clause was STRUCK, not met.** It read *"a genuine full transfer **of tens of
+gigabytes**"*, and the run transferred **3.7 GB**. Architect ruling on quince#378, 2026-08-02,
+recorded here rather than edited silently, because a gate whose literal text went unmet must not be
+quietly reinterpreted by the seat that accepts it.
 
-**G9 is declared owed with its owner named, per state honesty.** No PR in this rung claims the
-hardware leg until it has run.
+**The clause was unmeetable on the stand that ran it** — the device holds 3.7 GB, so no run against
+that iPad could have satisfied it. That is a defect in the gate: it was written without pinning
+which device would run it, and a gate clause the chosen device cannot satisfy tests the lab, not
+the code.
+
+**And the cost it wanted is banked elsewhere.** `qn.4c` committed **33.3 GB** full over supervised
+netmuxd and `qn.6b` proved liveness patience through multi-minute device-side pauses, both on
+hardware. What G9 uniquely claims — *two storages, the second full, the first untouched* — needs a
+**second** storage, not a **big** one.
+
+**The implementer missed this and it is worth recording that too**: the run was checked against what
+G9 is *for* rather than against the sentence that exists, with the sentence open. The report's own
+*what this does not prove* list ran to five items and omitted the one the gate says literally. The
+architect caught it against the gate's text.
+
+**G9's PLACEMENT claim has run; its RETENTION leg has not, and both are stated rather than one
+standing for the other.** No PR in this rung claimed the hardware leg before it ran, and none claims
+the retention leg now.
 
 ---
 
@@ -691,7 +711,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | **Contracts are stop-and-ask** | Gaps 1, 2 and 3 are contract surfaces (§2, §1/§2, §6); gap 4 is storage semantics (design §5). **No code lands before the verdicts.** |
 | **Never mutate a committed version** | **The rung's sharpest near-miss, and it is answered by measurement rather than by argument.** `quince-storage.json` is written into a root that already holds committed versions. It sits above every device dir, hence above every version; interface facts 5 and 6 name the four walks it is invisible to and the one rule that would otherwise have shipped it offsite. **G3 asserts all four** — two by observation (`reconcileUDIDs`, `scanJournals`) and two as regression guards over paths that are invisible by construction (`Scan`, `Verify`), which is stated in G3 rather than left as an unqualified "measured". `latest/` is still changed only by the marker-guarded exchange, under each root independently. |
 | **No silent caps or fallbacks** | A backend/identity mismatch **refuses**; it never downgrades to what it found. An unreachable storage is listed with a reason, never hidden and never queued. The `copy`-backend warning path is unchanged and now fires per storage. |
-| **State honesty** | The full-transfer claim is stated **before** the transfer, from the server's knowledge of prior versions, and G2 asserts it against the committed marker so a UI-only claim cannot pass. `backend: "unknown"` on a storage never yet reached means quince does not know — not a guess. G9 is declared owed with an owner rather than quietly skipped. |
+| **State honesty** | The full-transfer claim is stated **before** the transfer, from the server's knowledge of prior versions, and G2 asserts it against the committed marker so a UI-only claim cannot pass. `backend: "unknown"` on a storage never yet reached means quince does not know — not a guess. G9 was declared owed with an owner rather than quietly skipped, and its placement half is now reported as run while its retention half is still reported as owed — the same rule applied to a gate that turned out to have two claims in it. |
 | **Config tidiness (D12)** | Storages live in `config.yml` with no secrets, and gap 3's ruling makes this **stronger** than the spec first proposed: with `QUINCE_BACKUPS` retired, nothing about where a backup lands is implied by an env var invisible in the file. **Two near-misses, both declared.** (1) A storage-list change needs a **restart**, which D12 permits only if the spec says why — gap 3 says why, *Rung-ruled decisions* #1 records it. (2) **`storages` has no usable default and that is deliberate** — D12 says every setting has a sane default, and there is no sane default for *where the user's backups live* now that the implicit one is retired. The honest form of "no default" is a **refusal that names the key and prints what to write** (G7), never a guess and never a silent start. |
 | **No UI-only state** | The selector renders `GET /api/storages`; reachability and the full-transfer claim are both server answers. The UI stores neither. |
 | **Privacy is a commit-time gate** | **The sharpest surface in this rung is storage paths**, because the whole feature is about naming places on the Operator's own machines. Every path in this spec, in the fixtures, in the demo provider and in the config examples is `/backups` or an obvious placeholder. No lab topology, no real mount point, no dataset name from the private layer enters any of it. G10 sweeps diff, commit messages and PR text before every push. |
@@ -701,7 +721,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | **Docs are part of the diff** | contracts §1/§2/§6 and design §5 get their `PROPOSED (gap)` blocks in the same PR as this spec; each is flipped to decided text in the PR that implements it, alongside stack D5/D12. |
 | **Coverage declared** | Every code PR carries `go test -cover` plus an explicit known-untested list. Expected standing entries: the hardware-only paths (G9) and the zfs-hook branch under a second storage, which no CI box can exercise. |
 | **A rung starts from a spec** | This document, reviewed before any code exists. |
-| **A rung's goal is provable at rung close** | G1–G8 all run in CI or ui-e2e at rung close; none depends on a later rung. The one thing that cannot is G9, declared owed rather than claimed. The onboarding dependency the epic implies is removed by *Sequencing*. |
+| **A rung's goal is provable at rung close** | G1–G8 all run in CI or ui-e2e at rung close; none depends on a later rung. The one thing that cannot is G9, declared owed rather than claimed and run on hardware 2026-08-02 — except its retention leg, which quince#506 added after this line was written and which is still owed. The onboarding dependency the epic implies is removed by *Sequencing*. |
 | **Approver ≠ author** | Implementer authors; the architect reviews and merges. Unchanged. |
 
 ---
@@ -849,7 +869,7 @@ relay on quince#378.
 | 9b | G8 — the selector driven against the real API | quince#453 |
 | — | `Job.storage_id` in the TS type | quince#456 |
 | — | per-storage `backend` and `zfs` (quince#458) | quince#461 |
-| 11 | **G9 — a real device to two real storages** | **OWED** |
+| 11 | **G9 — a real device to two real storages** | ran 2026-08-02; retention leg owed |
 
 **THERE IS NO STATUS COLUMN, AND THAT IS THE POINT.** This table had one; it said `open` for three
 PRs that merged *while the table's own PR was in review* (quince#457). That is not a lapse to be more
@@ -858,8 +878,19 @@ the status lives on the forge, so every merge invalidates it including merges du
 quince#409's review said the same of a different table, as a warning; this was the demonstration.
 
 **A PR number is immutable, so it is what the table records.** A reader who wants status has the
-number and the forge. `OWED` survives on G9 alone precisely because it is *not* a forge state — it is
-a fact about hardware nobody has run.
+number and the forge.
+
+**The one status cell this table allowed itself went stale, and it went stale by the event it was
+waiting for.** `OWED` sat on G9 on the grounds that it was *not* a forge state — *"a fact about
+hardware nobody has run"* — and therefore could not rot the way a status column does. That reasoning
+was wrong in a way worth keeping rather than deleting: **it was a status cell like any other, and its
+update was merely scheduled for a known future event.** Hardware ran on 2026-08-02 and the cell was
+false from that moment until someone edited it — the exact failure the paragraph above describes,
+arriving on the single entry that had argued itself exempt.
+
+**The test the exemption should have faced is *what makes this one different when it changes*, and
+the answer was nothing.** A cell that is true only until a thing happens is a status cell.
+
 
 **The slicing diverged from the plan, and the divergences are the record worth keeping.** Slice 5 was
 planned as one PR for stories 5+6+7 and became five, because each one's absence made the next
@@ -906,3 +937,4 @@ merged spec asserting what the Operator overruled is the defect class this proje
 It is separated from PR 2 so the correction is not buried inside a code diff — and because PR 2's
 own scope grew: gap 3's ruling turned *"synthesize an implicit storage"* into *"refuse loudly, and
 ship an upgrade note"*.
+
