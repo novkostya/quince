@@ -54,8 +54,11 @@ func TestParseKeepsDefaultsForMissingKeys(t *testing.T) {
 	if cfg.Backup.RequireEncryption != true {
 		t.Errorf("require_encryption default lost")
 	}
-	if cfg.Storage.Backend != "auto" {
-		t.Errorf("storage.backend default lost = %q", cfg.Storage.Backend)
+	// storage: has NO defaults to lose — it is a list, and per-entry defaults are applied by
+	// ResolveStorages at parse rather than pre-filled into Default() (quince#473). What this
+	// asserts instead is that an absent key stays NIL, which is what G7's refusal reads.
+	if cfg.Storage != nil {
+		t.Errorf("storage should be nil when the key is absent, got %+v", cfg.Storage)
 	}
 	if cfg.Sessions.TTLMinutes != 30 {
 		t.Errorf("sessions.ttl_minutes default lost = %d", cfg.Sessions.TTLMinutes)
@@ -63,7 +66,10 @@ func TestParseKeepsDefaultsForMissingKeys(t *testing.T) {
 }
 
 func TestUnknownKeysWarn(t *testing.T) {
-	raw := "nonsense: 1\nstorage:\n  bogus: 2\n  zfs:\n    typo: 3\n"
+	// `storage:` is a LIST now, so a typo lives inside an ENTRY and the warning is indexed
+	// (quince#473). unknownKeys already recursed into slices of structs, which is why this needed
+	// no new machinery — measured before the flatten was written rather than discovered after.
+	raw := "nonsense: 1\nstorage:\n  - path: /backups\n    bogus: 2\n    zfs:\n      typo: 3\n"
 	_, warns, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -72,7 +78,7 @@ func TestUnknownKeysWarn(t *testing.T) {
 	for _, w := range warns {
 		gotPaths[w.Path] = true
 	}
-	for _, want := range []string{"nonsense", "storage.bogus", "storage.zfs.typo"} {
+	for _, want := range []string{"nonsense", "storage[0].bogus", "storage[0].zfs.typo"} {
 		if !gotPaths[want] {
 			t.Errorf("missing unknown-key warning for %q; got %+v", want, warns)
 		}
@@ -81,7 +87,10 @@ func TestUnknownKeysWarn(t *testing.T) {
 
 func TestValidateCatchesBadEnums(t *testing.T) {
 	c := Default()
-	c.Storage.Backend = "banana"
+	// The backend enum moved onto the ENTRY with the flattening, so this reaches it through the
+	// list rather than through a global.
+	c.Storage = &[]StorageEntry{{Name: "local", Path: "/backups", Default: true, Backend: "banana",
+		ZFS: ZFSConfig{Mode: "exec", Seed: "auto"}}}
 	c.UI.Theme = "neon"
 	c.Sessions.TTLMinutes = 0
 	errs := Validate(c)
@@ -89,7 +98,7 @@ func TestValidateCatchesBadEnums(t *testing.T) {
 	for _, e := range errs {
 		gotPaths[e.Path] = true
 	}
-	for _, want := range []string{"storage.backend", "ui.theme", "sessions.ttl_minutes"} {
+	for _, want := range []string{"storage[0].backend", "ui.theme", "sessions.ttl_minutes"} {
 		if !gotPaths[want] {
 			t.Errorf("missing validation error for %q; got %+v", want, errs)
 		}

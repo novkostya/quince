@@ -45,8 +45,8 @@ func newNSManager(t *testing.T, strategy clonetree.Strategy, policy RetentionPol
 	}[strategy]
 	be := newNamespaceBackend(name, strategy, backups, "test", testLogger())
 	seedStorageMarker(t, backups, "", name)
-	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: name, Reachable: true}},
-		st, st, bus.New(), policy, seqID(), testLogger())
+	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: name, Reachable: true, Retention: policy}},
+		st, st, bus.New(), seqID(), testLogger())
 	m.now = monotonicClock()
 	return m, be, backups, st
 }
@@ -152,8 +152,8 @@ func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, seed string) (
 	cli.run = f.run
 	be := newZFSBackend(context.Background(), cli, backups, seed, "test", testLogger())
 	seedStorageMarker(t, backups, "", BackendZFS)
-	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: BackendZFS, Reachable: true}},
-		st, st, bus.New(), policy, seqID(), testLogger())
+	m := NewManager([]Slot{{Name: "test", Root: backups, Backend: be, BackendName: BackendZFS, Reachable: true, Retention: policy}},
+		st, st, bus.New(), seqID(), testLogger())
 	m.now = monotonicClock()
 	return m, be, f, backups, st
 }

@@ -40,6 +40,12 @@ func Parse(raw []byte) (Config, []Warning, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return Default(), nil, err
 	}
+	// PER-ENTRY DEFAULTS ARE APPLIED HERE, once, rather than at each read (quince#473,
+	// quince#504). `storage:` entries do not exist until the file is decoded, so unlike every
+	// other section their defaults cannot be pre-filled into Default(). Doing it in one place is
+	// what lets `- path: /backups` mean what the 2026-08-01 ruling says it means, without any
+	// consumer learning that a name might be empty.
+	cfg.Storage = ResolveStorages(cfg.Storage)
 	var rawMap map[string]any
 	if err := yaml.Unmarshal(raw, &rawMap); err != nil || rawMap == nil {
 		return cfg, nil, nil // empty doc or non-mapping root: no unknown keys to report
@@ -77,7 +83,7 @@ func unknownKeys(raw map[string]any, t reflect.Type, prefix string) []Warning {
 		case reflect.Slice:
 			// qn.6c: recurse into slices of structs. Without this a typo INSIDE a storages
 			// entry (`pathh:`) is silently dropped by yaml.Unmarshal and never reported —
-			// the guard would cover `storage.storages` itself and nothing under it, so a
+			// the guard would cover `storage:` itself and nothing under it, so a
 			// mistyped key reads as an omitted one and the storage lands somewhere the user
 			// did not name. Indexed, because "which entry" is the first thing you need.
 			elem := deref(ft.Elem())
@@ -100,7 +106,7 @@ func unknownKeys(raw map[string]any, t reflect.Type, prefix string) []Warning {
 	return warnings
 }
 
-// deref unwraps pointer types so a *[]T field is walked as []T. StorageConfig.Storages is a
+// deref unwraps pointer types so a *[]T field is walked as []T. Config.Storage is a
 // pointer purely to distinguish an absent key from an empty list; that encoding must not also
 // decide whether the typo guard looks inside it.
 func deref(t reflect.Type) reflect.Type {
@@ -237,7 +243,7 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, error) {
 		if req.Empty {
 			msg = "the storage list is empty — " + msg
 		}
-		return []wire.ConfigError{{Path: "storage.storages", Message: msg}}, nil
+		return []wire.ConfigError{{Path: "storage", Message: msg}}, nil
 	}
 	data, err := Marshal(c)
 	if err != nil {

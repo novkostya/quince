@@ -10,8 +10,12 @@ package config
 // used by Marshal — keep it aligned with the documented YAML. qn.6 swaps Marshal for a
 // yaml.Node encoder that also emits generated doc-comments; the ordering hook is here now.
 type Config struct {
-	Backup     BackupConfig     `yaml:"backup" json:"backup"`
-	Storage    StorageConfig    `yaml:"storage" json:"storage"`
+	Backup BackupConfig `yaml:"backup" json:"backup"`
+	// Storage IS the list of declared storages (qn.6c, quince#473). A POINTER so an absent
+	// `storage:` key stays distinguishable from `storage: []` — no key and declared none want the
+	// same refusal for different reasons, and Parse unmarshals over Default(), which would
+	// otherwise make absent and zero-value identical.
+	Storage    *[]StorageEntry  `yaml:"storage" json:"storage"`
 	Devices    DevicesConfig    `yaml:"devices" json:"devices"`
 	Sessions   SessionsConfig   `yaml:"sessions" json:"sessions"`
 	Automation AutomationConfig `yaml:"automation" json:"automation"`
@@ -24,80 +28,114 @@ type BackupConfig struct {
 	RequireEncryption bool   `yaml:"require_encryption" json:"require_encryption"`
 }
 
-// StorageConfig is the `storage:` section.
+// StorageEntry is one declared storage under `storage:` (qn.6c, quince#473).
 //
-// qn.6c: Storages is FIRST because it is the only required key in this section and the only one
-// with no default — quince refuses to start without it (gap 3, ruled 2026-07-31: QUINCE_BACKUPS is
-// retired, so nothing conjures a storage any more). Backend and ZFS are the INHERITED DEFAULT
-// for entries that declare neither, not a global that overrides them — quince#458, Operator
-// ruling 2026-08-02. Retention is still global. This comment said the globals stay global
-// "because per-storage zfs settings only start mattering when a second zfs storage exists,
-// which qn.6c cannot create"; true, and the breaking case is one zfs storage beside a NON-zfs
-// one, which qn.6c creates trivially.
+// `storage:` IS THE LIST. There is no `storage.storages:`, no global `backend`, `zfs` or
+// `retention`, and no inheritance — Operator direction 2026-08-02, five inline comments on
+// quince#461, ruled onto quince#500.
 //
-// Storages is a POINTER so that an absent `storages:` key is distinguishable from `storages: []`.
-// Parse unmarshals over Default(), which makes absent and zero-value identical for every other
-// field — harmless where a default exists, and exactly wrong here, because "the user did not
-// declare storage" and "the user declared none" want the same refusal for different reasons and
-// must not be silently merged into "nil".
-type StorageConfig struct {
-	Storages  *[]StorageEntry `yaml:"storages" json:"storages"`
-	Backend   string          `yaml:"backend" json:"backend"` // auto | zfs | reflink | hardlink | copy
-	ZFS       ZFSConfig       `yaml:"zfs" json:"zfs"`
-	Retention RetentionConfig `yaml:"retention" json:"retention"`
-}
-
-// StorageEntry is one declared storage under `storage.storages:` (qn.6c story 1).
+// THE INHERITANCE IS WHAT WENT, AND IT TOOK A CLASS OF BUG WITH IT. A global block applied to
+// every storage, so a second storage on a USB disk got a zfs backend whose parent dataset pointed
+// at another pool (quince#458). With every entry fully specified, nothing can bleed from a global
+// onto a storage it was never written for — the defect is not guarded against, it is unconstructible.
+// `BackendFor`, `ZFSFor` and the `zfs: {}` opt-out idiom went with it, and quince#468 — choosing
+// between remedies that named a global — cannot exist without something to inherit from.
 //
-// THIS USED TO SAY "there is deliberately NO backend field", and its argument was right about the
-// wrong half (quince#458). A storage's NAMESPACE backend — reflink | hardlink | copy — really is
-// discovered: `probeNamespace` probes each path, so every storage finds its own without anyone
-// declaring anything, and a per-entry declaration would invite an edit that disagrees with the
-// medium.
-//
-// zfs is not like that. Interface fact 4: **zfs intent is declared config-side and NEVER probed.**
-// So while `storage.backend`/`storage.zfs` were the only place to declare it, one global
-// declaration applied to EVERY storage — a second storage on a USB disk got a zfs backend whose
-// parent dataset pointed at another pool. The old rule prevented a per-entry edit that disagrees
-// with ONE medium, at the price of a global one that disagrees with all but one.
-//
-// Both fields are OPTIONAL OVERRIDES; empty inherits the global. A single-storage config is
-// unchanged, and discovery still does the work wherever nothing is declared.
+// `backend: auto` IS STILL LEGAL AND IS NOT AN OVERSIGHT. The direction also said only a CONCRETE
+// backend may land in the file; that half is DEFERRED to `qn.6e` (quince#502), because `auto` is
+// not a convenience default — it is the only thing that checks a declaration against the medium.
+// `storage.Select` returns an explicit namespace backend WITHOUT probing, so a hand-written guess
+// would be accepted at startup, frozen into `quince-storage.json` where the marker is the
+// authority, and fail at SEED TIME. Do not remove it here.
 type StorageEntry struct {
-	Name    string `yaml:"name" json:"name"`
-	Path    string `yaml:"path" json:"path"`
-	Default bool   `yaml:"default" json:"default"`
+	// Name is the stable identity across replug, where a path is not; it keys the DB row.
+	//
+	// OPTIONAL — it defaults to Path at load (ruled 2026-08-01, quince#504). On a single-storage
+	// install `name: backups, path: /backups` says the same thing twice, so the short form is just
+	// `- path: /backups`. Multi-storage users still write `usb` and `nas`, which is what the field
+	// is for. The defaulting happens HERE, at config load, so nothing downstream learns a new
+	// shape and `wire.Storage.Name` stays non-optional.
+	Name string `yaml:"name" json:"name"`
 
-	// Backend overrides `storage.backend` for THIS storage. "" = inherit. Prefer leaving it unset:
-	// `auto` probes the path, which is how a namespace backend is meant to be chosen.
+	// Path is absolute and unique across entries.
+	Path string `yaml:"path" json:"path"`
+
+	// Default marks the storage a backup goes to when none is named.
+	//
+	// OPTIONAL, and only when there is exactly ONE storage, where it is implied (ruled
+	// 2026-08-01). With several, exactly one must carry it: declaring none of several stays an
+	// error rather than defaulting to the first, because order is not intent and a silent pick is
+	// the class this rung exists to remove.
+	Default bool `yaml:"default" json:"default"`
+
+	// Backend is this storage's backend. auto | zfs | reflink | hardlink | copy.
+	//
+	// Defaults to `auto` at load, which probes the path — see the type comment on why `auto` is
+	// still here.
 	Backend string `yaml:"backend" json:"backend"`
 
-	// ZFS overrides `storage.zfs` for THIS storage. nil = inherit the global block.
+	// ZFS is this storage's zfs settings. A VALUE, not a pointer: the pointer existed so an entry
+	// could tell "inherit the global" from "explicitly empty, opt out". With no global there is
+	// nothing to inherit and nothing to opt out of.
+	ZFS ZFSConfig `yaml:"zfs" json:"zfs"`
+
+	// Retention is this storage's retention policy.
 	//
-	// A POINTER, because absent and empty differ: absent inherits, and an explicitly empty
-	// `zfs: {}` — TOGETHER WITH `backend: auto` — is how a storage opts out of a global zfs
-	// declaration. `zfs: {}` ALONE does not opt out and is REFUSED at startup: BackendFor
-	// still returns the global `backend: zfs`, which would build a zfs backend with no parent
-	// dataset. Without the pointer distinction a second storage could not opt out at all,
-	// which is quince#458.
-	ZFS *ZFSConfig `yaml:"zfs" json:"zfs"`
+	// A POINTER, and for a reason the others do not need: absent must differ from zero. `0` is a
+	// legal explicit value for every Keep* field, so a value type could not tell "the user did not
+	// write retention" from "the user asked to keep none". Absent falls back to CODE defaults,
+	// which D12 permits — a setting with a sane default the file need not spell out.
+	Retention *RetentionConfig `yaml:"retention" json:"retention"`
 }
 
-// BackendFor returns the backend declaration that applies to one entry.
-func (c StorageConfig) BackendFor(e StorageEntry) string {
-	if e.Backend != "" {
-		return e.Backend
-	}
-	return c.Backend
+// DefaultRetention is the policy an entry gets when it declares none.
+func DefaultRetention() RetentionConfig {
+	return RetentionConfig{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12}
 }
 
-// ZFSFor returns the zfs settings that apply to one entry: its own block when present, else the
-// global one. An entry with `zfs: {}` gets the empty block, which is how it declares it is not zfs.
-func (c StorageConfig) ZFSFor(e StorageEntry) ZFSConfig {
-	if e.ZFS != nil {
-		return *e.ZFS
+// Resolved returns the entry with every optional field filled: the name defaulted to the path, the
+// backend to `auto`, the zfs mode/seed to their defaults, and retention to the code policy.
+//
+// It is applied at PARSE, not at each read, so exactly one place decides what an omitted key means
+// and no consumer has to remember. That is why `Default()` no longer carries a storage block:
+// entries do not exist until the file is read, so their defaults cannot be pre-filled into a
+// struct the way every other section's are.
+func (e StorageEntry) Resolved() StorageEntry {
+	if e.Name == "" {
+		e.Name = e.Path
 	}
-	return c.ZFS
+	if e.Backend == "" {
+		e.Backend = "auto"
+	}
+	if e.ZFS.Mode == "" {
+		e.ZFS.Mode = "exec"
+	}
+	if e.ZFS.Seed == "" {
+		e.ZFS.Seed = "auto"
+	}
+	if e.Retention == nil {
+		r := DefaultRetention()
+		e.Retention = &r
+	}
+	return e
+}
+
+// ResolveStorages applies Resolved to every entry and implies `default: true` on a lone storage.
+//
+// The implication is deliberately narrow — ONE entry only. With several, an absent default is an
+// error from Validate, never a pick.
+func ResolveStorages(in *[]StorageEntry) *[]StorageEntry {
+	if in == nil {
+		return nil
+	}
+	out := make([]StorageEntry, 0, len(*in))
+	for _, e := range *in {
+		out = append(out, e.Resolved())
+	}
+	if len(out) == 1 {
+		out[0].Default = true
+	}
+	return &out
 }
 
 // ZFSConfig is `storage.zfs:`.
@@ -160,23 +198,17 @@ type UIConfig struct {
 
 // Default returns schema v0 with every documented default filled (contracts §6). Missing
 // keys in a loaded file fall back to these.
+//
+// THERE IS NO STORAGE BLOCK HERE, and that is structural rather than an omission (quince#473).
+// Every other section is a fixed set of keys whose defaults can be pre-filled into a struct;
+// `storage:` is a LIST whose entries do not exist until the file is read. Per-entry defaults are
+// applied by ResolveStorages at parse instead, which is the one place that decides what an omitted
+// key means.
 func Default() Config {
 	return Config{
 		Backup: BackupConfig{
 			Transport:         "auto",
 			RequireEncryption: true,
-		},
-		Storage: StorageConfig{
-			Backend: "auto",
-			ZFS: ZFSConfig{
-				Mode: "exec",
-				Seed: "auto",
-			},
-			Retention: RetentionConfig{
-				KeepRecent: 10,
-				KeepDaily:  30,
-				KeepWeekly: 12,
-			},
 		},
 		Devices: DevicesConfig{
 			ManageMuxer:   true,

@@ -138,5 +138,5 @@ func TestNewManagerRefusesNoSlots(t *testing.T) {
 			t.Error("NewManager must panic on an empty slot list")
 		}
 	}()
-	NewManager(nil, nil, nil, nil, RetentionPolicy{}, nil, nil)
+	NewManager(nil, nil, nil, nil, nil, nil)
 }

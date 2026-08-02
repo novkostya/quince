@@ -16,25 +16,7 @@ func Validate(c Config) []wire.ConfigError {
 	if !oneOf(c.Backup.Transport, "auto", "usb", "wifi") {
 		add("backup.transport", enumMsg(c.Backup.Transport, "auto", "usb", "wifi"))
 	}
-	if !oneOf(c.Storage.Backend, "auto", "zfs", "reflink", "hardlink", "copy") {
-		add("storage.backend", enumMsg(c.Storage.Backend, "auto", "zfs", "reflink", "hardlink", "copy"))
-	}
-	if !oneOf(c.Storage.ZFS.Mode, "exec", "hook") {
-		add("storage.zfs.mode", enumMsg(c.Storage.ZFS.Mode, "exec", "hook"))
-	}
-	if !oneOf(c.Storage.ZFS.Seed, "auto", "reflink", "copy") {
-		add("storage.zfs.seed", enumMsg(c.Storage.ZFS.Seed, "auto", "reflink", "copy"))
-	}
-	if c.Storage.Retention.KeepRecent < 0 {
-		add("storage.retention.keep_recent", "must be >= 0")
-	}
-	if c.Storage.Retention.KeepDaily < 0 {
-		add("storage.retention.keep_daily", "must be >= 0")
-	}
-	if c.Storage.Retention.KeepWeekly < 0 {
-		add("storage.retention.keep_weekly", "must be >= 0")
-	}
-	validateStorages(c.Storage.Storages, add)
+	validateStorages(c.Storage, add)
 	if c.Sessions.TTLMinutes <= 0 {
 		add("sessions.ttl_minutes", "must be > 0")
 	}
@@ -50,7 +32,8 @@ func Validate(c Config) []wire.ConfigError {
 	return errs
 }
 
-// validateStorages checks the declared storage list (qn.6c story 1).
+// validateStorages checks the declared storage list (qn.6c story 1). `storage:` IS the list
+// (quince#473), so every path below reads `storage[i]`.
 //
 // It deliberately does NOT report an absent or empty list. That is the refusal-to-start case, and
 // it does not belong here: Load() DISCARDS a config that fails Validate and falls back to
@@ -59,6 +42,12 @@ func Validate(c Config) []wire.ConfigError {
 // looks healthy, which is the one outcome gap 3's ruling forbids. The refusal is a separate,
 // fatal check on the serve path (StorageRequirement). Everything below is a well-formedness
 // problem in a list the user DID declare, which is what 422 is for.
+//
+// It runs AFTER ResolveStorages, which is why name is never empty here and a lone storage is
+// already default. Both were REQUIRED keys until quince#504: the 2026-08-01 ruling made `name`
+// optional (defaulting to the path) and `default` implied on a list of one, and it had been ruled
+// and never built — `- path: /backups` failed with two errors while canon documented both as
+// required, so code and canon agreed with each other and both disagreed with the ruling.
 func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 	if storages == nil {
 		return
@@ -67,13 +56,15 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 	seenPath := map[string]int{}
 	defaults := 0
 	for i, s := range *storages {
-		at := fmt.Sprintf("storage.storages[%d]", i)
-		if s.Name == "" {
-			add(at+".name", "must not be empty — the name is the stable identity of a storage across replug, where the path is not")
-		} else if prev, dup := seenName[s.Name]; dup {
-			add(at+".name", fmt.Sprintf("duplicate name %q (also storage.storages[%d]); names must be unique because they key a storage's DB row", s.Name, prev))
-		} else {
-			seenName[s.Name] = i
+		at := fmt.Sprintf("storage[%d]", i)
+		// Name is defaulted from Path, so an empty one here means the path was empty too — which
+		// its own error already reports. Reporting both would name two problems for one mistake.
+		if s.Name != "" {
+			if prev, dup := seenName[s.Name]; dup {
+				add(at+".name", fmt.Sprintf("duplicate name %q (also storage[%d]); names must be unique because they key a storage's DB row", s.Name, prev))
+			} else {
+				seenName[s.Name] = i
+			}
 		}
 		switch {
 		case s.Path == "":
@@ -83,21 +74,44 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 		default:
 			clean := filepath.Clean(s.Path)
 			if prev, dup := seenPath[clean]; dup {
-				add(at+".path", fmt.Sprintf("duplicate path %q (also storage.storages[%d]); two storages at one path would each claim the other's identity marker", s.Path, prev))
+				add(at+".path", fmt.Sprintf("duplicate path %q (also storage[%d]); two storages at one path would each claim the other's identity marker", s.Path, prev))
 			} else {
 				seenPath[clean] = i
+			}
+		}
+		if !oneOf(s.Backend, "auto", "zfs", "reflink", "hardlink", "copy") {
+			add(at+".backend", enumMsg(s.Backend, "auto", "zfs", "reflink", "hardlink", "copy"))
+		}
+		if !oneOf(s.ZFS.Mode, "exec", "hook") {
+			add(at+".zfs.mode", enumMsg(s.ZFS.Mode, "exec", "hook"))
+		}
+		if !oneOf(s.ZFS.Seed, "auto", "reflink", "copy") {
+			add(at+".zfs.seed", enumMsg(s.ZFS.Seed, "auto", "reflink", "copy"))
+		}
+		if r := s.Retention; r != nil {
+			if r.KeepRecent < 0 {
+				add(at+".retention.keep_recent", "must be >= 0")
+			}
+			if r.KeepDaily < 0 {
+				add(at+".retention.keep_daily", "must be >= 0")
+			}
+			if r.KeepWeekly < 0 {
+				add(at+".retention.keep_weekly", "must be >= 0")
 			}
 		}
 		if s.Default {
 			defaults++
 		}
 	}
+	// A LONE STORAGE IS ALREADY MARKED DEFAULT by ResolveStorages, so `defaults == 0` here can
+	// only mean several storages and none chosen. That stays an error rather than a pick: order is
+	// not intent, and a silent pick is the class this rung exists to remove.
 	if n := len(*storages); n > 0 {
 		switch {
 		case defaults == 0:
-			add("storage.storages", "exactly one storage must be marked `default: true` — a backup that names no storage resolves to it, and there is no sane guess")
+			add("storage", "exactly one storage must be marked `default: true` — a backup that names no storage resolves to it, and there is no sane guess. It is implied only when there is exactly one storage")
 		case defaults > 1:
-			add("storage.storages", fmt.Sprintf("%d storages are marked `default: true`; exactly one may be", defaults))
+			add("storage", fmt.Sprintf("%d storages are marked `default: true`; exactly one may be", defaults))
 		}
 	}
 }

@@ -659,7 +659,7 @@ QUINCE_LISTEN=:8080
 ```
 
 **`QUINCE_BACKUPS` was RETIRED at `qn.6c`** (gap 3, Operator ruling 2026-07-31 — quince#378).
-Backup locations are **declared**, in `storage.storages` below: no env var, no implicit storage,
+Backup locations are **declared**, in `storage:` below: no env var, no implicit storage,
 no fallback. **Setting it now produces the ordinary unknown-`QUINCE_`-variable warning** — it is
 gone, not merely unread, and that is asserted rather than assumed.
 
@@ -680,56 +680,65 @@ backup:
   require_encryption: true  # preflight fails (actionably) on an unencrypted device;
                             # false permits unencrypted backups behind persistent UI
                             # warnings (no Health/Keychain/passwords in such backups)
-storage:
-  storages:                 # REQUIRED, qn.6c. The ONLY key with no default: quince REFUSES TO
-                            # START without at least one, naming the key and printing what to
-                            # write. There is no sane default for where a user's backups live
-                            # now that QUINCE_BACKUPS is retired, and the honest form of "no
-                            # default" is a refusal, never a guess (D12 near-miss, declared).
-    - name: local           # stable identity across replug, where a PATH is not; keys the DB row
-      path: /backups        # absolute; unique across entries
-      default: true         # EXACTLY ONE — the storage a backup goes to when none is named
-      backend: auto         # OPTIONAL override of storage.backend for THIS storage.
-                            # Omit it: `auto` probes the path, which is how a namespace
-                            # backend (reflink|hardlink|copy) is meant to be chosen.
+storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#473) — no wrapper
+                            # key, no globals, no inheritance. It is the ONLY key with no
+                            # default: quince REFUSES TO START without at least one, naming the
+                            # key and printing what to write. There is no sane default for where
+                            # a user's backups live now that QUINCE_BACKUPS is retired, and the
+                            # honest form of "no default" is a refusal, never a guess (D12
+                            # near-miss, declared).
+                            #
+                            # A SINGLE STORAGE IS JUST A PATH — everything else has a default:
+                            #
+                            #     storage:
+                            #       - path: /backups
+                            #
+  - name: local             # OPTIONAL — defaults to `path` (ruled 2026-08-01, quince#504). On a
+                            # single-storage install `name: backups, path: /backups` says the
+                            # same thing twice. It is the stable identity across replug, where a
+                            # path is not, and it keys the DB row.
+    path: /backups          # REQUIRED; absolute; unique across entries
+    default: true           # OPTIONAL with exactly ONE storage, where it is implied. With
+                            # several, exactly one must carry it — declaring none of several is
+                            # an ERROR, not a pick: order is not intent.
+    backend: auto           # auto | zfs | reflink | hardlink | copy. Defaults to `auto`.
+                            # auto: zfs when this entry's zfs block is configured, else probe
+                            # reflink → hardlink → copy on THIS path.
+                            #
                             # `auto` IS STILL LEGAL AND IS NOT AN OVERSIGHT. The 2026-08-02
                             # direction that only a CONCRETE backend may land in this file is
-                            # DEFERRED, not withdrawn — it is homed on quince#502 (`qn.6e`).
-                            # Do not tidy it out: `auto` is the ONLY thing that checks a
-                            # backend declaration against the medium (probe.go:42-48 returns
-                            # an explicit backend WITHOUT probing), so removing it early
-                            # would make quince-storage.json record a guess. See the ruled
-                            # block in this section.
-      zfs: {}               # OPTIONAL override of storage.zfs for THIS storage. To opt OUT of a
-                            # global `backend: zfs` you need BOTH this and `backend: auto` —
-                            # `zfs: {}` alone leaves the global backend applying with no parent
-                            # dataset, which quince REFUSES to serve rather than half-build.
-                            # ABSENT inherits the global block. An explicitly EMPTY one
-                            # opts OUT — but only together with `backend: auto` above.
-  backend: auto             # auto | zfs | reflink | hardlink | copy
-                            # THE DEFAULT every entry inherits, no longer a global that
-                            # overrides them. It said "per-storage zfs settings only start
-                            # mattering when a second zfs storage exists, which qn.6c
-                            # cannot create" — true, and the breaking case is one zfs
-                            # storage beside a NON-zfs one, which qn.6c creates trivially
-                            # (quince#458, Operator ruling 2026-08-02).
-                            # auto: zfs when the applicable zfs block is configured,
-                            # else probe reflink → hardlink → copy on that path.
-  zfs:
-    parent_dataset: ""      # e.g. rpool/userdata/iphone-backup; one child dataset per device
-    mode: exec              # exec (delegated) | hook
-    hook_cmd: ""            # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
+                            # DEFERRED, not withdrawn — homed on quince#502 (`qn.6e`). Do not
+                            # tidy it out: `auto` is the ONLY thing that checks a declaration
+                            # against the medium (storage.Select returns an explicit backend
+                            # WITHOUT probing), so removing it early would make
+                            # quince-storage.json record a guess and fail at seed time.
+    zfs:                    # THIS storage's zfs settings. No global to inherit from and none to
+                            # opt out of, so the `zfs: {}` idiom is gone with quince#458 — a
+                            # second storage can no longer be handed a parent dataset that was
+                            # written for the first.
+      parent_dataset: ""    # e.g. rpool/userdata/iphone-backup; one child dataset per device.
+                            # Two storages sharing one parent dataset are REFUSED: they would
+                            # create the same <parent>/<udid> per device and each believe they
+                            # owned it. That refusal survived the flattening because it was
+                            # never about inheritance (quince#473).
+      mode: exec            # exec (delegated) | hook
+      hook_cmd: ""          # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
                             # (forced-command: snapshot/destroy/list @quince-*, create children,
                             #  seed working/<udid> from latest/; dataset destroy impossible via the key)
-    seed: auto              # qn.5b: in-container strategy to clone latest/ → working/<udid> at job
+      seed: auto            # qn.5b: in-container strategy to clone latest/ → working/<udid> at job
                             #   start (renamed from `mirror` when the reflink moved commit→seed).
                             #   auto (reflink → copy) | reflink | copy — hardlink is NEVER used for
                             #   the seed (it would alias the committed latest/; gate 12c). In hook
                             #   mode the host-side `seed` verb does the reflink and this is moot.
-  retention:
-    keep_recent: 10
-    keep_daily: 30
-    keep_weekly: 12
+    retention:              # THIS storage's keep policy. ABSENT falls back to the code defaults
+                            # below, which D12 permits — a setting with a sane default the file
+                            # need not spell out. Prune groups a device's versions by storage and
+                            # applies each one's policy, so `keep_recent: 10` means ten ON THIS
+                            # DISK; a single policy across storages would have let a second disk
+                            # silently change what the first one keeps.
+      keep_recent: 10
+      keep_daily: 30
+      keep_weekly: 12
 devices:
   manage_muxer: true        # true = SIMPLE profile: quince owns the lifecycle of EVERY muxer
                             # daemon it is configured to reach — usbmuxd (USB) and netmuxd
@@ -766,7 +775,7 @@ YAML file once. Against that, an env var with a built-in default that quietly co
 is a permanent implicit path: cheap now, expensive later, load-bearing by the time anyone wants it
 gone.
 
-**What the ruling requires, and each is implemented rather than described.** No `storages:` key →
+**What the ruling requires, and each is implemented rather than described.** No `storage:` key →
 **refuse to start**, name the key, print the remedy (`config.CheckStorages` + `StorageRequirement.Explain`,
 called on the serve path). The variable is **gone rather than unread** — it is no longer in
 `knownBootstrapVars`, so setting it produces the unknown-variable warning. A still-set
@@ -818,7 +827,7 @@ zfs `parent_dataset` would create the same `<parent>/<udid>` per device and each
 which voids every per-storage guarantee this rung adds. quince refuses to serve and names both
 storages and the remedy.
 
-A **restart** is still required to pick up a `storages:` change — D12 permits that only if the spec
+A **restart** is still required to pick up a `storage:` change — D12 permits that only if the spec
 says why, and `docs/specs/qn.6c/qn.6c.md` says why.
 **RULED (was `PROPOSED (gap)`): `storage:` becomes a list of fully-specified storages; `auto`
 REMAINS LEGAL and its removal is descoped to `qn.6e` — `qn.6c`, quince#473, quince#502.** Operator

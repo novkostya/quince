@@ -288,9 +288,10 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	body := `{"backup":{"transport":"usb","require_encryption":true},` +
 		// qn.6c: a saved config must declare a storage or PUT is a 422. This test is about CSRF,
 		// so the body carries a valid one rather than asserting the storage rule by accident.
-		`"storage":{"storages":[{"name":"local","path":"/backups","default":true}],` +
-		`"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
-		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
+		// `storage` IS the list (quince#473) — no wrapper object, no globals.
+		`"storage":[{"name":"local","path":"/backups","default":true,"backend":"auto",` +
+		`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}],` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
@@ -321,9 +322,7 @@ func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
 	c := authedClient(t, srv)
 
 	body := `{"backup":{"transport":"usb","require_encryption":true},` +
-		`"storage":{"storages":[],` + // the user removed their last storage
-		`"backend":"auto","zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
-		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
+		`"storage":[],` + // the user removed their last storage
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`

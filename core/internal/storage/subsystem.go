@@ -81,7 +81,6 @@ type Manager struct {
 	log     *slog.Logger
 	newID   func() string
 	now     func() time.Time
-	policy  RetentionPolicy
 	refresh Refresher
 
 	// jobStorage maps jobID → storageID for jobs in flight. Guarded by mu.
@@ -94,15 +93,17 @@ type Manager struct {
 // It must be non-empty — `config.CheckStorages` refuses to serve without a declared storage, so a
 // Manager with no slots is a programming error rather than a state to degrade through, and the
 // panic says so rather than producing an index-out-of-range three calls later.
+// THE GLOBAL RetentionPolicy PARAMETER IS GONE (quince#473): retention is per-storage, so it
+// arrives on each Slot. A Manager-wide policy would have been a number the config file no longer
+// has a place to say.
 func NewManager(slots []Slot, reg Registry, audit Auditor, b *bus.Bus,
-	policy RetentionPolicy, newID func() string, log *slog.Logger) *Manager {
+	newID func() string, log *slog.Logger) *Manager {
 	if len(slots) == 0 {
 		panic("storage: NewManager needs at least one Slot — config.CheckStorages should have refused first")
 	}
 	return &Manager{
 		slots: slots, reg: reg, audit: audit, bus: b,
 		log: log, newID: newID, now: func() time.Time { return time.Now().UTC() },
-		policy: policy,
 	}
 }
 
@@ -431,19 +432,69 @@ func (m *Manager) deleteVersion(id, event string) (int, error) {
 	return http.StatusAccepted, nil
 }
 
-// Prune applies the retention policy to a device's versions (post-commit + on demand; NO
-// scheduler this rung — A3). Deletes only quince-created non-latest versions; adopted protected.
+// Prune applies each storage's retention policy to a device's versions (post-commit + on demand;
+// NO scheduler this rung — A3). Deletes only quince-created non-latest versions; adopted protected.
+//
+// GROUPED BY STORAGE (qn.6c, quince#473). Retention became per-storage when `storage:` flattened,
+// and applying one policy across a device's whole history would mean a second disk silently
+// changed what the first one keeps — `keep_recent: 10` has to mean ten ON THAT DISK, or the
+// number in the config file is not the number the user gets.
+//
+// A version with NO storage_id is UNATTRIBUTED, which is transitional rather than permanent: it
+// means reconciliation has not yet worked out which storage the artifact is under. Those rows are
+// pruned under the DEFAULT storage's policy, because that is the only policy that exists for a
+// version whose storage is unknown — and pruning them under nobody's policy would mean never
+// pruning them at all, which is a silent unbounded keep.
 func (m *Manager) Prune(udid string) error {
 	rows, err := m.reg.ListVersions(udid)
 	if err != nil {
 		return err
 	}
-	for _, r := range selectPrunable(rows, m.policy) {
-		if status, err := m.deleteVersion(r.ID, "version.prune"); err != nil {
-			return fmt.Errorf("prune %s (status %d): %w", r.ID, status, err)
+	byStorage := map[string][]store.VersionRow{}
+	for _, r := range rows {
+		key := ""
+		if r.StorageID != nil {
+			key = *r.StorageID
+		}
+		byStorage[key] = append(byStorage[key], r)
+	}
+	for key, group := range byStorage {
+		policy, ok := m.policyFor(key)
+		if !ok {
+			// A version attributed to a storage this process does not have declared — the entry
+			// was removed from config.yml, or the disk's storage is no longer listed. Pruning it
+			// under some other storage's policy would delete versions using a number the user
+			// never wrote for them, so it is skipped and SAID (no silent caps).
+			m.log.Warn("prune skipped — this version's storage is not declared here",
+				"udid", udid, "storage_id", key, "versions", len(group))
+			continue
+		}
+		for _, r := range selectPrunable(group, policy) {
+			if status, err := m.deleteVersion(r.ID, "version.prune"); err != nil {
+				return fmt.Errorf("prune %s (status %d): %w", r.ID, status, err)
+			}
 		}
 	}
 	return nil
+}
+
+// policyFor returns the retention policy for a storage id, and whether one applies. The empty id
+// is an unattributed version and resolves to the default slot's policy — see Prune.
+func (m *Manager) policyFor(storageID string) (RetentionPolicy, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if storageID == "" {
+		if len(m.slots) == 0 {
+			return RetentionPolicy{}, false
+		}
+		return m.slots[0].Retention, true
+	}
+	for _, s := range m.slots {
+		if s.StorageID == storageID {
+			return s.Retention, true
+		}
+	}
+	return RetentionPolicy{}, false
 }
 
 // RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).

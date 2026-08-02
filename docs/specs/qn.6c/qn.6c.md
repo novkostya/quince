@@ -44,7 +44,7 @@ moment?*
 
 **In scope:**
 
-- `core/internal/config` — a `storage.storages` list in the schema, its validation, and the
+- `core/internal/config` — a `storage:` list in the schema (flattened by quince#473), its validation, and the
   REFUSAL to start when it is absent or empty. `QUINCE_BACKUPS` is retired — there is no implicit
   storage and no fallback (gap 3, ruled).
 - `core/internal/storage` — a storage **registry** holding one `Backend` per storage rather
@@ -459,7 +459,7 @@ mattering when a second zfs storage exists, and this rung cannot create one. Int
 why this cannot simply be assumed: zfs intent is config-declared and never probed, so a
 config-global zfs setting silently applies to every declared storage.
 
-**Restart.** A change to `storage.storages` requires a restart in this rung, because the backend
+**Restart.** A change to `storage:` requires a restart in this rung, because the backend
 is selected and probed at startup and the registry holds one live `Backend` instance per storage.
 D12 permits a restart *"unless the spec says why"* — this is the spec saying why. It is recorded
 as rung-ruled below rather than buried here.
@@ -588,7 +588,7 @@ key is a version-skew question.
 
 Each is independently checkable.
 
-1. **Storages exist as entities, and every one of them is declared.** `storage.storages` in the
+1. **Storages exist as entities, and every one of them is declared.** `storage:` in the
    config schema, validated; exactly one storage is `default`. **`QUINCE_BACKUPS` is retired** —
    no implicit storage, no synthesized fallback, no env var read. A `config.yml` with no
    `storages:` key **refuses to start**, names the key and prints what to write (G7); the env var

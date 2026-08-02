@@ -24,7 +24,7 @@ import (
 // The idiom is deploy/runner/preflight's, ported rather than invented: name what was OBSERVED,
 // say what follows from it, and print the exact thing to do — an error message is a claim.
 type StorageRequirement struct {
-	// Missing is true when `storage.storages:` is absent from config.yml entirely.
+	// Missing is true when `storage:` is absent from config.yml entirely.
 	Missing bool
 	// Empty is true when the key is present and declares no entries.
 	Empty bool
@@ -45,9 +45,9 @@ func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty }
 func CheckStorages(c Config, environ []string) StorageRequirement {
 	r := StorageRequirement{}
 	switch {
-	case c.Storage.Storages == nil:
+	case c.Storage == nil:
 		r.Missing = true
-	case len(*c.Storage.Storages) == 0:
+	case len(*c.Storage) == 0:
 		r.Empty = true
 	}
 	for _, kv := range environ {
@@ -70,9 +70,9 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, "quince: "+format+"\n", a...) }
 
 	if r.Missing {
-		p("no `storage.storages:` key in %s — quince does not know where to keep backups.", configPath)
+		p("no `storage:` key in %s — quince does not know where to keep backups.", configPath)
 	} else {
-		p("`storage.storages:` in %s declares no storages — quince does not know where to keep backups.", configPath)
+		p("`storage:` in %s declares no storages — quince does not know where to keep backups.", configPath)
 	}
 
 	suggested := "/backups"
@@ -90,81 +90,76 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	p("Add this to %s, then start again:", configPath)
 	p("")
 	p("    storage:")
-	p("      storages:")
-	p("        - name: local")
-	p("          path: %s", suggested)
-	p("          default: true")
+	p("      - path: %s", suggested)
 	p("")
 	p("The path must already exist and hold your backups if you have any; quince will adopt")
-	p("what it finds there. `default: true` marks the storage a backup goes to when none is named.")
+	p("what it finds there. With ONE storage that is the whole of it — `name` defaults to the")
+	p("path and `default: true` is implied. Declare both only when you add a second storage.")
 	p("")
 	p("REFUSING to start. A quince that comes up with nowhere to put backups looks healthy and")
 	p("silently protects nothing, which is worse than one that did not start.")
 
 	if r.Missing {
-		return fmt.Errorf("no storage declared: %s has no storage.storages key", configPath)
+		return fmt.Errorf("no storage declared: %s has no storage: key", configPath)
 	}
-	return fmt.Errorf("no storage declared: storage.storages in %s is empty", configPath)
+	return fmt.Errorf("no storage declared: storage: in %s is empty", configPath)
 }
 
 // CheckStorageBackends refuses configurations where two storages would write to the same place
 // (qn.6c, quince#458).
 //
 // zfs is the case that needs it: a zfs backend creates `<parent_dataset>/<udid>`, so two storages
-// inheriting one global `storage.zfs` block would create THE SAME dataset for a device and each
-// believe it owned it. That is not a degraded mode to surface — it is two storages that are one
-// storage, and every guarantee this rung added about per-storage attribution is void beneath it.
+// on one parent dataset would create THE SAME dataset for a device and each believe it owned it.
+// That is not a degraded mode to surface — it is two storages that are one storage, and every
+// guarantee this rung added about per-storage attribution is void beneath it.
 //
 // Namespace backends need no equivalent: they are rooted at their own paths, which
 // `CheckStorages` already requires to be distinct.
 //
+// THIS FUNCTION SURVIVED THE FLATTENING, and quince#473's deletion list was wrong to include it.
+// The collision above is NOT caused by inheritance: two fully-specified entries can each spell out
+// the same `parent_dataset`. What the flattening removed is the REMEDY BRANCHING — quince#468 and
+// quince#492 split the advice three ways because a zfs backend could arrive by inheritance, by a
+// global, or by an entry's own block, and naming the wrong one sent an operator to a key they
+// never wrote. With every entry self-contained there is exactly one key it can mean, so the
+// three-way split is deleted and the refusal keeps its subject.
+//
 // Returns one message per collision, empty when the config is coherent.
-func CheckStorageBackends(c StorageConfig) []string {
-	if c.Storages == nil {
+func CheckStorageBackends(storages *[]StorageEntry) []string {
+	if storages == nil {
 		return nil
 	}
 	seen := map[string]string{} // parent dataset → the storage that claimed it
 	var out []string
-	for _, e := range *c.Storages {
-		z := c.ZFSFor(e)
-		isZFS := c.BackendFor(e) == "zfs" ||
-			(c.BackendFor(e) == "auto" && (z.ParentDataset != "" || z.HookCmd != ""))
-		if isZFS && z.ParentDataset == "" {
+	for _, e := range *storages {
+		// `auto` still resolves to zfs when zfs intent is declared — interface fact 4: zfs intent
+		// is config-side and never probed. Keeping that here is what makes `auto` legal without
+		// making it a hole (quince#502 owns removing it).
+		isZFS := e.Backend == "zfs" ||
+			(e.Backend == "auto" && (e.ZFS.ParentDataset != "" || e.ZFS.HookCmd != ""))
+		if isZFS && e.ZFS.ParentDataset == "" {
 			// A ZFS BACKEND WITH NO PARENT DATASET is not a degraded mode, it is an incoherent
 			// declaration: `Select` would build a zfs backend with nothing to create datasets
-			// under. It is reachable the obvious way — an entry writes `zfs: {}` to say "I am not
-			// zfs" while the GLOBAL `backend: zfs` still applies to it, which is the first thing
-			// anyone tries and what my own first guidance on quince#458 told the Operator to do.
-			//
-			// THREE CAUSES, THREE REMEDIES (quince#468). The binary split conflated an entry that
-			// wrote `zfs: {}` to opt OUT with one whose OWN block is incoherent — a hook and no
-			// parent — and sent the second to `backend: auto`, which would not fix it.
-			remedy := "set `storage.zfs.parent_dataset`"
-			switch {
-			case e.ZFS != nil && *e.ZFS != (ZFSConfig{}):
-				remedy = "this storage has its own `zfs:` block with no `parent_dataset` — set one " +
-					"there, or use `zfs: {}` with `backend: auto` to make it a non-zfs storage"
-			case e.ZFS != nil:
-				remedy = "an entry that sets `zfs: {}` to opt OUT must also set `backend: auto` " +
-					"(or a namespace backend), because the global `backend: zfs` still applies to it"
-			}
+			// under. ONE remedy now, because there is one key it could be.
 			out = append(out, fmt.Sprintf(
-				"storage %q resolves to the zfs backend but has no `zfs.parent_dataset` — %s",
-				e.Name, remedy))
+				"storage %q resolves to the zfs backend but has no `zfs.parent_dataset` — set it in "+
+					"that storage's own `zfs:` block, or give the storage a namespace backend "+
+					"(`backend: reflink`, `hardlink` or `copy`)",
+				e.Name))
 			continue
 		}
 		if !isZFS {
 			continue
 		}
-		if first, dup := seen[z.ParentDataset]; dup {
+		if first, dup := seen[e.ZFS.ParentDataset]; dup {
 			out = append(out, fmt.Sprintf(
 				"storages %q and %q are both zfs on parent dataset %q — they would create the same "+
 					"dataset per device and each believe it owned it. Give one of them its own "+
-					"`zfs.parent_dataset`, or `zfs: {}` to make it a non-zfs storage",
-				first, e.Name, z.ParentDataset))
+					"`zfs.parent_dataset`, or a namespace backend",
+				first, e.Name, e.ZFS.ParentDataset))
 			continue
 		}
-		seen[z.ParentDataset] = e.Name
+		seen[e.ZFS.ParentDataset] = e.Name
 	}
 	return out
 }
