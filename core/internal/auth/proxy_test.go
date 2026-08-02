@@ -1,6 +1,7 @@
-package httpapi
+package auth
 
 import (
+	"crypto/tls"
 	"net/http"
 	"testing"
 )
@@ -108,4 +109,61 @@ func mustProxies(t *testing.T) *TrustedProxies {
 		t.Fatalf("unexpected bad entries: %v", bad)
 	}
 	return tp
+}
+
+// TestSecureOriginGatesForwardedProtoOnTheTrustList is quince#555. `X-Forwarded-Proto` used to be
+// believed from ANY peer, on the argument that it can only upgrade a cookie to Secure. That is true
+// of the cookie and false of the two consumers that read the same predicate.
+func TestSecureOriginGatesForwardedProtoOnTheTrustList(t *testing.T) {
+	trusted, _ := NewTrustedProxies([]string{"203.0.113.1"})
+	unset, _ := NewTrustedProxies(nil)
+
+	proto := func(remote string) *http.Request {
+		r := &http.Request{RemoteAddr: remote, Header: http.Header{}}
+		r.Header.Set("X-Forwarded-Proto", "https")
+		return r
+	}
+
+	for _, tc := range []struct {
+		name    string
+		list    *TrustedProxies
+		req     *http.Request
+		want    bool
+		because string
+	}{
+		{"unset list believes anyone", unset, proto("198.51.100.9:1111"), true,
+			"an unset list must behave exactly as before, so no deployment changes on upgrade"},
+		{"configured + trusted peer", trusted, proto("203.0.113.1:1111"), true,
+			"the operator named this proxy; its header is the whole point of the list"},
+		{"configured + UNTRUSTED peer", trusted, proto("198.51.100.9:1111"), false,
+			"an attacker injecting the header must not be able to claim the origin is encrypted"},
+		{"real TLS beats everything", trusted, &http.Request{RemoteAddr: "198.51.100.9:1", TLS: &tls.ConnectionState{}}, true,
+			"r.TLS is a fact about this connection, not a claim about a previous hop"},
+		{"no header at all", trusted, &http.Request{RemoteAddr: "203.0.113.1:1", Header: http.Header{}}, false,
+			"a trusted peer that says nothing is not asserting https"},
+	} {
+		if got := SecureOrigin(tc.req, tc.list); got != tc.want {
+			t.Errorf("%s: SecureOrigin = %v, want %v — %s", tc.name, got, tc.want, tc.because)
+		}
+	}
+}
+
+// TestInjectedForwardedProtoCannotSuppressTheLoginLoopWarning is the first inversion quince#555
+// names, and it is the one that is easy to miss: CookieWillBeDiscarded is
+// `Secure(r) && !SecureOrigin(r)`, so believing an injected header makes it report FALSE while the
+// browser still discards the cookie — suppressing the quince#497 warning in exactly the case that
+// warning exists for.
+func TestInjectedForwardedProtoCannotSuppressTheLoginLoopWarning(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	trusted, _ := NewTrustedProxies([]string{"203.0.113.1"})
+	svc.SetTrustedProxies(trusted)
+
+	// Plain http to a LAN host, from an UNTRUSTED peer, with the header injected.
+	r := &http.Request{Host: "nas.local:8968", RemoteAddr: "198.51.100.9:2222", Header: http.Header{}}
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	if !svc.CookieWillBeDiscarded(r) {
+		t.Fatal("an injected X-Forwarded-Proto suppressed the login-loop warning: quince would " +
+			"stay silent while the browser discards the cookie (quince#497, quince#555)")
+	}
 }

@@ -475,9 +475,28 @@ non-negotiable:
   fixation as its reason, and the Operator found it by being signed out of a desktop by an iPad.
 - **Web baseline**: CSRF protection on mutating endpoints; strict WS `Origin`
   validation; CSP + frame denial; reverse-proxy trust headers only from configured
-  addresses; path-traversal-safe file serving (malicious filenames inside backups are
-  expected input); response size limits + range requests for large files; rate limits on
-  expensive vault operations, not just login.
+  addresses — **with one deliberate asymmetry, below**; path-traversal-safe file serving
+  (malicious filenames inside backups are expected input); response size limits + range
+  requests for large files; rate limits on expensive vault operations, not just login.
+- **Forwarded headers: `X-Forwarded-For` is gated ALWAYS; `X-Forwarded-Proto` only once a
+  trust list EXISTS** (`QUINCE_TRUSTED_PROXIES` — quince#547, quince#549, quince#555). With
+  the list unset, `X-Forwarded-For` is ignored outright and `X-Forwarded-Proto` is believed
+  from any peer.
+
+  **The asymmetry is about what DISBELIEVING falls back to, and that is the whole reason.**
+  Disbelieving `X-Forwarded-For` falls back to the peer address, which is **true** — a worse
+  bucketing key, never a false statement. Disbelieving `X-Forwarded-Proto` falls back to
+  *"this origin is not encrypted"*, which on a correctly proxied deployment is **false** —
+  and two things read that predicate and would fail toward alarm: `CookieWillBeDiscarded`
+  would warn of a login loop that is not happening, and onboarding step 1 would report HTTPS
+  incomplete on a working HTTPS install. Gating it unconditionally would break every existing
+  proxied deployment on upgrade, to close a hole that only matters once someone has told
+  quince who their proxy is.
+
+  **So the gate is opt-in by construction. It is not a weaker rule — it is the same rule
+  applied to a predicate whose failure direction differs.** Do not "fix" the inconsistency by
+  gating `X-Forwarded-Proto` unconditionally: that reintroduces the false negative rejected
+  on friction grounds.
 - **Audit trail**: login, unlock, file download, version delete, **device pairing and
   encryption changes** (qn.3 — event + UDID + outcome, never the password) — appended to
   the app DB, visible in UI.

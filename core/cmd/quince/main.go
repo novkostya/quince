@@ -140,6 +140,23 @@ func serve(args []string) error {
 		}
 	}()
 
+	// quince#464/quince#555: who may be believed about `X-Forwarded-*`. Empty — the shipping
+	// default — trusts nobody: the login limiter buckets on the peer address, and
+	// `X-Forwarded-Proto` is believed from anyone, which is byte-for-byte what every deployment
+	// does today. A malformed entry is WARNED and ignored rather than dropped silently.
+	//
+	// FROM THE BOOTSTRAP ENV, not config.yml (Operator ruling 2026-08-02, quince#549):
+	// `--public-demo` deletes its config at startup, so the deployment that most needs a trust
+	// list could never carry one, and in that mode every visitor can `PUT /api/config`.
+	//
+	// Built HERE, before the auth service, because two things consume it — the limiter's bucketing
+	// and `SecureOrigin`'s header gate — and the second is a property of the Service.
+	proxies, badProxies := auth.NewTrustedProxies(bootstrap.TrustedProxies)
+	for _, b := range badProxies {
+		log.Warn("QUINCE_TRUSTED_PROXIES entry is not an IP or CIDR and is IGNORED",
+			"entry", b, "var", "QUINCE_TRUSTED_PROXIES")
+	}
+
 	cfgSvc := config.NewService(cfgPath, log)
 	authSvc := auth.NewService(st, log)
 	// The user's plain-http opt-in (qn.6f slice 8). Applied before either branch below,
@@ -147,6 +164,7 @@ func serve(args []string) error {
 	// live stack. `--demo` then forces Secure off entirely, which is a superset of this
 	// rather than a conflict.
 	applyInsecureTransportOptIn(authSvc, cfgSvc.Current(), os.Stderr)
+	authSvc.SetTrustedProxies(proxies)
 	eventBus := bus.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -212,22 +230,6 @@ func serve(args []string) error {
 		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
 			workingReset = ls.engine
 		}
-	}
-
-	// quince#464: who may be believed about X-Forwarded-For. Empty — the shipping default — trusts
-	// nobody and buckets on the peer address, which is byte-for-byte what every deployment does
-	// today. A malformed entry is WARNED and ignored rather than dropped silently: a proxy the
-	// operator believes is configured, and is not, is the exact silent degradation this fixes.
-	//
-	// FROM THE BOOTSTRAP ENV, not config.yml (Operator ruling 2026-08-02, quince#549). It was a
-	// config key for one afternoon and never shipped. Two reasons it cannot be one: `--public-demo`
-	// DELETES its config at startup, so the deployment that most needs a trust list could never
-	// carry one; and in that mode every visitor can `PUT /api/config`, so a file-based list would be
-	// editable by the population it protects against.
-	proxies, badProxies := httpapi.NewTrustedProxies(bootstrap.TrustedProxies)
-	for _, b := range badProxies {
-		log.Warn("QUINCE_TRUSTED_PROXIES entry is not an IP or CIDR and is IGNORED",
-			"entry", b, "var", "QUINCE_TRUSTED_PROXIES")
 	}
 
 	handler := httpapi.NewRouter(httpapi.Deps{

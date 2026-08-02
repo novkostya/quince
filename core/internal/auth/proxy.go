@@ -1,6 +1,7 @@
-package httpapi
+package auth
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -140,7 +141,7 @@ func reverse(in []string) []string {
 	return out
 }
 
-// warnUnconfiguredProxy logs ONCE per process when a request carrying `X-Forwarded-For` arrives
+// WarnUnconfiguredProxy logs ONCE per process when a request carrying `X-Forwarded-For` arrives
 // from a peer quince does not trust.
 //
 // That combination means a proxy is in front and `QUINCE_TRUSTED_PROXIES` does not name it, which
@@ -154,18 +155,26 @@ func reverse(in []string) []string {
 // the same rung. A warning whose fix instruction points at a key the reader cannot find is worse
 // than no warning: it costs them an edit to `config.yml`, a restart, and the same warning again.
 //
-// Once, not per request: a proxied deployment would otherwise log on every login attempt, and a log
+// Once, not per request: a proxied deployment would otherwise log on every login attempt, and a
 // line repeated per request is one nobody reads.
-func (d Deps) warnUnconfiguredProxy(r *http.Request) {
-	if !d.Proxies.UnconfiguredProxy(r) {
+func (t *TrustedProxies) WarnUnconfiguredProxy(log *slog.Logger, r *http.Request) {
+	if !t.UnconfiguredProxy(r) {
 		return
 	}
 	proxyWarnOnce.Do(func() {
-		d.Log.Warn("a request carried X-Forwarded-For from an address that is not in QUINCE_TRUSTED_PROXIES — "+
-			"the login rate limiter is bucketing every visitor together, because it cannot see past your proxy. "+
-			"Set QUINCE_TRUSTED_PROXIES to the proxy's address to fix it",
-			"peer", peerHost(r), "key", "QUINCE_TRUSTED_PROXIES")
+		log.Warn("a request carried X-Forwarded-For from an address that is not in "+
+			"QUINCE_TRUSTED_PROXIES — the login rate limiter is bucketing every visitor together, "+
+			"because it cannot see past your proxy. Set QUINCE_TRUSTED_PROXIES to the proxy's "+
+			"address to fix it",
+			"peer", peerHost(r), "var", "QUINCE_TRUSTED_PROXIES")
 	})
 }
 
 var proxyWarnOnce sync.Once
+
+// TrustsPeer reports whether the request's PEER is one of the configured proxies. It is the
+// question SecureOrigin asks about `X-Forwarded-Proto` (quince#555), where ClientIP asks the
+// related but different question of which forwarded hop to bill.
+func (t *TrustedProxies) TrustsPeer(r *http.Request) bool {
+	return t.trusts(net.ParseIP(peerHost(r)))
+}
