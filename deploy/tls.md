@@ -60,9 +60,15 @@ never as evidence it is not, so a proxy that omits it produces the login loop ra
 downgrade. If step 1 will not complete behind your proxy, that header is the first thing to check.
 
 **`X-Forwarded-For` is different and must be configured.** quince believes it only from addresses
-listed in `server.trusted_proxies`, which is **empty by default** — so out of the box every request
-is attributed to the proxy's own address and the login rate limit is shared by everyone behind it.
-Set it to your proxy's address (quince#464).
+listed in **`QUINCE_TRUSTED_PROXIES`** — a bootstrap environment variable, comma-separated, and
+**empty by default**. Out of the box every request is therefore attributed to the proxy's own
+address, and the login rate limit is shared by everyone behind it. Set it to your proxy's address
+(quince#464).
+
+It is **env rather than `config.yml`**, ruled 2026-08-02 (quince#549), and the reason matters if you
+are tempted to move it: `--public-demo` deletes its config at startup, so the deployment that most
+needs a trust list could never carry one — and in that mode every visitor can `PUT /api/config`,
+which would make a file-based trust list editable by the population it exists to protect against.
 
 **Bind quince to loopback when a proxy is in front.** `QUINCE_LISTEN=127.0.0.1:8968` — otherwise the
 plain-HTTP port stays reachable on the LAN and the proxy is a suggestion rather than a boundary.
