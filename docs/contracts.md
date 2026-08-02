@@ -76,13 +76,28 @@ POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session 
 POST /api/auth/logout            → 204, clears the cookie.
 ```
 
-Onboarding (qn.6f; design §9 has the three steps):
+Onboarding (qn.6f):
 
 ```
-GET  /api/onboarding/step1 → {complete: bool, detected: "tls" | "forwarded_proto" | "none"}
+GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_proto" | "none"}
      // PRE-AUTH — the fifth exempt route, and the only onboarding one, BY EXACT PATH.
-     // complete = this origin is already encrypted, so the step needs no action.
+     // complete = this origin is already encrypted, so nothing needs doing.
 ```
+
+**The path names its SUBJECT, not a position** — Operator ruling 2026-08-02. An ordinal would be
+anchored to nothing: design §9 describes first-run onboarding as *guided checks* and names four of
+them, unnumbered — backups dir writable, backend probe, usbmuxd reachable, optional Wi-Fi toggle —
+**and does not name this one at all.** Whether those checks ever acquire numbers is quince#558, and
+it is unruled.
+
+That matters more than an ordinary naming preference, because **`authExempt` is keyed to the literal
+string.** Named for its subject the exemption reads as its own justification — *the https check is
+pre-auth because you cannot log in without https*. Anchored to an ordinal nobody has fixed, the one
+pre-auth route in the product would be guarded by an accident of ordering.
+
+`https` rather than `tls`, deliberately: `complete` is true for `r.TLS != nil` **or**
+`X-Forwarded-Proto: https`, and the second is not TLS at quince at all. `https` is the one word that
+covers both, and it is the user's word.
 
 **This is the FIRST onboarding surface in the product**, and its shape is precedent for steps 2 and
 3 — which is the argument for it being this narrow. `detected` is the **evidence** and `complete`

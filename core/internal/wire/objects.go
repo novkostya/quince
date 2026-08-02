@@ -237,22 +237,22 @@ type StorageResponse struct {
 	Storage Storage `json:"storage"`
 }
 
-// Step1Detected names WHY step 1 is or is not complete. Values are frozen: a client renders
+// HTTPSDetected names WHY step 1 is or is not complete. Values are frozen: a client renders
 // different prose for each, and adding one is a contract change.
 const (
-	// Step1DetectedTLS — quince terminated TLS itself (`tls:` configured, this connection
+	// HTTPSDetectedTLS — quince terminated TLS itself (`tls:` configured, this connection
 	// arrived on the TLS half of the listener).
-	Step1DetectedTLS = "tls"
-	// Step1DetectedForwarded — a proxy in front terminated it and said so with
+	HTTPSDetectedTLS = "tls"
+	// HTTPSDetectedForwarded — a proxy in front terminated it and said so with
 	// `X-Forwarded-Proto: https`.
-	Step1DetectedForwarded = "forwarded_proto"
-	// Step1DetectedNone — plain http, so the step is not complete. Includes loopback, which
+	HTTPSDetectedForwarded = "forwarded_proto"
+	// HTTPSDetectedNone — plain http, so the step is not complete. Includes loopback, which
 	// is deliberate: the step asks whether a PHONE can reach quince, and a browser on
 	// http://localhost cannot answer yes on its behalf.
-	Step1DetectedNone = "none"
+	HTTPSDetectedNone = "none"
 )
 
-// OnboardingStep1 is GET /api/onboarding/step1 — the FIRST onboarding surface in the product
+// OnboardingHTTPS is GET /api/onboarding/https — the FIRST onboarding surface in the product
 // (qn.6f, design §9). Deliberately two fields: it sets the shape steps 2 and 3 inherit, and a
 // richer payload here would be a precedent every later step cites.
 //
@@ -260,7 +260,7 @@ const (
 // EVIDENCE and Complete is the VERDICT: a client that only wants to know whether to show the
 // tiers should not have to keep a list of which reasons count, because that list is exactly
 // the thing that goes stale when a fourth reason is added.
-type OnboardingStep1 struct {
+type OnboardingHTTPS struct {
 	Complete bool   `json:"complete"`
 	Detected string `json:"detected"` // tls | forwarded_proto | none
 }

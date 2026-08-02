@@ -76,7 +76,7 @@ func authExempt(r *http.Request) bool {
 	// (Operator ruling 2026-08-02, quince#501). A prefix would silently exempt every future
 	// onboarding step, and this switch has no prefix support to do it with by accident.
 	case "GET /api/health", "GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup",
-		"GET /api/onboarding/step1":
+		"GET /api/onboarding/https":
 		return true
 	}
 	return false
