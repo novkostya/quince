@@ -771,6 +771,24 @@ devices:
                             # from this (plus a private --socket-path and --disable-usb).
                             # Wi-Fi discovery is mDNS-only, so the container must be on the
                             # LAN — see deploy/compose.nas.yml.
+tls:                        # qn.6f — the certificate quince serves ITSELF, for the tier with no
+                            # reverse proxy in front of it. BOTH EMPTY (the default) MEANS TLS IS
+                            # OFF, and that is a correct configuration, not a degraded one: it is
+                            # what the reverse-proxy and `tailscale serve` tiers want, and what
+                            # `--demo` runs. Setting exactly ONE of the two is a 422 naming the
+                            # other — it can only be a mistake, and unreported it reads as "off".
+  cert_file: ""             # PEM certificate chain
+  key_file: ""              # PEM private key — a PATH. A key body never enters this file (D12);
+                            # config.yml is hand-editable and carries no secrets, ever.
+                            #
+                            # WHETHER THESE FILES EXIST, PARSE, OR MATCH EACH OTHER IS NOT A
+                            # VALIDATION ERROR. An invalid config is DISCARDED in favour of
+                            # last-good/defaults, and the defaults have no TLS — so a certificate
+                            # fault raised as a validation error would start quince on plain HTTP
+                            # for somebody who asked for HTTPS, behind a warning banner they
+                            # cannot see because they are not connected. It is a FATAL check on
+                            # the serve path instead: quince refuses to start, names the file and
+                            # the reason, in the shape the storage requirement already uses.
 sessions:
   ttl_minutes: 30
 automation:                 # assisted-backup policy (consumed from qn.12)

@@ -17,6 +17,7 @@ type Config struct {
 	// otherwise make absent and zero-value identical.
 	Storage    *[]StorageEntry  `yaml:"storage" json:"storage"`
 	Devices    DevicesConfig    `yaml:"devices" json:"devices"`
+	TLS        TLSConfig        `yaml:"tls" json:"tls"`
 	Sessions   SessionsConfig   `yaml:"sessions" json:"sessions"`
 	Automation AutomationConfig `yaml:"automation" json:"automation"`
 	UI         UIConfig         `yaml:"ui" json:"ui"`
@@ -178,6 +179,36 @@ type DevicesConfig struct {
 	// until qn.7's audition). Empty = no Wi-Fi muxer at all.
 	NetmuxdAddr string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
 }
+
+// TLSConfig is the `tls:` section (qn.6f): the certificate quince serves itself, for the
+// tier where there is no reverse proxy in front of it.
+//
+// BOTH EMPTY IS THE DEFAULT AND MEANS TLS IS OFF. That is not a degraded mode needing a
+// surfaced warning — it is the correct configuration for the reverse-proxy and
+// `tailscale serve` tiers, which are the recommended ones, and for `--demo`. What must
+// never happen is a config that ASKS for TLS and silently does not get it, which is why
+// the certificate is checked on the serve path and not here (see below).
+//
+// VALIDATION HERE IS WELL-FORMEDNESS ONLY — one of the pair set is an error, because it
+// can only be a mistake. Whether the files exist, parse, and match each other is NOT
+// checked by Validate, for exactly the reason validateStorages spells out for `storage:`:
+// Load() DISCARDS a config that fails Validate and falls back to Default(), and Default()
+// has no TLS. So a certificate error expressed as a validation error would start the
+// daemon on defaults and serve PLAIN HTTP to a user who asked for HTTPS — the silent
+// downgrade, reached by putting the check in the obvious place. The fatal check lives on
+// the serve path beside StorageRequirement, and is slice 4.
+type TLSConfig struct {
+	// CertFile is the PEM certificate chain quince serves. Empty (with KeyFile) = TLS off.
+	CertFile string `yaml:"cert_file" json:"cert_file"`
+	// KeyFile is the PEM private key. A PATH, never a key body: secrets never enter
+	// config.yml (D12), and this file is world-readable by design.
+	KeyFile string `yaml:"key_file" json:"key_file"`
+}
+
+// Enabled reports whether the operator asked quince to serve TLS itself. One accessor so
+// no caller re-derives it and gets the half-set case wrong; Validate has already rejected
+// that case by the time anything can ask.
+func (t TLSConfig) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
 
 // SessionsConfig is the `sessions:` section (vault-unlock TTL — NOT the admin cookie TTL,
 // which has no config key in schema v0; see auth defaults).

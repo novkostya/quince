@@ -17,6 +17,7 @@ func Validate(c Config) []wire.ConfigError {
 		add("backup.transport", enumMsg(c.Backup.Transport, "auto", "usb", "wifi"))
 	}
 	validateStorages(c.Storage, add)
+	validateTLS(c.TLS, add)
 	if c.Sessions.TTLMinutes <= 0 {
 		add("sessions.ttl_minutes", "must be > 0")
 	}
@@ -30,6 +31,28 @@ func Validate(c Config) []wire.ConfigError {
 		add("ui.theme", enumMsg(c.UI.Theme, "system", "light", "dark"))
 	}
 	return errs
+}
+
+// validateTLS checks the `tls:` pair for well-formedness and nothing else (qn.6f story 3).
+//
+// Half a pair is the only thing wrong here that is knowable from the values alone: it can
+// only be a mistake, since neither file does anything without the other, and left
+// unreported it reads as "TLS is off" — the operator writes a cert_file, restarts, and
+// gets plain HTTP with no complaint.
+//
+// EVERYTHING ELSE ABOUT THE CERTIFICATE IS DELIBERATELY NOT CHECKED HERE, for the reason
+// validateStorages gives below and this rung's spec calls its load-bearing measurement:
+// Load() discards a config that fails Validate and returns Default(), which has no TLS, so
+// a certificate error raised here would produce a daemon serving plain HTTP to somebody who
+// asked for HTTPS and saw only a warning banner. Unreadable, malformed and mismatched are a
+// FATAL serve-path check (slice 4), in the shape StorageRequirement already established.
+func validateTLS(t TLSConfig, add func(path, msg string)) {
+	switch {
+	case t.CertFile != "" && t.KeyFile == "":
+		add("tls.key_file", "required when tls.cert_file is set — a certificate cannot be served without its key")
+	case t.KeyFile != "" && t.CertFile == "":
+		add("tls.cert_file", "required when tls.key_file is set — a key alone serves nothing")
+	}
 }
 
 // validateStorages checks the declared storage list (qn.6c story 1). `storage:` IS the list
