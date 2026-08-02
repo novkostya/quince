@@ -1,6 +1,6 @@
 // Command quince is the core daemon. Subcommands:
 //
-//	quince serve [--demo] [--listen :8080]             # serve the UI + API (contracts.md)
+//	quince serve [--demo|--public-demo] [--listen :8080]  # serve the UI + API (contracts.md)
 //	quince backup <udid> [--transport usb|wifi|auto]   # drive one backup to completion (lab CLI)
 //	quince versions verify <id> | --udid <udid>        # re-run structural verification (qn.4b)
 //	quince device reset-working <udid>                 # discard the dirty working/ (qn.5b Reset)
@@ -75,7 +75,7 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "quince %s\n\nUsage:\n"+
-		"  quince serve [--demo] [--listen :8080]             serve the UI + API\n"+
+		"  quince serve [--demo|--public-demo] [--listen :8080]  serve the UI + API\n"+
 		"  quince backup <udid> [--transport usb|wifi|auto]   drive one backup to completion\n"+
 		"  quince versions verify <id> | --udid <udid>        re-run structural verification\n"+
 		"  quince device reset-working <udid>                 discard the dirty working/\n"+
@@ -85,11 +85,17 @@ func usage() {
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	demoMode := fs.Bool("demo", false, "serve in-memory fixture data (no hardware)")
+	demoFlag := fs.Bool("demo", false, "serve in-memory fixture data (no hardware)")
+	publicDemo := fs.Bool("public-demo", false, "as --demo, for a public instance: password preset, Secure cookies left alone")
 	listenFlag := fs.String("listen", "", "override listen address (else QUINCE_LISTEN)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// --public-demo IMPLIES the --demo fixture stack and differs in exactly two behaviours, both
+	// isolated in configureDemoAuth (spec D1). Everything downstream keys off demoMode, so the
+	// fixture wiring is shared verbatim rather than duplicated — which is what keeps "otherwise
+	// identical to --demo" true by construction instead of by discipline.
+	demoMode := *demoFlag || *publicDemo
 
 	log := newLogger()
 
@@ -109,7 +115,7 @@ func serve(args []string) error {
 	dbPath := bootstrap.DBPath()
 	cfgPath := bootstrap.ConfigPath()
 	var cleanup func()
-	if *demoMode {
+	if demoMode {
 		// Fresh throwaway state each run so the first-run set-password flow is exercised
 		// (rung-ruled reading of "--demo seeds password demo": demo starts at needs_setup;
 		// the canonical demo password is "demo", entered at setup).
@@ -149,15 +155,18 @@ func serve(args []string) error {
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	var ops httpapi.DeviceOps             // assigned in both branches below (demo → provider, else → manager)
 	var workingReset httpapi.WorkingReset // nil in demo → router serves 503 on the reset surface
-	if *demoMode {
-		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
+	if demoMode {
+		// configureDemoAuth owns the mode banner too, so this branch has NO `if *publicDemo` in it.
+		// A second divergence point here would erode what the shared branch buys — see its doc.
+		if err := configureDemoAuth(authSvc, log, *publicDemo); err != nil {
+			return err
+		}
 		prov := demo.NewProvider(eventBus, log)
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
 		storages = prov
 		versionAdmin = prov
 		jobControl = prov // qn.4b: the demo command surface is live (scripts on-demand jobs, no hardware)
-		log.Info("demo mode: serving fixture data — set the admin password to begin")
 	} else {
 		// qn.6c gap 3: refuse to serve with no declared storage. Deliberately INSIDE this branch
 		// rather than above it — `--demo` serves fixture data and never touches storage (it takes
@@ -207,7 +216,7 @@ func serve(args []string) error {
 	go func() {
 		log.Info("quince serving",
 			"version", version.String(), "listen", listen,
-			"ui_embedded", webui.Built(), "demo", *demoMode)
+			"ui_embedded", webui.Built(), "demo", demoMode, "public_demo", *publicDemo)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -222,6 +231,53 @@ func serve(args []string) error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// demoPassword is the canonical demo password, ruled on quince#444, 2026-08-01. Under `--demo` it
+// is what the operator types at first-run setup; under `--public-demo` it is preset at startup and
+// printed on the login screen. It is PUBLISHED BY RULING and therefore not a secret — `test`
+// remains the fixture password, unrelated and unchanged.
+const demoPassword = "demo"
+
+// configureDemoAuth applies the only two behaviours that separate `--public-demo` from `--demo`
+// (docs/specs/public-demo/public-demo.md, D1). Split out because they are the whole difference
+// between the modes, and a difference that lives inline in a 100-line function is one nothing can
+// assert.
+//
+// PUBLIC: preset the password, and leave the Secure flag alone.
+//
+//   - Presetting IS what makes it immutable (D3), with no new refusal needed: `SetPassword` has
+//     exactly one caller, `POST /api/auth/setup`, which 409s once a password exists, and there is
+//     no change-password endpoint. So the instance starts at `needs_login` and setup is already
+//     closed.
+//   - NOT calling `SetInsecureCookies` is the point of the mode existing. `auth/service.go` says
+//     of that flag: *"Never set in production"*, and a public instance on the internet over HTTPS
+//     issuing real session cookies is production in the only sense that matters. Left alone, the
+//     ordinary rule applies: `Secure` on HTTPS or behind a proxy setting `X-Forwarded-Proto`.
+//
+// PLAIN --demo is unchanged, and deliberately so: it forces `Secure` off because the e2e host is
+// plain http and NOT loopback, and it starts at `needs_setup` so the first-run flow stays covered.
+// Presetting the password there would delete that coverage — a test-coverage loss disguised as a
+// feature flag, which is the argument that made this a separate mode rather than a flag on --demo.
+// It also emits the mode's startup banner, and that is deliberate rather than incidental: the
+// shared demo branch used to print "set the admin password to begin" for BOTH modes, which under
+// --public-demo instructs the operator to do something the same binary refuses with a 409. That is
+// the price of sharing the branch — a mode-specific message inside shared code is wrong for one
+// mode — and the fix is to move the message to where the modes already differ, not to add a second
+// place where they differ.
+func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) error {
+	if !public {
+		authSvc.SetInsecureCookies(true) // demo runs over plain http (localhost / e2e host)
+		log.Info("demo mode: serving fixture data — set the admin password to begin")
+		return nil
+	}
+	if err := authSvc.SetPassword(demoPassword); err != nil {
+		return fmt.Errorf("preset the public-demo password: %w", err)
+	}
+	log.Info("public demo mode: serving fixture data — the password is preset and setup is closed; "+
+		"Secure cookies follow the request, as in production",
+		"password", demoPassword) // published by ruling (quince#444) — a secret would never be logged
+	return nil
 }
 
 func configCmd(args []string) error {
