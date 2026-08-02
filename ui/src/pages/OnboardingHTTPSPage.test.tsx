@@ -61,8 +61,13 @@ describe("the onboarding HTTPS check", () => {
     // The docs reference is a LINK, not a filename. This page is read on a phone more than
     // anywhere else, and a phone cannot open `deploy/tls.md` — printing a path at somebody who
     // is stuck is a dead end dressed as help (Operator, 2026-08-02, on a screenshot).
+    //
+    // THREE, not `toBeGreaterThan(0)`, which is what this said first. Three tiers carry the
+    // link, so a floor of one passes while two of them lose it — and the comment above claimed
+    // the assertion existed to stop exactly that tidy-up. An assertion weaker than the sentence
+    // describing it is the day's recurring defect (review on quince#560).
     const docLinks = screen.getAllByRole("link", { name: "deploy/tls.md" });
-    expect(docLinks.length).toBeGreaterThan(0);
+    expect(docLinks).toHaveLength(3);
     for (const a of docLinks) {
       expect(a).toHaveAttribute("href", "https://github.com/novkostya/quince/blob/main/deploy/tls.md");
     }
