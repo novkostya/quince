@@ -692,6 +692,14 @@ storage:
       backend: auto         # OPTIONAL override of storage.backend for THIS storage.
                             # Omit it: `auto` probes the path, which is how a namespace
                             # backend (reflink|hardlink|copy) is meant to be chosen.
+                            # `auto` IS STILL LEGAL AND IS NOT AN OVERSIGHT. The 2026-08-02
+                            # direction that only a CONCRETE backend may land in this file is
+                            # DEFERRED, not withdrawn — it is homed on quince#502 (`qn.6e`).
+                            # Do not tidy it out: `auto` is the ONLY thing that checks a
+                            # backend declaration against the medium (probe.go:42-48 returns
+                            # an explicit backend WITHOUT probing), so removing it early
+                            # would make quince-storage.json record a guess. See the ruled
+                            # block in this section.
       zfs: {}               # OPTIONAL override of storage.zfs for THIS storage. To opt OUT of a
                             # global `backend: zfs` you need BOTH this and `backend: auto` —
                             # `zfs: {}` alone leaves the global backend applying with no parent
@@ -812,6 +820,113 @@ storages and the remedy.
 
 A **restart** is still required to pick up a `storages:` change — D12 permits that only if the spec
 says why, and `docs/specs/qn.6c/qn.6c.md` says why.
+**RULED (was `PROPOSED (gap)`): `storage:` becomes a list of fully-specified storages; `auto`
+REMAINS LEGAL and its removal is descoped to `qn.6e` — `qn.6c`, quince#473, quince#502.** Operator
+ruling 2026-08-02, relayed by architect session `arch1` on quince#500 — a **relay of an out-of-band
+decision**, which is the citable record rather than a forge artefact the Operator authored.
+
+**What lands, in full and unchanged:** `storage:` **is** the list, with no global `backend`, `zfs`
+or `retention` — the five inline directions on quince#461.
+
+```yaml
+storage:
+  - path: /backups          # name and default optional, per the 2026-08-01 ruling
+    backend: zfs            # concrete OR `auto`; see below
+    zfs: {parent_dataset: rpool/quince, mode: hook, hook_cmd: "…", seed: auto}
+    retention: {keep_recent: 10, keep_daily: 30, keep_weekly: 12}
+  - {path: /mnt/shuttle, backend: hardlink}
+```
+It dissolves quince#458 **by construction** — no inheritance means nothing bleeds from a global onto
+a storage it was never written for — and it **deletes** rather than amends: `BackendFor`, `ZFSFor`,
+the `zfs: {}` opt-out idiom with its comments and tests, `CheckStorageBackends`' remedy BRANCHING,
+and **quince#468 entirely**.
+
+**`CheckStorageBackends` itself SURVIVES, and quince#473's deletion list is wrong about it.** Read
+before building, not assumed from the issue. The function does two things and only one of them is
+about inheritance:
+
+- **The zfs-with-no-parent refusal** is an incoherent *declaration*, still reachable when an entry
+  writes `backend: zfs` with no `parent_dataset`. It survives, and its remedy collapses from three
+  branches to **one** — *set `parent_dataset` in this entry's `zfs:` block* — because with no global
+  there is no other key it could mean. That is what deletes quince#468, whose whole content is
+  choosing between remedies that no longer exist.
+- **The duplicate-`parent_dataset` collision** — two storages that would create the same
+  `<parent>/<udid>` per device and each believe they owned it — **is not caused by inheritance at
+  all.** Two flattened entries can each spell out the same `parent_dataset`. Deleting the function
+  would reintroduce quince#458's actual hazard by a different route, which is the opposite of what
+  the flattening is for.
+
+**What is DEFERRED, and this is the half that changed:** *"only a specific backend can land in
+settings.yaml"* is deferred, **not withdrawn**. It is homed on **quince#502 (`qn.6e`)**, an explicit
+placeholder. **`backend: auto` is still legal in `config.yml` and is not an oversight** — a reader
+meeting it after a direction that said *concrete backends only* should not tidy it out. **Nothing is
+built to compensate**; in particular the creation-time probe-and-refuse this block recommended is
+**not** wanted.
+
+**The measurement below is what decided it, and it is kept verbatim for that reason.**
+`core/internal/storage/probe.go:42-48`:
+
+```go
+switch opts.Backend {
+case BackendReflink, BackendHardlink, BackendCopy:
+	// returned WITHOUT probing — "storage.backend: <x> (explicit)"
+}
+// auto: probe the real filesystem
+name, reason := probeNamespace(opts.Backups)
+```
+
+`probeNamespace` — FICLONE independence, then `link()`+inode identity — runs on the **`auto` branch
+only**. An explicit namespace backend is taken at face value. **So `auto` is not a convenience
+default; it is the only thing in the product that checks a backend declaration against the medium**,
+at a time when nothing creates a storage for you — that flow is quince#443, a later rung.
+
+Without it, a wrong guess is accepted silently at startup, frozen into `quince-storage.json` where
+gap 4 makes the marker the authority, and fails at **seed time, inside a backup the user just
+pressed** — `ErrReflinkUnsupported` is a surfaced error and explicitly *"never a silent fallback"*
+(`clonetree.go:49-52`). It also feeds quince#476, where a `backend_mismatch` clears only by
+hand-deleting a checksummed file and the refusal never says so.
+
+**Why deferral rather than a new mechanism, which is the reusable part.** Removing `auto` was chosen
+as the *simpler* option — *"pick the simplest, don't accumulate debt for no reason"*. But keeping
+`backend_mismatch` meaningful without it required **building** a creation-time probe-and-refuse:
+more machinery, not less, and a cost the simplicity argument had not priced. Descoping is what makes
+that argument actually hold. **The marker safety property then returns for free**: with `auto`, the
+creation moment probes, so the marker records what the medium *is* and `Mismatch` compares a real
+observation against a real observation.
+
+**Two things quince#473 listed as undecided, measured rather than argued, and neither blocks.**
+
+*The absent-vs-empty pointer distinction survives.* It is what G7 rests on — *no key* and *declared
+none* want the same refusal for different reasons. Moving `*[]StorageEntry` up one level, onto
+`storage:` itself, preserves it exactly, because `Parse` unmarshals over `Default()` and a nil
+pointer stays nil:
+
+```
+PROBE absent key     → nil       PROBE declared none → empty       PROBE one storage → 1 entry
+```
+
+So `CheckStorages` keeps its shape and `Explain` changes one string: `storage.storages:` →
+`storage:`.
+
+*Unknown-key detection still reaches inside an entry.* `unknownKeys` recurses into slices of structs
+and indexes them, so a typo in a flattened entry is still reported and still says which entry:
+
+```
+PROBE warning → unknown config key "storage[0].pth" (ignored)
+```
+
+**Two consequences to state in the implementing PR rather than discover.** Per-storage `retention`
+with no global block means an absent `retention:` falls back to **code** defaults — D12 permits a
+setting with a sane default the file need not spell out. And **the upgrade note gap 3 made a
+deliverable now has two steps**, because this is the second config break in one rung.
+
+**Whether this is `qn.6c` or its own rung was open in quince#473 and is answered by the Operator
+naming it the most important piece left of `qn.6c` (2026-08-02).** Recorded because it was listed as
+undecided and a later reader will look for where it went.
+
+**Not ruled here:** `qn.6e`'s scope, which quince#502 leaves open by instruction; and whether `auto`
+removal ultimately sits in `qn.6e` or travels with quince#443's add-storage flow, which would be a
+scoping decision rather than a reversal.
 
 **PROPOSED (gap): one listener or two, and what plain HTTP does once quince serves TLS?**
 `qn.6f`, quince#462 — quince#446's open decision 3, spec `docs/specs/qn.6f/qn.6f.md`. Nothing is
@@ -927,3 +1042,4 @@ live:
 address is already a first-class setting rather than a good number. And under host networking a bind
 failure must be a **loud named error, never a fallback to another port** — *no silent caps or
 fallbacks*.
+
