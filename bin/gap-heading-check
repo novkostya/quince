@@ -63,6 +63,29 @@
 # on a line inside the block. Same design as `bin/sh-lint-coverage`'s exclusion list: an exemption
 # costs somebody a written reason in a diff a reviewer sees, rather than being silent.
 #
+# THE BOUNDING FAILS *NEGATIVE*, AND THE OPT-OUT DOES NOT REACH THAT CASE (quince#478). A ruling
+# under an intervening `###` heading INSIDE a block is MISSED, because bounding stops at the next
+# heading of any level:
+#
+#     **PROPOSED (gap): does X?**
+#     ### A sub-heading inside the block
+#     **RULED — yes.**                       <- not seen; the block ended at the heading above
+#
+# Say the DIRECTION and not just the mechanism, because the two want opposite responses. The opt-out
+# above suppresses a FINDING, and a missed block produces none — so nothing here is opt-out-shaped
+# and a reader who knows only "sections are not resolved semantically" will reach for the wrong
+# remedy. A false negative is also the worse half for a gate: an over-report is argued with, a
+# missed one is invisible.
+#
+# Unreachable in this corpus as of 2026-08-02 — no gap block in canon carries a sub-heading, checked
+# against both quince#408 instances and the block quince#472 was adding. `gap-heading-check-test`
+# pins it as KNOWN AND ACCEPTED rather than undiscovered, which is the whole difference between a
+# limit somebody chose and one nobody noticed.
+#
+# DO NOT widen the bounder to "the next heading of the same or higher level" without a live
+# instance. A bold lead has no level, so the rule would need one invented for it, and that is a
+# larger change than the case currently justifies.
+#
 # `RULED` is matched as an UPPERCASE WORD. Lowercase `ruled` is ordinary prose all over these
 # documents ("ruled 2026-07-31", "the ruling", "unruled") and matching it would bury the signal.
 # `OVERRULED` does not match, because `-w` requires a word boundary — an overruled proposal is

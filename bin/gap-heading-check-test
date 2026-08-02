@@ -172,6 +172,37 @@ expect "lowercase prose (ruled / ruling / unruled) does not trip it" 0 "clean" \
 expect "a RULED beyond the next heading is NOT attributed to the block" 0 "clean" \
 	"$CHECK" "$WORK/bounded.md"
 
+# THE KNOWN FALSE NEGATIVE, PINNED AS ACCEPTED RATHER THAN LEFT UNDISCOVERED (quince#478).
+#
+# This asserts the gate does NOT fire on a block whose own body says RULED, because the ruling sits
+# under an intervening `###`. It is the one place in this suite where `clean` is the WRONG answer in
+# principle and the right answer in fact — the limit falls straight out of bounding at the next
+# heading, and closing it needs a level-aware bounder that a bold lead cannot supply a level for.
+#
+# It is written down HERE, as an executable assertion, for the reason quince#478 gives: a limitation
+# somebody chose and a limitation nobody noticed look identical in a passing suite. If a future
+# change makes this FIRE, that is an improvement and this assertion is what will say so — flip it,
+# do not delete it.
+#
+# The opt-out cannot help: it suppresses findings, and there is no finding to suppress.
+{
+	printf '**%s does X?**\n\n' "$M"
+	printf '### A sub-heading inside the block\n\n'
+	printf '**RULED — yes.**\n'
+} >"$WORK/subheading.md"
+expect "KNOWN LIMIT: a ruling under an intervening sub-heading is MISSED (fails negative)" 0 "clean" \
+	"$CHECK" "$WORK/subheading.md"
+
+# THE CONTROL, without which the assertion above is vacuous. Byte-for-byte the same block with the
+# `###` line removed: it FIRES. So the sub-heading is the sole cause, and the pair states the limit
+# precisely rather than merely recording that one input happens to pass.
+{
+	printf '**%s does X?**\n\n' "$M"
+	printf '**RULED — yes.**\n'
+} >"$WORK/subheading-control.md"
+expect "…and the SAME block without the sub-heading fires, so bounding is the sole cause" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/subheading-control.md"
+
 # Two markers in one file: the second bounds the first, and each is judged on its own body.
 {
 	printf '**%s the first question.**\n\nOpen, nothing decided here.\n\n' "$M"
