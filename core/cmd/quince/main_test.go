@@ -293,3 +293,31 @@ func TestInsecureTransportOptInAnnouncesItselfAndTakesEffect(t *testing.T) {
 		}
 	})
 }
+
+// The redirect is what makes one-port routing worth having: the URL the user typed keeps
+// working, upgraded in place. It must preserve the HOST AND PORT, because the default is now
+// :8968 and a redirect to bare https://host would send them to 443 where nothing listens.
+func TestRedirectToHTTPSPreservesHostPortAndPath(t *testing.T) {
+	tests := []struct {
+		name, host, target, want string
+	}{
+		{"non-default port", "quince.example:8968", "/devices", "https://quince.example:8968/devices"},
+		{"root", "quince.example:8968", "/", "https://quince.example:8968/"},
+		{"query preserved", "quince.example:8968", "/jobs?state=failed", "https://quince.example:8968/jobs?state=failed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			redirectToHTTPS()(rec, req)
+
+			if rec.Code != http.StatusMovedPermanently {
+				t.Fatalf("status = %d, want 301", rec.Code)
+			}
+			if got := rec.Header().Get("Location"); got != tc.want {
+				t.Errorf("Location = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -1012,11 +1012,23 @@ undecided and a later reader will look for where it went.
 removal ultimately sits in `qn.6e` or travels with quince#443's add-storage flow, which would be a
 scoping decision rather than a reversal.
 
-**PROPOSED (gap): one listener or two, and what plain HTTP does once quince serves TLS?**
-`qn.6f`, quince#462 — quince#446's open decision 3, spec `docs/specs/qn.6f/qn.6f.md`. Nothing is
-built on this until it is decided.
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): ONE port, both protocols, routed by the first byte
+of the connection, vendored rather than `cmux`. Plain HTTP gets a `301` to `https://<same host>:<same
+port>` — EXCEPT when `sessions.allow_insecure_transport` is on, where quince serves it.** Operator
+ruling 2026-08-02, relayed by architect session `arch1` on quince#446 — option (c) — and built in
+slice 4.
 
-**The question.** With `tls.cert_file` set, does quince **(a)** add a second port for HTTPS and keep
+`core/internal/tlsx` carries it: a per-connection peek goroutine, two channel-backed
+`net.Listener`s, a `Conn` that replays the peeked byte, and an idempotent `Close` so two
+`http.Server`s over one real listener cannot race into a double-close. `0x16` is a TLS
+ClientHello; every HTTP request begins with an ASCII method letter.
+
+**The redirect shipped WITH its exception rather than before it.** The sequencing note at the end of
+this block permitted slice 4 to send the `301` unconditionally, *because slice 8's flag did not exist
+yet and there was therefore no user it could wrong.* Slice 8 merged first (quince#540), so that
+reasoning expired before slice 4 was written and the exception is in the same commit as the redirect.
+
+**The question it answered.** With `tls.cert_file` set, does quince **(a)** add a second port for HTTPS and keep
 serving the app over http on `QUINCE_LISTEN`, **(b)** listen on two ports where the http one
 redirects or refuses, or **(c)** serve both protocols on the single port `QUINCE_LISTEN` already
 names, routed by inspecting the first byte of each connection?

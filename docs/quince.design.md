@@ -581,11 +581,20 @@ forced to terminate TLS inside a tunnel they already trust. **A redirect that ov
 off-by-default, surfaced opt-in would make this setting undeclarable whenever a certificate exists** —
 which is most of the deployments that would want it.
 
-**Sequencing, so nobody writes a condition on a key that does not exist yet:** the flag arrives in
-**slice 8**, the listener and its redirect in **slice 4**. **Slice 4 may ship the redirect
-unconditional**, because until slice 8 there is no flag to honour and therefore no user it can
-wrong. Slice 8 adds the exception when it adds the key. There is no window between the two — the
-setting cannot be enabled before it is built.
+**Sequencing — and IT DID NOT HAPPEN IN THIS ORDER, which is why the licence below went unused.**
+The plan was: the flag in **slice 8**, the listener and its redirect in **slice 4**, and *"slice 4
+may ship the redirect unconditional, because until slice 8 there is no flag to honour and therefore
+no user it can wrong."*
+
+**Slice 8 shipped FIRST** (quince#540, merged 2026-08-02), so by the time slice 4 (quince#551) was
+written the flag existed and the licence had expired. The redirect therefore landed **with** its
+exception, in one commit, and no unconditional `301` was ever on `main`.
+
+Kept rather than deleted because the reasoning is still the rule — *a condition may not be written
+on a key that does not exist* — and because a licence that was granted and then quietly dropped
+looks, to the next reader, like an obligation somebody forgot. It was not forgotten; it stopped
+applying. The general form is worth carrying: **a sequencing licence is conditional on the sequence,
+and slices do not always land in the order a spec numbers them.**
 
 *(These numbers are the `docs/specs/qn.6f/qn.6f.md` PR-slicing table's. They read `slice 2` until
 2026-08-02 — wrong, and wrong in the direction that misdirects: slice 2 is the page and has no
