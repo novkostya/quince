@@ -194,7 +194,13 @@ export interface Config {
   // ConfigEditor spreads a document it FETCHED rather than building one, and nothing enforces
   // that it keeps doing so. Same gap, different blast radius — quince#493.
   tls: { cert_file: string; key_file: string };
-  sessions: { ttl_minutes: number };
+  // allow_insecure_transport is a DEGRADED MODE the user opted into (qn.6f slice 8), not a
+  // preference: with it on, session and CSRF cookies are served without `Secure` to plain-http
+  // clients. It is here for the same reason `tls` directly above is — PUT is a full-document
+  // replace decoded into a zero-valued Go struct, so a client that omits the key silently turns
+  // the setting OFF on the next save. For this one that direction is safe-by-accident rather than
+  // dangerous, but relying on which way an omission happens to fall is exactly quince#493.
+  sessions: { ttl_minutes: number; allow_insecure_transport: boolean };
   automation: { staleness_days: number; reminder_cooldown_hours: number };
   ui: { theme: string };
 }

@@ -274,24 +274,86 @@ func TestCheckCSRF(t *testing.T) {
 	}
 }
 
+// The default rule, with the opt-in OFF. Every call states the mode explicitly, which is
+// why secureCookie takes it as a parameter rather than reading a package variable.
 func TestSecureCookieRule(t *testing.T) {
 	loopback := httptest.NewRequest("GET", "http://localhost:8080/api/health", nil)
-	if secureCookie(loopback) {
+	if secureCookie(loopback, false) {
 		t.Error("loopback http should not be Secure")
 	}
 	lan := httptest.NewRequest("GET", "http://10.20.30.40/api/health", nil)
-	if !secureCookie(lan) {
+	if !secureCookie(lan, false) {
 		t.Error("non-loopback http should be Secure")
 	}
 	tlsReq := httptest.NewRequest("GET", "http://localhost/api/health", nil)
 	tlsReq.TLS = &tls.ConnectionState{}
-	if !secureCookie(tlsReq) {
+	if !secureCookie(tlsReq, false) {
 		t.Error("TLS should be Secure")
 	}
 	proxied := httptest.NewRequest("GET", "http://localhost/api/health", nil)
 	proxied.Header.Set("X-Forwarded-Proto", "https")
-	if !secureCookie(proxied) {
+	if !secureCookie(proxied, false) {
 		t.Error("X-Forwarded-Proto https should be Secure")
+	}
+}
+
+// The opt-in relaxes THE FALLBACK ONLY (qn.6f slice 8, Operator ruling 2026-08-02). The two
+// rows that matter here are the last two: a positive signal must still win, or the flag
+// would strip Secure from a genuine HTTPS session — a different and much worse setting than
+// the one that was ruled, and reachable by moving one branch three lines up.
+func TestAllowInsecureTransportRelaxesOnlyTheFallback(t *testing.T) {
+	tlsReq := httptest.NewRequest("GET", "http://quince.example/api/health", nil)
+	tlsReq.TLS = &tls.ConnectionState{}
+	proxied := httptest.NewRequest("GET", "http://quince.example/api/health", nil)
+	proxied.Header.Set("X-Forwarded-Proto", "https")
+
+	tests := []struct {
+		name string
+		req  *http.Request
+		want bool
+	}{
+		{
+			name: "the case the opt-in exists for: plain http to a lan address",
+			req:  httptest.NewRequest("GET", "http://quince.example:8968/api/health", nil),
+			want: false, // relaxed — the cookie is usable, which is the whole point
+		},
+		{
+			name: "loopback is unaffected",
+			req:  httptest.NewRequest("GET", "http://localhost:8968/api/health", nil),
+			want: false, // already false without the flag
+		},
+		{
+			name: "direct TLS still gets Secure",
+			req:  tlsReq,
+			want: true,
+		},
+		{
+			name: "a proxy saying https still gets Secure — the header can only ever upgrade",
+			req:  proxied,
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := secureCookie(tc.req, true); got != tc.want {
+				t.Errorf("secureCookie(_, allowInsecure=true) = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The payoff of defining CookieWillBeDiscarded in terms of Secure rather than re-deriving
+// the host test: the quince#497 refusal switches itself off when the user opts in, with no
+// second condition anywhere to keep in step. contracts §1 states this as contract.
+func TestOptInAlsoDisarmsTheInsecureOriginRefusal(t *testing.T) {
+	lan := httptest.NewRequest("POST", "http://quince.example:8968/api/auth/login", nil)
+
+	if !(&Service{}).CookieWillBeDiscarded(lan) {
+		t.Fatal("without the opt-in the cookie IS discarded — the refusal must fire")
+	}
+	if (&Service{allowInsecureTransport: true}).CookieWillBeDiscarded(lan) {
+		t.Error("with the opt-in the cookie survives, so the refusal must NOT fire; " +
+			"a second switch has appeared somewhere and the two can now disagree")
 	}
 }
 
