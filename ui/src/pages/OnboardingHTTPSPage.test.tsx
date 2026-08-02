@@ -58,6 +58,19 @@ describe("the onboarding HTTPS check", () => {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
 
+    // The docs reference is a LINK, not a filename. This page is read on a phone more than
+    // anywhere else, and a phone cannot open `deploy/tls.md` — printing a path at somebody who
+    // is stuck is a dead end dressed as help (Operator, 2026-08-02, on a screenshot).
+    const docLinks = screen.getAllByRole("link", { name: "deploy/tls.md" });
+    expect(docLinks.length).toBeGreaterThan(0);
+    for (const a of docLinks) {
+      expect(a).toHaveAttribute("href", "https://github.com/novkostya/quince/blob/main/deploy/tls.md");
+    }
+
+    // Plain http forecloses web push the same way a click-through certificate does, and the
+    // page said so for only one of the two until the Operator asked.
+    expect(screen.getByText(/only allow web push on an encrypted origin/i)).toBeInTheDocument();
+
     // Rendered AND labelled, both of them — the story's own words.
     expect(screen.getAllByText("Not implemented")).toHaveLength(2);
   });
