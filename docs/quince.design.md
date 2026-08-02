@@ -504,10 +504,17 @@ non-negotiable:
 - **Subprocess hygiene**: argv arrays only; UDIDs and paths validated against strict
   patterns before use.
 
-**PROPOSED (gap): may a user on a trusted network opt into plain HTTP — that is, may `Secure`
-be relaxed for a NON-loopback host?** `qn.6f`, quince#462; the analysis is on quince#446, where
-three separate rulings say this block is required before any plain-HTTP code exists. Affects the
-**Auth** bullet above and `core/internal/auth/cookie.go`. Nothing is built on this until it is ruled.
+**RULED (was `PROPOSED (gap)`): a user on a trusted network MAY knowingly opt into plain HTTP —
+`Secure` is relaxed for a non-loopback host by an explicit, off-by-default, surfaced switch.**
+Operator, 2026-08-02, relayed on quince#446 at `05:58:57Z`. `qn.6f`, quince#462. Option (b). Affects
+the **Auth** bullet above and `core/internal/auth/cookie.go`; **built in slice 8**, which flips
+nothing further — this block is already decided text.
+
+**Flipped ahead of its implementing PR, deliberately.** The rung process flips a block in the PR that
+builds it, and this one is early because **gap A's ruling depends on it**: the redirect exception
+below is written in terms of this setting, and a session reading canon to decide what it may build
+would otherwise meet a `PROPOSED (gap)` marker for the thing slice 2 must honour (quince#446,
+2026-08-02).
 
 **The defect it answers.** `secureCookie` returns `true` for every non-loopback host, so over
 `http://` to a LAN address quince sets a `Secure` cookie on an insecure origin. The browser
@@ -537,8 +544,8 @@ itself a *no silent fallbacks* problem, in the direction where the user cannot t
 **Rejected, and recorded only so the rejection is on the record.** A security baseline that switches
 itself off when the network makes it inconvenient is the thing the baseline exists to prevent.
 
-**Option (b) — an explicit, off-by-default, surfaced opt-in. RECOMMENDED**, and the shape is the
-part that needs ruling rather than the yes/no:
+**Option (b) — an explicit, off-by-default, surfaced opt-in. THIS IS WHAT WAS RULED**, in the shape
+below and with every recommendation taken:
 
 1. **One config key, defaulting to off** — `sessions.allow_insecure_transport: false`. Under
    `sessions:` rather than a `tls:` section, because it governs the session and CSRF cookies and it
@@ -557,18 +564,28 @@ part that needs ruling rather than the yes/no:
 5. **No HSTS while this is reachable.** Already true (quince sends none, `httpapi.securityHeaders`)
    and it must stay true, or a user who enables this is locked out with no in-browser recovery.
 
-**What a ruling settles beyond yes/no**, any of which may be edited into it: the key's name and
-section; whether "trusted" is the user's blanket assertion (recommended — someone who sets the flag
-has already made that judgement) or a declared host/CIDR allowlist (more machinery, and it changes
-nothing about who can read the wire); and whether the banner is dismissible (recommended: no).
+**What the ruling settled beyond yes/no, and every recommendation above was taken.** The key is
+`sessions.allow_insecure_transport`. **"Trusted" is the user's BLANKET ASSERTION — one boolean, not a
+host/CIDR allowlist**: someone who sets the flag has already made that judgement, and an allowlist
+narrows which requests get a usable cookie without changing who can read the wire, which is
+machinery that reads as security it does not provide. **The banner is NOT dismissible** — a degraded
+mode that can be hidden stops being surfaced.
 
-<!-- gap-heading-check: ignore — the decided text below belongs to the NEXT block (step 1
-     pre-auth), not to this one. This block LOST ITS TERMINATOR when that neighbour was flipped,
-     because a live open-gap marker is one of the three things that bounds a block; flipping the
-     block below removed the boundary, so this block's bounds now run past it to section 7.
-     This block's own question — may a user opt into plain HTTP — is decided on quince#446 but is
-     deliberately NOT flipped here: that ruling says it flips in the PR that implements it.
-     Remove this opt-out in that PR, when this block is flipped too. -->
+**AND IT WINS OVER THE REDIRECT.** Gap A (contracts §6) routes one port by first byte and sends
+plain-HTTP connections a `301` to `https://<same host>:<same port>` — **except when this setting is
+enabled, where quince serves them.** Operator, 2026-08-02 (quince#446).
+
+The reason is the case that inverted this question to begin with: over WireGuard or Tailscale the
+transport is *already* encrypted, and a user who configured a certificate for one path should not be
+forced to terminate TLS inside a tunnel they already trust. **A redirect that overrode an explicit,
+off-by-default, surfaced opt-in would make this setting undeclarable whenever a certificate exists** —
+which is most of the deployments that would want it.
+
+**Sequencing, so nobody writes a condition on a key that does not exist yet:** the flag arrives in
+slice 8, the listener in slice 2. **Slice 2 may ship the redirect unconditional**, because until
+slice 8 there is no flag to honour and therefore no user it can wrong. Slice 8 adds the exception
+when it adds the key. There is no window between the two — the setting cannot be enabled before it
+is built.
 
 **RULED (was `PROPOSED (gap)`): onboarding step 1 IS reachable without a session — a fifth
 `authExempt` route, by exact path.** Operator, 2026-08-02, on quince#501: *"Of course it's pre-auth,
