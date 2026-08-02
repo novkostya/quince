@@ -73,7 +73,7 @@ type stubReset struct {
 	reason string
 }
 
-func (s stubReset) ResetWorking(string) (int, string) { return s.status, s.reason }
+func (s stubReset) ResetWorking(string, string) (int, string) { return s.status, s.reason }
 
 // TestResetWorkingHandler covers POST /api/devices/{udid}/reset-working (qn.5b): the handler maps
 // the control's status, and a nil control (no engine wired) defaults to 503 via the router guard.

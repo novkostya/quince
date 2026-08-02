@@ -22,13 +22,25 @@ func (d Deps) handlePair() http.HandlerFunc {
 	}
 }
 
+// resetWorkingRequest is the optional POST /api/devices/{udid}/reset-working body. Omitting
+// storage_id resolves by DIRTY COUNT: none is already clean, exactly one is reset, two or more
+// refuses and names them (contracts §1, quince#448).
+type resetWorkingRequest struct {
+	StorageID string `json:"storage_id"`
+}
+
 // handleResetWorking serves POST /api/devices/{udid}/reset-working → 202 (qn.5b Reset, contracts
 // §1): discard the device's dirty working/ so the next backup starts clean from latest/. 409 while
 // a backup is running for the device, 404 unknown device, 503 no engine wired. Never touches a
 // committed version.
 func (d Deps) handleResetWorking() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		status, reason := d.WorkingReset.ResetWorking(r.PathValue("udid"))
+		// storage_id is OPTIONAL and a MISSING BODY IS VALID — the endpoint took none before
+		// this rung, and the CLI still sends none. A decode failure is therefore not an error
+		// to report: it means the caller sent what it always sent (quince#448).
+		var req resetWorkingRequest
+		_ = decodeJSON(r, &req)
+		status, reason := d.WorkingReset.ResetWorking(r.PathValue("udid"), req.StorageID)
 		if status != http.StatusAccepted {
 			writeError(w, d.Log, status, statusCode(status), reason)
 			return
