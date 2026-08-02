@@ -13,11 +13,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,6 +33,7 @@ import (
 	"github.com/novkostya/quince/core/internal/demo"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/store"
+	"github.com/novkostya/quince/core/internal/tlsx"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
 )
@@ -221,24 +224,119 @@ func serve(args []string) error {
 			"entry", b, "key", "server.trusted_proxies")
 	}
 
-	srv := newHTTPServer(listen, httpapi.NewRouter(httpapi.Deps{
+	handler := httpapi.NewRouter(httpapi.Deps{
 		Log: log, Version: version.String(), Mode: serveMode(demoMode, *publicDemo),
 		Config: cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages,
-	}))
+	})
 
+	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
+	// the rung's load-bearing measurement. Load() discards a config that fails Validate and
+	// returns Default(), which has no TLS, so a certificate fault raised there would start
+	// the daemon on plain http for somebody who asked for https. Placed OUTSIDE the demo
+	// branch, unlike CheckStorages: TLS governs how every mode is reached, and a deployment
+	// with TLS off never reaches the loader at all.
+	var keeper *tlsx.Keeper
+	if req := config.CheckTLS(cfgSvc.Current(), func(certFile, keyFile string) error {
+		k, err := tlsx.NewKeeper(certFile, keyFile)
+		keeper = k
+		return err
+	}); !req.OK() {
+		return req.Explain(os.Stderr, cfgPath)
+	}
+	if keeper != nil {
+		keeper.OnReloadError = func(err error) {
+			// Not fatal: a half-written key mid-renewal is transient and the cached
+			// certificate is still valid. WARN so a rotation that is genuinely broken leaves
+			// a trail, rather than a browser error being the first anyone hears of it.
+			log.Warn("tls certificate reload failed, still serving the previous one", "error", err)
+		}
+	}
+
+	log.Info("quince serving",
+		"version", version.String(), "listen", listen, "tls", keeper != nil,
+		"ui_embedded", webui.Built(), "demo", demoMode, "public_demo", *publicDemo)
+
+	return runHTTP(ctx, listen, handler, keeper, cfgSvc.Current().Sessions.AllowInsecureTransport, log)
+}
+
+// runHTTP runs the HTTP server, and when a certificate is configured runs BOTH protocols on the
+// single port QUINCE_LISTEN names (gap A, Operator ruling 2026-08-02, option (c)).
+//
+// With no certificate this is the plain http.Server it always was, so the reverse-proxy and
+// --demo tiers get none of the machinery below.
+func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure bool, log *slog.Logger) error {
+	if keeper == nil {
+		srv := newHTTPServer(listen, handler)
+		return runUntilDone(ctx, log, srv.ListenAndServe, srv.Shutdown)
+	}
+
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		// A BIND FAILURE IS A LOUD NAMED ERROR, NEVER A FALLBACK TO ANOTHER PORT. Under
+		// network_mode: host — which Wi-Fi requires — nothing can be remapped, so silently
+		// moving would leave quince at an address the user will never guess.
+		return fmt.Errorf("listen on %s: %w", listen, err)
+	}
+	mux := tlsx.NewMux(ln)
+
+	tlsSrv := newHTTPServer(listen, handler)
+	tlsSrv.TLSConfig = &tls.Config{GetCertificate: keeper.GetCertificate, MinVersion: tls.VersionTLS12}
+
+	// The plain half either redirects or serves, and WHICH is the user's setting rather than
+	// ours. `sessions.allow_insecure_transport` beats the redirect (Operator, same ruling):
+	// over a VPN the transport is already encrypted, and a redirect overriding an explicit,
+	// off-by-default, surfaced opt-in would make that setting undeclarable on exactly the
+	// deployments that want it — every one where a certificate also exists.
+	//
+	// The spec permitted slice 4 to ship the redirect UNCONDITIONAL, reasoning that slice 8's
+	// flag did not exist yet so there was no user it could wrong. That expired when slice 8
+	// merged first (quince#540), so the exception ships with the redirect rather than after.
+	plainHandler := http.Handler(redirectToHTTPS())
+	if allowInsecure {
+		plainHandler = handler
+	}
+	plainSrv := newHTTPServer(listen, plainHandler)
+
+	errCh := make(chan error, 2)
+	serveHalf := func(name string, f func() error) {
+		if err := f(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			errCh <- fmt.Errorf("%s server: %w", name, err)
+		}
+	}
+	go serveHalf("https", func() error { return tlsSrv.ServeTLS(mux.TLS(), "", "") })
+	go serveHalf("http", func() error { return plainSrv.Serve(mux.Plain()) })
+
+	select {
+	case err := <-errCh:
+		_ = mux.Close()
+		return err
+	case <-ctx.Done():
+		log.Info("shutdown signal received, draining")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// Both servers, then the mux. Each Shutdown closes the listener it was given, which
+		// is a `side` whose Close closes the whole mux — idempotent by design, so the second
+		// is a no-op rather than the `use of closed network connection` two servers over one
+		// listener would otherwise race into.
+		errTLS := tlsSrv.Shutdown(shutdownCtx)
+		errPlain := plainSrv.Shutdown(shutdownCtx)
+		_ = mux.Close()
+		return errors.Join(errTLS, errPlain)
+	}
+}
+
+// runUntilDone is the pre-TLS serve loop, unchanged in behaviour and factored out so the
+// no-certificate path stays visibly the same code it was.
+func runUntilDone(ctx context.Context, log *slog.Logger, start func() error, shutdown func(context.Context) error) error {
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("quince serving",
-			"version", version.String(), "listen", listen,
-			"ui_embedded", webui.Built(), "demo", demoMode, "public_demo", *publicDemo)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
-
 	select {
 	case err := <-errCh:
 		return fmt.Errorf("http server: %w", err)
@@ -246,7 +344,26 @@ func serve(args []string) error {
 		log.Info("shutdown signal received, draining")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		return shutdown(shutdownCtx)
+	}
+}
+
+// redirectToHTTPS sends plain-http callers to the same host and port over https, which is
+// what makes one-port routing worth having: the URL the user typed keeps working.
+//
+// 301 PERMANENT, per the ruling, and it is cacheable on purpose — a bookmark upgrades itself
+// once and stays upgraded. The cost is that it stays cached if the user later removes the
+// certificate, sending them to an https URL that no longer answers. That is the recorded
+// trade against `307`, and it is why turning TLS off is a config edit rather than something
+// quince ever decides on its own.
+func redirectToHTTPS() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// r.Host is the host:port the client actually asked for, which is what makes "same
+		// URL, upgraded in place" true — including a non-default port, the normal case here
+		// now that the default is :8968.
+		u := *r.URL
+		u.Scheme, u.Host = "https", r.Host
+		http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
 	}
 }
 
