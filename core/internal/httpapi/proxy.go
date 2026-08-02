@@ -143,11 +143,16 @@ func reverse(in []string) []string {
 // warnUnconfiguredProxy logs ONCE per process when a request carrying `X-Forwarded-For` arrives
 // from a peer quince does not trust.
 //
-// That combination means a proxy is in front and `server.trusted_proxies` does not name it, which
+// That combination means a proxy is in front and `QUINCE_TRUSTED_PROXIES` does not name it, which
 // produces quince#464's exact symptom — every visitor sharing one login bucket — and produces it
 // SILENTLY. `no silent caps or fallbacks` makes a degraded mode something to surface, and this is
-// the cheapest half of the fix and probably the most valuable: the operator learns the key exists
-// at the moment it would have helped.
+// the cheapest half of the fix and probably the most valuable: the operator learns the setting
+// exists at the moment it would have helped.
+//
+// THE REMEDY MUST NAME THE THING THAT EXISTS. This said `server.trusted_proxies` — a config key
+// that lived for one afternoon and never shipped, retired to a bootstrap env var by quince#549 in
+// the same rung. A warning whose fix instruction points at a key the reader cannot find is worse
+// than no warning: it costs them an edit to `config.yml`, a restart, and the same warning again.
 //
 // Once, not per request: a proxied deployment would otherwise log on every login attempt, and a log
 // line repeated per request is one nobody reads.
@@ -156,10 +161,10 @@ func (d Deps) warnUnconfiguredProxy(r *http.Request) {
 		return
 	}
 	proxyWarnOnce.Do(func() {
-		d.Log.Warn("a request carried X-Forwarded-For from an address that is not in server.trusted_proxies — "+
+		d.Log.Warn("a request carried X-Forwarded-For from an address that is not in QUINCE_TRUSTED_PROXIES — "+
 			"the login rate limiter is bucketing every visitor together, because it cannot see past your proxy. "+
-			"Set server.trusted_proxies to the proxy's address to fix it",
-			"peer", peerHost(r), "key", "server.trusted_proxies")
+			"Set QUINCE_TRUSTED_PROXIES to the proxy's address to fix it",
+			"peer", peerHost(r), "key", "QUINCE_TRUSTED_PROXIES")
 	})
 }
 
