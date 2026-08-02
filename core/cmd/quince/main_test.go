@@ -7,10 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/store"
@@ -172,5 +174,81 @@ func TestPlainDemoBannerStillAsksForTheSetup(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "set the admin password") {
 		t.Fatalf("--demo banner no longer tells the operator to set a password, but it still starts at needs_setup:\n%s", buf.String())
+	}
+}
+
+// TestHTTPServerTimeoutsAreSet is the regression guard for quince#466. Only ReadHeaderTimeout was
+// set, which left IdleTimeout inheriting ReadTimeout's zero — documented by net/http as no timeout
+// at all — so idle keep-alive connections were never reclaimed.
+//
+// Asserted field by field rather than as a lump, because the defect was ONE missing field among
+// four and a test that checked "some timeout is set" would have passed before the fix.
+func TestHTTPServerTimeoutsAreSet(t *testing.T) {
+	srv := newHTTPServer(":0", http.NotFoundHandler())
+
+	for _, tc := range []struct {
+		name string
+		got  time.Duration
+	}{
+		{"ReadHeaderTimeout", srv.ReadHeaderTimeout},
+		{"ReadTimeout", srv.ReadTimeout},
+		{"WriteTimeout", srv.WriteTimeout},
+		{"IdleTimeout", srv.IdleTimeout},
+	} {
+		if tc.got <= 0 {
+			t.Errorf("%s = %v, want > 0 — a zero here is 'no timeout', not 'a default' (quince#466)", tc.name, tc.got)
+		}
+	}
+}
+
+// TestIdleTimeoutDoesNotInheritZero pins the exact mechanism of quince#466 rather than its symptom.
+// net/http: "IdleTimeout … If zero, the value of ReadTimeout is used. If negative, or if zero and
+// ReadTimeout is zero or negative, there is no timeout." Both were zero, so there was none.
+//
+// This fails if someone removes IdleTimeout believing ReadTimeout covers it — the precise mistake
+// the original code embodied.
+func TestIdleTimeoutDoesNotInheritZero(t *testing.T) {
+	srv := newHTTPServer(":0", http.NotFoundHandler())
+	if srv.IdleTimeout == 0 && srv.ReadTimeout == 0 {
+		t.Fatal("IdleTimeout and ReadTimeout are both zero — net/http then applies NO idle timeout (quince#466)")
+	}
+	if srv.IdleTimeout == 0 {
+		t.Fatalf("IdleTimeout is 0, silently inheriting ReadTimeout=%v; set it explicitly", srv.ReadTimeout)
+	}
+}
+
+// TestWriteTimeoutClearsOnHijack records the fact that makes WriteTimeout safe for /api/ws, and
+// would catch a Go upgrade that changed it. quince#466 was filed asserting the opposite — that a
+// WriteTimeout would break the WebSocket — and it is wrong: net/http's hijackLocked calls
+// SetDeadline(time.Time{}), so an upgraded connection carries no server deadline.
+//
+// Asserted behaviourally rather than by reading the stdlib: the hijacked conn must accept a write
+// well after WriteTimeout would have expired.
+func TestWriteTimeoutClearsOnHijack(t *testing.T) {
+	const writeTO = 150 * time.Millisecond
+	done := make(chan error, 1)
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		time.Sleep(3 * writeTO) // well past the server's WriteTimeout
+		_, err = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+		done <- err
+	}))
+	srv.Config.WriteTimeout = writeTO
+	srv.Start()
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("write on a hijacked conn %v after WriteTimeout=%v failed: %v — "+
+			"the deadline was NOT cleared on hijack, so WriteTimeout would break /api/ws", 3*writeTO, writeTO, err)
 	}
 }

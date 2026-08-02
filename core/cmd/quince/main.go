@@ -201,16 +201,12 @@ func serve(args []string) error {
 		}
 	}
 
-	srv := &http.Server{
-		Addr: listen,
-		Handler: httpapi.NewRouter(httpapi.Deps{
-			Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
-			Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
-			VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
-			Storages: storages,
-		}),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newHTTPServer(listen, httpapi.NewRouter(httpapi.Deps{
+		Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
+		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
+		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
+		Storages: storages,
+	}))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -278,6 +274,43 @@ func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) err
 		"Secure cookies follow the request, as in production",
 		"password", demoPassword) // published by ruling (quince#444) — a secret would never be logged
 	return nil
+}
+
+// Server-level deadlines (quince#466). Only ReadHeaderTimeout was set, which left IdleTimeout
+// inheriting ReadTimeout's zero — and Go documents that as *no timeout at all*, so an idle
+// keep-alive connection was held for as long as the peer cared to hold it. On a LAN that is
+// untidy; on the public host quince#444 proposes, connection-holding is the cheapest attack there
+// is, and a periodic restart is the only thing currently reclaiming them.
+//
+// WriteTimeout is SAFE for the WebSocket despite that socket being long-lived, and this was
+// checked against the pinned toolchain rather than reasoned about: net/http's `hijackLocked` calls
+// `rwc.SetDeadline(time.Time{})` (go1.26.5, `net/http/server.go:325`), so an upgraded connection
+// carries no server deadline at all. quince#466 was filed asserting the opposite — that a
+// WriteTimeout "applied to a hijacked WebSocket connection would be actively wrong" — and that was
+// simply untrue.
+//
+// So the bound that actually constrains WriteTimeout is the largest ORDINARY response, which is
+// GET /api/jobs/{id}/log: handlers_read.go writes the whole log in one io.WriteString with no
+// flushing, so a big log to a slow reader has to fit inside it. Hence 120s rather than something
+// tight — this is a ceiling on abuse, not a latency budget.
+const (
+	readHeaderTimeout = 10 * time.Second  // the classic Slowloris bound, unchanged
+	readTimeout       = 30 * time.Second  // whole request; bodies are capped at 1 MiB (middleware.go)
+	writeTimeout      = 120 * time.Second // whole response; sized for a large job log, not for latency
+	idleTimeout       = 120 * time.Second // keep-alive idle — the defect quince#466 actually names
+)
+
+// newHTTPServer builds the serving http.Server. Split out so the timeouts are assertable: they are
+// a security property with no behavioural surface, so nothing else would notice them going missing.
+func newHTTPServer(listen string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              listen,
+		Handler:           h,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 }
 
 func configCmd(args []string) error {
