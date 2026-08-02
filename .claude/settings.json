@@ -157,7 +157,9 @@
       "Bash(make forge-watch-actor-test)",
       "Bash(make forge-watch-postmerge-test)",
       "Bash(make closing-refs-check)",
-      "Bash(make closing-refs-check *)"
+      "Bash(make closing-refs-check *)",
+      "Bash(make gap-heading-check)",
+      "Bash(make gap-heading-check-test)"
     ]
   }
 }
