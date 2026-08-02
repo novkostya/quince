@@ -57,7 +57,7 @@ site information by design. The first line is what *this box* verified — the s
 `/api/health` on the loopback — and the tool cannot verify that a name resolves for anybody
 else, which is why it says so instead of calling both "verified".
 
-**The port is allocated, not fixed, so it is part of the URL.** `make demo` takes 8080 if it is
+**The port is allocated, not fixed, so it is part of the URL.** `make demo` takes 8968 if it is
 free and the next port if it is not, because two runners serving demos on one box is the ordinary
 case once parallel rungs exist. A URL without the port is a URL for somebody else's demo.
 
