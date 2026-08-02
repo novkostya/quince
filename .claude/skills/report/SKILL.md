@@ -259,7 +259,7 @@ bin/gh-coder api -X PATCH repos/novkostya/quince/pulls/<n> -F body=@<file>
 lands in argv, and a PR body is the one artifact most likely to contain something a privacy sweep
 has just cleared.
 
-Then watch the checks: `gh pr checks <n> --repo novkostya/quince`. Red checks are yours to
+Then watch the checks: `bin/gh-coder pr checks <n> --repo novkostya/quince`. Red checks are yours to
 fix before asking for review.
 
 ## 6. The journal entry
