@@ -17,6 +17,7 @@ import (
 type Deps struct {
 	Log            *slog.Logger
 	Version        string
+	Mode           string // normal | demo | public_demo — see HealthResponse (spec story 5)
 	Config         *config.Service
 	Auth           *auth.Service
 	Bus            *bus.Bus

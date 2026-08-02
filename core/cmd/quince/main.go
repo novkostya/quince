@@ -206,7 +206,8 @@ func serve(args []string) error {
 	}
 
 	srv := newHTTPServer(listen, httpapi.NewRouter(httpapi.Deps{
-		Log: log, Version: version.String(), Config: cfgSvc, Auth: authSvc, Bus: eventBus,
+		Log: log, Version: version.String(), Mode: serveMode(demoMode, *publicDemo),
+		Config: cfgSvc, Auth: authSvc, Bus: eventBus,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages,
@@ -360,4 +361,18 @@ func isTTY(f *os.File) bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// serveMode maps the flags to the mode string GET /api/health reports (public-demo spec story 5).
+// The login screen reads it to decide whether to print the password, so getting it wrong either
+// leaks demo copy into the shipping product or leaves a public visitor with no way to sign in.
+func serveMode(demo, public bool) string {
+	switch {
+	case public:
+		return httpapi.ModePublicDemo
+	case demo:
+		return httpapi.ModeDemo
+	default:
+		return httpapi.ModeNormal
+	}
 }
