@@ -148,35 +148,41 @@ export interface WSEnvelope {
 
 // --- config (schema v0, contracts §6) ---
 
-// StorageEntry is one declared storage under `storage.storages` (qn.6c). There is no `backend`
-// field by design: a storage's backend is discovered and frozen at its creation moment and
-// recorded in quince-storage.json, never declared.
+// StorageEntry is one declared storage under `storage:` — which IS the list (qn.6c, quince#473).
+//
+// EVERY FIELD IS FULLY SPECIFIED, because there are no globals to inherit from any more. The
+// comment here used to read "there is no `backend` field by design: a storage's backend is
+// discovered and frozen at its creation moment, never declared" — true of the pre-flatten schema
+// and false since quince#506, which made `backend` a per-entry key with `auto` as its default.
 export interface StorageEntry {
   name: string;
   path: string;
   default: boolean;
+  backend: string; // auto | zfs | reflink | hardlink | copy
+  zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
+  // Retention is a POINTER in Go, and null here for the same reason: `0` is a legal value for
+  // every Keep*, so absent must stay distinguishable from zero. Absent means the code defaults.
+  retention: { keep_recent: number; keep_daily: number; keep_weekly: number } | null;
 }
 
 export interface Config {
   backup: { transport: string; require_encryption: boolean };
-  storage: {
-    // qn.6c: required server-side — quince refuses to serve, and refuses a PUT, without at least
-    // one. REQUIRED and NULLABLE here to match the Go shape exactly: the field carries no
-    // `omitempty`, so the key is always emitted and a nil list marshals to null.
-    //
-    // null is reachable: `--demo` never runs the storage requirement, so a demo config genuinely
-    // serves null. That is the state the type must let a client see — a document round-tripped
-    // through the UI has to be able to represent a server that has none, rather than the client
-    // inventing an empty list and PUTting it back as if declared.
-    //
-    // (Was `storages?:`. Same defect the review caught on `Version.storage_id` in this PR —
-    // modelling an omission the server never performs — found by checking whether I had made it
-    // twice. I had.)
-    storages: StorageEntry[] | null;
-    backend: string;
-    zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
-    retention: { keep_recent: number; keep_daily: number; keep_weekly: number };
-  };
+  // `storage` IS THE LIST (qn.6c, quince#473). No wrapper object, no global `backend`, `zfs` or
+  // `retention` — every entry carries its own.
+  //
+  // REQUIRED AND NULLABLE, matching the Go shape exactly: the field carries no `omitempty`, so the
+  // key is always emitted and a nil list marshals to null.
+  //
+  // null is reachable: `--demo` never runs the storage requirement, so a demo config genuinely
+  // serves null. That is the state the type must let a client see — a document round-tripped
+  // through the UI has to be able to represent a server that has none, rather than the client
+  // inventing an empty list and PUTting it back as if declared.
+  //
+  // THIS TYPE SAID `{ storages, backend, zfs, retention }` UNTIL 2026-08-02, one shape behind the
+  // daemon, and the UI crashed on `storage.backend` of a null. `make gates-ui` was green
+  // throughout: the type was internally consistent and NOTHING CROSS-CHECKS IT AGAINST THE GO
+  // SCHEMA — which is quince#493, filed before this happened and describing it exactly.
+  storage: StorageEntry[] | null;
   devices: { usbmuxd_socket: string; netmuxd_addr: string };
   sessions: { ttl_minutes: number };
   automation: { staleness_days: number; reminder_cooldown_hours: number };

@@ -100,12 +100,23 @@ export function ConfigEditor({ config }: { config: Config }) {
         Require encryption
       </label>
 
-      <Field label="Storage backend" error={errFor("storage.backend")}>
-        <Select
-          value={draft.storage.backend}
-          onChange={(v) => setDraft({ ...draft, storage: { ...draft.storage, backend: v } })}
-          options={["auto", "zfs", "reflink", "hardlink", "copy"]}
-        />
+      {/* THE GLOBAL "Storage backend" SELECT IS GONE, and it is not moved — it no longer exists.
+          quince#473 flattened `storage:` to a list of fully-specified entries, so `backend` is a
+          per-entry key and there is no global to edit. This control read `draft.storage.backend`
+          and crashed the whole Settings route on a null `storage` (the demo's state), which is how
+          it was found — reported from the demo, not caught by a gate.
+
+          Editing a storage is quince#443's surface (`qn.6d` — storage becomes visible), and a
+          read-only list here would be a second place to keep in step with it. What Settings shows
+          instead is nothing, which is honest: this page never edited storages, only the global. */}
+      <Field label="Storages" error={errFor("storage")}>
+        <p className="text-xs text-muted">
+          {draft.storage === null
+            ? "none declared — quince refuses to start without one (config.yml `storage:`)"
+            : `${draft.storage.length} declared in config.yml — ${draft.storage
+                .map((s) => `${s.name || s.path} (${s.backend})`)
+                .join(", ")}`}
+        </p>
       </Field>
 
       <Field label="Session TTL (minutes)" error={errFor("sessions.ttl_minutes")}>
