@@ -450,7 +450,7 @@ rather than asserted here.
 
 **A third finding came out of the spike and is NOT this rung's**: WebKit's `disableInLockdownMode`
 covers `ServiceWorkersEnabled`, `PushAPIEnabled` and `NotificationsEnabled`, so **`qn.12` push is
-unavailable to a Lockdown Mode user on a real certificate too.** Filed as quince#511 rather than left
+unavailable to a Lockdown Mode user on a real certificate too.** Filed as quince#510 rather than left
 in a comment.
 
 **One claim in the spike is third-party and must not enter canon as measured:** that a Safari
