@@ -45,6 +45,11 @@ services:
       - ./quince/data:/data
       - ./quince/cache:/cache
       - ./quince/backups:/backups # point at a real share; backend probed at runtime
+      # HTTPS: a phone is not loopback, so a plain-http LAN address CANNOT LOG IN — quince
+      # answers 426 rather than looping. Either put a reverse proxy or `tailscale serve` in
+      # front (nothing to configure here), or mount a certificate and set `tls:` in
+      # config.yml — read-only, because quince never writes to it. See deploy/tls.md.
+      # - ./quince/certs:/certs:ro
       - /dev/bus/usb:/dev/bus/usb  # LIVE USB bind — NOT `devices:` (that snapshots & defeats Rescan)
     device_cgroup_rules:
       - "c 189:* rmw" # allow opening USB char devices (major 189). nerdctl/LXC: drop this, use `privileged: true`.
