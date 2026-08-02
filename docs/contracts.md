@@ -674,7 +674,7 @@ app can run (unknown `QUINCE_*` vars are a startup warning, typo guard):
 
 ```
 QUINCE_DATA=/data   QUINCE_CACHE=/cache
-QUINCE_LISTEN=:8080
+QUINCE_LISTEN=:8968
 ```
 
 **`QUINCE_BACKUPS` was RETIRED at `qn.6c`** (gap 3, Operator ruling 2026-07-31 — quince#378).
@@ -1035,11 +1035,32 @@ out with no in-browser recovery. quince sends none today — `httpapi.securityHe
 `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`, measured — and must not start
 while any self-signed or plain-HTTP path is reachable.
 
-**PROPOSED (gap): the default listen port — `:8080` is close to the worst available choice, and it
-is free to change only until v0.1.** `qn.6f`, quince#462 — quince#446's open decision 4. Nothing is
-built on this until it is decided.
+### The default listen port
 
-**Why now.** The same argument the `QUINCE_BACKUPS` retirement above turned on: there is one
+*This heading is load-bearing rather than decoration.* A `PROPOSED (gap)` block is bounded by the
+next heading, the next live marker, or EOF (quince#408). While the listener gap above and the port
+gap below were both open, each bounded the other. Flipping the port gap alone removed that
+boundary, and the still-open listener block immediately read as though its own question had been
+ruled — `gap-heading-check` caught it on the first run. A heading restores the bound **correctly**,
+where the gate's documented opt-out comment would only have silenced the check, and would also have
+hidden any genuine future violation inside the listener block.
+
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): the default listen port is `:8968`.** Operator
+ruling 2026-08-02, relayed by architect session `arch1` on quince#446 — *"Gap B: `8968`"* — and
+built in the same rung. `:8080` was close to the worst available choice, and the change was free
+only until v0.1.
+
+**What moved with it, because a default nothing follows is not a default:** `QUINCE_LISTEN`'s
+fallback in `config.Bootstrap`, `deploy/Dockerfile`'s `ENV` and `EXPOSE`, both compose files,
+`deploy/dev.md`, the e2e harness and its Playwright `baseURL`, `make demo`, and the dev-deploy
+convention URL in `deploy/devct/` and its spec. **`docs/specs/qn.0/qn.0.md` deliberately still
+says `8080`**: it records what was proven at that rung, and a past acceptance is not rewritten to
+match a later decision.
+
+The criteria and the measurement that produced the number are kept below, because *"which ports
+are free"* is a live fact and whoever revisits it needs the method rather than the answer.
+
+**Why it had to be now.** The same argument the `QUINCE_BACKUPS` retirement above turned on: there is one
 instance, so changing the default is one edit today. After v0.1 it is in every README, every
 screenshot, every compose file anyone copies, and every user's bookmark.
 

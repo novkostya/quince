@@ -13,7 +13,7 @@
 # Wi-Fi stays empty forever. If Wi-Fi backup matters to you (it is quince's primary use case),
 # run the container ON the host network:
 #
-#   network_mode: host        # and DELETE the `ports:` block — QUINCE_LISTEN binds host :8080
+#   network_mode: host        # and DELETE the `ports:` block — QUINCE_LISTEN binds host :8968
 #
 # Honest tradeoff: host networking shares the host's network namespace with the container, so
 # the container can reach (and bind) anything the host can — strictly weaker isolation than the
@@ -38,9 +38,9 @@ services:
     container_name: quince
     restart: unless-stopped
     ports: # DELETE this block when you switch to `network_mode: host` for Wi-Fi (see the header)
-      - "8080:8080"
+      - "8968:8968"
     environment:
-      QUINCE_LISTEN: ":8080"
+      QUINCE_LISTEN: ":8968"
     volumes:
       - ./quince/data:/data
       - ./quince/cache:/cache

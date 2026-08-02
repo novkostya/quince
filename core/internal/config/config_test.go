@@ -180,6 +180,23 @@ func TestLoadBootstrapWarnsOnUnknownVar(t *testing.T) {
 	}
 }
 
+// The default listen port is :8968 (qn.6f gap B, Operator ruling 2026-08-02). Pinned as its own
+// test because a default is only a default if nothing overrides it and everything follows it —
+// the deployment files, the e2e harness and the demo all hardcode the same number, and this is
+// the single place that decides it. The message names the OLD value too, so a revert reads as a
+// deliberate act rather than a plausible-looking edit.
+func TestBootstrapDefaultListenPort(t *testing.T) {
+	b, warns := LoadBootstrap(nil)
+	if len(warns) != 0 {
+		t.Fatalf("an empty environment produced warnings: %+v", warns)
+	}
+	if b.Listen != ":8968" {
+		t.Errorf("default listen = %q, want \":8968\" (it was \":8080\" until qn.6f; 8080 is "+
+			"IANA-assigned http-alt and heavily squatted, and under network_mode: host — which "+
+			"Wi-Fi requires — a collision means quince does not start at all)", b.Listen)
+	}
+}
+
 // TestLoadBootstrapWarnsOnRetiredBackupsVar is G7b's first half: QUINCE_BACKUPS is GONE, not
 // merely unused. A retirement that leaves the variable silently accepted is indistinguishable
 // from one that never happened, so the guard is that it now takes the unknown-variable path.

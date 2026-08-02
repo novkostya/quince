@@ -51,23 +51,23 @@ the PR automatically; the privacy rule says LAN addresses never enter PR text. B
 this was raised rather than decided in code.
 
 **Ruled: the convention name, and never a bare address in PR text under any option.**
-`http://quince-dev-1:8080/` carries no site information — meaningless to a stranger, resolvable for
+`http://quince-dev-1:8968/` carries no site information — meaningless to a stranger, resolvable for
 anyone holding the binding, the same trick the allowlist and `devct`'s generated ssh aliases already
 use. The privacy rule is satisfied *by construction* rather than by a reviewer catching a leak.
 
 **Four reader paths, in the order the PR should present them:**
 
-1. **The convention URL is the identifier** — `http://quince-dev-1:8080/`, always in the PR.
+1. **The convention URL is the identifier** — `http://quince-dev-1:8968/`, always in the PR.
 2. **`ssh -L` is the address-free path — a fallback, not a requirement** (Operator amendment,
    2026-07-26, after the first implementation): on the LAN, the address the deploy prints is the
    fastest path and needs no setup, so the tool prints it first. `ssh -L` earns its place only
    where an address is unavailable or unusable — which is exactly the PR, and a reader off the LAN.
    **It is also the one path that does not scale to parallel rungs**, which the revamp exists to
-   enable: every container has its own `8080`, so N deploys are N addresses, while N tunnels
+   enable: every container has its own `8968`, so N deploys are N addresses, while N tunnels
    collide on the *local* port. Fixed by hand with a different local port when it happens;
    auto-allocating one is complexity bought for a path nobody is required to use.
    ```
-   ssh -L 8080:127.0.0.1:8080 quince-dev-1   # then open http://localhost:8080
+   ssh -L 8968:127.0.0.1:8968 quince-dev-1   # then open http://localhost:8968
    ```
    It reuses the binding `devct` already generates, needs no file editing, and **dies with the
    session** — no stale `hosts` entry left pointing at a recycled DHCP address, which is a real
@@ -94,7 +94,7 @@ Links canon rather than repeating it: R5 (demo-by-default, staging-by-request, t
    toolchain cache — this is what makes the deploy minutes, not tens of minutes).
 3. `make image` inside the container. This is the **production** image path, so the deploy proves
    the same artifact CI builds, not a special dev build.
-4. Run it: `--demo`, port 8080, restart-on-boot off, replacing any previous deploy container so a
+4. Run it: `--demo`, port 8968, restart-on-boot off, replacing any previous deploy container so a
    re-deploy is idempotent rather than accumulating.
 5. **Verify before claiming**: poll `GET /api/health` until it answers, then report. A URL printed
    without a successful fetch is the rung-2 defect class again, and this spec names it in advance.

@@ -34,24 +34,24 @@ What it prints:
 
 ```
 Open it (this session only — never paste this into a PR):
-  http://<address>:8080/
+  http://<address>:8968/
 
 For the PR (convention name — carries no site information):
-  http://quince-dev-1:8080/
+  http://quince-dev-1:8968/
 
 Address-free path, for a reader who has the alias but not the LAN:
-  ssh -L 8080:127.0.0.1:8080 quince-dev-1     # then open http://localhost:8080
-  (a second concurrent deploy needs a different LOCAL port: -L 8081:127.0.0.1:8080)
+  ssh -L 8968:127.0.0.1:8968 quince-dev-1     # then open http://localhost:8968
+  (a second concurrent deploy needs a different LOCAL port: -L 8081:127.0.0.1:8968)
 ```
 
 **On the LAN, just open the address.** It needs no setup, and it stays collision-free when several
-rungs run in parallel — every container has its own `8080`, so N deploys are N addresses.
+rungs run in parallel — every container has its own `8968`, so N deploys are N addresses.
 `ssh -L` exists so the **PR** can give an actionable instruction without naming an address; it is a
 fallback, not a requirement, and it is the one path that *does* collide locally when two deploys
 are live at once (fix it by hand with a different local port; auto-allocating one would be
 complexity bought for a path nobody is required to use).
 
-The demo binds `0.0.0.0:8080` inside its container, so it is reachable to anything on that LAN for
+The demo binds `0.0.0.0:8968` inside its container, so it is reachable to anything on that LAN for
 as long as it runs — a real property of a disposable demo on a trusted network, stated rather than
 implied.
 

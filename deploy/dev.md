@@ -168,12 +168,12 @@ that; the refusal above only covers the correctly-spelled name on a target that 
 
 ```sh
 make image
-docker run --rm -p 8080:8080 quince:local     # or: nerdctl run ...
-# → http://localhost:8080  (the UI shell; GET /api/health returns {"status":"ok",...})
+docker run --rm -p 8968:8968 quince:local     # or: nerdctl run ...
+# → http://localhost:8968  (the UI shell; GET /api/health returns {"status":"ok",...})
 ```
 
 For UI work with hot reload you can run Vite's dev server *inside* the node toolchain
-container against a running `quince serve` (it proxies `/api` to `:8080`); most day-to-day
+container against a running `quince serve` (it proxies `/api` to `:8968`); most day-to-day
 work just uses `make gates-ui`.
 
 ## Adding a dependency / bumping a toolchain

@@ -741,12 +741,12 @@ else
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
 	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
-	  -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
+	  -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	  $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null; \
 	status=0; \
 	$(RUN) --network $(E2E_NET) -w /src/ui \
 	  -v quince-pnpm-store:/pnpm-store -v $(E2E_MODULES):/src/ui/node_modules \
-	  -e BASE_URL=http://$(E2E_APP):8080 -e CI=1 -e PNPM_VERSION=$(PNPM_VERSION) \
+	  -e BASE_URL=http://$(E2E_APP):8968 -e CI=1 -e PNPM_VERSION=$(PNPM_VERSION) \
 	  $(PLAYWRIGHT_IMAGE) sh /src/deploy/e2e-run.sh || status=$$?; \
 	$(RUNTIME) logs $(E2E_APP) > $(E2E_LOG) 2>&1 || true; \
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
@@ -778,17 +778,17 @@ endif
 demo: image ## Build this branch and serve it in --demo mode on this box; prints a fetched URL
 	@set -e; \
 	$(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
-	port=$${DEMO_PORT}; [ "$$port" -ne 0 ] 2>/dev/null || port=8080; \
+	port=$${DEMO_PORT}; [ "$$port" -ne 0 ] 2>/dev/null || port=8968; \
 	started=no; \
 	for try in 1 2 3 4 5 6 7 8 9 10; do \
-	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8080 \
-	       -e QUINCE_LISTEN=:8080 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
+	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8968 \
+	       -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	       $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null 2>&1; then started=yes; break; fi; \
 	  $(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
 	  port=$$((port + 1)); \
 	done; \
 	if [ "$$started" != yes ]; then \
-	  echo "demo: could not bind a port in 10 tries from $${DEMO_PORT:-8080} — say so as 'deploy: unavailable', never as silence"; \
+	  echo "demo: could not bind a port in 10 tries from $${DEMO_PORT:-8968} — say so as 'deploy: unavailable', never as silence"; \
 	  exit 1; \
 	fi; \
 	ok=no; \
