@@ -117,7 +117,7 @@ and the page explaining exactly that sits behind the door the defect locks.
 **Two constraints on the implementation, both from the ruling.** The exemption is **by exact path**
 — `authExempt` switches on `r.Method + " " + r.URL.Path` with no prefix support, so
 `/api/onboarding/*` would mean changing the matcher, not just the set. And **step 1 only**: every
-future onboarding step will cite this as precedent, and §9 already names steps 2 and 3.
+future onboarding step will cite this as precedent.
 
 **This rung's to settle, and SETTLED — rung-ruled decision 6.** It asked whether the exemption
 covers the UI route as well as the endpoint, and what the page renders to an unauthenticated
