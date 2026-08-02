@@ -28,8 +28,8 @@ function renderLogin() {
   );
 }
 
-function health(mode: Health["mode"]): Health {
-  return { status: "ok", version: "0.0.0-dev", mode };
+function health(mode: Health["mode"], demoResetMinutes?: number): Health {
+  return { status: "ok", version: "0.0.0-dev", mode, demo_reset_minutes: demoResetMinutes };
 }
 
 describe("LoginPage demo copy", () => {
@@ -62,5 +62,60 @@ describe("LoginPage demo copy", () => {
     renderLogin();
     await waitFor(() => expect(screen.getByText("Enter your admin password.")).toBeInTheDocument());
     expect(screen.queryByText("demo")).not.toBeInTheDocument();
+  });
+});
+
+// Story 6. The reset is DESTRUCTIVE — a visitor mid-click is signed out and their edits are gone —
+// so the warning is the deliverable and the schedule is the detail. Every test here asserts the
+// rendered sentence rather than the hook, because "the mode is right" was never the story.
+describe("LoginPage reset notice", () => {
+  it("states the interval the server reported", async () => {
+    get.mockResolvedValue(health("public_demo", 30));
+    renderLogin();
+    await waitFor(() =>
+      expect(screen.getByText(/resets every 30 minutes/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/will be wiped/i)).toBeInTheDocument();
+  });
+
+  // THE DEGRADE, and the one that decides the shape of this feature. An interval nobody configured
+  // costs the SCHEDULE, never the warning: the option the spec's Rule check argues hardest against
+  // is saying nothing at all, because the instance with no declared interval is exactly the one
+  // where a visitor is most likely to be surprised.
+  it.each([undefined, 0])("still warns when the interval is %s", async (minutes) => {
+    get.mockResolvedValue(health("public_demo", minutes));
+    renderLogin();
+    await waitFor(() => expect(screen.getByText(/resets periodically/i)).toBeInTheDocument());
+    expect(screen.getByText(/will be wiped/i)).toBeInTheDocument();
+    expect(screen.queryByText(/every/i)).not.toBeInTheDocument();
+  });
+
+  // The shipping product's login screen must never carry it. `--demo` is included because it looks
+  // like the case that should: it runs fixtures and throws its state away at exit — but nothing
+  // restarts it on a schedule, so "resets every 30 minutes" there is simply false. The server
+  // already refuses to report an interval outside public_demo; this asserts the UI would not print
+  // one even if a server did.
+  it.each(["normal", "demo"] as const)("prints no reset notice in %s mode", async (mode) => {
+    get.mockResolvedValue(health(mode, 30));
+    renderLogin();
+    await waitFor(() => expect(screen.getByText("Enter your admin password.")).toBeInTheDocument());
+    expect(screen.queryByText(/resets/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will be wiped/i)).not.toBeInTheDocument();
+  });
+
+  // An unrecognised mode stands in for the two cases this file cannot drive directly: a server
+  // newer than this UI, and a health probe that failed (which resolves to `normal`). Both must be
+  // silent, never a false claim.
+  //
+  // NOT asserted by rejecting the mock, deliberately. A rejecting query here is reported by vitest
+  // as an unhandled rejection at the mock's own line and survives `QueryCache.onError`; quince#532
+  // chased that and settled on this substitute rather than leaving a flaky test in the suite. The
+  // `catch` inside `useHealth`'s queryFn is what makes the substitution sound — a failed probe and
+  // an unknown mode reach this component through the same `mode !== "public_demo"` branch.
+  it("prints no reset notice for an unrecognised mode", async () => {
+    get.mockResolvedValue({ status: "ok", version: "0.0.0-dev", mode: "something-new", demo_reset_minutes: 30 });
+    renderLogin();
+    await waitFor(() => expect(screen.getByText("Enter your admin password.")).toBeInTheDocument());
+    expect(screen.queryByText(/resets/i)).not.toBeInTheDocument();
   });
 });

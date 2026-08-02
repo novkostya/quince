@@ -15,22 +15,25 @@ import (
 // httpapi imports neither the demo provider nor (later) the real device/job/version
 // subsystems — they satisfy these structurally and are wired in main.
 type Deps struct {
-	Log            *slog.Logger
-	Version        string
-	Mode           string // normal | demo | public_demo — see HealthResponse (spec story 5)
-	Config         *config.Service
-	Auth           *auth.Service
-	Bus            *bus.Bus
-	Devices        DeviceReader
-	Jobs           JobReader
-	JobControl     JobControl
-	Versions       VersionReader
-	VersionAdmin   VersionAdmin
-	Storages       StorageReader
-	Muxer          MuxerControl
-	Ops            DeviceOps
-	WorkingReset   WorkingReset
-	AllowedOrigins []string
+	Log     *slog.Logger
+	Version string
+	Mode    string // normal | demo | public_demo — see HealthResponse (spec story 5)
+	// DemoResetMinutes is reported on GET /api/health (spec story 6). main gates it on the mode
+	// that actually resets, so httpapi reports whatever it is handed and decides nothing.
+	DemoResetMinutes int
+	Config           *config.Service
+	Auth             *auth.Service
+	Bus              *bus.Bus
+	Devices          DeviceReader
+	Jobs             JobReader
+	JobControl       JobControl
+	Versions         VersionReader
+	VersionAdmin     VersionAdmin
+	Storages         StorageReader
+	Muxer            MuxerControl
+	Ops              DeviceOps
+	WorkingReset     WorkingReset
+	AllowedOrigins   []string
 	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
 	// "trust nobody", which is the shipping default and today's behaviour.
 	Proxies *auth.TrustedProxies

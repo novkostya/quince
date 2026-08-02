@@ -53,6 +53,23 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   return "—";
 }
 
+// formatResetInterval turns whole minutes into the phrase that follows "resets every …" on the
+// public-demo login screen (spec story 6). Returns "" for anything it cannot state, and the CALLER
+// must then say the demo resets WITHOUT a schedule — never drop the sentence, because the reset is
+// destructive and the visitor is owed the warning even when the interval is unknown.
+//
+// It converts to hours ONLY on an exact multiple, so nothing is ever rounded. "90 minutes" is
+// clumsier than "1.5 hours" and it is also true; a notice that rounds is a notice that lies about
+// when a visitor's work disappears, which is the whole reason the line exists.
+export function formatResetInterval(minutes: number | undefined): string {
+  if (minutes === undefined || !Number.isInteger(minutes) || minutes <= 0) return "";
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "hour" : `${hours} hours`;
+  }
+  return minutes === 1 ? "minute" : `${minutes} minutes`;
+}
+
 const dtf = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function formatDateTime(iso: string): string {

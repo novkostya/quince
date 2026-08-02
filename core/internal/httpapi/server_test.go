@@ -69,6 +69,45 @@ func TestHealthReturnsOKAndVersion(t *testing.T) {
 	}
 }
 
+// TestHealthCarriesTheDemoResetInterval is story 6's wire. The login screen is the only consumer
+// and it renders BEFORE login — so if this field does not ride on health it cannot reach the one
+// screen that has to state it.
+//
+// Asserted on the RAW BODY rather than on a decoded struct: `omitempty` is the contract with the UI
+// (an absent key and a zero are one fact — "the deployment did not say"), and decoding into a Go
+// int collapses both to 0, which is precisely the distinction this test exists to hold.
+func TestHealthCarriesTheDemoResetInterval(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		minutes int
+		want    string
+		absent  bool
+	}{
+		{"set", 30, `"demo_reset_minutes":30`, false},
+		{"unset", 0, `"demo_reset_minutes"`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testDeps(t)
+			deps.DemoResetMinutes = tc.minutes
+			srv := httptest.NewServer(NewRouter(deps))
+			defer srv.Close()
+
+			resp, err := http.Get(srv.URL + "/api/health")
+			if err != nil {
+				t.Fatalf("GET /api/health: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if got := strings.Contains(string(body), tc.want); got == tc.absent {
+				t.Fatalf("health body %s: contains(%q) = %v, want %v", body, tc.want, got, !tc.absent)
+			}
+		})
+	}
+}
+
 // twoMuxers reports the shipped SIMPLE-profile topology: a managed usbmuxd (rescan applies) and a
 // managed netmuxd (it never does — restarting it would tear a live Wi-Fi backup).
 type twoMuxers struct{}

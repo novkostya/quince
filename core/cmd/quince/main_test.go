@@ -178,6 +178,42 @@ func TestPlainDemoBannerStillAsksForTheSetup(t *testing.T) {
 	}
 }
 
+// TestResetIntervalIsReportedOnlyByTheModeThatResets is story 6's gate. --public-demo is restarted
+// from outside the process (D4); nothing restarts a --demo instance or the shipping product, so an
+// interval reported there would put a destructive promise on a screen where it is false.
+//
+// The WARNING is asserted, not just the zero. Setting the var outside the mode is the mistake this
+// deployment invites — copy the compose file, drop the flag, keep the env — and its symptom is
+// nothing at all, which is also what a correct non-demo deployment looks like.
+func TestResetIntervalIsReportedOnlyByTheModeThatResets(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		minutes int
+		public  bool
+		want    int
+		warn    bool
+	}{
+		{"public demo reports what it was told", 30, true, 30, false},
+		{"public demo with nothing configured", 0, true, 0, false},
+		{"set on a non-public instance", 30, false, 0, true},
+		{"unset on a non-public instance", 0, false, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			got := reportableResetMinutes(tc.minutes, tc.public, slog.New(slog.NewTextHandler(&buf, nil)))
+			if got != tc.want {
+				t.Errorf("reportableResetMinutes(%d, public=%v) = %d, want %d",
+					tc.minutes, tc.public, got, tc.want)
+			}
+			warned := strings.Contains(buf.String(), "QUINCE_DEMO_RESET_MINUTES")
+			if warned != tc.warn {
+				t.Errorf("warned = %v, want %v — an interval that is silently ignored leaves the "+
+					"operator believing the notice is showing:\n%s", warned, tc.warn, buf.String())
+			}
+		})
+	}
+}
+
 // TestHTTPServerTimeoutsAreSet is the regression guard for quince#466. Only ReadHeaderTimeout was
 // set, which left IdleTimeout inheriting ReadTimeout's zero — documented by net/http as no timeout
 // at all — so idle keep-alive connections were never reclaimed.

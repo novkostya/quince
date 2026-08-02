@@ -1,5 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatDuration, formatPercent, formatRelativeTime, formatSpeed } from "./format";
+import {
+  formatBytes,
+  formatDuration,
+  formatPercent,
+  formatRelativeTime,
+  formatResetInterval,
+  formatSpeed,
+} from "./format";
+
+// formatResetInterval feeds "This demo resets every …" (public-demo story 6). Every case here is a
+// sentence a stranger reads on the login screen, so the assertions are on the whole phrase rather
+// than on a number.
+describe("formatResetInterval", () => {
+  it("reads as English after `every`", () => {
+    expect(formatResetInterval(30)).toBe("30 minutes");
+    expect(formatResetInterval(1)).toBe("minute");
+    expect(formatResetInterval(60)).toBe("hour");
+    expect(formatResetInterval(120)).toBe("2 hours");
+  });
+
+  // NEVER ROUNDED. 90 minutes is not "1.5 hours" and not "2 hours": this line tells a visitor when
+  // their work disappears, so an approximation here is a false statement rather than a nicety.
+  it("converts to hours only on an exact multiple", () => {
+    expect(formatResetInterval(90)).toBe("90 minutes");
+    expect(formatResetInterval(45)).toBe("45 minutes");
+    expect(formatResetInterval(180)).toBe("3 hours");
+  });
+
+  // "" is the signal that there is no schedule to state, and the caller keeps the reset warning and
+  // drops only the interval. A value that arrives unusable must land here rather than render raw —
+  // "resets every NaN minutes" on a public login screen is the failure this case exists to stop.
+  it.each([undefined, 0, -5, 12.5, NaN, Infinity])("has nothing to say for %s", (v) => {
+    expect(formatResetInterval(v as number | undefined)).toBe("");
+  });
+});
 
 describe("formatBytes", () => {
   it("scales SI decimal with spaced units", () => {

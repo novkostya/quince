@@ -212,6 +212,59 @@ func TestLoadBootstrapWarnsOnRetiredBackupsVar(t *testing.T) {
 	}
 }
 
+// TestBootstrapDemoResetMinutes covers the carrier for public-demo story 6. The value is cosmetic
+// — the login screen states it and nothing branches on it (quince#470) — so the whole risk lives in
+// the parse: an interval the operator MEANT to set and that never arrived renders as "resets
+// periodically", which is exactly what a correctly-unset deployment renders. The two are
+// indistinguishable on screen, so they must be distinguishable in the log.
+func TestBootstrapDemoResetMinutes(t *testing.T) {
+	for _, tc := range []struct {
+		name, env string
+		want      int
+		warn      bool
+		because   string
+	}{
+		{"unset", "", 0, false,
+			"the shipping default claims nothing and must not warn about it"},
+		{"a plain interval", "QUINCE_DEMO_RESET_MINUTES=30", 30, false, ""},
+		{"whitespace is trimmed", "QUINCE_DEMO_RESET_MINUTES=  45  ", 45, false,
+			"an env var copied out of a compose file carries whatever spacing it had"},
+		{"units the operator added", "QUINCE_DEMO_RESET_MINUTES=30 minutes", 0, true,
+			"the var NAMES its unit, so a value repeating it is a mistake rather than a dialect"},
+		{"a duration string", "QUINCE_DEMO_RESET_MINUTES=30m", 0, true,
+			"Go duration syntax is the obvious guess and this var does not take it"},
+		{"explicit zero", "QUINCE_DEMO_RESET_MINUTES=0", 0, true,
+			"zero minutes is not an interval, and unset already means `did not say`"},
+		{"negative", "QUINCE_DEMO_RESET_MINUTES=-5", 0, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var environ []string
+			if tc.env != "" {
+				environ = []string{tc.env}
+			}
+			b, warns := LoadBootstrap(environ)
+			if b.DemoResetMinutes != tc.want {
+				t.Errorf("DemoResetMinutes = %d, want %d — %s", b.DemoResetMinutes, tc.want, tc.because)
+			}
+			gotWarn := len(warns) == 1 && warns[0].Path == "QUINCE_DEMO_RESET_MINUTES"
+			if gotWarn != tc.warn {
+				t.Errorf("warned = %v, want %v (warnings %+v) — an unusable value dropped in "+
+					"silence is the fallback the hard rule forbids. %s", gotWarn, tc.warn, warns, tc.because)
+			}
+		})
+	}
+}
+
+// TestDemoResetMinutesIsAKnownVar is the half a reader would assume rather than check: a var absent
+// from knownBootstrapVars is rejected by the typo guard BEFORE it is ever parsed, so the parse above
+// could be perfect and the variable still never arrive.
+func TestDemoResetMinutesIsAKnownVar(t *testing.T) {
+	_, warns := LoadBootstrap([]string{"QUINCE_DEMO_RESET_MINUTES=30"})
+	if len(warns) != 0 {
+		t.Fatalf("a valid QUINCE_DEMO_RESET_MINUTES was treated as an unknown variable: %+v", warns)
+	}
+}
+
 func TestValidateDirsFlagsNonWritable(t *testing.T) {
 	good := t.TempDir()
 	b := Bootstrap{Data: good, Cache: filepath.Join(good, "nope")}

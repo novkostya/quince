@@ -256,6 +256,10 @@ export interface Health {
   status: string;
   version: string;
   mode: ServeMode;
+  // How often the DEPLOYMENT restarts a public-demo instance, in whole minutes. OPTIONAL because
+  // the server omits it when the deployment did not say — quince runs no timer and performs no
+  // reset, so this is a fact it is told rather than one it knows (public-demo spec story 6).
+  demo_reset_minutes?: number;
 }
 
 // --- onboarding (qn.6f) ---
