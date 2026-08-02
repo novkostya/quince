@@ -184,6 +184,16 @@ export interface Config {
   // SCHEMA — which is quince#493, filed before this happened and describing it exactly.
   storage: StorageEntry[] | null;
   devices: { usbmuxd_socket: string; netmuxd_addr: string };
+  // `tls` MUST be here, and its absence would not have been the harmless kind. PUT /api/config
+  // decodes into a zero-valued `config.Config`, so a key the client omits arrives as the Go zero
+  // value rather than its default — and for `tls` the zero value is two empty strings, which is
+  // TLS OFF. A UI that reconstructed a config document without this field would silently stop
+  // quince serving HTTPS on the next save (qn.6f, interface fact 6).
+  //
+  // `devices.manage_muxer` is missing from this type and has been harmless purely by luck:
+  // ConfigEditor spreads a document it FETCHED rather than building one, and nothing enforces
+  // that it keeps doing so. Same gap, different blast radius — quince#493.
+  tls: { cert_file: string; key_file: string };
   sessions: { ttl_minutes: number };
   automation: { staleness_days: number; reminder_cooldown_hours: number };
   ui: { theme: string };
