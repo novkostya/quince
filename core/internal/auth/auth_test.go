@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -291,5 +292,74 @@ func TestSecureCookieRule(t *testing.T) {
 	proxied.Header.Set("X-Forwarded-Proto", "https")
 	if !secureCookie(proxied) {
 		t.Error("X-Forwarded-Proto https should be Secure")
+	}
+}
+
+// TestSetPasswordDoesNotDeriveWhenAlreadyConfigured is the regression guard for quince#463:
+// POST /api/auth/setup is pre-auth and un-rate-limited by design (first-run setup must be
+// reachable with no session), so a derivation on a path whose 409 is already decided is a
+// remote memory-and-CPU amplifier. Measured before the fix at 9 MB → 2063 MB RSS over 60
+// requests. The assertion is on the COUNT rather than on timing, so it cannot go flaky.
+func TestSetPasswordDoesNotDeriveWhenAlreadyConfigured(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	derivations := 0
+	inner := svc.hash
+	svc.hash = func(pw string, p argonParams) (string, error) {
+		derivations++
+		return inner(pw, p)
+	}
+
+	if err := svc.SetPassword("first"); err != nil {
+		t.Fatalf("first-run setup: %v", err)
+	}
+	if derivations != 1 {
+		t.Fatalf("first-run setup derived %d time(s), want exactly 1", derivations)
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := svc.SetPassword("again"); !errors.Is(err, ErrAlreadyConfigured) {
+			t.Fatalf("setup #%d on a configured service: err=%v, want ErrAlreadyConfigured", i+2, err)
+		}
+	}
+	if derivations != 1 {
+		t.Fatalf("guaranteed-409 setups derived %d extra time(s), want 0 — quince#463", derivations-1)
+	}
+}
+
+// TestSetPasswordFirstRunRaceStillHasExactlyOneWinner guards the half the fix must NOT break.
+// The cheap HasPassword check is an optimisation for the already-configured case and is NOT
+// atomic with the insert; SetSettingIfAbsent is what actually decides the first-run race. A
+// future simplification that dropped it would pass the test above and silently turn setup into
+// an unauthenticated password reset.
+func TestSetPasswordFirstRunRaceStillHasExactlyOneWinner(t *testing.T) {
+	svc, _ := newTestAuth(t)
+
+	const racers = 8
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	for i := 0; i < racers; i++ {
+		go func() {
+			<-start
+			errs <- svc.SetPassword("concurrent")
+		}()
+	}
+	close(start)
+
+	winners, configured := 0, 0
+	for i := 0; i < racers; i++ {
+		switch err := <-errs; {
+		case err == nil:
+			winners++
+		case errors.Is(err, ErrAlreadyConfigured):
+			configured++
+		default:
+			t.Fatalf("unexpected error from concurrent setup: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("concurrent first-run setup: %d winners, want exactly 1", winners)
+	}
+	if configured != racers-1 {
+		t.Fatalf("concurrent first-run setup: %d already-configured, want %d", configured, racers-1)
 	}
 }
