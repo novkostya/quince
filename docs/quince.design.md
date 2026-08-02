@@ -633,9 +633,8 @@ only shape the function has. (Measured by the reviewer on quince#501; the block 
 the narrow form on taste, and the code turns out to require it.)
 
 **The cost, recorded because it will bite later:** this is one more pre-auth surface to keep honest
-forever, and **every future onboarding step will cite it as precedent** — and steps 2 and 3 are
-already specified in §9, so that precedent has named claimants. Exempting step 1 only is what keeps
-the precedent from generalising by default.
+forever, and **every future onboarding step will cite it as precedent**. Exempting step 1 only is
+what keeps the precedent from generalising by default.
 
 **Option (b) — step 1 stays behind auth — was rejected**, and its cost is why: the rung's own remedy
 would stay unreachable to the user who most needs it.
