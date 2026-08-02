@@ -32,11 +32,17 @@ import (
 // which a mode is not. The cost is one extra request on the login page.
 //
 // A MODE STRING, not a boolean: a third mode later must not need a second field.
+// qn.6 also adds `demo_reset_minutes` (spec story 6) — how often the DEPLOYMENT restarts a
+// --public-demo instance. It rides here rather than anywhere else for the same reason `mode` does:
+// the login screen is the one screen that must state it, and health is the only authExempt endpoint
+// that is not frozen. `omitempty` is deliberate — an absent key and a zero are the same fact, "the
+// deployment did not say", and one representation of one fact is fewer than two.
 type HealthResponse struct {
-	Status  string        `json:"status"`
-	Version string        `json:"version"`
-	Mode    string        `json:"mode"` // normal | demo | public_demo
-	Muxers  []MuxerHealth `json:"muxers"`
+	Status           string        `json:"status"`
+	Version          string        `json:"version"`
+	Mode             string        `json:"mode"` // normal | demo | public_demo
+	DemoResetMinutes int           `json:"demo_reset_minutes,omitempty"`
+	Muxers           []MuxerHealth `json:"muxers"`
 }
 
 // Serving modes reported by GET /api/health (public-demo spec story 5).
@@ -138,10 +144,11 @@ func (d Deps) handleHealth() http.HandlerFunc {
 			muxers = []MuxerHealth{}
 		}
 		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
-			Status:  "ok",
-			Version: d.Version,
-			Mode:    mode,
-			Muxers:  muxers,
+			Status:           "ok",
+			Version:          d.Version,
+			Mode:             mode,
+			DemoResetMinutes: d.DemoResetMinutes,
+			Muxers:           muxers,
 		})
 	}
 }

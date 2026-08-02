@@ -2,7 +2,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { PasswordForm } from "@/features/auth/PasswordForm";
 import { authStatusKey, login } from "@/lib/auth";
-import { useIsPublicDemo } from "@/lib/health";
+import { useDemoResetMinutes, useIsPublicDemo } from "@/lib/health";
+import { formatResetInterval } from "@/lib/format";
 
 // DEMO_PASSWORD mirrors the server constant, ruled on quince#444 and published deliberately. It is
 // hardcoded rather than served because a password the server SENDS to an unauthenticated client is
@@ -16,6 +17,7 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const next = params.get("next") ?? "/";
   const isPublicDemo = useIsPublicDemo();
+  const interval = formatResetInterval(useDemoResetMinutes());
 
   return (
     <PasswordForm
@@ -24,9 +26,22 @@ export function LoginPage() {
       cta="Sign in"
       notice={
         isPublicDemo ? (
-          <p className="mt-3 rounded-card border border-line bg-bg px-3 py-2 text-sm text-muted">
-            Password: <span className="font-mono font-semibold text-fg">{DEMO_PASSWORD}</span>
-          </p>
+          <div className="mt-3 space-y-2 rounded-card border border-line bg-bg px-3 py-2 text-sm text-muted">
+            <p>
+              Password: <span className="font-mono font-semibold text-fg">{DEMO_PASSWORD}</span>
+            </p>
+            {/*
+              Story 6, and the sentence is UNCONDITIONAL while the schedule is not. The reset wipes
+              whatever a visitor has done, which is a destructive degraded mode — `no silent caps or
+              fallbacks` says it is surfaced, and an instance whose deployment never declared an
+              interval is exactly the one where a visitor is most likely to be surprised. So a
+              missing interval costs the schedule, never the warning.
+            */}
+            <p>
+              This demo resets {interval ? `every ${interval}` : "periodically"} — anything you
+              change here will be wiped.
+            </p>
+          </div>
         ) : null
       }
       onSubmit={async (pw) => {

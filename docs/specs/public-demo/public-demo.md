@@ -122,7 +122,40 @@ shape: the mode takes the interval as a value it is told and asserts nothing abo
 The Operator left the *value* open deliberately — *decide it when the instance exists* — and this
 ruling is about where it lives, not what it is.
 
-**Still open, and rung-local:** the env var's exact name and where it is read.
+**DECIDED, rung-local (this line read "still open" until story 6 was built): `QUINCE_DEMO_RESET_MINUTES`,
+a positive whole number of minutes, read by `config.LoadBootstrap` and reported on `GET /api/health`
+as `demo_reset_minutes`.**
+
+*Whole minutes rather than a Go duration string* — `sessions.ttl_minutes` is the only other time
+value quince takes from a human, so the project already has a convention and this follows it. It also
+removes a parser from each side: the UI renders the value as English, and `30m` would have to become
+`30` somewhere before it could.
+
+*Read in `LoadBootstrap`* — beside `QUINCE_TRUSTED_PROXIES`, which the same ruling put in env for the
+same reason. That places it behind the unknown-`QUINCE_`-variable typo guard, which matters more than
+it looks: a var the list does not know is rejected before it is parsed, so a misspelling would
+otherwise produce a page silently missing its schedule.
+
+*A present-but-unusable value WARNS and is dropped* — `30m`, `30 minutes`, `0`, a negative. It does
+**not** refuse to start: nothing branches on the value (that is the ruling's own test), so refusing
+to serve a demo over a typo in a notice is worse than the typo. The warning is load-bearing because a
+dropped interval and a correctly-unset one render **identically**, so the log is the only place the
+difference can appear.
+
+*Reported only in `public_demo`* — `main.reportableResetMinutes`, warning when the var is set outside
+that mode. Nothing restarts `--demo` or the shipping product, so an interval reported there would be a
+destructive promise on a screen where it is false. The UI gates on the mode a second time; two cheap
+gates, because the failure lands on the shipping product's login screen.
+
+*The warning sentence is unconditional and only the schedule is conditional* — no interval renders
+"This demo resets periodically", never silence. Stating nothing is the option the Rule check below
+argues hardest against, and an instance whose deployment declared no interval is exactly the one
+where a visitor is most likely to be surprised.
+
+**Still open, and NOT this rung's:** nothing asserts that the deployment actually restarts on the
+interval it declares. quince#494 owns both the timer and the var, so it can set one without the other
+and the login screen would then state a schedule nobody keeps. That is an owed assertion against
+#494, recorded there, rather than a defect in this rung.
 
 *(The enumeration of candidates was never repeated here, and this section is not the place to start.
 An earlier draft listed them in both this spec and canon, and the two sets diverged within the hour

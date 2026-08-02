@@ -234,7 +234,8 @@ func serve(args []string) error {
 
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Log: log, Version: version.String(), Mode: serveMode(demoMode, *publicDemo),
-		Config: cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
+		DemoResetMinutes: reportableResetMinutes(bootstrap.DemoResetMinutes, *publicDemo, log),
+		Config:           cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages,
@@ -544,4 +545,28 @@ func serveMode(demo, public bool) string {
 	default:
 		return httpapi.ModeNormal
 	}
+}
+
+// reportableResetMinutes gates QUINCE_DEMO_RESET_MINUTES on the ONE mode that is actually reset on
+// a schedule (spec story 6). --public-demo is restarted from outside the process (D4); nothing
+// restarts a --demo instance or the shipping product, so reporting an interval there would put a
+// destructive promise on a screen where it is simply false.
+//
+// The var set OUTSIDE that mode WARNS rather than being dropped. It is the shape of mistake this
+// deployment invites — copy the compose file, drop the flag, keep the env — and its symptom is
+// nothing at all: no reset happens and no notice appears, which is also exactly what a correct
+// non-demo deployment looks like. `no silent caps or fallbacks` is about precisely this case.
+//
+// It takes an int and a bool rather than the whole Bootstrap so a test can drive every combination
+// without building a deployment.
+func reportableResetMinutes(minutes int, public bool, log *slog.Logger) int {
+	if public {
+		return minutes
+	}
+	if minutes > 0 {
+		log.Warn("QUINCE_DEMO_RESET_MINUTES is set but this instance is not --public-demo: "+
+			"nothing here resets on a schedule, so the interval is ignored and no reset notice "+
+			"is shown", "minutes", minutes)
+	}
+	return 0
 }

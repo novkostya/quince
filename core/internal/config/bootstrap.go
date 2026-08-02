@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +24,19 @@ type Bootstrap struct {
 	// trust list could never carry one; and in that mode every visitor can PUT /api/config,
 	// so a file-based trust list is editable by the population it protects against.
 	TrustedProxies []string
+	// DemoResetMinutes is how often the DEPLOYMENT restarts a --public-demo instance, in whole
+	// minutes (QUINCE_DEMO_RESET_MINUTES). quince runs no timer and performs no reset: design
+	// D4 puts the restart outside the process, so this is a fact the deployment TELLS quince so
+	// the login screen can warn a visitor before their edits are wiped (spec story 6).
+	//
+	// A REPORTED DEPLOYMENT FACT, not a setting — Operator ruling 2026-08-02 (quince#470). D12
+	// governs settings; the test that ruling gives is *does any code branch on this value*, and
+	// nothing does. Env rather than config.yml for the same two reasons as TrustedProxies above.
+	//
+	// ZERO means the deployment did not say, and that is a supported state rather than a broken
+	// one: the UI then states that the demo resets WITHOUT naming a schedule. Naming one quince
+	// cannot keep would be worse than saying less.
+	DemoResetMinutes int
 }
 
 // knownBootstrapVars is the exact set of env vars quince understands. Anything else with a
@@ -35,10 +49,11 @@ type Bootstrap struct {
 // var carried a built-in "/backups" default, so every deployment had a working storage while
 // declaring nothing — the implicit path the ruling removed.
 var knownBootstrapVars = map[string]struct{}{
-	"QUINCE_DATA":            {},
-	"QUINCE_CACHE":           {},
-	"QUINCE_LISTEN":          {},
-	"QUINCE_TRUSTED_PROXIES": {},
+	"QUINCE_DATA":               {},
+	"QUINCE_CACHE":              {},
+	"QUINCE_LISTEN":             {},
+	"QUINCE_TRUSTED_PROXIES":    {},
+	"QUINCE_DEMO_RESET_MINUTES": {},
 }
 
 // LoadBootstrap parses the bootstrap env from an os.Environ()-style slice ("KEY=VALUE").
@@ -61,6 +76,9 @@ func LoadBootstrap(environ []string) (Bootstrap, []Warning) {
 		vals[k] = v
 	}
 
+	resetMinutes, mwarn := parseMinutes("QUINCE_DEMO_RESET_MINUTES", vals["QUINCE_DEMO_RESET_MINUTES"])
+	warnings = append(warnings, mwarn...)
+
 	// :8968 is IANA-unassigned, mid-block in the 8955–8979 run, below the 32768 ephemeral
 	// floor and off Chromium's restricted list — Operator ruling 2026-08-02 (qn.6f gap B,
 	// quince#446), measured against the live registry rather than chosen for looks.
@@ -76,10 +94,11 @@ func LoadBootstrap(environ []string) (Bootstrap, []Warning) {
 	// silent caps or fallbacks. The real mitigation for "8968 is not memorable" is that the
 	// listen address is a first-class setting, not that the number is a good one.
 	b := Bootstrap{
-		Data:           orDefault(vals["QUINCE_DATA"], "/data"),
-		Cache:          orDefault(vals["QUINCE_CACHE"], "/cache"),
-		Listen:         orDefault(vals["QUINCE_LISTEN"], ":8968"),
-		TrustedProxies: splitList(vals["QUINCE_TRUSTED_PROXIES"]),
+		Data:             orDefault(vals["QUINCE_DATA"], "/data"),
+		Cache:            orDefault(vals["QUINCE_CACHE"], "/cache"),
+		Listen:           orDefault(vals["QUINCE_LISTEN"], ":8968"),
+		TrustedProxies:   splitList(vals["QUINCE_TRUSTED_PROXIES"]),
+		DemoResetMinutes: resetMinutes,
 	}
 	return b, warnings
 }
@@ -139,6 +158,33 @@ func orDefault(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// parseMinutes reads a whole-minutes env value, returning 0 plus a warning for anything it cannot
+// use. An UNSET var is 0 and silent — that is the shipping default and says nothing is claimed.
+//
+// A value that is present and unusable WARNS rather than being dropped, including an explicit "0".
+// The consumer renders "resets periodically" for 0, which is indistinguishable from a correctly
+// unset deployment — so without the warning an operator who typed `30 minutes` or `0` would see a
+// plausible page and never learn their interval never arrived. That is exactly the silent fallback
+// the hard rule forbids.
+//
+// It does NOT refuse to start. The value is cosmetic — nothing branches on it (quince#470) — and
+// refusing to serve a demo over a typo in a notice would be a worse failure than the notice.
+func parseMinutes(name, v string) (int, []Warning) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, []Warning{{
+			Path: name,
+			Message: fmt.Sprintf("%q is not a positive whole number of minutes (ignored; the demo "+
+				"reset notice will not name an interval)", v),
+		}}
+	}
+	return n, nil
 }
 
 // splitList parses a comma-separated env value into trimmed, non-empty entries. An unset or empty

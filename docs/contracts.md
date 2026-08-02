@@ -717,6 +717,7 @@ app can run (unknown `QUINCE_*` vars are a startup warning, typo guard):
 QUINCE_DATA=/data   QUINCE_CACHE=/cache
 QUINCE_LISTEN=:8968
 QUINCE_TRUSTED_PROXIES=203.0.113.5,198.51.100.0/24   # default: empty = trust none
+QUINCE_DEMO_RESET_MINUTES=30                         # default: unset = state no schedule
 ```
 
 **`QUINCE_TRUSTED_PROXIES`** lists the IPs/CIDRs whose `X-Forwarded-*` headers quince believes
@@ -730,6 +731,22 @@ same peer, so **ten wrong password guesses deny login to everybody**, correct pa
 `--public-demo` deletes its config at startup, so the deployment that most needs a trust list
 could never carry one; and in that mode every visitor can `PUT /api/config`, which would make a
 file-based list editable by the population it protects against.
+
+**`QUINCE_DEMO_RESET_MINUTES`** is how often the **deployment** restarts a `--public-demo`
+instance, in whole minutes. quince runs no timer and performs no reset — the restart is
+performed from outside the process (public-demo spec D4) — so this is a fact quince is *told*
+purely so the login screen can warn a visitor that their work will be wiped, and how soon
+(story 6). **A reported deployment fact, not a setting**, Operator ruling 2026-08-02
+(quince#470): D12 governs settings, and the test that ruling gives is *does any code branch on
+this value*. Nothing does.
+
+**Unset is the default and means "state no schedule"** — the login screen then says the demo
+resets *periodically*, never nothing at all. A present-but-unusable value (`30m`, `30 minutes`,
+`0`, a negative) is **dropped with a startup warning** rather than refusing to start; a dropped
+interval and an unset one render identically, so the log is the only place that difference can
+appear. It is reported on `GET /api/health` **only** in `public_demo` mode, and setting it
+elsewhere warns: nothing restarts `--demo` or the shipping product, so an interval there would
+be a destructive promise on a screen where it is false.
 
 **`QUINCE_BACKUPS` was RETIRED at `qn.6c`** (gap 3, Operator ruling 2026-07-31 — quince#378).
 Backup locations are **declared**, in `storage:` below: no env var, no implicit storage,

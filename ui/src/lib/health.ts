@@ -38,3 +38,17 @@ export function useIsPublicDemo(): boolean {
   const { data } = useHealth();
   return data?.mode === "public_demo";
 }
+
+// useDemoResetMinutes is story 6's half, gated on the mode for the same reason the server gates it
+// (main.go `reportableResetMinutes`): an interval is only true where something actually performs the
+// reset. Two gates for one fact is deliberate — the failure they prevent is a destructive promise
+// rendered on the SHIPPING product's login screen, and neither side is expensive.
+//
+// `undefined` means "no schedule to state", and it covers three servers at once: one that was told
+// nothing, one older than this UI, and one that could not be reached. The caller must still say the
+// demo resets — only the schedule is conditional.
+export function useDemoResetMinutes(): number | undefined {
+  const { data } = useHealth();
+  if (data?.mode !== "public_demo") return undefined;
+  return data.demo_reset_minutes;
+}
