@@ -69,10 +69,29 @@ GET  /api/auth/status  → {state: "needs_setup" | "needs_login" | "authenticate
 POST /api/auth/setup {password}  → 200 {state, csrf_token} + session cookie
      // FIRST-RUN ONLY: 409 if a password already exists — setup succeeds exactly once
      // and can never be an unauthenticated password reset. Auto-logs-in on success.
+     // 426 insecure_origin, BEFORE the password is stored (see below).
 POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session cookie
-     // 401 on bad password; 429 when the per-IP login rate limit trips.
+     // 401 on bad password; 429 when the per-IP login rate limit trips;
+     // 426 insecure_origin, BEFORE the password is checked (see below).
 POST /api/auth/logout            → 204, clears the cookie.
 ```
+
+**`426 insecure_origin` on both credential endpoints.** When the session cookie a request
+would earn is marked `Secure` while the origin is one the browser does not consider secure
+— plain http to a non-loopback host, outside `--demo` — the endpoint refuses rather than
+answering `200` with two cookies the browser then discards. Without it the client lands back
+on the login form with no error of any kind, which is quince#497: a phone is not loopback,
+so this is what the primary client of a Wi-Fi backup tool meets first. The response carries
+an `Upgrade` header because RFC 9110 §15.5.22 makes one a MUST on a `426`; no browser acts
+on it.
+
+Two properties of the refusal are contract rather than implementation detail. It fires
+**before the credential is examined**, so it answers identically for a right and a wrong
+password and cannot become a password oracle over the one channel that is not encrypted —
+and on `/setup` that is also what stops a refusal leaving the password set behind an error.
+And it is conditioned on **the `Secure` decision**, not on the scheme: an option that turns
+`Secure` off for plain-http transport turns the refusal off with it, which is how `qn.6f`'s
+plain-http opt-in lands without a second switch to keep in step.
 
 Everything else requires the session cookie. State-changing requests (POST/PUT/DELETE,
 except `login`/`setup`) must echo the CSRF token in the `X-CSRF-Token` header — a

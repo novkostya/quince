@@ -65,13 +65,24 @@ func CSRFCookie(token string, secure bool) *http.Cookie {
 // downgrade). X-Forwarded-Proto only ever upgrades to Secure, so trusting it cannot weaken
 // anything.
 func secureCookie(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if secureOrigin(r) {
 		return true
 	}
 	return !isLoopbackHost(r.Host)
+}
+
+// secureOrigin reports whether the browser reached us over an origin IT considers secure —
+// TLS terminated here, or terminated by a proxy we trust to say so.
+//
+// It is the half of secureCookie that describes the CONNECTION rather than the policy. The
+// remaining !isLoopbackHost branch is a deliberate choice to mark the cookie Secure on a
+// plain-http LAN address even though the browser will then discard it, and separating the
+// two is what lets Service.CookieWillBeDiscarded name exactly that case (quince#497).
+func secureOrigin(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func isLoopbackHost(hostport string) bool {

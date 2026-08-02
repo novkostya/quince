@@ -78,6 +78,19 @@ func (s *Service) Secure(r *http.Request) bool {
 	return secureCookie(r)
 }
 
+// CookieWillBeDiscarded reports whether a session cookie issued for THIS request would be
+// marked Secure and then dropped by the browser for arriving over an insecure origin — the
+// login-loop condition of quince#497. It is true for exactly one case: plain http to a
+// non-loopback host, outside demo mode.
+//
+// Deliberately phrased as Secure(r) && !secureOrigin(r) rather than re-deriving the host
+// test. It is the same predicate asked from the other side, so a change to the Secure rule
+// (or to demo mode) cannot leave this answer behind — and a second copy of a security
+// predicate is a thing that drifts.
+func (s *Service) CookieWillBeDiscarded(r *http.Request) bool {
+	return s.Secure(r) && !secureOrigin(r)
+}
+
 // HasPassword reports whether the admin password has been set.
 func (s *Service) HasPassword() (bool, error) {
 	_, ok, err := s.store.GetSetting(settingPasswordHash)
