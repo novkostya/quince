@@ -835,7 +835,7 @@ relay on quince#378.
 | — | **rulings** — no code PR opened before this | 2026-07-31 |
 | 1b–3c | the planned slices through *the wiring* | — |
 | — | **storage registry** — the Manager holds a SET of slots; every read says which | quince#433 |
-| — | `browse_root` is EMPTY for an unresolvable storage, not relative | quince#437 |
+| — | `browse_root` is EMPTY for an unresolvable storage, not relative | quince#433 |
 | — | **RULED**: unreachable is a listed state, not a refusal (quince#435) | quince#436 |
 | — | story 5's contract surface, and the probe/re-check split | quince#438 |
 | 5a | attribution from the SCAN; `attributeVersions` deleted; folds in quince#428 | quince#440 |
@@ -872,10 +872,19 @@ Two slices were folded in rather than deferred: quince#428 landed inside 5a beca
 attribution-during-reconciliation is impossible while `adopt`'s predicate is *no row I own*, and the
 `deleteVersion` cross-storage defect landed inside 5b because the loop is what makes it reachable.
 
-**Two issues were opened by this rung and are NOT part of it:** quince#448 — `RepairWorkingCopy` is
-device-scoped and silently no-ops for a job on a non-default storage — and quince#458's residue,
-whether a marker written from a global declaration may ever be repaired. Both need contract
-decisions, so both are filed rather than folded.
+**Two questions this rung opened and did NOT answer, in different states:**
+
+- **quince#448 — RULED AND UNBUILT.** `RepairWorkingCopy` is device-scoped and silently
+  no-ops for a job on a non-default storage. Ruled 2026-08-02: `storage_id` becomes an
+  optional parameter, and when omitted Reset resolves by DIRTY COUNT — none is already
+  clean, exactly one is reset, two or more refuses and names them. Work to do, not a thread
+  to stop.
+- **quince#476 — OPEN.** A `backend_mismatch` can only be cleared by deleting
+  `quince-storage.json` by hand, and the refusal never says so. Split out of quince#458
+  because that issue is CLOSED — quince#461 stops a NEW fabricated marker and does nothing
+  for a disk that already carries one. It needs a contract and identity decision, because
+  gap 4 makes the marker the authority and a repair path is that model conceding an
+  identity can be wrong.
 
 
 **Story 2 is split because it stopped being one claim, not to route around a review queue**
