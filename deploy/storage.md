@@ -100,10 +100,30 @@ case "$op" in
               sz=$(du -sb "$mp/working/$udid" | cut -f1); drop=$((a0 - a1))
               [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED # pool-level sharing verdict
               exit 0 ;; esac ;;
+  capacity) # qn.6d: the storage card's free-of-total. NO caller argument reaches zfs — the verb
+            # takes none, and $PARENT is the helper's own. That makes it TIGHTER than the arms
+            # above, which accept a pattern-guarded $target.
+            exec zfs list -H -p -o used,available "$PARENT" ;;
 esac
 echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
 exit 1
 ```
+
+**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case above**, the same way the header
+records the `qn.5b` `mirror)` → `seed)` replacement. Without it every zfs storage card reads *"free
+space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
+Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
+number rather than showing a wrong one — which is why this is a migration note rather than a
+release blocker.
+
+**Why a new verb rather than letting `list` take flags** — Operator ruling 2026-08-03 (quince#600).
+quince first shipped this read as `list -H -p -o used,available "$PARENT"`, which assumes the
+helper forwards argv to `zfs`. **It does not, and that is the entire point of a forced command.**
+The `list` arm runs a fixed `zfs list -t snapshot`, so the call returned the *snapshot list* at
+**exit 0** — a succeeded command with wrong-shaped output, which is why it survived a release.
+Teaching `list` to forward flags was the tempting fix and was refused: the same key would then take
+arbitrary `zfs list` arguments, and *"dataset destroy is intentionally NOT reachable"* would stop
+being checkable by reading these five case arms.
 
 The `seed` verb (qn.5b, replacing `mirror`): with a hook configured, quince delegates the job-start
 clone of `latest/` → `working/<udid>` to the host, where block cloning is not blocked by the
