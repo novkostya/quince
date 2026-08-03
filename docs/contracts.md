@@ -617,6 +617,22 @@ Storage: {
   "id": "01J...",              // the UUID from quince-storage.json (design §5) — stable across
                                // replug, which a PATH is not. Never the config `name`, which the
                                // user may change.
+                               //
+                               // EMPTY means the storage was NEVER CREATED: quince has not reached
+                               // the declared path, so no UUID was ever minted. It does NOT mean
+                               // "not currently readable" — an unplugged disk quince created before
+                               // KEEPS its id, because the identity lives in the `storages` row and
+                               // the marker is only where it is normally READ from (`qn.6d`,
+                               // quince#582). Until that fix the id vanished on unplug and returned
+                               // on replug, making the stability promised one line above false
+                               // across exactly the transition it names.
+                               //
+                               // ADDRESSING does not use this field. The API keys on the config
+                               // `name` (quince#570, ruled 2026-08-02), precisely because a
+                               // never-created storage has no id and is the one a user most needs
+                               // to reach. `id` is for ATTRIBUTION — `Version.storage_id` joins on
+                               // it — and an empty id correctly matches no versions, because a
+                               // storage that was never created has none.
   "name": "pool",              // from config.yml; the label the UI shows
   "path": "/backups",
   "backend": "zfs" | "reflink" | "hardlink" | "copy" | "unknown",
