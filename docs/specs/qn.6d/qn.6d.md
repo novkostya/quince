@@ -383,8 +383,20 @@ and story 8's UI copy must not promise it.**
 2. **Every declared storage is a card on Home**, showing free-of-total, a fill bar, a backup count
    and a device count.
 3. **A `copy`-backend storage carries a caution pill** on its card.
-4. **An unreachable storage is listed, says why, and dates its counts** — never hidden, never
-   presented as current.
+4. **An unreachable storage is listed and says why** — never hidden, and it claims no size, because
+   capacity is `null` rather than `0` when the disk cannot be read.
+
+   ~~*and dates its counts*~~ — **struck, quince#588.** The dating clause served a premise this rung
+   falsified: *"counts come from the DB and were true at last contact."* The counts **are** the DB —
+   a `COUNT(*)` over `versions` — and the DB is reachable whether or not the disk is, so they are
+   true **now** and cannot be stale. `counts_as_of` was stamped at request time and read *"just
+   now"* on every card, always.
+
+   **The genuinely stale thing already has a field**: whether those versions still exist on disk is
+   `Version.missing`, set by reconciliation and rendered as a dead row with no size claim.
+
+   Struck rather than deleted, because the story was implemented as written before it was falsified,
+   and a reader comparing the card to this list needs to see which half went and why.
 5. **A storage has a details page** at `storage/:name` with the marker rendered as a status header.
 6. **The details page's device list, version list and `Back up now` are scoped to that storage.**
 7. **A device with no versions on this storage is shown there, with the full-transfer warning.**
