@@ -1,0 +1,90 @@
+# The PUBLIC DEMO instance (quince#494). `quince serve --public-demo` on fly.io.
+#
+# This file is NOT how anybody runs quince for real — that is deploy/compose.nas.yml and
+# deploy/compose.lab.yml. It hosts the throwaway demo and nothing else. deploy/demo.md is the
+# prose; this is the artifact.
+#
+# It lives at the repository ROOT rather than under deploy/ because `[build] dockerfile` is
+# resolved against the build context, and fly sets the context to the project root. Root is also
+# where `make image` builds from (`-f deploy/Dockerfile .`), so the two agree by construction
+# rather than by comment.
+
+app = "quince-demo"
+primary_region = "fra"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+  # HYPHEN, not underscore. Every other key in this file is snake_case; this one is not, and
+  # flyctl IGNORES an unknown key silently — `build_target` would build the last stage without
+  # complaint. Verified against flyctl's own struct tag, not from memory.
+  # `runtime` is currently the last stage anyway, so this is insurance against a stage being
+  # appended later rather than a live requirement.
+  build-target = "runtime"
+
+[env]
+  # The image already sets QUINCE_LISTEN=:8968. Repeated here so this file and `internal_port`
+  # below cannot drift apart invisibly: if the Dockerfile's ENV changed, the two values here would
+  # still agree with each other and with the running process.
+  QUINCE_LISTEN = ":8968"
+
+  # QUINCE_DEMO_RESET_MINUTES IS DELIBERATELY UNSET, and that is a decision rather than an
+  # oversight (quince#494). Under scale-to-zero there is no interval to promise: the machine
+  # resets when it sleeps and wakes, which is "whenever nobody has visited for a while", not
+  # every N minutes. fly's native scheduling is hourly at finest, so no honest number exists.
+  #
+  # Unset is already correct behaviour — `useDemoResetMinutes` returns undefined and the login
+  # screen says the demo resets WITHOUT stating a schedule (ui/src/lib/health.ts). Setting it
+  # would put a promise on the login screen that nothing keeps, which quince#575 flagged as the
+  # thing this deployment could get wrong.
+
+# `[processes]` sets CMD; it does NOT replace the image's ENTRYPOINT ["quince"]. So this becomes
+# `quince serve --public-demo`. The group is named `app` because that is fly's default group —
+# any other name would need `processes = [...]` on the service below.
+#
+# --public-demo, NOT --demo. The difference is the whole point of the mode: the password is preset
+# so a visitor can log in, and Secure cookies are NOT forced off. Deploying --demo here would put
+# an instance on the internet issuing session cookies without Secure, which is exactly what
+# `auth/service.go` says never to do in production.
+[processes]
+  app = "serve --public-demo"
+
+[http_service]
+  internal_port = 8968
+  force_https = true
+
+  # "stop", NEVER "suspend" — this is the load-bearing line in the file.
+  #
+  # The demo's reset guarantee rests entirely on removeDemoState running at PROCESS START
+  # (core/cmd/quince/main.go). "suspend" restores a Firecracker memory snapshot and, in fly's own
+  # words, picks up "without rebooting the OS or restarting your app" — so the wipe never runs and
+  # a vandalised demo stays vandalised, with nothing inside quince able to tell. "stop" fully
+  # terminates the VM and resets the rootfs, which is the cold boot the reset depends on.
+  #
+  # "suspend" is also non-deterministic: snapshots are not guaranteed to persist, and ineligible
+  # machines silently fall back to stopping. A demo that resets SOMETIMES is worse than either.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # NO [[http_service.checks]] BLOCK, on purpose, and the reason is worth stating because adding
+  # one looks like an obvious improvement.
+  #
+  # A periodic check is traffic against the instance, and this deployment's entire shape is
+  # "asleep almost all the time". Whether fly's service checks defeat autostop is NOT documented
+  # either way — so a check added for tidiness might quietly hold the machine awake 24/7 and turn
+  # a near-free demo into a billed one, with no signal that it had happened.
+  #
+  # The cost of omitting it is real and small: `fly deploy` does not wait for the app to answer
+  # before declaring success. Acceptable here because the demo reaches "quince serving" in ~64ms
+  # (measured), so there is almost no window in which it could be up-but-not-ready.
+  #
+  # If this is ever revisited, measure the sleep behaviour first rather than reasoning about it.
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # 256mb is the FLOOR for a shared CPU (fly requires multiples of 256), and it is chosen because
+  # the demo is deliberately the cheapest thing that works: it serves fixture data out of memory,
+  # never builds the live stack, and starts no muxer or vault subprocess.
+  #
+  # If it OOMs the next step is 512mb — there is nothing between them.
+  memory = "256mb"
