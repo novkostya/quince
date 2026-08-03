@@ -162,6 +162,23 @@ COPY --from=core-build /quince /usr/local/bin/quince
 # The vault venv's console script (quince-vault) on PATH.
 ENV PATH="/opt/quince/vault/.venv/bin:${PATH}"
 ENV QUINCE_DATA=/data QUINCE_CACHE=/cache QUINCE_LISTEN=:8968
+
+# THE IMAGE MUST CONTAIN THE DIRECTORIES IT DECLARES. Without this, `docker run quince` cannot
+# start: the two paths above do not exist, so quince WARNs once per path and then dies on
+# `open db /cache/demo.db: unable to open database file (14)` — a sqlite errno that names neither
+# the missing directory nor the variable that pointed at it.
+#
+# It went unnoticed because NOTHING HAD EVER RUN THIS IMAGE AS-IS. `make demo` overrides both
+# (`-e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp`, and /tmp exists); compose.nas.yml and
+# compose.lab.yml BIND-MOUNT over both, and a bind mount creates its target. So every existing
+# path either replaced the values or covered the paths, and these defaults were dead config that
+# read as live. The public demo on fly.io (quince#494) is the first deployment to run the image
+# with no mounts and no overrides, and it crash-looped to its restart limit.
+#
+# A VOLUME IS NOT THE FIX and would re-hide it: the demo needs these EPHEMERAL. A fresh rootfs on
+# every start is exactly what makes the reset work (docs/specs/public-demo/public-demo.md, D4).
+RUN mkdir -p /data /cache
+
 EXPOSE 8968
 ENTRYPOINT ["quince"]
 CMD ["serve"]
