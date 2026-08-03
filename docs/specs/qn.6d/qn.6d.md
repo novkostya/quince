@@ -260,10 +260,14 @@ degraded mode, and `CLAUDE.md` requires those be surfaced.
 **`Default` shows only when there is more than one storage.** On a single-storage install it labels
 nothing. This mirrors `StorageSelect`, which already returns `null` below two storages.
 
-**An unreachable card is LISTED, states why, and DATES its counts.** Counts come from the DB and
-were true at last contact; the card must not present them as current. This is `qn.6c` story 5 made
-visible and it is the case removable media exists for — quiet when healthy, loud and
-self-explaining when the disk is out. The existing precedent to copy is `VersionList`'s missing row
+**An unreachable card is LISTED, states why, and CLAIMS NO SIZE — while its counts stay.** ~~*and
+DATES its counts. Counts come from the DB and were true at last contact; the card must not present
+them as current.*~~ **That premise is false and the clause went with it** (quince#588): the counts
+**are** the DB — a `COUNT(*)` over `versions` — and the DB is reachable whether or not the disk is,
+so they are true now and there is nothing to date. What the card must not claim is **capacity**,
+which is why that is `null` rather than `0` on the wire. This is `qn.6c` story 5 made visible and it
+is the case removable media exists for — quiet when healthy, loud and self-explaining when the disk
+is out. The existing precedent to copy is `VersionList`'s missing row
 (`VersionList.tsx:62-76`): dashed, `opacity-80`, a `danger` badge, and **no size claim**.
 
 ### The details page
@@ -404,7 +408,7 @@ and story 8's UI copy must not promise it.**
 | --- | --- | --- |
 | **G1a** | Two storages that are **two directories on one filesystem** report the same `filesystem_free_bytes` / `filesystem_total_bytes`, under those prefixed names. **A wire claim only** — the card renders no caveat (gap A ruling), so there is no UI half to assert. | **CI (Go)** — see below |
 | **G1b** | Two declared storages each render a card with free-of-total, a fill bar and counts. | ui-e2e |
-| **G2** | The unreachable storage's card is **listed**, states why, and **dates** its counts. The reachable one is unaffected. | ui-e2e |
+| **G2** | The unreachable storage's card is **listed**, states why, and **claims no size** — while its counts are still shown, because they are the DB's answer. The reachable one is unaffected. | ui-e2e |
 | **G3** | On a storage details page, the device list, the version list and `Back up now` are scoped to that storage — **asserted on the job the button creates**, not only on what is rendered. | ui-e2e |
 | **G4** | A device with no versions on this storage is **shown**, with the full-transfer warning. | ui-e2e |
 | **G5** | Forget on a non-default storage removes it from the declaration and **leaves every file on disk** — asserted on the tree, not only on the API. | CI |
@@ -431,8 +435,9 @@ real removable disk being pulled and replaced is not proven by any of them and i
 ## Fixtures
 
 **The demo provider's two storages already exist** (`core/internal/demo/provider.go:157-214`) and
-are extended, not replaced: the fixture gains free/total, counts and a freshness stamp, with the
-**unreachable** one carrying a dated count and null capacity so G2 has something to assert.
+are extended, not replaced: the fixture gains free/total and counts, with the **unreachable** one
+carrying populated counts and **null** capacity so G2 has the asymmetry to assert. (It gained a
+freshness stamp too, and that field was removed again — quince#588; the counts were never stale.)
 
 **New: a two-directories-on-one-filesystem fixture for G1a** — two storage roots under one
 `t.TempDir()`, which is the only way to get two storages that genuinely share a filesystem without
