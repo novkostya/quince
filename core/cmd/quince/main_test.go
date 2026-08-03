@@ -225,10 +225,10 @@ func TestResetIntervalIsReportedOnlyByTheModeThatResets(t *testing.T) {
 //
 // `public` is a parameter rather than a constant because the two modes fail DIFFERENTLY when the
 // startup wipe is missing, and only one of those failures is loud (see prepareDemoState).
-func demoBoot(t *testing.T, cache string, public bool) (*auth.Service, *demo.Provider, string, func(), func()) {
+func demoBoot(t *testing.T, cache string, public bool) (*auth.Service, *demo.Provider, *config.Service, string, func(), func()) {
 	t.Helper()
-	// prepareDemoState, NOT a local copy of what it does: a test that reimplements the sequence it
-	// is asserting would keep passing with the startup wipe deleted from serve()'s path.
+	// prepareDemoState and configureDemo, NOT local copies of what they do: a test that
+	// reimplements the sequence it is asserting keeps passing when a step is deleted from serve().
 	dbPath, cfgPath, cleanup := prepareDemoState(cache)
 
 	st, err := store.Open(dbPath)
@@ -237,10 +237,11 @@ func demoBoot(t *testing.T, cache string, public bool) (*auth.Service, *demo.Pro
 	}
 	log := discardLog()
 	svc := auth.NewService(st, log)
-	if err := configureDemoAuth(svc, log, public); err != nil {
-		t.Fatalf("configureDemoAuth(public=%v): %v", public, err)
+	cfgSvc := config.NewService(cfgPath, log)
+	if err := configureDemo(cfgSvc, svc, log, public); err != nil {
+		t.Fatalf("configureDemo(public=%v): %v", public, err)
 	}
-	return svc, demo.NewProvider(bus.New(), log), cfgPath, func() { _ = st.Close() }, cleanup
+	return svc, demo.NewProvider(bus.New(), log), cfgSvc, cfgPath, func() { _ = st.Close() }, cleanup
 }
 
 // TestDemoRestartResetsEverything is spec story 7, and it is the story that makes the mode worth
@@ -289,7 +290,7 @@ func TestDemoRestartResetsEverything(t *testing.T) {
 		} {
 			t.Run(mode.name+"/"+tc.name, func(t *testing.T) {
 				cache := t.TempDir()
-				svc, prov, cfgPath, closeDB, cleanup := demoBoot(t, cache, mode.public)
+				svc, prov, _, cfgPath, closeDB, cleanup := demoBoot(t, cache, mode.public)
 
 				// Whatever the mode starts at, a visitor ends up logged in against a password. In
 				// --demo that means completing first-run setup, which is the state that must NOT
@@ -329,7 +330,7 @@ func TestDemoRestartResetsEverything(t *testing.T) {
 				}
 
 				// --- the restart ---
-				svc2, prov2, cfgPath2, closeDB2, _ := demoBoot(t, cache, mode.public)
+				svc2, prov2, cfgSvc2, _, closeDB2, _ := demoBoot(t, cache, mode.public)
 				defer closeDB2()
 
 				// NOT EVIDENCE THAT THE RESET COVERS VERSIONS, and a later reader should not take it
@@ -343,9 +344,22 @@ func TestDemoRestartResetsEverything(t *testing.T) {
 					t.Errorf("after restart: %d version(s), want %d — a visitor's deletions outlived the restart",
 						n, len(before))
 				}
-				if _, err := os.Stat(cfgPath2); !os.IsNotExist(err) {
-					t.Errorf("after restart: %s still exists (stat err %v) — the config edit outlived the reset",
-						filepath.Base(cfgPath2), err)
+				// THE VISITOR'S EDIT IS GONE, but the FILE is not — and that changed with quince#574.
+				// It used to assert `demo-config.yml` does not exist, which was true when nothing
+				// wrote one; seedDemoStorages now writes a fresh document at every boot. Asserting
+				// absence would have been the easy way to keep this green and would have gated the
+				// wrong thing: what the reset owes a visitor is that their EDIT does not survive,
+				// not that the file is missing.
+				if ttl := cfgSvc2.Current().Sessions.TTLMinutes; ttl == 999 {
+					t.Errorf("after restart: sessions.ttl_minutes is still %d — the config edit "+
+						"outlived the reset", ttl)
+				}
+				// And the declaration is restored, which is the ruling's own requirement: a visitor
+				// may edit or delete these entries, and the next start must put them back or the
+				// instance returns to the quince#574 state where its own config cannot be saved.
+				if st := cfgSvc2.Current().Storage; st == nil || len(*st) == 0 {
+					t.Errorf("after restart: no storage declared — the reset did not re-seed it, so " +
+						"Settings would 422 on save again (quince#574)")
 				}
 				got, err := svc2.Status("")
 				if err != nil {
@@ -376,6 +390,87 @@ func TestDemoStateLivesInTheCacheDir(t *testing.T) {
 	}
 	if dbPath == b.DBPath() || cfgPath == b.ConfigPath() {
 		t.Error("demo state collides with the REAL db/config path")
+	}
+}
+
+// TestDemoConfigRoundTripsThroughSave is quince#574: the document `GET /api/config` serves must be
+// one `PUT /api/config` accepts. A visitor on the public demo who opened Settings and pressed Save
+// got a 422 having changed nothing, because `config.storage` was null in demo mode and `Replace`
+// requires a declared storage.
+//
+// BOTH HALVES RUN, and the unseeded one is what makes this a regression test rather than an
+// assertion that today works. It reproduces the original defect exactly — remove the seeding call
+// from serve() and the first subtest fails while the second still passes.
+//
+// Asserted through Replace rather than over HTTP because Replace IS the save path: the handler
+// decodes and delegates. The ruling turns on Replace staying mode-blind, so the test drives the
+// unexempted path deliberately.
+func TestDemoConfigRoundTripsThroughSave(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		seed     bool
+		wantSave bool
+	}{
+		{"seeded, as serve() does it", true, true},
+		{"UNSEEDED — the quince#574 defect", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgSvc := config.NewService(filepath.Join(t.TempDir(), "demo-config.yml"), discardLog())
+			if tc.seed {
+				// configureDemo, not seedDemoStorages: driving serve()'s own entry point is what
+				// makes deleting the seed from serve() fail this test rather than pass it.
+				if err := configureDemo(cfgSvc, newDemoAuth(t), discardLog(), true); err != nil {
+					t.Fatalf("configureDemo: %v", err)
+				}
+			}
+
+			// Exactly what the UI does on Save: PUT back the document it was served, unmodified.
+			errs, err := cfgSvc.Replace(cfgSvc.Current())
+			if err != nil {
+				t.Fatalf("Replace: %v", err)
+			}
+			if saved := len(errs) == 0; saved != tc.wantSave {
+				t.Fatalf("saving an unmodified fetched config: accepted=%v, want %v (errors %+v) — a "+
+					"demo whose own config cannot be saved breaks the surface quince#444 calls the "+
+					"reason a live demo beats screenshots", saved, tc.wantSave, errs)
+			}
+			if !tc.wantSave && (len(errs) == 0 || errs[0].Path != "storage") {
+				t.Fatalf("the unseeded refusal should name `storage`, got %+v — if that changed, the "+
+					"seeded half may now be passing for a different reason", errs)
+			}
+		})
+	}
+}
+
+// TestSeedDemoStoragesDeclaresWhatTheProviderServes is the ruling's own requirement — the demo
+// declares the storages it SERVES — asserted against the config document that actually lands rather
+// than against demo.StorageEntries, which is merely the input.
+//
+// The count check is the one that matters: Settings showing one storage while the cards show two is
+// precisely the incoherence the ruling declined the seed-one-throwaway-entry option to avoid.
+func TestSeedDemoStoragesDeclaresWhatTheProviderServes(t *testing.T) {
+	cfgSvc := config.NewService(filepath.Join(t.TempDir(), "demo-config.yml"), discardLog())
+	if err := configureDemo(cfgSvc, newDemoAuth(t), discardLog(), true); err != nil {
+		t.Fatalf("configureDemo: %v", err)
+	}
+	got := cfgSvc.Current().Storage
+	if got == nil {
+		t.Fatal("storage is still nil after seeding — the whole point of quince#574")
+	}
+	served := demo.NewProvider(bus.New(), discardLog()).Storages("")
+	if len(*got) != len(served) {
+		t.Fatalf("declared %d storage(s), the provider serves %d — Settings and the storage cards "+
+			"would disagree", len(*got), len(served))
+	}
+	for i, s := range served {
+		if (*got)[i].Name != s.Name || (*got)[i].Path != s.Path {
+			t.Errorf("storage %d: declared %q at %q, provider serves %q at %q",
+				i, (*got)[i].Name, (*got)[i].Path, s.Name, s.Path)
+		}
+		if (*got)[i].Default != s.Default {
+			t.Errorf("storage %q: declared default=%v, provider serves default=%v",
+				s.Name, (*got)[i].Default, s.Default)
+		}
 	}
 }
 
