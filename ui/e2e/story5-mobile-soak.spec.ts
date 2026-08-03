@@ -16,7 +16,10 @@ async function authenticate(page: Page): Promise<void> {
     await page.getByLabel("Password").fill("demo");
     await page.getByRole("button", { name: /sign in/i }).click();
   }
-  await expect(page).toHaveURL(/\/devices/);
+  // Home is `/` since qn.6d (quince#443); `/devices` redirects to it. Asserting the HEADING
+  // rather than the URL keeps this stable across the next rename — this label has already
+  // had one.
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 }
 
 test("the dashboard fits a phone and lists an offline device with a disabled, explained action", async ({ page }) => {
