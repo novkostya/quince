@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import { modelLine } from "@/features/devices/modelName";
 import { StorageDeviceBackup } from "@/features/storage/StorageDeviceBackup";
+import { ForgetStorage } from "@/features/storage/ForgetStorage";
 import type { Version } from "@/lib/types";
 
 // versionsOn scopes a version list to ONE storage, and is exported so it can be tested without
@@ -213,6 +214,19 @@ export function StorageDetailsPage() {
           // spec asks for, in the direction this page needs.
           <VersionList versions={versions} showDevice />
         )}
+      </div>
+
+      {/* Forget sits at the BOTTOM, after everything a user might want to check before deciding —
+          the version list directly above it is the answer to "what am I about to detach". */}
+      <h2 className="mt-10 text-sm font-semibold text-muted">Forget</h2>
+      <div className="mt-3 rounded-card border border-line bg-card p-4">
+        <p className="text-sm text-muted">
+          Remove this storage from quince&apos;s configuration. The backups on the disk are not
+          deleted.
+        </p>
+        <div className="mt-3">
+          <ForgetStorage storage={storage} />
+        </div>
       </div>
     </section>
   );
