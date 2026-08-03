@@ -360,6 +360,11 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 GET /api/config   → {config, warnings: [], source: {path, mtime}}
 PUT /api/config   → full-document replace; validated then atomically written to
                     /data/config.yml; 422 {errors: [{path, message}]} on invalid
+DELETE /api/config/storage/{name}
+                  → forget one storage: 200 {config, warnings, source} | 404 | 422.
+                    Splices SERVER-SIDE, which is the whole reason it is not a PUT —
+                    see the gap B ruling above for what a reconstructed full document
+                    silently loses. The 200's `warnings` carry the restart notice.
 ```
 
 ### Automation (shape frozen now; implemented in qn.12 — the assisted-backup flow, stack D13)
