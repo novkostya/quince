@@ -44,7 +44,9 @@ settings**; **marker-based discovery**; **Forget a device**.
 
 **Also explicitly out: live registry reconfiguration.** Interface fact 4 — it does not exist,
 `qn.6c` rung-ruled that a storage-list change needs a restart, and this rung does not build it.
-Whether Forget *needs* it is gap B's question, not an assumption this spec gets to make.
+Gap B ruled that Forget does **not** need it: Forget is a config mutation, so the restart stays and
+is surfaced. **General config live-apply is a SEPARATE RUNG** — see the gap B section — and nothing
+here builds toward it.
 
 **And out: fixing quince#569 and quince#570.** Both were found while writing this spec and both are
 in this rung's blast radius (interface fact 9). They are contract-surface defects with their own
@@ -128,8 +130,9 @@ a test that a Forget preserves the survivors byte-for-byte.
 **7. After a Forget, `recheck` on the forgotten storage returns STALE state rather than a 404.**
 The `Refresher` closure reads `cfgSvc.Current().Storage` **live** (`live.go:209-218`), so a deleted
 entry makes `refresh(name)` return `ok=false` — and `RecheckStorage` then reports the slot it
-already had (`storages_api.go:101-107`) rather than saying the storage is gone. Whichever way gap B
-goes, this is the seam where a half-forgotten storage becomes observable.
+already had (`storages_api.go:101-107`) rather than saying the storage is gone. **Gap B ruled this
+the CORRECT behaviour**: recheck reports **runtime truth**, and the card marks it pending with
+*"forgotten · restart to apply"*. A `404` would be a lie while the process still serves the disk.
 
 **8. Storage identity is THREE different keys, and they do not agree on which storages have one.**
 
@@ -241,11 +244,14 @@ target rather than re-argued:
 ground truth on zfs, reflink, hardlink and copy alike, where every other size fact currently is not
 (quince#442).
 
-**It must not be attributed to the storage.** Fact 2's `statfsFree` reports the **filesystem**. Two
-storages that are two directories on one disk — `qn.6c`'s own G1 fixture — would otherwise each
-claim the same free space as if they had it to themselves. **The wording is settled by rung-ruled
-decision 2; the field names are gap A's to rule**, because a client that reads `storage.free_bytes`
-will attribute it whatever the card says.
+**It is not attributed to the storage ON THE WIRE, and the CARD carries no caveat at all** — gap A,
+ruled 2026-08-03. Fact 2's `statfsFree` reports the **filesystem**, so two storages that are two
+directories on one disk report identical figures; the field names `filesystem_free_bytes` /
+`filesystem_total_bytes` say so to an API client. **The card always renders plain *"1.2 TB
+free"***, because the conditional wording this spec first proposed cannot be implemented — equal
+byte counts do not prove a shared filesystem, and the two fields that would have carried filesystem
+identity were offered to the Operator and declined. The accepted cost is written out in the
+retirement of rung-ruled decision 2.
 
 **Backend is NOT on the card** — permanent, and it matters, but it is not a glance fact; it is on
 the details page. **`copy` is the exception** and keeps a caution pill: a degraded backend is a
@@ -320,84 +326,54 @@ a `config.yml` edit that already has a validated path (fact 5).
 
 ---
 
-## Contract and design changes — TWO gaps, and NO CODE LANDS BEFORE THEY ARE RULED
+## Contract and design changes — BOTH GAPS RULED 2026-08-03
 
-Both touch frozen interfaces. Per the gap protocol they ship as `PROPOSED (gap)` blocks in
-`docs/contracts.md` **in this same PR**, are tracked in the devlog open-questions list, and are
-flipped to decided text by the PR that builds each.
+Both touched frozen interfaces, so both shipped as `PROPOSED (gap)` blocks in `docs/contracts.md`
+(quince#573) and were tracked on the devlog dashboard. **The Operator ruled both on 2026-08-03**,
+relayed on quince#443; the blocks are flipped to decided text in the same PR as this section, per
+quince#408 and quince#409. The decided text lives in `contracts.md` §1 and §2 and is **cited here,
+not restated** — where this section and `contracts.md` disagree, `contracts.md` is right.
 
-### Gap A — `Storage` gains space and counts (contracts §1 and §2)
+### Gap A — `Storage` gains space and counts (contracts §1 and §2) — RULED
 
-The block proposes: `free_bytes`, `total_bytes`, `backup_count`, `device_count`, and a freshness
-stamp. Four sub-questions the Operator is asked to settle, each with this rung's recommendation and
-each explicitly **a recommendation, not a decision**:
+**The fields land as proposed:** `filesystem_free_bytes`, `filesystem_total_bytes`, `backup_count`,
+`device_count`, `counts_as_of`. All four sub-questions were taken as recommended — prefixed names
+kept, the stamp always present, capacity `null` (never `0`) when unreachable with counts still
+populated, and counts as properties of the storage rather than device-scoped.
 
-1. **Naming, and whose number it is.** `free_bytes` on a `Storage` object *reads* as the storage's.
-   Recommended: `filesystem_free_bytes` / `filesystem_total_bytes` — ugly and unambiguous, and the
-   ugliness is doing work, because fact 2 means two storages on one disk report identical numbers
-   and nothing else in the payload says why.
-2. **The freshness stamp.** Recommended `counts_as_of` (RFC3339), always present, so a client never
-   has to infer staleness from `reachable`. The alternative — omit when reachable — makes the
-   common case smaller and the unreachable case a special path in every client.
-3. **What the capacity fields are when the storage is UNREACHABLE.** Recommended `null`, never `0`:
-   a zero is a measurement and this is an absence. Requires them nullable, which is the same
-   discipline `will_be_full` already follows.
-4. **Whether counts are device-independent.** Recommended yes — they are properties of the storage,
-   and `?udid=` continues to add only `will_be_full`. This keeps the ruled device-independence of
-   the list intact and lets the storage page fetch with no udid.
+**One thing the block did not ask, which the ruling settled: the card renders NO filesystem
+caveat.** Rung-ruled decision 2 is **retired** — see its entry, which carries the accepted cost in
+full. Two storages on one disk will each show the same figure with nothing saying it is the same
+space. `filesystem_id` and a `filesystem_shared` boolean were both offered and both declined.
 
-The block also **corrects §1's listing** to include `?udid=` and `POST /api/storages/{id}/recheck`
-(fact 14), and **documents `unreachable_code`**, which §2 has never mentioned. Both are existing
-drift rather than new proposals, and are marked as such.
+**Consequence for this rung's own gates:** G1a still proves the *wire* claim — two storages on one
+filesystem report the same figures — and no longer has a UI half to check, because there is no
+conditional wording left to render. G1b is unchanged.
 
-### Gap B — Forget's shape, and the restart question is INSIDE it
+### Gap B — Forget's shape, and the restart question was INSIDE it — RULED
 
-quince#443 files these as two questions — the endpoint shape, and *"the sharpest open question in
-the rung"*, whether the card lingers until a restart. **This spec argues they are one question, and
-that is the design judgement it contributes.** The shape decides the restart behaviour:
+**Forget is a config mutation, not a resource-delete**, via a narrow endpoint:
 
-**The ADDRESSING KEY is no longer part of this question** — Operator ruling on quince#570,
-2026-08-02 at `20:02:51`, six minutes before this spec's PR opened. **The API addresses a storage by
-its config `name`**, and *"`qn.6d`'s Forget the same. Not the marker UUID."* So both candidates
-below are written `{name}`, and what remains open is purely **resource-delete versus config
-mutation**:
+```
+DELETE /api/config/storage/{name}  → 200 {config, warnings, source} | 404 | 422
+```
 
-- **`DELETE /api/storages/{name}`** treats storage as a REST resource, which the peer-entity frame
-  argues for. But a `DELETE` that returns `204` and leaves the resource in `GET /api/storages` until
-  a restart is an incoherent contract, so this shape **forces** live deregistration — the class
-  `qn.6c` declined (fact 4), on a registry whose only mutation is an in-place slot swap guarded by a
-  comment about exactly this.
-- **A config mutation** matches **D12** — the UI edits `config.yml`, and the storage list *is*
-  `config.yml` since quince#506 — avoids a second write path to the same file, inherits the
-  `CheckStorages` floor that already implements half of G6 (fact 5), and makes *"Forgotten · restart
-  quince to apply"* the same idiom `ConfigEditor` already ships rather than a new excuse.
+Taken as recommended, on the behaviour grounds rather than on the withdrawn empty-`id` evidence: no
+live deregistration (the class `qn.6c` declined stays declined), server-side splicing so a
+sibling's `zfs:` / `retention:` keys cannot be dropped, `422` refusing the default, and the restart
+**surfaced** through the existing `warnings` channel rather than silently.
 
-**Recommended: the config mutation — on BEHAVIOUR, and no longer on addressing.**
+**The loose end this spec flagged is ruled too — recheck reports RUNTIME TRUTH, marked pending.**
+`POST /api/storages/{name}/recheck` keeps answering for the slot the process is still serving, and
+the card carries *"forgotten · restart to apply"*. It is the only answer true under both the current
+model and a future live-apply one.
 
-**The empty-`id` measurement is no longer load-bearing here, and saying so is the point.** An
-earlier draft of this section led with it: a delete-by-`id` cannot reach a storage that never came
-up, therefore the config `name` wins. **The ruling makes that argument moot rather than wrong** —
-the measurement is still true and still filed, but once the REST candidate is `DELETE
-/api/storages/{name}` it reaches an unreachable storage perfectly well, so the evidence stops
-discriminating between the two. Recorded rather than quietly deleted, because a recommendation that
-silently changes its grounds is one nobody can check.
-
-What survives is about **behaviour**, and it is independent of the key:
-
-1. A `204` whose effect appears at the next restart is not a different question from *what shape is
-   Forget* — it is that question answered badly. Making it coherent costs live deregistration.
-2. The storage list **is** `config.yml`, so removing an entry is an edit to a file the UI already
-   edits, needing no second write path to it.
-3. *"Forgotten · restart quince to apply"* is an idiom already in the product, not a new excuse
-   invented to cover a limitation.
-
-Sub-question the Operator is asked to settle either way: **whether Forget is expressible through
-the existing `PUT /api/config`** — which works today and which fact 6 makes hazardous for a partial
-document — **or wants a narrow `DELETE /api/config/storage/{name}`** that splices server-side and
-cannot drop a sibling's keys. This rung recommends the narrow endpoint for that reason and notes it
-is still a config mutation, not a resource delete.
-
----
+**General config live-apply is a SEPARATE RUNG and explicitly out of `qn.6d`.** The Operator wants
+hot add/remove without a restart; it is scoped as project-wide config→runtime propagation with
+storage as its first consumer. The measured blocker is the config layer rather than the storage
+registry — `config.Service` has no `Apply`, `Reload`, `onChange` or `Subscribe` at all, so
+restart-to-apply is the status quo for **every** setting. **Nothing in this rung builds toward it,
+and story 8's UI copy must not promise it.**
 
 ## Stories
 
@@ -422,7 +398,7 @@ is still a config mutation, not a resource delete.
 
 | id | what it proves | where |
 | --- | --- | --- |
-| **G1a** | Two storages that are **two directories on one filesystem** report the same free/total, and the payload names it as the filesystem's rather than each storage's. | **CI (Go)** — see below |
+| **G1a** | Two storages that are **two directories on one filesystem** report the same `filesystem_free_bytes` / `filesystem_total_bytes`, under those prefixed names. **A wire claim only** — the card renders no caveat (gap A ruling), so there is no UI half to assert. | **CI (Go)** — see below |
 | **G1b** | Two declared storages each render a card with free-of-total, a fill bar and counts. | ui-e2e |
 | **G2** | The unreachable storage's card is **listed**, states why, and **dates** its counts. The reachable one is unaffected. | ui-e2e |
 | **G3** | On a storage details page, the device list, the version list and `Back up now` are scoped to that storage — **asserted on the job the button creates**, not only on what is rendered. | ui-e2e |
@@ -511,10 +487,22 @@ behaviour beyond this rung. Recorded here per the gap protocol.
    a storage that never came up there is nothing to translate *from*. Written here so PR 5 does not
    re-derive it. Open question 3 is a different question — whether `Storage.id` is still *emitted* —
    and does not reopen this one.
-2. **The card attributes free space to the filesystem in PROSE regardless of gap A's field names** —
-   *"1.2 TB free on this filesystem"* when more than one storage shares one, plain *"1.2 TB free"*
-   when it does not. The wording is rung-local; the **field names are not**, which is why they are
-   in gap A.
+2. ~~**The card attributes free space to the filesystem in PROSE regardless of gap A's field
+   names**~~ — **RETIRED by the Operator's gap-A ruling, 2026-08-03.** This committed the card to
+   *"1.2 TB free on this filesystem"* when storages share one and plain *"1.2 TB free"* when they do
+   not. **That branch is not implementable with the ruled fields**: equal byte counts do not prove a
+   shared filesystem, and no field carries filesystem identity. A `filesystem_id` and a
+   `filesystem_shared` boolean were both offered and both declined.
+
+   **The card always says plain *"1.2 TB free"*.** The accepted cost, written here rather than left
+   to be rediscovered: two storages that are two directories on one disk each show the same figure
+   with nothing in the UI saying it is the same space, and a user may read 1.2 + 1.2 as 2.4 TB. That
+   is `qn.6c`'s own G1 fixture. **This is a ruled acceptance — do not "fix" it by reintroducing the
+   distinction, and do not file it as a bug.** The wire names stay prefixed regardless, so the
+   contract remains honest for API clients even where the card renders no caveat.
+
+   Kept struck rather than deleted, because G1b and the card copy were specified against the retired
+   version and a reader comparing them needs to see what changed.
 3. **Counts INCLUDE `missing` versions, and the card does not distinguish them.** Fact 3 shows the
    tree already splits on this. `UDIDsWithVersions`' reasoning wins — a version whose artifact is
    gone is still history the user should see — and the card is a glance surface, so a second number
@@ -533,8 +521,10 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 ## Known gaps and open questions
 
-1. **Gaps A and B** — open until the Operator rules. Tracked in the devlog `progress.md`
-   open-questions list. **No code PR opens before both verdicts.**
+1. ~~**Gaps A and B** — open until the Operator rules.~~ **BOTH RULED 2026-08-03**, relayed on
+   quince#443. The `contracts.md` blocks are flipped to decided text in the same PR as this line,
+   and the devlog dashboard's open questions 2 and 3 are cleared alongside it. **The park is lifted
+   by that PR landing** — not by the ruling comment, and not by quince#573 having merged.
 2. **quince#569 is OPEN. quince#570's ADDRESSING half is RULED and the dependency runs the OTHER
    way from what this section first said.** An earlier draft had gap B's ruling answering quince#570;
    it is the reverse — quince#570 was ruled on 2026-08-02 at `20:02:51`, six minutes before this
@@ -566,17 +556,26 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 ## PR slicing
 
-Each code PR **flips its `PROPOSED (gap)` block in canon to decided text**, citing the ruling.
+**The flip clause changed, and the change is recorded rather than silent.** This read *"each code PR
+flips its `PROPOSED (gap)` block in canon to decided text"* — the `qn.6c` sequence, where the
+rulings arrived after the spec merged. **That is not what happened here.** quince#573 merged on
+2026-08-03 carrying both blocks live, the Operator ruled both hours later, and **one PR flips both
+blocks before any code opens.** So PRs 3 and 6 implement against decided canon with nothing to flip.
+
+A slicing table is a **status table** (quince#409) — a second part describing the whole, with the
+same staleness property and no defence but somebody reading it. That is why this clause is corrected
+in the same diff as the flip rather than in a follow-up.
 
 | PR | claim | approval |
 | --- | --- | --- |
 | 1 | this spec + the two `PROPOSED (gap)` blocks in contracts §1/§2 | **`@novkostya`** — code owner |
-| — | **rulings** — no code PR opened before this | Operator |
+| — | **rulings on gaps A and B** — 2026-08-03, quince#443 | Operator |
+| 1b | **both blocks flipped to decided text**; rung-ruled decision 2 retired; this table corrected. **The park is lifted by this landing.** | **`@novkostya`** — code owner |
 | 2 | `Devices` → `Home`, the icon swap, and the `ui.design.md` / `design.md` amendments | **`@novkostya`** — code owner |
-| 3 | `Storage` gains space + counts + freshness (flips gap A); the two new store queries; the demo fixture | architect |
+| 3 | `Storage` gains space + counts + freshness; the two new store queries; the demo fixture | architect |
 | 4 | the card on Home — stories 2, 3, 4 (G1a, G1b, G2) | architect |
 | 5 | the details page — stories 5, 6, 7 (G3, G4) | architect |
-| 6 | Forget — stories 8, 9 (flips gap B; G5, G5b, G6) | architect |
+| 6 | Forget — stories 8, 9 (G5, G5b, G6) | architect |
 | 7 | `story7-storage.spec.ts` — the ui-e2e half | architect |
 
 **No status column** — `qn.6c`'s table recorded why, and its one self-exempting cell went stale by
@@ -584,7 +583,9 @@ the event it was waiting for. A PR number is immutable; a reader who wants statu
 
 **Why 3 is separated from 4 rather than folded in.** The ordering test `qn.6c` recorded is *which
 one's absence makes the other wrong*, not which is smaller. A card built before the wire fields
-exist has to invent them, and inventing them is what gap A is asking the Operator not to do.
+exist has to invent them, and gap A's ruling is what says which fields exist. The test still holds
+now that it is ruled: PR 4 renders `filesystem_free_bytes` and `counts_as_of`, so it is wrong before
+PR 3 puts them on the wire.
 
 **Why 2 is alone.** It touches two code-owned canon files and nothing else, and the rename is
 independently reviewable and independently revertable. Folding it into the card PR would put a nav
