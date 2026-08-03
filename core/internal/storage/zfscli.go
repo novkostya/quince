@@ -174,21 +174,41 @@ func (c *zfsCLI) Capacity(ctx context.Context) (free, total uint64, err error) {
 	if !datasetPattern.MatchString(c.parent) {
 		return 0, 0, fmt.Errorf("storage: invalid parent dataset %q", c.parent)
 	}
-	out, err := c.run(ctx, c.argv("list", "-H", "-p", "-o", "used,available", c.parent))
+	// A DEDICATED `capacity` VERB IN HOOK MODE, never a flagged `list` — Operator ruling
+	// 2026-08-03 (quince#600). This first shipped as `list -H -p -o used,available <parent>`,
+	// which assumes the hook forwards argv to `zfs`. IT DOES NOT: `hook_cmd` is a forced command
+	// whose arms run FIXED commands, and its `list` arm runs `zfs list -t snapshot`. Measured
+	// against the deployed helper, that call **exits 0** and returns the snapshot list — a
+	// SUCCEEDED command with wrong-shaped output, which is why nothing noticed for a release and
+	// why the field-count check below is load-bearing rather than defensive boilerplate. Relax it
+	// and this returns a confident capacity computed from snapshot names.
+	//
+	// `list` was deliberately NOT taught to forward flags: the same key would then take arbitrary
+	// `zfs list` arguments, and "dataset destroy impossible via the key" would stop being
+	// checkable by reading five case arms. The verb takes NO caller argument at all — the helper
+	// uses its own configured $PARENT — which is tighter than the arms that accept a
+	// pattern-guarded target. Operators upgrading MUST add the arm; see deploy/storage.md.
+	//
+	// exec mode keeps the direct call: no forced command is in the way.
+	argv := c.argv("capacity")
+	if c.mode != "hook" {
+		argv = []string{c.bin, "list", "-H", "-p", "-o", "used,available", c.parent}
+	}
+	out, err := c.run(ctx, argv)
 	if err != nil {
-		return 0, 0, fmt.Errorf("zfs list %s: %w: %s", c.parent, err, strings.TrimSpace(out))
+		return 0, 0, fmt.Errorf("zfs capacity %s: %w: %s", c.parent, err, strings.TrimSpace(out))
 	}
 	fields := strings.Fields(strings.TrimSpace(out))
 	if len(fields) != 2 {
-		return 0, 0, fmt.Errorf("zfs list %s: want 2 fields (used, available), got %q", c.parent, strings.TrimSpace(out))
+		return 0, 0, fmt.Errorf("zfs capacity %s: want 2 fields (used, available), got %q", c.parent, strings.TrimSpace(out))
 	}
 	used, err := strconv.ParseUint(fields[0], 10, 64)
 	if err != nil {
-		return 0, 0, fmt.Errorf("zfs list %s: parsing used %q: %w", c.parent, fields[0], err)
+		return 0, 0, fmt.Errorf("zfs capacity %s: parsing used %q: %w", c.parent, fields[0], err)
 	}
 	avail, err := strconv.ParseUint(fields[1], 10, 64)
 	if err != nil {
-		return 0, 0, fmt.Errorf("zfs list %s: parsing available %q: %w", c.parent, fields[1], err)
+		return 0, 0, fmt.Errorf("zfs capacity %s: parsing available %q: %w", c.parent, fields[1], err)
 	}
 	return avail, used + avail, nil
 }

@@ -970,7 +970,15 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
       mode: exec            # exec (delegated) | hook
       hook_cmd: ""          # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
                             # (forced-command: snapshot/destroy/list @quince-*, create children,
-                            #  seed working/<udid> from latest/; dataset destroy impossible via the key)
+                            #  seed working/<udid> from latest/, capacity; dataset destroy
+                            #  impossible via the key)
+                            # THE VERBS ARE FIXED COMMANDS — the helper dispatches on the verb and
+                            # DISCARDS the rest of the argv. quince must never send flags expecting
+                            # them to reach `zfs`: it did once, and got a snapshot list back at
+                            # exit 0 (quince#600, ruled 2026-08-03). `capacity` takes NO argument
+                            # at all — the helper uses its own $PARENT — which is why the fix was a
+                            # new verb rather than a `list` that forwards flags. Adding a verb is a
+                            # change to THIS list and an operator migration; see deploy/storage.md.
       seed: auto            # qn.5b: in-container strategy to clone latest/ → working/<udid> at job
                             #   start (renamed from `mirror` when the reflink moved commit→seed).
                             #   auto (reflink → copy) | reflink | copy — hardlink is NEVER used for
