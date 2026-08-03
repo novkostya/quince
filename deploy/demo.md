@@ -77,17 +77,26 @@ name: demo-deploy
 # same-repo ones, so a deploy triggered by `pull_request` gives the token to any branch anybody
 # pushes. There are no outside contributors here, which makes this a habit rather than a live
 # exposure — and it is the standard way this goes wrong.
+# SCHEDULED + MANUAL, deliberately not on push (Operator, 2026-08-03). A demo does not need to
+# track every merge, and a deploy on every push to `main` spends a full remote image build each
+# time to move a fixture-data instance nobody is looking at.
+#
+# 22:00 UTC is overnight for the Operator. Two GitHub facts that decide how much to trust it:
+# a scheduled workflow runs ONLY from the DEFAULT BRANCH, whatever branch the schedule was
+# written on; and scheduled runs are best-effort — GitHub delays them under load and does not
+# promise the minute. Neither matters for a demo refresh, and both would matter if anything
+# were ever gated on this having run.
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 22 * * *"
   workflow_dispatch:
 
 # Least privilege: this job reads the tree and talks to fly. It needs nothing from GitHub.
 permissions:
   contents: read
 
-# One deploy at a time. Without this, two merges in quick succession race and the LATER image can
-# lose to the earlier one.
+# One deploy at a time. Without this, a manual trigger and the nightly run can overlap and the
+# LATER image can lose to the earlier one.
 concurrency:
   group: demo-deploy
   cancel-in-progress: false
@@ -98,7 +107,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+      # NOT a bare `flyctl deploy`. deploy/fly-deploy supplies the build-args the Dockerfile
+      # needs from versions.env — without them four ARGs arrive empty and the build dies
+      # somewhere that looks unrelated. The script says which four and why.
+      - run: ./deploy/fly-deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 ```
@@ -127,10 +139,29 @@ Three things about that block, stated rather than hidden:
 ### By hand, without the workflow
 
 ```sh
-fly deploy --remote-only          # from the repository root, where fly.toml lives
+./deploy/fly-deploy               # NOT `fly deploy` — see below
 fly logs -a quince-demo
 fly status -a quince-demo
 ```
+
+**`fly deploy --remote-only` on its own does not work, and fails in a way that names the wrong
+thing.** flyctl knows nothing about `versions.env`, so every ARG `deploy/Dockerfile` declares
+without a default arrives empty. The first real deploy died here:
+
+```
+RUN git clone --depth 1 --branch ${NETMUXD_REF} https://github.com/jkcoxson/netmuxd /src/netmuxd
+fatal: repository '/src/netmuxd' does not exist
+```
+
+With `NETMUXD_REF` empty, `--branch` swallows the URL and git reads the *destination* as the
+repository — so an unset build-arg presents as *"that repository does not exist"*, pointing at the
+one path on the line that is fine. Four ARGs were empty; the image-ref ones have Dockerfile
+defaults and worked silently, which is why the build looked healthy until it did not.
+
+`deploy/fly-deploy` supplies them from `versions.env`, **deriving the list from the Dockerfile's own
+`ARG` lines** rather than repeating it — so a newly added ARG is either found or reported, never
+quietly empty. It runs where flyctl is installed and authenticated (a CI runner, or the Operator's
+machine) and refuses with an explanation anywhere else.
 
 ## A custom domain, when it is wanted
 
