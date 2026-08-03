@@ -11,9 +11,21 @@ import { cn } from "@/lib/cn";
 // found by a Playwright selector that could not match it, which is the only thing that could have
 // found it.
 //
-// So any `data-*` a caller relies on must be added here. That is the cost of an explicit list and
-// also the point of it: a spread would have fixed this one instance and left the next one equally
-// unfalsifiable.
+// So any `data-*` a caller relies on must be added here. WHAT THAT BUYS IS A NARROW, AUDITABLE
+// SURFACE, not safety: a spread (`{...props}`) would forward whatever a caller passed — handlers,
+// `style`, `aria-*`, anything — onto a vendored primitive that deliberately controls its own
+// contract, and the set of attributes a `Card` supports would stop being reviewable. Adding one
+// should cost a deliberate edit here, and that is the whole argument for the list.
+//
+// WHAT IT DOES NOT BUY, stated because the obvious claim is false: it does not make a mistake
+// detectable. `<Card data-storage-nme={x}>` typechecks and silently does nothing whether this
+// component spreads or lists — the props type never sees a hyphenated key either way. So on
+// FORWARDING RELIABILITY a spread is strictly better, and this list is the deliberate trade.
+//
+// An earlier version of this comment claimed the reverse, and the correction is kept because it
+// is load-bearing: a guard resting on a reason that does not hold is worse than no guard, since
+// the next reader checks it, finds the reason false, converts to a spread, and never learns the
+// constraint that was real (quince#598 review; the guard rule is quince#595).
 export function Card({
   className,
   children,
