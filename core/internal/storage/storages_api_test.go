@@ -143,7 +143,7 @@ func TestRecheckUsesTheRefresherAndIsPerStorage(t *testing.T) {
 		}, true
 	})
 
-	got, ok := m.RecheckStorage("01JSTORAGESHUTTLE0000000")
+	got, ok := m.RecheckStorage("shuttle")
 	if !ok {
 		t.Fatal("recheck must find a declared storage")
 	}
@@ -158,8 +158,8 @@ func TestRecheckUsesTheRefresherAndIsPerStorage(t *testing.T) {
 		t.Error("the rechecked state must persist on the Manager")
 	}
 
-	if _, ok := m.RecheckStorage("01JSTORAGENOSUCH00000000"); ok {
-		t.Error("an unknown storage id must not resolve — that is the 404")
+	if _, ok := m.RecheckStorage("nosuch"); ok {
+		t.Error("an unknown storage NAME must not resolve — that is the 404")
 	}
 }
 
@@ -171,7 +171,11 @@ func TestRecheckUsesTheRefresherAndIsPerStorage(t *testing.T) {
 // Run under `-race`, which the Go gate does.
 func TestRecheckDoesNotRaceReadsOfTheSameSlot(t *testing.T) {
 	m, _ := twoStorageManager(t)
-	target := m.slots[0].StorageID // the DEFAULT — the slot every read path touches
+	// The DEFAULT — the slot every read path touches. TWO handles on it now: recheck is keyed on
+	// NAME (quince#610) while `slotFor` still resolves a job's `storage_id`, so the test needs both
+	// and collapsing them would silently exercise one path twice.
+	target := m.slots[0].StorageID
+	targetName := m.slots[0].Name
 
 	m.SetRefresher(func(name string) (Slot, bool) {
 		return Slot{
@@ -184,7 +188,7 @@ func TestRecheckDoesNotRaceReadsOfTheSameSlot(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			m.RecheckStorage(target)
+			m.RecheckStorage(targetName)
 		}
 	}()
 	for i := 0; i < 200; i++ {

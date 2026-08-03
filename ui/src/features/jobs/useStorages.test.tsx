@@ -53,7 +53,7 @@ describe("useStorages recheck", () => {
     const { result } = renderHook(() => useStorages("DEV-1"));
     await waitFor(() => expect(result.current.state.status).toBe("loaded"));
 
-    act(() => result.current.recheck("01JB"));
+    act(() => result.current.recheck("shuttle"));
 
     await waitFor(() => {
       const s = result.current.state;
@@ -63,7 +63,7 @@ describe("useStorages recheck", () => {
       expect(s.storages[0].will_be_full).toBe(true);
     });
 
-    expect(post).toHaveBeenCalledWith("/api/storages/01JB/recheck");
+    expect(post).toHaveBeenCalledWith("/api/storages/shuttle/recheck");
     // Two GETs: the initial load and the reload. If the hook had spliced, there would be one.
     expect(get).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenLastCalledWith("/api/storages?udid=DEV-1");
@@ -78,9 +78,9 @@ describe("useStorages recheck", () => {
     const { result } = renderHook(() => useStorages("DEV-1"));
     await waitFor(() => expect(result.current.state.status).toBe("loaded"));
 
-    act(() => result.current.recheck("01JB"));
+    act(() => result.current.recheck("shuttle"));
 
-    await waitFor(() => expect(result.current.rechecking["01JB"]).toBe("failed"));
+    await waitFor(() => expect(result.current.rechecking["shuttle"]).toBe("failed"));
     const s = result.current.state;
     expect(s.status).toBe("loaded");
     if (s.status !== "loaded") return;
@@ -98,8 +98,8 @@ describe("useStorages recheck", () => {
     const { result } = renderHook(() => useStorages("DEV-1"));
     await waitFor(() => expect(result.current.state.status).toBe("loaded"));
 
-    act(() => result.current.recheck("01JB"));
-    await waitFor(() => expect(result.current.rechecking["01JB"]).toBe("pending"));
+    act(() => result.current.recheck("shuttle"));
+    await waitFor(() => expect(result.current.rechecking["shuttle"]).toBe("pending"));
     expect(result.current.rechecking["01JC"]).toBeUndefined();
 
     await act(async () => {
@@ -117,11 +117,11 @@ describe("useStorages recheck", () => {
       initialProps: { udid: "DEV-1" },
     });
     await waitFor(() => expect(result.current.state.status).toBe("loaded"));
-    act(() => result.current.recheck("01JB"));
-    await waitFor(() => expect(result.current.rechecking["01JB"]).toBe("failed"));
+    act(() => result.current.recheck("shuttle"));
+    await waitFor(() => expect(result.current.rechecking["shuttle"]).toBe("failed"));
 
     rerender({ udid: "DEV-2" });
-    await waitFor(() => expect(result.current.rechecking["01JB"]).toBeUndefined());
+    await waitFor(() => expect(result.current.rechecking["shuttle"]).toBeUndefined());
   });
 });
 

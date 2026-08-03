@@ -212,12 +212,12 @@ describe("StorageSelect re-check", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("storage-recheck"));
-    expect(recheck).toHaveBeenCalledWith("01JB");
+    expect(recheck).toHaveBeenCalledWith("shuttle");
   });
 
   // A second press while the first is in flight would queue a request the user did not ask for.
   it("disables the button while its own re-check is pending", () => {
-    const pending: Record<string, RecheckState> = { "01JB": "pending" };
+    const pending: Record<string, RecheckState> = { shuttle: "pending" };
     render(
       <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: pending })}
@@ -233,7 +233,7 @@ describe("StorageSelect re-check", () => {
   // the disk is still out, or the request never landed — and the user keeps pressing a control
   // that is not reaching the daemon. That is the no-silent-fallbacks rule on a button.
   it("says so when the re-check itself could not be performed", () => {
-    const failed: Record<string, RecheckState> = { "01JB": "failed" };
+    const failed: Record<string, RecheckState> = { shuttle: "failed" };
     render(
       <StorageNotices
         storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: failed })}
@@ -259,7 +259,7 @@ describe("StorageSelect re-check", () => {
       unreachable_code: "path_unreachable",
       unreachable_reason: "the path could not be read",
     });
-    const pending: Record<string, RecheckState> = { "01JB": "pending" };
+    const pending: Record<string, RecheckState> = { shuttle: "pending" };
     render(
       <StorageNotices
         storages={sub(
