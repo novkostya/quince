@@ -244,6 +244,21 @@ export interface Storage {
   unreachable_reason: string | null;
   // Present only when the list was fetched with `?udid=`. null means "not asked", NOT "no".
   will_be_full: boolean | null;
+  // `statfs` on this storage's path — of the FILESYSTEM, never of the storage (qn.6d gap A, ruled
+  // 2026-08-03). Two storages that are two directories on one disk report IDENTICAL figures, and
+  // nothing distinguishes them: `filesystem_id` and a `filesystem_shared` boolean were both
+  // offered and both declined. THE CARD RENDERS NO CAVEAT and always says plain "1.2 TB free" —
+  // a ruled acceptance, not a bug to fix.
+  //
+  // null when unreachable, never 0: a zero is a measurement and this is an absence.
+  filesystem_free_bytes: number | null;
+  filesystem_total_bytes: number | null;
+  // Properties of the STORAGE, so present with or without `?udid=`. From the DB, so populated even
+  // when unreachable — `counts_as_of` is what says they were true at last contact rather than now,
+  // and it is ALWAYS present so a client never infers staleness from `reachable`.
+  backup_count: number;
+  device_count: number;
+  counts_as_of: string;
 }
 
 // ServeMode is GET /api/health's `mode` — how this daemon is DEPLOYED, not who you are, which is

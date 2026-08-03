@@ -45,6 +45,10 @@ type Registry interface {
 	MarkVersionMissing(id string, missing bool) error
 	UDIDsWithVersions() ([]string, error)
 	AttributeVersion(id, storageID string) error
+	// CountVersionsByStorage backs the storage card's counts (qn.6d gap A, ruled 2026-08-03).
+	// One query for every storage rather than one per slot, because Storages() renders the whole
+	// list on every call.
+	CountVersionsByStorage() (map[string]store.StorageCounts, error)
 }
 
 // Auditor records the version-delete audit rows (*store.Store satisfies it). Detail never

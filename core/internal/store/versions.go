@@ -238,3 +238,41 @@ func timePtrOrNil(n sql.NullString) (*time.Time, error) {
 	}
 	return &t, nil
 }
+
+// StorageCounts is how many versions a storage holds and how many distinct devices they belong to.
+// Both are for the storage-card surface (qn.6d gap A, ruled 2026-08-03).
+type StorageCounts struct {
+	Backups int
+	Devices int
+}
+
+// CountVersionsByStorage returns per-storage counts keyed by storage_id, in ONE query.
+//
+// MISSING ROWS ARE INCLUDED, which is a ruled choice and not an oversight (qn.6d rung-ruled
+// decision 3). It follows UDIDsWithVersions' reasoning — a version whose artifact has vanished is
+// still history the user should see — and it deliberately differs from Slot.hasVersionFor, which
+// EXCLUDES missing rows because "will the next backup be full" depends on a usable artifact. Two
+// questions, two answers; the divergence is intentional.
+//
+// Rows with a NULL storage_id are omitted: unattributed means the server has not worked out which
+// storage they belong to, and counting them against any storage would be a guess. A storage with no
+// rows at all is absent from the map, so callers must treat a miss as zero rather than as unknown.
+func (s *Store) CountVersionsByStorage() (map[string]StorageCounts, error) {
+	rows, err := s.db.Query(
+		`SELECT storage_id, COUNT(*), COUNT(DISTINCT udid) FROM versions
+		 WHERE storage_id IS NOT NULL GROUP BY storage_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]StorageCounts)
+	for rows.Next() {
+		var id string
+		var c StorageCounts
+		if err := rows.Scan(&id, &c.Backups, &c.Devices); err != nil {
+			return nil, err
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}

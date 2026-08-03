@@ -1,6 +1,11 @@
 package storage
 
-import "github.com/novkostya/quince/core/internal/wire"
+import (
+	"time"
+
+	"github.com/novkostya/quince/core/internal/store"
+	"github.com/novkostya/quince/core/internal/wire"
+)
 
 // Refresher re-resolves ONE declared storage and returns the Slot it is now.
 //
@@ -20,14 +25,35 @@ func (m *Manager) SetRefresher(f Refresher) { m.refresh = f }
 // gigabytes move.
 func (m *Manager) Storages(udid string) []wire.Storage {
 	slots := m.slotsSnapshot()
+	// ONE count query for the whole list, not one per slot (qn.6d gap A). A failure is not fatal:
+	// counts are a card detail, where reachability and the full-transfer warning are the facts a
+	// user acts on. A nil map yields zeroes, and `counts_as_of` still stamps the attempt — the
+	// alternative, failing the whole list because a COUNT did not run, would hide the storages.
+	counts, asOf, err := m.countsNow()
+	if err != nil {
+		m.log.Warn("storage counts unavailable — cards will show zero", "err", err)
+	}
 	out := make([]wire.Storage, 0, len(slots))
 	for i, s := range slots {
-		out = append(out, m.storageToWire(s, i == 0, udid))
+		out = append(out, m.storageToWire(s, i == 0, udid, counts, asOf))
 	}
 	return out
 }
 
-func (m *Manager) storageToWire(s Slot, isDefault bool, udid string) wire.Storage {
+// countsNow reads every storage's counts and stamps them ONCE.
+//
+// The stamp belongs to the QUERY, not to each row: all the counts in one response came from one
+// round trip, so rendering them with per-slot timestamps would say two cards were true at different
+// moments when they were true at the same one. Cheap to get wrong — `now()` per slot compiles and
+// looks right — and it also made an unsynchronised test clock race under `-race`.
+func (m *Manager) countsNow() (map[string]store.StorageCounts, string, error) {
+	asOf := m.now().UTC().Format(time.RFC3339)
+	counts, err := m.reg.CountVersionsByStorage()
+	return counts, asOf, err
+}
+
+func (m *Manager) storageToWire(s Slot, isDefault bool, udid string,
+	counts map[string]store.StorageCounts, countsAsOf string) wire.Storage {
 	// A storage that was never reached has no backend, and "unknown" says so rather than guessing.
 	// It is a declared value in the enum precisely so a client is not left reading an empty string
 	// as either "none" or "not sent".
@@ -49,6 +75,27 @@ func (m *Manager) storageToWire(s Slot, isDefault bool, udid string) wire.Storag
 		// full transfer — and pre-empt the warning the user is owed.
 		full := !s.hasVersionFor(m, udid)
 		v.WillBeFull = &full
+	}
+
+	// Counts are the DB's answer, so they are populated whether or not the disk is reachable, and
+	// CountsAsOf is what tells a client they were true at last contact rather than now. A storage
+	// with no rows is simply absent from the map — the zero value is the right answer.
+	c := counts[s.StorageID]
+	v.BackupCount, v.DeviceCount = c.Backups, c.Devices
+	v.CountsAsOf = countsAsOf
+
+	// Capacity is the FILESYSTEM's and only exists when the path can be read. NULL rather than 0
+	// when unreachable: a zero is a measurement and this is an absence (ruled 2026-08-03).
+	if s.Reachable {
+		if free, total, err := FilesystemSpace(s.Root); err == nil {
+			f, t := int64(free), int64(total) //nolint:gosec // filesystem sizes do not exceed int64
+			v.FilesystemFreeBytes, v.FilesystemTotalBytes = &f, &t
+		} else {
+			// Reachable but unmeasurable — a path that became unreadable between the resolve and
+			// this call. Leaving both null is honest; substituting 0 would claim a full disk.
+			m.log.Warn("statfs failed on a reachable storage — capacity omitted",
+				"storage", s.Name, "path", s.Root, "err", err)
+		}
 	}
 	return v
 }
@@ -127,11 +174,19 @@ func (m *Manager) RecheckStorage(id string) (wire.Storage, bool) {
 }
 
 // renderSlot renders one slot by index under the read lock.
+//
+// The count query runs OUTSIDE the lock — it is a database round trip, and holding the slot lock
+// across it would block every reader for its duration. Rechecking one storage is rare enough that
+// a second query costs nothing worth pooling with Storages().
 func (m *Manager) renderSlot(idx int) wire.Storage {
+	counts, asOf, err := m.countsNow()
+	if err != nil {
+		m.log.Warn("storage counts unavailable — card will show zero", "err", err)
+	}
 	m.mu.RLock()
 	s := m.slots[idx]
 	m.mu.RUnlock()
-	return m.storageToWire(s, idx == 0, "")
+	return m.storageToWire(s, idx == 0, "", counts, asOf)
 }
 
 // Recheck satisfies httpapi.StorageReader.

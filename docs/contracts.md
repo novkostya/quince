@@ -261,8 +261,21 @@ Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Addi
 
 ```
 GET  /api/storages                                        → {storages: Storage[]}
+GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
+POST /api/storages/{id}/recheck                           → 200 {storage} | 404
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
+
+**The `?udid=` form and the re-probe were BUILT by `qn.6c` and never listed here** — they existed
+only in the prose below and in §2's `will_be_full` comment. Listing them is a drift correction, not
+a new surface (`qn.6d`, quince#443).
+
+**`{id}` is what the code serves and `{name}` is what is RULED.** quince#570, 2026-08-02: the API
+addresses a storage by its config `name`, not the marker UUID, because an unreachable storage has no
+UUID and an unreachable storage is the only one the button exists for. **Ruled and NOT yet built** —
+the route above is written as it currently behaves, so a client author is not told a lie; the key
+change is quince#570's to land, and `qn.6d`'s Forget (`DELETE /api/config/storage/{name}`) is already
+written to the ruled form.
 
 Three sub-decisions, each with the rung's recommendation:
 
@@ -621,10 +634,32 @@ Storage: {
                                //                     mountpoint is created as a NEW storage and
                                //                     backups land on the system disk.
                                //   backend_mismatch  the marker and the probe disagree (remount)
-  "will_be_full": true         // this device's next backup here is a FULL transfer, because
+  "will_be_full": true,        // this device's next backup here is a FULL transfer, because
                                // incremental is scoped to (device, storage) and there is no prior
                                // version on this one. Present ONLY when `?udid=` is passed —
                                // the list is device-independent by ruling (2026-07-31).
+
+  // --- space and counts (qn.6d gap A, Operator ruling 2026-08-03) ---
+  "filesystem_free_bytes":  1200000000000,
+  "filesystem_total_bytes": 3600000000000,
+                               // `statfs` on this storage's path — of the FILESYSTEM, NEVER of the
+                               // storage. Two storages that are two directories on one disk report
+                               // IDENTICAL figures and nothing distinguishes them: `filesystem_id`
+                               // and a `filesystem_shared` boolean were both offered and both
+                               // DECLINED. The card renders no caveat and a user may read
+                               // 1.2 + 1.2 as 2.4 TB — a RULED ACCEPTANCE, not a bug to file.
+                               // NULL when unreachable, never 0: a zero is a measurement and this
+                               // is an absence.
+  "backup_count": 14,          // versions attributed to this storage. MISSING versions COUNT,
+  "device_count": 2,           // matching UDIDsWithVersions and deliberately unlike the
+                               // will_be_full test, which needs a USABLE artifact. Versions with a
+                               // null storage_id are charged to nobody.
+                               // Properties of the STORAGE: present with or without `?udid=`.
+  "counts_as_of": "2026-08-02T18:20:00Z"
+                               // when the counts were last true. ALWAYS present, so a client never
+                               // infers staleness from `reachable`. Counts come from the DB and
+                               // stay populated when the disk is gone; capacity does not. This
+                               // field is what carries that asymmetry.
 }
 
 Version: { ..., "storage_id": "01J..." | null }
