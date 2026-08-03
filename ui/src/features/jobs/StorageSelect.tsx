@@ -122,14 +122,14 @@ export function StorageNotices({
               variant="outline"
               size="sm"
               className="h-6 px-2 text-xs sm:h-6"
-              disabled={rechecking[s.id] === "pending"}
-              onClick={() => recheck(s.id)}
+              disabled={rechecking[s.name] === "pending"}
+              onClick={() => recheck(s.name)}
               data-testid="storage-recheck"
               aria-label={`Re-check ${s.name}`}
             >
-              {rechecking[s.id] === "pending" ? "Checking…" : "Re-check"}
+              {rechecking[s.name] === "pending" ? "Checking…" : "Re-check"}
             </Button>
-            {rechecking[s.id] === "failed" ? (
+            {rechecking[s.name] === "failed" ? (
               <span data-testid="storage-recheck-failed">couldn&rsquo;t re-check</span>
             ) : null}
           </p>

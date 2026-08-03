@@ -112,7 +112,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/jobs/{id}/cancel", deps.handleJobCancel())
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
 	apiMux.HandleFunc("GET /api/storages", deps.handleStorages())
-	apiMux.HandleFunc("POST /api/storages/{id}/recheck", deps.handleStorageRecheck())
+	apiMux.HandleFunc("POST /api/storages/{name}/recheck", deps.handleStorageRecheck())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

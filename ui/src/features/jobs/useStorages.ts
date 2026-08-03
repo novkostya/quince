@@ -24,12 +24,12 @@ export interface Storages {
   // recheck asks the server to look at ONE storage again, then RELOADS THE DEVICE-SCOPED LIST.
   //
   // IT DELIBERATELY DOES NOT SPLICE THE 200 {storage} RESPONSE INTO THE LIST, and this is the
-  // whole subtlety of the endpoint. `POST /api/storages/{id}/recheck` is device-INDEPENDENT —
-  // `RecheckStorage(id)` takes no udid — so its `will_be_full` is always null. Splicing it would
+  // whole subtlety of the endpoint. `POST /api/storages/{name}/recheck` is device-INDEPENDENT —
+  // `RecheckStorage(name)` takes no udid — so its `will_be_full` is always null. Splicing it would
   // silently drop "First backup to X — this transfers everything" at exactly the moment the disk
   // came back and that warning became true, which is story 8's claim disappearing on success.
   // Re-fetching `?udid=` costs one request and keeps the pair fact the server owns.
-  recheck: (id: string) => void;
+  recheck: (name: string) => void;
   rechecking: Record<string, RecheckState>;
 
   // reload refetches the device-scoped list. The caller drives it, because the event that
@@ -95,20 +95,20 @@ export function useStorages(udid: string): Storages {
   }, [udid, load]);
 
   const recheck = React.useCallback(
-    (id: string) => {
-      setRechecking((m) => ({ ...m, [id]: "pending" }));
+    (name: string) => {
+      setRechecking((m) => ({ ...m, [name]: "pending" }));
       void (async () => {
         try {
-          await api.post(`/api/storages/${encodeURIComponent(id)}/recheck`);
+          await api.post(`/api/storages/${encodeURIComponent(name)}/recheck`);
         } catch {
           // A 404 (the storage is no longer declared) and a dropped connection land here alike.
           // Both mean "the press did nothing", which is what the row says — and neither is a
           // reason to blank a list that is still the last thing the server told us.
-          if (live.current) setRechecking((m) => ({ ...m, [id]: "failed" }));
+          if (live.current) setRechecking((m) => ({ ...m, [name]: "failed" }));
           return;
         }
         await load(udid);
-        if (live.current) setRechecking((m) => ({ ...m, [id]: "idle" }));
+        if (live.current) setRechecking((m) => ({ ...m, [name]: "idle" }));
       })();
     },
     [udid, load],
