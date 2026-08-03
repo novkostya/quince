@@ -1,0 +1,141 @@
+import { HardDrive, AlertTriangle } from "lucide-react";
+import type { Storage } from "@/lib/types";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { RelativeTime } from "@/components/RelativeTime";
+import { formatBytes } from "@/lib/format";
+
+// StorageCard is one declared storage on Home (qn.6d stories 2-4).
+//
+// It mirrors DeviceCard's anatomy deliberately — same Card/CardContent shell, same `h-full` +
+// `mt-auto` so the two kinds align in one grid, same title/status/meta rhythm. Storage is a PEER of
+// Device, and a card that looked like a different species would say otherwise.
+//
+// THE ACTION SLOT IS EMPTY IN THIS RUNG. Devices put `Back up now` there; storage has no card-level
+// action until a later rung. The slot is still reserved so the two card kinds keep the same shape.
+
+// freePercent is what the bar fills to: the fraction of the filesystem still FREE — so the bar
+// EMPTIES as the disk fills, like a battery.
+//
+// That is the spec's card mockup (`qn.6d.md`: "1.2 TB free of 3.6 TB" over a bar reading 33%), and
+// the reflex it contradicts is worth naming because a reviewer will have it: most disk UIs fill by
+// USAGE, which for these figures would read 67%.
+//
+// Free wins here on one concrete ground — the number beside the bar is then DERIVABLE from the line
+// directly above it. A reader sees "1.2 TB free of 3.6 TB" and "33%" and the two agree; "67%" is the
+// complement, and nothing on the card shows the subtraction. A gauge whose number cannot be checked
+// against its own label is a gauge people misread.
+//
+// Returns null when either figure is missing — an unreachable storage has no capacity at all, and a
+// bar at 0% would read as "no space left" rather than "no measurement". The caller hides the bar
+// entirely instead.
+function freePercent(s: Storage): number | null {
+  const { filesystem_free_bytes: free, filesystem_total_bytes: total } = s;
+  if (free === null || total === null || total <= 0 || free < 0) return null;
+  return Math.min(100, (free / total) * 100);
+}
+
+export function StorageCard({ storage, showDefault }: { storage: Storage; showDefault: boolean }) {
+  const pct = freePercent(storage);
+  const unreachable = !storage.reachable;
+
+  return (
+    <Card
+      data-testid="storage-card"
+      data-storage-name={storage.name}
+      className={`flex h-full flex-col${unreachable ? " border-dashed opacity-80" : ""}`}
+    >
+      <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <HardDrive size={14} className="shrink-0 text-muted" />
+              <span className="truncate text-sm font-semibold tracking-tight">{storage.name}</span>
+            </div>
+            {/* The name DEFAULTS to the path (quince#504), so repeating it below would say the same
+                thing twice on the single-storage install that default exists for. */}
+            {storage.name !== storage.path ? (
+              <div className="truncate text-xs text-muted">{storage.path}</div>
+            ) : null}
+          </div>
+          {/* `Default` labels nothing when there is only one storage — it is a distinction, and
+              there is nothing to distinguish it from. */}
+          {showDefault && storage.default ? <Badge tone="neutral">Default</Badge> : null}
+        </div>
+
+        {/* A degraded backend is a degraded mode and CLAUDE.md requires those be surfaced. Backend
+            is otherwise NOT a glance fact and lives on the details page; `copy` is the exception. */}
+        {storage.backend === "copy" ? (
+          <div className="mt-3">
+            <Badge tone="warn">
+              <AlertTriangle size={12} /> copy backend — every backup duplicates the whole tree
+            </Badge>
+          </div>
+        ) : null}
+
+        <div className="mt-3">
+          {unreachable ? (
+            // NO SIZE CLAIM for an unreachable storage — the same discipline VersionList follows for
+            // a missing version. Capacity is null rather than 0 on the wire precisely so the card
+            // cannot render "0 bytes free", which would read as a full disk.
+            <div data-testid="storage-unreachable-reason" className="text-xs text-warn">
+              {storage.unreachable_reason ?? "not connected"}
+            </div>
+          ) : pct === null ? (
+            <div className="text-xs text-muted">free space unavailable</div>
+          ) : (
+            <>
+              {/* ALWAYS plain "1.2 TB free" — never "on this filesystem". Gap A, ruled 2026-08-03:
+                  equal byte counts cannot prove two storages share a disk, and the two fields that
+                  would have carried filesystem identity were both DECLINED. Two storages on one
+                  disk each show this figure with nothing saying it is the same space. That is a
+                  RULED ACCEPTANCE — do not "fix" it by reintroducing the distinction. */}
+              <div data-testid="storage-space" className="text-sm">
+                <span className="font-medium tabular-nums">
+                  {formatBytes(storage.filesystem_free_bytes ?? 0)}
+                </span>{" "}
+                <span className="text-muted">
+                  free of{" "}
+                  <span className="tabular-nums">
+                    {formatBytes(storage.filesystem_total_bytes ?? 0)}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <Progress percent={pct} className="flex-1" />
+                <span className="w-9 shrink-0 text-right text-xs tabular-nums text-subtle">
+                  {Math.round(pct)}%
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div
+          data-testid="storage-counts"
+          className="mt-3 flex flex-wrap gap-x-3 text-xs text-subtle"
+        >
+          <span>
+            {storage.backup_count} {storage.backup_count === 1 ? "backup" : "backups"}
+          </span>
+          <span>
+            {storage.device_count} {storage.device_count === 1 ? "device" : "devices"}
+          </span>
+          {/* An unreachable storage's counts came from the DB and were true at LAST CONTACT. The
+              card DATES them rather than presenting them as current — story 4, and the reason
+              `counts_as_of` is always present rather than inferred from `reachable`. */}
+          {unreachable ? (
+            <span data-testid="storage-counts-as-of">
+              as of <RelativeTime iso={storage.counts_as_of} />
+            </span>
+          ) : null}
+        </div>
+
+        {/* The action slot devices use for `Back up now`. Empty this rung, and reserved so the two
+            card kinds keep one shape. */}
+        <div className="mt-auto pt-4" />
+      </CardContent>
+    </Card>
+  );
+}
