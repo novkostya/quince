@@ -21,6 +21,47 @@ func (p *Provider) setOp(op wire.Op) {
 	p.bus.PublishEvent(wire.EventOpUpdated, op)
 }
 
+// inFlightMsg mirrors deviceops.inFlightMsg VERBATIM. The demo exists to script what the real
+// manager does, so a message that drifted would make the demo teach a refusal the product does not
+// give — and the e2e stories read this text.
+const inFlightMsg = "another operation is already running on this device — wait for it to finish"
+
+// startGuardedOp is the demo's copy of deviceops.Manager.startGuardedOp: ONE in-flight device op
+// per UDID whatever its kind (quince#465, ruled 2026-08-02), released however the script ends.
+//
+// A copy rather than shared code because the two providers share no types — `demo.Provider`
+// satisfies `httpapi.DeviceOps` structurally, which is the whole arrangement. What must not drift
+// is the RULE and the message, so both are stated here against the real one.
+//
+// The demo's slot is separate from `p.running`, the backup slot, on purpose: whether a device op
+// should also be refused while a BACKUP runs is explicitly NOT ruled (quince#465), and sharing one
+// map would decide it by construction.
+func (p *Provider) startGuardedOp(kind, udid, msg string, script func(opID string)) (string, bool) {
+	opID := id.New()
+	p.mu.Lock()
+	if _, busy := p.opInflight[udid]; busy {
+		p.mu.Unlock()
+		return "", false
+	}
+	p.opInflight[udid] = opID
+	p.ops[opID] = wire.Op{ID: opID, UDID: udid, Kind: kind, State: "running", Message: msg}
+	op := p.ops[opID]
+	p.mu.Unlock()
+	p.bus.PublishEvent(wire.EventOpUpdated, op)
+	go func() {
+		defer p.releaseUDID(udid)
+		script(opID)
+	}()
+	return opID, true
+}
+
+// releaseUDID frees the demo's per-UDID op slot on every exit path the script can take.
+func (p *Provider) releaseUDID(udid string) {
+	p.mu.Lock()
+	delete(p.opInflight, udid)
+	p.mu.Unlock()
+}
+
 // Op returns a pair/encryption op (GET /api/ops/{id}).
 func (p *Provider) Op(opID string) (wire.Op, bool) {
 	p.mu.RLock()
@@ -41,9 +82,12 @@ func (p *Provider) Pair(_ context.Context, udid string) (string, int, string) {
 	if dev.Transports.USB == nil {
 		return "", http.StatusConflict, "pairing needs a USB connection — connect the device by cable"
 	}
-	opID := id.New()
-	p.setOp(wire.Op{ID: opID, UDID: udid, Kind: "pair", State: "running", Message: "Starting pairing…"})
-	go p.scriptPair(opID, udid)
+	opID, free := p.startGuardedOp("pair", udid, "Starting pairing…", func(opID string) {
+		p.scriptPair(opID, udid)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return opID, http.StatusAccepted, ""
 }
 
@@ -92,9 +136,12 @@ func (p *Provider) Encryption(_ context.Context, udid, action, password, oldPass
 	default:
 		return "", http.StatusUnprocessableEntity, "unknown action: " + action
 	}
-	opID := id.New()
-	p.setOp(wire.Op{ID: opID, UDID: udid, Kind: "encryption", State: "running", Message: "Applying encryption change…"})
-	go p.scriptEncryption(opID, udid, action)
+	opID, free := p.startGuardedOp("encryption", udid, "Applying encryption change…", func(opID string) {
+		p.scriptEncryption(opID, udid, action)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return opID, http.StatusAccepted, ""
 }
 
@@ -126,13 +173,16 @@ func (p *Provider) WifiSync(_ context.Context, udid, action string) (string, int
 	if action != "enable" && action != "disable" {
 		return "", http.StatusUnprocessableEntity, "unknown action: " + action
 	}
-	opID := id.New()
 	msg := "Turning off Wi-Fi sync…"
 	if action == "enable" {
 		msg = "Turning on Wi-Fi sync so this device can back up without a cable…"
 	}
-	p.setOp(wire.Op{ID: opID, UDID: udid, Kind: "wifi_sync", State: "running", Message: msg})
-	go p.scriptWifiSync(opID, udid, action)
+	opID, free := p.startGuardedOp("wifi_sync", udid, msg, func(opID string) {
+		p.scriptWifiSync(opID, udid, action)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return opID, http.StatusAccepted, ""
 }
 
