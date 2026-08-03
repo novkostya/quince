@@ -256,7 +256,7 @@ POST /api/jobs/{id}/cancel                              → 202 Job
 GET  /api/jobs/{id}/log                                 → text/plain (full so-far; live tail is WS)
 ```
 
-**RULED and IMPLEMENTED (was `PROPOSED (gap)`): a storage collection, and a job that names one — `qn.6c`, quince#378.** The READ half — `GET /api/storages`, the `Storage` object and `POST /api/storages/{id}/recheck` — ships in story 5c. `POST /api/jobs {storage_id}` is ruled and NOT yet built; it lands with story 6.
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): a storage collection, and a job that names one — `qn.6c`, quince#378.** The READ half — `GET /api/storages`, the `Storage` object and `POST /api/storages/{id}/recheck` — ships in story 5c. `POST /api/jobs {storage_id}` is RULED AND IMPLEMENTED too — it landed with `qn.6d` story 6 (quince#584), which is the PR canon named. The request field is accepted at `handlers_jobs.go` and genuinely consumed: `ResolveChoice` maps it to a concrete storage, `BindJobStorage` records it for the life of the job, and a retry inherits it.
 Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Additive:
 
 ```
@@ -576,7 +576,7 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
 
 **RULED (was `PROPOSED (gap)`): a `Storage` object, and how a job picks one — `qn.6c`, quince#378.**
 **Nothing in this block is unruled.** The `Storage` object and `GET /api/storages` are ruled AND
-BUILT (story 5c); `POST /api/jobs {storage_id}` is ruled and **not yet built**, landing with story 6
+BUILT (story 5c); `POST /api/jobs {storage_id}` is BUILT too, with `qn.6d` story 6
 — which is *work to do*, not *a thread to stop*.
 
 The heading said `PROPOSED (gap)` until 2026-08-01 while its own body already read *"now ruled AND
