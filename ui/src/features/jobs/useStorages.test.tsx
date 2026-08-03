@@ -20,6 +20,13 @@ function storage(over: Partial<Storage>): Storage {
     unreachable_code: "missing_medium",
     unreachable_reason: "the path is readable but carries no quince storage marker",
     will_be_full: null,
+    // This default is an UNREACHABLE storage, so capacity is null and counts are populated — the
+    // asymmetry gap A's ruling defines. A test wanting a reachable one overrides all three.
+    filesystem_free_bytes: null,
+    filesystem_total_bytes: null,
+    backup_count: 3,
+    device_count: 1,
+    counts_as_of: "2026-08-02T18:20:00Z",
     ...over,
   };
 }
