@@ -26,7 +26,7 @@ ask of this rung — `name` optional, defaulting to the path — is **already di
 | --- | --- |
 | `core/internal/storage/` | per-storage capacity and counts; whatever Forget's seam turns out to be |
 | `core/internal/store/` | a per-storage version count and a per-storage device count — **both new** |
-| `core/internal/wire/` | `Storage` gains space, counts and a freshness stamp (gap A) |
+| `core/internal/wire/` | `Storage` gains space and counts (gap A) |
 | `core/internal/httpapi/` | the Forget surface (gap B) |
 | `core/internal/demo/` | the fixture storages gain the new fields |
 | `ui/src/components/Sidebar.tsx` | `Devices` → `Home`; `HardDrive` is handed to storage |
@@ -34,7 +34,7 @@ ask of this rung — `name` optional, defaulting to the path — is **already di
 | `ui/src/routes/router.tsx` | `storage/:name` |
 | `ui/src/features/settings/ConfigEditor.tsx` | reconcile the read-only line that already defers here |
 | `docs/` | contracts §1/§2; `ui.design.md` principle 4; `design.md` §8 |
-| `ui/e2e/` | `story7-storage.spec.ts` |
+| `ui/e2e/` | `story7-storage.spec.ts`, and `story8-forget-storage.spec.ts` for Forget |
 
 **Out of scope**, per quince#443 and not revisited: **Add a storage** (`qn.6e`); **changing a
 storage's path**; **estimated-full projection and a usage sparkline** (both need periodic
@@ -272,9 +272,8 @@ is out. The existing precedent to copy is `VersionList`'s missing row
 
 ### The details page
 
-**Status header** — path, backend, reachability, the marker UUID, created-at. This is
-`quince-storage.json` rendered (`storage/storagemarker.go:42-48`, five fields), and it is what
-makes a storage an object rather than a path. `qn.6c` story 7's three distinguishable failures each
+**Status header** — path, backend, reachability, the marker UUID. It is what makes a storage an
+object rather than a path. `qn.6c` story 7's three distinguishable failures each
 land here with their remedy — **subject to quince#569, which is why the page must branch on the
 code and fall back to `unreachable_reason` prose rather than assuming the code is one of three**.
 
@@ -576,15 +575,6 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 7. **The demo cannot produce two storages on one real filesystem**, which is why G1 is split. If a
    future rung gives the demo provider a real temp-dir-backed storage, G1a could move to ui-e2e;
    until then the split is the honest shape.
-8. **`created_at` is NOT on the wire, so the details page does not render it — and this spec asked
-   for it.** The *Status header* section above says the header shows *"path, backend, reachability,
-   the marker UUID, created-at"*, and `Storage` carries no `created_at`. The daemon has the value
-   twice over (`StorageMarker.CreatedAt` and `StorageRow.CreatedAt`); it simply never reaches a
-   client. **Gap A's ruling settled a specific field set and this was not in it**, so adding one is a
-   contract addition rather than an implementation detail, and PR 5 renders the four fields that
-   exist rather than improvising a fifth. Small and additive when someone rules it; recorded here
-   rather than quietly dropped, because a spec that asks for a field no PR delivers is the
-   pointer-outliving-its-referent shape this rung has already produced four times.
 
 ---
 
