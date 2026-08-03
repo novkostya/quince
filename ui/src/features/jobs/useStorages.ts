@@ -73,10 +73,14 @@ export function useStorages(udid: string): Storages {
     };
   }, []);
 
+  // An EMPTY udid omits the parameter entirely rather than sending `?udid=`, which is what lets this
+  // hook serve Home's device-independent list as well as the per-device selector (qn.6d). The two
+  // differ only in `will_be_full`, which the server adds when asked about ONE device — so a second
+  // hook would duplicate the recheck machinery to change one query string.
   const load = React.useCallback(async (forUdid: string) => {
     try {
       const r = await api.get<{ storages: Storage[] }>(
-        `/api/storages?udid=${encodeURIComponent(forUdid)}`,
+        forUdid === "" ? `/api/storages` : `/api/storages?udid=${encodeURIComponent(forUdid)}`,
       );
       if (live.current) setState({ status: "loaded", storages: r.storages ?? [] });
     } catch {
