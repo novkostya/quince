@@ -38,8 +38,17 @@ primary_region = "fra"
   # thing this deployment could get wrong.
 
 # `[processes]` sets CMD; it does NOT replace the image's ENTRYPOINT ["quince"]. So this becomes
-# `quince serve --public-demo`. The group is named `app` because that is fly's default group —
-# any other name would need `processes = [...]` on the service below.
+# `quince serve --public-demo`.
+#
+# The group is named `app`, which is fly's default group name — and naming it that does NOT excuse
+# the service from binding to it. This file said it did, and the first deploy refused:
+#
+#   Service has no processes set but app has 1 processes defined;
+#   update fly.toml to set processes for each service
+#
+# flyctl requires the binding whenever ANY [processes] block exists, whatever the group is called.
+# Hence `processes = ["app"]` on the service below. Recorded because "it is the default name, so
+# the binding is optional" is a plausible reading that costs a failed deploy to disprove.
 #
 # --public-demo, NOT --demo. The difference is the whole point of the mode: the password is preset
 # so a visitor can log in, and Secure cookies are NOT forced off. Deploying --demo here would put
@@ -51,6 +60,9 @@ primary_region = "fra"
 [http_service]
   internal_port = 8968
   force_https = true
+  # Binds this service to the `app` process group above. Required, not decorative — see the note
+  # on [processes]; without it flyctl refuses the whole config before it builds anything.
+  processes = ["app"]
 
   # "stop", NEVER "suspend" — this is the load-bearing line in the file.
   #

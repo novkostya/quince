@@ -96,15 +96,22 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 ```
 
-Two known-imperfect things in that block, stated rather than hidden:
+Three things about that block, stated rather than hidden:
 
+- **`actions/checkout@v7`, and this said `@v4` until the first run said otherwise.** v4 runs on
+  Node 20, which GitHub deprecated, and the runner warned about it. The wrong number came from
+  copying fly's own documentation example rather than reading the action's releases — which is the
+  exact failure mode *"interface facts and version pins are looked up live, never remembered"*
+  exists to prevent, reached by trusting somebody else's stale memory instead of my own. **Check
+  this against the live releases when installing rather than trusting this line**, since it is a
+  version number in a document and will go stale the same way.
 - **`@master` is not a pin**, and this project's canon says to pin. fly publishes no maintained
   release tag for the `setup-flyctl` subdirectory action, and the tags that exist predate the
   repository's split, so pinning to one is not obviously safer than tracking `master`. The
