@@ -1,0 +1,42 @@
+name: demo-deploy
+
+# NEVER `pull_request`. GitHub withholds secrets from FORK pull requests but hands them to
+# same-repo ones, so a deploy triggered by `pull_request` gives the token to any branch anybody
+# pushes. There are no outside contributors here, which makes this a habit rather than a live
+# exposure — and it is the standard way this goes wrong.
+# SCHEDULED + MANUAL, deliberately not on push (Operator, 2026-08-03). A demo does not need to
+# track every merge, and a deploy on every push to `main` spends a full remote image build each
+# time to move a fixture-data instance nobody is looking at.
+#
+# 22:00 UTC is overnight for the Operator. Two GitHub facts that decide how much to trust it:
+# a scheduled workflow runs ONLY from the DEFAULT BRANCH, whatever branch the schedule was
+# written on; and scheduled runs are best-effort — GitHub delays them under load and does not
+# promise the minute. Neither matters for a demo refresh, and both would matter if anything
+# were ever gated on this having run.
+on:
+  schedule:
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+# Least privilege: this job reads the tree and talks to fly. It needs nothing from GitHub.
+permissions:
+  contents: read
+
+# One deploy at a time. Without this, a manual trigger and the nightly run can overlap and the
+# LATER image can lose to the earlier one.
+concurrency:
+  group: demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # NOT a bare `flyctl deploy`. deploy/fly-deploy supplies the build-args the Dockerfile
+      # needs from versions.env — without them four ARGs arrive empty and the build dies
+      # somewhere that looks unrelated. The script says which four and why.
+      - run: ./deploy/fly-deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
