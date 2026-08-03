@@ -602,12 +602,25 @@ in the same diff as the flip rather than in a follow-up.
 | 2 | `Devices` → `Home`, the icon swap, and the `ui.design.md` / `design.md` amendments | **`@novkostya`** — code owner |
 | 3 | `Storage` gains space + counts + freshness; the two new store queries; the demo fixture | architect |
 | 4 | the card on Home — stories 2, 3, 4 (G1a, G1b, G2) | architect |
-| 5 | the details page — stories 5, 6, 7 (G3, G4) | architect |
+| 5a | the details page — stories 5 and 7, story 8's warning (G4); settles open question 3 in canon | **`@novkostya`** — code owner |
+| 5b | `Back up now` scoped to this storage — story 6 (G3) | architect |
 | 6 | Forget — stories 8, 9 (G5, G5b, G6) | architect |
 | 7 | `story7-storage.spec.ts` — the ui-e2e half | architect |
 
 **No status column** — `qn.6c`'s table recorded why, and its one self-exempting cell went stale by
 the event it was waiting for. A PR number is immutable; a reader who wants status has the forge.
+
+**PR 5 split into 5a and 5b while it was being built, and the table says so rather than keeping the
+plan.** `useBackup` is keyed by udid and hooks cannot be called in a loop, so *`Back up now` scoped
+to this storage* needs a component per device — a different claim from *the page exists and is
+correctly scoped*, and a different approval path, since 5a touches code-owned canon and 5b does not.
+
+**It is recorded because a slicing table is a status table** (quince#409). The split was announced in
+5a's PR body and then **dropped out of a review summary** that counted the stories 5a delivered
+rather than the ones the rung still owed — which would have taken **G3** with it, the one gate that
+asserts on the job the button creates rather than on what is rendered. The arithmetic was right at
+every step and the total went wrong. Writing the split into the table is what makes it survive the
+next summary.
 
 **Why 3 is separated from 4 rather than folded in.** The ordering test `qn.6c` recorded is *which
 one's absence makes the other wrong*, not which is smaller. A card built before the wire fields
