@@ -202,7 +202,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		log.Error("storage: startup reconciliation failed", "error", err)
 	}
 
-	// THE RE-PROBE BEHIND POST /api/storages/{id}/recheck (quince#435: reachability may change
+	// THE RE-PROBE BEHIND POST /api/storages/{name}/recheck (quince#435: reachability may change
 	// without a restart; the storage LIST still needs one). It closes over the same resolver the
 	// startup loop used, so a recheck and a restart cannot disagree about what a storage is.
 	//

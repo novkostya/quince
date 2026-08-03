@@ -294,12 +294,19 @@ POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 only in the prose below and in §2's `will_be_full` comment. Listing them is a drift correction, not
 a new surface (`qn.6d`, quince#443).
 
-**`{id}` is what the code serves and `{name}` is what is RULED.** quince#570, 2026-08-02: the API
-addresses a storage by its config `name`, not the marker UUID, because an unreachable storage has no
-UUID and an unreachable storage is the only one the button exists for. **Ruled and NOT yet built** —
-the route above is written as it currently behaves, so a client author is not told a lie; the key
-change is quince#570's to land, and `qn.6d`'s Forget (`DELETE /api/config/storage/{name}`) is already
-written to the ruled form.
+**The route is keyed on `name`, and that is a hazard avoided rather than a preference.** quince#570,
+2026-08-02: the API addresses a storage by its config `name`, not the marker UUID, because **an
+unreachable storage has no UUID and is the only storage the button exists for** — nothing is ever
+minted for a path quince has not reached. `qn.6d`'s Forget (`DELETE /api/config/storage/{name}`) was
+written to that form from the start; this route was **built to it by quince#610**, which is also the
+measurement of what keying on the id had cost: the client sent `POST /api/storages//recheck`, the
+router path-cleaned that to a **`307`** — method-preserving, so the browser re-sent the POST — at a
+target matching no pattern, and the user got a silent `404` on the one storage they most wanted to
+recheck.
+
+**The general rule, since it outlives this route: never key a route on a value that can legitimately
+be empty.** The `307` is Go's own `ServeMux` and is not going away. What a route controls is whether
+a client can produce that URL at all.
 
 Three sub-decisions, each with the rung's recommendation:
 
