@@ -7,7 +7,6 @@ import { useStorages } from "@/features/jobs/useStorages";
 import { VersionList } from "@/features/versions/VersionList";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { RelativeTime } from "@/components/RelativeTime";
 import { formatBytes } from "@/lib/format";
 import { modelLine } from "@/features/devices/modelName";
 import type { Version } from "@/lib/types";
@@ -134,10 +133,6 @@ export function StorageDetailsPage() {
               </code>
             )
           }
-        />
-        <Row
-          label="Counts as of"
-          value={<RelativeTime iso={storage.counts_as_of} />}
         />
       </dl>
 

@@ -4,7 +4,6 @@ import type { Storage } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { RelativeTime } from "@/components/RelativeTime";
 import { formatBytes } from "@/lib/format";
 
 // StorageCard is one declared storage on Home (qn.6d stories 2-4).
@@ -139,14 +138,16 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
           <span>
             {storage.device_count} {storage.device_count === 1 ? "device" : "devices"}
           </span>
-          {/* An unreachable storage's counts came from the DB and were true at LAST CONTACT. The
-              card DATES them rather than presenting them as current — story 4, and the reason
-              `counts_as_of` is always present rather than inferred from `reachable`. */}
-          {unreachable ? (
-            <span data-testid="storage-counts-as-of">
-              as of <RelativeTime iso={storage.counts_as_of} />
-            </span>
-          ) : null}
+          {/* `counts_as_of` IS DELIBERATELY NOT RENDERED, because it says nothing — quince#588.
+
+              The spec justified it as *"counts came from the DB and were true at LAST CONTACT"*,
+              and that premise is wrong: the counts ARE DB rows, and the DB is reachable whether or
+              not the disk is. Unplugging a storage does not make its version count stale — quince
+              knows exactly how many rows point at it. The daemon stamps the field at REQUEST time,
+              so it reads "just now" on every card, for every storage, always.
+
+              What CAN go stale is whether those versions still exist on the disk, and that is
+              `Version.missing` — a different fact, with its own field, set by reconciliation. */}
         </div>
 
         {/* The action slot devices use for `Back up now`. Empty this rung, and reserved so the two

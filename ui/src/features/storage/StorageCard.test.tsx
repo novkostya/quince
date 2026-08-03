@@ -83,9 +83,9 @@ describe("StorageCard", () => {
     expect(screen.getByTestId("storage-unreachable-reason")).toHaveTextContent(
       "carries no quince storage marker",
     );
-    // Counts survive — they are the DB's answer and the DB is reachable — but they are DATED.
+    // Counts survive: they are DB rows and the DB is reachable regardless of the disk. They are
+    // NOT dated, because they are not stale -- quince#588.
     expect(screen.getByTestId("storage-counts")).toHaveTextContent("3 backups");
-    expect(screen.getByTestId("storage-counts-as-of")).toBeInTheDocument();
     // NO size claim at all. Null capacity must not become "0 B", which reads as a full disk.
     expect(screen.queryByTestId("storage-space")).not.toBeInTheDocument();
     expect(screen.queryByText(/0 B/)).not.toBeInTheDocument();
