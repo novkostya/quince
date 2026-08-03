@@ -31,17 +31,23 @@ export function Card({
   children,
   "data-testid": testId,
   "data-storage-name": storageName,
+  "data-udid": udid,
 }: {
   className?: string;
   children: ReactNode;
   "data-testid"?: string;
   "data-storage-name"?: string;
+  // Added when the storage page's device rows became Cards. It was on the plain <div> they
+  // replaced, so without this line the conversion would have dropped it silently — this file's
+  // own defect, one commit after documenting it.
+  "data-udid"?: string;
 }) {
   return (
     <div
       className={cn("rounded-card border border-line bg-card", className)}
       data-testid={testId}
       data-storage-name={storageName}
+      data-udid={udid}
     >
       {children}
     </div>
