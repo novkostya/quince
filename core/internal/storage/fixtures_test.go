@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,10 +121,18 @@ func writeSQLiteManifest(t *testing.T, path string) {
 
 // monotonicClock returns a now() that advances one second per call (RFC3339 is second-precision,
 // so distinct commits must land in distinct seconds → distinct versions/<ts> dirs).
+// MUTEX-GUARDED, because the Manager calls now() from whatever goroutine is rendering. The
+// production clock is `time.Now`, which is safe; this counter was not, and
+// TestRecheckDoesNotRaceReadsOfTheSameSlot found it the moment a render path began stamping a
+// timestamp (qn.6d gap A). The race was in the FIXTURE, not the Manager — worth saying, because a
+// `-race` failure inside a concurrency test invites the assumption that the subject broke.
 func monotonicClock() func() time.Time {
 	base := time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
+	var mu sync.Mutex
 	n := 0
 	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
 		n++
 		return base.Add(time.Duration(n) * time.Second)
 	}

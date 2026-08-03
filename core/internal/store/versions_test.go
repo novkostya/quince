@@ -135,3 +135,58 @@ func ids(vs []VersionRow) []string {
 	}
 	return out
 }
+
+// CountVersionsByStorage backs the storage card (qn.6d gap A). The two semantics asserted here are
+// both RULED choices rather than incidental behaviour, so they are pinned:
+//
+//   - MISSING rows COUNT (rung-ruled decision 3), following UDIDsWithVersions — a version whose
+//     artifact vanished is still history the user should see. This deliberately differs from
+//     Slot.hasVersionFor, which excludes them because "will the next backup be full" needs a
+//     USABLE artifact. Two questions, two answers.
+//   - NULL storage_id rows are OMITTED. Unattributed means the server has not worked out which
+//     storage they belong to; charging them to any storage would be a guess.
+func TestCountVersionsByStorage(t *testing.T) {
+	st := openTemp(t)
+	base := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	sA, sB := "01STORAGEA", "01STORAGEB"
+
+	rows := []VersionRow{
+		{ID: "01A1", UDID: "U1", Backend: "copy", CreatedAt: base, StorageID: &sA},
+		{ID: "01A2", UDID: "U1", Backend: "copy", CreatedAt: base.Add(time.Hour), StorageID: &sA},
+		{ID: "01A3", UDID: "U2", Backend: "copy", CreatedAt: base.Add(2 * time.Hour), StorageID: &sA},
+		// MISSING, and it must still be counted — the ruled choice.
+		{ID: "01A4", UDID: "U3", Backend: "copy", CreatedAt: base.Add(3 * time.Hour), StorageID: &sA, Missing: true},
+		{ID: "01B1", UDID: "U1", Backend: "copy", CreatedAt: base.Add(4 * time.Hour), StorageID: &sB},
+		// UNATTRIBUTED — belongs to no storage's count.
+		{ID: "01N1", UDID: "U9", Backend: "copy", CreatedAt: base.Add(5 * time.Hour)},
+	}
+	for _, r := range rows {
+		if err := st.InsertVersion(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := st.CountVersionsByStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A: four versions (one of them missing) across three distinct devices.
+	if got[sA].Backups != 4 {
+		t.Errorf("storage A backups = %d, want 4 — a MISSING version must still count", got[sA].Backups)
+	}
+	if got[sA].Devices != 3 {
+		t.Errorf("storage A devices = %d, want 3 (U1 twice, U2, U3)", got[sA].Devices)
+	}
+	if got[sB].Backups != 1 || got[sB].Devices != 1 {
+		t.Errorf("storage B = %+v, want {1 1}", got[sB])
+	}
+	// The unattributed row is charged to nobody, and a storage with no rows is simply absent —
+	// callers read a miss as zero rather than as unknown.
+	if len(got) != 2 {
+		t.Errorf("got %d storages %v, want exactly 2 — a NULL storage_id must not form a group", len(got), got)
+	}
+	if c, ok := got["01STORAGENOTHERE"]; ok || c.Backups != 0 {
+		t.Errorf("an unknown storage returned %+v, ok=%v — the zero value is the answer", c, ok)
+	}
+}

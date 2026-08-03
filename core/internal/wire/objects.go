@@ -226,6 +226,37 @@ type Storage struct {
 	// backup to a new storage is always full, and the server owns that answer because only it knows
 	// whether a (device, storage) pair has a prior version.
 	WillBeFull *bool `json:"will_be_full"`
+
+	// FilesystemFreeBytes / FilesystemTotalBytes are `statfs` on this storage's path — of the
+	// FILESYSTEM, never of the storage (qn.6d gap A, ruled 2026-08-03). The prefix is the whole
+	// point of the name: two storages that are two directories on one disk report IDENTICAL
+	// figures, and no field distinguishes them. `filesystem_id` and a `filesystem_shared` boolean
+	// were both offered to the Operator and both declined, so the card renders no caveat and a
+	// user may read 1.2 + 1.2 as 2.4 TB. That is a RULED ACCEPTANCE — do not "fix" it by
+	// reintroducing the distinction, and do not file it as a bug.
+	//
+	// NULL when the storage is unreachable, never 0: a zero is a measurement and this is an
+	// absence. Same discipline as WillBeFull.
+	FilesystemFreeBytes  *int64 `json:"filesystem_free_bytes"`
+	FilesystemTotalBytes *int64 `json:"filesystem_total_bytes"`
+
+	// BackupCount and DeviceCount are properties of the STORAGE, so they appear with or without
+	// `?udid=` — which continues to add only WillBeFull. They come from the DB, so they stay
+	// populated even when the storage is unreachable; CountsAsOf carries that asymmetry.
+	//
+	// MISSING versions are counted (qn.6d rung-ruled decision 3), matching UDIDsWithVersions and
+	// deliberately unlike Slot.hasVersionFor, which excludes them because "will the next backup be
+	// full" depends on a usable artifact.
+	BackupCount int `json:"backup_count"`
+	DeviceCount int `json:"device_count"`
+
+	// CountsAsOf is when the counts were last true, ALWAYS present. A client must never have to
+	// infer staleness from Reachable: an unreachable storage's counts are the DB's last word, and
+	// the card dates them rather than presenting them as current.
+	//
+	// RFC3339 string, matching Device.LastSeen and Version.CreatedAt — this package carries no
+	// time.Time on the wire.
+	CountsAsOf string `json:"counts_as_of"`
 }
 
 // StoragesResponse is GET /api/storages. StorageResponse is POST /api/storages/{id}/recheck.
