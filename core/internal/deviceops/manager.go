@@ -52,6 +52,10 @@ type Manager struct {
 
 	mu  sync.Mutex
 	ops map[string]wire.Op
+	// inflight is the per-UDID single-flight slot: udid → the op id holding the device. Separate
+	// from ops because ops RETAINS terminal ops (the GET /api/ops/{id} fallback reads them) while
+	// this must be empty the moment the op's goroutine ends. See startGuardedOp.
+	inflight map[string]string
 }
 
 // SetLockdown attaches a LockdownStore so a successful pair's records are backed up to
@@ -86,6 +90,7 @@ func NewManager(baseCtx context.Context, tools *Tools, devs Devices, b *bus.Bus,
 		enrichWait:      20 * time.Second,
 		validateTimeout: deviceOpTimeout,
 		ops:             map[string]wire.Op{},
+		inflight:        map[string]string{},
 	}
 }
 
@@ -99,14 +104,55 @@ func (m *Manager) Op(id string) (wire.Op, bool) {
 
 // --- op state transitions (mutate under lock, publish after unlock) ---
 
-func (m *Manager) startOp(kind, udid, msg string) wire.Op {
+// inFlightMsg is what a second concurrent device op on one device earns. ONE in-flight op per
+// UDID whatever its kind (quince#465, ruled 2026-08-02) — not per (UDID, kind), because
+// `wifi-sync` SEVERS the transport the other two run over and this project has already paid for
+// that discovery once (quince#363/quince#366: SetWifiSync verified its write by reading back over
+// the connection the write had just cut). A per-kind key would not merely fail to prevent that
+// combination; it is defined to permit it.
+//
+// It is a state conflict the user can act on, which contracts.md §1 fixes as the reading of 409,
+// and the action is *wait*. All three routes already declare 409, so this adds a condition under
+// a declared code rather than a code.
+const inFlightMsg = "another operation is already running on this device — wait for it to finish"
+
+// startGuardedOp claims the per-UDID single-flight slot, records the op, and runs fn in a
+// goroutine that RELEASES the slot however fn ends. ok=false means the device is already busy and
+// the caller owes a 409; nothing is recorded and nothing is published in that case.
+//
+// The claim, the prune and the insert happen under ONE lock hold, so two requests arriving
+// together cannot both see a free slot.
+//
+// The release is a defer in this wrapper rather than a call at the end of each run* deliberately.
+// A run* that grew an early return, or that panicked, would otherwise strand the device with no
+// way back short of a restart — a permanently unusable device is a worse failure than the burst
+// this guard exists to stop. It also means a fourth op route gets the guard by construction
+// instead of by remembering, which is the argument the ruling made against two keys.
+func (m *Manager) startGuardedOp(kind, udid, msg string, fn func(opID string)) (wire.Op, bool) {
 	op := wire.Op{ID: m.newID(), UDID: udid, Kind: kind, State: "running", Message: msg}
 	m.mu.Lock()
+	if _, busy := m.inflight[udid]; busy {
+		m.mu.Unlock()
+		return wire.Op{}, false
+	}
+	m.inflight[udid] = op.ID
 	m.pruneLocked()
 	m.ops[op.ID] = op
 	m.mu.Unlock()
 	m.bus.PublishEvent(wire.EventOpUpdated, op)
-	return op
+	go func() {
+		defer m.releaseUDID(udid)
+		fn(op.ID)
+	}()
+	return op, true
+}
+
+// releaseUDID frees the single-flight slot. Deferred by startGuardedOp, so it runs on every exit
+// path the op's goroutine can take.
+func (m *Manager) releaseUDID(udid string) {
+	m.mu.Lock()
+	delete(m.inflight, udid)
+	m.mu.Unlock()
 }
 
 func (m *Manager) setOp(id, state, msg string, opErr *wire.JobError) {
@@ -155,8 +201,12 @@ func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 	if dev.Transports.USB == nil {
 		return "", http.StatusConflict, "pairing needs a USB connection — connect the device by cable"
 	}
-	op := m.startOp("pair", udid, "Starting pairing…")
-	go m.runPair(op.ID, udid)
+	op, free := m.startGuardedOp("pair", udid, "Starting pairing…", func(opID string) {
+		m.runPair(opID, udid)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return op.ID, http.StatusAccepted, ""
 }
 
@@ -261,8 +311,12 @@ func (m *Manager) Encryption(_ context.Context, udid, action, password, oldPassw
 	default:
 		return "", http.StatusUnprocessableEntity, "unknown action: " + action
 	}
-	op := m.startOp("encryption", udid, encStartMsg(action))
-	go m.runEncryption(op.ID, udid, transport, action, password, oldPassword, newPassword)
+	op, free := m.startGuardedOp("encryption", udid, encStartMsg(action), func(opID string) {
+		m.runEncryption(opID, udid, transport, action, password, oldPassword, newPassword)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return op.ID, http.StatusAccepted, ""
 }
 
@@ -290,8 +344,12 @@ func (m *Manager) WifiSync(_ context.Context, udid, action string) (string, int,
 	if action != "enable" && action != "disable" {
 		return "", http.StatusUnprocessableEntity, "unknown action: " + action
 	}
-	op := m.startOp("wifi_sync", udid, wifiSyncStartMsg(action))
-	go m.runWifiSync(op.ID, udid, transport, action)
+	op, free := m.startGuardedOp("wifi_sync", udid, wifiSyncStartMsg(action), func(opID string) {
+		m.runWifiSync(opID, udid, transport, action)
+	})
+	if !free {
+		return "", http.StatusConflict, inFlightMsg
+	}
 	return op.ID, http.StatusAccepted, ""
 }
 

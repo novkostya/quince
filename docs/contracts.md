@@ -150,6 +150,8 @@ POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
      // 409: device not present on USB — pairing is USB-only at the protocol floor,
      // surfaced actionably ("pairing needs a USB connection"). The 202 op narrates
      // "tap Trust on the phone" / "enter the passcode on the device".
+     // 409 ALSO: another device op is already in flight for this udid — the
+     // single-flight rule, stated once under wifi-sync below. The action is *wait*.
 POST /api/devices/{udid}/pair/validate → {paired: bool} | 404 | 409
      // paired == "a pairing is CONFIRMED valid right now". A locked device cannot be
      // confirmed (`idevicepair validate` reports "passcode set" for ANY locked device,
@@ -166,7 +168,14 @@ POST /api/devices/rescan               → 202 | 409
      // would tear a live Wi-Fi backup. Per-daemon state lives in GET /api/health.
 POST /api/devices/{udid}/encryption
      {action: "enable" | "change_password" | "disable",
-      password?, old_password?, new_password?}            → 202 {op_id} | 422
+      password?, old_password?, new_password?}     → 202 {op_id} | 404 | 409 | 422
+     // 404 and 409 were REACHABLE HERE BEFORE THEY WERE DECLARED, and quince#465 found
+     // it: this line read `202 {op_id} | 422` while the handler passed the manager's
+     // 404 (no such device) and 409 (device not connected) straight through. Declared
+     // now, alongside the single-flight condition below — a client written to this
+     // contract would have treated both as undocumented.
+     // 409: device not connected; or another device op is already in flight for this
+     // udid — the single-flight rule, stated once under wifi-sync below.
      // 422: bad action or a missing required password field. Drives `idevicebackup2
      // encryption`/`changepw`. Passwords travel in the TLS body and reach the
      // subprocess over an interactive pty (`idevicebackup2 -i` — VERIFIED qn.3,
@@ -184,6 +193,21 @@ POST /api/devices/{udid}/wifi-sync
      // transport. 409: not connected, or NOT PAIRED — a lockdown write needs a trusted
      // session, and "not paired" is a state the user can act on where "the device
      // rejected it" is not. 422: unknown action.
+     //
+     // SINGLE-FLIGHT, stated here once for all three op routes (pair, encryption,
+     // wifi-sync). 409 ALSO means: an op is already in flight for this udid. ONE op per
+     // DEVICE, whatever its kind — not one per (device, kind) — ruled on quince#465,
+     // 2026-08-02. The finer key would permit `wifi-sync` to run beside `pair` or
+     // `encryption`, and that is the one combination measured to break: wifi-sync SEVERS
+     // the transport the other two run over (quince#363/quince#366, where SetWifiSync
+     // verified its write by reading back over the connection the write had just cut).
+     // It is also the ASSISTED model's constraint — two ops prompting on one screen give
+     // the user no way to tell which dialog belongs to which request.
+     // Same key and same reading as `POST /api/jobs`, which is per-UDID for the same
+     // reason. The action is *wait*; a refused op records nothing and returns no op_id.
+     // NOT ruled, and deliberately left open: whether a device op should also be refused
+     // while a BACKUP is running for that device. That is a precondition rather than
+     // single-flight, and it wants its own reasoning.
      // NO PASSWORD, and that is a design point rather than an omission: the value is a
      // boolean, so this op uses the plain argv path, NOT the pty machinery that exists to
      // keep a password out of argv.

@@ -32,6 +32,9 @@ type Provider struct {
 	versions map[string]wire.Version
 	verOrder []string           // version display order (newest first)
 	ops      map[string]wire.Op // pair/encryption ops (GET /api/ops/{id}; qn.3 DeviceOps)
+	// opInflight is the per-UDID device-op single-flight slot (quince#465). Distinct from
+	// `running`, the BACKUP slot — startGuardedOp says why they are deliberately not shared.
+	opInflight map[string]string
 }
 
 // NewProvider builds a provider seeded with deterministic fixtures. It does NOT start the
@@ -46,6 +49,8 @@ func NewProvider(b *bus.Bus, log *slog.Logger) *Provider {
 		running:  map[string]*demoRun{},
 		versions: map[string]wire.Version{},
 		ops:      map[string]wire.Op{},
+
+		opInflight: map[string]string{},
 	}
 	p.seed()
 	return p
