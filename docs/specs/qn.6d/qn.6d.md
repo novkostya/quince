@@ -482,7 +482,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | --- | --- |
 | **A rung starts from a spec** | This document, reviewed before any code exists. |
 | **Don't improvise architecture** | The two decisions that are not this rung's go to the Operator as `PROPOSED (gap)` blocks with options and recommendations, each explicitly a recommendation. **Nothing is built on a pending proposal**; PR 1 is followed by a declared park. |
-| **Contracts are stop-and-ask** | Gaps A and B are both contract surfaces (§1/§2). **No code lands before the verdicts.** |
+| **Contracts are stop-and-ask** | Gaps A and B were both contract surfaces (§1/§2) and both are now **RULED** (2026-08-03, quince#443), flipped to decided text in `contracts.md` by the same PR as this line. No code landed before the verdicts. |
 | **Never mutate a committed version** | **The rung's sharpest near-miss.** Forget is *detach-and-forget* and must touch no tree. **G5 asserts on the filesystem**, not on the API, because an API-only assertion would pass over a deletion. `latest/`, `working/`, `versions/` and every marker are untouched; this rung's only write is one `config.yml` edit. |
 | **State honesty** | An unreachable card **dates** its counts instead of presenting them as current, and its capacity is `null` rather than `0`. `backend: "unknown"` stays *quince does not know*. Free space is a **filesystem** fact and gap A's naming exists so the payload cannot imply otherwise. The two defects found while writing this are **filed** (quince#569, quince#570), not quietly worked around. |
 | **No silent caps or fallbacks** | `copy` keeps its caution pill. Forget's restart requirement is surfaced in the UI, not hidden behind a card that quietly lingers. An unreachable storage is listed with a reason and never hidden. |
@@ -511,10 +511,16 @@ behaviour beyond this rung. Recorded here per the gap protocol.
    a storage that never came up there is nothing to translate *from*. Written here so PR 5 does not
    re-derive it. Open question 3 is a different question — whether `Storage.id` is still *emitted* —
    and does not reopen this one.
-2. **The card attributes free space to the filesystem in PROSE regardless of gap A's field names** —
-   *"1.2 TB free on this filesystem"* when more than one storage shares one, plain *"1.2 TB free"*
-   when it does not. The wording is rung-local; the **field names are not**, which is why they are
-   in gap A.
+2. **RETIRED by the gap A ruling — the card NEVER attributes free space to the filesystem in prose.**
+   This read *"1.2 TB free on this filesystem"* when more than one storage shares one and plain
+   *"1.2 TB free"* when it does not. **Review found that branch is not implementable with the ruled
+   fields**: equal byte counts do not prove two storages share a filesystem, and nothing on the wire
+   carries filesystem identity. A `filesystem_id` and a `filesystem_shared` boolean were both put to
+   the Operator on 2026-08-03 and **both were declined**. The card always renders plain *"1.2 TB
+   free"*. **The cost is accepted rather than unnoticed**: two storages that are two directories on
+   one disk each show the same figure with nothing distinguishing them, so a user may read 1.2 + 1.2
+   as 2.4 TB — `qn.6c`'s own G1 fixture. Not a bug, not to be "fixed" by reintroducing the
+   distinction; the prefixed wire names are where the truth is kept.
 3. **Counts INCLUDE `missing` versions, and the card does not distinguish them.** Fact 3 shows the
    tree already splits on this. `UDIDsWithVersions`' reasoning wins — a version whose artifact is
    gone is still history the user should see — and the card is a glance surface, so a second number
@@ -533,8 +539,11 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 ## Known gaps and open questions
 
-1. **Gaps A and B** — open until the Operator rules. Tracked in the devlog `progress.md`
-   open-questions list. **No code PR opens before both verdicts.**
+1. **Gaps A and B are RULED** — Operator, 2026-08-03, relayed at quince#443 and flipped to decided
+   text in `docs/contracts.md` by the same PR that rewrote this line. **The park is lifted**; code
+   PRs open against decided canon. The gap A ruling also retired rung-ruled decision 2 above, and
+   quince#577 (config live-apply) was scoped out of the same conversation and is explicitly NOT this
+   rung.
 2. **quince#569 is OPEN. quince#570's ADDRESSING half is RULED and the dependency runs the OTHER
    way from what this section first said.** An earlier draft had gap B's ruling answering quince#570;
    it is the reverse — quince#570 was ruled on 2026-08-02 at `20:02:51`, six minutes before this
@@ -566,7 +575,17 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 ## PR slicing
 
-Each code PR **flips its `PROPOSED (gap)` block in canon to decided text**, citing the ruling.
+**Both `PROPOSED (gap)` blocks were flipped in ONE canon PR before any code opened**, which is not
+what this section originally said. It said *"each code PR flips its `PROPOSED (gap)` block in canon
+to decided text, citing the ruling"* — the `qn.6c` sequence, and right for `qn.6c`, where the
+rulings arrived after the spec merged and each block could wait for the PR that consumed it.
+
+**Both of this rung's rulings arrived together, on 2026-08-03, before PR 3 existed.** Leaving the
+markers for their implementing PRs would have left `contracts.md` saying `PROPOSED (gap)` — *nothing
+may be built on this yet* — about two decided questions, for as long as it took PR 6 to land. That
+is quince#408 exactly: a marker that outlives its ruling does not merely mislead, it says STOP about
+work that is finished. So the flip is its own PR and the code PRs implement against decided canon
+with nothing to flip.
 
 | PR | claim | approval |
 | --- | --- | --- |
