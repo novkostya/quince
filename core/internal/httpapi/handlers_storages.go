@@ -22,7 +22,7 @@ func (d Deps) handleStorages() http.HandlerFunc {
 	}
 }
 
-// handleStorageRecheck serves POST /api/storages/{id}/recheck → 200 {storage} | 404.
+// handleStorageRecheck serves POST /api/storages/{name}/recheck → 200 {storage} | 404.
 //
 // The button behind *plug the disk in and press it* (Operator ruling 2026-08-01): reachability may
 // change without a restart, where the storage LIST still needs one.
@@ -32,10 +32,10 @@ func (d Deps) handleStorages() http.HandlerFunc {
 // ONE disk, and a global re-check would make one press pay for every unreachable root.
 func (d Deps) handleStorageRecheck() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s, ok := d.Storages.Recheck(r.PathValue("id"))
+		s, ok := d.Storages.Recheck(r.PathValue("name"))
 		if !ok {
 			writeError(w, d.Log, http.StatusNotFound, "no_such_storage",
-				"no storage with that id is declared")
+				"no storage with that name is declared")
 			return
 		}
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageResponse{Storage: s})

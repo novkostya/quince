@@ -141,12 +141,22 @@ func (s Slot) hasVersionFor(m *Manager, udid string) bool {
 // THE LOCK IS NEVER HELD ACROSS THE RE-PROBE. `m.refresh` does filesystem work — a stat on a path
 // that may be a dead network mount — and holding a write lock across it would stall every read of
 // `slots`, which includes the render and backup paths (quince#445 review).
-func (m *Manager) RecheckStorage(id string) (wire.Storage, bool) {
+// KEYED ON `name`, NOT ON THE MARKER UUID — Operator ruling 2026-08-02 (quince#570), built for
+// this route by quince#610. A storage quince has never reached has NO id: none was ever minted,
+// which is correct. Keying on the id made this endpoint unreachable for exactly the storage it
+// exists to serve — the client sent `POST /api/storages//recheck`, the router path-cleaned that to
+// a `307` (method-preserving, so the POST is re-sent), and the redirect target matched no pattern,
+// giving a `404`. Measured against a running daemon rather than inferred.
+//
+// `name` exists for every declared storage, reachable or not, and it is the identity the config
+// carries — the same one `Refresher` already re-resolves by, a few lines down. Forget was built on
+// it from the start; this route was simply left behind.
+func (m *Manager) RecheckStorage(name string) (wire.Storage, bool) {
 	m.mu.RLock()
-	idx, name := -1, ""
+	idx := -1
 	for i, s := range m.slots {
-		if s.StorageID == id {
-			idx, name = i, s.Name
+		if s.Name == name {
+			idx = i
 			break
 		}
 	}
@@ -166,11 +176,13 @@ func (m *Manager) RecheckStorage(id string) (wire.Storage, bool) {
 	fresh, ok := m.refresh(name) // OUTSIDE the lock: filesystem work
 	if ok {
 		m.mu.Lock()
-		// Re-find by id rather than trusting idx across the unlocked window. Nothing else mutates
+		// Re-find by NAME rather than trusting idx across the unlocked window. Nothing else mutates
 		// the list today, and a position captured before an unlocked gap is precisely the assumption
-		// that stops holding the moment something does.
+		// that stops holding the moment something does. (It re-finds by name now rather than by id
+		// for the same reason the lookup above does: an unreached storage has no id to re-find by,
+		// so the id form silently failed to write back the very state a recheck exists to refresh.)
 		for i, s := range m.slots {
-			if s.StorageID == id {
+			if s.Name == name {
 				m.slots[i] = fresh
 				idx = i
 				break

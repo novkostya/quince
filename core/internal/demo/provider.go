@@ -213,9 +213,9 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 // Recheck re-probes one demo storage. The shuttle STAYS unreachable: a demo whose disk appears
 // because you pressed a button would teach the operator that the button fixes things, when what it
 // actually does is look again.
-func (p *Provider) Recheck(id string) (wire.Storage, bool) {
+func (p *Provider) Recheck(name string) (wire.Storage, bool) {
 	for _, s := range p.Storages("") {
-		if s.ID == id {
+		if s.Name == name {
 			return s, true
 		}
 	}

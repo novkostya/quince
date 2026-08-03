@@ -280,13 +280,13 @@ POST /api/jobs/{id}/cancel                              → 202 Job
 GET  /api/jobs/{id}/log                                 → text/plain (full so-far; live tail is WS)
 ```
 
-**RULED and IMPLEMENTED (was `PROPOSED (gap)`): a storage collection, and a job that names one — `qn.6c`, quince#378.** The READ half — `GET /api/storages`, the `Storage` object and `POST /api/storages/{id}/recheck` — ships in story 5c. `POST /api/jobs {storage_id}` is RULED AND IMPLEMENTED too — it landed with `qn.6d` story 6 (quince#584), which is the PR canon named. The request field is accepted at `handlers_jobs.go` and genuinely consumed: `ResolveChoice` maps it to a concrete storage, `BindJobStorage` records it for the life of the job, and a retry inherits it.
+**RULED and IMPLEMENTED (was `PROPOSED (gap)`): a storage collection, and a job that names one — `qn.6c`, quince#378.** The READ half — `GET /api/storages`, the `Storage` object and `POST /api/storages/{name}/recheck` — ships in story 5c. `POST /api/jobs {storage_id}` is RULED AND IMPLEMENTED too — it landed with `qn.6d` story 6 (quince#584), which is the PR canon named. The request field is accepted at `handlers_jobs.go` and genuinely consumed: `ResolveChoice` maps it to a concrete storage, `BindJobStorage` records it for the life of the job, and a retry inherits it.
 Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Additive:
 
 ```
 GET  /api/storages                                        → {storages: Storage[]}
 GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
-POST /api/storages/{id}/recheck                           → 200 {storage} | 404
+POST /api/storages/{name}/recheck                          → 200 {storage} | 404
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -620,7 +620,7 @@ much of that reaches the wire.
 
 **Two halves have left this proposal and are RULED below: `Version.backend` and
 `Version.storage_id`.** The **`Storage` object** and **`GET /api/storages`** are now ruled AND built
-as well (story 5c), together with `POST /api/storages/{id}/recheck`. What remains **ruled but
+as well (story 5c), together with `POST /api/storages/{name}/recheck`. What remains **ruled but
 unbuilt** is **the job's** `storage_id` on `POST /api/jobs`, which lands with story 6.
 
 This sentence listed the `Storage` object and `GET /api/storages` as *open* until 2026-08-01 — after

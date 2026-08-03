@@ -198,7 +198,7 @@ func (Empty) Versions(string) []wire.Version                { return []wire.Vers
 // selects nothing, which is what keeps G5b intact (quince#438).
 type StorageReader interface {
 	Storages(udid string) []wire.Storage
-	Recheck(id string) (wire.Storage, bool)
+	Recheck(name string) (wire.Storage, bool)
 }
 
 // UnavailableStorages stands in when no storage subsystem is wired: an empty list rather than a
