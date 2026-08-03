@@ -81,14 +81,26 @@ name: demo-deploy
 # track every merge, and a deploy on every push to `main` spends a full remote image build each
 # time to move a fixture-data instance nobody is looking at.
 #
-# 22:00 UTC is overnight for the Operator. Two GitHub facts that decide how much to trust it:
-# a scheduled workflow runs ONLY from the DEFAULT BRANCH, whatever branch the schedule was
-# written on; and scheduled runs are best-effort — GitHub delays them under load and does not
-# promise the minute. Neither matters for a demo refresh, and both would matter if anything
-# were ever gated on this having run.
+# NO BRANCH FAN-OUT, and this is the reflex worth spending a line on because other CI systems
+# get it wrong: some run a schedule once per branch that carries the file. GitHub does not.
+# "Scheduled workflows will only run on the default branch" — one run per tick, from `main`'s
+# copy. The same file on twenty branches registers no cron entries at all. Verified against
+# GitHub's docs rather than remembered.
+#
+# :23 PAST THE HOUR, NOT :00. GitHub's own guidance: "The `schedule` event can be delayed during
+# periods of high loads... High load times include the start of every hour. If the load is
+# sufficiently high enough, SOME QUEUED JOBS MAY BE DROPPED." Dropped, not merely late. This read
+# `0 22 * * *` first, which put a nightly deploy squarely in the window GitHub names.
+#
+# Two more, neither fatal for a demo but both surprising later:
+#   - `workflow_dispatch` needs this file ON THE DEFAULT BRANCH before the Run workflow button
+#     exists. Once it is there, a run can be aimed at any branch or tag.
+#   - In a PUBLIC repository, "scheduled workflows are automatically disabled when no repository
+#     activity has occurred in 60 days". quince is public. A quiet stretch stops the nightly, and
+#     nothing announces that it stopped.
 on:
   schedule:
-    - cron: "0 22 * * *"
+    - cron: "23 22 * * *"
   workflow_dispatch:
 
 # Least privilege: this job reads the tree and talks to fly. It needs nothing from GitHub.
@@ -115,8 +127,16 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 ```
 
-Three things about that block, stated rather than hidden:
+Four things about that block, stated rather than hidden:
 
+- **A failed nightly may notify nobody who is watching.** GitHub sends scheduled-workflow
+  notifications to *"the user who last modified the cron syntax in the workflow file"* — which, if
+  an agent seat authored it, is an agent identity rather than a person. This project has already
+  lost one agent account to suspension, so that is not a hypothetical mailbox. **If the nightly
+  deploy is meant to be noticed when it breaks, the Operator should be the last committer of the
+  `cron:` line.** Nothing here can arrange that: no agent seat can write under
+  `.github/workflows/`, so whoever installs the file is the last modifier by construction — which
+  happens to make the right thing the default, as long as it stays that way.
 - **`actions/checkout@v7`, and this said `@v4` until the first run said otherwise.** v4 runs on
   Node 20, which GitHub deprecated, and the runner warned about it. The wrong number came from
   copying fly's own documentation example rather than reading the action's releases — which is the
