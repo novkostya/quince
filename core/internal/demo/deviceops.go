@@ -44,6 +44,7 @@ func (p *Provider) startGuardedOp(kind, udid, msg string, script func(opID strin
 		return "", false
 	}
 	p.opInflight[udid] = opID
+	p.pruneOpsLocked()
 	p.ops[opID] = wire.Op{ID: opID, UDID: udid, Kind: kind, State: "running", Message: msg}
 	op := p.ops[opID]
 	p.mu.Unlock()
@@ -60,6 +61,35 @@ func (p *Provider) releaseUDID(udid string) {
 	p.mu.Lock()
 	delete(p.opInflight, udid)
 	p.mu.Unlock()
+}
+
+// demoOpsSoftCap mirrors deviceops.opsSoftCap. The demo copies the real manager's bound rather
+// than inventing its own, so the two cannot answer differently about how many ops a session keeps.
+const demoOpsSoftCap = 200
+
+// pruneOpsLocked drops TERMINAL ops once the map grows past the soft cap — the half of quince#465
+// the demo never had. `delete(p.ops, …)` appeared nowhere in this package, so one request bought
+// one permanent map entry plus three bus publishes, and quince#467 measured an op from the first of
+// twenty still resident after all twenty finished.
+//
+// TERMINAL ONLY, and that is what makes the cap work rather than merely exist. A cap that could
+// collect in-flight ops would drop work still running; a cap that collects only terminal ones
+// bounds nothing on its own, because a burst is by definition not terminal yet. It is the
+// single-flight guard beside it that makes this sufficient: at most one op per device can be
+// in flight, so everything above that floor is collectable. Neither half bounds the map alone —
+// which is why quince#465 has two.
+//
+// Caller holds p.mu for WRITING. Named …Locked for that reason; p.mu is an RWMutex here where the
+// real manager's is a plain Mutex, so "locked" is ambiguous unless it is said.
+func (p *Provider) pruneOpsLocked() {
+	if len(p.ops) < demoOpsSoftCap {
+		return
+	}
+	for id, op := range p.ops {
+		if op.State == "succeeded" || op.State == "failed" {
+			delete(p.ops, id)
+		}
+	}
 }
 
 // Op returns a pair/encryption op (GET /api/ops/{id}).
