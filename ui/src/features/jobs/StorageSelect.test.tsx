@@ -16,6 +16,13 @@ function storage(over: Partial<Storage>): Storage {
     unreachable_code: null,
     unreachable_reason: null,
     will_be_full: null,
+    // This default is a REACHABLE storage, so capacity is present. The unreachable case nulls both
+    // — never 0, which would render as a full disk (gap A, ruled 2026-08-03).
+    filesystem_free_bytes: 1_200_000_000_000,
+    filesystem_total_bytes: 3_600_000_000_000,
+    backup_count: 14,
+    device_count: 2,
+    counts_as_of: "2026-08-02T18:20:00Z",
     ...over,
   };
 }
