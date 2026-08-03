@@ -159,7 +159,22 @@ fi
 # build, a vitest run or a mypy pass. bin/ and docs/ likewise. Each of these was checked
 # against the full tracked list rather than added to make the suite green — CLAUDE.md was in fact
 # added BECAUSE this assertion failed on it the first time it ran, which is the guard working.
-PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md'
+#
+# fly.toml is the SECOND entry added because this assertion failed on it (quince#494), and it is
+# the first one that is not obviously process. It configures the public DEMO deployment — the app,
+# region, machine size and the `--public-demo` flag fly passes to the image. It is product-adjacent
+# and still belongs here, by this list's own criterion: a change to it cannot break a Go build, a
+# vitest run or a mypy pass, because nothing in the tree reads it. Only fly does, at deploy time.
+#
+# It is deliberately NOT in product_covered. Putting it there would make an edit to it trigger an
+# image rebuild and the e2e suite, which test the image — and fly.toml does not change the image.
+# That would be a gate that runs without being able to fail for the right reason.
+#
+# WHAT IS THEREFORE UNGATED, stated because this list is where somebody would look for it: nothing
+# in this repository validates fly.toml. A typo in it is found by `fly deploy`, not by CI. That is
+# accepted rather than overlooked — see deploy/demo.md, which says the same thing where an operator
+# will meet it.
+PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml'
 product_covered='core ui vault deploy versions.env Makefile'
 uncovered=''
 for top in $(git ls-files | awk -F/ '{print $1}' | sort -u); do
