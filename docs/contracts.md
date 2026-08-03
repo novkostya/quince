@@ -623,6 +623,18 @@ Storage: {
                                // "unknown" = never yet reached, so quince does not know. Not a guess.
   "default": true,             // exactly one storage is default
   "reachable": true,
+  "unreachable_code": null,    // the machine-readable cause; BRANCH ON THIS, show the reason.
+                               // Null when reachable and NEVER absent — a present null is a fact,
+                               // an absent key is a version-skew question (same ruling as
+                               // Version.storage_id). Two fields rather than one because prose
+                               // cannot be branched on and an enum cannot be shown.
+                               //
+                               // DECLARED VALUES ARE WRONG IN THE CODE TODAY — see quince#569. The
+                               // daemon also emits `unreachable` (for an unreadable path, where
+                               // this enum says `path_unreachable`) and `corrupt_marker`, neither
+                               // of which is below. Documented here as the field's EXISTENCE, which
+                               // was the drift; the values are quince#569's to fix and are
+                               // deliberately not corrected by inventing a third answer.
   "unreachable_reason": null,  // set when reachable is false; SHOWN, never thrown — an unreachable
                                // storage must not block backups to any other (epic point 5).
                                // THREE distinguishable causes, because the remedy differs:
