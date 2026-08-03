@@ -229,7 +229,7 @@ diff, because this rung is adding to it.
 ```
 /backups                                        [Default]
 1.2 TB free of 3.6 TB
-[▓▓▓▓▓░░░░░░░░░░░░]  33%
+[▓▓▓▓▓▓▓▓▓▓▓░░░░░░]  67%
 14 backups · 2 devices
 ```
 
