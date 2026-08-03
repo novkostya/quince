@@ -27,12 +27,6 @@ const (
 	tVerHL      = "2026-07-15T03:04:00Z"
 	tVerAdopted = "2026-07-01T01:00:00Z"
 	tJobStart   = "2026-07-18T09:14:02Z"
-	// Storage counts freshness (qn.6d gap A). FIXED, like every timestamp here: the golden httpapi
-	// fixtures compare rendered output byte for byte, so a live clock would make them unstable.
-	// The shuttle's stamp is deliberately ~38h older than the internal one -- an unreachable
-	// storage's counts were true at LAST CONTACT, and G2 asserts the card dates them.
-	tCountsInternal = "2026-07-18T09:15:00Z"
-	tCountsShuttle  = "2026-07-16T19:20:00Z"
 )
 
 // demoDevice is the demo provider's counterpart to the registry's deviceShellLocked: the three

@@ -242,21 +242,16 @@ type Storage struct {
 
 	// BackupCount and DeviceCount are properties of the STORAGE, so they appear with or without
 	// `?udid=` — which continues to add only WillBeFull. They come from the DB, so they stay
-	// populated even when the storage is unreachable; CountsAsOf carries that asymmetry.
+	// populated even when the storage is unreachable. NO TIMESTAMP ACCOMPANIES THEM: the counts are
+	// CURRENT, not a last-known reading — the DB is reachable whether or not the disk is, so there
+	// is nothing to date (quince#588, ruled 2026-08-03). The asymmetry a client needs is carried by
+	// THESE TWO FIELDS being populated while capacity is null, which is visible without one.
 	//
 	// MISSING versions are counted (qn.6d rung-ruled decision 3), matching UDIDsWithVersions and
 	// deliberately unlike Slot.hasVersionFor, which excludes them because "will the next backup be
 	// full" depends on a usable artifact.
 	BackupCount int `json:"backup_count"`
 	DeviceCount int `json:"device_count"`
-
-	// CountsAsOf is when the counts were last true, ALWAYS present. A client must never have to
-	// infer staleness from Reachable: an unreachable storage's counts are the DB's last word, and
-	// the card dates them rather than presenting them as current.
-	//
-	// RFC3339 string, matching Device.LastSeen and Version.CreatedAt — this package carries no
-	// time.Time on the wire.
-	CountsAsOf string `json:"counts_as_of"`
 }
 
 // StoragesResponse is GET /api/storages. StorageResponse is POST /api/storages/{id}/recheck.

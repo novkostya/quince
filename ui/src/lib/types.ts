@@ -254,11 +254,10 @@ export interface Storage {
   filesystem_free_bytes: number | null;
   filesystem_total_bytes: number | null;
   // Properties of the STORAGE, so present with or without `?udid=`. From the DB, so populated even
-  // when unreachable — `counts_as_of` is what says they were true at last contact rather than now,
-  // and it is ALWAYS present so a client never infers staleness from `reachable`.
+  // when unreachable — and CURRENT, not a last-known reading, so NO timestamp accompanies them
+  // (quince#588). The asymmetry a client needs is these two being populated while capacity is null.
   backup_count: number;
   device_count: number;
-  counts_as_of: string;
 }
 
 // ServeMode is GET /api/health's `mode` — how this daemon is DEPLOYED, not who you are, which is
