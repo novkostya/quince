@@ -1,10 +1,15 @@
 import { NavLink } from "react-router-dom";
-import { HardDrive, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
+import { House, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import { useConnectionStore } from "@/stores/connection";
 import { ConnBadge } from "./ConnBadge";
 
-const NAV: { to: string; label: string; icon: LucideIcon }[] = [
-  { to: "/devices", label: "Devices", icon: HardDrive },
+// `Home`, not `Devices` (Operator ruling, quince#443). `Devices` had stopped describing its own
+// page once storage moved onto it, and the replacement names the POSITION rather than the contents —
+// a label naming what is on the page goes stale the next time the page grows, and this one will.
+//
+// `end` matters: without it a NavLink to "/" is active on every route.
+const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
+  { to: "/", label: "Home", icon: House, end: true },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -25,10 +30,11 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-row gap-1 sm:flex-none sm:flex-col sm:px-3">
-        {NAV.map(({ to, label, icon: Icon }) => (
+        {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
+            end={end}
             className={({ isActive }) =>
               "flex min-h-[40px] items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors " +
               (isActive

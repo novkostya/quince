@@ -217,7 +217,7 @@ export function StorageDetailsPage() {
 
 function BackLink() {
   return (
-    <Link to="/devices" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
+    <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
       <ArrowLeft size={14} /> Home
     </Link>
   );

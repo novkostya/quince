@@ -40,12 +40,24 @@ that matters. Concretely —
    unbounded lists; first page fast, rest streams in.
 4. **Device-centric IA — one primary area** (Operator ruling; the old Devices/Backups
    split mirrored the engineering epics, not how anyone thinks). Navigation is
-   `Devices` + `Settings`, and backups live *inside* their device:
-   - **Home = the Devices dashboard**: one card per device (identity, presence,
+   `Home` + `Settings`, and backups live *inside* their device:
+   - **Home** is `/`, and `/devices` still resolves so existing links keep working. It was
+     labelled `Devices` until `qn.6d` (Operator ruling, quince#443): **storage joined the
+     page and the label stopped describing it.** `Home` names the POSITION rather than the
+     contents, and the position does not change — a label naming what is on a page goes
+     stale the next time the page grows, and this one will. **There is no third nav item**:
+     the sidebar is one `NAV` array rendered as a phone top bar *and* a desktop sidebar, so
+     a third entry is nearly free on desktop and expensive on the phone, with no way to have
+     it in one and not the other. `HardDrive` was Home's icon and is handed to storage,
+     which is what it actually depicts.
+   - **Home holds devices and storage as PEERS**: one card per device (identity, presence,
      encryption state, last-backup status) with a `Back up now` button and inline
-     mini-progress when a job is running, plus the N most recent backups across devices
+     mini-progress when a job is running; one card per declared storage (free-of-total, a
+     usage bar, backup and device counts); plus the N most recent backups across devices
      — a household with two or three devices doesn't generate much data, so the dashboard
      is composed to look alive rather than empty.
+   - **Storage details**: everything about one storage — its marker rendered as identity,
+     space, the devices backed up there, and the versions it holds.
    - **Device details**: everything about one device — status, actions, job history
      (grouped by intent), and its full version list with unlock/browse entry points.
    - *Parked for qn.12*: a phone-first entry point — when the PWA is opened from a

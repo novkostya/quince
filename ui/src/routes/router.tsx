@@ -47,8 +47,12 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Navigate to="/devices" replace /> },
-      { path: "devices", element: <DashboardPage /> },
+      // HOME IS `/`, and `/devices` still resolves (rung-ruled decision 5, quince#443). The pair is
+      // inverted from what it was: `/` used to redirect to `/devices`, and now `/devices` redirects
+      // to `/`. Breaking a bookmark to make a rename tidy is a cost with no benefit, and the
+      // redirect is one line where a broken link is a support question.
+      { index: true, element: <DashboardPage /> },
+      { path: "devices", element: <Navigate to="/" replace /> },
       { path: "devices/:udid", element: <DeviceDetailsPage /> },
       // Routed on NAME, not id: the API addresses a storage by its config name (quince#570), and a
       // name exists for every declared storage where an id does not — one that was never created

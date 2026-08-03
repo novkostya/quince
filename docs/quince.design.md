@@ -720,10 +720,13 @@ the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 
 
 ## 8. Frontend shape
 
-**Device-centric IA** (`ui.design.md` §4): home is the Devices dashboard (device cards +
-`Back up now` + inline job progress + N most recent backups across devices); a device's
-details page owns its job history (grouped by intent) and its version list with
-unlock/browse (files → overview → messages; photos parked); `Settings` is the only
+**Device-centric IA** (`ui.design.md` §4): **`Home`** at `/` — labelled `Devices` until `qn.6d`
+(quince#443), because storage joined the page and the label stopped describing it; `/devices` still
+resolves — holds device cards + `Back up now` + inline job progress + **storage cards** + N most
+recent backups across devices; a device's details page owns its job history (grouped by intent) and
+its version list with unlock/browse (files → overview → messages; photos parked); a **storage's**
+details page owns its marker-as-identity, space, the devices backed up there and the versions it
+holds; `Settings` is the only
 other area. One WS connection feeds the client stores; REST for commands. Virtualized
 lists for anything unbounded (messages, files). Design language and stack conventions:
 `ui.design.md`.

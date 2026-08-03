@@ -24,23 +24,29 @@ export function DashboardPage() {
     <section>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Devices</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Home</h1>
           <p className="mt-1 text-sm text-muted">
-            Your iPhones and iPads, live over USB or Wi-Fi.
+            Your devices and where their backups live.
           </p>
         </div>
         <RescanButton />
       </div>
 
+      {/* `Devices` becomes a SECTION heading now that the page is `Home` — it stopped being the
+          page's name the moment storage joined it, which is the defect the rename fixes. It sits
+          beside `Storage` and `Recent backups` in the same rhythm rather than being implied by the
+          page title. */}
+      <h2 className="mt-8 text-sm font-semibold text-muted">Devices</h2>
+
       {order.length === 0 ? (
-        <div className="mt-6 rounded-card border border-dashed border-line bg-card p-10 text-center">
+        <div className="mt-3 rounded-card border border-dashed border-line bg-card p-10 text-center">
           <div className="text-sm font-medium">No devices connected</div>
           <div className="mt-1 text-sm text-muted">
             Connect a device over USB to pair it. Once paired, it shows up here while it's connected.
           </div>
         </div>
       ) : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {order.map((udid) => {
             const device = byUdid[udid];
             return device ? <DeviceCard key={udid} device={device} /> : null;
