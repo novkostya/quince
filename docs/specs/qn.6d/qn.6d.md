@@ -171,8 +171,9 @@ rather than beside it.** *"The API addresses a storage by its config `name` … 
 the same. Not the marker UUID."* Three consequences this spec must carry, all from the ruling text:
 
 - **`POST /api/storages/{id}/recheck` becomes `POST /api/storages/{name}/recheck`** — an existing
-  route changes key. Not this rung's PR, but this rung's gap-A block is the one editing §1's listing,
-  so the two must not contradict each other.
+  route changes key. Deferred out of this rung, then **built by quince#610** once open question 4
+  measured what the old key cost: an idless storage made the client send `/api/storages//recheck`,
+  which path-cleans to a `307` and a silent `404`.
 - **The cost is accepted, not discovered later, and belongs in `contracts.md` beside the route:**
   renaming a storage changes its API address, and because `name` defaults to the path (quince#504),
   **editing a path renames the storage implicitly.** The key is stable-by-configuration, never

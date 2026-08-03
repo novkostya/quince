@@ -13,7 +13,7 @@ import (
 // silently returning the stale answer.
 type Refresher func(name string) (Slot, bool)
 
-// SetRefresher wires the re-probe used by POST /api/storages/{id}/recheck.
+// SetRefresher wires the re-probe used by POST /api/storages/{name}/recheck.
 func (m *Manager) SetRefresher(f Refresher) { m.refresh = f }
 
 // Storages implements the contracts §1 GET /api/storages read.
@@ -132,7 +132,7 @@ func (s Slot) hasVersionFor(m *Manager, udid string) bool {
 }
 
 // RecheckStorage re-probes ONE storage's reachability and returns its new state (contracts §1
-// POST /api/storages/{id}/recheck). ok=false means no storage with that id.
+// POST /api/storages/{name}/recheck). ok=false means no storage is declared under that name.
 //
 // IT IS THE REACHABILITY CHECK, NEVER THE BACKEND-SELECTION PROBE (quince#438). It creates no
 // directory, writes no marker and selects no backend, so G5b — which forbids re-probing a bare
