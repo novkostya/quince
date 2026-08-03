@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import { modelLine } from "@/features/devices/modelName";
+import { StorageDeviceBackup } from "@/features/storage/StorageDeviceBackup";
 import type { Version } from "@/lib/types";
 
 // versionsOn scopes a version list to ONE storage, and is exported so it can be tested without
@@ -196,6 +197,8 @@ export function StorageDetailsPage() {
                   no backups here yet — the first will be a full transfer
                 </div>
               ) : null}
+              {/* STORY 6 — the destination is the PAGE, not a dropdown. */}
+              <StorageDeviceBackup device={device} storage={storage} />
             </div>
           ))
         )}
