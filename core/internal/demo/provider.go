@@ -181,7 +181,7 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 		"if this is a removable disk, it is not mounted"
 
 	// Space and counts (qn.6d gap A). The reachable storage carries capacity; the unreachable one
-	// carries NULL capacity and POPULATED counts with an older `counts_as_of` — which is the whole
+	// carries NULL capacity and POPULATED counts — which is the whole
 	// asymmetry those fields exist for, and the state G2 asserts. Fabricated like the rest of this
 	// fixture, but fabricated to the shape the LIVE resolver produces rather than a convenient one:
 	// an unreachable disk cannot be statfs'd, and its counts are the DB's last word.
@@ -191,12 +191,12 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 		ID: demoStorageInternal, Name: "internal", Path: "/backups", Backend: "reflink",
 		Default: true, Reachable: true,
 		FilesystemFreeBytes: &free, FilesystemTotalBytes: &total,
-		BackupCount: 14, DeviceCount: 2, CountsAsOf: tCountsInternal,
+		BackupCount: 14, DeviceCount: 2,
 	}, {
 		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/shuttle", Backend: "unknown",
 		Default: false, Reachable: false,
 		UnreachableCode: &code, UnreachableReason: &reason,
-		BackupCount: 3, DeviceCount: 1, CountsAsOf: tCountsShuttle,
+		BackupCount: 3, DeviceCount: 1,
 	}}
 	if udid != "" {
 		out[0].WillBeFull = &internalFull

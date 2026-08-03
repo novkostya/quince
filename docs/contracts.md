@@ -679,15 +679,23 @@ Storage: {
                                // NULL when unreachable, never 0: a zero is a measurement and this
                                // is an absence.
   "backup_count": 14,          // versions attributed to this storage. MISSING versions COUNT,
-  "device_count": 2,           // matching UDIDsWithVersions and deliberately unlike the
+  "device_count": 2            // matching UDIDsWithVersions and deliberately unlike the
                                // will_be_full test, which needs a USABLE artifact. Versions with a
                                // null storage_id are charged to nobody.
                                // Properties of the STORAGE: present with or without `?udid=`.
-  "counts_as_of": "2026-08-02T18:20:00Z"
-                               // when the counts were last true. ALWAYS present, so a client never
-                               // infers staleness from `reachable`. Counts come from the DB and
-                               // stay populated when the disk is gone; capacity does not. This
-                               // field is what carries that asymmetry.
+                               //
+                               // NO TIMESTAMP ACCOMPANIES THEM, and that is a ruling rather than an
+                               // omission (quince#588, 2026-08-03). The counts are CURRENT, not a
+                               // last-known reading: they are a COUNT(*) over `versions`, and the
+                               // DB is reachable whether or not the disk is — so unplugging a
+                               // storage does not make its count stale. There is nothing to date.
+                               //
+                               // The asymmetry a client needs — counts populated while capacity is
+                               // NULL — is carried by THESE TWO FIELDS sitting beside the capacity
+                               // ones, and is visible without a timestamp. A `counts_as_of` field
+                               // claimed to carry it until 2026-08-03: it was stamped at REQUEST
+                               // time, so it read "just now" on every card for every storage,
+                               // always. Dropped with its rationale.
 }
 
 Version: { ..., "storage_id": "01J..." | null }
@@ -753,8 +761,8 @@ Storage: {
   "filesystem_free_bytes":  1200000000000,  // statfs Bavail × Bsize on this storage's path
   "filesystem_total_bytes": 3600000000000,  // NULL when the storage is unreachable, never 0
   "backup_count":  14,                      // versions attributed to this storage
-  "device_count":  2,                       // distinct devices with a version here
-  "counts_as_of": "2026-08-02T18:20:00Z"    // when the counts were last true; ALWAYS present
+  "device_count":  2                        // distinct devices with a version here
+  // `counts_as_of` was here until 2026-08-03 and is DROPPED — quince#588.
 }
 ```
 
@@ -764,10 +772,16 @@ Four decided points:
    storages that are two directories on one disk report identical figures. `free_bytes` on a
    `Storage` object would read as the storage's own; the prefix is ugly and the ugliness is doing
    the work, because nothing else in the payload says why the numbers match.
-2. **`counts_as_of` is always present**, so a client never has to infer staleness from `reachable`.
+2. ~~**`counts_as_of` is always present**, so a client never has to infer staleness from
+   `reachable`.~~ **DROPPED 2026-08-03 (quince#588).** It was stamped at **request** time, so it read
+   *"just now"* on every card for every storage, always — and its premise was false: the counts are a
+   `COUNT(*)` over `versions`, and the DB is reachable whether or not the disk is, so there is no
+   staleness to infer. Struck rather than deleted, because it was ruled *here* and a reader needs to
+   see it was reversed rather than never decided.
 3. **Capacity is `null` when unreachable, never `0`** — a zero is a measurement and this is an
-   absence. **Counts stay populated**, because they are the DB's answer and the DB is reachable;
-   the stamp is what carries that asymmetry.
+   absence. **Counts stay populated**, because they are the DB's answer and the DB is reachable.
+   **That asymmetry is carried by the fields themselves** — counts present, capacity `null` — and is
+   visible without a timestamp, which is what made the dropped field redundant.
 4. **Counts are properties of the STORAGE**, present with or without `?udid=`, which continues to
    add only `will_be_full`. The list stays device-independent.
 

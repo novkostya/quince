@@ -138,7 +138,8 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
           <span>
             {storage.device_count} {storage.device_count === 1 ? "device" : "devices"}
           </span>
-          {/* `counts_as_of` IS DELIBERATELY NOT RENDERED, because it says nothing — quince#588.
+          {/* NO TIMESTAMP accompanies the counts, and the field is gone from the wire entirely —
+              quince#588, ruled 2026-08-03.
 
               The spec justified it as *"counts came from the DB and were true at LAST CONTACT"*,
               and that premise is wrong: the counts ARE DB rows, and the DB is reachable whether or

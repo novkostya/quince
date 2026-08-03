@@ -45,7 +45,6 @@ function storage(over: Partial<Storage> = {}): Storage {
     filesystem_total_bytes: 2_000,
     backup_count: 0,
     device_count: 0,
-    counts_as_of: "2026-08-03T10:00:00Z",
     ...over,
   };
 }
