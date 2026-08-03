@@ -18,13 +18,18 @@ import { formatBytes } from "@/lib/format";
 
 // space narrows the two nullable capacity fields ONCE and returns them with the percentage.
 //
-// `pct` is the fraction still FREE, so the bar EMPTIES as the disk fills, like a battery. That is
-// the spec's card mockup (`qn.6d.md`: "1.2 TB free of 3.6 TB" over a bar reading 33%), and the
-// reflex it contradicts is worth naming because a reviewer will have it: most disk UIs fill by
-// USAGE, which for these figures reads 67%. Free wins on one concrete ground — the number beside the
-// bar is then DERIVABLE from the line directly above it. A reader sees "1.2 TB free of 3.6 TB" and
-// "33%" and the two agree; "67%" is the complement, and nothing on the card shows the subtraction.
-// A gauge whose number cannot be checked against its own label is one people misread.
+// `pct` is the fraction USED, so the bar FILLS as the disk fills. This is the convention every
+// reference the Operator checked uses — Proxmox Backup Server's "Usage %" column and Windows
+// Explorer's drive bar both fill by usage — and it is what a person already knows how to read.
+//
+// I SHIPPED THE INVERSE AND IT WAS WRONG ON REAL DATA. The card first rendered the FREE fraction,
+// on the argument that it is derivable from the "X free of Y" line directly above it. On staging an
+// EMPTY storage then rendered a COMPLETELY FULL bar at 100% — the most alarming thing a capacity
+// gauge can show, for the safest possible state. The argument was about arithmetic; the failure was
+// about what a filled bar MEANS, which no amount of internal consistency fixes.
+//
+// The spec's own mockup showed the free fraction and has been corrected with it, because it was my
+// invention rather than a ruling.
 //
 // RETURNING THE FIGURES, not just the percentage, is what removes the `?? 0` the render path used to
 // need. That fallback was unreachable in fact — guarded by a non-null percentage, which implied both
@@ -37,7 +42,8 @@ import { formatBytes } from "@/lib/format";
 function space(s: Storage): { pct: number; free: number; total: number } | null {
   const { filesystem_free_bytes: free, filesystem_total_bytes: total } = s;
   if (free === null || total === null || total <= 0 || free < 0) return null;
-  return { pct: Math.min(100, (free / total) * 100), free, total };
+  const used = Math.max(0, total - free);
+  return { pct: Math.min(100, (used / total) * 100), free, total };
 }
 
 export function StorageCard({ storage, showDefault }: { storage: Storage; showDefault: boolean }) {

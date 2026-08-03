@@ -75,7 +75,10 @@ export function StorageDetailsPage() {
 
   const free = storage.filesystem_free_bytes;
   const total = storage.filesystem_total_bytes;
-  const pct = free !== null && total !== null && total > 0 ? (free / total) * 100 : null;
+  // USED, not free — the bar fills as the disk fills (PBS and Windows Explorer both do this).
+  // Rendering the free fraction showed an EMPTY storage as a 100%-full bar on staging.
+  const pct =
+    free !== null && total !== null && total > 0 ? (Math.max(0, total - free) / total) * 100 : null;
 
   return (
     <section>

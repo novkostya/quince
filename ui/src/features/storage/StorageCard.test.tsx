@@ -41,9 +41,9 @@ describe("StorageCard", () => {
     expect(screen.getByTestId("storage-space")).toHaveTextContent("1.2 TB");
     expect(screen.getByTestId("storage-space")).toHaveTextContent("free of");
     expect(screen.getByTestId("storage-space")).toHaveTextContent("3.6 TB");
-    // 1.2 free of 3.6 total → 33%. The bar shows what is LEFT (battery-style), matching the spec's
-    // mockup and the "1.2 TB free of 3.6 TB" line directly above it.
-    expect(screen.getByText("33%")).toBeInTheDocument();
+    // 1.2 free of 3.6 total → 2.4 used → 67%. The bar shows what is USED, filling as the disk
+    // fills, which is what PBS and Windows Explorer do and what a person already reads.
+    expect(screen.getByText("67%")).toBeInTheDocument();
     expect(screen.getByTestId("storage-counts")).toHaveTextContent("14 backups");
     expect(screen.getByTestId("storage-counts")).toHaveTextContent("2 devices");
   });
@@ -120,6 +120,23 @@ describe("StorageCard", () => {
   it("does not repeat the path when the name defaults to it", () => {
     show(storage({ name: "/backups" }));
     expect(screen.getAllByText("/backups")).toHaveLength(1);
+  });
+
+  // THE STAGING REGRESSION, pinned at both ends. An EMPTY storage rendered a COMPLETELY FULL bar at
+  // 100% — the most alarming thing a capacity gauge can show, for the safest possible state —
+  // because the bar filled with the FREE fraction. Both cases are asserted, because either one alone
+  // still passes under the inverted implementation.
+  it("fills with USED, so an empty disk reads 0%", () => {
+    const r = show(
+      storage({ filesystem_free_bytes: 431_400_000_000, filesystem_total_bytes: 431_400_000_000 }),
+    );
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    r.unmount();
+  });
+
+  it("reads 100% only when the disk really is full", () => {
+    show(storage({ filesystem_free_bytes: 0, filesystem_total_bytes: 431_400_000_000 }));
+    expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
   // Reachable but unmeasurable: the daemon leaves capacity null and warns. The card must not
