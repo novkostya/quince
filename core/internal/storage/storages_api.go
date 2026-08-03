@@ -87,17 +87,41 @@ func (m *Manager) storageToWire(s Slot, isDefault bool, udid string,
 	// Capacity is the FILESYSTEM's and only exists when the path can be read. NULL rather than 0
 	// when unreachable: a zero is a measurement and this is an absence (ruled 2026-08-03).
 	if s.Reachable {
-		if free, total, err := FilesystemSpace(s.Root); err == nil {
+		if free, total, err := m.capacityOf(s); err == nil {
 			f, t := int64(free), int64(total) //nolint:gosec // filesystem sizes do not exceed int64
 			v.FilesystemFreeBytes, v.FilesystemTotalBytes = &f, &t
 		} else {
 			// Reachable but unmeasurable — a path that became unreadable between the resolve and
-			// this call. Leaving both null is honest; substituting 0 would claim a full disk.
-			m.log.Warn("statfs failed on a reachable storage — capacity omitted",
-				"storage", s.Name, "path", s.Root, "err", err)
+			// this call, or a zfs hook that could not be run. Leaving both null is honest;
+			// substituting 0 would claim a full disk. quince#585's ruling points a hook failure at
+			// this already-ruled path rather than inventing a second answer for it.
+			m.log.Warn("capacity unavailable on a reachable storage — omitted",
+				"storage", s.Name, "path", s.Root, "backend", s.BackendName, "err", err)
 		}
 	}
 	return v
+}
+
+// capacityReporter is a Backend that knows its own capacity better than `statfs` does.
+//
+// OPTIONAL BY DESIGN. Only zfs implements it, because only zfs has the problem: its storage root is
+// a dataset whose per-device CHILDREN hold every backup, and `statfs` on the parent counts none of
+// them (quince#585). reflink, hardlink and copy are ordinary directories under one filesystem, where
+// `statfs` is the right instrument — so requiring the method on the interface would make three
+// backends implement a workaround for a fourth's problem.
+type capacityReporter interface {
+	Capacity() (free, total uint64, err error)
+}
+
+// capacityOf asks the backend first and falls back to `statfs`.
+//
+// The fallback is not a degraded mode: for three of four backends it IS the correct measurement,
+// which is why there is no warning on taking it.
+func (m *Manager) capacityOf(s Slot) (free, total uint64, err error) {
+	if cr, ok := s.Backend.(capacityReporter); ok && s.Backend != nil {
+		return cr.Capacity()
+	}
+	return FilesystemSpace(s.Root)
 }
 
 // hasVersionFor reports whether this storage already holds a committed, present version for a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -154,4 +155,40 @@ func (c *zfsCLI) Seed(ctx context.Context, udid string) (sharingResult, error) {
 // hook glob `@quince-*` and ListSnapshots' HasPrefix are unaffected.
 func snapNameFor(versionID string, created time.Time) string {
 	return "quince-" + created.UTC().Format(snapDateLayout) + "-" + versionID
+}
+
+// Capacity reports the PARENT dataset's used+available, in bytes.
+//
+// THIS EXISTS BECAUSE `statfs` IS THE WRONG INSTRUMENT ON ZFS (quince#585, Operator ruling
+// 2026-08-03). Backups live in per-device CHILD datasets, and `statfs` on the parent reports the
+// parent's OWN used — 256 K against seventeen backups on the staging stand, so the card rendered
+// "431.4 GB free of 431.4 GB" for a storage that was far from empty.
+//
+// zfs `used` on a parent ALREADY INCLUDES DESCENDANTS, so one call measures the quantity gap A
+// already ruled: total = used + available, free = available. The field's MEANING was right; its
+// measurement was wrong on one backend. That is why the ruling changed no contract text.
+//
+// `-p` is load-bearing: without it zfs prints human units ("399G") and this would have to parse
+// them. With it the values are exact bytes.
+func (c *zfsCLI) Capacity(ctx context.Context) (free, total uint64, err error) {
+	if !datasetPattern.MatchString(c.parent) {
+		return 0, 0, fmt.Errorf("storage: invalid parent dataset %q", c.parent)
+	}
+	out, err := c.run(ctx, c.argv("list", "-H", "-p", "-o", "used,available", c.parent))
+	if err != nil {
+		return 0, 0, fmt.Errorf("zfs list %s: %w: %s", c.parent, err, strings.TrimSpace(out))
+	}
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("zfs list %s: want 2 fields (used, available), got %q", c.parent, strings.TrimSpace(out))
+	}
+	used, err := strconv.ParseUint(fields[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("zfs list %s: parsing used %q: %w", c.parent, fields[0], err)
+	}
+	avail, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("zfs list %s: parsing available %q: %w", c.parent, fields[1], err)
+	}
+	return avail, used + avail, nil
 }

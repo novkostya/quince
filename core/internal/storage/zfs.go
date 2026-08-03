@@ -367,3 +367,17 @@ func latestHasVersion(latest, versionID string) bool {
 	m, err := ReadMarker(latest)
 	return err == nil && m.VersionID == versionID
 }
+
+// Capacity satisfies the optional capacityReporter (quince#585, Operator ruling 2026-08-03).
+//
+// `statfs` on a zfs storage root reports the PARENT dataset's own used and excludes the per-device
+// children that hold every backup — measured on the staging stand as 256 K against seventeen
+// backups. zfs `used` on a parent includes descendants, so this measures what gap A already ruled
+// the field to mean. No contract text changed: the meaning was right, the instrument was wrong.
+//
+// Bounded by opCtx like every other hook call, so a dead SSH target cannot hang a render.
+func (b *zfsBackend) Capacity() (free, total uint64, err error) {
+	ctx, cancel := b.opCtx()
+	defer cancel()
+	return b.cli.Capacity(ctx)
+}
