@@ -683,19 +683,7 @@ Storage: {
                                // will_be_full test, which needs a USABLE artifact. Versions with a
                                // null storage_id are charged to nobody.
                                // Properties of the STORAGE: present with or without `?udid=`.
-                               //
-                               // NO TIMESTAMP ACCOMPANIES THEM, and that is a ruling rather than an
-                               // omission (quince#588, 2026-08-03). The counts are CURRENT, not a
-                               // last-known reading: they are a COUNT(*) over `versions`, and the
-                               // DB is reachable whether or not the disk is — so unplugging a
-                               // storage does not make its count stale. There is nothing to date.
-                               //
-                               // The asymmetry a client needs — counts populated while capacity is
-                               // NULL — is carried by THESE TWO FIELDS sitting beside the capacity
-                               // ones, and is visible without a timestamp. A `counts_as_of` field
-                               // claimed to carry it until 2026-08-03: it was stamped at REQUEST
-                               // time, so it read "just now" on every card for every storage,
-                               // always. Dropped with its rationale.
+                               // Counts stay populated when the disk is gone; capacity does not.
 }
 
 Version: { ..., "storage_id": "01J..." | null }
@@ -762,27 +750,19 @@ Storage: {
   "filesystem_total_bytes": 3600000000000,  // NULL when the storage is unreachable, never 0
   "backup_count":  14,                      // versions attributed to this storage
   "device_count":  2                        // distinct devices with a version here
-  // `counts_as_of` was here until 2026-08-03 and is DROPPED — quince#588.
 }
 ```
 
-Four decided points:
+Three decided points:
 
 1. **The prefixed names are kept.** `statfs` reports the **filesystem**, not the storage, so two
    storages that are two directories on one disk report identical figures. `free_bytes` on a
    `Storage` object would read as the storage's own; the prefix is ugly and the ugliness is doing
    the work, because nothing else in the payload says why the numbers match.
-2. ~~**`counts_as_of` is always present**, so a client never has to infer staleness from
-   `reachable`.~~ **DROPPED 2026-08-03 (quince#588).** It was stamped at **request** time, so it read
-   *"just now"* on every card for every storage, always — and its premise was false: the counts are a
-   `COUNT(*)` over `versions`, and the DB is reachable whether or not the disk is, so there is no
-   staleness to infer. Struck rather than deleted, because it was ruled *here* and a reader needs to
-   see it was reversed rather than never decided.
-3. **Capacity is `null` when unreachable, never `0`** — a zero is a measurement and this is an
+2. **Capacity is `null` when unreachable, never `0`** — a zero is a measurement and this is an
    absence. **Counts stay populated**, because they are the DB's answer and the DB is reachable.
-   **That asymmetry is carried by the fields themselves** — counts present, capacity `null` — and is
-   visible without a timestamp, which is what made the dropped field redundant.
-4. **Counts are properties of the STORAGE**, present with or without `?udid=`, which continues to
+   **That asymmetry is carried by the fields themselves** — counts present, capacity `null`.
+3. **Counts are properties of the STORAGE**, present with or without `?udid=`, which continues to
    add only `will_be_full`. The list stays device-independent.
 
 **The CARD renders no filesystem caveat, and that is a ruled acceptance rather than an oversight.**

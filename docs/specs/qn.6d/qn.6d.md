@@ -337,9 +337,9 @@ not restated** — where this section and `contracts.md` disagree, `contracts.md
 ### Gap A — `Storage` gains space and counts (contracts §1 and §2) — RULED
 
 **The fields land as proposed:** `filesystem_free_bytes`, `filesystem_total_bytes`, `backup_count`,
-`device_count`, `counts_as_of`. All four sub-questions were taken as recommended — prefixed names
-kept, the stamp always present, capacity `null` (never `0`) when unreachable with counts still
-populated, and counts as properties of the storage rather than device-scoped.
+`device_count`. The sub-questions were taken as recommended — prefixed names kept, capacity `null`
+(never `0`) when unreachable with counts still populated, and counts as properties of the storage
+rather than device-scoped.
 
 **One thing the block did not ask, which the ruling settled: the card renders NO filesystem
 caveat.** Rung-ruled decision 2 is **retired** — see its entry, which carries the accepted cost in
@@ -384,19 +384,11 @@ and story 8's UI copy must not promise it.**
    and a device count.
 3. **A `copy`-backend storage carries a caution pill** on its card.
 4. **An unreachable storage is listed and says why** — never hidden, and it claims no size, because
-   capacity is `null` rather than `0` when the disk cannot be read.
-
-   ~~*and dates its counts*~~ — **struck, quince#588.** The dating clause served a premise this rung
-   falsified: *"counts come from the DB and were true at last contact."* The counts **are** the DB —
-   a `COUNT(*)` over `versions` — and the DB is reachable whether or not the disk is, so they are
-   true **now** and cannot be stale. `counts_as_of` was stamped at request time and read *"just
-   now"* on every card, always.
+   capacity is `null` rather than `0` when the disk cannot be read. **Its counts are still true**:
+   they are a `COUNT(*)` over `versions` and the DB is reachable whether or not the disk is.
 
    **The genuinely stale thing already has a field**: whether those versions still exist on disk is
    `Version.missing`, set by reconciliation and rendered as a dead row with no size claim.
-
-   Struck rather than deleted, because the story was implemented as written before it was falsified,
-   and a reader comparing the card to this list needs to see which half went and why.
 5. **A storage has a details page** at `storage/:name` with the marker rendered as a status header.
 6. **The details page's device list, version list and `Back up now` are scoped to that storage.**
 7. **A device with no versions on this storage is shown there, with the full-transfer warning.**
@@ -625,7 +617,7 @@ next summary.
 **Why 3 is separated from 4 rather than folded in.** The ordering test `qn.6c` recorded is *which
 one's absence makes the other wrong*, not which is smaller. A card built before the wire fields
 exist has to invent them, and gap A's ruling is what says which fields exist. The test still holds
-now that it is ruled: PR 4 renders `filesystem_free_bytes` and `counts_as_of`, so it is wrong before
+now that it is ruled: PR 4 renders `filesystem_free_bytes` and `backup_count`, so it is wrong before
 PR 3 puts them on the wire.
 
 **Why 2 is alone.** It touches two code-owned canon files and nothing else, and the rename is
