@@ -596,11 +596,21 @@ in the same diff as the flip rather than in a follow-up.
 | 4 | the card on Home — stories 2, 3, 4 (G1a, G1b, G2) | architect |
 | 5a | the details page — stories 5 and 7, story 8's warning (G4); settles open question 3 in canon | **`@novkostya`** — code owner |
 | 5b | `Back up now` scoped to this storage — story 6 (G3) | architect |
-| 6 | Forget — stories 8, 9 (G5, G5b, G6) | architect |
+| 6a | Forget — the endpoint `DELETE /api/config/storage/{name}`; stories 8 and 9 server-side (G5, G5b, G6) | **`@novkostya`** — code owner |
+| 6b | Forget — the button, the confirm copy, the pending marker | architect |
 | 7 | `story7-storage.spec.ts` — the ui-e2e half | architect |
 
 **No status column** — `qn.6c`'s table recorded why, and its one self-exempting cell went stale by
 the event it was waiting for. A PR number is immutable; a reader who wants status has the forge.
+
+**PR 6 split into 6a and 6b for the same reason 5 did, and the table says so at the split rather
+than afterwards.** An endpoint and a destructive button are different claims with different proofs —
+6a's are three Go gates over the config layer, 6b's is what a user is told before they press it —
+and they take different approval paths, because 6a adds a route line to `contracts.md` and 6b
+touches no canon. **6a is code-owned and that is a deliberate cost:** the ruled gap-B block already
+documents the endpoint, so §1's `Config` listing could have been left alone and the PR routed to the
+architect. Fact 14 is the record of what that costs — §1's listing was already behind the built API
+in two places when this rung started, each an ordinary PR that declined to pay one approval hop.
 
 **PR 5 split into 5a and 5b while it was being built, and the table says so rather than keeping the
 plan.** `useBackup` is keyed by udid and hooks cannot be called in a loop, so *`Back up now` scoped
