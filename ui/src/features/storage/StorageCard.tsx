@@ -15,29 +15,32 @@ import { formatBytes } from "@/lib/format";
 // THE ACTION SLOT IS EMPTY IN THIS RUNG. Devices put `Back up now` there; storage has no card-level
 // action until a later rung. The slot is still reserved so the two card kinds keep the same shape.
 
-// freePercent is what the bar fills to: the fraction of the filesystem still FREE — so the bar
-// EMPTIES as the disk fills, like a battery.
+// space narrows the two nullable capacity fields ONCE and returns them with the percentage.
 //
-// That is the spec's card mockup (`qn.6d.md`: "1.2 TB free of 3.6 TB" over a bar reading 33%), and
-// the reflex it contradicts is worth naming because a reviewer will have it: most disk UIs fill by
-// USAGE, which for these figures would read 67%.
+// `pct` is the fraction still FREE, so the bar EMPTIES as the disk fills, like a battery. That is
+// the spec's card mockup (`qn.6d.md`: "1.2 TB free of 3.6 TB" over a bar reading 33%), and the
+// reflex it contradicts is worth naming because a reviewer will have it: most disk UIs fill by
+// USAGE, which for these figures reads 67%. Free wins on one concrete ground — the number beside the
+// bar is then DERIVABLE from the line directly above it. A reader sees "1.2 TB free of 3.6 TB" and
+// "33%" and the two agree; "67%" is the complement, and nothing on the card shows the subtraction.
+// A gauge whose number cannot be checked against its own label is one people misread.
 //
-// Free wins here on one concrete ground — the number beside the bar is then DERIVABLE from the line
-// directly above it. A reader sees "1.2 TB free of 3.6 TB" and "33%" and the two agree; "67%" is the
-// complement, and nothing on the card shows the subtraction. A gauge whose number cannot be checked
-// against its own label is a gauge people misread.
+// RETURNING THE FIGURES, not just the percentage, is what removes the `?? 0` the render path used to
+// need. That fallback was unreachable in fact — guarded by a non-null percentage, which implied both
+// figures were non-null — and one loosened condition away from silently rendering "0 B free", which
+// is exactly the full-disk misreading the ruling forbids (capacity is null, never 0). Narrowing once
+// here makes the guarantee structural rather than a property two functions must keep agreeing about.
 //
-// Returns null when either figure is missing — an unreachable storage has no capacity at all, and a
-// bar at 0% would read as "no space left" rather than "no measurement". The caller hides the bar
-// entirely instead.
-function freePercent(s: Storage): number | null {
+// Null when either figure is missing: an unreachable storage has no capacity at all, and a bar at 0%
+// would read as "no space left" rather than "no measurement". The caller hides the bar instead.
+function space(s: Storage): { pct: number; free: number; total: number } | null {
   const { filesystem_free_bytes: free, filesystem_total_bytes: total } = s;
   if (free === null || total === null || total <= 0 || free < 0) return null;
-  return Math.min(100, (free / total) * 100);
+  return { pct: Math.min(100, (free / total) * 100), free, total };
 }
 
 export function StorageCard({ storage, showDefault }: { storage: Storage; showDefault: boolean }) {
-  const pct = freePercent(storage);
+  const sp = space(storage);
   const unreachable = !storage.reachable;
 
   return (
@@ -82,7 +85,7 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
             <div data-testid="storage-unreachable-reason" className="text-xs text-warn">
               {storage.unreachable_reason ?? "not connected"}
             </div>
-          ) : pct === null ? (
+          ) : sp === null ? (
             <div className="text-xs text-muted">free space unavailable</div>
           ) : (
             <>
@@ -93,19 +96,19 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
                   RULED ACCEPTANCE — do not "fix" it by reintroducing the distinction. */}
               <div data-testid="storage-space" className="text-sm">
                 <span className="font-medium tabular-nums">
-                  {formatBytes(storage.filesystem_free_bytes ?? 0)}
+                  {formatBytes(sp.free)}
                 </span>{" "}
                 <span className="text-muted">
                   free of{" "}
                   <span className="tabular-nums">
-                    {formatBytes(storage.filesystem_total_bytes ?? 0)}
+                    {formatBytes(sp.total)}
                   </span>
                 </span>
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <Progress percent={pct} className="flex-1" />
+                <Progress percent={sp.pct} className="flex-1" />
                 <span className="w-9 shrink-0 text-right text-xs tabular-nums text-subtle">
-                  {Math.round(pct)}%
+                  {Math.round(sp.pct)}%
                 </span>
               </div>
             </>
