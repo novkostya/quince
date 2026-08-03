@@ -6,6 +6,7 @@ import { useVersionsStore } from "@/stores/versions";
 import { useStorages } from "@/features/jobs/useStorages";
 import { VersionList } from "@/features/versions/VersionList";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import { modelLine } from "@/features/devices/modelName";
@@ -119,9 +120,14 @@ export function StorageDetailsPage() {
         </div>
       ) : null}
 
-      <dl className="mt-4 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <Row label="Path" value={<code className="text-xs">{storage.path}</code>} />
-        <Row label="Backend" value={storage.backend} />
+      {/* ONE ROW, because the other two were saying things the page had already said.
+          `Path` repeated the subtitle directly under the title, and `Backend` repeated the badge
+          two lines above it — and in a two-column grid the leftover `Backend zfs` sat alone
+          against the right edge with nothing beside it, which is what made the duplication look
+          like a layout bug rather than a content one. The status header still shows all five
+          facts the spec asks for; path is the subtitle, backend and reachability are badges, and
+          this is the one fact nothing else carries. */}
+      <dl className="mt-4 text-sm">
         <Row
           label="Storage ID"
           value={
@@ -164,17 +170,23 @@ export function StorageDetailsPage() {
       </div>
 
       <h2 className="mt-8 text-sm font-semibold text-muted">Devices</h2>
-      <div className="mt-3 space-y-2">
+      {/* CARDS IN A GRID, the same shape Home uses for devices and storages. Full-width rows made
+          each device look like a list entry rather than a peer object, and on a wide screen the
+          backup count drifted a long way from the name it belongs to — visible on the staging
+          stand, which is where this came from. `Card` + `h-full` + `mt-auto` is DeviceCard's own
+          idiom, kept so the two card kinds line up. */}
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {devices.length === 0 ? (
           <div className="text-sm text-muted">No devices known yet.</div>
         ) : (
           devices.map(({ device, here }) => (
-            <div
+            <Card
               key={device.udid}
               data-testid="storage-device-row"
               data-udid={device.udid}
-              className="rounded-card border border-line bg-card p-3"
+              className="flex h-full flex-col"
             >
+              <CardContent className="flex flex-1 flex-col p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <Link
@@ -198,9 +210,13 @@ export function StorageDetailsPage() {
                   no backups here yet — the first will be a full transfer
                 </div>
               ) : null}
-              {/* STORY 6 — the destination is the PAGE, not a dropdown. */}
-              <StorageDeviceBackup device={device} storage={storage} />
-            </div>
+              {/* STORY 6 — the destination is the PAGE, not a dropdown. `mt-auto` pins the action
+                  to the bottom so it lines up across a row of unequal-height cards. */}
+              <div className="mt-auto pt-1">
+                <StorageDeviceBackup device={device} storage={storage} />
+              </div>
+              </CardContent>
+            </Card>
           ))
         )}
       </div>

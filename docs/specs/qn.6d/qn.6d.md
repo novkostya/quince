@@ -278,6 +278,15 @@ makes a storage an object rather than a path. `qn.6c` story 7's three distinguis
 land here with their remedy — **subject to quince#569, which is why the page must branch on the
 code and fall back to `unreachable_reason` prose rather than assuming the code is one of three**.
 
+**EACH FACT APPEARS ONCE, and "the header" is all of it rather than the definition list at the
+bottom of it.** Path is the subtitle under the title; backend and reachability are badges; the
+marker UUID is the one fact nothing else carries, so it is the only `<dl>` row. The first build
+rendered path and backend *again* as `<dl>` rows below the badges that already showed them — and in
+a two-column grid the leftover `Backend zfs` sat alone against the right edge, so the duplication
+read as a layout bug (Operator, on the staging stand, 2026-08-03). Do not restore those rows to
+"complete" the list against the sentence above: that sentence is about the header, not about the
+grid.
+
 **Space** — the card's bar, larger. No per-version physical until quince#442 is real.
 
 **Device cards, filtered to this storage** — the same component Home uses, with every counter scoped:
