@@ -179,7 +179,7 @@ func serve(args []string) error {
 	if demoMode {
 		// configureDemoAuth owns the mode banner too, so this branch has NO `if *publicDemo` in it.
 		// A second divergence point here would erode what the shared branch buys — see its doc.
-		if err := configureDemoAuth(authSvc, log, *publicDemo); err != nil {
+		if err := configureDemo(cfgSvc, authSvc, log, *publicDemo); err != nil {
 			return err
 		}
 		prov := demo.NewProvider(eventBus, log)
@@ -514,6 +514,59 @@ func configCmd(args []string) error {
 // quietly wiping a real deployment's DB the first time somebody ran the binary with `--demo`.
 func demoStatePaths(cache string) (dbPath, cfgPath string) {
 	return filepath.Join(cache, "demo.db"), filepath.Join(cache, "demo-config.yml")
+}
+
+// configureDemo is everything the demo branch configures before the provider is built: the mode's
+// auth (preset password or first-run, per D1) and the storage declaration quince#574 added.
+//
+// ONE FUNCTION SO A TEST CAN DRIVE THE SEQUENCE RATHER THAN A COPY OF IT. With the two calls
+// inlined in serve(), every test called them individually and deleting one from serve() failed
+// nothing — which is the same defect quince#575's review found in story 7's first revision, rebuilt
+// here within a day. The lesson did not survive contact with a second call site, so it is now
+// structural instead of remembered.
+func configureDemo(cfgSvc *config.Service, authSvc *auth.Service, log *slog.Logger, public bool) error {
+	if err := configureDemoAuth(authSvc, log, public); err != nil {
+		return err
+	}
+	return seedDemoStorages(cfgSvc)
+}
+
+// seedDemoStorages writes the storages the demo provider serves into the demo's config document,
+// so the document quince SERVES is one quince ACCEPTS BACK (quince#574, Operator ruling
+// 2026-08-03).
+//
+// Without it `config.storage` is null in demo mode — nothing in that branch ever sets it — and
+// `config.Service.Replace` refuses a save that declares no storage. So a visitor who opened
+// Settings and pressed Save got a 422 having changed nothing, on the surface quince#444 calls the
+// reason a live demo beats screenshots.
+//
+// IT GOES THROUGH Replace, not around it. That is the point of the ruling rather than an
+// implementation detail: Replace is the same validating path a visitor's save takes, so seeding
+// through it means the seeded document is proven acceptable by the very check that was rejecting
+// it. A seed written straight to the file could satisfy this function and still 422 on save.
+//
+// FATAL on failure, deliberately. The ruling is explicit that no exemption is added anywhere: "if
+// a 422 still appears after this lands, that is a real defect in the seeded document, not a case
+// for an exemption". A demo that silently came up with an unsaveable config would restore exactly
+// the bug this fixes, minus the symptom that led anyone to find it.
+//
+// Re-seeded on EVERY demo start, which is what makes it survive the reset: prepareDemoState has
+// just deleted demo-config.yml, so a visitor's edits — including removing these entries — are
+// gone by the time this runs (spec story 7, gated by quince#575).
+func seedDemoStorages(cfgSvc *config.Service) error {
+	c := cfgSvc.Current()
+	entries := demo.StorageEntries()
+	c.Storage = &entries
+	errs, err := cfgSvc.Replace(c)
+	if err != nil {
+		return fmt.Errorf("seed the demo storage declaration: %w", err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("the demo storage declaration does not validate (%s: %s) — "+
+			"demo.StorageEntries is wrong; the save path is deliberately not exempt (quince#574)",
+			errs[0].Path, errs[0].Message)
+	}
+	return nil
 }
 
 // prepareDemoState is a demo instance's whole state lifecycle: fresh throwaway paths, wiped on the

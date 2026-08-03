@@ -173,7 +173,7 @@ does not count: *"a periodic reset does not bound either"*.
 | `POST /api/auth/login` | 401/429 | **MUST FIX — finding 2** (quince#464). The limiter is correctly placed *before* the argon2 verify, which is why login is not finding 1. |
 | `POST /api/auth/logout` | 204 | **safe.** Deletes one session row. |
 | `GET /api/config` | 200 | **safe in demo** — serves throwaway `demo-config.yml`, and D12 forbids secrets in the file by construction. On a real deploy it discloses storage roots and filesystem layout; out of scope here, worth a line in the mode's own spec. |
-| `PUT /api/config` | 200/422 | **accept.** Full-document replace, body capped at 1 MiB (`middleware.go:12`), written via `AtomicWrite` (temp + rename, no partial file, no temp litter). In demo the config drives nothing live — the demo provider never reads it — so a vandalised config is cosmetic until restart, and restart is the reset. |
+| `PUT /api/config` | 200/422 | **accept.** Full-document replace, body capped at 1 MiB (`middleware.go:12`), written via `AtomicWrite` (temp + rename, no partial file, no temp litter). In demo the config drives nothing live — the demo provider never reads it — so a vandalised config is cosmetic until restart, and restart is the reset. **The disposition stands; its stated reason was half-false until quince#574 — see the note below the table.** |
 | `GET /api/devices`, `GET /api/devices/{udid}` | 200/404 | **safe.** Fixture data. |
 | `POST /api/devices/rescan` | 409 | **safe.** `UnmanagedMuxer` refuses; quince owns no muxer in demo. |
 | `POST /api/devices/{udid}/pair` | 202 | **MUST FIX — finding 3** (quince#465). |
@@ -191,6 +191,30 @@ does not count: *"a periodic reset does not bound either"*.
 | `/api/…` (unmatched) | 404 | **safe.** |
 | `GET /api/ws` | 101 with session + Origin | **accept, with a named cost.** Auth and strict same-origin both enforced pre-upgrade, and a slow subscriber is dropped rather than blocking the publisher. But **nothing caps concurrent connections**: each is 2 goroutines plus a 64-envelope buffer, and `Publish` walks every subscriber under a read lock, so per-event cost is O(subscribers). Not measured; called out rather than dispositioned clean. |
 | `GET /` (UI) | 200 | **safe.** Embedded `embed.FS`, no filesystem path reaches it. |
+
+## Correction (2026-08-03, quince#574): `PUT /api/config`'s reason assumed something untrue
+
+**The disposition survives; the argument for it did not.** *"Bounded by the reset"* takes for granted
+that a visitor can edit the config at all. They could not.
+
+`--demo` never set `config.storage` — nothing in that branch does — so `GET /api/config` served a
+document with `storage: null`, and `config.Service.Replace` refuses any save that declares no
+storage. **PUT back the document GET had just served, unmodified, and it was a `422`.** Measured on a
+live `--public-demo` container while proving spec story 7. So the row read `200/422` and in practice
+only ever produced the second.
+
+Two things worth carrying, because this is a review-method failure rather than a code one:
+
+- **The reviewed surface was the handler, not the round trip.** Everything the row says about `PUT`
+  is true — 1 MiB cap, `AtomicWrite`, no partial file — and none of it could reveal the defect,
+  because the defect lives in the relationship between two endpoints. A route-by-route table cannot
+  see a pairing, and this table is route-by-route by construction.
+- **"Bounded by the reset" is a claim about a hazard, and it silently implied a capability.** The
+  disposition was reasoning about what a visitor could *damage*. Whether they could *act* was assumed
+  on the way past, and never stated as an assumption — so nothing marked it as needing a check.
+
+Fixed by Operator ruling 2026-08-03: the demo now **declares** the storages it serves, and validation
+stays identical in both modes — no exemption anywhere. The row is now accurate as written.
 
 ## Two things the reset does not bound, beyond the findings
 
