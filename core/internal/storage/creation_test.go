@@ -145,6 +145,33 @@ func TestResolveRefusesAnEmptyPathForAKnownStorage(t *testing.T) {
 			t.Errorf("refusal must name the real cause; missing %q in: %s", want, st.Reason)
 		}
 	}
+	// 5. IT CARRIES THE KNOWN UUID (quince#570). It used to appear only inside the Reason prose, so
+	//    `Storage.id` reached the wire EMPTY for a storage quince had created and could name — and
+	//    `id` is how a client scopes anything to a storage, `Version.storage_id` above all. An
+	//    unplugged disk with no id has no discoverable history, which is the opposite of what an
+	//    unplugged disk needs.
+	if st.StorageID != "01JUSB000000000000000000" {
+		t.Errorf("missing_medium must carry the known storage id, got %q — an unplugged disk with "+
+			"an empty id cannot be scoped to its own versions", st.StorageID)
+	}
+}
+
+// The OTHER half of the same field, pinned beside it so the asymmetry is deliberate rather than
+// discovered: a storage that was NEVER created has no id, because none was ever minted. Carrying
+// the known UUID for `missing_medium` NARROWS what `id` means; it does not invent one here.
+func TestResolveUnreachableCarriesNoStorageID(t *testing.T) {
+	st, err := ResolveStorage("usb", filepath.Join(t.TempDir(), "not-there"), probeAs(BackendCopy),
+		unknownLookup, fixedNow, "test", idGen("01JNEVER0000000000000000"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if st.Resolution != ResolutionUnreachable {
+		t.Fatalf("want unreachable, got %q", st.Resolution)
+	}
+	if st.StorageID != "" {
+		t.Errorf("a storage that was never created must carry NO id, got %q — fabricating one "+
+			"would invent an identity for a disk quince has never seen", st.StorageID)
+	}
 }
 
 // The residual, pinned so it is a KNOWN limitation rather than a surprise: with neither marker nor

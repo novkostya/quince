@@ -143,6 +143,19 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 		return st, fmt.Errorf("storage %q: checking whether it is known: %w", name, err)
 	}
 	if k.Known {
+		// THE UUID IS CARRIED, not merely narrated (quince#570). Until now it went into the Reason
+		// prose below and nowhere else, so `Storage.id` reached the wire EMPTY for a storage quince
+		// had created and could name — while the DB held its identity the whole time.
+		//
+		// It matters because `id` is how a client scopes anything to a storage: versions carry
+		// `storage_id`, so an unplugged disk with no id has no discoverable history — and an
+		// unplugged disk is exactly when a user wants to see what is on it.
+		//
+		// This NARROWS the field's meaning rather than widening it. The value is the one minted at
+		// this storage's own creation moment; the marker is where that identity is normally READ
+		// from, not what makes it exist. A storage that was never created still has no id, which is
+		// correct, because none was ever minted.
+		st.StorageID = k.StorageID
 		st.Resolution = ResolutionMissingMedium
 		st.Reason = fmt.Sprintf("storage %q: %q is readable but has no %s, and quince created this storage before (%s). Its medium is ABSENT — a mountpoint with nothing mounted on it looks exactly like this. Refusing rather than creating a second storage here, which would put backups on the wrong filesystem. Mount it and start again.",
 			name, path, StorageMarkerName, k.StorageID)
