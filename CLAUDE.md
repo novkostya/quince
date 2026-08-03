@@ -705,6 +705,40 @@ wrong is corrected by addition, with the original left standing: a citation is o
 if the text it points at is the text that was there, and a quietly corrected entry destroys the
 evidence that anyone was misled.
 
+**THAT RULE IS THE JOURNAL'S AND IT STOPS AT THE JOURNAL. Everywhere else the test is: does a
+reader who never knew the old state need this to avoid a mistake? Yes → it is a GUARD, keep it.
+No → it is ARCHAEOLOGY, delete it.** Operator ruling, 2026-08-03 (quince#595), raised as *"is there
+a canon saying we should leave all the garbage in code forever?"* — and the finding that prompted it
+is that **there was not**. It binds the four canon docs, this file, `docs/specs/**`, and code
+comments. It does **not** bind the journal or the decisions log, which keep `decisions/0006` for
+their own reason: those are append-only events cited by id, so their text *is* the evidence.
+
+**A GUARD is forward-looking** — it names a mistake a future reader would otherwise make. *"Two
+storages on one disk each show the same figure with nothing saying it is the same space; that is a
+ruled acceptance — do not 'fix' it and do not file it."* *"Re-find by id rather than trusting `idx`
+across the unlocked window."* Neither needs you to have known the old state; both stop you doing
+something wrong.
+
+**ARCHAEOLOGY is backward-looking** — a tombstone for a field with no clients, *"this paragraph said
+X until 2026-08-02"* where X is simply gone, a struck-through sub-question about something that no
+longer exists.
+
+**The test is about the READER, not the author, and that is the whole of it.** *Is it interesting
+that this changed?* keeps everything, because it is always a little interesting to whoever changed
+it. *Will someone get it wrong without this?* keeps only what is load-bearing.
+
+**Nothing here obliges a sweep.** Going forward only; a pass over existing archaeology is a separate
+question and is deliberately not ruled. This file is the largest holder of it — the *"three
+revisions, three wrong remedies"* sequences below are exactly the shape — and every such paragraph
+competes with the job a canon document has, which is to say what is true **now**.
+
+**A caution the ruling earned within the hour, worth more than another example: the issue that filed
+this rule offered `NO TIMESTAMP ACCOMPANIES THEM, and that is a ruling rather than an omission` as a
+model GUARD, and the Operator deleted that exact paragraph the same day** (quince#594). Both readings
+were defensible from the rule alone. **So the test narrows the question; it does not answer it, and a
+close call is the code owner's rather than yours to settle** — asking cost one question, where
+guessing cost a review round trip.
+
 **Nothing mechanically prevents a rewrite, and nothing reliably detects one either.** Every box holds
 a clone, so a rewritten branch *can* be contradicted by another copy — but only by a copy that is
 **current**, and **nothing names which commit a journal clone holds.** `preflight` asserts the private
