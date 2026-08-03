@@ -7,6 +7,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DeviceDetailsPage } from "@/pages/DeviceDetailsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 
 export const router = createBrowserRouter([
   // OUTSIDE EVERY GUARD, and that is the decision rather than an oversight (qn.6f rung-ruled 6).
@@ -49,6 +50,10 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/devices" replace /> },
       { path: "devices", element: <DashboardPage /> },
       { path: "devices/:udid", element: <DeviceDetailsPage /> },
+      // Routed on NAME, not id: the API addresses a storage by its config name (quince#570), and a
+      // name exists for every declared storage where an id does not — one that was never created
+      // has none, and that is exactly the storage a user goes looking for.
+      { path: "storage/:name", element: <StorageDetailsPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },

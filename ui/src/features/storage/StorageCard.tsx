@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { HardDrive, AlertTriangle } from "lucide-react";
 import type { Storage } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,7 +55,14 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
               <HardDrive size={14} className="shrink-0 text-muted" />
-              <span className="truncate text-sm font-semibold tracking-tight">{storage.name}</span>
+              {/* Linked on NAME, matching the route and the ruled API identity — an unreachable
+                  storage has no id, and it is the one a user most wants to open. */}
+              <Link
+                to={`/storage/${encodeURIComponent(storage.name)}`}
+                className="truncate text-sm font-semibold tracking-tight hover:text-accent"
+              >
+                {storage.name}
+              </Link>
             </div>
             {/* The name DEFAULTS to the path (quince#504), so repeating it below would say the same
                 thing twice on the single-storage install that default exists for. */}

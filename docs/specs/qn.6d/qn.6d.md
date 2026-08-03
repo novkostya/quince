@@ -532,11 +532,18 @@ behaviour beyond this rung. Recorded here per the gap protocol.
    are now `{name}`-addressed and the question narrows to *resource-delete versus config mutation*.
    Neither issue is fixed here (see Boundary). What remains open on quince#570 is the
    `ResolutionMissingMedium` field-carrying half and the `Storage.id` question below.
-3. **`Storage.id`'s fate is THIS rung's, by the ruling's own words** — *"whether `id` should still be
-   emitted at all, and what it means when empty, belongs with `qn.6d`'s card work."* Not decided in
-   this spec, because the card is where it becomes answerable: the card is the first surface that
-   must render a storage with no id. The options are keep-and-document-empty, drop it in favour of
-   `name`, or make it nullable. **Named here so PR 4 does not pick one by accident.**
+3. ~~**`Storage.id`'s fate is THIS rung's**~~ — **SETTLED, keep-and-document-empty** (quince#582,
+   quince#583). `id` is still emitted; it means *the identity minted at this storage's creation
+   moment*; **empty means never created**, not *not currently readable*. The decided text is in
+   `contracts.md` §2 beside the field.
+
+   **What settled it was a defect, not a preference.** `contracts.md` already promised the id is
+   *stable across replug* — and it was not: an unplugged disk resolved with `id: ""` and got its
+   UUID back on replug, so the field failed across exactly the transition it exists to survive. The
+   fix carries the DB's UUID onto `missing_medium`, which makes the standing promise true rather
+   than narrowing it. Addressing keys on `name` regardless (quince#570); `id` is for **attribution**,
+   which is what makes the empty case matter — `Version.storage_id` joins on it, and a storage that
+   was never created correctly matches no versions.
 4. **quince#570's HTTP claim is still unreproduced, and the ruling asks for it.** The resolver
    measurement is solid; *"the claim that the button cannot work is currently an inference from
    `ServeMux` behaviour nobody has watched."* Owed against a running daemon with a genuinely
@@ -551,6 +558,15 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 7. **The demo cannot produce two storages on one real filesystem**, which is why G1 is split. If a
    future rung gives the demo provider a real temp-dir-backed storage, G1a could move to ui-e2e;
    until then the split is the honest shape.
+8. **`created_at` is NOT on the wire, so the details page does not render it — and this spec asked
+   for it.** The *Status header* section above says the header shows *"path, backend, reachability,
+   the marker UUID, created-at"*, and `Storage` carries no `created_at`. The daemon has the value
+   twice over (`StorageMarker.CreatedAt` and `StorageRow.CreatedAt`); it simply never reaches a
+   client. **Gap A's ruling settled a specific field set and this was not in it**, so adding one is a
+   contract addition rather than an implementation detail, and PR 5 renders the four fields that
+   exist rather than improvising a fifth. Small and additive when someone rules it; recorded here
+   rather than quietly dropped, because a spec that asks for a field no PR delivers is the
+   pointer-outliving-its-referent shape this rung has already produced four times.
 
 ---
 
