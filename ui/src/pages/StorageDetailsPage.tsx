@@ -67,9 +67,14 @@ export function StorageDetailsPage() {
   // correctly has no versions either, so the empty match is the right answer rather than a gap.
   const versions = versionsOn(storage.id, allVersions);
 
-  // EVERY declared device is listed, including those with nothing here — story 8's argument, and the
-  // whole 3-2-1 case. The action this page exists to make easy is "start backing that device up here
-  // too", and it is invisible if those devices are hidden.
+  // EVERY declared device is listed, including those with nothing here. The action this page exists
+  // to make easy is "start backing that device up here too" — the whole 3-2-1 case — and it is
+  // invisible if those devices are hidden (quince#443).
+  //
+  // THE BEHAVIOUR OUTLIVED ITS ORIGINAL JUSTIFICATION, which is why this comment no longer cites
+  // story 8. A device with nothing here used to be shown partly "so this sentence has somewhere to
+  // be", and that sentence has been deleted (quince#630). The reason above is the one that was
+  // always load-bearing, and it stands on its own.
   const devices = devicesOrder
     .map((udid) => devicesByUdid[udid])
     .filter((d): d is NonNullable<typeof d> => Boolean(d))
@@ -203,13 +208,20 @@ export function StorageDetailsPage() {
                   {here.length} {here.length === 1 ? "backup" : "backups"} here
                 </span>
               </div>
-              {here.length === 0 ? (
-                // STORY 8's warning, inline and BEFORE the cost is paid. A device with nothing here
-                // is shown rather than filtered out precisely so this sentence has somewhere to be.
-                <div data-testid="storage-device-will-be-full" className="mt-2 text-xs text-warn">
-                  no backups here yet — the first will be a full transfer
-                </div>
-              ) : null}
+              {/* STORY 8'S WARNING USED TO RENDER HERE AND IS GONE — one render site, not two
+                  (quince#630). The warning itself is untouched and still shows in the device action
+                  area, where the server supplies it as `will_be_full` for the chosen storage.
+
+                  What was deleted is a second DERIVATION, not a second consumer: this copy made the
+                  same claim from `here.length === 0` — a client-side count of versions — and never
+                  read `will_be_full` at all. Two sources for one claim, with a `data-testid`
+                  asserting they were the same thing. qn.6d's G2 cannot reach it by construction,
+                  because G2 asserts on the API answer AND the marker, "so a UI-only claim cannot
+                  pass it".
+
+                  If this page should ever carry the claim again it must CONSUME `will_be_full`,
+                  which means a device-scoped fetch: it is a (device, storage) fact the server only
+                  supplies when asked about one device. Counting is what made it ungateable. */}
               {/* STORY 6 — the destination is the PAGE, not a dropdown. `mt-auto` pins the action
                   to the bottom so it lines up across a row of unequal-height cards. */}
               <div className="mt-auto pt-1">

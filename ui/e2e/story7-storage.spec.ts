@@ -120,13 +120,24 @@ test("a storage page scopes its lists, and Back up now targets THAT storage", as
     .toBe("01JSTORAGEDEMOINTERNAL00");
 });
 
-// G4 — a device with no versions on this storage is SHOWN there, with the full-transfer warning.
+// G4 — a device with no versions on this storage is SHOWN there.
 //
 // The shuttle holds nothing for any device in the demo, so every device on its page is in this
 // state. Shown rather than filtered is the point: the action this page exists to make easy is
 // "start backing that device up here too", which is the whole 3-2-1 argument and is invisible if
 // those devices are hidden.
-test("a device with nothing on this storage is shown, with the full-transfer warning", async ({
+//
+// THIS TEST USED TO ASSERT THE FULL-TRANSFER WARNING ON EVERY ROW, and that copy is deleted
+// (quince#630). It derived the claim from `here.length === 0` — a client-side version count — and
+// never read the server's `will_be_full`, so it was a second DERIVATION rather than a second
+// consumer, and G2 could not reach it by construction. The warning itself is unchanged and still
+// renders once, in the device action area, from the server's answer.
+//
+// So what is asserted here is the half that outlived it: the device is still LISTED. That was
+// always the load-bearing reason for showing it; the sentence was the incidental one. The deleted
+// testid is asserted ABSENT rather than merely dropped, because this page has no device scope from
+// which to derive that claim honestly — if it reappears here, it is wrong again.
+test("a device with nothing on this storage is still listed, and carries no derived warning", async ({
   page,
 }) => {
   await authenticate(page);
@@ -136,12 +147,7 @@ test("a device with nothing on this storage is shown, with the full-transfer war
 
   const rows = page.getByTestId("storage-device-row");
   await expect(rows.first()).toBeVisible();
+  expect(await rows.count()).toBeGreaterThan(0);
 
-  const warnings = page.getByTestId("storage-device-will-be-full");
-  await expect(warnings.first()).toBeVisible();
-  await expect(warnings.first()).toContainText("first will be a full transfer");
-
-  // EVERY device row on this page carries it, because none of them has anything here — a warning
-  // on only the first row would pass a `.first()` assertion and be wrong.
-  await expect(warnings).toHaveCount(await rows.count());
+  await expect(page.getByTestId("storage-device-will-be-full")).toHaveCount(0);
 });
