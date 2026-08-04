@@ -185,7 +185,9 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 	}
 
 	// Success: create a fresh version, link it to the job, finish.
-	newVer := p.commitDemoVersionFor(udidPhone, jobID)
+	// The seeded script job never named a storage, so it lands on the default, which is what an
+	// omitted `storage_id` means everywhere else.
+	newVer := p.commitDemoVersionFor(udidPhone, jobID, p.defaultStorageID())
 	fin := wire.Now()
 	j.State = "succeeded"
 	j.Progress.Phase = "done"
@@ -202,11 +204,16 @@ func (p *Provider) runOneBackup(ctx context.Context) bool {
 }
 
 // commitDemoVersionFor prepends a new fixture version for a device, trimming to a reasonable count.
-func (p *Provider) commitDemoVersionFor(udid, jid string) wire.Version {
+//
+// `storageID` is where the backup landed, and it is a PARAMETER rather than something looked up
+// inside, so a caller has to answer the question. Versions with no storage are what quince#624 was
+// about: the demo created backups that existed nowhere, so the storage pages and the device cards
+// disagreed the moment anything ran.
+func (p *Provider) commitDemoVersionFor(udid, jid, storageID string) wire.Version {
 	now := wire.Now()
 	vid := id.New()
 	v := wire.Version{
-		ID: vid, UDID: udid, Backend: "zfs",
+		ID: vid, UDID: udid, Backend: "zfs", StorageID: strptr(storageID),
 		ZFSSnapshot:         strptr("tank/backups/iphone-backup/" + udid + "@quince-2026-07-18T02-30-" + vid),
 		BrowseRoot:          "/backups/" + udid + "/.zfs/snapshot/quince-2026-07-18T02-30-" + vid + "/latest",
 		CreatedAt:           now,
@@ -228,11 +235,18 @@ func (p *Provider) commitDemoVersionFor(udid, jid string) wire.Version {
 	}
 	p.versions[vid] = v
 	p.verOrder = append([]string{vid}, p.verOrder...)
-	if len(p.verOrder) > 10 { // trim to bound growth: drop the oldest NON-offline version
+	// Trim to bound RUNTIME growth. The bound counts only what the demo has created since it
+	// started, because the seeded history is exempt below — before that exemption the fixture
+	// history was what got eaten, since this scans from the END of verOrder and the seed is
+	// appended there (quince#624).
+	if len(p.verOrder)-len(p.seededVersions) > 10 {
 		for i := len(p.verOrder) - 1; i >= 0; i-- {
-			// Keep the offline device's seeded versions (the live + DEAD fixture the qn.6a e2e needs);
-			// otherwise the ambient loop would eventually trim them away as the oldest.
-			if p.versions[p.verOrder[i]].UDID == udidOffline {
+			// Never trim the SEED. It is the fixture world — the storage history the counts derive
+			// from, and the offline device's live+DEAD pair the qn.6a e2e needs. This used to name
+			// the offline device specifically, for exactly this reason ("otherwise the ambient loop
+			// would eventually trim them away as the oldest"); the seeded set generalises that from
+			// one device to the whole fixture, which is what the storage history needed too.
+			if p.seededVersions[p.verOrder[i]] {
 				continue
 			}
 			drop := p.verOrder[i]

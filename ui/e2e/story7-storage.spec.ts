@@ -42,8 +42,18 @@ test("both storages are cards on Home, with free-of-total, a bar and counts", as
   await expect(internal.getByRole("progressbar")).toBeVisible();
   await expect(internal).toContainText("67%");
 
-  await expect(internal.getByTestId("storage-counts")).toContainText("14 backups");
-  await expect(internal.getByTestId("storage-counts")).toContainText("2 devices");
+  // COUNTS ARE ASSERTED BY SHAPE, NOT BY VALUE, and that is the change quince#624 forces.
+  //
+  // These read "14 backups" and "2 devices" — literals that matched the provider's own literals,
+  // so the assertion and the subject were the same fabrication and neither could be wrong. Now the
+  // numbers are DERIVED from the version list, which means they move: the demo commits real
+  // versions as it runs, and story4 completes a backup before this file executes. A fixed number
+  // here would be a scheduling dependency dressed as a fact.
+  //
+  // What the numbers must actually satisfy is that the surfaces AGREE, which is asserted properly
+  // in the test below rather than approximated here.
+  await expect(internal.getByTestId("storage-counts")).toContainText(/\d+ backups?/);
+  await expect(internal.getByTestId("storage-counts")).toContainText(/\d+ devices?/);
 
   // `Default` is a distinction, so it renders only where there is something to distinguish from —
   // and with two storages declared, there is.
@@ -75,7 +85,10 @@ test("the unreachable storage is listed, says why, and claims no size", async ({
 
   // Its counts ARE still shown — they are the DB's answer and the DB is reachable. This is the
   // asymmetry the capacity/counts fields exist to carry.
-  await expect(shuttle.getByTestId("storage-counts")).toContainText("3 backups");
+  // By shape, for the reason G1b gives above: derived, so it moves. What matters here is that an
+  // unreachable storage still reports counts AT ALL — the disk is out, the database is not — which
+  // a `\d+` match asserts and a hardcoded 3 asserted only by coincidence.
+  await expect(shuttle.getByTestId("storage-counts")).toContainText(/\d+ backups?/);
 
   // THE REACHABLE ONE IS UNAFFECTED, which the gate asks for by name: a page that degraded both
   // cards because one disk was out would pass every assertion above.
@@ -150,4 +163,56 @@ test("a device with nothing on this storage is still listed, and carries no deri
   expect(await rows.count()).toBeGreaterThan(0);
 
   await expect(page.getByTestId("storage-device-will-be-full")).toHaveCount(0);
+});
+
+// quince#624 — THE STORAGE HEADER AND THE PER-DEVICE ROWS MUST BE THE SAME NUMBER.
+//
+// This is the gate the issue was actually about. The demo asserted three different backup counts
+// for one fixture set: a storage card claiming 14, every device row on that storage's page reading
+// "0 backups here", and device cards saying something else again. No version carried a
+// `storage_id`, so anything computed per (device, storage) found nothing and rendered the empty
+// case — under a header that had simply been written down.
+//
+// Summing the rows and comparing to the header is what makes that unrepeatable from the OUTSIDE.
+// A Go test pins the derivation at the source (`storagecounts_test.go`); this pins that the two
+// surfaces a user actually looks at cannot drift apart.
+//
+// It also gives qn.6d's G3 something to fail on. G3 asserts a storage page's lists are SCOPED to
+// their storage, and while every device read zero it passed whether the filter worked or not.
+test("the storage header's count equals the sum of its per-device rows", async ({ page }) => {
+  await authenticate(page);
+
+  const internal = page.locator('[data-testid="storage-card"][data-storage-name="internal"]');
+  const header = await internal.getByTestId("storage-counts").textContent();
+  const headerBackups = Number(/(\d+)\s+backups?/.exec(header ?? "")?.[1]);
+  expect(headerBackups, "the card must state a backup count").not.toBeNaN();
+
+  await internal.locator("a").first().click();
+  await expect(page).toHaveURL(/\/storage\/internal$/);
+
+  const rows = page.getByTestId("storage-device-row");
+  await expect(rows.first()).toBeVisible();
+
+  // READ THE COUNT ELEMENT, never the row's text. `textContent` concatenates siblings with no
+  // separator, so the model line's trailing "iOS 26.0.1" runs into "15 backups here" and a regex
+  // over the row reads 115. That is not hypothetical — it is what the first version of this
+  // assertion did, and it summed to 189 against a header of 18.
+  const counts = page.getByTestId("storage-device-count");
+  await expect(counts.first()).toBeVisible();
+  expect(await counts.count(), "every device row states a count").toBe(await rows.count());
+
+  let summed = 0;
+  for (const cell of await counts.all()) {
+    const text = (await cell.textContent()) ?? "";
+    // Every row states its own count, INCLUDING the zeros — devices with nothing here are listed
+    // rather than filtered, so the sum is over all rows and not just the non-empty ones.
+    const n = Number(/^(\d+)\s+backups?\s+here$/.exec(text.trim())?.[1]);
+    expect(n, `a device row must state a count, got: ${text}`).not.toBeNaN();
+    summed += n;
+  }
+
+  expect(
+    summed,
+    "the storage header and its per-device rows are computed from different sources again",
+  ).toBe(headerBackups);
 });

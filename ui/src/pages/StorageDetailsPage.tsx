@@ -78,7 +78,18 @@ export function StorageDetailsPage() {
   const devices = devicesOrder
     .map((udid) => devicesByUdid[udid])
     .filter((d): d is NonNullable<typeof d> => Boolean(d))
-    .map((d) => ({ device: d, here: versions.filter((v) => v.udid === d.udid) }));
+    // `here` EXCLUDES MISSING VERSIONS, and that is a fix rather than a filter (quince#624).
+    //
+    // A missing version's registry row survives but its artifact is gone, so counting it tells the
+    // user they have a backup they cannot restore. `DeviceCard` already excluded them from its own
+    // "N backups", and the storage's `backup_count` excludes them on the wire — this row was the
+    // one surface that did not, so a storage holding one dead version reported one more backup here
+    // than its own header did. Found by the e2e that sums these rows against that header: 19 vs 18.
+    //
+    // The version LIST below is deliberately NOT filtered this way. A dead version renders there,
+    // explicitly dead, with a Remove action (qn.6a) — history is not silently shrunk. It is the
+    // COUNT that must not claim it.
+    .map((d) => ({ device: d, here: versions.filter((v) => v.udid === d.udid && !v.missing) }));
 
   const free = storage.filesystem_free_bytes;
   const total = storage.filesystem_total_bytes;
@@ -204,7 +215,15 @@ export function StorageDetailsPage() {
                     {modelLine(device.model, device.ios_version)}
                   </div>
                 </div>
-                <span className="shrink-0 text-xs tabular-nums text-subtle">
+                {/* Its own testid so the count can be read as a VALUE rather than scraped out of
+                    the row's text. `textContent` concatenates siblings with no separator, so the
+                    model line above ends "…iOS 26.0.1" and runs straight into "15 backups here" —
+                    a regex over the row then reads 115. Measured, on the assertion that exists to
+                    prove these numbers agree (quince#624). */}
+                <span
+                  data-testid="storage-device-count"
+                  className="shrink-0 text-xs tabular-nums text-subtle"
+                >
                   {here.length} {here.length === 1 ? "backup" : "backups"} here
                 </span>
               </div>

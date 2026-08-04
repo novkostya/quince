@@ -30,8 +30,14 @@ type Provider struct {
 	jobLog   map[string][]string // per-job accumulated log lines (GET /api/jobs/{id}/log)
 	running  map[string]*demoRun // in-flight scripted jobs by UDID (single-flight, qn.4b)
 	versions map[string]wire.Version
-	verOrder []string           // version display order (newest first)
-	ops      map[string]wire.Op // pair/encryption ops (GET /api/ops/{id}; qn.3 DeviceOps)
+	verOrder []string // version display order (newest first)
+	// seededVersions are the fixture history, which the growth trim must never eat. Without it the
+	// trim — which drops from the END of verOrder, by position rather than by date — would consume
+	// the storage history seeded at the end of that slice, one version per committed backup, until
+	// the storage counts drifted back toward the disagreement quince#624 fixed. The trim exists to
+	// bound RUNTIME growth; the seed is not growth.
+	seededVersions map[string]bool
+	ops            map[string]wire.Op // pair/encryption ops (GET /api/ops/{id}; qn.3 DeviceOps)
 	// opInflight is the per-UDID device-op single-flight slot (quince#465). Distinct from
 	// `running`, the BACKUP slot — startGuardedOp says why they are deliberately not shared.
 	opInflight map[string]string
@@ -50,9 +56,15 @@ func NewProvider(b *bus.Bus, log *slog.Logger) *Provider {
 		versions: map[string]wire.Version{},
 		ops:      map[string]wire.Op{},
 
+		seededVersions: map[string]bool{},
+
 		opInflight: map[string]string{},
 	}
 	p.seed()
+	// Everything present after the seed is fixture history and is exempt from the growth trim.
+	for _, id := range p.verOrder {
+		p.seededVersions[id] = true
+	}
 	return p
 }
 
@@ -166,48 +178,114 @@ func f64ptr(f float64) *float64 { return &f }
 // selector in story 9 has to render a disabled option with a reason attached.
 //
 // `will_be_full` appears only when a udid is asked for, matching the ruled device-independence of
-// the list. The demo answers `true` for the shuttle because no version of any device lives there,
-// which is exactly the warning a user should see before choosing it.
+// the list. It is now COMPUTED per (storage, device) rather than asserted: this comment used to say
+// "the demo answers `true` for the shuttle because no version of any device lives there", which was
+// a description of a hardcoded literal and stopped being true the moment the shuttle had a history
+// (quince#624).
 func (p *Provider) Storages(udid string) []wire.Storage {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	internalFull, shuttleFull := false, true
-	if udid != "" {
-		internalFull = true
-		for _, id := range p.verOrder {
-			if v, ok := p.versions[id]; ok && v.UDID == udid && !v.Missing {
-				internalFull = false
-				break
-			}
-		}
-	}
+	// COUNTS ARE DERIVED FROM THE VERSIONS, not written down beside them (quince#624). Every number
+	// below is a fold over one fixture set, so the storage card, the storage page's per-device rows
+	// and the device card cannot disagree — which they did, three ways, because the totals were
+	// literals and nothing computed them.
+	tally := p.tallyLocked()
+
 	code, reason := "missing_medium", "the path is readable but carries no quince storage marker — "+
 		"if this is a removable disk, it is not mounted"
 
-	// Space and counts (qn.6d gap A). The reachable storage carries capacity; the unreachable one
-	// carries NULL capacity and POPULATED counts — which is the whole
-	// asymmetry those fields exist for, and the state G2 asserts. Fabricated like the rest of this
-	// fixture, but fabricated to the shape the LIVE resolver produces rather than a convenient one:
-	// an unreachable disk cannot be statfs'd, and its counts are the DB's last word.
+	// Space (qn.6d gap A). The reachable storage carries capacity; the unreachable one carries NULL
+	// capacity and POPULATED counts — the whole asymmetry those fields exist for, and the state G2
+	// asserts. The capacity is still fabricated, because a demo has no filesystem to statfs; the
+	// COUNTS no longer are, because it does have versions to count. An unreachable disk cannot be
+	// measured, but the database that remembers what is on it is reachable either way.
 	free, total := int64(1_200_000_000_000), int64(3_600_000_000_000)
 
 	out := []wire.Storage{{
 		ID: demoStorageInternal, Name: "internal", Path: "/backups", Backend: "reflink",
 		Default: true, Reachable: true,
 		FilesystemFreeBytes: &free, FilesystemTotalBytes: &total,
-		BackupCount: 14, DeviceCount: 2,
+		BackupCount: tally.backups[demoStorageInternal],
+		DeviceCount: len(tally.devices[demoStorageInternal]),
 	}, {
 		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/shuttle", Backend: "unknown",
 		Default: false, Reachable: false,
 		UnreachableCode: &code, UnreachableReason: &reason,
-		BackupCount: 3, DeviceCount: 1,
+		BackupCount: tally.backups[demoStorageShuttle],
+		DeviceCount: len(tally.devices[demoStorageShuttle]),
 	}}
 	if udid != "" {
+		// `will_be_full` IS PER (STORAGE, DEVICE), which is the question the field actually asks:
+		// "this device has nothing on THIS storage, so the first backup here transfers everything".
+		//
+		// It used to be a hardcoded `true` for the shuttle and, for internal, "does this device have
+		// ANY version anywhere" — a device-wide test standing in for a per-storage one. With one
+		// storage that was indistinguishable; with two it was simply the wrong question, and it
+		// answered `false` for a device that had never written a byte to the storage being asked
+		// about.
+		internalFull := !tally.hasVersion[verKey{demoStorageInternal, udid}]
+		shuttleFull := !tally.hasVersion[verKey{demoStorageShuttle, udid}]
 		out[0].WillBeFull = &internalFull
 		out[1].WillBeFull = &shuttleFull
 	}
 	return out
+}
+
+// defaultStorageID is where an omitted `storage_id` resolves, matching the daemon's own rule that
+// the default is what an unspecified destination means.
+func (p *Provider) defaultStorageID() string {
+	for _, s := range p.Storages("") {
+		if s.Default {
+			return s.ID
+		}
+	}
+	return demoStorageInternal
+}
+
+// verKey identifies the (storage, device) pair `will_be_full` is a property of.
+type verKey struct{ storageID, udid string }
+
+type storageTally struct {
+	backups    map[string]int
+	devices    map[string]map[string]bool
+	hasVersion map[verKey]bool
+}
+
+// tallyLocked folds the version list into the per-storage numbers the wire carries. ONE pass, ONE
+// source: the point of quince#624 is that these three answers cannot drift apart, and they cannot
+// if they are computed together from the same slice.
+//
+// A MISSING version is excluded. Its registry row survives but the artifact is gone, so counting it
+// would claim backups a user cannot restore — and `will_be_full` would say "not a full transfer"
+// about a storage holding nothing usable for that device.
+//
+// An UNATTRIBUTED version (nil storage_id) is excluded too, and that is deliberate rather than
+// incidental: it is a real state — the migration that added `storage_id` left older rows null on
+// purpose rather than guessing — so a demo that silently folded them into some storage would model
+// the one behaviour the real resolver refuses.
+//
+// Caller must hold at least a read lock.
+func (p *Provider) tallyLocked() storageTally {
+	t := storageTally{
+		backups:    map[string]int{},
+		devices:    map[string]map[string]bool{},
+		hasVersion: map[verKey]bool{},
+	}
+	for _, id := range p.verOrder {
+		v, ok := p.versions[id]
+		if !ok || v.Missing || v.StorageID == nil || *v.StorageID == "" {
+			continue
+		}
+		sid := *v.StorageID
+		t.backups[sid]++
+		if t.devices[sid] == nil {
+			t.devices[sid] = map[string]bool{}
+		}
+		t.devices[sid][v.UDID] = true
+		t.hasVersion[verKey{sid, v.UDID}] = true
+	}
+	return t
 }
 
 // Recheck re-probes one demo storage. The shuttle STAYS unreachable: a demo whose disk appears

@@ -169,4 +169,98 @@ func (p *Provider) seed() {
 		PhysicalBytes:       40_100_000_000,
 	}
 	p.verOrder = []string{verZFS, verHL, verADOP}
+
+	// THE THREE ABOVE LIVE ON `internal`, and every version below exists so the storage counts can
+	// be DERIVED rather than written down three times (quince#624).
+	//
+	// Before this, no demo version carried a `storage_id` at all. Anything computed per
+	// (device, storage) therefore found nothing and rendered the empty case, while the storage
+	// cards simultaneously asserted hardcoded totals — a storage page reading "0 backups here" for
+	// every device under a header claiming 14. Three surfaces, three answers, one fixture set.
+	//
+	// It also left qn.6d's G3 unfalsifiable: that gate asserts a storage page's lists are SCOPED to
+	// their storage, and with every version unattributed each device read zero whether the filter
+	// worked or not. A gate that cannot fail for the reason it exists is not yet a gate.
+	p.versions[verZFS] = withStorage(p.versions[verZFS], demoStorageInternal)
+	p.versions[verHL] = withStorage(p.versions[verHL], demoStorageInternal)
+	p.versions[verADOP] = withStorage(p.versions[verADOP], demoStorageInternal)
+
+	// 11 more on `internal` and 3 on `shuttle`, so the seeded world derives to internal = 14
+	// backups / 1 device and shuttle = 3 / 1 — the figures the fixture used to assert.
+	//
+	// ALL ON ONE DEVICE, BECAUSE studio-ipad HAS NEVER BEEN BACKED UP and stays that way (Operator,
+	// 2026-08-04). That is a state the demo exists to show — the empty card, and the unencrypted
+	// warning beside it — and inventing a history for it to satisfy a fabricated `device_count: 2`
+	// would trade a real demo state for a number nobody measured. The count now reads 1 because 1
+	// is true.
+	p.seedStorageHistory(udidPhone, demoStorageInternal, "reflink", 11, 26)
+	p.seedStorageHistory(udidPhone, demoStorageShuttle, "hardlink", 3, 12)
+}
+
+// withStorage attributes an existing fixture version to a storage.
+func withStorage(v wire.Version, storageID string) wire.Version {
+	v.StorageID = strptr(storageID)
+	return v
+}
+
+// seedStorageHistory appends n plausible committed backups for one device on one storage.
+//
+// Deterministic ids and timestamps, because the httpapi golden fixtures render this list and a
+// generated id would churn them on every run.
+//
+// `backend` is the VERSION's backend — how those bytes were written — which is a different field
+// from the storage's. They agree here, but they are ALLOWED to differ: `shuttle` reports backend
+// "unknown" because it is unreachable and its marker cannot be read right now, while the versions
+// the database remembers on it were written as hardlink. That is the same asymmetry gap A ruled for
+// capacity-versus-counts — the disk is out, the database is not.
+func (p *Provider) seedStorageHistory(udid, storageID, backend string, n, startDay int) {
+	for i := 0; i < n; i++ {
+		vid := histID("V", storageID, i)
+		at := histTimestamp(startDay - i) // walking backwards in time
+		p.versions[vid] = wire.Version{
+			ID:      vid,
+			UDID:    udid,
+			Backend: backend,
+			// No snapshot: reflink and hardlink store a version as a directory, not a zfs
+			// snapshot, and a `zfs_snapshot` here would contradict the backend beside it.
+			ZFSSnapshot:         nil,
+			BrowseRoot:          "/backups/" + udid + "/versions/" + at,
+			CreatedAt:           at,
+			JobID:               strptr(histID("J", storageID, i)),
+			Kind:                "incremental",
+			Encrypted:           true,
+			IsLatest:            false, // the newest for this device is verZFS, seeded above
+			StructureVerifiedAt: strptr(at),
+			ContentVerifiedAt:   nil,
+			LogicalBytes:        41_000_000_000 + int64(i)*17_000_000,
+			PhysicalBytes:       180_000_000 + int64(i)*11_000_000,
+			StorageID:           strptr(storageID),
+		}
+		p.verOrder = append(p.verOrder, vid)
+	}
+}
+
+// histID mints a stable 26-character ULID-shaped id. The storage is folded in so the two runs
+// cannot collide: "01JCZQ8XH" + kind + storage tag + 15 digits.
+func histID(kind, storageID string, i int) string {
+	tag := "I"
+	if storageID == demoStorageShuttle {
+		tag = "S"
+	}
+	return "01JCZQ8XH" + kind + tag + padDigits(i, 15)
+}
+
+func padDigits(i, width int) string {
+	out := make([]byte, width)
+	for k := width - 1; k >= 0; k-- {
+		out[k] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(out)
+}
+
+// histTimestamp renders a fixed instant on a day of 2026-06, so the generated history is stable
+// across runs and orders the way a real history would.
+func histTimestamp(day int) string {
+	return "2026-06-" + padDigits(day, 2) + "T04:12:00Z"
 }
