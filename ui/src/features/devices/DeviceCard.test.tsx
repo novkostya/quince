@@ -173,3 +173,43 @@ function ver(id: string, udid: string) {
     storage_id: null,
   };
 }
+
+// THE BADGE HAD NO TEST AT ALL, IN EITHER DIRECTION, AND THAT IS THE FINDING (quince#625).
+//
+// The issue expected to trade one assertion for another — *"a test asserting `Encrypted` renders
+// comes out; a test asserting `Not encrypted` renders must stay and is the one that matters."*
+// Neither existed. The only `Encrypted` / `Not encrypted` assertions in the suite are in
+// `OnboardingHTTPSPage.test.tsx`, which is about HTTPS transport encryption — a different subject
+// that happens to share the words, and is untouched by this change.
+//
+// So nothing was removed here and this is net-new coverage on the branch that now carries the whole
+// user consequence. `off` is the only state that renders anything; if it ever stops, a device whose
+// backups are unencrypted becomes indistinguishable on Home from one that is fine.
+describe("DeviceCard encryption badge", () => {
+  beforeEach(() => {
+    useJobsStore.setState({ byId: {}, logByJobId: {} });
+    useVersionsStore.setState({ byId: {}, order: [] });
+  });
+
+  // THE ONE THAT MATTERS. The card must interrupt for an unencrypted device.
+  it("warns when backups are NOT encrypted", () => {
+    renderCard(device({ backup_encryption: "off" }));
+    expect(screen.getByText("Not encrypted")).toBeTruthy();
+  });
+
+  // Quiet when healthy — the whole point of quince#625. An `ok` badge in the loudest slot on the
+  // card reported the expected state of a standing setting and never changed between visits.
+  it("says nothing when backups ARE encrypted", () => {
+    renderCard(device({ backup_encryption: "on" }));
+    expect(screen.queryByText("Encrypted")).toBeNull();
+    expect(screen.queryByText("Not encrypted")).toBeNull();
+  });
+
+  // `unknown` rendered nothing before this change and still does. Asserted so the two silent states
+  // are pinned as silent for DIFFERENT reasons, and a future edit cannot quietly give one a badge.
+  it("says nothing when the encryption state is unknown", () => {
+    renderCard(device({ backup_encryption: "unknown" }));
+    expect(screen.queryByText("Encrypted")).toBeNull();
+    expect(screen.queryByText("Not encrypted")).toBeNull();
+  });
+});

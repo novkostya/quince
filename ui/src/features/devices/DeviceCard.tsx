@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ShieldAlert, ShieldCheck, Usb, Wifi, WifiOff } from "lucide-react";
+import { ShieldAlert, Usb, Wifi, WifiOff } from "lucide-react";
 import type { Device, Job } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,14 +11,25 @@ import { useVersionsStore } from "@/stores/versions";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
 import { useBackup } from "@/features/jobs/useBackup";
 
+// THE CARD IS SILENT WHEN THINGS ARE FINE AND SPEAKS WHEN THEY ARE NOT (quince#625, Operator).
+//
+// `Encrypted` used to render here as an `ok` badge — the loudest element on the card, in the slot
+// the eye reaches first, reporting the EXPECTED state of a standing setting. On a screen whose job
+// is "which of my devices are backed up, and can I back one up now", the most prominent position
+// went to a fact that is true of every healthy device and never changes between visits.
+//
+// `Not encrypted` is the opposite and is KEPT, unchanged: it is the one encryption state worth
+// interrupting for, and the card is where a user would want to be told.
+//
+// WHAT IS LOST, deliberately: Home no longer distinguishes `on` from `unknown` — both render
+// nothing. `unknown` is the muxd-minimal, pre-qn.3-lockdown state, so the remaining ambiguity is
+// between "encrypted" and "we could not read lockdown yet", never between encrypted and NOT. The
+// positive state still shows on the device DETAILS page (`encryption: on`), checked rather than
+// assumed.
+//
+// Same rule qn.6d gives storage cards — quiet when healthy, loud and self-explaining when a disk is
+// out (quince#443) — so the two card families now agree rather than differing.
 function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
-  if (state === "on") {
-    return (
-      <Badge tone="ok">
-        <ShieldCheck size={12} /> Encrypted
-      </Badge>
-    );
-  }
   if (state === "off") {
     return (
       <Badge tone="warn">
@@ -26,7 +37,8 @@ function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
       </Badge>
     );
   }
-  return null; // "unknown" (muxd-minimal, before qn.3 lockdown) — no badge
+  // "on", and "unknown" (muxd-minimal, before qn.3 lockdown) — no badge either way.
+  return null;
 }
 
 // BackupStatus is the one line under the transports: real history if any (with a live, hover-exact
