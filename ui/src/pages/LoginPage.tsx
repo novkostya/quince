@@ -28,7 +28,18 @@ export function LoginPage() {
         isPublicDemo ? (
           <div className="mt-3 space-y-2 rounded-card border border-line bg-bg px-3 py-2 text-sm text-muted">
             <p>
-              Password: <span className="font-mono font-semibold text-fg">{DEMO_PASSWORD}</span>
+              Password:{" "}
+              {/*
+                data-testid is what lets the e2e read this password OFF THE SCREEN and log in with
+                exactly that string (quince#534). The two constants are deliberately NOT
+                un-duplicated — serving the password from /api/health would put a credential on an
+                authExempt endpoint — so the only honest guard is behavioural: whatever is rendered
+                here must actually work. Locating it by styling class instead would break the guard
+                the day somebody restyles this notice, which is the wrong thing to be fragile to.
+              */}
+              <span className="font-mono font-semibold text-fg" data-testid="demo-password">
+                {DEMO_PASSWORD}
+              </span>
             </p>
             {/*
               Story 6, and the sentence is UNCONDITIONAL while the schedule is not. The reset wipes

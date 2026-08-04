@@ -71,11 +71,19 @@ TC_GO   := quince-toolchain-go:$(IMAGE_TAG)
 TC_NODE := quince-toolchain-node:$(IMAGE_TAG)
 TC_UV   := quince-toolchain-uv:$(IMAGE_TAG)
 
-# e2e (Playwright) plumbing: a demo app container + a runner container on a shared network.
-E2E_NET     := quince-e2e-net$(NS)
-E2E_APP     := quince-e2e-app$(NS)
-E2E_MODULES := quince-e2e-node-modules$(NS)
-E2E_LOG     := /tmp/quince-e2e-app$(NS).log
+# e2e (Playwright) plumbing: TWO app containers + a runner container on a shared network.
+#
+# The second one runs `--public-demo` and exists for quince#534: the demo password lives as two
+# independent constants (Go and TSX) that nothing connected, so the only honest guard is reading the
+# password off the rendered login screen and logging in with it. That needs the mode, and the shared
+# app deliberately runs `--demo` — story 4 asserts that mode is unchanged, so it cannot be flipped.
+# Namespaced per runner like everything else that runs (quince#45).
+E2E_NET        := quince-e2e-net$(NS)
+E2E_APP        := quince-e2e-app$(NS)
+E2E_PUBLIC_APP := quince-e2e-public-app$(NS)
+E2E_MODULES    := quince-e2e-node-modules$(NS)
+E2E_LOG        := /tmp/quince-e2e-app$(NS).log
+E2E_PUBLIC_LOG := /tmp/quince-e2e-public-app$(NS).log
 
 # The PRODUCT image, separate from IMAGE_TAG for the reason above: `make image` rebuilds one fixed
 # tag, so a second session retags the image the first is testing. This one is per-runner; the
@@ -734,23 +742,28 @@ else
 endif
 
 .PHONY: gates-ui-e2e
-gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two containers)
+gates-ui-e2e: image ## Playwright stories against `quince serve --demo` + a `--public-demo` app (three containers)
 ifeq ($(E2E_NEEDED),3)
 	@echo "gates-ui-e2e: SKIPPED — nothing the image is built from changed in $(SCOPE). Same coverage as image, so the two skip together and e2e never runs against an image that was not built."
 else
 	@set -e; \
-	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
+	$(RUNTIME) rm -f $(E2E_APP) $(E2E_PUBLIC_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
 	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
 	  -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	  $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null; \
+	$(RUNTIME) run -d --name $(E2E_PUBLIC_APP) --network $(E2E_NET) \
+	  -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
+	  $(IMAGE_NAME):$(APP_TAG) serve --public-demo >/dev/null; \
 	status=0; \
 	$(RUN) --network $(E2E_NET) -w /src/ui \
 	  -v quince-pnpm-store:/pnpm-store -v $(E2E_MODULES):/src/ui/node_modules \
 	  -e BASE_URL=http://$(E2E_APP):8968 -e CI=1 -e PNPM_VERSION=$(PNPM_VERSION) \
+	  -e PUBLIC_DEMO_URL=http://$(E2E_PUBLIC_APP):8968 \
 	  $(PLAYWRIGHT_IMAGE) sh /src/deploy/e2e-run.sh || status=$$?; \
 	$(RUNTIME) logs $(E2E_APP) > $(E2E_LOG) 2>&1 || true; \
-	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
+	$(RUNTIME) logs $(E2E_PUBLIC_APP) > $(E2E_PUBLIC_LOG) 2>&1 || true; \
+	$(RUNTIME) rm -f $(E2E_APP) $(E2E_PUBLIC_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
 	exit $$status
 endif
