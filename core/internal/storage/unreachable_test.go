@@ -9,6 +9,7 @@ import (
 
 	"github.com/novkostya/quince/core/internal/storage/clonetree"
 	"github.com/novkostya/quince/core/internal/store"
+	"github.com/novkostya/quince/core/internal/wire"
 )
 
 // qn.6c story 5b (quince#435). An unreachable storage is a LISTED STATE, not a refusal to serve —
@@ -449,5 +450,70 @@ func TestSeedKindIsFullForAFirstBackupToASECONDStorage(t *testing.T) {
 	// per-(device, storage) question rather than a per-device one.
 	if got := m.seedKind(m.slots[0], testUDID); got != "incremental" {
 		t.Errorf("the default already holds a version for this device, want incremental, got %q", got)
+	}
+}
+
+// quince#652 — AN UNREACHABLE STORAGE'S COUNTS REACH THE WIRE POPULATED, and an unplugged disk that
+// quince has never created is still distinguishable from one it has.
+//
+// The gap A ruling (quince#443, 2026-08-03): "capacity is null when unreachable, never 0. Counts
+// stay populated — they are the DB's answer and the DB is reachable." The capacity half was
+// implemented; the counts half was not, because `storageToWire` keys the count map on
+// `Slot.StorageID` and every way of failing to read the disk lost that id.
+//
+// WHAT THIS TEST DOES NOT PROVE, and it took a mutation run to notice. It builds the Slot with
+// `StorageID` ALREADY SET, so it exercises how storageToWire keys the count map and never reaches
+// the resolver that was losing the id — it passes on the unfixed code. It is a genuine regression
+// guard for the KEYING half and nothing more.
+//
+// The claim "an unplugged disk keeps its identity" is asserted where it actually happens, on the
+// path a real disk takes: cmd/quince/live_test.go, through resolveSlot → ResolveStorage → the DB.
+// Two halves of one defect, pinned separately, because a single test that appeared to cover both
+// covered only the half that was already working.
+func TestAnUnreachableStorageReportsItsCountsOnTheWire(t *testing.T) {
+	m, _, _, st := newNSManager(t, clonetree.Copy, generousPolicy())
+	gone := "01JSTORAGEGONE0000000000"
+	m.slots = append(m.slots, Slot{
+		StorageID: gone, Name: "shuttle", Root: "/nowhere", Reachable: false,
+		UnreachableCode: "path_unreachable",
+	})
+
+	for _, id := range []string{"01VONGONE1", "01VONGONE2"} {
+		if err := st.InsertVersion(store.VersionRow{
+			ID: id, UDID: testUDID, Backend: BackendCopy, CreatedAt: time.Now().UTC(),
+			JobID: strPtrLocal("j"), Kind: "full", StorageID: &gone,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got *wire.Storage
+	for _, s := range m.Storages("") {
+		if s.Name == "shuttle" {
+			cp := s
+			got = &cp
+		}
+	}
+	if got == nil {
+		t.Fatal("the unreachable storage is absent from Storages() — it must be LISTED, never hidden")
+	}
+	if got.Reachable {
+		t.Fatal("test setup is wrong: the slot under assertion is reachable")
+	}
+	// THE ASSERTION. Two versions are on this disk and the DB knows it, whether or not the disk is
+	// plugged in. Zero here is the reported defect: "No backups on this storage yet" about a disk
+	// full of them.
+	if got.BackupCount != 2 {
+		t.Errorf("backup_count = %d, want 2 — an unplugged disk's counts come from the DB, which is "+
+			"reachable when the disk is not (gap A ruling, quince#443)", got.BackupCount)
+	}
+	if got.DeviceCount != 1 {
+		t.Errorf("device_count = %d, want 1", got.DeviceCount)
+	}
+	// And the id itself, because the UI reads "" as "quince has never reached this path" — a claim
+	// about history made from the absence of a file.
+	if got.ID != gone {
+		t.Errorf("id = %q, want %q — an empty id makes the page claim quince has never reached a "+
+			"path it has been backing up to", got.ID, gone)
 	}
 }

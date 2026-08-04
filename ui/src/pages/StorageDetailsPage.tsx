@@ -66,6 +66,12 @@ export function StorageDetailsPage() {
   // used to reach the wire with id "" and could not be matched to its own history — the moment a
   // user most wants to see what is on it. A storage that was NEVER created still has no id, and
   // correctly has no versions either, so the empty match is the right answer rather than a gap.
+  //
+  // quince#582 was NOT sufficient, and this page is where that showed: it covered the
+  // missing-medium refusal only, so an unplugged USB — which fails at the marker READ, not the
+  // reachability check — still arrived with id "" and hit `versionsOn`'s early return. The page
+  // then said "No backups on this storage yet" about a disk full of them. quince#652 makes every
+  // refusal carry the id, so this scoping now works whenever the DB knows the storage.
   const versions = versionsOn(storage.id, allVersions);
 
   // EVERY declared device is listed, including those with nothing here. The action this page exists
@@ -145,8 +151,16 @@ export function StorageDetailsPage() {
           label="Storage ID"
           value={
             storage.id === "" ? (
-              // Empty means NEVER CREATED, not "not currently readable" — quince#582 made the id
-              // survive a replug, so an absent one now says something definite.
+              // Empty means NEVER CREATED, not "not currently readable" — so an absent id says
+              // something definite.
+              //
+              // THAT BECAME TRUE IN TWO STEPS, AND THIS COMMENT ASSERTED IT AFTER ONLY THE FIRST.
+              // quince#582 carried the id on the missing-medium path; every OTHER way of failing to
+              // read the disk still lost it, so an unplugged USB rendered this sentence — a claim
+              // about history, made from the absence of a file — about a disk quince had been
+              // backing up to for months. quince#652 moved the DB lookup to the front of
+              // ResolveStorage so every refusal carries the id, which is what makes branching on
+              // the line above safe.
               <span className="text-muted">not yet created — quince has never reached this path</span>
             ) : (
               <code className="text-xs" data-testid="storage-detail-id">

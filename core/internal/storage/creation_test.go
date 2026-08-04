@@ -616,3 +616,90 @@ func TestAttributedManagerDoesNotOwnPreUpgradeRowsUntilTheyAreSwept(t *testing.T
 		t.Errorf("the sweep must leave nothing unattributed; %d remain (%v)", n, err)
 	}
 }
+
+// quince#652 — EVERY refusal carries the id when the DB knows the storage, not just missing_medium.
+//
+// The defect these pin: `Slot.StorageID` is what `versions.storage_id` joins against, so a storage
+// that loses its id reports 0 backups AND — because the UI reads `id == ""` as "never created" —
+// claims quince has never reached a path it has been backing up to for months. Two false statements
+// from one lost join key, at exactly the moment a user wants reassurance about a disk they unplugged.
+//
+// TestResolveUnreachableCarriesNoStorageID above is the other half and still holds: an UNKNOWN
+// storage carries no id on the same path. The distinction is the DB row, never the reachability.
+
+// The unplugged mountpoint: the path is gone entirely, so reachable() refuses before any marker read.
+func TestResolveUnreachableCarriesTheKnownStorageID(t *testing.T) {
+	st, err := ResolveStorage("usb", filepath.Join(t.TempDir(), "not-there"), probeAs(BackendCopy),
+		knownLookup("01JUSB000000000000000000"), fixedNow, "test", idGen("01JNEW00000000000000000"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if st.Resolution != ResolutionUnreachable {
+		t.Fatalf("want unreachable, got %q", st.Resolution)
+	}
+	if st.StorageID != "01JUSB000000000000000000" {
+		t.Errorf("an unreachable but KNOWN storage must carry its id, got %q — without it the "+
+			"storage page reports 0 backups and says quince has never reached the path", st.StorageID)
+	}
+}
+
+// A damaged marker is not an absent one: quince refuses to read identity from it, and the DB's
+// answer is still good.
+func TestResolveCorruptMarkerCarriesTheKnownStorageID(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, StorageMarkerName), []byte(`{"storage_id":"x","checksum":"nope"}`), 0o644); err != nil {
+		t.Fatalf("write corrupt marker: %v", err)
+	}
+	st, err := ResolveStorage("usb", root, probeAs(BackendCopy),
+		knownLookup("01JUSB000000000000000000"), fixedNow, "test", idGen("01JNEW00000000000000000"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if st.Resolution != ResolutionCorruptMarker {
+		t.Fatalf("want corrupt_marker, got %q", st.Resolution)
+	}
+	if st.StorageID != "01JUSB000000000000000000" {
+		t.Errorf("a corrupt marker must not cost the storage its identity, got %q — the DB knows "+
+			"it, and refusing to trust the FILE is not a reason to forget the STORAGE", st.StorageID)
+	}
+}
+
+// THE REPORTED CASE, and the one a fix aimed only at reachable() would have missed. An unplugged USB
+// whose mountpoint still exists is a readable DIRECTORY, so reachable() passes; the failure arrives
+// from the marker read as an I/O error. ResolveStorage returns an error here — and returns its state
+// alongside it, which is what `resolveSlot` reads.
+func TestResolveCarriesTheKnownStorageIDEvenWhenItReturnsAnError(t *testing.T) {
+	root := t.TempDir()
+	// A DIRECTORY where the marker file should be: ReadStorageMarker's open/read fails with
+	// something that is neither ErrNotExist nor ErrStorageMarkerCorrupt, which is the error limb.
+	if err := os.Mkdir(filepath.Join(root, StorageMarkerName), 0o755); err != nil {
+		t.Fatalf("mkdir marker-as-dir: %v", err)
+	}
+	st, err := ResolveStorage("usb", root, probeAs(BackendCopy),
+		knownLookup("01JUSB000000000000000000"), fixedNow, "test", idGen("01JNEW00000000000000000"))
+	if err == nil {
+		t.Fatalf("want an error from an unreadable marker, got none (resolution %q)", st.Resolution)
+	}
+	if st.StorageID != "01JUSB000000000000000000" {
+		t.Errorf("the state returned ALONGSIDE an error must still carry the id, got %q — this is "+
+			"the path the reported unplugged-USB case actually took", st.StorageID)
+	}
+}
+
+// The creation rule is UNCHANGED by the hoist, and this is the assertion that says so. No marker and
+// no row is still a creation with a freshly minted id — the hoist only changes what a FAILURE can
+// say about itself, never whether a creation happens.
+func TestTheHoistedLookupDoesNotLoosenTheCreationRule(t *testing.T) {
+	root := t.TempDir()
+	st, err := ResolveStorage("fresh", root, probeAs(BackendCopy), unknownLookup,
+		fixedNow, "test", idGen("01JMINTED000000000000000"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if st.Resolution != ResolutionCreated {
+		t.Fatalf("want created, got %q", st.Resolution)
+	}
+	if st.StorageID != "01JMINTED000000000000000" {
+		t.Errorf("a creation must mint a NEW id, got %q", st.StorageID)
+	}
+}

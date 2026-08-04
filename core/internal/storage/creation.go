@@ -101,6 +101,33 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 
 	st := StorageState{Name: name, Path: path}
 
+	// THE DB IS ASKED FIRST, AND IT IS ASKED ON EVERY PATH (quince#652).
+	//
+	// The marker is where a storage's identity is normally READ from; it is not what makes that
+	// identity exist. It lives ON the disk, so every way of failing to read the disk used to also
+	// lose the id — and `Slot.StorageID` is what `versions.storage_id` joins against, so an
+	// unplugged disk reported 0 backups and, because the UI reads `id == ""` as "never created",
+	// claimed quince had never reached a path it had been backing up to for months. Two false
+	// statements, one cause, at exactly the moment a user wants reassurance about a disk they just
+	// unplugged.
+	//
+	// `storages` maps name → storage_id and lives in SQLite, which is reachable when the disk is
+	// not. quince#570 already put this lookup on the missing-medium path for the same reason; this
+	// hoist is that fix finished rather than a new idea. Every `return st` below now carries the id,
+	// INCLUDING the two that return an error — Go returns the value alongside it, and `resolveSlot`
+	// now reads it there.
+	//
+	// It does NOT loosen the creation rule. Creation still requires no marker AND no row: `k.Known`
+	// is false exactly then, so `st.StorageID` is empty and a new uuid is minted below. What the
+	// hoist changes is only what a FAILURE can still say about itself.
+	k, err := known(name)
+	if err != nil {
+		return st, fmt.Errorf("storage %q: checking whether it is known: %w", name, err)
+	}
+	if k.Known {
+		st.StorageID = k.StorageID
+	}
+
 	if !reachable(path) {
 		st.Resolution = ResolutionUnreachable
 		st.Reason = fmt.Sprintf("storage %q: path %q cannot be read — if this is removable media, it is not mounted; quince will not back up to it and will not create anything there", name, path)
@@ -137,11 +164,8 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 	}
 
 	// No marker. Whether that is a creation or an absent medium is the DB's answer, not the
-	// directory's.
-	k, err := known(name)
-	if err != nil {
-		return st, fmt.Errorf("storage %q: checking whether it is known: %w", name, err)
-	}
+	// directory's — asked once at the top of this function, because every other refusal needs the
+	// same answer (quince#652).
 	if k.Known {
 		// THE UUID IS CARRIED, not merely narrated (quince#570). Until now it went into the Reason
 		// prose below and nowhere else, so `Storage.id` reached the wire EMPTY for a storage quince
@@ -155,6 +179,10 @@ func ResolveStorage(name, path string, probe func(string) string, known StorageL
 		// this storage's own creation moment; the marker is where that identity is normally READ
 		// from, not what makes it exist. A storage that was never created still has no id, which is
 		// correct, because none was ever minted.
+		//
+		// Redundant since quince#652 hoisted the same assignment to the top, and KEPT deliberately:
+		// this path's correctness should not depend on where the lookup happens to sit. If the hoist
+		// is ever moved or narrowed, missing-medium still carries its id.
 		st.StorageID = k.StorageID
 		st.Resolution = ResolutionMissingMedium
 		st.Reason = fmt.Sprintf("storage %q: %q is readable but has no %s, and quince created this storage before (%s). Its medium is ABSENT — a mountpoint with nothing mounted on it looks exactly like this. Refusing rather than creating a second storage here, which would put backups on the wrong filesystem. Mount it and start again.",
