@@ -137,15 +137,43 @@ export function DeviceCard({ device }: { device: Device }) {
         {/* Exactly ONE primary action per card (qn.6a soak fix — a "needs attention" line PLUS a
             separate "Back up now" was two buttons doing the same thing). When the newest attempt
             failed, Retry IS that action and replaces Back up now, with the failure as context.
-            mt-auto pins it to the card bottom so buttons align across cards of different heights. */}
+
+            THE BUTTON IS THE LAST CHILD OF EVERY BRANCH, AND THAT IS THE ALIGNMENT (quince#512).
+            `mt-auto` pins the WRAPPER to the card bottom; it says nothing about where the button
+            sits inside it. The branches used to disagree — offline was `[Button, reason]`, attention
+            `[message, Button, error?]`, default `[Button, error?]` — so the wrapper's bottom edge
+            aligned and the button's did not, across three distinct baselines. Two cards side by
+            side put the same control at visibly different heights.
+
+            Ending every branch with its button makes alignment INDEPENDENT of the caption: the
+            button's bottom edge is the wrapper's bottom edge however tall the text above it is,
+            however many lines it wraps to, and whether or not it is there at all. A reserved
+            fixed-height caption slot was the alternative, and it is a guess about that caption's
+            height — correct until a longer string, a bigger font or a translation silently breaks
+            it back into this bug.
+
+            THIS IS THE INVARIANT A FUTURE BRANCH WILL BREAK, so it is stated rather than implied:
+            `mt-auto` pins the wrapper; the buttons align because each branch ENDS with its button.
+
+            The two conditional `error` spans are the easy half to miss — a card only misaligned
+            AFTER a failed click, which is exactly when the user is least served by things moving. */}
         <div className="mt-auto pt-4">
           {activeJob ? (
+            // Out of scope for that rule, deliberately: a card actively backing up has no button at
+            // all and is in a different state. It must not acquire one to satisfy an alignment rule.
             <JobProgressInline job={activeJob} />
           ) : !present ? (
-            // Offline: a disabled "Back up now" WITH a reason (never a dead button), same shape as an
-            // online card so the layout stays aligned (Operator ruling, (ch)/(bq)). The reason is
-            // shown inline too — a hover title alone is invisible on a phone.
+            // Offline: a disabled "Back up now" WITH a reason (never a dead button), so the card
+            // keeps its shape (Operator ruling, (ch)/(bq)). The reason is shown inline as well as in
+            // the title — a hover title alone is invisible on a phone.
+            //
+            // THE REASON SITS ABOVE THE BUTTON NOW, and that RESTORES the ruling rather than
+            // altering it. The comment here used to say "same shape as an online card so the layout
+            // stays aligned" — right about the ruling and wrong about the code, which is the more
+            // dangerous way to be wrong, because it reads as authority. The caption underneath was
+            // precisely what pushed this branch's button a line higher than every other card's.
             <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted">Connect it over USB or Wi-Fi to back it up.</span>
               <Button
                 size="sm"
                 disabled
@@ -154,7 +182,6 @@ export function DeviceCard({ device }: { device: Device }) {
               >
                 Back up now
               </Button>
-              <span className="text-xs text-muted">Connect it over USB or Wi-Fi to back it up.</span>
             </div>
           ) : device.paired !== "yes" ? (
             // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
@@ -166,8 +193,16 @@ export function DeviceCard({ device }: { device: Device }) {
               </Link>
             </Button>
           ) : attention ? (
+            // This branch already led with its message, which is the precedent (a) finishes
+            // applying rather than introduces. What moved is the `error` span: it followed the
+            // button, so a retry that failed dropped this card's baseline below every other one.
             <div className="flex flex-col gap-1.5">
               <span className="text-xs text-danger">Last attempt needs attention</span>
+              {error ? (
+                <span className="text-xs text-danger" role="alert">
+                  {error}
+                </span>
+              ) : null}
               <Button
                 size="sm"
                 onClick={() => void start("auto", { retryOf: attention.id })}
@@ -176,14 +211,17 @@ export function DeviceCard({ device }: { device: Device }) {
               >
                 {busy ? "Starting…" : "Retry backup"}
               </Button>
+            </div>
+          ) : (
+            // The common case, and the one whose `error` span is easiest to overlook because it is
+            // almost always absent: a healthy card was already aligned, and only fell out of line
+            // once a click had failed.
+            <div className="flex flex-col gap-1">
               {error ? (
                 <span className="text-xs text-danger" role="alert">
                   {error}
                 </span>
               ) : null}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1">
               <Button
                 size="sm"
                 onClick={() => void start("auto")}
@@ -192,11 +230,6 @@ export function DeviceCard({ device }: { device: Device }) {
               >
                 {busy ? "Starting…" : "Back up now"}
               </Button>
-              {error ? (
-                <span className="text-xs text-danger" role="alert">
-                  {error}
-                </span>
-              ) : null}
             </div>
           )}
         </div>
