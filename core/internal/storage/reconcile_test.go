@@ -20,7 +20,7 @@ func stageNSCommit(t *testing.T, m *Manager, backups, udid, jobID, vid string, p
 	t.Helper()
 	tree := workingTree(backups, udid)
 	goodEncryptedFull(t, tree)
-	mustMarker(t, tree, vid, jobID, udid, m.defaultSlot().BackendName)
+	mustMarker(t, tree, vid, jobID, udid, m.BackendName())
 	dev := deviceDir(backups, udid)
 	latest := latestDir(backups, udid)
 	// Capture prevTS from the current latest (v1) BEFORE any exchange.
@@ -30,7 +30,7 @@ func stageNSCommit(t *testing.T, m *Manager, backups, udid, jobID, vid string, p
 		prevTS = tsDir(pt)
 	}
 	j := Journal{
-		VersionID: vid, UDID: udid, Backend: m.defaultSlot().BackendName, JobID: jobID, Phase: PhasePrepared,
+		VersionID: vid, UDID: udid, Backend: m.BackendName(), JobID: jobID, Phase: PhasePrepared,
 		CreatedAt: fmtRFC(created2), Kind: "full", Encrypted: true, StructureVerifiedAt: fmtRFC(created2),
 		JobDir: tree, PrevTS: prevTS,
 	}

@@ -68,6 +68,20 @@ func (m *Manager) jobSlot(jobID string) (Slot, error) {
 	copy(slots, m.slots)
 	m.mu.RUnlock()
 
+	// GUARDED (qn.6g). Note this function already copies the list under the lock and then works on
+	// the copy — which is the right shape and is why the ONLY thing missing was the length check:
+	// once the list can shrink, the copy can be empty.
+	//
+	// A bound job does not need slots[0] at all, so the guard is deliberately AFTER the bound lookup
+	// would have run... except it cannot be, because `s` is assigned first. Hence the explicit
+	// ordering below: an unbound job on an empty list is the only case that has nowhere to go.
+	if len(slots) == 0 {
+		if bound {
+			return Slot{}, fmt.Errorf(
+				"this job was started against storage %q, and no storage is declared any more", want)
+		}
+		return Slot{}, fmt.Errorf("no storage is declared, so this job has nowhere to write")
+	}
 	s := slots[0]
 	if bound {
 		found := false
@@ -112,6 +126,13 @@ func (m *Manager) ResolveChoice(storageID string) (concrete string, status int, 
 	defer m.mu.RUnlock()
 
 	if storageID == "" {
+		// GUARDED (qn.6g, quince#577): the list can be REPLACED while the process runs, so
+		// "non-empty at construction" no longer implies non-empty here. A 409 rather than a panic,
+		// and with its own wording — an absent declaration and an unreachable disk are two distinct
+		// conditions, and a message that covers both is false half the time it appears.
+		if len(m.slots) == 0 {
+			return "", 409, "no storage is declared, so there is nowhere to back up to — declare one in config.yml"
+		}
 		s := m.slots[0]
 		if !s.Usable() {
 			return "", 409, fmt.Sprintf(

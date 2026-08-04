@@ -111,12 +111,23 @@ func NewManager(slots []Slot, reg Registry, audit Auditor, b *bus.Bus,
 	}
 }
 
-// defaultSlot is the storage a backup goes to when none is named. Declaration order decides it,
-// and `config.CheckStorages` guarantees the list is non-empty before a Manager is ever built.
-func (m *Manager) defaultSlot() Slot {
+// defaultSlot is the storage a backup goes to when none is named. Declaration order decides it.
+//
+// THE NON-EMPTY GUARANTEE MOVES FROM CONSTRUCTION TIME TO CALL TIME (qn.6g, quince#577). It used to
+// rest on `config.CheckStorages` refusing an empty list before a Manager was ever built, plus
+// `NewManager` panicking on one — both one-shot checks at startup. Once the list can be REPLACED
+// while the process runs, "non-empty when it was built" says nothing about "non-empty now", and an
+// unguarded `m.slots[0]` is an index into a slice another goroutine may just have shortened.
+//
+// The `ok` return is what makes that checkable instead of a panic. `CheckStorages` still refuses an
+// empty declaration, so false should be unreachable; this is the guard for when it is not.
+func (m *Manager) defaultSlot() (Slot, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.slots[0]
+	if len(m.slots) == 0 {
+		return Slot{}, false
+	}
+	return m.slots[0], true
 }
 
 // slotFor resolves the storage a VERSION lives on, from its storage_id.
@@ -182,15 +193,28 @@ func (s Slot) owns(rowStorageID *string) bool {
 // unconfigured Manager inserts NULL rather than "" — the two are different states on the wire and
 // "" is not one of them (contracts §2: null = not yet attributed).
 func (m *Manager) storageIDPtr() *string {
-	if m.defaultSlot().StorageID == "" {
+	// ONE read, not two. It called defaultSlot() twice — a re-read across which the list can now
+	// change, so the value tested and the value returned were not guaranteed to be the same one.
+	d, ok := m.defaultSlot()
+	if !ok || d.StorageID == "" {
 		return nil
 	}
-	s := m.defaultSlot().StorageID
+	s := d.StorageID
 	return &s
 }
 
 // BackendName reports the resolved backend (for /api/health + onboarding).
-func (m *Manager) BackendName() string { return m.defaultSlot().BackendName }
+//
+// "unknown" on an empty list, which is the value the wire already uses for a storage whose backend
+// quince has not determined (`storageToWire`). A caller asking what backend is in use when there is
+// no storage gets an answer that is true rather than an empty string that reads as "none".
+func (m *Manager) BackendName() string {
+	d, ok := m.defaultSlot()
+	if !ok {
+		return "unknown"
+	}
+	return d.BackendName
+}
 
 // KnownUDIDs returns the distinct UDIDs that have any committed version — the offline-device set the
 // device registry unions with live presence so a powered-off device that has backups is still listed
@@ -502,8 +526,21 @@ func (m *Manager) policyFor(storageID string) (RetentionPolicy, bool) {
 }
 
 // RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).
+//
+// Guarded twice, and the second is the sharper one: an empty list has no slot, and an UNUSABLE slot
+// has a NIL Backend (`Slot.Reachable`'s doc: "BACKEND IS NIL WHEN THIS IS FALSE"). The old form
+// dereferenced it unconditionally, which was safe only while nothing could replace a reachable slot
+// with an unreachable one mid-flight — exactly the assumption this rung removes.
 func (m *Manager) RepairWorkingCopy(udid string) error {
-	return m.defaultSlot().Backend.RepairWorkingCopy(udid)
+	d, ok := m.defaultSlot()
+	if !ok {
+		return fmt.Errorf("repair working copy for %s: no storage is declared", udid)
+	}
+	if !d.Usable() {
+		return fmt.Errorf("repair working copy for %s: the default storage %q is not reachable (%s): %s",
+			udid, d.Name, d.UnreachableCode, d.UnreachableReason)
+	}
+	return d.Backend.RepairWorkingCopy(udid)
 }
 
 // VerifyWork is the passwordless structural-verification exposed to the backup engine (qn.4a/qn.5b):
