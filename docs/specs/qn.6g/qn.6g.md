@@ -226,12 +226,62 @@ interface fact 6's windows rather than narrowing them. Removing the current defa
 refused** with a `422` by `qn.6d`'s ruling, so nothing can promote a different storage by removing
 index 0 — that ruling is load-bearing for this rung and is cited, not rebuilt.
 
-**An in-flight job keeps the storage it started on, and that is correct.** It holds a copied `Slot`,
-so it completes against the disk it began writing to — which is what *never mutate a committed
-version* and *a failed job keeps its dirty `working/`* both require. The consequence is that
-**forgotten and no-longer-in-use differ for the duration of a job**, and this rung says so rather
-than letting it be discovered: the storage leaves the list immediately, and the job that is using it
-finishes. Story 6 and G5.
+## PROPOSED (gap): a live forget KILLS a running backup, and this spec claimed the opposite
+
+**This paragraph asserted the wrong thing, and PR 4 measured it.** It read:
+
+> **An in-flight job keeps the storage it started on, and that is correct.** It holds a copied
+> `Slot`, so it completes against the disk it began writing to … the storage leaves the list
+> immediately, and the job that is using it finishes. Story 6 and G5.
+
+**The engine does not hold a copied `Slot`.** Every phase — `Seed`, `PrepareWork`, `SeedWork`,
+`CommitJob`, `Discard`, `VerifyWork` — re-resolves through `Manager.jobSlot(jobID)`, which looks the
+storage up in the CURRENT list by the job's binding. Measured on this branch, `internal/storage`:
+
+```
+ApplyStorages([alpha, beta]); bind job-1 → beta; ApplyStorages([alpha])
+jobSlot("job-1") → error: this job was started against storage "…" , which is no longer declared —
+                          refusing rather than writing it to a different disk
+```
+
+So with the applier wired, **forgetting a storage mid-backup fails the running job at its next
+phase.** That refusal is correct in itself and predates this rung — silently retargeting a backup to
+a different disk would be far worse — but it was written for a config change observed at *restart*,
+where no job can be in flight. Live apply is what makes it reachable mid-transfer.
+
+**It contradicts a hard rule, which is why this is a gap rather than a scope call.** `CLAUDE.md`:
+*"a commit failure must not destroy a multi-hour Wi-Fi transfer"*, and *"a failed job KEEPS its dirty
+`working/` so a retry resumes without re-transferring."* A job killed this way loses the phase it was
+in, and Wi-Fi is the primary transport under the assisted model — the case where hours are at stake.
+
+**PR 4 is HELD.** The wiring is written and is not being merged behind this: shipping the applier
+turns an unreachable refusal into a reachable one, which is a regression introduced by the fix.
+
+- **(a) `ApplyStorages` retains a slot with in-flight jobs bound to it**, dropping it when the last
+  finishes. The storage leaves the wire immediately (the user sees it forgotten) while the running
+  job keeps resolving. **RECOMMENDED** — it is what this spec already claimed, and it makes
+  *forgotten* and *no-longer-in-use* differ for exactly the duration the paragraph described. Cost:
+  the Manager grows a rule that the slot list is "declared ∪ in-use", and something must drop the
+  retained slot at job end.
+- **(b) `DELETE /api/config/storage/{name}` refuses with `422` while a job is running on it**,
+  naming the job. Simplest, and honest — but it makes a user wait out a multi-hour backup to remove
+  a disk they may have already unplugged, and the existing `422` set is about *coherence of the
+  declaration*, not about liveness.
+- **(c) Accept it and say so.** Let the job fail, with the refusal reaching the UI. Cheapest, and it
+  needs the hard rule above amended rather than merely noted — which is the Operator's, not mine.
+
+**What is NOT in question:** the refusal itself. Retargeting a bound job to another disk is not on
+the table under any option.
+
+**Nothing is built on this while it is pending.** PRs 5–7 do not touch it; PR 4 resumes the moment it
+is ruled, and under (a) or (b) its G5 becomes assertable rather than aspirational.
+
+---
+
+**Once ruled, the paragraph this replaces becomes true again**, and the consequence it names is the
+one worth keeping: **forgotten and no-longer-in-use differ for the duration of a job**. The storage
+leaves the list immediately; what happens to the job in flight is what the ruling decides. Story 6
+and G5.
 
 ### The per-setting answer — the actual deliverable
 
@@ -243,7 +293,7 @@ bins impossible to fill honestly.
 | `backup.transport` | **nothing reads it** | quince#654. The job's transport comes from the POST body. |
 | `backup.require_encryption` | **live** | Read per job (fact 8); the applier swaps one synchronized field. A running job keeps its answer. |
 | `storage[]` (membership) | **live** | The ruled first consumer. |
-| `storage[].path` / `.backend` / `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses (fact 4). An in-flight job keeps its slot. |
+| `storage[].path` / `.backend` / `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses (fact 4). What happens to an in-flight job is the `PROPOSED (gap)` above. |
 | `storage[].retention.*` | **live** | Read only in `Prune` (`subsystem.go:240`), off the slot the applier replaces. |
 | `storage[].default` | **live** | Re-ordering `declaredStorages` moves `slots[0]`. Safe only because removing the default is refused; a *re-designation* takes effect for the next unbound job. |
 | `devices.manage_muxer` / `.usbmuxd_socket` / `.netmuxd_addr` | **restart** — *and D12 requires this sentence:* a netmuxd restart tears a live Wi-Fi backup (`supervisor.go:122`), so applying these live means ruling on what happens to a running transfer. Out of scope, named, not silent. |
@@ -452,6 +502,11 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 
 ## Known gaps and open questions
 
+0. **OPEN AND BLOCKING PR 4: what happens to a job running on a storage that is forgotten.** The
+   `PROPOSED (gap)` above, raised 2026-08-04 by PR 4 and **measured** rather than reasoned — a live
+   forget makes the running job's next phase refuse. This spec claimed the opposite, so the paragraph
+   it replaces was wrong rather than merely incomplete. PR 4 is written and held; PRs 5–7 are
+   unaffected.
 1. **File-watch** — **RULED 2026-08-04**, option (a): propagation only, file-watch its own rung, its
    letter unallocated. No longer open. The two canon obligations it leaves — re-dating D12 and
    stating the cost in contracts §6 — travel with **PR 6**, and the second is the one this spec
