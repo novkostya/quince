@@ -75,3 +75,66 @@ test("a dead version renders explicitly dead with a Remove action", async ({ pag
   await expect(page.getByText(/artifact gone/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /^remove$/i })).toBeVisible();
 });
+
+// quince#649 — THE BOTTOM OF THE PAGE MUST BE REACHABLE, and the shell must not outgrow the viewport.
+//
+// WHAT THIS CAN AND CANNOT ANSWER, stated because the issue's own diagnosis is unconfirmed.
+// It CANNOT reproduce the reported clip: that needs an iOS toolbar expanding, and headless Chromium
+// has none — `100svh`, `100dvh` and `100vh` are the same number here, so this passes on the code
+// this PR replaces too. Confirmation on a real iPhone is OWED to the Operator.
+//
+// What it DOES settle is the second contributor the architect asked about rather than assumed:
+// <main> carries `pb-[max(1rem,env(safe-area-inset-bottom))]`, and the open question was whether
+// that bottom padding is SCROLLABLE or CLIPPED. That is an engine behaviour, not a toolbar one, so
+// Chromium answers it honestly. `env(safe-area-inset-bottom)` is 0 here, so the padding is 1rem.
+test("the bottom of a long page is reachable, and <main>'s bottom padding scrolls rather than clipping", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  const main = page.locator("main");
+
+  // PRECONDITION, asserted rather than assumed: if Home fits the viewport there is nothing to
+  // scroll and every assertion below would pass by having nothing to do — a check whose positive
+  // answer is produced by the act of asking. Fail loudly instead.
+  const metrics = await main.evaluate((el) => ({
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+    padBottom: parseFloat(getComputedStyle(el).paddingBottom),
+  }));
+  expect(
+    metrics.scrollHeight,
+    "Home is not taller than the phone viewport, so this test proves nothing — give it more content",
+  ).toBeGreaterThan(metrics.clientHeight);
+  expect(metrics.padBottom).toBeGreaterThan(0);
+
+  // The shell can never be taller than the visible viewport — the property that makes the clip
+  // structurally impossible. (True of `dvh` here too; it is the invariant, not the discriminator.)
+  const shellHeight = await page.locator("main").evaluate((el) => {
+    const shell = el.parentElement as HTMLElement;
+    return shell.getBoundingClientRect().height;
+  });
+  expect(shellHeight).toBeLessThanOrEqual((await page.evaluate(() => window.innerHeight)) + 1);
+
+  // Scroll <main> to its end and assert it actually reached it.
+  await main.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const atEnd = await main.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  expect(Math.abs(atEnd)).toBeLessThanOrEqual(1);
+
+  // THE ANSWER TO THE ARCHITECT'S QUESTION: the scrollable extent INCLUDES the bottom padding, so
+  // the padding is scrolled past rather than clipping the last element. If Chromium excluded
+  // end-edge padding from the scroll extent, scrollHeight would stop at the content box and this
+  // would fail by exactly padBottom.
+  const contentBottomGap = await main.evaluate((el) => {
+    const last = el.lastElementChild?.lastElementChild ?? el.lastElementChild;
+    if (!last) return NaN;
+    return el.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+  });
+  expect(contentBottomGap).toBeGreaterThanOrEqual(metrics.padBottom - 1);
+
+  // The document still does not scroll — the qn.6a invariant this fix must not trade away.
+  const docVScroll = await page.evaluate(
+    () => document.documentElement.scrollHeight - document.documentElement.clientHeight,
+  );
+  expect(docVScroll).toBeLessThanOrEqual(1);
+});
