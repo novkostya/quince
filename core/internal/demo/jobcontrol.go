@@ -55,8 +55,12 @@ func (p *Provider) endRun(udid string) {
 // StartBackup scripts an on-demand backup (contracts §1 POST /api/jobs). It mirrors the real
 // engine's outcomes: 404 unknown device, 422 bad transport or auto-when-absent, 409 already running,
 // 202 accepted. transport "auto" resolves against the fixture device's presence (design §4/(bp)).
-// storageID is accepted and IGNORED by the demo: it has fixture storages but no real write path,
-// so honouring the choice would be theatre. The real engine binds it (qn.6c story 6b).
+// storageID is RESOLVED AND RECORDED (quince#624). This comment used to say it was "accepted and
+// IGNORED … honouring the choice would be theatre", which was true of the bytes and false of the
+// bookkeeping: the demo has no write path, but it does have a version list, and dropping the id
+// meant every demo backup landed on no storage at all. That is what made the storage pages and the
+// device cards disagree the moment anything ran. The demo still writes nothing; it now records
+// WHERE it would have written, which is the part the UI reads.
 func (p *Provider) StartBackup(udid, transport, storageID, retryOf string) (wire.Job, int, string) {
 	p.mu.RLock()
 	dev, ok := p.devices[udid]
@@ -103,10 +107,24 @@ func (p *Provider) StartBackup(udid, transport, storageID, retryOf string) (wire
 			retryPtr = strptr(retryOf)
 		}
 	}
+	// THE JOB NOW CARRIES ITS RESOLVED STORAGE, and the version it commits inherits it
+	// (quince#624). The demo used to accept `storage_id`, validate it, then drop it — so every demo
+	// job reported `storage_id: null` and every version it created landed on no storage at all.
+	// That is what let backups exist while nothing could say where they were.
+	//
+	// An omitted id resolves to the DEFAULT here, exactly as the daemon resolves it server-side.
+	// Recording the RESOLVED value rather than the request's is the point: the field is documented
+	// as "the resolved concrete storage this backup was aimed at — never the word default", and a
+	// null leaves the UI unable to name the destination the user just chose.
+	resolvedStorage := storageID
+	if resolvedStorage == "" {
+		resolvedStorage = p.defaultStorageID()
+	}
 	job := wire.Job{
 		ID: jid, UDID: udid, Kind: "backup", Transport: resolved, State: "queued",
 		Progress:  wire.JobProgress{Phase: "queued", Percent: f64ptr(0), Liveness: "active"},
 		StartedAt: wire.Now(), RetryOf: retryPtr, IntentID: intent, Attempt: attempt,
+		StorageID: strptr(resolvedStorage),
 	}
 	p.mu.Lock()
 	p.jobLog[jid] = nil
@@ -188,7 +206,14 @@ func (p *Provider) scriptBackup(run *demoRun, job wire.Job) {
 		}
 	}
 
-	ver := p.commitDemoVersionFor(job.UDID, job.ID)
+	// The version lands on the storage the JOB was bound to — the whole point of resolving it at
+	// start. A backup begun from a storage page therefore shows up on that storage's page, which is
+	// what makes qn.6d's G3 a gate that can fail rather than one that renders.
+	storageID := p.defaultStorageID()
+	if job.StorageID != nil && *job.StorageID != "" {
+		storageID = *job.StorageID
+	}
+	ver := p.commitDemoVersionFor(job.UDID, job.ID, storageID)
 	fin := wire.Now()
 	job.State = "succeeded"
 	job.Progress.Phase = "done"
@@ -300,7 +325,7 @@ func (p *Provider) seedOnDemandDevice() {
 	})
 	liveVerID, deadVerID := id.New(), id.New()
 	liveVer := wire.Version{
-		ID: liveVerID, UDID: udidOffline, Backend: "zfs",
+		ID: liveVerID, UDID: udidOffline, Backend: "zfs", StorageID: strptr(demoStorageInternal),
 		ZFSSnapshot: strptr("tank/backups/iphone-backup/" + udidOffline + "@quince-2026-07-18T09-15-" + liveVerID),
 		BrowseRoot:  "/backups/" + udidOffline + "/.zfs/snapshot/quince-2026-07-18T09-15-" + liveVerID + "/latest",
 		CreatedAt:   "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Kind: "incremental",
@@ -310,7 +335,7 @@ func (p *Provider) seedOnDemandDevice() {
 	// A DEAD version: its artifact is gone (reconciliation marked it missing). Rendered explicitly
 	// dead — no size, no Unlock, a Remove action (qn.6a (cr)).
 	deadVer := wire.Version{
-		ID: deadVerID, UDID: udidOffline, Backend: "zfs",
+		ID: deadVerID, UDID: udidOffline, Backend: "zfs", StorageID: strptr(demoStorageInternal),
 		CreatedAt: "2026-07-10T09:15:00Z", JobID: strptr(id.New()), Kind: "full",
 		Encrypted: true, IsLatest: false, Missing: true,
 		LogicalBytes: 11_800_000_000, PhysicalBytes: 11_800_000_000,
