@@ -144,6 +144,25 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.jobs = eng
 	ls.jobControl = eng
 	ls.engine = eng
+
+	// THE SECOND CONSUMER OF THE CONFIG SEAM (qn.6g, quince#577), and the one that proves the
+	// mechanism is GENERAL rather than a storage hook wearing a general name: a different package,
+	// a different lock, a different shape of state.
+	//
+	// Both `backup:` settings anything reads — `require_encryption` (checked at preflight) and
+	// `preferred_transport` (resolved before the job row exists). A job already past those points
+	// keeps the answer it got; Engine.SetLiveConfig says why that is correct rather than incidental.
+	cfgSvc.Subscribe("backup", func(old, next config.Config) []config.Warning {
+		if old.Backup == next.Backup {
+			return nil // an edit to some other section
+		}
+		eng.SetLiveConfig(next.Backup.RequireEncryption, next.Backup.PreferredTransport)
+		log.Info("backup settings applied without a restart",
+			"require_encryption", next.Backup.RequireEncryption,
+			"preferred_transport", next.Backup.PreferredTransport)
+		return nil
+	})
+
 	log.Info("backup engine ready")
 	return ls, nil
 }

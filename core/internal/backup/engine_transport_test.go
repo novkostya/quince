@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -191,4 +192,133 @@ func TestAnUnsetPreferenceReadsAsUSB(t *testing.T) {
 		t.Fatalf("an unset preference resolved to %q, want usb — an empty value must preserve the "+
 			"pre-quince#654 behaviour", job.Transport)
 	}
+}
+
+// qn.6g PR 5 — THE `backup:` SETTINGS APPLY WITHOUT A RESTART, and this is the consumer that proves
+// the seam is GENERAL rather than a storage hook wearing a general name: a different package, a
+// different lock, a different shape of state.
+//
+// There is no config.Service here — that wiring is asserted in cmd/quince. What these pin is the
+// Engine's half of the contract: SetLiveConfig changes what the NEXT job sees, and a job already
+// past the relevant decision keeps the answer it got.
+
+func TestSetLiveConfigChangesThePreferenceForTheNextJob(t *testing.T) {
+	m := loadMeta(t, "wifi-incremental-success")
+	h := newHarness(t, m.params(t), TransportWiFi, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = TransportUSB
+	})
+	setTransports(h.dev, testUDID, true, true, "on") // both present — the only case the key decides
+
+	// Before: the configured preference wins.
+	job := h.start(t, TransportAuto, "")
+	if job.Transport != TransportUSB {
+		t.Fatalf("setup: auto resolved to %q, want usb", job.Transport)
+	}
+	h.drain(t)
+
+	// A config write lands. No restart.
+	h.eng.SetLiveConfig(true, TransportWiFi)
+
+	job2 := h.start(t, TransportAuto, "")
+	if job2.Transport != TransportWiFi {
+		t.Errorf("after SetLiveConfig the next job resolved to %q, want wifi — the setting did not "+
+			"reach the engine, which is the whole defect this rung closes", job2.Transport)
+	}
+}
+
+// require_encryption, the other half. Turning it ON must stop an unencrypted device's next backup.
+//
+// ASSERTED AT THE JOB'S TERMINAL STATE, NOT AT StartBackup — and that correction is the test
+// teaching me where the check is. `require_encryption` is enforced in PREFLIGHT, which runs inside
+// the job goroutine, so `StartBackup` returns 202 either way and the job fails afterwards with
+// `encryption_required`. Two earlier versions of this test asserted on the status code and were
+// meaningless: the first compared against `status == 0`, which is a value StartBackup never
+// returns, so it could not fail at all.
+func TestSetLiveConfigTurnsEncryptionEnforcementOnForTheNextJob(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), TransportUSB, func(o *Options, _ *fakeDevices) {
+		o.Config.RequireEncryption = false
+	})
+	setTransports(h.dev, testUDID, true, false, "off") // unencrypted device
+
+	// Off: the backup runs to success.
+	first := h.start(t, TransportUSB, "")
+	if got := waitTerminal(t, h.eng, first.ID, 10*time.Second); got.State != StateSucceeded {
+		t.Fatalf("setup: with require_encryption off the job ended %s (%v), want succeeded",
+			got.State, got.Error)
+	}
+
+	// The user turns it on. No restart.
+	h.eng.SetLiveConfig(true, TransportUSB)
+
+	second := h.start(t, TransportUSB, "")
+	final := waitTerminal(t, h.eng, second.ID, 10*time.Second)
+	if final.State == StateSucceeded {
+		t.Fatalf("after turning require_encryption ON the next backup still succeeded — the setting " +
+			"did not reach preflight, which is the whole defect this rung closes")
+	}
+	if final.Error == nil || final.Error.Code != ErrEncryptionRequired {
+		t.Errorf("the job failed with %v, want %s — it must refuse for the RIGHT reason, or this "+
+			"test would pass on any failure at all", final.Error, ErrEncryptionRequired)
+	}
+}
+
+// AND THE REVERSE, because a one-directional test would pass on an implementation that only ever
+// tightened. Turning it OFF must let an unencrypted device through.
+func TestSetLiveConfigTurnsEncryptionEnforcementOffForTheNextJob(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), TransportUSB, func(o *Options, _ *fakeDevices) {
+		o.Config.RequireEncryption = true
+	})
+	setTransports(h.dev, testUDID, true, false, "off")
+
+	first := h.start(t, TransportUSB, "")
+	blocked := waitTerminal(t, h.eng, first.ID, 10*time.Second)
+	if blocked.Error == nil || blocked.Error.Code != ErrEncryptionRequired {
+		t.Fatalf("setup: an unencrypted device should fail with %s while require_encryption is on, "+
+			"got state=%s error=%v", ErrEncryptionRequired, blocked.State, blocked.Error)
+	}
+
+	h.eng.SetLiveConfig(false, TransportUSB)
+
+	second := h.start(t, TransportUSB, "")
+	final := waitTerminal(t, h.eng, second.ID, 10*time.Second)
+	if final.State != StateSucceeded {
+		t.Errorf("after turning require_encryption OFF the backup still ended %s (%v), want succeeded",
+			final.State, final.Error)
+	}
+}
+
+// CONCURRENT READS AND WRITES. The engine reads these per job from its own goroutines while the
+// config applier writes them from an HTTP handler goroutine — the same shape as storage's slot list,
+// and the reason this is a lock rather than a plain field on `cfg`. Under `-race` this is the
+// assertion.
+func TestLiveConfigIsSafeUnderConcurrentReadsAndWrites(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), TransportUSB)
+	setTransports(h.dev, testUDID, true, true, "on")
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if i%2 == 0 {
+				h.eng.SetLiveConfig(true, TransportWiFi)
+			} else {
+				h.eng.SetLiveConfig(false, TransportUSB)
+			}
+		}
+	}()
+	for i := 0; i < 3000; i++ {
+		_, _, _ = h.eng.resolveTransport(testUDID, TransportAuto)
+	}
+	close(stop)
+	wg.Wait()
 }
