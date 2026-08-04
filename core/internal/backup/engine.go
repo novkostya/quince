@@ -97,9 +97,46 @@ type Engine struct {
 	now       func() time.Time
 	freeSpace func(string) (uint64, error)
 
+	// live holds the two `backup:` settings config.yml can change WHILE THE PROCESS RUNS (qn.6g,
+	// quince#577). Everything else on `cfg` is a code constant — that struct's own doc says so:
+	// "the engine's tunables (design §4; NOT v0.1 config keys, D12)".
+	//
+	// SEPARATE FROM cfg RATHER THAN MUTATING IT. `e.cfg` is read from every job goroutine, so
+	// writing to it would be a data race on the whole struct, and putting a mutex around `Config`
+	// would make six code constants pay for two settings. The split also makes the boundary
+	// legible: what is in `live` is exactly what a user can change without a restart.
+	live *liveSettings
+
 	mu      sync.Mutex
 	running map[string]*liveJob // by UDID
 	logs    *logStore
+}
+
+// liveSettings is the engine's config.yml-derived state: read per job, written by the config
+// applier. Its own lock, because it is the only mutable thing the engine holds besides `running`.
+type liveSettings struct {
+	mu                 sync.RWMutex
+	requireEncryption  bool
+	preferredTransport string
+}
+
+func (s *liveSettings) get() (requireEncryption bool, preferredTransport string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.requireEncryption, s.preferredTransport
+}
+
+// SetLiveConfig takes the `backup:` settings a config write produced. Called by the qn.6g applier.
+//
+// A JOB ALREADY PAST ITS PREFLIGHT KEEPS THE ANSWER IT GOT, and that is correct rather than
+// incidental. `require_encryption` is checked ONCE, at preflight; re-deciding it mid-transfer would
+// abort a backup that was legitimately started, which is the opposite of what a settings change
+// should do. The transport is likewise resolved to a concrete value before the job row exists, and
+// `Job.transport` records what was resolved rather than what was requested.
+func (e *Engine) SetLiveConfig(requireEncryption bool, preferredTransport string) {
+	e.live.mu.Lock()
+	defer e.live.mu.Unlock()
+	e.live.requireEncryption, e.live.preferredTransport = requireEncryption, preferredTransport
 }
 
 type liveJob struct {
@@ -132,6 +169,12 @@ func New(o Options) *Engine {
 		devices: o.Devices, prober: o.Prober, announcer: o.Announcer,
 		bus: o.Bus, log: o.Log, cfg: o.Config, backups: o.Backups,
 		newID: o.NewID, now: o.Now, freeSpace: o.FreeSpace,
+		// Seeded from Options.Config so every existing caller — the tests, both CLIs — keeps the
+		// behaviour it had. The applier overwrites these; nothing else does.
+		live: &liveSettings{
+			requireEncryption:  o.Config.RequireEncryption,
+			preferredTransport: o.Config.PreferredTransport,
+		},
 		tool: &tool{bin: o.Tool.Bin, argPrefix: o.Tool.ArgPrefix, env: o.Tool.Env,
 			usbmuxd: o.Tool.UsbmuxdSocket, netmuxd: o.Tool.NetmuxdAddr},
 		running: map[string]*liveJob{}, logs: newLogStore(),
@@ -472,7 +515,7 @@ func (e *Engine) preflight(ctx context.Context, lj *liveJob) (code, reason strin
 	if dev.Paired == "no" {
 		return ErrNotPaired, "device is not paired — pair it first"
 	}
-	if e.cfg.RequireEncryption {
+	if requireEncryption, _ := e.live.get(); requireEncryption {
 		if code, reason := e.checkEncryption(ctx, udid, transport, dev.BackupEncryption); code != "" {
 			return code, reason
 		}
@@ -1056,8 +1099,12 @@ func (e *Engine) resolveTransport(udid, requested string) (transport string, sta
 		//
 		// An unset preference reads as `usb`, so a Config built by hand — every test, both CLIs —
 		// behaves exactly as it did before this key existed.
+		//
+		// Read through `live` rather than `cfg` since qn.6g: `backup.preferred_transport` is one of
+		// the two settings a config write can change without a restart.
+		_, configured := e.live.get()
 		preferred, other := TransportUSB, TransportWiFi
-		if e.cfg.PreferredTransport == TransportWiFi {
+		if configured == TransportWiFi {
 			preferred, other = TransportWiFi, TransportUSB
 		}
 		switch {
