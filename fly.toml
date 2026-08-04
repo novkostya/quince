@@ -27,6 +27,36 @@ primary_region = "fra"
   # still agree with each other and with the running process.
   QUINCE_LISTEN = ":8968"
 
+  # WITHOUT THIS THE DEMO LOCKS ITSELF OUT — quince#464, and it was live on the deployed instance
+  # until 2026-08-04.
+  #
+  # `ClientIP` returns the PEER unless a trust list is configured (`if !t.Configured()`), and on
+  # fly the peer is fly-proxy — identical for every visitor. So the login rate limiter bucketed
+  # the whole internet together: ten wrong passwords from any one visitor deny login to ALL of
+  # them, on an instance whose password is printed on its own login screen.
+  #
+  # NOTE THE ASYMMETRY THAT HID IT. For `X-Forwarded-Proto` an unset list BELIEVES ANYONE
+  # (preserving pre-quince#555 behaviour); for `X-Forwarded-For` an unset list reads the header not
+  # at all. Two headers, two opposite defaults, each preserving its own history — so the `Secure`
+  # cookie working end to end said nothing whatever about this, and looked like reassurance.
+  #
+  # 172.16.0.0/16, AND /12 WOULD BE WRONG. Fly staff state the /16 is "the range used by the proxy
+  # for egress connections to machines". It is NOT in fly's own documentation — a forum-sourced
+  # fact rather than a contract, recorded as such. /12 would additionally swallow 172.17.0.0/16
+  # (docker's default bridge) and 172.19.0.0/16, and nothing at fly endorses it.
+  #
+  # A /32 WOULD ALSO BE WRONG, though the observed peer was a single address (172.16.16.122): that
+  # peer is the WORKER-LOCAL proxy, so it is host-scoped and changes when the machine migrates.
+  # Pinning it would work until it silently did not, and the failure mode is the lockout returning.
+  #
+  # SAFE, because the bypass path cannot forge it: another machine in this org can dial this port
+  # directly over 6PN, skipping the proxy — but it arrives with an IPv6 `fdaa::/16` source and so
+  # never matches this list. Excluding exactly that path is what fly recommends this range for.
+  #
+  # UNVERIFIED and deliberately recorded: the precise conditions under which the /16 address
+  # changes. Nobody at fly documents it, which is itself the argument for a range over an address.
+  QUINCE_TRUSTED_PROXIES = "172.16.0.0/16"
+
   # QUINCE_DEMO_RESET_MINUTES IS DELIBERATELY UNSET, and that is a decision rather than an
   # oversight (quince#494). Under scale-to-zero there is no interval to promise: the machine
   # resets when it sleeps and wakes, which is "whenever nobody has visited for a while", not
