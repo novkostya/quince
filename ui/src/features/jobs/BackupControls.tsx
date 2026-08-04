@@ -2,7 +2,7 @@ import * as React from "react";
 import type { Device, Job } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { StorageSelect, StorageNotices } from "./StorageSelect";
-import type { Storages } from "./useStorages";
+import { chosenStorage, type Storages } from "./useStorages";
 import type { RequestTransport } from "./useBackup";
 
 interface BackupControlsProps {
@@ -74,15 +74,18 @@ export function BackupControls({
   // sentence is what makes this disabled button honest rather than mute, and a second copy in a
   // `title` would be two strings to keep in step — plus a hover title is invisible on a phone,
   // which is the primary client.
-  const chosenStorage =
+  // THE SHARED RESOLVER, not a third copy of the same two lines (quince#647). This is where the
+  // third copy lived: an empty `storageID` means nothing was chosen, and `""` is also the id of a
+  // storage quince has never reached, so a bare `find` selected that storage on an untouched page.
+  // The button must be asking about the SAME storage the selector displays and the notice names.
+  const chosen =
     storages.state.status === "loaded"
-      ? (storages.state.storages.find((s) => s.id === storageID) ??
-        storages.state.storages.find((s) => s.default))
+      ? chosenStorage(storages.state.storages, storageID)
       : undefined;
   // An id of "" means quince has never reached that storage, so it cannot be a destination yet —
   // the same refusal `StorageDeviceBackup` already makes, for the same reason.
   const storageUnusable =
-    chosenStorage !== undefined && (!chosenStorage.reachable || chosenStorage.id === "");
+    chosen !== undefined && (!chosen.reachable || chosen.id === "");
 
 
   if (activeJob) {
@@ -114,7 +117,7 @@ export function BackupControls({
             !present
               ? "Connect the device over USB or Wi-Fi to back it up"
               : storageUnusable
-                ? `${chosenStorage?.name ?? "That storage"} is unavailable — backups can't be written to it right now`
+                ? `${chosen?.name ?? "That storage"} is unavailable — backups can't be written to it right now`
                 : undefined
           }
           data-testid="backup-now"
