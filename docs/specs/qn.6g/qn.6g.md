@@ -63,8 +63,8 @@ both on the same day and either sequence builds.
 - **`tls.*` on/off and the listen address.** Both need a socket rebind. The address is not even in
   `config.yml` (it is `QUINCE_LISTEN`, bootstrap env — contracts §6), so D12 does not reach it.
 - **Fixing the fields nothing reads.** `backup.transport` is quince#654; `sessions.ttl_minutes` is
-  filed by this rung as its sibling. Live-apply cannot make an unread field take effect, and folding
-  the fix in here would let this rung's table claim a key works when nothing consumes it.
+  quince#656, filed while writing this spec. Live-apply cannot make an unread field take effect, and
+  folding the fix in here would let this rung's table claim a key works when nothing consumes it.
 - **A new WebSocket event for config changes.** Rung-ruled decision 4.
 
 ---
@@ -151,7 +151,7 @@ live). All five are validated and editable.
 **This is the fact that shapes the deliverable.** A per-setting table that answers only *live* or
 *restart* would have to put four of these in one of those bins, and both would be false. The
 `automation.*` pair is **declared debt** and fine; `sessions.ttl_minutes` is quince#654's twin and is
-filed by this rung, not fixed by it.
+**quince#656**, filed while writing this spec and deliberately not fixed by it.
 
 **10. The demo bounds what ui-e2e can prove here.** `--public-demo` **deletes its config at
 startup** (contracts §6, quince#549) and every visitor can `PUT /api/config`, and the demo provider
@@ -414,8 +414,9 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
    valid write (`service.go:281`), so an apply warning written into that field is cleared by the next
    save even if its cause persists. Rung-local, settled in PR 2, flagged here because the obvious
    implementation gets it wrong.
-3. **`sessions.ttl_minutes`** — filed by this rung as quince#654's twin, and deliberately not fixed
-   here.
+3. **`sessions.ttl_minutes`** — **quince#656**, quince#654's twin, filed while writing this spec and
+   deliberately not fixed here. Its label says *"Session TTL"* on a page reached from a login, which
+   is the half that makes it worse than quince#654 rather than merely equal to it.
 4. **Ordering among appliers** is registration order, which is `buildLiveStack` order. Nothing today
    needs a second applier to observe a first one's effect. If something ever does, this becomes a
    dependency graph, and that is a decision this rung does not pre-empt.
