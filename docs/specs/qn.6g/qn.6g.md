@@ -535,10 +535,25 @@ Each carries one reviewable claim and its own proof.
    write*. Proof: Go tests, including open question 2.
 3. **`Manager` survives a moving list** — `ApplyStorages`, `renderSlot` by name, the three missing
    empty-list guards. **No wiring yet**, so this PR is provable in isolation. Proof: **G9**.
-4. **Storage is wired** — the applier in `live.go`, including the reconcile on add. Proof: G1, G2,
-   G3, G5, G7.
-5. **Retention and `require_encryption`** — the second and third consumers, which is what proves the
-   mechanism is general rather than a storage hook wearing a general name. Proof: G4, G6.
+4. **Storage is wired, AND retention with it** — the applier in `live.go`, including the reconcile on
+   add. Proof: G1, G2, G3, **G4**, G5, G7.
+
+   **Retention moved here from item 5, and it is a dependency rather than a preference.** It lives on
+   `Slot.Retention` (`slot.go:29`) and `policyFor` reads it off the slot list (`subsystem.go:518`),
+   so it reaches `Prune` only through `ApplyStorages` — which is this item. It cannot land earlier.
+   **G4 travels with it.**
+
+   **HELD** on the in-flight-forget `PROPOSED (gap)` above.
+5. **`require_encryption` and `preferred_transport`** — the second and third consumers, which is what
+   proves the mechanism is general rather than a storage hook wearing a general name: a different
+   package, a different lock, a different shape of state. Proof: G6.
+
+   **This item read "retention and `require_encryption`" until PR 5 was written.** Retention cannot
+   land without item 4, so `preferred_transport` took its place — and it is the better partner
+   anyway, because it **postdates this spec** (quince#654, merged 2026-08-04) and is the other
+   `backup:` key that anything actually reads. **The per-setting table above still calls
+   `backup.transport` "nothing reads it", which was true when written and is now false. Correcting
+   it is item 6's**, since that table is canon.
 6. **The per-setting table** — contracts §6, D12's staged-delivery line, design §8. Canon-owned;
    needs `@novkostya`. **It also carries the file-watch ruling's two canon obligations, and they are
    not optional extras to the table:** D12's staged-delivery paragraph is **re-dated** (naming the
