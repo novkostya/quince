@@ -20,9 +20,30 @@
   --sidebar-w: 15rem;
   --radius: 0.75rem;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+
+  /* THE ONE PART OF THE THEME OUR TOKENS CANNOT REACH (quince#645).
+   *
+   * Every colour above is ours to paint. `color-scheme` is how we tell the browser about the parts
+   * it paints ITSELF — the `<select>` dropdown chevron, number-input spinners, checkboxes,
+   * scrollbars. It is not a custom property because it is not our paint: it declares which system
+   * palette those internals should be drawn from.
+   *
+   * Nothing declared it, so the UA assumed a light page and drew a DARK chevron — correct for a
+   * white control — while quince painted that control's background dark from `--bg-card` right
+   * beside it. The two disagreed and the indicator was near-invisible in dark mode.
+   *
+   * IT PRESENTED AS A MOBILE BUG AND IS AN ENGINE DIFFERENCE. WebKit takes that arrow from the
+   * system appearance and ignores `color`; Blink and Gecko usually tint it with `currentColor`, so
+   * `text-fg` was accidentally covering for the missing declaration everywhere except the phone —
+   * which is the only WebKit surface in regular use here. */
+  color-scheme: light;
 }
 
 :root.dark {
+  /* The counterpart. Light and dark differ by token values, never by a branch in a component
+   * (ui.design.md) — and this is that rule applied to the one value the platform owns. */
+  color-scheme: dark;
+
   --bg: #0b0d10;
   --bg-card: #14171c;
   --bg-elevated: #191d23;
