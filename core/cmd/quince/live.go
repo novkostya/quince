@@ -126,6 +126,10 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// job-row reconciliation runs AFTER storage's (order matters — amendment 1).
 	ecfg := backup.DefaultConfig()
 	ecfg.RequireEncryption = cfgSvc.Current().Backup.RequireEncryption
+	// quince#654: which transport an `auto` request prefers when the device is on BOTH. This line is
+	// what makes `backup.preferred_transport` a setting rather than a validated string — its
+	// predecessor `backup.transport` had no equivalent anywhere, which was the whole defect.
+	ecfg.PreferredTransport = cfgSvc.Current().Backup.PreferredTransport
 	eng := backup.New(backup.Options{
 		BaseCtx: ctx, Store: st, Storage: storageMgr, VersionQ: storageMgr, Devices: reg,
 		Prober: opsMgr, Announcer: reg,

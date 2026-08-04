@@ -30,7 +30,7 @@ function entry(over: Partial<StorageEntry> = {}): StorageEntry {
 
 function config(storage: StorageEntry[] | null): Config {
   return {
-    backup: { transport: "auto", require_encryption: true },
+    backup: { preferred_transport: "usb", require_encryption: true },
     storage,
     devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
     sessions: { ttl_minutes: 30 },

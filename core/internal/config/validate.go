@@ -13,8 +13,12 @@ func Validate(c Config) []wire.ConfigError {
 	var errs []wire.ConfigError
 	add := func(path, msg string) { errs = append(errs, wire.ConfigError{Path: path, Message: msg}) }
 
-	if !oneOf(c.Backup.Transport, "auto", "usb", "wifi") {
-		add("backup.transport", enumMsg(c.Backup.Transport, "auto", "usb", "wifi"))
+	// NO `auto` HERE (quince#654). This is the PREFERENCE enum — which transport wins when a device
+	// is present on both — and `auto` would mean "prefer whatever is already preferred". `auto`
+	// stays legal as a REQUEST transport; it is not validated here because it arrives on
+	// POST /api/jobs rather than in config.yml.
+	if !oneOf(c.Backup.PreferredTransport, "usb", "wifi") {
+		add("backup.preferred_transport", enumMsg(c.Backup.PreferredTransport, "usb", "wifi"))
 	}
 	validateStorages(c.Storage, add)
 	validateTLS(c.TLS, add)

@@ -79,7 +79,7 @@ func TestConfigRoundTripPreservesTLS(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	body := `{"backup":{"transport":"usb","require_encryption":true},` + storageJSON +
+	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
@@ -118,7 +118,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	withTLS := `{"backup":{"transport":"usb","require_encryption":true},` + storageJSON +
+	withTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
@@ -129,7 +129,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 		t.Fatalf("setup PUT = %d, want 200", resp.StatusCode)
 	}
 
-	withoutTLS := `{"backup":{"transport":"usb","require_encryption":true},` + storageJSON +
+	withoutTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
@@ -162,7 +162,7 @@ func TestConfigPutRejectsAHalfSetTLSPair(t *testing.T) {
 			defer srv.Close()
 			c := authedClient(t, srv)
 
-			body := `{"backup":{"transport":"usb","require_encryption":true},` + storageJSON +
+			body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 				`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 				tc.tlsJSON +
 				`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +

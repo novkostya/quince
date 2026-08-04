@@ -58,19 +58,31 @@ export function ConfigEditor({ config }: { config: Config }) {
         mutation.mutate(draft);
       }}
     >
-      <Field label="Backup transport" error={errFor("backup.transport")}>
+      {/* PREFERRED, not "backup transport" — the label is the fix as much as the key is (quince#654).
+          "Backup transport: usb" reads as "use USB", and the only true meaning is "prefer USB when
+          both are available". That misreading is the report that opened the issue, so the label says
+          what it does and the hint below says what it does NOT do. No `auto`: as a preference it
+          would mean "prefer whatever is already preferred". */}
+      <Field label="Preferred transport" error={errFor("backup.preferred_transport")}>
         <Select
-          value={draft.backup.transport}
+          value={draft.backup.preferred_transport}
           onChange={(e) =>
-            setDraft({ ...draft, backup: { ...draft.backup, transport: e.target.value } })
+            setDraft({
+              ...draft,
+              backup: { ...draft.backup, preferred_transport: e.target.value },
+            })
           }
         >
-          {["auto", "usb", "wifi"].map((o) => (
+          {["usb", "wifi"].map((o) => (
             <option key={o} value={o}>
               {o}
             </option>
           ))}
         </Select>
+        <p className="mt-1 text-xs text-muted">
+          Used when a device is reachable over both. A device on only one is always backed up over
+          that one.
+        </p>
       </Field>
 
       <label className="flex items-center gap-2 text-sm">

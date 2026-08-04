@@ -149,7 +149,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 	// dropped the key", so the code defaults take over without a word.
 	// Built from the FETCHED document with only the storage list reconstructed, because that is
 	// the reachable version of the hazard: a wholly zero-valued Config is rejected outright by
-	// three other sections (`backup.transport`, `sessions.ttl_minutes`, `ui.theme` all fail
+	// three other sections (`backup.preferred_transport`, `sessions.ttl_minutes`, `ui.theme` all fail
 	// their enum or range checks), so the silent path needs the rest of the document to be
 	// well-formed — which, for a client that fetched it and re-sent it, it is.
 	naive := svc.Current()

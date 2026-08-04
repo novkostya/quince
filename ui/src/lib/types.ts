@@ -166,7 +166,15 @@ export interface StorageEntry {
 }
 
 export interface Config {
-  backup: { transport: string; require_encryption: boolean };
+  // `preferred_transport` — usb | wifi. Which transport wins when a device is present on BOTH;
+  // IGNORED when only one is available, so it is never a restriction (quince#654).
+  //
+  // RENAMED FROM `transport` IN THE SAME COMMIT AS THE GO FIELD, and that is load-bearing rather
+  // than tidy. quince#493: `PUT /api/config` zeroes any key the client omits, so a TS type still
+  // saying `transport` would make every Settings save send a document with no
+  // `preferred_transport` — resetting it to the Go zero value on each save, which `Validate` then
+  // rejects. The two renames are one atomic change.
+  backup: { preferred_transport: string; require_encryption: boolean };
   // `storage` IS THE LIST (qn.6c, quince#473). No wrapper object, no global `backend`, `zfs` or
   // `retention` — every entry carries its own.
   //

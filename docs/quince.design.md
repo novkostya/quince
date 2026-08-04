@@ -203,12 +203,35 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   `latest/`, losing only the partial; the landed `RepairWorkingCopy` op, never automatic in v0.1).
   On FAILURE the dirty `working/` is otherwise KEPT so a one-tap retry RESUMES into it (no
   re-transfer). Never two concurrent jobs per UDID. Transport policy
-  `auto` prefers USB when plugged, Wi-Fi otherwise — and resolves against **current
+  `auto` resolves against **current
   presence only**: a device on neither transport is **refused actionably** (no job
   minted; the UI disables "Back up now" with the reason), because a guessed transport
   would persist a dishonest `Job.transport` (the contract stores only concrete
   `usb`/`wifi`). Explicit `usb`/`wifi` keeps the start-then-connect
   `waiting_for_device` flow. (Ruled at the qn.4b spec review, decisions log (bp).)
+
+  **WHICH transport `auto` prefers when the device is present on BOTH is configurable —
+  `backup.preferred_transport`, `usb` | `wifi`, default `usb`** (Operator ruling 2026-08-04,
+  quince#654). This paragraph read *"prefers USB when plugged, Wi-Fi otherwise"*, which described a
+  hardcoded USB-first sitting beside a `backup.transport` key that was validated, documented,
+  editable in Settings — and read by nobody.
+
+  | requested | device present on | result |
+  | --- | --- | --- |
+  | `usb` or `wifi` | — | the requested transport, unchanged |
+  | `auto` | both | **the preference** |
+  | `auto` | one | that one — **the preference is IGNORED** |
+  | `auto` | neither | `422`, unchanged |
+
+  **A preference, NEVER a restriction** — part of the ruling rather than a caveat on it: the other
+  reading would make a Wi-Fi-only device silently unbackupable through a setting whose name does not
+  say so, and Wi-Fi is the primary transport under the assisted model. **There is no `auto` in the
+  preference enum**, because as a preference it would mean *prefer whatever is already preferred*;
+  `auto` stays legal and correct as a REQUEST transport — `Job.transport`, the wire contract, and the
+  CLI's `--transport auto`. Two enums sharing two of their values. **The default is `usb` because it
+  preserves today's behaviour and for no other reason**: no claim is made about throughput in either
+  direction — the Operator reports Wi-Fi outperforming USB on the soak stand — and if anyone measures
+  it, this default is the thing to revisit.
 
 There is no post-backup indexing state: backup content is only ever read lazily inside
 an unlocked viewer session (§7), so success is defined purely by verify + commit.
