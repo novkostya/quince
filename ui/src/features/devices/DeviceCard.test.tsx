@@ -213,3 +213,78 @@ describe("DeviceCard encryption badge", () => {
     expect(screen.queryByText("Not encrypted")).toBeNull();
   });
 });
+
+// THE BUTTON IS THE LAST CHILD OF EVERY BRANCH — quince#512, ruled option (a).
+//
+// `mt-auto` pins the WRAPPER to the card bottom and says nothing about where the button sits inside
+// it. The branches disagreed — offline `[Button, reason]`, attention `[message, Button, error?]`,
+// default `[Button, error?]` — so the wrapper's bottom edge aligned and the button's did not,
+// across three baselines. Two cards side by side put the same control at visibly different heights.
+//
+// THIS IS THE INVARIANT A FUTURE BRANCH WILL BREAK, which is why it is asserted structurally rather
+// than per-branch: whatever the action area renders, its LAST element must be the control. A new
+// branch that appends a caption fails here instead of on the Operator's screen.
+//
+// WHAT IT CANNOT DO: jsdom has no layout, so this cannot measure that two cards' buttons share a
+// baseline. It asserts the ordering the alignment is derived FROM. The defect was reported from a
+// screen and every test passed at the time — that is the shape of it, and a visual check is
+// quince#371's territory, not this test's.
+function actionArea(container: HTMLElement): HTMLElement {
+  const el = container.querySelector(".mt-auto");
+  if (!el) throw new Error("no action area — the mt-auto wrapper is what pins the row");
+  return el as HTMLElement;
+}
+
+function lastControl(container: HTMLElement): Element | null {
+  const area = actionArea(container);
+  // The branch either renders the control directly or wraps it in a flex column.
+  const inner = area.children.length === 1 && area.firstElementChild?.tagName === "DIV"
+    ? (area.firstElementChild as HTMLElement)
+    : area;
+  return inner.lastElementChild;
+}
+
+describe("DeviceCard action area ends with its button", () => {
+  beforeEach(() => {
+    useJobsStore.setState({ byId: {}, logByJobId: {} });
+    useVersionsStore.setState({ byId: {}, order: [] });
+  });
+
+  it("default branch: the button is last", () => {
+    const { container } = renderCard(device());
+    expect(lastControl(container)?.tagName).toBe("BUTTON");
+  });
+
+  // THE REPORTED PAIR. An offline card and an online card side by side was the screenshot.
+  it("offline branch: the reason is above and the button is last", () => {
+    const { container } = renderCard(device({ transports: {} }));
+    const last = lastControl(container);
+    expect(last?.tagName).toBe("BUTTON");
+    expect(last?.textContent).toMatch(/back up now/i);
+    // The reason is still THERE — the ruling is a disabled button WITH a reason, never a dead one.
+    expect(screen.getByText(/Connect it over USB or Wi-Fi/)).toBeTruthy();
+  });
+
+  it("attention branch: the button is last, below its message", () => {
+    useJobsStore.getState().upsert(job("failed", 41));
+    const { container } = renderCard(device());
+    const last = lastControl(container);
+    expect(last?.tagName).toBe("BUTTON");
+    expect(last?.textContent).toMatch(/retry/i);
+    expect(screen.getByText(/needs attention/i)).toBeTruthy();
+  });
+
+  it("pair branch: unchanged, the control is already last", () => {
+    const { container } = renderCard(device({ paired: "no" }));
+    // asChild renders a Link, so the control is an anchor here rather than a button.
+    expect(lastControl(container)?.textContent).toMatch(/pair/i);
+  });
+
+  // THE ACTIVE BRANCH IS DELIBERATELY EXEMPT. A card that is backing up has no button at all and is
+  // in a different state — it must not acquire one to satisfy an alignment rule.
+  it("active branch renders progress and no button, on purpose", () => {
+    useJobsStore.getState().upsert(job("backing_up", 50));
+    const { container } = renderCard(device());
+    expect(actionArea(container).querySelector("button")).toBeNull();
+  });
+});
