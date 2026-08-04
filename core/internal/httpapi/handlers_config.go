@@ -33,7 +33,7 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
 			return
 		}
-		errs, err := d.Config.Replace(cfg)
+		errs, applied, err := d.Config.Replace(cfg)
 		if err != nil {
 			d.Log.Error("config write failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not write config")
@@ -46,6 +46,10 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 			return
 		}
 		cfg2, warns, src := d.Config.Snapshot()
+		// APPENDED to the load's own warnings, exactly as the Forget handler appends its restart
+		// notice (qn.6g). An applier warning says "saved, but not applied" — a fact about THIS
+		// response rather than about the file, so it rides here and is never stored.
+		warns = append(append([]config.Warning{}, warns...), applied...)
 		if warns == nil {
 			warns = []config.Warning{}
 		}
@@ -66,7 +70,7 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		outcome, errs, err := d.Config.ForgetStorage(name)
+		outcome, errs, applied, err := d.Config.ForgetStorage(name)
 		switch {
 		case err != nil:
 			d.Log.Error("config write failed", "error", err, "forgetting", name)
@@ -88,6 +92,7 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 		// already had, say, an unknown-key warning still has it, and dropping that to make room
 		// for this one would trade one silent thing for another.
 		warns = append(append([]config.Warning{}, warns...), config.ForgetRestartWarning(name))
+		warns = append(warns, applied...) // qn.6g: anything an applier could not take
 		d.Log.Info("storage forgotten", "storage", name, "restart_required", true)
 		writeJSON(w, d.Log, http.StatusOK, configGetResponse{Config: cfg2, Warnings: warns, Source: src})
 	}

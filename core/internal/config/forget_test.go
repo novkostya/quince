@@ -15,7 +15,7 @@ func forgetSvc(t *testing.T, entries ...StorageEntry) (*Service, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if errs, err := svc.Replace(withStorages(entries...)); err != nil || len(errs) != 0 {
+	if errs, _, err := svc.Replace(withStorages(entries...)); err != nil || len(errs) != 0 {
 		t.Fatalf("precondition: seeding the config must succeed; errs=%+v err=%v", errs, err)
 	}
 	return svc, path
@@ -61,7 +61,7 @@ func TestForgetStorageLeavesTheTreeAlone(t *testing.T) {
 		StorageEntry{Name: "shuttle", Path: shuttle},
 	)
 
-	outcome, errs, err := svc.ForgetStorage("shuttle")
+	outcome, errs, _, err := svc.ForgetStorage("shuttle")
 	if err != nil || outcome != ForgetDone || len(errs) != 0 {
 		t.Fatalf("forgetting a non-default storage must succeed; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
@@ -118,7 +118,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if outcome, errs, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
+	if outcome, errs, _, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
 		t.Fatalf("forget must succeed; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
 
@@ -157,7 +157,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 		Name: "pool", Path: "/backups", Default: true, Backend: "zfs",
 		ZFS: pool.ZFS, // fetched and echoed back; it is the retention key that goes missing
 	}}
-	errs, err := svc.Replace(naive)
+	errs, _, err := svc.Replace(naive)
 	if err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestForgetStorageRefusesTheDefault(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			outcome, errs, err := svc.ForgetStorage(tc.target)
+			outcome, errs, _, err := svc.ForgetStorage(tc.target)
 			if err != nil {
 				t.Fatalf("a refusal is not an error: %v", err)
 			}
@@ -250,7 +250,7 @@ func TestForgetStorageUnknownName(t *testing.T) {
 		StorageEntry{Name: "pool", Path: "/backups", Default: true},
 		StorageEntry{Name: "shuttle", Path: "/mnt/shuttle"},
 	)
-	outcome, errs, err := svc.ForgetStorage("nosuch")
+	outcome, errs, _, err := svc.ForgetStorage("nosuch")
 	if err != nil || outcome != ForgetNoSuchStorage || len(errs) != 0 {
 		t.Fatalf("an unknown name is a 404 and nothing else; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
@@ -271,7 +271,7 @@ func TestForgetStorageDoesNotMutateAPriorSnapshot(t *testing.T) {
 	held := svc.Current()
 	heldNames := storageNames(held)
 
-	if outcome, _, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
+	if outcome, _, _, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
 		t.Fatalf("forget must succeed; outcome=%v err=%v", outcome, err)
 	}
 

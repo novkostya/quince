@@ -63,7 +63,7 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 			if errs := Validate(tc.cfg); len(errs) != 0 {
 				t.Fatalf("precondition: Validate must still permit this, got %+v", errs)
 			}
-			errs, err := svc.Replace(tc.cfg)
+			errs, _, err := svc.Replace(tc.cfg)
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}
@@ -82,7 +82,7 @@ func TestReplaceAcceptsAConfigWithAStorage(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	errs, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}))
+	errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}))
 	if err != nil || len(errs) != 0 {
 		t.Fatalf("a well-formed config must save: errs=%+v err=%v", errs, err)
 	}
