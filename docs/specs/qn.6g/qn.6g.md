@@ -56,7 +56,8 @@ both on the same day and either sequence builds.
 **Out of scope, each with a why.**
 
 - **File-watch pickup of hand-edits** — the other half of D12's *"edited by the UI and by hand
-  equally"*. It is a **gap for the Operator**, not a silent descope; see the `PROPOSED (gap)` block.
+  equally"*. **RULED out of this rung and into its own, 2026-08-04**, rather than descoped silently;
+  the block below carries the ruling and the three obligations it lands.
 - **`devices.*` live re-supervision.** A netmuxd restart tears a live Wi-Fi backup — that is why
   `muxsup.Spec.Rescan` is `false` for netmuxd (`supervisor.go:122`, design §4) — and Wi-Fi is the
   PRIMARY use case. Applying `devices.*` live means deciding what happens to a running transfer,
@@ -258,9 +259,44 @@ becomes conditional on the fields the form actually changed, and means something
 
 ---
 
-## PROPOSED (gap): does this rung build file-watch, or is D12's staged plan re-staged?
+## RULED (was `PROPOSED (gap)`): this rung builds PROPAGATION ONLY; file-watch becomes its own rung
 
-**Why this is a gap and not a scope call.** D12's *Staged delivery* paragraph
+**Operator ruling 2026-08-04, option (a) as recommended**, relayed by architect session `arch1` —
+[quince#577, `issuecomment-5182609911`](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911).
+Cited by comment URL and self-declared role rather than by login, per quince#47.
+
+`qn.6g` builds the `Subscribe` seam and the appliers. A file-watcher later becomes a **second
+producer feeding the same appliers**, which is why the seam is the prerequisite under every option
+and building it cannot be wrong.
+
+**Not (c): D12's file-watch commitment is MOVED, not dropped.** Hand-editing `config.yml` stays a
+path worth live-applying; it is simply not this rung's. **Which rung it lands in is unallocated** —
+`qn.6h` is quince#591's — so D12 must say *unallocated* rather than name a rung nobody has agreed to.
+
+**Three obligations follow, and PR 6 carries two of them:**
+
+1. This block, flipped — heading and body in the same diff (quince#408), which `bin/gap-heading-check`
+   enforces.
+2. **`stack.md`'s staged-delivery paragraph is re-dated.** It says file-watch lands *"with qn.6"*,
+   which is now false. **Deleting the line would be (c) by the back door** and is not what was ruled.
+3. **Contracts §6 states the cost**, rather than leaving a reader to find it: *a setting changed
+   through the UI applies immediately; the same setting hand-edited in `config.yml` still needs a
+   restart until file-watch lands.* §6 repeats the *"file-watch pickup"* claim and needs the same
+   treatment. **This is the obligation most likely to be skipped**, because it documents a limitation
+   inside the rung that fixes the larger one — and it is the condition the recommendation was
+   accepted on.
+
+**Explicitly NOT settled, and not to be settled inside `qn.6g`:** the invalid-edit contract — *a bad
+hand-edit keeps last-good and shows a UI banner*. That is D12's other half with its own
+`Warning`-surfacing question, and (a) was chosen partly so it can be decided on its own evidence.
+
+**PRs 2–7 are unchanged**, which the block below predicted and the ruling now settles.
+
+---
+
+### The question as it was asked, kept because the reasoning that lost is what makes a ruling checkable later
+
+**Why this was a gap and not a scope call.** D12's *Staged delivery* paragraph
 (`stack.md:571-577`) is a written plan with a rung attached: *"File-watch live reload, generated
 doc-comments, and the full transparent-editor UX land with **qn.6**."* This is qn.6. Contracts §6
 repeats it (*"file-watch pickup"*). The ruling on quince#577 is about `config.Service` telling the
@@ -293,6 +329,9 @@ differ.
 **Nothing is built on this while it is pending.** Under (a) or (c) the code slices below are
 unchanged; under (b) a seventh PR is added. So PR 1 can be reviewed and merged before the ruling —
 this block is a spec paragraph, not a blocker on the spec.
+
+*(That last paragraph held: PR 1 merged at `36e1060` before the ruling arrived, and the ruling
+changed no slice.)*
 
 ---
 
@@ -375,7 +414,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 | rule | how this plan complies |
 | --- | --- |
 | **A rung starts from a spec** | This document, PR 1, reviewed before any code exists. |
-| **Don't improvise architecture** | The one thing the ruling does not cover — file-watch versus D12's dated plan — is a `PROPOSED (gap)` block with options and a recommendation, and **nothing is built on it** under any answer. The rung letter and the order against quince#591 were handed to the spec explicitly by the ruling and are recorded as rung-ruled. |
+| **Don't improvise architecture** | The one thing the rung ruling did not cover — file-watch versus D12's dated plan — was raised as a gap rather than decided, and is now **RULED (a), 2026-08-04**: propagation only. Nothing was built on it while it was pending, and the ruling changed no slice. The rung letter and the order against quince#591 were handed to the spec explicitly and are recorded as rung-ruled. **The ruling's two canon obligations are carried in PR 6, not treated as discharged by this flip** — a gap answered is not a gap acted on. |
 | **Contracts are stop-and-ask** | No route changes, no wire object changes, no new event kind (decision 4). What *does* change is contracts §6's restart claim, and it changes in the PR that makes it false — which is the docs rule, not a contract gap. |
 | **Never mutate a committed version** | **The rung's sharpest near-miss.** Forgetting a storage removes it from a list; it touches no tree. G2 asserts on the **filesystem**. A job in flight keeps its slot and finishes its commit — roll-forward is preserved exactly, and G5 asserts it rather than assuming it. |
 | **State honesty** | The per-setting table has **three** bins because two would force a false answer for five keys (fact 9). *"Restart to apply"* stops appearing where it is untrue and stays where it is true. An applier that cannot complete emits a warning rather than logging success. Two of the issue's own citations are corrected in fact 5 rather than repeated. |
@@ -413,7 +452,10 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 
 ## Known gaps and open questions
 
-1. **File-watch** — the `PROPOSED (gap)` above. Blocks nothing here.
+1. **File-watch** — **RULED 2026-08-04**, option (a): propagation only, file-watch its own rung, its
+   letter unallocated. No longer open. The two canon obligations it leaves — re-dating D12 and
+   stating the cost in contracts §6 — travel with **PR 6**, and the second is the one this spec
+   flags as most likely to be skipped.
 2. **Does an applier's warning survive the next `GET`?** `Replace` sets `s.warnings = nil` on every
    valid write (`service.go:281`), so an apply warning written into that field is cleared by the next
    save even if its cause persists. Rung-local, settled in PR 2, flagged here because the obvious
@@ -443,7 +485,14 @@ Each carries one reviewable claim and its own proof.
 5. **Retention and `require_encryption`** — the second and third consumers, which is what proves the
    mechanism is general rather than a storage hook wearing a general name. Proof: G4, G6.
 6. **The per-setting table** — contracts §6, D12's staged-delivery line, design §8. Canon-owned;
-   needs `@novkostya`.
+   needs `@novkostya`. **It also carries the file-watch ruling's two canon obligations, and they are
+   not optional extras to the table:** D12's staged-delivery paragraph is **re-dated** (naming the
+   rung as *unallocated* — deleting the line is option (c) by the back door and was not ruled), and
+   §6 states the cost in a sentence — *a setting changed through the UI applies immediately; the same
+   setting hand-edited in `config.yml` still needs a restart until file-watch lands.* §6's own
+   *"file-watch pickup"* claim needs the same treatment. **The cost sentence is the condition (a) was
+   accepted on**, and the thing most likely to be dropped, because it documents a limitation inside
+   the rung that fixes the larger one.
 7. **The UI stops promising a restart** — `ConfigEditor`, `SettingsPage`, `ForgetStorage` including
    its list invalidation. Proof: G8.
 
