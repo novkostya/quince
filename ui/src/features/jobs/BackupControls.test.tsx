@@ -181,3 +181,38 @@ describe("retry names the job, not a storage", () => {
     expect(opts.storageID).toBeUndefined();
   });
 });
+
+// quince#616, the same shape as `StorageSelect` — see that file for the full reasoning. 12px meant
+// a 1.33x page zoom on tap, on the control sitting directly beside "Back up now" on a phone.
+// A class assertion cannot prove Safari's behaviour; only a device can, and that is owed.
+describe("BackupControls transport select is 16px on mobile", () => {
+  function renderBoth() {
+    return render(
+      <BackupControls
+        device={device({ usb: "t", wifi: "t" })}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        {...storageProps}
+      />,
+    );
+  }
+
+  it("steps the select 16px -> 12px at the sm breakpoint", () => {
+    renderBoth();
+    const cls = screen.getByLabelText(/backup transport/i).className;
+    expect(cls).toContain("text-base");
+    expect(cls).toContain("sm:text-xs");
+    expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+
+  it("steps the surrounding label with it", () => {
+    renderBoth();
+    const label = screen.getByLabelText(/backup transport/i).closest("label");
+    expect(label).not.toBeNull();
+    const cls = label?.className ?? "";
+    expect(cls).toContain("text-base");
+    expect(cls).toContain("sm:text-xs");
+    expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+});

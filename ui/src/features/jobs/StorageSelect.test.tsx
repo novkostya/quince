@@ -318,3 +318,47 @@ describe("StorageSelect after G9", () => {
     expect(screen.queryByTestId("storage-will-be-full")).toBeNull();
   });
 });
+
+// WHAT THIS PINS, AND WHAT IT CANNOT: quince#616.
+//
+// iOS Safari zooms the page when a focused control computes below 16px. This select carried
+// `text-xs` = 12px, and WebKit's target scale is `16 / fontSize`, so tapping it zoomed the page to
+// 1.33x — worse than the 14px full-width fields, not better, which is the correction the ruling
+// made to the original report.
+//
+// THESE ASSERTIONS CANNOT PROVE SAFARI DOES NOT ZOOM. Only a device can, and that check is owed to
+// the Operator. What they catch is the likely regression: someone restoring a plain `text-xs` with
+// no iPhone in the room and every gate green.
+describe("StorageSelect is 16px on mobile", () => {
+  function renderBoth() {
+    return render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
+        value=""
+        onChange={() => {}}
+      />,
+    );
+  }
+
+  it("steps the select 16px -> 12px at the sm breakpoint", () => {
+    renderBoth();
+    const cls = screen.getByTestId("storage-select").className;
+    expect(cls).toContain("text-base");
+    expect(cls).toContain("sm:text-xs");
+    expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+
+  // THE LABEL STEPS WITH THE CONTROL, and this is the assertion that would not exist if the fix
+  // were purely technical. WebKit reads only the focused control, so `sm:text-xs` on the select
+  // alone stops the zoom — and leaves a 16px control inside a 12px sentence reading "to <select>".
+  // Ruled on quince#616 as an outcome; this pins the outcome rather than the reasoning.
+  it("steps the surrounding label with it, so the control is never larger than its sentence", () => {
+    renderBoth();
+    const label = screen.getByTestId("storage-select").closest("label");
+    expect(label).not.toBeNull();
+    const cls = label?.className ?? "";
+    expect(cls).toContain("text-base");
+    expect(cls).toContain("sm:text-xs");
+    expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+});
