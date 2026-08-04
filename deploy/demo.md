@@ -84,16 +84,21 @@ Two things that are cheap now and awkward later:
   and an expired deploy token fails the workflow rather than the demo — the demo keeps running the
   last image, so the failure is quiet unless somebody reads the run.
 
-### The workflow — BUILT, NOT WIRED
+### The workflow — INSTALLED
 
 **No agent seat can create a file under `.github/workflows/`.** Measured for the implementer PAT
 (quince#113), the architect (same 403), and again on 2026-08-03 for the coder App, which gets
 `403 Resource not accessible by integration` on that path while an ordinary contents write to the
 same branch in the same call succeeds — so the refusal is path-scoped, not a broken credential.
 
-**The Operator installs it**, by copying the block below to `.github/workflows/demo-deploy.yml`
-and pushing over SSH, which consults no OAuth scope. It lives here rather than in a PR comment so
-there is one copy rather than two that drift.
+**The Operator installed it** as `.github/workflows/demo-deploy.yml` (quince#618), pushed over SSH,
+which consults no OAuth scope. **Do not copy the block below into a new file** — it is already
+there, and this is the reference copy.
+
+It lives here rather than in a PR comment so there is one copy rather than two that drift. That
+arrangement earned itself immediately: quince#618 first installed a `cron:` this document had
+already tried and moved away from, and one `diff` against this block found it. **Two copies still
+means two copies** — an edit to either belongs in the same change as an edit to the other.
 
 ```yaml
 name: demo-deploy
