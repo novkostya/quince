@@ -17,8 +17,12 @@ interface BackupControlsProps {
 }
 
 // BackupControls is the assisted "Back up now" action on a device's details page. It starts a backup
-// over the chosen transport (default "auto" — the engine resolves it, design §4/(bp)), offers a
-// transport override only when the device is present on both, and cancels a running job. The
+// over the chosen transport, offers a transport override only when the device is present on both,
+// and cancels a running job.
+//
+// The transport it sends is `auto` — the engine resolves it, design §4/(bp) — EXCEPT where the
+// override renders, which is exactly where `auto` had no meaning left to carry. See
+// `effectiveTransport` below for why that is one derived value rather than two (quince#653). The
 // started/cancelled job renders from the WS job.updated stream; this never fabricates progress
 // (ui.design.md). start/cancel/busy are lifted to the page so Retry shares the same state.
 //
@@ -44,6 +48,38 @@ export function BackupControls({
   const onUSB = Boolean(device.transports.usb);
   const onWifi = Boolean(device.transports.wifi);
   const present = onUSB || onWifi;
+  const onBoth = onUSB && onWifi;
+
+  // THE TRANSPORT THE SELECTOR SHOWS AND THE TRANSPORT A PRESS SENDS ARE ONE VALUE (quince#653).
+  //
+  // `Auto` is gone from the option list because it cannot mean a third thing where that list is
+  // rendered: the selector only mounts when the device is on BOTH, and `resolveTransport` resolves
+  // `auto` to USB whenever USB is present. So `Auto` was a second label for `USB`, and "Back up now
+  // over Auto" is not a sentence.
+  //
+  // THE STATE DEFAULT STAYS "auto", and that is the trap. It is load-bearing for the case where the
+  // selector does NOT render: a device on one transport shows no selector, and `auto` is what must
+  // be sent so the engine resolves it to whichever transport the device is actually on. Defaulting
+  // the state to "usb" would make a Wi-Fi-only device send `usb`, which `resolveTransport` returns
+  // UNCHECKED — the job starts and then waits out the window for a device that was never going to
+  // appear. An immediate, actionable state becomes a job that hangs.
+  //
+  // So the concrete value is DERIVED rather than stored, once, for both uses:
+  //
+  //   - not on both → "auto", whatever the state holds. This is also the mitigation for the one
+  //     thing dropping `Auto` could have cost: presence can change while the page is open, and a
+  //     user who explicitly picked USB before the cable came out would otherwise send `usb` to a
+  //     device that is now Wi-Fi-only. Derived from CURRENT presence rather than reset by an
+  //     effect, so there is no window in which the stale choice is still sendable.
+  //   - on both, untouched → "usb", which is what `auto` already resolved to here. Behaviour-
+  //     preserving, and the control now names the transport it will actually use.
+  //   - on both, chosen → the choice.
+  const effectiveTransport: RequestTransport = !onBoth
+    ? "auto"
+    : transport === "auto"
+      ? "usb"
+      : transport;
+
   // The storage a RUNNING job is writing to, by name. Only named when the list is loaded and the
   // job carries an id we recognise — an unresolvable id says nothing rather than guessing, because
   // "to <the default>" would be a claim the job never made.
@@ -111,7 +147,7 @@ export function BackupControls({
   return (
     <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => void start(transport, { storageID: storageID || undefined })}
+          onClick={() => void start(effectiveTransport, { storageID: storageID || undefined })}
           disabled={!present || busy || storageUnusable}
           title={
             !present
@@ -124,7 +160,7 @@ export function BackupControls({
         >
           {busy ? "Starting…" : "Back up now"}
         </Button>
-        {onUSB && onWifi ? (
+        {onBoth ? (
           // 16px on phones, 12px from `sm` up, label stepping with the control — the same shape as
           // `StorageSelect`, which carries the full reasoning (quince#616). At 12px this was a
           // 1.33x page zoom on tap, and it sits directly beside "Back up now" on the phone.
@@ -132,11 +168,10 @@ export function BackupControls({
             over{" "}
             <select
               className="rounded-md border border-line bg-card px-1.5 py-1 text-base text-fg sm:text-xs"
-              value={transport}
+              value={effectiveTransport}
               onChange={(e) => setTransport(e.target.value as RequestTransport)}
               aria-label="Backup transport"
             >
-              <option value="auto">Auto</option>
               <option value="usb">USB</option>
               <option value="wifi">Wi-Fi</option>
             </select>

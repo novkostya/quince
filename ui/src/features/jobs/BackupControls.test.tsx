@@ -89,6 +89,70 @@ describe("BackupControls", () => {
     expect(start).toHaveBeenCalledWith("wifi", { storageID: undefined });
   });
 
+  // quince#653 — `Auto` IS GONE FROM THE SELECTOR, and here are the two things that could break.
+  //
+  // The option meant nothing where it rendered: the selector only mounts when the device is on
+  // BOTH, and `resolveTransport` resolves `auto` to USB whenever USB is present. So `Auto` was a
+  // second label for `USB`. Removing it is behaviour-preserving, and these assert that rather than
+  // the PR claiming it.
+
+  it("does not offer Auto in the selector, and shows USB as the concrete default", () => {
+    render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={ok} cancel={ok} busy={false} {...storageProps} />);
+    const select = screen.getByLabelText(/backup transport/i) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["usb", "wifi"]);
+    // The control names the transport it will actually use, rather than a word for "whichever".
+    expect(select.value).toBe("usb");
+  });
+
+  it("sends usb from an untouched selector — the same job auto produced here", () => {
+    const start = vi.fn().mockResolvedValue(true);
+    render(<BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />);
+    fireEvent.click(screen.getByTestId("backup-now"));
+    // Behaviour preservation as an assertion, not as a sentence in a PR: `auto` with both
+    // transports present resolved to USB in the engine, so this is the same backup as before.
+    expect(start).toHaveBeenCalledWith("usb", { storageID: undefined });
+  });
+
+  // THE TRAP THE ISSUE NAMES, on the path it flagged as "read, not exercised". A device on ONE
+  // transport renders no selector, and `auto` must reach the API so the engine resolves it to
+  // whichever transport the device is on. Change the STATE default to "usb" and this Wi-Fi-only
+  // device sends `usb` — which `resolveTransport` returns unchecked, turning an immediate backup
+  // into a job that waits out its window for a device that cannot appear.
+  it("sends auto for a Wi-Fi-only device, where no selector renders", () => {
+    const start = vi.fn().mockResolvedValue(true);
+    render(<BackupControls device={device({ wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />);
+    expect(screen.queryByLabelText(/backup transport/i)).toBeNull();
+    fireEvent.click(screen.getByTestId("backup-now"));
+    expect(start).toHaveBeenCalledWith("auto", { storageID: undefined });
+  });
+
+  // THE RESIDUAL — the only case dropping `Auto` could have cost anything, and it is now strictly
+  // better than before rather than merely no worse.
+  //
+  // Presence changes while the page is open: the user picks USB, then the cable comes out. The
+  // selector unmounts, and because the sent transport is DERIVED from current presence rather than
+  // held in state, the stale `usb` cannot be sent. Under the old code the state still held the
+  // choice, and a `usb` request against a Wi-Fi-only device hangs.
+  //
+  // Derived rather than reset by an effect on purpose: an effect leaves a window between the
+  // presence change and the reset in which a press still sends the stale value.
+  it("falls back to auto when the chosen transport disappears while the page is open", () => {
+    const start = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(
+      <BackupControls device={device({ usb: "t", wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />,
+    );
+    fireEvent.change(screen.getByLabelText(/backup transport/i), { target: { value: "usb" } });
+
+    // The cable comes out. Same component, new presence — this is the WS-driven rerender.
+    rerender(
+      <BackupControls device={device({ wifi: "t" })} start={start} cancel={ok} busy={false} {...storageProps} />,
+    );
+    expect(screen.queryByLabelText(/backup transport/i)).toBeNull();
+
+    fireEvent.click(screen.getByTestId("backup-now"));
+    expect(start).toHaveBeenCalledWith("auto", { storageID: undefined });
+  });
+
   it("shows cancel for a running job", () => {
     const cancel = vi.fn().mockResolvedValue(true);
     render(
