@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import type { Storages } from "./useStorages";
 // StorageSelect is the "where does this backup go" CONTROL on Back up now (qn.6c story 9).
 //
@@ -96,7 +96,7 @@ export function StorageNotices({
   storages: Storages;
   value: string;
 }) {
-  const { state, recheck, rechecking } = sub;
+  const { state } = sub;
   const storages = state.status === "loaded" ? state.storages : [];
   const exact = storages.find((s) => s.id === value);
   const chosen = exact ?? storages.find((s) => s.default);
@@ -112,41 +112,33 @@ export function StorageNotices({
 
   return (
     <>
-      {/* THE REASON FOR EVERY UNREACHABLE STORAGE, not just a chosen one — because a disabled
-          option CANNOT BE CHOSEN. Showing it on selection was unreachable code: the user saw
-          "not connected" and could never learn which path or why (qn.6c story 9).
+      {/* THE FACT, NOT THE DIAGNOSIS — and only about the storage this backup is aimed at
+          (quince#627).
 
-          RE-CHECK sits on that row, and only there (quince#459): the Operator's ruling is "plug
-          the disk in and press the button", and this is where the sentence describing the problem
-          already is. A reachable storage gets none — the press would be a no-op the user cannot
-          interpret. */}
-      {storages
-        .filter((s) => !s.reachable && s.unreachable_reason)
-        .map((s) => (
-          <p
-            key={s.id}
-            className="flex flex-wrap items-center gap-2 text-xs text-warn"
-            data-testid="storage-unreachable"
-          >
-            <span>
-              {s.name}: {s.unreachable_reason}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-xs sm:h-6"
-              disabled={rechecking[s.name] === "pending"}
-              onClick={() => recheck(s.name)}
-              data-testid="storage-recheck"
-              aria-label={`Re-check ${s.name}`}
-            >
-              {rechecking[s.name] === "pending" ? "Checking…" : "Re-check"}
-            </Button>
-            {rechecking[s.name] === "failed" ? (
-              <span data-testid="storage-recheck-failed">couldn&rsquo;t re-check</span>
-            ) : null}
-          </p>
-        ))}
+          What stood here was the full diagnosis of EVERY unreachable storage in the configuration,
+          each with its own `Re-check` button, on a page about one phone. It never referenced the
+          chosen storage at all: the screenshot the issue came from showed `shuttle` selected and
+          the sentence diagnosing `ghost` — a storage the user was not using, could not reach and
+          had not asked about. With N unreachable storages it was N lines and N buttons.
+
+          So this was a DELETION rather than a rescoping: there was no correct chosen-storage-only
+          version to keep, because a storage's health belongs on the storage's page, where the
+          diagnosis and `Re-check` now live (`StorageProblem`).
+
+          What a device page owes instead is this: one line, naming the storage it is about, saying
+          it is unavailable, linking to where the explanation and the remedy are.
+
+          ONE SENTENCE, SHARED. quince#628 disables `Back up now` for exactly this state, and this
+          line is what makes that disabled button honest rather than mute. Neither needs its own
+          wording, and a second one here would be two things to keep in step. */}
+      {chosen && !chosen.reachable ? (
+        <p className="text-xs text-warn" data-testid="storage-unavailable">
+          <Link to={`/storage/${chosen.name}`} className="underline underline-offset-2">
+            {chosen.name}
+          </Link>{" "}
+          is unavailable — backups can&rsquo;t be written to it right now.
+        </p>
+      ) : null}
 
       {/* THE COST, STATED BEFORE IT IS PAID (story 8). Proven on hardware during G9 — the staging
           stand's first backup to a second disk showed this line before the transfer started. */}

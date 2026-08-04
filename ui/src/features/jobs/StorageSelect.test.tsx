@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { StorageSelect, StorageNotices } from "./StorageSelect";
 import type { Storage } from "@/lib/types";
 
-import type { Storages, StoragesState, RecheckState } from "./useStorages";
+import type { Storages, StoragesState } from "./useStorages";
 
 function storage(over: Partial<Storage>): Storage {
   return {
@@ -26,9 +27,10 @@ function storage(over: Partial<Storage>): Storage {
   };
 }
 
-// sub() wraps a bare state in the hook's return shape. The component now takes the whole
-// subscription — state plus recheck — because the button lives on the row that explains the
-// problem, and only the hook can reload the DEVICE-SCOPED list after a successful press.
+// sub() wraps a bare state in the hook's return shape. These components still take the whole
+// subscription even though neither uses `recheck` any more: the prop IS the hook's shape, and the
+// re-check half moved to `StorageProblem` on the storage page, taking its tests with it
+// (quince#627).
 function sub(state: StoragesState, over: Partial<Storages> = {}): Storages {
   return { state, recheck: () => {}, rechecking: {}, reload: () => {}, ...over };
 }
@@ -65,25 +67,10 @@ describe("StorageSelect", () => {
     expect(opt.textContent).toMatch(/not connected/);
   });
 
-  // The daemon's own sentence, shown rather than replaced with client copy: it names which path and
-  // which marker, which no client-side string could.
-  // WITHOUT selecting it. A disabled option cannot be chosen, so a reason that only appeared
-  // on selection was unreachable code — the user saw "not connected" and could never learn
-  // which path or why. Caught by G8 driving the real API; this pins it at the unit level.
-  it("shows the daemon's reason for an unreachable storage without it being chosen", () => {
-    // value is the DEFAULT, not the unreachable one.
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
-        value="01JA"
-      />,
-    );
-    expect(screen.getByTestId("storage-unreachable")).toHaveTextContent(
-      /carries no quince storage marker/,
-    );
-  });
-
   // THE COST BEFORE IT IS PAID (story 8), attached to the option that carries it.
+  //
+  // The daemon's-own-sentence assertions that used to sit here moved to `StorageProblem`
+  // (quince#627): the diagnosis is a storage fact and now renders on the storage's page.
   it("warns that a first backup to this storage transfers everything", () => {
     const fresh = storage({ id: "01JB", name: "shuttle", default: false, will_be_full: true });
     render(<StorageNotices storages={sub({ status: "loaded", storages: [storage({}), fresh] })} value="01JB" />);
@@ -171,111 +158,6 @@ describe("StorageSelect degradation", () => {
   });
 });
 
-// quince#459 — "plug the disk in and press the button" (Operator ruling, quince#435) shipped its
-// endpoint in quince#445 and its button nowhere. These pin the button to the row that names the
-// problem, and pin the two states a press can leave behind.
-describe("StorageSelect re-check", () => {
-  it("offers Re-check on the unreachable row, beside its reason", () => {
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
-        value="01JA"
-      />,
-    );
-    const row = screen.getByTestId("storage-unreachable");
-    expect(row).toHaveTextContent(/carries no quince storage marker/);
-    // Inside the SAME row as the reason — a button elsewhere on the page would not be "press it"
-    // for the disk the sentence is about.
-    expect(row.querySelector('[data-testid="storage-recheck"]')).not.toBeNull();
-  });
-
-  // The taste call, pinned so it cannot drift back silently: a reachable storage gets no button.
-  // The press would be a no-op the user cannot interpret, and a control offered where there is
-  // nothing to fix teaches that pressing it is how you make things happen.
-  it("offers no Re-check when every storage is reachable", () => {
-    const other = storage({ id: "01JB", name: "shuttle", default: false });
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), other] })}
-        value="01JA"
-      />,
-    );
-    expect(screen.queryByTestId("storage-recheck")).toBeNull();
-  });
-
-  it("asks the hook to re-check THAT storage", () => {
-    const recheck = vi.fn();
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { recheck })}
-        value="01JA"
-      />,
-    );
-    fireEvent.click(screen.getByTestId("storage-recheck"));
-    expect(recheck).toHaveBeenCalledWith("shuttle");
-  });
-
-  // A second press while the first is in flight would queue a request the user did not ask for.
-  it("disables the button while its own re-check is pending", () => {
-    const pending: Record<string, RecheckState> = { shuttle: "pending" };
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: pending })}
-        value="01JA"
-      />,
-    );
-    const btn = screen.getByTestId("storage-recheck") as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.textContent).toMatch(/Checking/);
-  });
-
-  // A FAILED PRESS IS SHOWN. Without this the button looks identical whether the re-check ran and
-  // the disk is still out, or the request never landed — and the user keeps pressing a control
-  // that is not reaching the daemon. That is the no-silent-fallbacks rule on a button.
-  it("says so when the re-check itself could not be performed", () => {
-    const failed: Record<string, RecheckState> = { shuttle: "failed" };
-    render(
-      <StorageNotices
-        storages={sub({ status: "loaded", storages: [storage({}), shuttle] }, { rechecking: failed })}
-        value="01JA"
-      />,
-    );
-    expect(screen.getByTestId("storage-recheck-failed")).toHaveTextContent(/couldn’t re-check/);
-    // And the storage's OWN reason is still there: "we could not ask" does not replace "the disk
-    // is not there", which is still the last thing the daemon said.
-    expect(screen.getByTestId("storage-unreachable")).toHaveTextContent(
-      /carries no quince storage marker/,
-    );
-  });
-
-  // The button belongs to ONE row. The user plugged in one disk and pressed one button; a second
-  // unreachable storage showing "Checking…" would be a claim about something nobody touched.
-  it("keeps pending state to the storage that was pressed", () => {
-    const third = storage({
-      id: "01JC",
-      name: "nas",
-      default: false,
-      reachable: false,
-      unreachable_code: "path_unreachable",
-      unreachable_reason: "the path could not be read",
-    });
-    const pending: Record<string, RecheckState> = { shuttle: "pending" };
-    render(
-      <StorageNotices
-        storages={sub(
-          { status: "loaded", storages: [storage({}), shuttle, third] },
-          { rechecking: pending },
-        )}
-        value="01JA"
-      />,
-    );
-    const buttons = screen.getAllByTestId("storage-recheck") as HTMLButtonElement[];
-    expect(buttons).toHaveLength(2);
-    expect(buttons.filter((b) => b.disabled)).toHaveLength(1);
-    expect(buttons.filter((b) => /Checking/.test(b.textContent ?? ""))).toHaveLength(1);
-  });
-});
-
 // THE THREE THINGS THE G9 RUN REPORTED, pinned. All three were found by the Operator watching a
 // real transfer on the staging stand, and none of them is a layout preference — each is the UI
 // saying less than it knows, or saying something untrue.
@@ -360,5 +242,73 @@ describe("StorageSelect is 16px on mobile", () => {
     expect(cls).toContain("text-base");
     expect(cls).toContain("sm:text-xs");
     expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+});
+
+// THE DEVICE PAGE SAYS THE FACT AND NOT THE DIAGNOSIS (quince#627).
+//
+// What used to render here was the full diagnosis of EVERY unreachable storage in the
+// configuration, each with its own Re-check button, on a page about one phone — and it never
+// referenced the chosen storage at all. The screenshot the issue came from showed `shuttle`
+// selected while the sentence diagnosed `ghost`.
+//
+// These pin both halves: the short line IS about the chosen storage, and the moved block is
+// asserted ABSENT rather than merely untested, because "it happens not to render" and "it cannot
+// render" are different guarantees and only the second survives a refactor.
+describe("StorageNotices says a storage is unavailable without diagnosing it", () => {
+  it("names the CHOSEN storage and links to it when that storage is unreachable", () => {
+    render(
+      <MemoryRouter>
+        <StorageNotices
+          storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
+          value="01JB"
+        />
+      </MemoryRouter>,
+    );
+    const line = screen.getByTestId("storage-unavailable");
+    expect(line).toHaveTextContent(/shuttle/);
+    expect(line).toHaveTextContent(/unavailable/);
+    expect(line.querySelector('a[href="/storage/shuttle"]')).not.toBeNull();
+  });
+
+  // THE DIAGNOSIS DOES NOT COME WITH IT. The daemon's sentence explains a disk; this page is about
+  // a phone. It lives on the storage page now, one link away.
+  it("does not reproduce the daemon's diagnosis", () => {
+    render(
+      <MemoryRouter>
+        <StorageNotices
+          storages={sub({ status: "loaded", storages: [storage({}), shuttle] })}
+          value="01JB"
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/carries no quince storage marker/)).toBeNull();
+    expect(screen.queryByTestId("storage-recheck")).toBeNull();
+    expect(screen.queryByTestId("storage-unreachable")).toBeNull();
+  });
+
+  // AND NOT A WORD ABOUT A STORAGE NOBODY CHOSE. This is the `ghost` case exactly: a second
+  // unreachable storage, not selected, must produce no line at all.
+  it("says nothing about an unreachable storage that is not the chosen one", () => {
+    const ghost = storage({
+      id: "01JC",
+      name: "ghost",
+      default: false,
+      reachable: false,
+      unreachable_code: "path_unreachable",
+      unreachable_reason: "the path could not be read",
+    });
+    render(
+      <MemoryRouter>
+        <StorageNotices
+          storages={sub({ status: "loaded", storages: [storage({}), ghost] })}
+          value="01JA"
+        />
+      </MemoryRouter>,
+    );
+    // The chosen storage is reachable, so there is nothing to say — and `ghost` is not this
+    // backup's business.
+    expect(screen.queryByTestId("storage-unavailable")).toBeNull();
+    expect(screen.queryByText(/ghost/)).toBeNull();
   });
 });

@@ -47,11 +47,21 @@ test("the storage selector shows both storages, the unreachable one disabled, an
   await expect(shuttle).toHaveJSProperty("disabled", true);
   await expect(shuttle).toContainText("not connected");
 
-  // Choosing the unreachable storage shows the DAEMON's reason, not client copy.
-  // The reason is shown WITHOUT selecting it — a disabled option cannot be chosen, so a
-  // reason that only appeared on selection would be unreachable. This assertion is what
-  // caught that.
-  await expect(page.getByTestId("storage-unreachable")).toContainText(/marker/);
+  // THE DIAGNOSIS IS NOT ON THIS PAGE ANY MORE (quince#627), and its absence is asserted rather
+  // than the assertion simply deleted.
+  //
+  // This used to read `expect(getByTestId("storage-unreachable")).toContainText(/marker/)` — the
+  // daemon's full sentence about a disk, on a page about a phone. Worse, that block rendered one
+  // line per unreachable storage in the whole configuration with no reference to the chosen one, so
+  // it diagnosed disks the user was not backing up to. It now lives on the storage's own page,
+  // where the re-check test below drives it.
+  //
+  // The device page still says something when ITS chosen storage is unavailable — a short line
+  // naming it, `storage-unavailable`. Not exercised here: this device's chosen storage is the
+  // default, which is reachable, so there is correctly nothing to say.
+  await expect(page.getByTestId("storage-unreachable")).toHaveCount(0);
+  await expect(page.getByTestId("storage-recheck")).toHaveCount(0);
+  await expect(page.getByText(/carries no quince storage marker/)).toHaveCount(0);
 
   // And the default — reachable, and already holding this device's backups in the demo — does NOT
   // claim a full transfer. A warning that is always on trains the user to ignore it.
@@ -71,34 +81,40 @@ test("re-check reaches the daemon for one storage and leaves an unreachable row 
   page,
 }) => {
   await authenticate(page);
-  await page.getByRole("link", { name: "spare-iphone" }).click();
-  await expect(page).toHaveURL(/\/devices\//);
 
-  await expect(page.getByTestId("storage-select")).toBeVisible();
+  // ON THE STORAGE'S OWN PAGE, not a device's (quince#627). This drove a DEVICE page until now,
+  // because that is where the diagnosis and the button used to render — a disk's mount state, and a
+  // button that re-probes it, on a screen about a phone. The endpoint and the round trip are
+  // unchanged; the surface offering them moved.
+  await page.locator('[data-testid="storage-card"][data-storage-name="shuttle"] a').first().click();
+  await expect(page).toHaveURL(/\/storage\/shuttle$/);
 
-  // ONE button, on the one unreachable row — not one per storage.
+  // ONE button, on the one row that states the problem. This page is about ONE storage, so
+  // "one button per unreachable storage in the configuration" — the defect quince#627 deleted — is
+  // no longer expressible here at all.
   const button = page.getByTestId("storage-recheck");
   await expect(button).toHaveCount(1);
 
   const recheck = page.waitForResponse(
     (r) => /\/api\/storages\/[^/]+\/recheck$/.test(r.url()) && r.request().method() === "POST",
   );
+  // NO `?udid=` — this page asks for the device-INDEPENDENT list, so the refetch is the bare
+  // endpoint. The device-scoped variant is the device page's, and that page no longer carries this
+  // button. The reason for refetching rather than splicing the 200 in is unchanged: `recheck`
+  // answers about a storage, not a pair, so its `will_be_full` is null and splicing would drop the
+  // full-transfer warning exactly when a returning disk made it true.
   const reload = page.waitForResponse(
-    (r) => /\/api\/storages\?udid=/.test(r.url()) && r.request().method() === "GET",
+    (r) => /\/api\/storages(\?|$)/.test(r.url()) && r.request().method() === "GET",
   );
 
   await button.click();
 
   // The press reaches the daemon, and it answers 200 for a storage that is declared.
   expect((await recheck).status()).toBe(200);
-
-  // AND the device-scoped list is refetched rather than the 200 {storage} being spliced in.
-  // recheck is device-independent, so its will_be_full is null; splicing would drop the
-  // full-transfer warning at the moment a returning disk made it true.
   expect((await reload).status()).toBe(200);
 
   // The disk is still out, and the row still says so — with the daemon's own sentence.
-  await expect(page.getByTestId("storage-unreachable")).toContainText(/marker/);
+  await expect(page.getByTestId("storage-detail-reason")).toContainText(/marker/);
   await expect(page.getByTestId("storage-recheck-failed")).toHaveCount(0);
   await expect(button).toBeEnabled();
 });
