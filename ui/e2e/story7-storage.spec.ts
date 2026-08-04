@@ -216,3 +216,28 @@ test("the storage header's count equals the sum of its per-device rows", async (
     "the storage header and its per-device rows are computed from different sources again",
   ).toBe(headerBackups);
 });
+
+// quince#639 — PRESSING `Back up now` ON A STORAGE PAGE MUST SHOW SOMETHING.
+//
+// It started a backup and showed nothing: `busy` is "the POST is in flight", not "a job is
+// running", so the button disabled for a few hundred milliseconds and returned with the same label
+// while the job ran invisibly. The only feedback the page could produce was the 409 from pressing
+// it a second time.
+//
+// This drives the real round trip — click, job starts, WS `job.updated` reaches the store, the row
+// renders progress. A unit test can only assert the component's reaction to a store it was handed;
+// this is what proves the store actually gets there from a press.
+test("a backup started from a storage page shows its progress on that page", async ({ page }) => {
+  await authenticate(page);
+
+  await page.locator('[data-testid="storage-card"][data-storage-name="internal"] a').first().click();
+  await expect(page).toHaveURL(/\/storage\/internal$/);
+
+  const button = page.getByTestId("storage-device-backup").first();
+  await expect(button).toBeEnabled();
+  await button.click();
+
+  // The progress row replaces the action for THIS device — the job is aimed at this storage, so
+  // the page may honestly claim the backup is arriving here.
+  await expect(page.getByTestId("storage-device-progress").first()).toBeVisible({ timeout: 15_000 });
+});
