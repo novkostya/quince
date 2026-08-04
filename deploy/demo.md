@@ -18,6 +18,31 @@ readable after that issue is closed and forgotten.
 | password | `demo`, published on the login screen (rung ruling; `test` remains the *fixture* password and is unrelated) |
 | state | none. No volume, no persistence — the rootfs is the state and it is thrown away |
 | address | `quince-demo.fly.dev` today. A custom domain is a later, independent step — see below |
+| proxy trust | `QUINCE_TRUSTED_PROXIES = "172.16.0.0/16"` — **required**, see below |
+
+## The proxy trust list is not optional
+
+**Without it the demo locks itself out**, and it did — quince#464, live on the deployed instance
+until 2026-08-04. `ClientIP` returns the peer unless a trust list is configured, and on fly the peer
+is fly-proxy, identical for every visitor. So the login limiter bucketed every visitor together:
+**ten wrong passwords from any one visitor denied login to all of them** — on an instance that
+prints its own password on the login screen.
+
+Measured before and after, against the image, ten wrong attempts from one forwarded client then a
+correct password from another:
+
+```
+no trust list   victim, CORRECT password, different X-Forwarded-For  ->  429
+trust list set  victim, CORRECT password, different X-Forwarded-For  ->  200
+trust list set  attacker, correct password, SAME X-Forwarded-For     ->  429   (still limited)
+```
+
+The third line matters as much as the second: the limiter still works, it just bills the right
+party. `fly.toml` carries why the value is a `/16` rather than a `/12` or the observed `/32`.
+
+**The `Secure` cookie working is not evidence this is configured**, which is what made it easy to
+miss. `X-Forwarded-Proto` believes anyone when the list is unset; `X-Forwarded-For` believes nobody.
+Opposite defaults, each preserving its own history.
 
 ## Why there is no reset timer
 
