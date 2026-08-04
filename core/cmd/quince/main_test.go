@@ -425,7 +425,7 @@ func TestDemoConfigRoundTripsThroughSave(t *testing.T) {
 			}
 
 			// Exactly what the UI does on Save: PUT back the document it was served, unmodified.
-			errs, err := cfgSvc.Replace(cfgSvc.Current())
+			errs, _, err := cfgSvc.Replace(cfgSvc.Current())
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}

@@ -557,7 +557,7 @@ func seedDemoStorages(cfgSvc *config.Service) error {
 	c := cfgSvc.Current()
 	entries := demo.StorageEntries()
 	c.Storage = &entries
-	errs, err := cfgSvc.Replace(c)
+	errs, _, err := cfgSvc.Replace(c) // qn.6g: no appliers are registered at seed time
 	if err != nil {
 		return fmt.Errorf("seed the demo storage declaration: %w", err)
 	}

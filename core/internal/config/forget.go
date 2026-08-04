@@ -44,10 +44,10 @@ const (
 // ruled behaviour, not a shortcut: the caller SURFACES the restart through the `warnings` channel,
 // and `POST /api/storages/{name}/recheck` keeps answering for the slot still being served, which
 // is runtime truth. Project-wide config→runtime propagation is its own rung (quince#577).
-func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError, error) {
+func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError, []Warning, error) {
 	cur := s.Current()
 	if cur.Storage == nil {
-		return ForgetNoSuchStorage, nil, nil
+		return ForgetNoSuchStorage, nil, nil, nil
 	}
 
 	idx := -1
@@ -58,7 +58,7 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 		}
 	}
 	if idx < 0 {
-		return ForgetNoSuchStorage, nil, nil
+		return ForgetNoSuchStorage, nil, nil, nil
 	}
 
 	// THE DEFAULT IS REFUSED, AND THIS ONE RULE SUBSUMES THE LAST-STORAGE CASE. A backup that
@@ -81,7 +81,7 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 					"either way.",
 				name)
 		}
-		return ForgetRefused, []wire.ConfigError{{Path: "storage", Message: msg}}, nil
+		return ForgetRefused, []wire.ConfigError{{Path: "storage", Message: msg}}, nil, nil
 	}
 
 	// A NEW SLICE, never a splice in place: Current() hands back a Config whose Storage pointer
@@ -94,14 +94,14 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 
 	// Replace re-validates the whole document and runs CheckStorages, so nothing here has to
 	// re-derive what a coherent declaration is. Its errors reach the caller as the same 422.
-	errs, err := s.Replace(next)
+	errs, warns, err := s.Replace(next)
 	switch {
 	case err != nil:
-		return ForgetRefused, nil, err
+		return ForgetRefused, nil, nil, err
 	case len(errs) > 0:
-		return ForgetRefused, errs, nil
+		return ForgetRefused, errs, nil, nil
 	}
-	return ForgetDone, nil, nil
+	return ForgetDone, nil, warns, nil
 }
 
 // ForgetRestartWarning is the notice a successful Forget carries back, in the `warnings` channel

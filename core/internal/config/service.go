@@ -201,9 +201,12 @@ func degradedModeWarnings(c Config) []Warning {
 	return out
 }
 
-// Service owns the live config and serves GET/PUT /api/config. It is safe for concurrent
-// use. Restart-required semantics this rung: a valid PUT updates the in-memory snapshot
-// (so GET reflects it) and the file, but no subsystem consumes config live until qn.2+.
+// Service owns the live config and serves GET/PUT /api/config. It is safe for concurrent use.
+//
+// SUBSYSTEMS CAN NOW BE TOLD (qn.6g, quince#577). A valid write updates the file and the in-memory
+// snapshot and then runs the registered Appliers, which is what turns a saved setting into an
+// applied one. Whether a given KEY is applied live is a property of its consumer, not of this
+// mechanism — the per-setting answer lives in contracts §6.
 type Service struct {
 	mu       sync.RWMutex
 	path     string
@@ -211,6 +214,88 @@ type Service struct {
 	cfg      Config
 	warnings []Warning
 	source   Source
+
+	// appliers is written ONLY at wiring time and read under mu on every write.
+	//
+	// Registration is deliberately not a runtime operation (spec decision 3): a fixed list cannot
+	// be mutated concurrently, so this never becomes the unsynchronised-func-value race that
+	// `storage.Manager.SetRefresher` is today (a benign startup-only write that stops being benign
+	// the moment anything re-registers).
+	appliers []applier
+}
+
+// applier is one registered subsystem, named so a failure can say which one.
+type applier struct {
+	name  string
+	apply Applier
+}
+
+// Applier is a subsystem's chance to take a new configuration. It returns warnings describing
+// anything it could NOT apply.
+//
+// IT CANNOT REFUSE, AND THAT IS THE LOAD-BEARING DECISION (spec decision 2). By the time an Applier
+// runs the file is already written, and the file is the source of truth — so an Applier that could
+// fail the request would leave the file and the process disagreeing, with a 500 to explain it.
+// Anything that may refuse runs BEFORE the write, in Validate / CheckStorages / CheckTLS, which is
+// the shape this package already has rather than a new one.
+//
+// An Applier that cannot complete its work says so in a Warning and leaves its subsystem on its
+// last-good state — which is D12's own rule for a bad edit, one layer down.
+//
+// `old` is the configuration that was live until this write; `next` is what has just been written.
+// Both are passed because most consumers only care about their own section, and comparing is how
+// they decide whether they have anything to do at all.
+type Applier func(old, next Config) []Warning
+
+// Subscribe registers an Applier. WIRING TIME ONLY — see the `appliers` field for why that is a
+// constraint rather than a convention. Order of registration is order of application; nothing today
+// needs one applier to observe another's effect, and if that ever changes it becomes a dependency
+// graph rather than a slice.
+func (s *Service) Subscribe(name string, apply Applier) {
+	if apply == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appliers = append(s.appliers, applier{name: name, apply: apply})
+}
+
+// notify runs every Applier against a completed write and collects their warnings.
+//
+// HOLDS NO LOCK WHILE APPLYING. An Applier reaches into another subsystem — taking its mutex,
+// doing filesystem work — and holding `mu` across that would deadlock the moment one of them called
+// back into Current(), which is exactly what a storage applier re-resolving the declared list does.
+// So the list is copied under the read lock and released before anything runs.
+//
+// A PANICKING APPLIER MUST NOT TAKE THE WRITE WITH IT. The file is already on disk and the snapshot
+// already swapped; unwinding through the HTTP handler would report a failed save that succeeded.
+// It is recovered, logged, and reported as a warning naming the applier.
+func (s *Service) notify(old, next Config) []Warning {
+	s.mu.RLock()
+	list := append([]applier(nil), s.appliers...)
+	s.mu.RUnlock()
+
+	var out []Warning
+	for _, a := range list {
+		out = append(out, s.runApplier(a, old, next)...)
+	}
+	return out
+}
+
+// runApplier is one applier call, isolated so a panic in it cannot escape the loop.
+func (s *Service) runApplier(a applier, old, next Config) (warns []Warning) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("config: applier panicked — the write STANDS and the subsystem may be stale",
+				"applier", a.name, "panic", r)
+			warns = []Warning{{
+				Path: a.name,
+				Message: "the configuration was saved, but the " + a.name + " subsystem failed while " +
+					"applying it and may still be running the previous settings — restart quince to be sure",
+			}}
+		}
+	}()
+	return a.apply(old, next)
 }
 
 // NewService loads config.yml at startup, logging any warnings/invalidity (never fatal).
@@ -239,11 +324,14 @@ func (s *Service) Current() Config {
 	return s.cfg
 }
 
-// Replace validates a full-document config, writes it canonically, and updates the live
-// snapshot. Returns validation errors (→ 422) or a write error.
-func (s *Service) Replace(c Config) ([]wire.ConfigError, error) {
+// Replace validates a full-document config, writes it canonically, updates the live snapshot, and
+// then tells every registered Applier (qn.6g).
+//
+// Returns validation errors (→ 422), the Appliers' warnings, and a write error. The warnings are
+// per-response and are never stored — see the notify call at the end for why.
+func (s *Service) Replace(c Config) ([]wire.ConfigError, []Warning, error) {
 	if errs := Validate(c); len(errs) > 0 {
-		return errs, nil
+		return errs, nil, nil
 	}
 	// qn.6c: a SAVE must also satisfy the storage requirement, and this check lives here rather
 	// than in Validate for a reason that is easy to get backwards (quince#394 review).
@@ -264,23 +352,37 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, error) {
 		if req.Empty {
 			msg = "the storage list is empty — " + msg
 		}
-		return []wire.ConfigError{{Path: "storage", Message: msg}}, nil
+		return []wire.ConfigError{{Path: "storage", Message: msg}}, nil, nil
 	}
 	data, err := Marshal(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := AtomicWrite(s.path, data); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	mtime := ""
 	if info, err := os.Stat(s.path); err == nil {
 		mtime = info.ModTime().UTC().Format(time.RFC3339)
 	}
 	s.mu.Lock()
+	old := s.cfg
 	s.cfg = c
 	s.warnings = nil // a valid structured replace clears prior file warnings
 	s.source = Source{Path: s.path, Mtime: mtime}
 	s.mu.Unlock()
-	return nil, nil
+
+	// THE SUBSYSTEMS ARE TOLD, AFTER the write and after the snapshot swap (qn.6g).
+	//
+	// After, because an Applier that observed the old snapshot while the new file was on disk would
+	// see a state that never existed. And outside the lock — see notify.
+	//
+	// THE WARNINGS ARE RETURNED, NEVER STORED, which settles the spec's open question 2. `warnings`
+	// above is cleared on every valid write because it describes THE FILE AS PARSED; an apply
+	// warning describes the gap between the file and the running process, which is a different fact
+	// with a different lifetime. Storing it there would have it wiped by the next unrelated save
+	// while its cause persisted. `ForgetRestartWarning` already made exactly this split for exactly
+	// this reason — "a property of the response, not of the stored state" — and this follows it
+	// rather than inventing a second rule.
+	return nil, s.notify(old, c), nil
 }
