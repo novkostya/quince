@@ -1,0 +1,444 @@
+# qn.6g — config.yml applies without a restart: one propagation mechanism, all settings, storage first
+
+**Goal.** Someone edits a setting in quince — adds a disk, changes retention, turns encryption
+enforcement on — and it takes effect, without restarting the daemon and without having to know that
+some settings work that way and some do not.
+
+Rung issue: quince#577, Operator-scoped 2026-08-03 out of `qn.6d`, ruled 2026-08-04. **The ruling
+lives on that issue and is cited rather than re-litigated:** one live-apply mechanism on
+`config.Service` rather than a per-setting special case, storage as its first consumer, and the
+interim *"restart required"* UI notice **declined**. What is new here is the *how* — where the seam
+is, what each setting's answer actually is, and the one gap that is not this rung's to take.
+
+**Everything below was measured in this checkout at `ab2d43a`, 2026-08-04.** Two of the issue's own
+citations are corrected by that measurement; see interface fact 5.
+
+---
+
+## Why `qn.6g`, and why it runs before quince#591
+
+**The letter.** `qn.6e` is taken by quince#502 — an explicit, still-unscoped placeholder holding
+`qn.6c`'s deferrals — and `qn.6f` closed on 2026-08-02. `qn.6g` is the next free letter. quince#591
+takes `qn.6h`; it states its own need for a number and names the same two taken letters.
+
+**The order.** quince#577 first. It discharges a violation that is **live right now**: the UI edits
+`config.yml`, nothing applies, and — because the interim notice was declined — nothing on screen
+says so. Measured against `CLAUDE.md`'s *no silent caps or fallbacks*, that is a standing defect,
+and the ruling records it as knowingly accepted only until this rung lands. quince#591 makes an
+already-correct path faster and cheaper to operate; it fixes nothing that is currently wrong.
+
+**They barely touch.** quince#591 rewrites the zfs **write lifecycle** (`seedWorking`, the exchange,
+the helper's `seed` verb). This rung rewrites **registry membership** (`Manager.slots` and who may
+mutate it). The one shared file is `core/internal/storage/subsystem.go`, and in different methods.
+Neither blocks the other, and this ordering is **rung-ruled and reversible** — the Operator scoped
+both on the same day and either sequence builds.
+
+---
+
+## Boundary
+
+**In scope.**
+
+| tree | what changes |
+| --- | --- |
+| `core/internal/config/` | the propagation seam: `Subscribe` + a post-write notify on `Replace` and `ForgetStorage` |
+| `core/internal/storage/` | `Manager` learns to replace its slot list; every default-by-position site made safe against a shrinking list |
+| `core/internal/backup/` | `Engine` learns to take a new `require_encryption` without a race |
+| `core/cmd/quince/live.go` | the appliers, registered at the wiring seam that already exists |
+| `core/internal/httpapi/` | no new routes — the existing `PUT`/`DELETE` gain their effect |
+| `ui/src/features/settings/ConfigEditor.tsx` | *"restart quince to apply"* stops being unconditional |
+| `ui/src/features/storage/ForgetStorage.tsx` | the restart copy goes, and the storage list is invalidated |
+| `ui/src/pages/SettingsPage.tsx` | the page intro's *"changes apply on restart"* line |
+| `docs/` | contracts §6 gains the per-setting table; design §8; `stack.md` D12's staged-delivery note |
+| `ui/e2e/` | one story for the settings copy |
+
+**Out of scope, each with a why.**
+
+- **File-watch pickup of hand-edits** — the other half of D12's *"edited by the UI and by hand
+  equally"*. It is a **gap for the Operator**, not a silent descope; see the `PROPOSED (gap)` block.
+- **`devices.*` live re-supervision.** A netmuxd restart tears a live Wi-Fi backup — that is why
+  `muxsup.Spec.Rescan` is `false` for netmuxd (`supervisor.go:122`, design §4) — and Wi-Fi is the
+  PRIMARY use case. Applying `devices.*` live means deciding what happens to a running transfer,
+  which is a job-semantics question this rung does not need to answer to be useful.
+- **`tls.*` on/off and the listen address.** Both need a socket rebind. The address is not even in
+  `config.yml` (it is `QUINCE_LISTEN`, bootstrap env — contracts §6), so D12 does not reach it.
+- **Fixing the fields nothing reads.** `backup.transport` is quince#654; `sessions.ttl_minutes` is
+  filed by this rung as its sibling. Live-apply cannot make an unread field take effect, and folding
+  the fix in here would let this rung's table claim a key works when nothing consumes it.
+- **A new WebSocket event for config changes.** Rung-ruled decision 4.
+
+---
+
+## Interface facts — measured at `ab2d43a`, not recalled
+
+**1. There is no propagation seam of any kind.** `config.Service` (`core/internal/config/service.go:207-213`)
+has exactly four methods — `NewService` (:217), `Snapshot` (:229), `Current` (:236), `Replace` (:244)
+— plus `ForgetStorage` (`forget.go:47`). No `Subscribe`, no `Apply`, no `Reload`, no watcher, no
+setter injection. `Replace` validates, checks storages, marshals, writes atomically, re-`Stat`s for
+the mtime, and swaps `s.cfg` under the write lock (:280-284). **Then it returns.** Nothing downstream
+learns a write happened. No `fsnotify` dependency exists in `core/go.mod`; the only signal handling
+is `SIGINT`/`SIGTERM` for shutdown (`main.go:164`).
+
+**2. The consequence is written in the code, in the words the issue quotes** —
+`core/internal/config/service.go:258-261`:
+
+> the UI could remove the last storage, get a 200, and the user would discover backups were disabled
+> at the next restart — an acceptance that is silent, which is what `no silent caps or fallbacks`
+> forbids and what D12 makes reachable by making the UI the editing surface.
+
+Six more places say the same thing about their own setting: `service.go:208-209`, `schema.go:244`
+(*"there is no live config reload in schema v0"*), `schema.go:170`, `auth/service.go:85`,
+`forget.go:42-46` (which names this issue), `forget.go:122-123` (the user-facing warning string).
+
+**3. Exactly one thing already reads config live after startup, and it is the model to copy.**
+`Manager.SetRefresher`'s closure (`live.go:212-219`) calls `cfgSvc.Current().Storage` on every
+recheck and re-runs `resolveSlot`. Everything else is a value copy taken during `buildLiveStack`.
+Only `httpapi.Deps.Config` (`deps.go:24`) holds a `*config.Service` past startup.
+
+**4. `resolveSlot` is safe to re-run, and that is not an accident.** `live.go:258`: *"NOBODY CREATES
+A STORAGE ROOT. A declared path must already exist."* The backend probe is a lazy closure precisely
+so a refusal never reaches `storage.Select`, whose `probeNamespace` would `MkdirAll` the path
+(`live.go:246-256`, quince#415). So re-resolving the whole list creates nothing, mutates no tree, and
+is idempotent — which is what makes a whole-list apply cheap rather than dangerous.
+
+**5. The default-by-position sites are SIX, not three, and two of the issue's line numbers are off
+by four.** Verified by reading each:
+
+| site | line | issue says | correct |
+| --- | --- | --- | --- |
+| `defaultSlot()` | `subsystem.go:119` | `subsystem.go:115` | ✗ off by 4 (:115 is a comment line) |
+| `policyFor()` | `subsystem.go:494` | `subsystem.go:490` | ✗ off by 4 (:490 is `if storageID == ""`) |
+| `ResolveChoice()` | `jobstorage.go:115` | `jobstorage.go:115` | ✓ |
+| `jobSlot()` | `jobstorage.go:71` | — | not cited |
+| `Storages()` | `storages_api.go:36` | — | not cited |
+| `renderSlot()` | `storages_api.go:211` | — | not cited |
+
+Two of the six already guard a short list: `policyFor` checks `len(m.slots) == 0` (:491).
+**`defaultSlot`, `jobSlot` and `ResolveChoice` do not** — and `NewManager` panics on an empty list
+(:105-107), so today the guard is the constructor. A live remove moves that guarantee from
+construction time to every-call time, which is the actual shape of hazard 2.
+
+**6. `renderSlot(idx)` has TWO unlocked windows in front of it, not one.** `RecheckStorage`
+(`storages_api.go:154-195`) finds `idx` under RLock, **unlocks**, calls `m.refresh(name)` (filesystem
+work), re-locks, re-finds by name, unlocks, then calls `renderSlot(idx)` — which itself runs a
+database count **outside** the lock (:204) before reading `m.slots[idx]` (:209). A remove landing in
+either window is an out-of-range panic. Its own comment is the prediction:
+
+> Nothing else mutates the list today, and a position captured before an unlocked gap is precisely
+> the assumption that stops holding the moment something does.
+
+**This rung is the moment something does.** Note also that the `ok` branch re-finds by name and the
+`!ok` branch does not, so a failed refresh carries the stale `idx` all the way to `renderSlot`.
+
+**7. `m.refresh` is written without the lock.** `SetRefresher` (`storages_api.go:17`) assigns the
+field with no `mu` held — benign today because it happens once at startup before any reader exists.
+Any applier that re-registers it later is a data race on a func value. This rung must not create one.
+
+**8. `require_encryption` is read PER JOB, not at construction.** `live.go:128` copies it into
+`backup.Options.Config`, frozen into `Engine.cfg` (`engine.go:122`), and read at `engine.go:475` when
+a job starts. So the value the Engine holds is consulted late — which makes it live-applicable by
+swapping one field, and makes it a data race unless that swap is synchronized. A job already past
+:475 keeps the answer it got, which is correct.
+
+**9. Five settings have NO Go consumer at all.** `backup.transport` (quince#654 — the job's transport
+comes from the POST body, `handlers_jobs.go:29`), `sessions.ttl_minutes` (the *vault-unlock* TTL per
+`auth/service.go:4-6`; nothing reads it, and `ConfigEditor.tsx:106` labels it *"Session TTL
+(minutes)"*, which reads as the login timeout), `automation.staleness_days` and
+`automation.reminder_cooldown_hours` (declared for qn.12, `schema.go:248`), and server-side
+`ui.theme` (applied by the browser from the PUT response, `ConfigEditor.tsx:35`, so it is already
+live). All five are validated and editable.
+
+**This is the fact that shapes the deliverable.** A per-setting table that answers only *live* or
+*restart* would have to put four of these in one of those bins, and both would be false. The
+`automation.*` pair is **declared debt** and fine; `sessions.ttl_minutes` is quince#654's twin and is
+filed by this rung, not fixed by it.
+
+**10. The demo bounds what ui-e2e can prove here.** `--public-demo` **deletes its config at
+startup** (contracts §6, quince#549) and every visitor can `PUT /api/config`, and the demo provider
+fabricates its two storages (`demo/provider.go:157-214`) rather than resolving them. So a green
+ui-e2e can assert **what the settings screen says**; it cannot assert that a real storage began being
+served. That splits G8 from G1–G3 rather than being discovered in a slice — the lesson `qn.6d`
+recorded from `qn.6f`: *a thing can run and still answer a narrower question than the one asked.*
+
+**11. Three UI surfaces currently promise a restart, and one deliberately declines to refresh.**
+`ConfigEditor.tsx:145` (*"Saved · restart quince to apply"*, unconditional), `SettingsPage.tsx:12`
+(*"changes apply on restart (live reload lands later)"*), `ForgetStorage.tsx:75-76` and `:99`. And
+`ForgetStorage.tsx:55-58` deliberately does **not** invalidate the storage list, with a comment
+saying why — *"it still lists this storage, correctly — the process is still serving it"*. That
+comment becomes false in this rung and must flip with it.
+
+---
+
+## Design
+
+### The mechanism — refusal before the write, application after, and application cannot refuse
+
+```go
+// config/service.go
+type Applier func(old, new Config) []Warning
+
+func (s *Service) Subscribe(name string, apply Applier)   // wiring time only
+```
+
+`Replace` and `ForgetStorage` call the registered appliers, **in registration order**, after the
+write and after the snapshot swap, holding no lock. Each returns warnings; they are logged and
+folded into `s.warnings` so the endpoint's existing `warnings` channel carries them — the same
+channel `qn.6d`'s Forget already uses for its restart notice.
+
+**An applier cannot refuse, and this is the load-bearing decision.** By the time it runs, the file is
+already written and the file is the source of truth. An applier that could fail the request would
+leave the file and the process disagreeing, with a `500` to explain it. So anything that may refuse
+runs **before** the write, in `Validate` / `CheckStorages` / `CheckTLS` — which is the shape the
+codebase already has, not a new one. An applier that cannot complete its work says so in a warning
+and leaves the subsystem on its last-good state, which is D12's own rule for a bad edit.
+
+**Registration is wiring-time only** (`buildLiveStack`), so the applier list is never mutated
+concurrently, and interface fact 7's unlocked-write hazard is not recreated.
+
+### Storage — the first consumer
+
+`Manager` gains one method:
+
+```go
+func (m *Manager) ApplyStorages(next []Slot) []Warning
+```
+
+It takes the whole resolved list under `mu.Lock()` and replaces `m.slots`. The applier in `live.go`
+builds `next` with `declaredStorages(cfgSvc.Current().Storage)` + `resolveSlot` — the same two calls
+`buildStorage` already makes at startup (interface fact 4 is why that is safe), so a live apply and a
+restart **cannot disagree about what a storage is**, which is the property `SetRefresher`'s comment
+already argues for.
+
+**Hot add is an append plus a reconcile, and the reconcile is the part that is easy to forget.** A
+newly declared disk may already hold committed backups — the adopt path exists. `buildStorage` runs
+`storageMgr.Reconcile(ctx)` after `NewManager`; an add that skips it leaves those versions invisible
+until a restart, which is the same defect in a new place. Story 5 and G7 exist for this.
+
+**Hot remove is bounded by making every default-by-position site re-read under one lock.**
+`defaultSlot`, `jobSlot` and `ResolveChoice` gain the `len(m.slots) == 0` guard `policyFor` already
+has; `renderSlot(idx)` becomes `renderSlot(name)` and re-finds under the lock, which removes both of
+interface fact 6's windows rather than narrowing them. Removing the current default is **already
+refused** with a `422` by `qn.6d`'s ruling, so nothing can promote a different storage by removing
+index 0 — that ruling is load-bearing for this rung and is cited, not rebuilt.
+
+**An in-flight job keeps the storage it started on, and that is correct.** It holds a copied `Slot`,
+so it completes against the disk it began writing to — which is what *never mutate a committed
+version* and *a failed job keeps its dirty `working/`* both require. The consequence is that
+**forgotten and no-longer-in-use differ for the duration of a job**, and this rung says so rather
+than letting it be discovered: the storage leaves the list immediately, and the job that is using it
+finishes. Story 6 and G5.
+
+### The per-setting answer — the actual deliverable
+
+Every key in `config.yml`, with a verdict. Three bins, not two, because interface fact 9 makes two
+bins impossible to fill honestly.
+
+| key | verdict | why |
+| --- | --- | --- |
+| `backup.transport` | **nothing reads it** | quince#654. The job's transport comes from the POST body. |
+| `backup.require_encryption` | **live** | Read per job (fact 8); the applier swaps one synchronized field. A running job keeps its answer. |
+| `storage[]` (membership) | **live** | The ruled first consumer. |
+| `storage[].path` / `.backend` / `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses (fact 4). An in-flight job keeps its slot. |
+| `storage[].retention.*` | **live** | Read only in `Prune` (`subsystem.go:240`), off the slot the applier replaces. |
+| `storage[].default` | **live** | Re-ordering `declaredStorages` moves `slots[0]`. Safe only because removing the default is refused; a *re-designation* takes effect for the next unbound job. |
+| `devices.manage_muxer` / `.usbmuxd_socket` / `.netmuxd_addr` | **restart** — *and D12 requires this sentence:* a netmuxd restart tears a live Wi-Fi backup (`supervisor.go:122`), so applying these live means ruling on what happens to a running transfer. Out of scope, named, not silent. |
+| `tls.cert_file` / `.key_file` | **paths: restart. Contents: already live** | `tlsx.Keeper` re-reads the files on rotation (`keeper.go:79,109`) — renewals already need no restart (`OnboardingHTTPSPage.tsx:141`). Changing the *paths*, or turning TLS on or off, needs a rebind. |
+| `sessions.ttl_minutes` | **nothing reads it** | Filed by this rung. It is the vault-unlock TTL and the label says *"Session TTL"*. |
+| `sessions.allow_insecure_transport` | **restart** | Decides the plain-half handler once at bind (`main.go:300-303`). |
+| `automation.staleness_days` / `.reminder_cooldown_hours` | **nothing reads it (declared)** | qn.12, `schema.go:248`. Declared debt, not a defect. |
+| `ui.theme` | **already live** | Client-side, from the PUT response. |
+
+This table goes into **contracts §6**, beside the schema it describes, because it is the answer a
+reader needs at the same moment they read the key. `ConfigEditor`'s *"restart quince to apply"* then
+becomes conditional on the fields the form actually changed, and means something.
+
+---
+
+## PROPOSED (gap): does this rung build file-watch, or is D12's staged plan re-staged?
+
+**Why this is a gap and not a scope call.** D12's *Staged delivery* paragraph
+(`stack.md:571-577`) is a written plan with a rung attached: *"File-watch live reload, generated
+doc-comments, and the full transparent-editor UX land with **qn.6**."* This is qn.6. Contracts §6
+repeats it (*"file-watch pickup"*). The ruling on quince#577 is about `config.Service` telling the
+running process when **it** changes the file — it does not mention detecting a change made by
+somebody else, and the two are different mechanisms.
+
+Leaving file-watch out therefore moves a dated commitment. `CLAUDE.md` forbids silently patching that
+kind of hole, so it is asked rather than assumed.
+
+**What is at stake.** With propagation only, a hand-edit of `config.yml` still needs a restart, while
+the same edit through the UI does not. D12's *"edited by the UI and by hand equally"* becomes false in
+a new way — a smaller lie than today's, but a lie with a sharper edge, because the two paths now
+differ.
+
+- **(a) Propagation only, file-watch is its own rung. — RECOMMENDED.** This rung builds the
+  `Subscribe` seam, which is the prerequisite for file-watch either way; a watcher is then a second
+  producer feeding the same appliers, and provably so. It also lets the *"invalid edit keeps
+  last-good and shows a UI banner"* half of D12 — a separate user-visible contract, with a
+  `Warning`-surfacing question of its own — be decided on its own evidence rather than at the tail of
+  a rung about propagation. Cost: stated above, and it must be written into contracts §6 rather than
+  left for a reader to notice.
+- **(b) Build both here.** D12 lands whole and the hand-edit path stops being second class. Cost: a
+  new dependency (`fsnotify` is not in `core/go.mod`), a debounce-and-coalesce policy, atomic-write
+  semantics to get right (quince's own `AtomicWrite` renames, and so does every editor), and the
+  bad-edit banner contract — roughly doubling the rung, on top of a slice that already touches four
+  packages.
+- **(c) Amend D12 to drop file-watch.** Only if the Operator's answer is that hand-edits are not a
+  path worth live-applying. Cheapest, and the one that must not happen by default.
+
+**Nothing is built on this while it is pending.** Under (a) or (c) the code slices below are
+unchanged; under (b) a seventh PR is added. So PR 1 can be reviewed and merged before the ruling —
+this block is a spec paragraph, not a blocker on the spec.
+
+---
+
+## Stories
+
+1. **A storage added through the UI is being served before the page finishes reloading.** `PUT
+   /api/config` with a new entry; `GET /api/storages` lists it; a backup can be started against it.
+   No restart.
+2. **A storage forgotten through the UI stops being served.** `DELETE /api/config/storage/{name}`;
+   it leaves `GET /api/storages`; a job naming it is refused with the ordinary not-found answer.
+   Nothing on the disk is touched.
+3. **Forgetting the default is still refused**, with the same `422` and the same remedy — live-apply
+   does not open a path around a standing ruling.
+4. **A retention change takes effect at the next prune**, with no restart.
+5. **A storage added while holding existing backups shows them.** Its versions are reconciled on
+   add, not at the next restart.
+6. **A job running on a storage that is forgotten mid-job completes against that storage**, and the
+   storage is gone from the list the whole time.
+7. **`require_encryption` applies to the next job**, and not to one already running.
+8. **The settings screen only says "restart to apply" when that is true** — for the fields in the
+   restart bin, and never for the live ones. Forget's dialog and confirmation stop mentioning a
+   restart at all.
+9. **Nothing panics or tears while the list moves.** Concurrent readers — recheck, list, job
+   resolution, prune — against a list being replaced.
+
+---
+
+## Gates
+
+| id | what it proves | where |
+| --- | --- | --- |
+| **G1** | Add via `PUT /api/config` → `GET /api/storages` lists it and a job can target it, one process, no restart. | CI (Go) |
+| **G2** | `DELETE /api/config/storage/{name}` → it leaves `GET /api/storages`, a job naming it is refused, and **the tree is asserted untouched** — on the filesystem, not on the API. | CI (Go) |
+| **G3** | Forgetting the default still `422`s, single-storage case included. | CI (Go) |
+| **G4** | A retention edit changes what the next `Prune` keeps, with no restart. | CI (Go) |
+| **G5** | A job started on storage X completes against X after X is forgotten mid-job; the version lands where the job began. | CI (Go) |
+| **G6** | `require_encryption` flipped mid-flight: the running job keeps its answer, the next job gets the new one. | CI (Go) |
+| **G7** | A storage added hot, whose root already holds committed backups, has them **visible without a restart**. | CI (Go) |
+| **G8** | The settings screen's restart copy matches the table: present for a restart-bin field, absent for a live one; Forget's copy carries no restart. | ui-e2e |
+| **G9** | **`go test -race ./...`, plus a targeted harness**: goroutines calling `Storages`, `RecheckStorage`, `ResolveChoice` and `Prune` while another applies adds and removes. | CI (Go, `-race`) |
+| **G10** | `make privacy-check REF=origin/main...HEAD TEXT=<file under $HOME/scratch/r17/>` | host |
+
+**G9 is the gate this rung stands or falls on**, and it is stated first among equals rather than
+last. All three of the issue's named hazards are races, and `Slot` holds a `Backend` **interface** —
+so a torn value is an itab/data mismatch, a segfault rather than a wrong answer. That is the reason
+`Manager.mu` exists (`subsystem.go:64-79`), proven under `-race` by quince#445, and this rung is the
+first to write the list rather than one element of it.
+
+**G8's limits are declared, not discovered.** Per interface fact 10 the demo fabricates its storages
+and `--public-demo` deletes its config, so **ui-e2e proves the copy and nothing about a disk being
+served**. G1–G7 carry that claim, in Go, against a real temp-dir storage.
+
+**No hardware gate, and no live-apply claim is made about real removable media.** A disk physically
+pulled while a live apply runs is proven by nothing here and is not claimed.
+
+---
+
+## Fixtures
+
+**New: a live-apply harness** — a `*config.Service` over a `t.TempDir()` config file plus a `Manager`
+over two temp-dir storage roots, driven through the real `PUT`/`DELETE` handlers rather than by
+calling `ApplyStorages` directly. Calling the applier directly would prove the applier and skip the
+seam, which is the half most likely to be wrong.
+
+**New: the G9 race harness**, above.
+
+**No new transcripts.** This rung drives no device.
+
+**The demo provider is extended only if G8 needs it**, and its storages stay fabricated. `qn.6d`'s
+requirement stands and is inherited verbatim: *a fixture that fabricates a value the live code never
+produces makes its gate a lie.* G8 asserts UI copy, which the demo can honestly produce; it must not
+be widened into a claim about serving a storage.
+
+---
+
+## Rule check
+
+Written before building. Every rule this rung touches **or comes near**, near-misses included.
+
+| rule | how this plan complies |
+| --- | --- |
+| **A rung starts from a spec** | This document, PR 1, reviewed before any code exists. |
+| **Don't improvise architecture** | The one thing the ruling does not cover — file-watch versus D12's dated plan — is a `PROPOSED (gap)` block with options and a recommendation, and **nothing is built on it** under any answer. The rung letter and the order against quince#591 were handed to the spec explicitly by the ruling and are recorded as rung-ruled. |
+| **Contracts are stop-and-ask** | No route changes, no wire object changes, no new event kind (decision 4). What *does* change is contracts §6's restart claim, and it changes in the PR that makes it false — which is the docs rule, not a contract gap. |
+| **Never mutate a committed version** | **The rung's sharpest near-miss.** Forgetting a storage removes it from a list; it touches no tree. G2 asserts on the **filesystem**. A job in flight keeps its slot and finishes its commit — roll-forward is preserved exactly, and G5 asserts it rather than assuming it. |
+| **State honesty** | The per-setting table has **three** bins because two would force a false answer for five keys (fact 9). *"Restart to apply"* stops appearing where it is untrue and stays where it is true. An applier that cannot complete emits a warning rather than logging success. Two of the issue's own citations are corrected in fact 5 rather than repeated. |
+| **No silent caps or fallbacks** | This rung exists to close one. Applier warnings ride the `warnings` channel the endpoints already return. The settings that stay restart-required are **named individually with a reason**, which is D12's *"unless the spec says why"* discharged per key rather than in the aggregate. |
+| **Config tidiness (D12)** | The whole point. No new key, no secret, no UI-only state. **Near-miss declared:** `devices.*` and `tls.*` remain restart-required, and D12 permits that only with a stated why — both have one, in the table and in the Boundary. |
+| **No UI-only state** | The restart-required verdict is a property of the key, published in contracts §6; the UI renders it and stores nothing. |
+| **Privacy is a commit-time gate** | Storage **paths** are the sharp surface again — every fixture and screenshot names a place. Everything here is `t.TempDir()`, `/backups` or `/mnt/shuttle`; no lab topology, no dataset name, no real mount point. `TEXT=` takes a **path** to a body file under `$HOME/scratch/r17/`, never inline prose and never a fixed `/tmp` path. |
+| **Secrets discipline** | Near-miss by adjacency: `tls.*` and `sessions.*` are in the table. No secret is read, moved, logged, or added — TLS **paths** are not key material, and no backup password is on any path this rung touches. |
+| **Subprocesses** | None added. `devices.*` is out of scope precisely so no supervised subprocess is restarted by a config edit in this rung. |
+| **Every hardware bug becomes a fixture** | No hardware gate here, so nothing is owed — stated rather than left blank. |
+| **Docs are part of the diff** | contracts §6's table lands with the code that makes it true; `stack.md` D12's staged-delivery line and `design.md` §8's restart sentences change in the PR that falsifies them, not later. |
+| **Coverage declared** | Every code PR carries `go test -cover` plus a known-untested list. Expected standing entry: the applier-failure branch for a storage whose root becomes unreadable between the write and the apply, which no CI box stages reliably. |
+| **A rung's goal is provable at rung close** | G1–G9 run in CI or ui-e2e at rung close; none depends on a later rung. G10 is a host gate per PR. |
+| **Approver ≠ author** | Implementer authors. **This spec and the contracts §6 / D12 changes touch code-owned canon and need `@novkostya`** — an App cannot be a code owner, so those PRs must not be routed to the architect. The architect approves the rest. |
+
+---
+
+## Rung-ruled decisions
+
+1. **The letter is `qn.6g` and it runs before quince#591 (`qn.6h`).** Reversible; the reasoning is at
+   the top, and the two rungs share one file in different methods.
+2. **An applier cannot refuse.** Refusal runs before the write, where the codebase already puts it.
+   A file written and a process that rejected it is a state with no honest report.
+3. **Appliers are registered at wiring time only**, so the list is immutable at runtime and interface
+   fact 7's unlocked-write hazard is not recreated.
+4. **No new WebSocket event kind this rung.** The tab that made the edit refetches, which is what
+   `ForgetStorage.tsx:55-58` will now do. A second tab, or a hand-edit, is exactly the population
+   file-watch serves — so the event belongs with the gap's answer, not ahead of it. Recorded because
+   *not* minting a `config.updated` kind is a decision, and the cheap-looking moment to mint one is
+   the same PR that adds the notify.
+5. **`renderSlot` takes a name, not an index.** Narrowing the two windows of fact 6 would leave a
+   race that is rare rather than absent; re-finding under the lock removes them.
+
+---
+
+## Known gaps and open questions
+
+1. **File-watch** — the `PROPOSED (gap)` above. Blocks nothing here.
+2. **Does an applier's warning survive the next `GET`?** `Replace` sets `s.warnings = nil` on every
+   valid write (`service.go:281`), so an apply warning written into that field is cleared by the next
+   save even if its cause persists. Rung-local, settled in PR 2, flagged here because the obvious
+   implementation gets it wrong.
+3. **`sessions.ttl_minutes`** — filed by this rung as quince#654's twin, and deliberately not fixed
+   here.
+4. **Ordering among appliers** is registration order, which is `buildLiveStack` order. Nothing today
+   needs a second applier to observe a first one's effect. If something ever does, this becomes a
+   dependency graph, and that is a decision this rung does not pre-empt.
+
+---
+
+## PR slicing
+
+Each carries one reviewable claim and its own proof.
+
+1. **This spec.** Canon-owned; needs `@novkostya`.
+2. **The seam** — `Applier`, `Subscribe`, notify from `Replace` and `ForgetStorage`, warning
+   plumbing. No consumer yet, so the claim is *the mechanism exists and fires exactly once per
+   write*. Proof: Go tests, including open question 2.
+3. **`Manager` survives a moving list** — `ApplyStorages`, `renderSlot` by name, the three missing
+   empty-list guards. **No wiring yet**, so this PR is provable in isolation. Proof: **G9**.
+4. **Storage is wired** — the applier in `live.go`, including the reconcile on add. Proof: G1, G2,
+   G3, G5, G7.
+5. **Retention and `require_encryption`** — the second and third consumers, which is what proves the
+   mechanism is general rather than a storage hook wearing a general name. Proof: G4, G6.
+6. **The per-setting table** — contracts §6, D12's staged-delivery line, design §8. Canon-owned;
+   needs `@novkostya`.
+7. **The UI stops promising a restart** — `ConfigEditor`, `SettingsPage`, `ForgetStorage` including
+   its list invalidation. Proof: G8.
+
+PRs 2 and 3 are independent and can be reviewed in parallel; 4 needs both.
