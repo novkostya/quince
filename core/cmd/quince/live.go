@@ -284,8 +284,19 @@ func resolveSlot(ctx context.Context, e config.StorageEntry,
 		},
 		time.Now, version.String(), id.New)
 	if err != nil {
+		// THE ID SURVIVES THE ERROR (quince#652). ResolveStorage returns its state alongside the
+		// error, and the DB lookup is now the first thing it does — so that state carries the known
+		// storage_id even when reading the marker failed outright.
+		//
+		// THIS is the path the reported case actually took, which quince#652 attributed to the
+		// !reachable branch: an unplugged USB whose MOUNTPOINT still exists is a readable directory,
+		// so reachable() passes and the failure surfaces from the marker read as
+		// `open …/quince-storage.json: input/output error` — which is this err, verbatim, and is
+		// what the Operator saw on the page. Fixing only the !reachable branch would have left the
+		// reported symptom exactly as it was.
 		return storage.Slot{
-			Name: e.Name, Root: e.Path, Reachable: false,
+			StorageID: state.StorageID,
+			Name:      e.Name, Root: e.Path, Reachable: false,
 			UnreachableCode: "path_unreachable", UnreachableReason: err.Error(),
 		}
 	}
