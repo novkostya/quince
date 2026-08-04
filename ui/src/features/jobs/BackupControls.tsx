@@ -84,10 +84,13 @@ export function BackupControls({
           {busy ? "Starting…" : "Back up now"}
         </Button>
         {onUSB && onWifi ? (
-          <label className="text-xs text-muted">
+          // 16px on phones, 12px from `sm` up, label stepping with the control — the same shape as
+          // `StorageSelect`, which carries the full reasoning (quince#616). At 12px this was a
+          // 1.33x page zoom on tap, and it sits directly beside "Back up now" on the phone.
+          <label className="text-base text-muted sm:text-xs">
             over{" "}
             <select
-              className="rounded-md border border-line bg-card px-1.5 py-1 text-xs text-fg"
+              className="rounded-md border border-line bg-card px-1.5 py-1 text-base text-fg sm:text-xs"
               value={transport}
               onChange={(e) => setTransport(e.target.value as RequestTransport)}
               aria-label="Backup transport"

@@ -48,10 +48,23 @@ export function StorageSelect({
   if (storages.length < 2) return null;
 
   return (
-    <label className="text-xs text-muted">
+    // 16px ON PHONES, 12px FROM `sm` UP — AND THE LABEL STEPS WITH THE CONTROL (quince#616).
+    //
+    // iOS Safari zooms the page in when a focused control computes below 16px, and `text-xs` is
+    // 12px: WebKit's target scale is `16 / fontSize`, so this select was a 1.33x zoom on tap —
+    // worse than the 14px form fields, not better.
+    //
+    // The label steps too, and that is a VISUAL requirement rather than a technical one. WebKit
+    // reads only the focused control's size, so `sm:text-xs` on the select alone would stop the
+    // zoom — and would leave a 16px control sitting inside a 12px sentence reading "to <select>".
+    // Ruled on quince#616: where an inline select steps up, its surrounding label steps with it.
+    //
+    // NOT the shared full-width `Select` (quince#623). That is the form-field shape; dropping it
+    // into this sentence is the wrong control at the wrong size. Also ruled on quince#616.
+    <label className="text-base text-muted sm:text-xs">
       to{" "}
       <select
-        className="rounded-md border border-line bg-card px-1.5 py-1 text-xs text-fg"
+        className="rounded-md border border-line bg-card px-1.5 py-1 text-base text-fg sm:text-xs"
         value={chosen?.id ?? ""}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
