@@ -571,10 +571,30 @@ onboarding, file-first truth.
 **Staged delivery** (external-review point, accepted): the full subsystem is the
 destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed config,
 YAML as source of truth, atomic canonical writes, `config validate`, a small Settings
-page for safe keys, restart-required for the rest. File-watch live reload, generated
-doc-comments, and the full transparent-editor UX land with qn.6 (the release gated on
-onboarding anyway). The contract (file-first, no secrets, no UI-only state) binds from
-day one.
+page for safe keys, restart-required for the rest. Generated doc-comments and the full
+transparent-editor UX land with qn.6 (the release gated on onboarding anyway). The
+contract (file-first, no secrets, no UI-only state) binds from day one.
+
+**FILE-WATCH LIVE RELOAD IS SPLIT OUT OF qn.6, AND ITS RUNG IS UNALLOCATED** — Operator ruling
+2026-08-04, option (a), relayed by architect session `arch1` on
+[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911). The sentence
+above named it as landing *"with qn.6"*, and `qn.6g` (quince#577) is the qn.6 rung that would have
+carried it.
+
+**What `qn.6g` builds is PROPAGATION**: `config.Service` tells the running subsystems when **it**
+writes the file, so a change made through the UI takes effect. **Detecting a change somebody else
+made — a hand-edit — is a different mechanism**, deferred rather than dropped: D12's *"edited by the
+UI and by hand equally"* stands as the destination.
+
+**Unallocated on purpose, not pending a letter.** `qn.6h` is quince#591's. Naming a rung nobody has
+agreed to would be this file asserting a plan that does not exist, which is the defect this
+correction exists to fix.
+
+**The interim cost is stated in contracts §6 rather than left to be discovered**, and that was the
+condition the recommendation was accepted on: a setting changed through the UI applies immediately;
+the same setting hand-edited in `config.yml` still needs a restart until file-watch lands. **Deleting
+the clause rather than re-dating it would have been option (c) — dropping file-watch — which was NOT
+ruled.**
 
 **RULED (was `PROPOSED (gap)`): a value quince only RENDERS is not a setting, and D12 does not reach it.**
 Operator ruling, 2026-08-02, on quince#470. Raised by `docs/specs/public-demo/public-demo.md`.
