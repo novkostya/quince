@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import { modelLine } from "@/features/devices/modelName";
 import { StorageDeviceBackup } from "@/features/storage/StorageDeviceBackup";
+import { StorageProblem } from "@/features/storage/StorageProblem";
 import { ForgetStorage } from "@/features/storage/ForgetStorage";
 import type { Version } from "@/lib/types";
 
@@ -127,14 +128,10 @@ export function StorageDetailsPage() {
         {storage.default ? <Badge tone="neutral">Default</Badge> : null}
       </div>
 
-      {!storage.reachable && storage.unreachable_reason ? (
-        <div
-          data-testid="storage-detail-reason"
-          className="mt-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
-        >
-          {storage.unreachable_reason}
-        </div>
-      ) : null}
+      {/* THE DIAGNOSIS AND ITS REMEDY, TOGETHER, ON THE STORAGE'S OWN PAGE (quince#627). Both used
+          to render under a DEVICE's action row — a disk's mount state, and a button that re-probes
+          it, on a screen about a phone. `Re-check` arrives here with the sentence it belongs to. */}
+      <StorageProblem storage={storage} storages={storages} />
 
       {/* ONE ROW, because the other two were saying things the page had already said.
           `Path` repeated the subtitle directly under the title, and `Backend` repeated the badge
