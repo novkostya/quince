@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // qn.6g PR 2 — THE SEAM. Its claim is narrow on purpose: the mechanism exists and fires EXACTLY
@@ -274,5 +276,131 @@ func TestConcurrentWritesDoNotRaceTheApplierList(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 8 {
 		t.Errorf("applier ran %d time(s) over 8 concurrent writes, want 8", calls)
+	}
+}
+
+// THE LAST APPLIER CALL CARRIES THE CONFIG THAT IS ACTUALLY LIVE (quince#665 review).
+//
+// The test above fires eight writes of the SAME document, so it proves the list read is race-free
+// and that each write notifies once — and ordering is unobservable by construction, because every
+// write carries identical content. This one makes the writes DISTINGUISHABLE, which is the whole
+// point: without writeMu serialising the write path, which AtomicWrite lands last, which snapshot
+// swap lands last and which notify arrives last are three independent orderings, so a subsystem
+// could be left on a config that neither the file nor the snapshot holds — and left there, because
+// nothing re-notifies.
+// DETERMINISTIC, NOT A RACE OF EIGHT GOROUTINES, and the first version of this test was the latter
+// — it passed with writeMu removed. Worth stating: the hazard is a LOGICAL ordering race, not a data
+// race, so `-race` cannot see it and identical timing may simply never interleave. A test that
+// hopes to catch it is a test that reports green for the wrong reason.
+//
+// So the interleaving is FORCED. The first applier call blocks on a channel; while it is blocked a
+// second Replace runs. Without writeMu that second write proceeds — swapping the snapshot and
+// notifying — and the released first call then records ITS config as the applier's last word, which
+// is now stale. With writeMu the second Replace cannot start until the first has finished
+// notifying, so the last word is the live one.
+func TestTheLastApplierCallMatchesTheLiveConfig(t *testing.T) {
+	svc := testService(t)
+
+	var mu sync.Mutex
+	var lastSeen string
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var seq atomic.Int32
+
+	svc.Subscribe("recorder", func(_, next Config) []Warning {
+		// The FIRST call blocks; every later call passes straight through.
+		//
+		// NOT sync.Once — that was the first version and it made this test useless. `Once.Do`
+		// BLOCKS concurrent callers until the first Do returns, so it serialised the two applier
+		// calls itself and the test passed with writeMu removed. The harness's own primitive was
+		// supplying the ordering the test existed to detect the absence of.
+		if seq.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		lastSeen = next.Backup.PreferredTransport
+		return nil
+	})
+
+	first := validConfig()
+	first.Backup.PreferredTransport = "usb"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = svc.Replace(first)
+	}()
+	<-entered // the first applier is now inside, holding the write open
+
+	second := validConfig()
+	second.Backup.PreferredTransport = "wifi"
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_, _, _ = svc.Replace(second)
+	}()
+
+	// Give the second write every chance to overtake. Under writeMu it is parked on the mutex;
+	// without it, it has completed by now — snapshot swapped, applier notified.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	<-done
+	<-secondDone
+
+	mu.Lock()
+	got := lastSeen
+	mu.Unlock()
+	if live := svc.Current().Backup.PreferredTransport; got != live {
+		t.Errorf("the last applier call saw %q while the live config is %q — a subsystem is left on "+
+			"a configuration nothing holds, and nothing will re-notify it", got, live)
+	}
+
+	// AND THE FILE AGREES. The snapshot and the file are swapped and written at different moments,
+	// so checking only the snapshot would miss a write path that serialised one and not the other.
+	raw, err := os.ReadFile(svc.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "preferred_transport: "+got) {
+		t.Errorf("the file does not carry %q, which the last applier was told is live:\n%s", got, raw)
+	}
+}
+
+// Two concurrent forgets must not lose one. Forget is a READ-MODIFY-WRITE — read the list, splice,
+// write — so without the whole of it under writeMu both callers read the same list and the second
+// write restores the entry the first removed, with both getting a 200.
+func TestConcurrentForgetsBothTakeEffect(t *testing.T) {
+	svc := testService(t)
+	three := withStorages(
+		StorageEntry{Name: "local", Path: "/backups", Default: true, Backend: "auto"},
+		StorageEntry{Name: "shuttle", Path: "/mnt/shuttle", Backend: "auto"},
+		StorageEntry{Name: "attic", Path: "/mnt/attic", Backend: "auto"},
+	)
+	if _, _, err := svc.Replace(three); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for _, name := range []string{"shuttle", "attic"} {
+		wg.Add(1)
+		go func(n string) {
+			defer wg.Done()
+			_, _, _, _ = svc.ForgetStorage(n)
+		}(name)
+	}
+	wg.Wait()
+
+	live := svc.Current()
+	if live.Storage == nil {
+		t.Fatal("the storage list vanished entirely")
+	}
+	if n := len(*live.Storage); n != 1 {
+		var names []string
+		for _, e := range *live.Storage {
+			names = append(names, e.Name)
+		}
+		t.Errorf("%d storage(s) remain (%v), want 1 — a concurrent forget was silently undone",
+			n, names)
 	}
 }

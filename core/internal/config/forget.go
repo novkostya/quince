@@ -45,6 +45,14 @@ const (
 // and `POST /api/storages/{name}/recheck` keeps answering for the slot still being served, which
 // is runtime truth. Project-wide config→runtime propagation is its own rung (quince#577).
 func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError, []Warning, error) {
+	// THE WHOLE READ-MODIFY-WRITE IS UNDER writeMu (quince#665 review). Reading the list, splicing
+	// one entry out and writing the result is three steps; without the lock two concurrent forgets
+	// both read the same list, so the second write silently RESTORES the entry the first removed and
+	// both callers get a 200. It calls replaceLocked below rather than Replace, which would deadlock
+	// on this same mutex.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	cur := s.Current()
 	if cur.Storage == nil {
 		return ForgetNoSuchStorage, nil, nil, nil
@@ -94,7 +102,7 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 
 	// Replace re-validates the whole document and runs CheckStorages, so nothing here has to
 	// re-derive what a coherent declaration is. Its errors reach the caller as the same 422.
-	errs, warns, err := s.Replace(next)
+	errs, warns, err := s.replaceLocked(next)
 	switch {
 	case err != nil:
 		return ForgetRefused, nil, nil, err
