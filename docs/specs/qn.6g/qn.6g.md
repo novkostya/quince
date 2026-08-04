@@ -113,10 +113,13 @@ by four.** Verified by reading each:
 | `Storages()` | `storages_api.go:36` | — | not cited |
 | `renderSlot()` | `storages_api.go:211` | — | not cited |
 
-Two of the six already guard a short list: `policyFor` checks `len(m.slots) == 0` (:491).
-**`defaultSlot`, `jobSlot` and `ResolveChoice` do not** — and `NewManager` panics on an empty list
+Two of the six are already safe, **by two different means, which is worth the extra words because
+the arithmetic here is load-bearing**: `policyFor` *checks* `len(m.slots) == 0` (:491), and
+`Storages()` *ranges* over the slice, so there is no index to be out of. **`defaultSlot`, `jobSlot`
+and `ResolveChoice` are the three that are neither** — and `NewManager` panics on an empty list
 (:105-107), so today the guard is the constructor. A live remove moves that guarantee from
-construction time to every-call time, which is the actual shape of hazard 2.
+construction time to every-call time, which is the actual shape of hazard 2. The sixth,
+`renderSlot`, is a distinct hazard on the same function and is decision 5's, not this paragraph's.
 
 **6. `renderSlot(idx)` has TWO unlocked windows in front of it, not one.** `RecheckStorage`
 (`storages_api.go:154-195`) finds `idx` under RLock, **unlocks**, calls `m.refresh(name)` (filesystem
@@ -385,7 +388,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 | **Docs are part of the diff** | contracts §6's table lands with the code that makes it true; `stack.md` D12's staged-delivery line and `design.md` §8's restart sentences change in the PR that falsifies them, not later. |
 | **Coverage declared** | Every code PR carries `go test -cover` plus a known-untested list. Expected standing entry: the applier-failure branch for a storage whose root becomes unreadable between the write and the apply, which no CI box stages reliably. |
 | **A rung's goal is provable at rung close** | G1–G9 run in CI or ui-e2e at rung close; none depends on a later rung. G10 is a host gate per PR. |
-| **Approver ≠ author** | Implementer authors. **This spec and the contracts §6 / D12 changes touch code-owned canon and need `@novkostya`** — an App cannot be a code owner, so those PRs must not be routed to the architect. The architect approves the rest. |
+| **Approver ≠ author** | Implementer authors. **PR 6 alone is code-owned** — `contracts.md`, `stack.md` and `design.md` are three of `CODEOWNERS`' six owned paths, so it needs `@novkostya`, and an App verdict cannot satisfy it because an App cannot be a code owner. **Every other PR here, this spec included, is the architect's to approve.** `/docs/specs/**` is deliberately *not* owned, and the file says why: specs *"bind one rung, not the project, and routing them to the Operator would make every rung wait on the seat that is deliberately not in the loop."* |
 
 ---
 
@@ -427,7 +430,8 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 
 Each carries one reviewable claim and its own proof.
 
-1. **This spec.** Canon-owned; needs `@novkostya`.
+1. **This spec.** **Not** code-owned — `/docs/specs/**` is one of `CODEOWNERS`' declared omissions,
+   so the architect approves it. Only PR 6 below needs `@novkostya`.
 2. **The seam** — `Applier`, `Subscribe`, notify from `Replace` and `ForgetStorage`, warning
    plumbing. No consumer yet, so the claim is *the mechanism exists and fires exactly once per
    write*. Proof: Go tests, including open question 2.
