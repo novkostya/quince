@@ -14,7 +14,67 @@ import (
 type Refresher func(name string) (Slot, bool)
 
 // SetRefresher wires the re-probe used by POST /api/storages/{name}/recheck.
+//
+// WIRING TIME ONLY, and unsynchronised on purpose — the same constraint `config.Service.Subscribe`
+// carries. It is written once during `buildStorage`, before the HTTP server exists, so no reader
+// can be concurrent with it. Re-setting it later would be a data race on a func value, and there is
+// no lock here to make that safe.
 func (m *Manager) SetRefresher(f Refresher) { m.refresh = f }
+
+// ApplyStorages replaces the whole slot list (qn.6g, quince#577). It is what makes a `storage:`
+// change take effect without a restart.
+//
+// THE WHOLE LIST, never a splice. The caller rebuilds it from the declaration with the same
+// `declaredStorages` + `resolveSlot` pair `buildStorage` uses at startup, so a live apply and a
+// restart cannot disagree about what a storage IS — the property `SetRefresher`'s closure already
+// argues for, applied to the list rather than to one entry.
+//
+// AN EMPTY LIST IS REFUSED. `config.CheckStorages` refuses an empty declaration before any write,
+// so this should be unreachable; it returns a warning rather than panicking because by the time an
+// applier runs, the file is already written and a panic would take down a daemon over a document
+// that is already on disk. Every reader below is guarded anyway — that is the rest of this PR — so
+// the refusal is about keeping the Manager's invariant, not about preventing a crash.
+//
+// It does NOT touch `jobStorage`: a job bound to a storage that has just been forgotten must keep
+// its binding, so `jobSlot` can refuse by name rather than silently retargeting it. An in-flight job
+// holds its own copied Slot and completes against the disk it started on.
+func (m *Manager) ApplyStorages(next []Slot) []string {
+	if len(next) == 0 {
+		return []string{"the storage list would be empty, so it was not applied — quince kept the " +
+			"storages it was already serving"}
+	}
+	m.mu.Lock()
+	prev := m.slots
+	m.slots = next
+	m.mu.Unlock()
+
+	var warns []string
+	for _, p := range prev {
+		if !slotNamed(next, p.Name) {
+			m.log.Info("storage no longer declared — it is no longer served", "storage", p.Name)
+		}
+	}
+	for _, n := range next {
+		if !slotNamed(prev, n.Name) {
+			m.log.Info("storage newly declared", "storage", n.Name, "path", n.Root,
+				"reachable", n.Reachable)
+		}
+		if !n.Usable() {
+			warns = append(warns, "storage "+n.Name+" is declared but not reachable ("+
+				n.UnreachableCode+"): "+n.UnreachableReason)
+		}
+	}
+	return warns
+}
+
+func slotNamed(list []Slot, name string) bool {
+	for _, s := range list {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 // Storages implements the contracts §1 GET /api/storages read.
 //
@@ -152,17 +212,20 @@ func (s Slot) hasVersionFor(m *Manager, udid string) bool {
 // carries — the same one `Refresher` already re-resolves by, a few lines down. Forget was built on
 // it from the start; this route was simply left behind.
 func (m *Manager) RecheckStorage(name string) (wire.Storage, bool) {
+	// NO INDEX SURVIVES A LOCK RELEASE ANY MORE (qn.6g). This used to capture `idx` here and carry
+	// it through two unlocked windows into renderSlot; it now only asks whether the storage is
+	// declared, and every later read re-finds by name.
 	m.mu.RLock()
-	idx := -1
-	for i, s := range m.slots {
+	known := false
+	for _, s := range m.slots {
 		if s.Name == name {
-			idx = i
+			known = true
 			break
 		}
 	}
 	m.mu.RUnlock()
 
-	if idx < 0 {
+	if !known {
 		return wire.Storage{}, false
 	}
 	if m.refresh == nil {
@@ -170,21 +233,21 @@ func (m *Manager) RecheckStorage(name string) (wire.Storage, bool) {
 		// rather than dressed up as a fresh reading.
 		m.log.Warn("storage: recheck requested but no refresher is wired — returning the last known state",
 			"storage", name)
-		return m.renderSlot(idx), true
+		return m.renderSlot(name)
 	}
 
 	fresh, ok := m.refresh(name) // OUTSIDE the lock: filesystem work
 	if ok {
 		m.mu.Lock()
-		// Re-find by NAME rather than trusting idx across the unlocked window. Nothing else mutates
-		// the list today, and a position captured before an unlocked gap is precisely the assumption
-		// that stops holding the moment something does. (It re-finds by name now rather than by id
-		// for the same reason the lookup above does: an unreached storage has no id to re-find by,
-		// so the id form silently failed to write back the very state a recheck exists to refresh.)
+		// Re-find by NAME rather than trusting a position across the unlocked window. Nothing else
+		// mutated the list when this was written, and a position captured before an unlocked gap is
+		// precisely the assumption that stops holding the moment something does — which is qn.6g.
+		// (By name rather than by id for the same reason the lookup above is: an unreached storage
+		// has no id to re-find by, so the id form silently failed to write back the very state a
+		// recheck exists to refresh.)
 		for i, s := range m.slots {
 			if s.Name == name {
 				m.slots[i] = fresh
-				idx = i
 				break
 			}
 		}
@@ -192,23 +255,44 @@ func (m *Manager) RecheckStorage(name string) (wire.Storage, bool) {
 		m.log.Info("storage rechecked", "storage", fresh.Name, "reachable", fresh.Reachable,
 			"code", fresh.UnreachableCode)
 	}
-	return m.renderSlot(idx), true
+	// The storage may have been forgotten while the re-probe ran. renderSlot reports that as a miss
+	// and the caller 404s, rather than rendering a card for something no longer declared.
+	return m.renderSlot(name)
 }
 
-// renderSlot renders one slot by index under the read lock.
+// renderSlot renders one slot BY NAME under the read lock.
 //
-// The count query runs OUTSIDE the lock — it is a database round trip, and holding the slot lock
-// across it would block every reader for its duration. Rechecking one storage is rare enough that
-// a second query costs nothing worth pooling with Storages().
-func (m *Manager) renderSlot(idx int) wire.Storage {
+// IT TOOK AN INDEX UNTIL qn.6g, AND THAT WAS THE SHARPEST HAZARD IN THIS FILE (quince#577).
+// `RecheckStorage` found `idx` under the read lock, released it, did filesystem work, re-locked,
+// re-found, released again — and then called this, which ran a DATABASE ROUND TRIP before indexing.
+// So there were TWO unlocked windows in front of `m.slots[idx]`, not one, and the `!ok` branch
+// carried a stale `idx` past both. A list that shrinks in either window is an out-of-range panic —
+// and `Slot` holds a Backend INTERFACE, so a torn read is an itab/data mismatch: a segfault, not a
+// wrong answer.
+//
+// Narrowing those windows would have left a race that is rare rather than absent. Re-finding by
+// name under the lock removes them, and name is the right key for the same reason `RecheckStorage`
+// already re-finds by it: an unreached storage has no id to be found by (quince#570).
+//
+// `found=false` means the storage was forgotten while this call was in flight. That is a real state
+// once the list is live, and the caller reports it as a 404 rather than rendering a zero Slot —
+// which would put an empty card on screen for a storage that no longer exists.
+//
+// The count query still runs OUTSIDE the lock: it is a database round trip, and holding the slot
+// lock across it would block every reader for its duration.
+func (m *Manager) renderSlot(name string) (wire.Storage, bool) {
 	counts, err := m.reg.CountVersionsByStorage()
 	if err != nil {
 		m.log.Warn("storage counts unavailable — card will show zero", "err", err)
 	}
 	m.mu.RLock()
-	s := m.slots[idx]
-	m.mu.RUnlock()
-	return m.storageToWire(s, idx == 0, "", counts)
+	defer m.mu.RUnlock()
+	for i, s := range m.slots {
+		if s.Name == name {
+			return m.storageToWire(s, i == 0, "", counts), true
+		}
+	}
+	return wire.Storage{}, false
 }
 
 // Recheck satisfies httpapi.StorageReader.

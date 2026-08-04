@@ -197,7 +197,7 @@ func TestRecheckDoesNotRaceReadsOfTheSameSlot(t *testing.T) {
 		_ = m.BackendName()
 		_ = m.Storages("")
 		_, _ = m.slotFor(&target)
-		_ = m.defaultSlot()
+		_, _ = m.defaultSlot()
 	}
 	<-done
 }
