@@ -130,8 +130,13 @@ export function StorageNotices({
 
           ONE SENTENCE, SHARED. quince#628 disables `Back up now` for exactly this state, and this
           line is what makes that disabled button honest rather than mute. Neither needs its own
-          wording, and a second one here would be two things to keep in step. */}
-      {chosen && !chosen.reachable ? (
+          wording, and a second one here would be two things to keep in step.
+
+          The condition matches that button's exactly — unreachable OR never created (`id === ""`).
+          A storage quince has never reached cannot be a destination either, and the two states
+          coincide in practice; what must NOT happen is a disabled button whose reason is missing
+          because the two conditions drifted apart. */}
+      {chosen && (!chosen.reachable || chosen.id === "") ? (
         <p className="text-xs text-warn" data-testid="storage-unavailable">
           <Link to={`/storage/${chosen.name}`} className="underline underline-offset-2">
             {chosen.name}

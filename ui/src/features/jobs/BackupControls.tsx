@@ -52,6 +52,38 @@ export function BackupControls({
       ? (storages.state.storages.find((s) => s.id === activeJob.storage_id)?.name ?? null)
       : null;
 
+  // NO BUTTON AIMED AT A REFUSAL (quince#628, ruled shape 2).
+  //
+  // The selector keeps showing the DECLARED DEFAULT even when it is unreachable — deliberately.
+  // Falling back to the first reachable storage would make the UI quietly disagree with the server
+  // about what `default` means, and `default` is a real semantic: it is where an omitted
+  // `storage_id` goes on `POST /api/jobs`. A UI that silently redirects a backup somewhere the user
+  // did not choose is worse than one that shows an unusable selection.
+  //
+  // So the selection stays honest and the ACTION becomes impossible instead of doomed. `POST
+  // /api/jobs` answers 409 for an unreachable storage, so the old button was not dangerous — it was
+  // pre-loaded with a failure, and the user's first act on the page was aimed at a refusal.
+  //
+  // THIS IS THE PATTERN THE PRODUCT ALREADY USES, twice: the offline DEVICE case on `DeviceCard`
+  // (a disabled button carrying its reason, never a dead one), and `StorageDeviceBackup` on the
+  // storage page, which has refused an unreachable storage since story 6. This is the third, so a
+  // user learns one rule rather than three.
+  //
+  // The REASON is not duplicated here. `StorageNotices` renders one short line naming the storage
+  // and linking to it (quince#627), below the action row where prose belongs (quince#325). That
+  // sentence is what makes this disabled button honest rather than mute, and a second copy in a
+  // `title` would be two strings to keep in step — plus a hover title is invisible on a phone,
+  // which is the primary client.
+  const chosenStorage =
+    storages.state.status === "loaded"
+      ? (storages.state.storages.find((s) => s.id === storageID) ??
+        storages.state.storages.find((s) => s.default))
+      : undefined;
+  // An id of "" means quince has never reached that storage, so it cannot be a destination yet —
+  // the same refusal `StorageDeviceBackup` already makes, for the same reason.
+  const storageUnusable =
+    chosenStorage !== undefined && (!chosenStorage.reachable || chosenStorage.id === "");
+
 
   if (activeJob) {
     return (
@@ -77,8 +109,14 @@ export function BackupControls({
     <div className="flex flex-wrap items-center gap-2">
         <Button
           onClick={() => void start(transport, { storageID: storageID || undefined })}
-          disabled={!present || busy}
-          title={present ? undefined : "Connect the device over USB or Wi-Fi to back it up"}
+          disabled={!present || busy || storageUnusable}
+          title={
+            !present
+              ? "Connect the device over USB or Wi-Fi to back it up"
+              : storageUnusable
+                ? `${chosenStorage?.name ?? "That storage"} is unavailable — backups can't be written to it right now`
+                : undefined
+          }
           data-testid="backup-now"
         >
           {busy ? "Starting…" : "Back up now"}

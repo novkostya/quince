@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { BackupControls, BackupControlsStatus } from "./BackupControls";
-import type { Device, Job, Transports } from "@/lib/types";
+import type { Device, Job, Storage, Transports } from "@/lib/types";
 import type { Storages } from "./useStorages";
+import { MemoryRouter } from "react-router-dom";
 
 function device(transports: Transports): Device {
   return {
@@ -214,5 +215,208 @@ describe("BackupControls transport select is 16px on mobile", () => {
     expect(cls).toContain("text-base");
     expect(cls).toContain("sm:text-xs");
     expect(cls.split(/\s+/)).not.toContain("text-xs");
+  });
+});
+
+// NO BUTTON AIMED AT A REFUSAL — quince#628, ruled shape 2.
+//
+// A device page opened with an unreachable storage pre-selected, so `Back up now` was aimed at a
+// disk that cannot be written. `POST /api/jobs` answers 409 for that, so nothing was corrupted —
+// the button was simply pre-loaded with a failure, and the user's first act on the page was aimed
+// at a refusal.
+//
+// SHAPE 2, not "fall back to the first reachable storage": `default` is a real semantic — it is
+// where an omitted `storage_id` goes on the server — so a UI that silently redirected the backup
+// would disagree with the daemon about the user's own choice. The selection stays honest; the
+// action becomes impossible instead of doomed.
+function storageEntry(over: Partial<Storage> = {}): Storage {
+  return {
+    id: "01JA",
+    name: "internal",
+    path: "/backups",
+    backend: "reflink",
+    default: true,
+    reachable: true,
+    unreachable_code: null,
+    unreachable_reason: null,
+    will_be_full: null,
+    filesystem_free_bytes: 1_200_000_000_000,
+    filesystem_total_bytes: 3_600_000_000_000,
+    backup_count: 14,
+    device_count: 1,
+    ...over,
+  };
+}
+
+function withStorages(list: Storage[], over: Partial<Storages> = {}): Storages {
+  return {
+    state: { status: "loaded", storages: list },
+    recheck: () => {},
+    rechecking: {},
+    reload: () => {},
+    ...over,
+  };
+}
+
+describe("Back up now refuses an unusable storage", () => {
+  const online = () => device({ usb: "t", wifi: "t" });
+
+  // THE REPORTED STATE: the declared default is unreachable, so the page opens pre-set to the one
+  // storage the user cannot back up to.
+  it("disables the button when the DEFAULT storage is unreachable", () => {
+    const storages = withStorages([
+      storageEntry({ reachable: false, unreachable_reason: "not mounted" }),
+      storageEntry({ id: "01JB", name: "shuttle", default: false }),
+    ]);
+    render(
+      <BackupControls
+        device={online()}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        storages={storages}
+        storageID=""
+        setStorageID={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // THE SELECTION IS NOT SILENTLY REDIRECTED. The control still shows the declared default — this
+  // is the half of the ruling that a "fall back to the first reachable one" fix would have broken,
+  // and it is invisible unless asserted.
+  it("keeps the declared default selected rather than redirecting to a reachable one", () => {
+    const storages = withStorages([
+      storageEntry({ reachable: false, unreachable_reason: "not mounted" }),
+      storageEntry({ id: "01JB", name: "shuttle", default: false }),
+    ]);
+    render(
+      <BackupControls
+        device={online()}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        storages={storages}
+        storageID=""
+        setStorageID={() => {}}
+      />,
+    );
+    const select = screen.getByTestId("storage-select") as HTMLSelectElement;
+    expect(select.value).toBe("01JA");
+  });
+
+  // A storage quince has never reached cannot be a destination either — the same refusal
+  // `StorageDeviceBackup` has made since story 6.
+  it("disables the button for a storage that was never created", () => {
+    const storages = withStorages([
+      storageEntry({ id: "", reachable: true }),
+      storageEntry({ id: "01JB", name: "shuttle", default: false }),
+    ]);
+    render(
+      <BackupControls
+        device={online()}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        storages={storages}
+        storageID=""
+        setStorageID={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // AND IT STAYS ENABLED WHEN THE CHOSEN STORAGE IS FINE, even with another storage unreachable.
+  // A page that disabled the action because SOME disk was out would pass every assertion above and
+  // be a worse bug than the one being fixed.
+  it("stays enabled when the chosen storage is reachable and another is not", () => {
+    const storages = withStorages([
+      storageEntry({}),
+      storageEntry({ id: "01JB", name: "ghost", default: false, reachable: false }),
+    ]);
+    render(
+      <BackupControls
+        device={online()}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        storages={storages}
+        storageID=""
+        setStorageID={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // A CHOSEN storage, not merely the default: selecting the unreachable one must disable too.
+  it("disables when the user's explicit choice is the unreachable one", () => {
+    const storages = withStorages([
+      storageEntry({}),
+      storageEntry({ id: "01JB", name: "shuttle", default: false, reachable: false }),
+    ]);
+    render(
+      <BackupControls
+        device={online()}
+        start={ok}
+        cancel={ok}
+        busy={false}
+        storages={storages}
+        storageID="01JB"
+        setStorageID={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// THE DISABLED BUTTON AND ITS REASON MUST SHARE ONE CONDITION.
+//
+// A disabled control with no reason is the state this project has already had to fix once, and the
+// reason lives in a DIFFERENT component (`StorageNotices`, below the action row — quince#325 puts
+// prose there, quince#627 wrote the sentence). Two components, one rule: if they ever drift apart
+// the product grows a mute dead button, and nothing else would notice.
+describe("the disabled button and the unavailability line agree", () => {
+  function renderBoth(list: Storage[], storageID = "") {
+    const storages = withStorages(list);
+    return render(
+      <MemoryRouter>
+        <BackupControls
+          device={device({ usb: "t", wifi: "t" })}
+          start={ok}
+          cancel={ok}
+          busy={false}
+          storages={storages}
+          storageID={storageID}
+          setStorageID={() => {}}
+        />
+        <BackupControlsStatus
+          device={device({ usb: "t", wifi: "t" })}
+          error={null}
+          storages={storages}
+          storageID={storageID}
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the reason exactly when the button is disabled — unreachable", () => {
+    renderBoth([
+      storageEntry({ reachable: false, unreachable_reason: "not mounted" }),
+      storageEntry({ id: "01JB", name: "shuttle", default: false }),
+    ]);
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("storage-unavailable")).toHaveTextContent(/internal/);
+  });
+
+  it("shows the reason exactly when the button is disabled — never created", () => {
+    renderBoth([storageEntry({ id: "", reachable: true }), storageEntry({ id: "01JB", default: false })]);
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("storage-unavailable")).toBeTruthy();
+  });
+
+  it("shows neither when the chosen storage is fine", () => {
+    renderBoth([storageEntry({}), storageEntry({ id: "01JB", name: "shuttle", default: false })]);
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("storage-unavailable")).toBeNull();
   });
 });
