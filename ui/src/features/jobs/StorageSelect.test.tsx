@@ -312,3 +312,64 @@ describe("StorageNotices says a storage is unavailable without diagnosing it", (
     expect(screen.queryByText(/ghost/)).toBeNull();
   });
 });
+
+// AN UNTOUCHED PAGE MUST NOT SELECT THE NEVER-CREATED STORAGE — quince#647.
+//
+// `value === ""` means the user has chosen nothing. `""` is ALSO the real id of a storage quince has
+// never reached (quince#582, deliberately: "never created" is why it cannot be a destination). So
+// `storages.find((s) => s.id === value)` matched that storage on an untouched page, the default
+// fallback never ran, and the control opened pointed at the one storage that can never accept a
+// backup — reported from staging, with the default sitting right there, reachable and ignored.
+//
+// Not "the first unreachable one" and not "the last declared" — specifically the never-created one,
+// because the empty id is what it collides with. These fixtures reproduce that exactly.
+const ghost = storage({
+  id: "", // never created — this is the collision
+  name: "ghost",
+  default: false,
+  reachable: false,
+  unreachable_code: "path_unreachable", // the daemon also emits "unreachable", which the TS enum lacks (quince#569)
+  unreachable_reason: "the path could not be read",
+});
+
+describe("an empty selection is not a selection", () => {
+  const list = () => ({ status: "loaded" as const, storages: [storage({}), ghost] });
+
+  it("selects the DEFAULT, not the never-created storage, when nothing was chosen", () => {
+    render(<StorageSelect storages={sub(list())} value="" onChange={() => {}} />);
+    expect((screen.getByTestId("storage-select") as HTMLSelectElement).value).toBe("01JA");
+  });
+
+  // THE NOTICE MUST AGREE WITH THE CONTROL. They resolve through the same helper now; before, both
+  // resolved independently and both were wrong in the same way, which is why the screen was
+  // internally consistent and consistently wrong.
+  it("says nothing is unavailable when the default is fine and only the never-created one is not", () => {
+    render(
+      <MemoryRouter>
+        <StorageNotices storages={sub(list())} value="" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("storage-unavailable")).toBeNull();
+  });
+
+  // An EXPLICIT choice of a real storage still resolves — the guard must not swallow real ids.
+  it("still honours an explicit choice", () => {
+    const other = storage({ id: "01JB", name: "shuttle", default: false });
+    render(
+      <StorageSelect
+        storages={sub({ status: "loaded", storages: [storage({}), other] })}
+        value="01JB"
+        onChange={() => {}}
+      />,
+    );
+    expect((screen.getByTestId("storage-select") as HTMLSelectElement).value).toBe("01JB");
+  });
+
+  // And the never-created storage is still LISTED and still disabled — it is not hidden, which is
+  // the rule a list a disk vanishes from would break. It just is not the default selection.
+  it("still lists the never-created storage, disabled", () => {
+    render(<StorageSelect storages={sub(list())} value="" onChange={() => {}} />);
+    const opt = screen.getByRole("option", { name: /ghost/ }) as HTMLOptionElement;
+    expect(opt.disabled).toBe(true);
+  });
+});

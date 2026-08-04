@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
-import type { Storages } from "./useStorages";
+import { chosenStorage, type Storages } from "./useStorages";
 // StorageSelect is the "where does this backup go" CONTROL on Back up now (qn.6c story 9).
 //
 // IT RENDERS ONLY THE CONTROL. Every sentence it used to emit — the full-transfer warning, the
@@ -29,8 +29,14 @@ export function StorageSelect({
 }) {
   const { state } = sub;
   const storages = state.status === "loaded" ? state.storages : [];
-  const exact = storages.find((s) => s.id === value);
-  const chosen = exact ?? storages.find((s) => s.default);
+  // `chosenStorage`, not a bare `find` by id (quince#647). An empty `value` means NOTHING WAS
+  // CHOSEN — and `""` is also the real id of a storage quince has never reached, so the naive match
+  // selected THAT storage on an untouched page and the default fallback never ran. The guard now
+  // lives in one place instead of three.
+  const chosen = chosenStorage(storages, value);
+  // `exact` is only "did the user's explicit choice resolve", for the effect below. Same guard: an
+  // empty value is not an explicit choice, so it must not be looked up either.
+  const exact = value === "" ? undefined : storages.find((s) => s.id === value);
 
   // TELL THE PARENT WHEN THE FALLBACK FIRES (quince#452 review). If `value` names a storage that is
   // no longer declared — a config edit plus a restart while this page is open — the select would
@@ -98,8 +104,9 @@ export function StorageNotices({
 }) {
   const { state } = sub;
   const storages = state.status === "loaded" ? state.storages : [];
-  const exact = storages.find((s) => s.id === value);
-  const chosen = exact ?? storages.find((s) => s.default);
+  // Same resolver as the control above, which is the point of it existing (quince#647): the notices
+  // and the select must never disagree about which storage this page is aimed at.
+  const chosen = chosenStorage(storages, value);
 
   if (state.status === "failed") {
     return (

@@ -118,3 +118,27 @@ export function useStorages(udid: string): Storages {
 
   return { state, recheck, rechecking, reload };
 }
+
+// chosenStorage answers "which storage is this page aimed at" — the ONE resolver for that question
+// (quince#647).
+//
+// AN EMPTY `value` MEANS NOTHING WAS CHOSEN, AND `""` IS ALSO A REAL STORAGE ID. Those two facts
+// together are the whole bug. A storage quince has never reached carries `id: ""` (quince#582, and
+// deliberately — it means "never created", which is exactly why it cannot be a destination). So the
+// obvious `storages.find((s) => s.id === value)` MATCHED that storage whenever the user had chosen
+// nothing, the default fallback never ran, and an untouched device page opened pointed at the one
+// storage that can never accept a backup.
+//
+// Not the first unreachable one, and not the last declared — specifically the never-created one,
+// because the empty id is what it collides with.
+//
+// THE REPO ALREADY KNEW THIS RULE ONE FILE AWAY. `versionsOn` in `StorageDetailsPage` guards the
+// identical hazard and writes out the identical reasoning; it was simply never applied to the three
+// selection sites. This function exists so there is one place to know it rather than three places
+// to remember it — which is the same lesson quince#616 learned about a shared class string and
+// quince#631 about a containment rule.
+export function chosenStorage(storages: Storage[], value: string): Storage | undefined {
+  // The guard comes BEFORE the match, not after: `""` must never be looked up at all.
+  const exact = value === "" ? undefined : storages.find((s) => s.id === value);
+  return exact ?? storages.find((s) => s.default);
+}
