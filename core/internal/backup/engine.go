@@ -1029,20 +1029,42 @@ func (e *Engine) killReasonOf(lj *liveJob) string {
 // resolveTransport turns the requested transport into a concrete usb|wifi, or an HTTP error to
 // return from StartBackup. Explicit usb|wifi passes through unchanged (keeping the start-then-connect
 // waiting_for_device flow — presence is NOT required at Start). "auto" (design §4, decisions (bp))
-// resolves against CURRENT presence — prefer USB when present, else Wi-Fi — and refuses a device on
-// neither transport with an actionable 422 (no job minted): a guessed transport would persist a
-// dishonest Job.transport. status == 0 means success (the resolved transport is returned).
+// resolves against CURRENT presence and refuses a device on neither transport with an actionable 422
+// (no job minted): a guessed transport would persist a dishonest Job.transport. status == 0 means
+// success (the resolved transport is returned).
+//
+// WHICH ONE `auto` PREFERS IS NOW CONFIGURABLE — `backup.preferred_transport` (quince#654). It used
+// to be a hardcoded USB-first that nothing documented, beside a `backup.transport` key that was
+// validated and read by nobody. The full table:
+//
+//	requested            device present on   result
+//	usb | wifi           —                   the requested transport, unchanged
+//	auto                 both                the preference
+//	auto                 one                 that one — the preference is IGNORED
+//	auto                 neither             422, unchanged
 func (e *Engine) resolveTransport(udid, requested string) (transport string, status int, reason string) {
 	switch requested {
 	case TransportUSB, TransportWiFi:
 		return requested, 0, ""
 	case TransportAuto:
 		dev, ok := e.devices.Device(udid)
+		// THE PREFERENCE IS CONSULTED ONLY WHERE THERE IS A CHOICE. On one transport the device is
+		// backed up over that one whatever the preference says, because this is A PREFERENCE AND
+		// NEVER A RESTRICTION — the other reading would make a Wi-Fi-only device silently
+		// unbackupable through a setting whose name does not say so, and Wi-Fi is the PRIMARY
+		// transport under the assisted model.
+		//
+		// An unset preference reads as `usb`, so a Config built by hand — every test, both CLIs —
+		// behaves exactly as it did before this key existed.
+		preferred, other := TransportUSB, TransportWiFi
+		if e.cfg.PreferredTransport == TransportWiFi {
+			preferred, other = TransportWiFi, TransportUSB
+		}
 		switch {
-		case ok && presentOn(dev, TransportUSB):
-			return TransportUSB, 0, ""
-		case ok && presentOn(dev, TransportWiFi):
-			return TransportWiFi, 0, ""
+		case ok && presentOn(dev, preferred):
+			return preferred, 0, ""
+		case ok && presentOn(dev, other):
+			return other, 0, ""
 		default:
 			return "", http.StatusUnprocessableEntity,
 				"device is not currently connected — connect it over USB or Wi-Fi, or choose a transport"

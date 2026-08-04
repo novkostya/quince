@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,15 +44,19 @@ func TestDefaultRoundTripIsStableAndAtomicWrites(t *testing.T) {
 }
 
 func TestParseKeepsDefaultsForMissingKeys(t *testing.T) {
-	cfg, warns, err := Parse([]byte("backup:\n  transport: usb\n"))
+	// `preferred_transport: wifi` rather than the retired `transport: usb` (quince#654) — a
+	// NON-DEFAULT value on purpose, so this test still proves that setting one key keeps the others'
+	// defaults. With `usb` (now the default) the assertion below would pass whether the key was read
+	// or ignored, which is the shape of check this repository keeps filing bugs about.
+	cfg, warns, err := Parse([]byte("backup:\n  preferred_transport: wifi\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if len(warns) != 0 {
 		t.Fatalf("unexpected warnings: %+v", warns)
 	}
-	if cfg.Backup.Transport != "usb" {
-		t.Errorf("transport = %q, want usb", cfg.Backup.Transport)
+	if cfg.Backup.PreferredTransport != "wifi" {
+		t.Errorf("preferred_transport = %q, want wifi", cfg.Backup.PreferredTransport)
 	}
 	if cfg.Backup.RequireEncryption != true {
 		t.Errorf("require_encryption default lost")
@@ -365,5 +370,90 @@ func TestConfigHasNoServerSection(t *testing.T) {
 	if !named {
 		t.Fatalf("the retired server: section parsed without a warning — a user moving to "+
 			"QUINCE_TRUSTED_PROXIES would be silently ignored; got %+v", warns)
+	}
+}
+
+// quince#654 — THE RENAME ROUND-TRIPS THROUGH THE FILE AND THROUGH JSON, which is the assertion the
+// ruling asked for rather than "it compiles".
+//
+// quince#493: `PUT /api/config` decodes into a ZERO-VALUED Config, so any key the client omits is
+// reset to the Go zero value. A rename that changed the Go field and left the TS type saying
+// `transport` would therefore be that defect fired deliberately — every Settings save sending a
+// document with no `preferred_transport`, zeroing it, and `Validate` then rejecting the result. The
+// two renames are one commit; this is what proves the Go half of it and pins the wire name.
+func TestPreferredTransportRoundTripsUnderItsNewName(t *testing.T) {
+	// YAML: written under the new key, and read back.
+	c := Default()
+	c.Backup.PreferredTransport = "wifi"
+	data, err := Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "preferred_transport: wifi") {
+		t.Errorf("marshalled config does not carry `preferred_transport: wifi`:\n%s", data)
+	}
+	if strings.Contains(string(data), "\n  transport:") {
+		t.Errorf("marshalled config still carries the OLD `transport:` key:\n%s", data)
+	}
+	back, _, err := Parse(data)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if back.Backup.PreferredTransport != "wifi" {
+		t.Errorf("round-tripped preferred_transport = %q, want wifi", back.Backup.PreferredTransport)
+	}
+
+	// JSON: the name the UI's Config type must use. A mismatch here is exactly the quince#493 hazard.
+	j, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("json marshal: %v", err)
+	}
+	if !strings.Contains(string(j), `"preferred_transport":"wifi"`) {
+		t.Errorf("JSON does not carry preferred_transport:\n%s", j)
+	}
+}
+
+// The default is `usb`, and it is behaviour-preserving rather than a speed claim (quince#654).
+func TestPreferredTransportDefaultsToUSB(t *testing.T) {
+	if got := Default().Backup.PreferredTransport; got != "usb" {
+		t.Errorf("default preferred_transport = %q, want usb — resolveTransport returned USB for a "+
+			"both-present device before this key existed, and the default preserves that", got)
+	}
+}
+
+// NO `auto` IN THE PREFERENCE ENUM. As a preference it would mean "prefer whatever is already
+// preferred" — quince#653's defect migrating out of the UI and into config.yml. `auto` stays legal
+// as a REQUEST transport, which this package never validates because it arrives on POST /api/jobs.
+func TestPreferredTransportRefusesAuto(t *testing.T) {
+	c := Default()
+	c.Backup.PreferredTransport = "auto"
+	errs := Validate(c)
+	var found bool
+	for _, e := range errs {
+		if e.Path == "backup.preferred_transport" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("`auto` was accepted as a preference; errors = %+v", errs)
+	}
+}
+
+// The OLD key is now an unknown key. quince#401 means the warning does not name its successor — that
+// is a known, filed defect and not this change's to fix. What matters here is that the value does not
+// silently take effect under a name that no longer means anything.
+func TestTheOldTransportKeyIsNowUnknown(t *testing.T) {
+	_, warns, err := Parse([]byte("backup:\n  transport: wifi\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var named bool
+	for _, w := range warns {
+		if strings.Contains(w.Message, "transport") || strings.Contains(w.Path, "transport") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("setting the retired `backup.transport` produced no warning at all; warnings = %+v", warns)
 	}
 }

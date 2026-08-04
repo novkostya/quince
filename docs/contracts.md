@@ -953,7 +953,29 @@ ever). Schema v0:
 
 ```yaml
 backup:
-  transport: auto           # auto (prefer usb when plugged, else wifi) | usb | wifi
+  preferred_transport: usb  # usb | wifi. WHICH transport an `auto` request uses when the device is
+                            # present on BOTH. IGNORED when only one is available — a device on
+                            # Wi-Fi alone is backed up over Wi-Fi whatever this says.
+                            #
+                            # A PREFERENCE, NEVER A RESTRICTION. The other reading would make a
+                            # Wi-Fi-only device silently unbackupable through a setting whose name
+                            # does not say so, and Wi-Fi is the PRIMARY transport (design §4).
+                            #
+                            # RENAMED FROM `transport`, WHICH WAS READ BY NOBODY (quince#654,
+                            # Operator ruling 2026-08-04). It was parsed, range-checked and editable
+                            # in Settings while changing nothing. `transport: usb` reads as "use
+                            # USB"; the only true meaning is "prefer USB". Setting the old key now
+                            # produces the ordinary unknown-key warning (quince#401 — it does not
+                            # name the successor, which is why the rename happened while the key
+                            # still did nothing and nobody could lose a value by it).
+                            #
+                            # NO `auto` HERE, and this is NOT the request enum: as a preference,
+                            # `auto` would mean "prefer whatever is already preferred". `auto`
+                            # remains legal as a REQUEST transport on POST /api/jobs and as the
+                            # CLI's `--transport auto`. Two enums, two of their values shared.
+                            #
+                            # Default `usb` because it PRESERVES today's behaviour, and for no other
+                            # reason — no throughput claim is made in either direction.
   require_encryption: true  # preflight fails (actionably) on an unencrypted device;
                             # false permits unencrypted backups behind persistent UI
                             # warnings (no Health/Keychain/passwords in such backups)

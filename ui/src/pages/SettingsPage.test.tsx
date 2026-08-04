@@ -33,7 +33,7 @@ describe("SettingsPage grid containment", () => {
   it("gives both grid columns min-w-0, so one long config line cannot widen the page", async () => {
     vi.spyOn(api, "get").mockResolvedValue({
       config: {
-        backup: { transport: "auto", require_encryption: true },
+        backup: { preferred_transport: "usb", require_encryption: true },
         storage: null,
         sessions: { ttl_minutes: 60, allow_insecure_transport: false },
         ui: { theme: "system" },

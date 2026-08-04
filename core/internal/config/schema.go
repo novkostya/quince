@@ -25,8 +25,39 @@ type Config struct {
 
 // BackupConfig is the `backup:` section.
 type BackupConfig struct {
-	Transport         string `yaml:"transport" json:"transport"` // auto | usb | wifi
-	RequireEncryption bool   `yaml:"require_encryption" json:"require_encryption"`
+	// PreferredTransport decides which transport a backup uses WHEN THE DEVICE IS PRESENT ON BOTH.
+	// `usb` | `wifi`, default `usb`. It is IGNORED when only one transport is available.
+	//
+	// A PREFERENCE, NEVER A RESTRICTION. A device reachable on one transport is backed up over that
+	// transport whatever this says. Part of the ruling rather than a caveat on it: the restriction
+	// reading would make a Wi-Fi-only device silently unbackupable through a setting whose name does
+	// not say so, and Wi-Fi is the PRIMARY transport under the assisted model.
+	//
+	// IT WAS `backup.transport`, AND IT DID NOTHING (quince#654, Operator ruling 2026-08-04).
+	// Parsed, range-checked, rendered in Settings, read by nobody — so setting it to `usb` still
+	// backed up over Wi-Fi. The rename is part of the ruling rather than tidying: `transport: usb`
+	// reads as "use USB", the only safe meaning is "prefer USB", and the two would disagree
+	// permanently. The evidence that they would is the report that opened the issue — "If I select
+	// 'usb' in settings then I won't be able to sync over wifi at all or what?" — which IS that
+	// misreading, made by the person with the most context in the project.
+	//
+	// The rename was free EXACTLY ONCE. quince#401: a renamed key warns `unknown config key
+	// (ignored)` without naming its successor, so whoever set it silently loses it. While the key
+	// did nothing, nobody lost anything; wiring it under the old name would have ended that.
+	//
+	// THERE IS NO `auto` HERE, AND THIS IS NOT THE REQUEST ENUM. As a *preference*, `auto` would
+	// mean "prefer whatever the engine already prefers" — a third label for `usb`, which is
+	// quince#653's defect migrating out of the UI and into config.yml. `auto` stays legal and
+	// correct as a REQUEST transport: `Job.transport`, the wire contract, and the CLI's documented
+	// `--transport auto`. Two enums sharing two of their values; said out loud because the next
+	// reader will try to unify them.
+	//
+	// The default is `usb` because that is BEHAVIOUR-PRESERVING — `resolveTransport` returns USB
+	// today when both are present — and for no other reason. NO CLAIM IS MADE ABOUT SPEED in either
+	// direction: the Operator reports Wi-Fi outperforming USB on the soak stand, and nothing here
+	// has measured it. If anyone ever does, this default is the thing to revisit.
+	PreferredTransport string `yaml:"preferred_transport" json:"preferred_transport"` // usb | wifi
+	RequireEncryption  bool   `yaml:"require_encryption" json:"require_encryption"`
 }
 
 // StorageEntry is one declared storage under `storage:` (qn.6c, quince#473).
@@ -267,8 +298,10 @@ type UIConfig struct {
 func Default() Config {
 	return Config{
 		Backup: BackupConfig{
-			Transport:         "auto",
-			RequireEncryption: true,
+			// `usb` preserves today's behaviour: resolveTransport already returns USB when a device
+			// is present on both. Not a speed claim — see the field's own comment.
+			PreferredTransport: "usb",
+			RequireEncryption:  true,
 		},
 		Devices: DevicesConfig{
 			ManageMuxer:   true,

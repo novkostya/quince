@@ -324,7 +324,7 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	body := `{"backup":{"transport":"usb","require_encryption":true},` +
+	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		// qn.6c: a saved config must declare a storage or PUT is a 422. This test is about CSRF,
 		// so the body carries a valid one rather than asserting the storage rule by accident.
 		// `storage` IS the list (quince#473) — no wrapper object, no globals.
@@ -360,7 +360,7 @@ func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	body := `{"backup":{"transport":"usb","require_encryption":true},` +
+	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":[],` + // the user removed their last storage
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +

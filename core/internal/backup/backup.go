@@ -82,6 +82,14 @@ type Config struct {
 	ProgressThrottle     time.Duration // ≤2/s job.updated progress throttle (500ms)
 	DiskLowFreeBytes     uint64        // A3 free-space floor (2 GiB); warn + preflight-refuse
 	RequireEncryption    bool          // backup.require_encryption
+	// PreferredTransport is which transport an `auto` REQUEST resolves to when the device is
+	// present on BOTH — `backup.preferred_transport`, usb | wifi (quince#654).
+	//
+	// Consulted on exactly one branch of resolveTransport and ignored everywhere else: a concrete
+	// request wins unchanged, and a device on one transport gets that one. An EMPTY value reads as
+	// `usb`, which is what lets every caller that builds a Config by hand — the tests, the CLIs —
+	// keep the behaviour it had without being touched.
+	PreferredTransport string
 }
 
 const gib = 1 << 30
@@ -114,6 +122,9 @@ func DefaultConfig() Config {
 		ProgressThrottle:     500 * time.Millisecond,
 		DiskLowFreeBytes:     2 * gib,
 		RequireEncryption:    true,
+		// Behaviour-preserving: resolveTransport returned USB for an `auto` request on a
+		// both-present device before this key existed. Not a speed claim (quince#654).
+		PreferredTransport: TransportUSB,
 	}
 }
 

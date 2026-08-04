@@ -16,7 +16,7 @@ import (
 // the same document a client would have sent rather than reaching into the service.
 func seedStorages(t *testing.T, srv *httptest.Server, c *http.Client, storageJSON string) {
 	t.Helper()
-	body := `{"backup":{"transport":"usb","require_encryption":true},` +
+	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":` + storageJSON + `,` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +

@@ -99,3 +99,96 @@ func TestExplicitTransportDoesNotRequirePresenceAtStart(t *testing.T) {
 		t.Fatalf("absent explicit-usb job = %s error=%v, want failed/%s", final.State, final.Error, ErrDeviceNotVisible)
 	}
 }
+
+// quince#654 — `backup.preferred_transport` DECIDES WHICH TRANSPORT `auto` PICKS WHEN BOTH ARE
+// PRESENT, and is IGNORED everywhere else.
+//
+// The key it replaces, `backup.transport`, was validated, documented, editable in Settings and read
+// by nobody — so setting it to `usb` still backed up over Wi-Fi. These pin the four rows of the
+// ruled resolution table (design §4), and the one that matters most is the third: a device on ONE
+// transport is backed up over that one WHATEVER the preference says. A preference that could
+// restrict would make a Wi-Fi-only device silently unbackupable through a setting whose name does
+// not say so — and Wi-Fi is the primary transport under the assisted model.
+//
+// TestAutoResolvesToUSBWhenBothPresent above is the behaviour-preservation half and is deliberately
+// left untouched: `testCfg()` sets no preference, an empty preference reads as `usb`, and that test
+// still passes — which is the assertion that this change altered nothing for a config built before
+// the key existed.
+
+func TestPreferredTransportWifiWinsWhenBothPresent(t *testing.T) {
+	m := loadMeta(t, "wifi-incremental-success")
+	h := newHarness(t, m.params(t), TransportWiFi, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = TransportWiFi
+	})
+	setTransports(h.dev, testUDID, true, true, "on") // BOTH present — the only case the key decides
+
+	job := h.start(t, TransportAuto, "")
+	if job.Transport != TransportWiFi {
+		t.Fatalf("auto with both present and preferred_transport=wifi resolved to %q, want wifi — "+
+			"the preference is the whole point of the key", job.Transport)
+	}
+}
+
+// THE ROW THAT MAKES IT A PREFERENCE RATHER THAN A RESTRICTION. Preference usb, device on Wi-Fi
+// only: it backs up over Wi-Fi. If this ever returns usb (or refuses), a user who set `usb` has
+// silently lost the ability to back up every Wi-Fi-only device they own.
+func TestPreferredTransportIsIgnoredWhenOnlyTheOtherIsPresent(t *testing.T) {
+	m := loadMeta(t, "wifi-incremental-success")
+	h := newHarness(t, m.params(t), TransportWiFi, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = TransportUSB
+	})
+	setTransports(h.dev, testUDID, false, true, "on") // Wi-Fi only
+
+	job := h.start(t, TransportAuto, "")
+	if job.Transport != TransportWiFi {
+		t.Fatalf("preferred_transport=usb on a Wi-Fi-ONLY device resolved to %q, want wifi — a "+
+			"preference must never restrict, or this device becomes unbackupable", job.Transport)
+	}
+}
+
+// The mirror of the above, so the asymmetry cannot be introduced on one side only.
+func TestPreferredWifiIsIgnoredOnAUSBOnlyDevice(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), TransportUSB, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = TransportWiFi
+	})
+	setTransports(h.dev, testUDID, true, false, "on") // USB only
+
+	job := h.start(t, TransportAuto, "")
+	if job.Transport != TransportUSB {
+		t.Fatalf("preferred_transport=wifi on a USB-ONLY device resolved to %q, want usb", job.Transport)
+	}
+}
+
+// A CONCRETE REQUEST OUTRANKS THE PREFERENCE — row 1 of the table. The key answers "which one when
+// there is a choice", and an explicit request has already made that choice.
+func TestAConcreteRequestOutranksThePreference(t *testing.T) {
+	m := loadMeta(t, "wifi-incremental-success")
+	h := newHarness(t, m.params(t), TransportWiFi, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = TransportUSB
+	})
+	setTransports(h.dev, testUDID, true, true, "on")
+
+	job := h.start(t, TransportWiFi, "")
+	if job.Transport != TransportWiFi {
+		t.Fatalf("an explicit wifi request under preferred_transport=usb resolved to %q, want wifi",
+			job.Transport)
+	}
+}
+
+// An UNSET preference reads as usb, so every Config built by hand — the tests, both CLIs — keeps the
+// behaviour it had before the key existed. Asserted rather than left to the zero value's good
+// manners, because the alternative reading ("" is neither, so refuse) would break every one of them.
+func TestAnUnsetPreferenceReadsAsUSB(t *testing.T) {
+	m := loadMeta(t, "full-usb-success")
+	h := newHarness(t, m.params(t), TransportUSB, func(o *Options, _ *fakeDevices) {
+		o.Config.PreferredTransport = ""
+	})
+	setTransports(h.dev, testUDID, true, true, "on")
+
+	job := h.start(t, TransportAuto, "")
+	if job.Transport != TransportUSB {
+		t.Fatalf("an unset preference resolved to %q, want usb — an empty value must preserve the "+
+			"pre-quince#654 behaviour", job.Transport)
+	}
+}
