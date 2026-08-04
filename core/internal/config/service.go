@@ -208,6 +208,27 @@ func degradedModeWarnings(c Config) []Warning {
 // applied one. Whether a given KEY is applied live is a property of its consumer, not of this
 // mechanism — the per-setting answer lives in contracts §6.
 type Service struct {
+	// writeMu serialises the WHOLE write path — validate, write, swap, notify — so that the last
+	// Applier call always carries the configuration that is on disk and in the snapshot.
+	//
+	// WITHOUT IT THE SEAM HAS NO ORDERING (quince#665 review). `Replace` touches three things that
+	// were independently ordered: which AtomicWrite lands last, which snapshot swap lands last, and
+	// which notify reaches the appliers last. Two concurrent writes could therefore leave a
+	// subsystem on a config that neither the file nor the snapshot holds — and leave it there, since
+	// nothing re-notifies. `old` was incoherent for the same reason: read at swap time, so it could
+	// be the OTHER writer's document rather than what was live when this call began.
+	//
+	// That race predates this rung and was harmless while nothing consumed the config. It stops
+	// being harmless here, which is why it is closed rather than declared: PRs 3–7 are built against
+	// this contract, and a concurrency property baked in unstated is far more expensive once four
+	// consumers exist.
+	//
+	// IT IS NOT `mu`, and the two must not be merged. Appliers take `mu` — via Current() — while
+	// writeMu is held, which is exactly why notify can run outside `mu` without deadlocking.
+	//
+	// THE ONE RULE IT CREATES: an Applier must not call Replace or ForgetStorage. See Applier.
+	writeMu sync.Mutex
+
 	mu       sync.RWMutex
 	path     string
 	log      *slog.Logger
@@ -241,6 +262,10 @@ type applier struct {
 //
 // An Applier that cannot complete its work says so in a Warning and leaves its subsystem on its
 // last-good state — which is D12's own rule for a bad edit, one layer down.
+//
+// AN APPLIER MUST NOT CALL Replace OR ForgetStorage. Both hold `writeMu` for the whole write, so a
+// re-entrant call deadlocks. It may freely call Current()/Snapshot(), which take `mu` only — and
+// `next` is already the configuration Current() would return, so there is no reason to.
 //
 // `old` is the configuration that was live until this write; `next` is what has just been written.
 // Both are passed because most consumers only care about their own section, and comparing is how
@@ -330,6 +355,18 @@ func (s *Service) Current() Config {
 // Returns validation errors (→ 422), the Appliers' warnings, and a write error. The warnings are
 // per-response and are never stored — see the notify call at the end for why.
 func (s *Service) Replace(c Config) ([]wire.ConfigError, []Warning, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.replaceLocked(c)
+}
+
+// replaceLocked is Replace's body. CALLER MUST HOLD writeMu.
+//
+// It exists so ForgetStorage can do its READ-MODIFY-WRITE under the same lock. That is a second
+// race the split closes and the review did not name: Forget reads the storage list, splices one
+// entry out, and writes the result — so two concurrent forgets both read the same list and the
+// second write silently restores the entry the first removed.
+func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error) {
 	if errs := Validate(c); len(errs) > 0 {
 		return errs, nil, nil
 	}
