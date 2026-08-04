@@ -949,7 +949,25 @@ does not exist.
 **Everything else**: `/data/config.yml` — single source of truth, edited by the UI and
 by hand equally (stack D12: atomic validated writes, canonical order + generated
 doc-comments, file-watch pickup, invalid edits keep last-good + UI banner, no secrets
-ever). Schema v0:
+ever).
+
+**THE TWO EDITING PATHS DIFFER TODAY, AND THAT IS A RULING'S COST RATHER THAN AN OVERSIGHT.**
+A setting changed **through the UI applies immediately**; the **same setting hand-edited in
+`config.yml` still needs a restart**, because nothing watches the file. `qn.6g` (quince#577) builds
+propagation — `config.Service` telling the running subsystems about its own write — and file-watch
+was **split into its own, unallocated rung** by Operator ruling 2026-08-04, option (a), relayed on
+[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911).
+
+So *"edited by the UI and by hand equally"* above is the **destination**, and *"file-watch pickup"*
+in that list is **not yet built**. Stated here rather than left for a reader to discover: it was the
+condition the ruling was accepted on, and a document describing a wider reality than the one that
+exists is this project's most-filed defect. Until file-watch lands, a hand-edit is picked up at the
+next start.
+
+**Which settings apply live at all is a PER-KEY answer, not a blanket one**, and lands with `qn.6g`'s
+per-setting table.
+
+Schema v0:
 
 ```yaml
 backup:
