@@ -8,6 +8,7 @@ import { setTheme, type Theme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
   return (
@@ -16,30 +17,6 @@ function Field({ label, error, children }: { label: string; error?: string; chil
       {children}
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </div>
-  );
-}
-
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 w-full rounded-lg border border-line bg-bg px-3 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
   );
 }
 
@@ -84,9 +61,16 @@ export function ConfigEditor({ config }: { config: Config }) {
       <Field label="Backup transport" error={errFor("backup.transport")}>
         <Select
           value={draft.backup.transport}
-          onChange={(v) => setDraft({ ...draft, backup: { ...draft.backup, transport: v } })}
-          options={["auto", "usb", "wifi"]}
-        />
+          onChange={(e) =>
+            setDraft({ ...draft, backup: { ...draft.backup, transport: e.target.value } })
+          }
+        >
+          {["auto", "usb", "wifi"].map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
       </Field>
 
       <label className="flex items-center gap-2 text-sm">
@@ -144,9 +128,14 @@ export function ConfigEditor({ config }: { config: Config }) {
           value={draft.ui.theme}
           // Same shape as above. `ui:` has one key today so nothing is lost yet — which is
           // precisely why it is worth fixing now rather than when it is a bug.
-          onChange={(v) => setDraft({ ...draft, ui: { ...draft.ui, theme: v } })}
-          options={["system", "light", "dark"]}
-        />
+          onChange={(e) => setDraft({ ...draft, ui: { ...draft.ui, theme: e.target.value } })}
+        >
+          {["system", "light", "dark"].map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
       </Field>
 
       <div className="flex items-center gap-3">
