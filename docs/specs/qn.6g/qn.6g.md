@@ -18,8 +18,9 @@ citations are corrected by that measurement; see interface fact 5.
 ## Why `qn.6g`, and why it runs before quince#591
 
 **The letter.** `qn.6e` is taken by quince#502 — an explicit, still-unscoped placeholder holding
-`qn.6c`'s deferrals — and `qn.6f` closed on 2026-08-02. `qn.6g` is the next free letter. quince#591
-takes `qn.6h`; it states its own need for a number and names the same two taken letters.
+`qn.6c`'s deferrals — and `qn.6f` (quince#462) closed **2026-08-04 at `16:20:05Z`**, hours before
+this spec was written. `qn.6g` is the next free letter. quince#591 takes `qn.6h`; it states its own
+need for a number and names the same two taken letters.
 
 **The order.** quince#577 first. It discharges a violation that is **live right now**: the UI edits
 `config.yml`, nothing applies, and — because the interim notice was declined — nothing on screen
