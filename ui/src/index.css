@@ -27,30 +27,9 @@
 html,
 body,
 #root {
-  height: 100%; /* fallback for browsers without viewport units */
-  height: 100svh; /* PHONE: a definite viewport height so the fixed shell (h-full) can make <main>
-                     the only scroll region — no nested/document scroll.
-
-                     svh, NOT dvh (quince#649). `dvh` tracks the mobile toolbars as they expand and
-                     collapse. The shell is `overflow-hidden` and the document never scrolls, so any
-                     window in which the computed height exceeds the VISIBLE height puts the bottom
-                     of the page where no scroller reaches it — clipped, not merely awkward. The
-                     Operator saw exactly that, intermittently, and rotating the phone HEALED it:
-                     a full re-layout fixing it is what says the height was STALE rather than wrong.
-
-                     `svh` is the small viewport — toolbars expanded — and the point is that it is
-                     STATIC. It does not merely happen to be the safe size; it removes the window in
-                     which computed and visible height can disagree at all, so the shell becomes
-                     structurally incapable of overflowing whatever the trigger turns out to be.
-                     The cost is a band of background at the bottom once the toolbars retract.
-                     Content stays reachable either way — <main> is `flex-1 overflow-y-auto` — and
-                     unreachable content is the worse failure. Ruled, not assumed (architect,
-                     2026-08-04): the fix must not depend on the diagnosis being right.
-
-                     Both tempting alternatives cost a behaviour the qn.6a mobile pass established:
-                     `overflow-y: auto` on the shell reintroduces a second nested scroll region, and
-                     dropping `overscroll-behavior: none` restores the iOS rubber-band and scroll
-                     chaining. Sizing the shell costs neither. */
+  height: 100%; /* fallback for browsers without dvh */
+  height: 100dvh; /* PHONE: a definite viewport height so the fixed shell (h-full) can make <main>
+                     the only scroll region, tracking the mobile toolbar — no nested/document scroll. */
 }
 
 @media (min-width: 640px) {
@@ -58,13 +37,7 @@ body,
   body,
   #root {
     /* DESKTOP: natural height so the document itself scrolls (native macOS bounce), at least a
-       viewport tall. The sidebar is sticky; there is no forced-height seam.
-
-       THIS ONE STAYS `dvh`, and the asymmetry is deliberate rather than an edit that missed a line
-       (quince#649). Here the box is a `min-height` on a DOCUMENT that scrolls, so a box taller than
-       the viewport is scrolled to — never clipped. `dvh` is the failure mode only where a fixed,
-       overflow-hidden box is the sole scroller, which is the phone rule above. Making both `svh`
-       would shorten the desktop page for no benefit. */
+       viewport tall. The sidebar is sticky; there is no forced-height seam. */
     height: auto;
     min-height: 100dvh;
   }
