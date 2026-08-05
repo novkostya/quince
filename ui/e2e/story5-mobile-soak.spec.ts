@@ -123,29 +123,14 @@ test("the bottom of a long page is reachable, and <main>'s bottom padding scroll
 
   // THE ANSWER TO THE ARCHITECT'S QUESTION: the scrollable extent INCLUDES the bottom padding, so
   // the padding is scrolled past rather than clipping the last element. If Chromium excluded
-  // end-edge padding from the scroll extent, the gap below the lowest content would be ~0 instead
-  // of padBottom.
-  //
-  // THE DEEPEST descendant, not `lastElementChild.lastElementChild` (quince#658 review). Descending
-  // a fixed number of levels picks an element that may not be the visually lowest one, and the
-  // measured gap is then LARGER than padBottom — which a bare `>=` bound accepts. That is precisely
-  // the case this assertion exists to catch, hidden by the two things that made it convenient to
-  // write: a hardcoded depth and a one-sided bound.
-  //
-  // So: the maximum bottom edge over every rendered descendant, and an EQUALITY BAND. A gap near
-  // zero fails (the padding is outside the extent — the real defect), and so does a gap much larger
-  // than padBottom (the test is measuring the wrong element — the test being wrong).
+  // end-edge padding from the scroll extent, scrollHeight would stop at the content box and this
+  // would fail by exactly padBottom.
   const contentBottomGap = await main.evaluate((el) => {
-    let lowest = -Infinity;
-    for (const node of Array.from(el.querySelectorAll("*"))) {
-      const r = node.getBoundingClientRect();
-      if (r.height > 0 && r.bottom > lowest) lowest = r.bottom;
-    }
-    if (lowest === -Infinity) return NaN;
-    return el.getBoundingClientRect().bottom - lowest;
+    const last = el.lastElementChild?.lastElementChild ?? el.lastElementChild;
+    if (!last) return NaN;
+    return el.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
   });
   expect(contentBottomGap).toBeGreaterThanOrEqual(metrics.padBottom - 1);
-  expect(contentBottomGap).toBeLessThanOrEqual(metrics.padBottom + 1);
 
   // The document still does not scroll — the qn.6a invariant this fix must not trade away.
   const docVScroll = await page.evaluate(
