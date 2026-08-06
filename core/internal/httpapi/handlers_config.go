@@ -75,34 +75,30 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 
-		// LIVENESS REFUSAL, BEFORE THE WRITE (qn.6g, Operator ruling 2026-08-06 — quince#577,
-		// option (b)). A forget while a backup runs on that storage would leave `CommitJob` unable to
-		// resolve its slot between verify passing and commit completing, and restart-time recovery
-		// fails identically — which is what *"a commit failure must not destroy a multi-hour Wi-Fi
-		// transfer"* forbids. `storage.Manager.JobsOn` carries the full reasoning.
+		// THE LIVENESS REFUSAL IS HANDED IN, NOT RUN HERE FIRST (qn.6g, Operator ruling 2026-08-06 —
+		// quince#577, option (b)). A forget while a backup runs on that storage would leave
+		// `CommitJob` unable to resolve its slot between verify passing and commit completing, and
+		// restart-time recovery fails identically — which is what *"a commit failure must not destroy
+		// a multi-hour Wi-Fi transfer"* forbids. `storage.Manager.JobsOn` carries the full reasoning.
 		//
-		// HERE RATHER THAN IN `config.Service`: putting it there would make the config package depend
-		// on the storage subsystem, which is backwards — qn.6g's seam runs storage-subscribes-to-
-		// config. `Deps` already holds both side by side, and HTTP semantics live in the handler.
+		// THIS WAS AN `if` ABOVE THE CALL AND IT WAS WRONG, caught by `story8` on the first CI run
+		// that dispatched. `--demo` keeps a backup running on `internal`, which is also the default —
+		// so the transient refusal fired first and a user was told to *wait for the backup* when
+		// waiting could never help. `ForgetStorage` now runs the declaration refusals first and calls
+		// this only if the forget would otherwise succeed; its doc comment carries the reasoning.
 		//
-		// THE FIRST 422 ON THIS ENDPOINT ABOUT LIVENESS rather than about coherence of the
-		// declaration: every other refusal here answers "is this a valid set of storages?", this one
-		// answers "is quince busy?". Written into contracts §1 as a decision so the next reader does
-		// not meet it as an inconsistency.
-		if busy := d.jobsRunningOn(name); len(busy) > 0 {
-			writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
-				Errors []wire.ConfigError `json:"errors"`
-			}{Errors: []wire.ConfigError{{
-				Path: "storage",
-				Message: fmt.Sprintf(
-					"a backup is running on %q (job %s) — wait for it to finish, or cancel it, and "+
-						"then forget the storage. Forgetting it now would leave that backup unable "+
-						"to finish writing and unable to clean up.", name, busy[0]),
-			}}})
-			return
-		}
-
-		outcome, errs, applied, err := d.Config.ForgetStorage(name)
+		// THE MESSAGE STAYS HERE. `config` gets a sentence, never a job — so it still knows nothing
+		// about the storage subsystem, which is what kept the check out of that package to begin with.
+		outcome, errs, applied, err := d.Config.ForgetStorage(name, func(storageName string) string {
+			busy := d.jobsRunningOn(storageName)
+			if len(busy) == 0 {
+				return ""
+			}
+			return fmt.Sprintf(
+				"a backup is running on %q (job %s) — wait for it to finish, or cancel it, and "+
+					"then forget the storage. Forgetting it now would leave that backup unable "+
+					"to finish writing and unable to clean up.", storageName, busy[0])
+		})
 		switch {
 		case err != nil:
 			d.Log.Error("config write failed", "error", err, "forgetting", name)

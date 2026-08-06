@@ -145,6 +145,52 @@ func TestForgetSucceedsWhenTheRunningJobIsOnAnotherStorage(t *testing.T) {
 	}
 }
 
+// THE ORDER: A PERMANENT REFUSAL OUTRANKS A TRANSIENT ONE, and this is the test for the bug that
+// shipped in the first version of this PR.
+//
+// `pool` is the default AND has a backup running on it — which is the ORDINARY state, not a corner:
+// the default storage is where backups go. The first implementation ran the liveness check before
+// the declaration check, so the user was told *"wait for it to finish, or cancel it"*. They wait an
+// hour, retry, and are then told *"it is the default"* — a remedy that was never going to work.
+//
+// **Every Go gate passed on the wrong order.** `story8` caught it on the first CI run that
+// dispatched, because `--demo` keeps a job running on `internal`, which is also its default. This
+// test exists so the next reader does not need a browser and a running daemon to find it again.
+func TestTheDefaultRefusalOutranksTheBusyRefusal(t *testing.T) {
+	fake := &busyStorages{name: "pool", id: "01STORAGEPOOL",
+		jobsByI: map[string][]string{"01STORAGEPOOL": {"01JOBRUNNING"}}}
+	srv, c := busyServer(t, fake)
+
+	code, body := deleteStorage(t, srv, c, "pool")
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("DELETE the default storage = %d, want 422: %s", code, body)
+	}
+
+	var got struct {
+		Errors []struct{ Message string } `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil || len(got.Errors) != 1 {
+		t.Fatalf("want one config error: %v: %s", err, body)
+	}
+	msg := got.Errors[0].Message
+
+	if !strings.Contains(msg, "is the default") {
+		t.Errorf("a storage that is BOTH default and busy must be refused for being the DEFAULT — "+
+			"the permanent reason. Got %q", msg)
+	}
+	if strings.Contains(msg, "wait for it to finish") {
+		t.Errorf("the transient remedy must not be offered when a permanent refusal also applies: "+
+			"waiting out the backup cannot make this forget succeed. Got %q", msg)
+	}
+}
+
+// AND THE BUSY REFUSAL STILL FIRES when the declaration would otherwise allow the forget — the
+// other half of the ordering, without which the reorder above could be implemented by deleting the
+// liveness check entirely and every test would still pass.
+//
+// `TestForgetIsRefusedWhileABackupRunsOnThatStorage` covers this, on a NON-default storage. Named
+// here so the pair is findable together rather than by luck.
+
 // A storage the reader does not list at all still reaches `ForgetStorage`, which owns the 404.
 //
 // The liveness check must be a REFUSAL it can add, never a gate it can close: a name absent from

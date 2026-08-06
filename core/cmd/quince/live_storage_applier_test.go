@@ -141,7 +141,7 @@ func TestAForgottenStorageStopsBeingServedAndItsTreeSurvives(t *testing.T) {
 		t.Fatalf("seed canary: %v", err)
 	}
 
-	outcome, errs, _, err := svc.ForgetStorage("beta")
+	outcome, errs, _, err := svc.ForgetStorage("beta", nil)
 	if err != nil {
 		t.Fatalf("ForgetStorage: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestForgettingTheDefaultIsStillRefusedWithTheApplierWired(t *testing.T) {
 	beta := entry(t, "beta", false)
 	svc, mgr, _ := wiredStorage(t, []config.StorageEntry{alpha, beta})
 
-	outcome, errs, _, err := svc.ForgetStorage("alpha")
+	outcome, errs, _, err := svc.ForgetStorage("alpha", nil)
 	if err != nil {
 		t.Fatalf("ForgetStorage: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestAForgetDoesNotTriggerAReconcile(t *testing.T) {
 		t.Fatalf("write marker: %v", err)
 	}
 
-	if _, _, _, err := svc.ForgetStorage("beta"); err != nil {
+	if _, _, _, err := svc.ForgetStorage("beta", nil); err != nil {
 		t.Fatalf("ForgetStorage: %v", err)
 	}
 
