@@ -112,24 +112,21 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 	return ForgetDone, nil, warns, nil
 }
 
-// ForgetRestartWarning is the notice a successful Forget carries back, in the `warnings` channel
-// the config endpoints already return.
+// ForgetRestartWarning IS DELETED, and the deletion is the point of qn.6g PR 4 rather than tidying.
 //
-// A PROPERTY OF THE RESPONSE, not of the stored state, and that is why it is built here rather
-// than pushed into Service.warnings: `Replace` clears those on a valid write, because they
-// describe the FILE as parsed. This describes the gap between the file and the running process,
-// which is true from the moment of the write until the restart and belongs to nobody's snapshot.
+// It read: *"storage %q is no longer declared, but this process is still serving it — restart
+// quince to apply. Nothing on the disk was deleted."* With the storage applier wired, the second
+// clause is false: the storage stops being served at the moment of the write. A warning that names
+// a restart nobody needs is exactly the silent-fallback inversion — it would send a user to reboot
+// a daemon to complete something already complete.
 //
-// It exists at all because `no silent caps or fallbacks` applies squarely: the storage is gone
-// from the declaration and still being served, and a 200 with nothing said would leave a user
-// watching a card that should have disappeared with no explanation for why it has not.
-func ForgetRestartWarning(name string) Warning {
-	return Warning{
-		Path: "storage",
-		Message: fmt.Sprintf(
-			"storage %q is no longer declared, but this process is still serving it — restart "+
-				"quince to apply. Nothing on the disk was deleted; the backups that were there "+
-				"are still there.",
-			name),
-	}
-}
+// **Its SHAPE outlives it and is cited in three places** (`service.go`, `subscribe_test.go`, and
+// qn.6g's own spec): an applier warning is a property of THIS RESPONSE, built at the call site and
+// never pushed into `Service.warnings`, because `Replace` clears those on every valid write — they
+// describe the FILE as parsed, and this describes the gap between the file and the running process.
+// That precedent is why applier warnings are returned per-call. The rule survives; this instance of
+// it does not.
+//
+// What replaces it for the case it really covered — an applier that could not take the change — is
+// the applier's own returned warning, which says what actually failed instead of prescribing a
+// restart that may not fix it.

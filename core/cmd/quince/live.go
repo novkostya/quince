@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/backup"
@@ -241,6 +242,55 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		return storage.Slot{}, false
 	})
 
+	// STORAGE IS THE FIRST CONSUMER OF THE CONFIG SEAM (qn.6g, quince#577). A `storage:` edit — the
+	// list, a path, a backend, a zfs block, or retention — now takes effect without a restart.
+	//
+	// IT REBUILDS THE LIST THE WAY STARTUP DOES: `declaredStorages` + `resolveSlot`, the same two
+	// calls forty lines above, so a live apply and a restart cannot disagree about what a storage IS.
+	// That is the property `SetRefresher`'s closure already argues for, applied to the whole list
+	// rather than to one entry. `resolveSlot` is safe to re-run — it creates nothing (see its own
+	// "NOBODY CREATES A STORAGE ROOT"), so re-resolving is idempotent and touches no tree.
+	//
+	// RETENTION RIDES HERE rather than in its own applier, and that is a dependency rather than a
+	// preference: retention lives on `Slot.Retention` and `policyFor` reads it off the slot list, so
+	// `ApplyStorages` is the only path by which a retention edit can reach `Prune`.
+	cfgSvc.Subscribe("storage", func(old, next config.Config) []config.Warning {
+		before := declaredStorages(old.Storage)
+		after := declaredStorages(next.Storage)
+		if sameStorageDeclaration(before, after) {
+			return nil // an edit to some other section; nothing here to do
+		}
+
+		rebuilt := make([]storage.Slot, 0, len(after))
+		for _, e := range after {
+			rebuilt = append(rebuilt, resolveSlot(ctx, e, st, log))
+		}
+
+		var warns []config.Warning
+		for _, w := range storageMgr.ApplyStorages(rebuilt) {
+			warns = append(warns, config.Warning{Path: "storage", Message: w})
+		}
+
+		// THE RECONCILE IS THE PART THAT IS EASY TO FORGET, and the spec says so in as many words.
+		// A newly declared disk may ALREADY HOLD committed backups — the adopt path exists — and
+		// without this they stay invisible until a restart, which is this rung's own defect one layer
+		// along. Startup runs Reconcile right after NewManager for exactly this reason.
+		//
+		// Only when something was ADDED: a forget needs no scan, and reconciling on every unrelated
+		// storage edit would walk every declared tree for nothing.
+		if addedStorage(before, after) {
+			if err := storageMgr.Reconcile(ctx); err != nil {
+				log.Error("storage: reconciliation after a live add failed", "error", err)
+				warns = append(warns, config.Warning{
+					Path: "storage",
+					Message: "the storage list was applied, but scanning for backups already on the " +
+						"new storage failed, so they may not be listed until quince restarts: " + err.Error(),
+				})
+			}
+		}
+		return warns
+	})
+
 	reportUnattributed(st, log)
 
 	for _, s := range slots {
@@ -248,6 +298,43 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 			"storage_id", s.StorageID, "reachable", s.Reachable)
 	}
 	return storageMgr, nil
+}
+
+// sameStorageDeclaration reports whether two resolved declarations are the same storages, in the
+// same order, with the same per-entry settings.
+//
+// ORDER MATTERS and is not a detail: position IS the default (`slots[0]`), so a reorder with
+// identical members is a real change — the user made a different disk the default. Comparing sets
+// would miss exactly that.
+//
+// It exists so an edit to `backup:` or `ui:` does not re-resolve every storage. Re-resolution is
+// idempotent but not free: it stats every declared root and may probe a backend.
+func sameStorageDeclaration(a, b []config.StorageEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !reflect.DeepEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// addedStorage reports whether b names a storage a did not. BY NAME, which is the identity the
+// config carries and the one `resolveSlot` re-resolves by — a path change on an existing entry is an
+// edit rather than an addition, and it re-resolves through ApplyStorages either way.
+func addedStorage(a, b []config.StorageEntry) bool {
+	known := make(map[string]bool, len(a))
+	for _, e := range a {
+		known[e.Name] = true
+	}
+	for _, e := range b {
+		if !known[e.Name] {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveSlot resolves ONE declared storage into a Slot, reachable or not.

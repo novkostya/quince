@@ -51,12 +51,17 @@ func deleteStorage(t *testing.T, srv *httptest.Server, c *http.Client, name stri
 	return resp.StatusCode, body
 }
 
-// The happy path AT THE BOUNDARY: 200, the config-endpoint body, and the restart SURFACED.
+// The happy path AT THE BOUNDARY: 200, the config-endpoint body, and NO RESTART PROMISED.
 //
-// The warning is the half worth pinning. Gap B ruled the restart is never silent, and the only
-// thing standing between a 200 and a card that lingers with no explanation is this notice riding
-// the `warnings` channel the UI already renders.
-func TestForgetStorageReturnsTheConfigAndSurfacesTheRestart(t *testing.T) {
+// THIS TEST ASSERTED THE OPPOSITE UNTIL qn.6g PR 4, and the inversion is the point rather than a
+// rename. Gap B ruled the restart must never be silent, and while a forget really did need one this
+// notice was the only thing between a 200 and a card that lingers unexplained. With the storage
+// applier wired the card is gone by the time the response is written, so the same notice became the
+// same defect pointing the other way: a remedy prescribed for a problem that no longer exists.
+//
+// The warning channel itself is unchanged and still carries anything an applier could NOT take —
+// which is what `no silent caps` actually requires here.
+func TestForgetStorageReturnsTheConfigAndPromisesNoRestart(t *testing.T) {
 	srv := httptest.NewServer(NewRouter(testDeps(t)))
 	defer srv.Close()
 	c := authedClient(t, srv)
@@ -86,15 +91,11 @@ func TestForgetStorageReturnsTheConfigAndSurfacesTheRestart(t *testing.T) {
 		t.Error("the body must carry `source`, like every other config endpoint")
 	}
 
-	var found bool
 	for _, w := range got.Warnings {
-		if strings.Contains(w.Message, "shuttle") && strings.Contains(strings.ToLower(w.Message), "restart") {
-			found = true
+		if strings.Contains(strings.ToLower(w.Message), "restart") {
+			t.Errorf("a successful forget must promise no restart — the storage applier has already "+
+				"stopped serving it by the time this response is written; got %q", w.Message)
 		}
-	}
-	if !found {
-		t.Errorf("the restart must be SURFACED, never silent — no warning names the storage and "+
-			"the restart; got %+v", got.Warnings)
 	}
 }
 

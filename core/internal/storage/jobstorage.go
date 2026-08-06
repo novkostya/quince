@@ -1,6 +1,9 @@
 package storage
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // A JOB'S STORAGE IS BOUND AT START AND RESOLVED FROM THE jobID EVERY WRITE-PATH METHOD ALREADY
 // CARRIES (qn.6c story 6a).
@@ -152,4 +155,45 @@ func (m *Manager) ResolveChoice(storageID string) (concrete string, status int, 
 		return s.StorageID, 0, ""
 	}
 	return "", 404, "no storage with that id is declared"
+}
+
+// JobsOn returns the ids of jobs currently bound to a storage, SORTED — see the sort's own note.
+//
+// THE LIVENESS QUESTION `DELETE /api/config/storage/{name}` ASKS BEFORE IT WRITES (qn.6g, Operator
+// ruling 2026-08-06, option (b) on quince#577): a forget is refused with a 422 while a backup is
+// running on that storage.
+//
+// WHY REFUSING BEATS LETTING THE JOB DIE. All six write phases resolve through `jobSlot`, and three
+// of them decide it — `VerifyWork`, `CommitJob`, `Discard`. A forget landing BETWEEN verify passing
+// and commit completing leaves `CommitJob` unable to resolve its slot, and restart-time recovery
+// fails identically because the storage is no longer declared. `Discard` needs the slot too, so even
+// the cleanup path is gone. Canon: *"once verify has passed and the immutable artifact exists,
+// recovery completes the remaining commit phases — it never unwinds them, because a commit failure
+// must not destroy a multi-hour Wi-Fi transfer."*
+//
+// AND WHY NOT "CANCEL IT FOR YOU". Cancellation is ASYNCHRONOUS: `JobControl` requests it, the job
+// goroutine observes it, and `UnbindJob` drops the binding only when the job finishes. Cancel-then-
+// forget would have to wait for every affected job to reach a terminal state inside an HTTP handler,
+// with a timeout — and the timeout path lands the forget while a job is still mid-phase, which is
+// the defect the ruling exists to prevent. A mechanism whose failure mode is the bug it fixes is the
+// wrong mechanism.
+//
+// RESIDUAL, STATED RATHER THAN SOLVED: a job can bind between this call and the write. The window is
+// the width of an HTTP handler and the failure is the pre-existing one, so it is accepted — but it
+// is not zero, and the way to close it is to make the check and the write share the lock, never to
+// add a retry.
+func (m *Manager) JobsOn(storageID string) []string {
+	if storageID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []string
+	for jobID, sid := range m.jobStorage {
+		if sid == storageID {
+			out = append(out, jobID)
+		}
+	}
+	sort.Strings(out) // deterministic: the message names a job, and a set iteration would vary it
+	return out
 }

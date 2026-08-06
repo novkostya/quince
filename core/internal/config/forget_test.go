@@ -281,18 +281,8 @@ func TestForgetStorageDoesNotMutateAPriorSnapshot(t *testing.T) {
 	}
 }
 
-// The restart notice is a property of the RESPONSE, not of stored state — Replace clears the
-// service's warnings on a valid write, because those describe the file as parsed. This one
-// describes the gap between the file and the running process.
-func TestForgetRestartWarningNamesTheStorageAndTheRemedy(t *testing.T) {
-	w := ForgetRestartWarning("shuttle")
-	if w.Path != "storage" {
-		t.Errorf("warning path: want storage, got %q", w.Path)
-	}
-	for _, want := range []string{"shuttle", "restart", "nothing on the disk was deleted"} {
-		if !strings.Contains(strings.ToLower(w.Message), want) {
-			t.Errorf("the notice must contain %q — it is the only thing that explains a card that "+
-				"has not gone away; got %q", want, w.Message)
-		}
-	}
-}
+// TestForgetRestartWarningNamesTheStorageAndTheRemedy IS DELETED WITH THE FUNCTION IT GUARDED
+// (qn.6g PR 4). It asserted the notice contained the word "restart"; with the storage applier wired
+// there is no restart, so the test could only be kept by keeping a lie. `forget.go` carries why the
+// function went. The coverage it stood for moves to `handlers_config_forget_live_test.go`, which
+// asserts the opposite property — that a successful forget's warnings mention no restart at all.
