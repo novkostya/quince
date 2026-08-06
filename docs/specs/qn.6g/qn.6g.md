@@ -255,9 +255,29 @@ LIVENESS.** Every other refusal there answers *is this a valid set of storages?*
 *is quince busy?*. Both seats named it as the real objection and the ruling was taken with it in
 view. Written into contracts §1 so the next reader meets it as a decision.
 
-**Residual, stated rather than solved:** a job can bind between the check and the write. The window
-is the width of an HTTP handler and the failure is the pre-existing one, so it is accepted — and if
-it is ever worth closing, the way is to make the check and the write share the lock, never to add a
+**THE ORDER IS THE DESIGN, and the first implementation had it backwards.** The declaration refusals
+— default, only-storage — run **before** the liveness check, because a **permanent** refusal must
+outrank a **transient** one. Reversed, a user forgetting their default disk mid-backup is told *"wait
+for it to finish, or cancel it"*, waits out a multi-hour transfer, retries, and is then told *"it is
+the default"* — a remedy that was never going to work.
+
+**Not a corner case: the default storage is where backups go**, so *default and busy* is the ordinary
+state. **Every Go gate passed on the wrong order**; `story8` caught it on the first CI run that
+dispatched, because `--demo` keeps a job running on `internal`, which is also its default. That is
+this rung's clearest instance of ui-e2e answering a question the Go gates could not — and it is worth
+noting that the spec's own G5 did not ask it either: the gate was written as *"a busy storage is
+refused"*, which the wrong order satisfies.
+
+**The check therefore lives INSIDE `ForgetStorage`, passed in as `busyReason func(string) string`.**
+The handler supplies the sentence; `config` decides when to ask. That keeps the config package free
+of the storage subsystem — it receives a string, never a job — while putting the ordering in the one
+place that owns the sequence of refusals, rather than splitting it across a handler `if` and a
+function nobody can see from there.
+
+**Residual, stated rather than solved:** a job can bind between the check and the write. Moving the
+check inside `writeMu` narrows the window from *the width of an HTTP handler* to *two statements*,
+but does not close it — a job binds under `storage.Manager.mu`, which that lock knows nothing about.
+Accepted, and if it is ever worth closing, the way is to make the two locks meet, never to add a
 retry.
 
 **Story 6 changes meaning, and G5 with it.** *A job running on a storage that is forgotten mid-job*
@@ -469,6 +489,7 @@ changed no slice.)*
 | **G3** | Forgetting the default still `422`s, single-storage case included. | CI (Go) |
 | **G4** | A retention edit changes what the next `Prune` keeps, with no restart. | CI (Go) |
 | **G5** | Forgetting a storage with a job bound to it is refused `422`, the message names the job, **and the config file is unchanged** — asserted on the file, not on the response, because a refusal that still writes is the failure this gate exists to catch. The same forget succeeds once the job reaches a terminal state. | CI (Go) |
+| **G5c** | **A storage that is BOTH the default and busy is refused for being the DEFAULT**, and the *wait-or-cancel* remedy is not offered. Added after the fact: G5 as first written was satisfied by the wrong order, and `story8` caught what it missed. | CI (Go) |
 | **G6** | `require_encryption` flipped mid-flight: the running job keeps its answer, the next job gets the new one. | CI (Go) |
 | **G7** | A storage added hot, whose root already holds committed backups, has them **visible without a restart**. | CI (Go) |
 | **G8** | The settings screen's restart copy matches the table: present for a restart-bin field, absent for a live one; Forget's copy carries no restart. | ui-e2e |

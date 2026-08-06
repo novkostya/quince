@@ -418,6 +418,16 @@ on a config endpoint is otherwise a surprise: every other refusal on this route 
 the document, and this one is a statement about the moment. It is the same `{errors:[{path,message}]}`
 shape, at `path: "storage"`, so a client that renders one renders the other.
 
+**THE ORDER IS PART OF THE CONTRACT: the declaration refusals outrank the liveness one.** A storage
+that is both the default and has a backup running on it is refused for being **the default** — the
+permanent reason — and the transient remedy is not offered. Reversed, a user is told *"wait for it to
+finish, or cancel it"*, waits out a multi-hour Wi-Fi transfer, retries, and is then told *"it is the
+default"*: a remedy that was never going to work, which is the same defect as a silent failure.
+
+**Not a corner case, and it shipped in the first implementation.** The default storage is where
+backups go, so *default and busy* is the ordinary state. Every Go gate passed on the wrong order; the
+ui-e2e caught it on the first run, because `--demo` keeps a job running on its default storage.
+
 **The alternative was letting the running job die, and it is forbidden by design §4.** Every write
 phase re-resolves its storage from the job's binding, so a forget landing between verify passing and
 commit completing leaves the commit unable to resolve — and restart-time recovery fails identically,

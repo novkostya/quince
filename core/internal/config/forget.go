@@ -39,12 +39,28 @@ const (
 // could not round-trip them even in principle. Splicing HERE, server-side, over the live parsed
 // config, means the survivors are the same values that were loaded; G5b pins that.
 //
-// It is NOT a live deregistration. `storage.Manager`'s slot list is fixed at construction
-// (only reachability moves), so the process keeps serving the disk until it restarts. That is the
-// ruled behaviour, not a shortcut: the caller SURFACES the restart through the `warnings` channel,
-// and `POST /api/storages/{name}/recheck` keeps answering for the slot still being served, which
-// is runtime truth. Project-wide config→runtime propagation is its own rung (quince#577).
-func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError, []Warning, error) {
+// IT IS NOW A LIVE DEREGISTRATION, and this comment said the opposite until `qn.6g` (quince#577).
+// It read: *"`storage.Manager`'s slot list is fixed at construction … the process keeps serving the
+// disk until it restarts … the caller SURFACES the restart through the `warnings` channel."* The
+// storage applier subscribes to this write, so the slot list moves before this function returns and
+// there is no restart to surface — `ForgetRestartWarning` is deleted below for the same reason.
+//
+// `busyReason` IS WHY THIS TAKES A CALLBACK RATHER THAN IMPORTING ANYTHING. It answers *"is there a
+// reason this storage cannot be forgotten RIGHT NOW"*, returning the sentence to show or `""`. Today
+// the caller's answer is *a backup is running on it* (Operator ruling 2026-08-06, option (b)); this
+// package neither knows nor asks what a job is, which keeps `config` free of the storage subsystem —
+// the direction `qn.6g`'s seam runs. A nil callback means nothing is ever busy.
+//
+// THE ORDER IS THE DESIGN, AND IT IS THE OPPOSITE OF THE FIRST IMPLEMENTATION. The declaration
+// refusals — default, only-storage — run BEFORE `busyReason`, because a **permanent** refusal must
+// outrank a **transient** one. Reversed, a user forgetting their default disk mid-backup is told
+// *"wait for it to finish, or cancel it"*, waits an hour, retries, and is then told *"it is the
+// default"* — a remedy that was never going to work, which is the same defect as a silent failure.
+//
+// NOT A CORNER CASE: the default storage is where backups go, so *default AND busy* is the ordinary
+// state, not an exotic one. The e2e caught it on the very first run (`story8`, `--demo` keeps a job
+// running on `internal`), and the original order had survived every Go gate.
+func (s *Service) ForgetStorage(name string, busyReason func(string) string) (ForgetOutcome, []wire.ConfigError, []Warning, error) {
 	// THE WHOLE READ-MODIFY-WRITE IS UNDER writeMu (quince#665 review). Reading the list, splicing
 	// one entry out and writing the result is three steps; without the lock two concurrent forgets
 	// both read the same list, so the second write silently RESTORES the entry the first removed and
@@ -90,6 +106,18 @@ func (s *Service) ForgetStorage(name string) (ForgetOutcome, []wire.ConfigError,
 				name)
 		}
 		return ForgetRefused, []wire.ConfigError{{Path: "storage", Message: msg}}, nil, nil
+	}
+
+	// THE LIVENESS REFUSAL, third and last (see the ordering note on this function).
+	//
+	// INSIDE `writeMu`, adjacent to the write. That does NOT close the race — a job binds under
+	// `storage.Manager.mu`, which this lock knows nothing about — but it narrows the window from
+	// "the width of an HTTP handler" to "two statements", and it means no other config write can
+	// interleave between asking and acting.
+	if busyReason != nil {
+		if why := busyReason(name); why != "" {
+			return ForgetRefused, []wire.ConfigError{{Path: "storage", Message: why}}, nil, nil
+		}
 	}
 
 	// A NEW SLICE, never a splice in place: Current() hands back a Config whose Storage pointer

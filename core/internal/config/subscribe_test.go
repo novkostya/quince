@@ -236,7 +236,7 @@ func TestForgetStorageNotifiesAppliers(t *testing.T) {
 		return []Warning{{Path: "storage", Message: "noted"}}
 	})
 
-	outcome, errs, warns, err := svc.ForgetStorage("shuttle")
+	outcome, errs, warns, err := svc.ForgetStorage("shuttle", nil)
 	if err != nil || outcome != ForgetDone || len(errs) > 0 {
 		t.Fatalf("forget: outcome=%v errs=%v err=%v", outcome, errs, err)
 	}
@@ -386,7 +386,7 @@ func TestConcurrentForgetsBothTakeEffect(t *testing.T) {
 		wg.Add(1)
 		go func(n string) {
 			defer wg.Done()
-			_, _, _, _ = svc.ForgetStorage(n)
+			_, _, _, _ = svc.ForgetStorage(n, nil)
 		}(name)
 	}
 	wg.Wait()

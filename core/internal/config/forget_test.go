@@ -61,7 +61,7 @@ func TestForgetStorageLeavesTheTreeAlone(t *testing.T) {
 		StorageEntry{Name: "shuttle", Path: shuttle},
 	)
 
-	outcome, errs, _, err := svc.ForgetStorage("shuttle")
+	outcome, errs, _, err := svc.ForgetStorage("shuttle", nil)
 	if err != nil || outcome != ForgetDone || len(errs) != 0 {
 		t.Fatalf("forgetting a non-default storage must succeed; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
@@ -118,7 +118,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if outcome, errs, _, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
+	if outcome, errs, _, err := svc.ForgetStorage("shuttle", nil); err != nil || outcome != ForgetDone {
 		t.Fatalf("forget must succeed; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
 
@@ -211,7 +211,7 @@ func TestForgetStorageRefusesTheDefault(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			outcome, errs, _, err := svc.ForgetStorage(tc.target)
+			outcome, errs, _, err := svc.ForgetStorage(tc.target, nil)
 			if err != nil {
 				t.Fatalf("a refusal is not an error: %v", err)
 			}
@@ -250,7 +250,7 @@ func TestForgetStorageUnknownName(t *testing.T) {
 		StorageEntry{Name: "pool", Path: "/backups", Default: true},
 		StorageEntry{Name: "shuttle", Path: "/mnt/shuttle"},
 	)
-	outcome, errs, _, err := svc.ForgetStorage("nosuch")
+	outcome, errs, _, err := svc.ForgetStorage("nosuch", nil)
 	if err != nil || outcome != ForgetNoSuchStorage || len(errs) != 0 {
 		t.Fatalf("an unknown name is a 404 and nothing else; outcome=%v errs=%+v err=%v", outcome, errs, err)
 	}
@@ -271,7 +271,7 @@ func TestForgetStorageDoesNotMutateAPriorSnapshot(t *testing.T) {
 	held := svc.Current()
 	heldNames := storageNames(held)
 
-	if outcome, _, _, err := svc.ForgetStorage("shuttle"); err != nil || outcome != ForgetDone {
+	if outcome, _, _, err := svc.ForgetStorage("shuttle", nil); err != nil || outcome != ForgetDone {
 		t.Fatalf("forget must succeed; outcome=%v err=%v", outcome, err)
 	}
 
