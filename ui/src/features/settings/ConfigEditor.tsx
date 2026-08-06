@@ -48,7 +48,25 @@ function Field({
 }
 
 // A safe-keys editor over config.yml. PUT replaces the full document (contracts §1); a 422
-// surfaces per-field inline. Restart-required this rung (D12 staging).
+// surfaces per-field inline.
+//
+// NO RESTART IS PROMISED, AND THE REASON IS PER-FIELD RATHER THAN BLANKET (`qn.6g`, quince#577).
+// This header said *"Restart-required this rung (D12 staging)"* and the Save row said
+// *"Saved · restart quince to apply"* unconditionally. Neither is true of anything this form
+// renders:
+//
+//	backup.preferred_transport   LIVE   — the backup applier (qn.6g PR 5)
+//	backup.require_encryption    LIVE   — read per job, off a synchronized field (PR 5)
+//	sessions.ttl_minutes         UNREAD — quince#656; a restart would not make it take effect either
+//	ui.theme                     LIVE   — client-side, from the PUT response
+//
+// Storages are shown read-only here, and are live besides (PR 4).
+//
+// SO THE NOTICE IS DELETED RATHER THAN MADE CONDITIONAL — the smaller change, and the one this
+// form's contents justify: there is no field left to condition it on. **If a restart-required field
+// is ever added here — `sessions.allow_insecure_transport` and `devices.*` are the two bins
+// contracts §6 names — the notice comes back attached to THAT field, never to the Save row.** An
+// unconditional notice over a form of live fields is exactly what this change removes.
 export function ConfigEditor({ config }: { config: Config }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Config>(config);
@@ -198,7 +216,12 @@ export function ConfigEditor({ config }: { config: Config }) {
         <Button type="submit" disabled={mutation.isPending}>
           Save
         </Button>
-        {saved ? <span className="text-xs text-ok">Saved · restart quince to apply</span> : null}
+        {/* "Saved", and NOT "Saved · applied". The stronger word was the first draft and it is a
+            lie about one of the four fields above: `sessions.ttl_minutes` is read by nothing
+            (quince#656), so a save neither applies nor fails to apply — it lands in a file with no
+            consumer. Trading a false restart promise for a false apply promise is not a fix.
+            Surfacing the unread field is quince#656's, and this spec puts it out of scope. */}
+        {saved ? <span className="text-xs text-ok">Saved</span> : null}
         {errFor("") ? <span className="text-xs text-danger">{errFor("")}</span> : null}
       </div>
     </form>

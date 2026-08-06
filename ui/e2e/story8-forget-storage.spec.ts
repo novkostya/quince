@@ -64,7 +64,7 @@ test("forgetting the default storage is refused, in the daemon's own words", asy
 });
 
 // Story 8 end to end, and the MUTATING one, so it is last.
-test("forgetting a non-default storage succeeds and surfaces the restart", async ({ page }) => {
+test("forgetting a non-default storage succeeds and promises no restart", async ({ page }) => {
   await openStorage(page, "shuttle");
 
   await page.getByTestId("storage-forget").click();
@@ -73,14 +73,12 @@ test("forgetting a non-default storage succeeds and surfaces the restart", async
   const done = page.getByTestId("storage-forgotten");
   await expect(done).toBeVisible();
   await expect(done).toContainText(/no longer declared/);
-  // THE RESTART IS SURFACED. Gap B ruled it is never silent, and this is the assertion that the
-  // ruled behaviour reached a browser rather than only a unit test.
-  await expect(done).toContainText(/still serving this disk until it restarts/i);
+  // NO RESTART IS PROMISED (`qn.6g`, quince#577). This asserted the opposite — *"still serving this
+  // disk until it restarts"* — which gap B required while the storage really did stay served. The
+  // applier removed the state that sentence described, so the assertion inverts with the copy.
+  await expect(done).not.toContainText(/restart/i);
+  // And the ruled half survives the deletion, which is the failure mode of removing a sentence.
   await expect(done).toContainText(/[Nn]othing on the disk was deleted/);
-
-  // AND IT DID NOT PROMISE LIVE-APPLY. quince#577 is a separate rung; story 8's copy must not
-  // imply the storage is already gone from the running process.
-  await expect(done).not.toContainText(/immediately|already stopped|no longer in use/i);
 
   // The config really changed — asserted against the API rather than the DOM, because the DOM is
   // what 6b already covers and the point of this file is the wire.
@@ -89,9 +87,21 @@ test("forgetting a non-default storage succeeds and surfaces the restart", async
   const body = (await cfg.json()) as { config: { storage: { name: string }[] } };
   expect(body.config.storage.map((s) => s.name)).toEqual(["internal"]);
 
-  // AND THE CARD IS STILL THERE, which is the ruled behaviour rather than a bug: the process keeps
-  // serving the disk until it restarts, so `GET /api/storages` still lists it. A card vanishing
-  // here would mean live deregistration, which this rung explicitly did not build.
+  // THE CARD IS STILL THERE, AND THE REASON HAS CHANGED COMPLETELY — read this before "fixing" it.
+  //
+  // It used to be the RULED BEHAVIOUR: the process kept serving the disk until it restarted, so a
+  // vanishing card would have meant live deregistration nobody had built. **That is no longer why.**
+  //
+  // It is now a DEMO FIXTURE artefact. `demo.Provider.Storages` returns two hardcoded storages and
+  // is not wired to `config.Service` at all, so a config edit cannot move it. In a real quince the
+  // card is gone the moment the `DELETE` returns — G1 and G2 prove that in Go, against a real
+  // temp-dir storage.
+  //
+  // The spec says so in advance rather than leaving it to be discovered here (`qn.6g` interface
+  // fact 10, and G8's declared limits): **ui-e2e proves the copy and nothing about a disk being
+  // served.** The assertion is kept, because a change in it would mean the demo fixture moved and
+  // this file should know — but it is NOT evidence about live-apply, and reading it as such is the
+  // trap this comment exists to close.
   await page.goto("/");
   await expect(
     page.locator('[data-testid="storage-card"][data-storage-name="shuttle"]'),
