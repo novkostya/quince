@@ -1,8 +1,39 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigEditor } from "./ConfigEditor";
 import type { Config, StorageEntry } from "@/lib/types";
+
+// `updateConfig` is mocked so the post-save branch is reachable. The notice this rung removes lived
+// ONLY in that branch, so a suite that never submits cannot see it — which is how the first version
+// of the test below passed against the unfixed code.
+const saveResult = vi.fn();
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return { ...actual, updateConfig: (c: unknown) => saveResult(c) as Promise<unknown> };
+});
+
+// `window.matchMedia` IS MISSING IN JSDOM AND THE SUCCESS PATH NEEDS IT. `onSuccess` calls
+// `setTheme`, which calls `apply`, which reads `matchMedia("(prefers-color-scheme: dark)")` — so
+// without this stub the save handler throws and the confirmation never renders. It cost a run to
+// find, because the symptom is "the Saved span is absent", which is indistinguishable from the
+// thing the test below is asserting.
+//
+// A STUB RATHER THAN A MOCK OF `setTheme`: the real theme code then runs, so a save that would
+// break theming in a browser still breaks here.
+beforeAll(() => {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+});
 
 // THE CRASH THIS PINS: quince#473 flattened `storage:` from an object to a LIST in Go, and the TS
 // `Config` type kept the old `{ storages, backend, zfs, retention }` shape for a day. The editor
@@ -118,5 +149,66 @@ describe("ConfigEditor labels are associated with their controls", () => {
     ];
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((i) => i !== "")).toBe(true);
+  });
+});
+
+// qn.6g G8's cheap half. The e2e in `story9-settings-copy.spec.ts` walks a browser through a real
+// save; this pins the same claim without one, because a gate that needs Playwright to notice a
+// removed sentence is a gate that runs on a fraction of the pushes.
+describe("ConfigEditor promises no restart", () => {
+  // THE FORM'S OWN FIELDS ARE WHAT DECIDE THIS, so they are asserted rather than assumed. The
+  // notice was deleted rather than made conditional, on the argument that nothing here is
+  // restart-required — and that argument holds only while the form renders these four. A field
+  // from contracts §6's restart bin (`sessions.allow_insecure_transport`, `devices.*`) appearing
+  // here would make the deletion wrong, and this test is what notices.
+  it("renders only fields that are live or unread — the premise of deleting the notice", () => {
+    renderEditor(config([entry()]));
+
+    expect(screen.getByText(/^Preferred transport$/)).toBeInTheDocument();
+    expect(screen.getByText(/Require encryption/)).toBeInTheDocument();
+    expect(screen.getByText(/^Session TTL \(minutes\)$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Theme$/)).toBeInTheDocument();
+
+    // The two restart-bin keys, neither of which this form has ever edited. If either arrives, the
+    // unconditional deletion stops being honest and the notice belongs on THAT field.
+    expect(screen.queryByText(/insecure transport/i)).toBeNull();
+    expect(screen.queryByText(/netmuxd|usbmuxd/i)).toBeNull();
+  });
+
+  // THE TEST HAS TO SAVE, and the first version of it did not — which made it a test that could
+  // not fail.
+  //
+  // It rendered the form and asserted `queryByText(/restart/i)` was null. That passes on the
+  // UNFIXED code too: the notice only ever rendered inside the `saved` branch, so a form that has
+  // not been submitted does not contain it either way. **Mutation testing caught this** — the old
+  // string was put back, the whole suite stayed green, and the assertion was asserting the absence
+  // of something that was never present.
+  //
+  // So `updateConfig` is mocked and the form is actually submitted. What is asserted is the state a
+  // user reaches, which is the only state the notice ever occupied.
+  it("says nothing about restarting quince, after an actual save", async () => {
+    saveResult.mockResolvedValue({
+      config: config([entry()]),
+      warnings: [],
+      source: { path: "/data/config.yml", mtime: null },
+    });
+
+    const { container } = renderEditor(config([entry()]));
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+
+    // THE SUBMIT ACTUALLY HAPPENED. Asserted separately so a harness that stops submitting fails
+    // here, loudly, rather than at the absence-assertion below — where it would read as "the notice
+    // is gone" and be indistinguishable from success.
+    await waitFor(() => expect(saveResult).toHaveBeenCalled());
+
+    // Reaching the confirmation is the precondition for the assertion after it.
+    expect(await screen.findByText(/^Saved$/)).toBeInTheDocument();
+    expect(screen.queryByText(/restart/i)).toBeNull();
+    // And NOT "Saved · applied", which was the first draft of the replacement and is a different
+    // lie: `sessions.ttl_minutes` is read by nothing (quince#656), so a save of it neither applies
+    // nor fails. Trading a false restart promise for a false apply promise is not a fix.
+    expect(screen.queryByText(/applied/i)).toBeNull();
   });
 });

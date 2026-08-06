@@ -86,16 +86,67 @@ describe("ForgetStorage", () => {
     expect(forget).not.toHaveBeenCalledWith("01JSTORAGE-A");
   });
 
-  // THE RESTART IS SURFACED. Gap B ruled it is never silent, and this is the only thing standing
-  // between a success and a card that stays on Home with no explanation.
-  it("says the disk is still being served until a restart, and that nothing was deleted", async () => {
+  // THE ASSERTION INVERTS AS OF `qn.6g` (quince#577), and both halves matter.
+  //
+  // It read *"says the disk is still being served until a restart"*, which gap B required while the
+  // card really did linger. With the storage applier wired it does not linger, so the sentence
+  // describes a state that no longer occurs — and a test asserting it would hold the copy to a
+  // fixed lie. What is asserted instead is the ABSENCE of the promise AND the SURVIVAL of the
+  // ruled half, because deleting a sentence is the edit most likely to take a neighbour with it.
+  it("promises no restart, and still says nothing on the disk was deleted", async () => {
     renderIt();
     fireEvent.click(screen.getByTestId("storage-forget"));
     fireEvent.click(screen.getByTestId("storage-forget-confirm"));
 
     const done = await screen.findByTestId("storage-forgotten");
-    expect(done.textContent).toMatch(/still serving this disk until it restarts/i);
+    expect(done.textContent).not.toMatch(/restart/i);
     expect(done.textContent).toMatch(/[Nn]othing on the disk was deleted/);
+  });
+
+  // THE CONFIRM DIALOG TOO, and separately, because it carried its own copy of the promise
+  // (*"quince will keep serving this disk until it restarts"*). Two sentences in two places, and a
+  // change that removed one and left the other would tell a user about a restart at the moment of
+  // deciding but not at the moment of acting — the worse half to miss.
+  it("the confirm dialog promises no restart either", () => {
+    renderIt();
+    fireEvent.click(screen.getByTestId("storage-forget"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).not.toMatch(/restart/i);
+    // And the ruled sentence is still the one shown before pressing.
+    expect(dialog.textContent).toMatch(/The backups on the disk are not deleted/);
+  });
+
+  // THE NEW REFUSAL NEEDS NO NEW CODE, which is what this test is really pinning.
+  //
+  // `qn.6g` PR 4 added a `422` for a backup running on the storage (Operator ruling 2026-08-06).
+  // `firstError` already renders the server's sentence verbatim, so the job id and both remedies
+  // reach the user through the path built for the default-storage refusal. A client that reworded
+  // refusals would have needed a change here; this one does not, and that is the payoff.
+  it("shows the server's own refusal when a backup is running on the storage", async () => {
+    forget.mockRejectedValue(
+      new APIError(422, "unprocessable", "unprocessable", {
+        errors: [
+          {
+            path: "storage",
+            message:
+              'a backup is running on "shuttle" (job 01JOBRUNNING) — wait for it to finish, or ' +
+              "cancel it, and then forget the storage. Forgetting it now would leave that backup " +
+              "unable to finish writing and unable to clean up.",
+          },
+        ],
+      }),
+    );
+
+    renderIt();
+    fireEvent.click(screen.getByTestId("storage-forget"));
+    fireEvent.click(screen.getByTestId("storage-forget-confirm"));
+
+    const err = await screen.findByTestId("storage-forget-error");
+    // The JOB ID is the whole remedy: "something is running" leaves a user with nothing to find.
+    expect(err.textContent).toMatch(/01JOBRUNNING/);
+    expect(err.textContent).toMatch(/wait for it to finish, or cancel it/);
+    expect(screen.queryByTestId("storage-forgotten")).toBeNull();
   });
 
   // G9's client half: the refusal is the SERVER's sentence, not ours. It names the storage and the
@@ -139,14 +190,26 @@ describe("ForgetStorage", () => {
     expect(err.textContent).toMatch(/could not write config/);
   });
 
-  // The copy must NOT promise live-apply — quince#577 is a separate rung and nothing here builds
-  // toward it. A sentence saying the storage is gone from the running process would be false.
-  it("never claims the storage is already gone from the running process", async () => {
+  // THIS TEST IS DELETED RATHER THAN INVERTED, and the distinction is worth the paragraph.
+  //
+  // It read *"never claims the storage is already gone from the running process"*, forbidding
+  // `immediately|already stopped|no longer in use` because quince#577 was a separate rung. That
+  // rung has landed and the storage IS gone from the running process, so the prohibition is void.
+  //
+  // The tempting move is to invert it — assert the copy now DOES say "immediately". That would be
+  // wrong: the copy deliberately says nothing about the running process at all. It says the
+  // backups survive, and lets the list speak for itself. **An assertion that a specific reassuring
+  // word appears is how copy gets frozen into a shape nobody chose**, and the claim this rung makes
+  // is about behaviour, which G1–G7 prove in Go.
+  //
+  // What survives from it is the `not.toMatch(/restart/i)` above, which is the same guard aimed at
+  // the promise that is actually false now.
+  it("still confirms by NAME after the copy change", async () => {
     renderIt();
     fireEvent.click(screen.getByTestId("storage-forget"));
     fireEvent.click(screen.getByTestId("storage-forget-confirm"));
 
     const done = await screen.findByTestId("storage-forgotten");
-    expect(done.textContent).not.toMatch(/immediately|already stopped|no longer in use/i);
+    expect(done.textContent).toMatch(/shuttle is no longer declared/);
   });
 });

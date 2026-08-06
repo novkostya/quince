@@ -37,8 +37,14 @@ function firstError(err: unknown): string {
 // spelled out a user assumes the button wiped their backups, and the fear is the thing that stops
 // them tidying a stale disk out of their config.
 //
-// It does NOT promise live-apply. The restart is real and stays until quince#577's rung lands, so
-// the copy says so rather than implying the storage is gone from the running process.
+// IT NO LONGER PROMISES A RESTART. This comment read *"the restart is real and stays until
+// quince#577's rung lands, so the copy says so"* — that rung is `qn.6g` and it has landed, so the
+// storage stops being served at the moment of the write and there is no restart to mention.
+//
+// THE REFUSAL SET GREW BY ONE, and it arrives through the same path: `DELETE` now also answers
+// `422` while a backup is running on that storage (Operator ruling 2026-08-06, quince#577). No code
+// here changes for it — `firstError` already renders the server's sentence, which names the job and
+// both remedies — and that is the point of having refused to reword refusals client-side.
 export function ForgetStorage({ storage }: { storage: Storage }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -52,9 +58,23 @@ export function ForgetStorage({ storage }: { storage: Storage }) {
     setError(null);
     try {
       await forgetStorage(storage.name);
-      // The config is what changed, so the config query is what is stale. The STORAGE list is
-      // deliberately NOT invalidated: it still lists this storage, correctly — the process is
-      // still serving it — and refetching would only re-render the same runtime truth.
+      // The config is what changed, so the config query is what is stale.
+      //
+      // THE REASON FOR NOT INVALIDATING THE STORAGE LIST HAS CHANGED, AND SO HAS THE ANSWER TO
+      // "how". This read *"deliberately NOT invalidated: it still lists this storage, correctly —
+      // the process is still serving it"*. False as of `qn.6g`: the storage is gone from
+      // `GET /api/storages` the moment this call returns.
+      //
+      // But there is NO STORAGE QUERY TO INVALIDATE. `useStorages` (features/jobs/useStorages.ts)
+      // is a `useState` + `useEffect` hook with no shared cache, not a react-query one, so
+      // `invalidateQueries` has no key to reach it by. The spec's *"the storage list is
+      // invalidated"* describes a mechanism this codebase does not have.
+      //
+      // It does not need one HERE: this component is on the storage's own details page, and the
+      // only way out of the `done` state is navigating away, which remounts whatever list you land
+      // on and refetches. Stated rather than left as a silent omission — if a storage list is ever
+      // rendered beside this component, it will need a real refresh and this comment is the note
+      // saying so.
       await queryClient.invalidateQueries({ queryKey: configKey });
       setDone(true);
     } catch (err) {
@@ -68,12 +88,18 @@ export function ForgetStorage({ storage }: { storage: Storage }) {
     return (
       <div data-testid="storage-forgotten" className="text-sm">
         <div className="font-medium">{storage.name} is no longer declared.</div>
-        {/* THE RESTART IS SURFACED, never silent — gap B ruled it, and `no silent caps or
-            fallbacks` requires it. Without this line the card stays on Home with no explanation
-            for why a storage the user just forgot is still there. */}
+        {/* THE RESTART SENTENCE IS GONE, and what stays is the half that was never about the
+            restart. It read *"quince is still serving this disk until it restarts"*, which existed
+            because the card DID linger on Home with no explanation. As of `qn.6g` it does not
+            linger, so the sentence explains a state that no longer occurs — and a remedy offered
+            for a problem that is already solved is the same defect as a silent failure, pointing
+            the other way.
+
+            WHAT SURVIVES IS THE RULED HALF (quince#443): you do not delete a disk, you detach it,
+            and the backups stay. That is what stops a user leaving a stale storage in their config
+            out of fear, and it is true whatever the process is doing. */}
         <div className="mt-1 text-muted">
-          quince is still serving this disk until it restarts. Nothing on the disk was deleted — the
-          backups that were there are still there.
+          Nothing on the disk was deleted — the backups that were there are still there.
         </div>
         <Button variant="outline" size="sm" className="mt-3" onClick={() => void navigate("/")}>
           Back to Home
@@ -95,9 +121,10 @@ export function ForgetStorage({ storage }: { storage: Storage }) {
           <DialogDescription>
             Forget removes it from quince. The backups on the disk are not deleted.
           </DialogDescription>
-          <div className="mt-3 text-sm text-muted">
-            quince will keep serving this disk until it restarts.
-          </div>
+          {/* The confirm's own restart line is gone for the same reason as the one above. Nothing
+              replaces it: a dialog that has to explain what will NOT happen is a dialog describing
+              a defect, and after `qn.6g` there is no longer one to describe. The sentence a user
+              needs before pressing is the one above it — the backups are not deleted. */}
           {error !== null ? (
             <div
               role="alert"

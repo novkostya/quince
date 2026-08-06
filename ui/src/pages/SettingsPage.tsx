@@ -7,9 +7,19 @@ export function SettingsPage() {
   return (
     <section>
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+      {/* THE TWO EDITING PATHS DIFFER, AND THIS LINE IS WHERE A USER FINDS THAT OUT (`qn.6g`,
+          quince#577). It read *"changes apply on restart (live reload lands later)"* — false for
+          the form below as of this rung, and this is the only place the difference is stated.
+
+          A change made HERE applies immediately. The SAME change hand-edited into `config.yml` does
+          not, because nothing watches the file — file-watch was ruled into its own rung on
+          2026-08-04, option (a). Saying only *"changes apply immediately"* would be the wider claim
+          this project keeps paying for; saying nothing would leave a hand-editor waiting for an
+          effect that never arrives. */}
       <p className="mt-1 text-sm text-muted">
-        quince is configured by one file, <code className="font-mono">config.yml</code>. Edit safe
-        keys here or by hand; changes apply on restart (live reload lands later).
+        quince is configured by one file, <code className="font-mono">config.yml</code>. Changes made
+        here apply immediately. You can edit the file by hand instead — quince picks those up when it
+        restarts.
       </p>
 
       {isLoading ? <div className="mt-6 text-sm text-muted">Loading…</div> : null}
