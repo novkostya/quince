@@ -256,9 +256,24 @@ type storageTally struct {
 // source: the point of quince#624 is that these three answers cannot drift apart, and they cannot
 // if they are computed together from the same slice.
 //
-// A MISSING version is excluded. Its registry row survives but the artifact is gone, so counting it
-// would claim backups a user cannot restore — and `will_be_full` would say "not a full transfer"
-// about a storage holding nothing usable for that device.
+// A MISSING VERSION IS COUNTED IN `backups` AND `devices`, AND EXCLUDED FROM `hasVersion`. Three
+// questions, three answers — and the demo now gives the same three the daemon gives (quince#661,
+// architect ruling 2026-08-04):
+//
+//	backups / devices  store.CountVersionsByStorage  INCLUDES missing — "a version whose artifact has
+//	                   (no `missing` predicate)       vanished is still history the user should see"
+//	                                                  (qn.6d rung-ruled decision 3)
+//	hasVersion         Slot.hasVersionFor            EXCLUDES missing — "will the next backup be
+//	                   (storages_api.go:173-175)      full" depends on a USABLE artifact
+//
+// THIS FUNCTION USED TO EXCLUDE MISSING FROM ALL THREE, which is the defect quince#661 is about. The
+// demo fabricated nothing; it implemented a DIFFERENT RULE — so `story7`'s assertion that the header
+// equals the sum of its per-device rows was green here and would have been red against the daemon,
+// which counts missing in the header while the client filters it out of the rows.
+//
+// That is a sharper instance of qn.6d's *"a fixture that fabricates a value the live code never
+// produces makes its gate a lie"*: a fixture that answers a different QUESTION is harder to see than
+// one that invents a value, because every number it produces is individually plausible.
 //
 // An UNATTRIBUTED version (nil storage_id) is excluded too, and that is deliberate rather than
 // incidental: it is a real state — the migration that added `storage_id` left older rows null on
@@ -274,16 +289,21 @@ func (p *Provider) tallyLocked() storageTally {
 	}
 	for _, id := range p.verOrder {
 		v, ok := p.versions[id]
-		if !ok || v.Missing || v.StorageID == nil || *v.StorageID == "" {
+		if !ok || v.StorageID == nil || *v.StorageID == "" {
 			continue
 		}
 		sid := *v.StorageID
+		// History: counted whether or not the artifact survives.
 		t.backups[sid]++
 		if t.devices[sid] == nil {
 			t.devices[sid] = map[string]bool{}
 		}
 		t.devices[sid][v.UDID] = true
-		t.hasVersion[verKey{sid, v.UDID}] = true
+		// Restorability: a missing artifact means the next backup transfers everything again, so it
+		// must NOT suppress the full-transfer warning. This is the one filter that stays.
+		if !v.Missing {
+			t.hasVersion[verKey{sid, v.UDID}] = true
+		}
 	}
 	return t
 }

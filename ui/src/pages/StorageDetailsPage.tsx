@@ -89,9 +89,17 @@ export function StorageDetailsPage() {
     //
     // A missing version's registry row survives but its artifact is gone, so counting it tells the
     // user they have a backup they cannot restore. `DeviceCard` already excluded them from its own
-    // "N backups", and the storage's `backup_count` excludes them on the wire — this row was the
-    // one surface that did not, so a storage holding one dead version reported one more backup here
-    // than its own header did. Found by the e2e that sums these rows against that header: 19 vs 18.
+    // "N backups"; this row was the one surface that did not.
+    //
+    // THIS COMMENT SAID `backup_count` EXCLUDES THEM ON THE WIRE. IT DOES NOT (quince#661). The
+    // daemon's `CountVersionsByStorage` has NO `missing` predicate — qn.6d rung-ruled decision 3:
+    // *a version whose artifact has vanished is still history the user should see*. The sentence was
+    // true of the DEMO PROVIDER, which implemented the opposite rule until quince#661 — and the e2e
+    // that "found 19 vs 18" runs against that demo, so it was green over a real disagreement.
+    //
+    // THE TWO NUMBERS MEASURE DIFFERENT THINGS AND NEITHER IS WRONG: the header is backups ever made
+    // here, this row is what can be restored now. They are labelled accordingly below, and their
+    // difference is the number of missing versions rather than a discrepancy.
     //
     // The version LIST below is deliberately NOT filtered this way. A dead version renders there,
     // explicitly dead, with a Remove action (qn.6a) — history is not silently shrunk. It is the
@@ -235,7 +243,12 @@ export function StorageDetailsPage() {
                   data-testid="storage-device-count"
                   className="shrink-0 text-xs tabular-nums text-subtle"
                 >
-                  {here.length} {here.length === 1 ? "backup" : "backups"} here
+                  {/* "restorable", not "here" (quince#661). This counts what can be restored NOW;
+                      the storage header counts everything ever made here, including versions whose
+                      artifact is gone. Both are true and they are different numbers, so each says
+                      which question it answers rather than leaving the difference to read as a
+                      discrepancy. */}
+                  {here.length} restorable
                 </span>
               </div>
               {/* STORY 8'S WARNING USED TO RENDER HERE AND IS GONE — one render site, not two

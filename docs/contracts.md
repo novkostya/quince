@@ -784,8 +784,13 @@ Storage: {
   ...,
   "filesystem_free_bytes":  1200000000000,  // statfs Bavail × Bsize on this storage's path
   "filesystem_total_bytes": 3600000000000,  // NULL when the storage is unreachable, never 0
-  "backup_count":  14,                      // versions attributed to this storage
-  "device_count":  2                        // distinct devices with a version here
+  "backup_count":  14,                      // versions attributed to this storage. MISSING versions
+                                            // COUNT — history the user should still see (qn.6d
+                                            // rung-ruled decision 3). §1 states this beside the same
+                                            // field; THIS copy was silent on it, which is how the
+                                            // demo came to implement the opposite rule with a green
+                                            // e2e sitting over the disagreement (quince#661).
+  "device_count":  2                        // distinct devices with a version here, missing included
 }
 ```
 

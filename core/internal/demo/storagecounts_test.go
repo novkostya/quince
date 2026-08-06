@@ -118,10 +118,18 @@ func TestWillBeFullIsAbsentWithoutADevice(t *testing.T) {
 	}
 }
 
-// A MISSING version must not be counted. Its registry row survives but the artifact is gone, so
-// counting it claims a backup the user cannot restore — and would make `will_be_full` answer "not a
-// full transfer" about a storage holding nothing usable for that device.
-func TestMissingVersionsAreNotCounted(t *testing.T) {
+// A MISSING VERSION IS STILL COUNTED IN backup_count.
+//
+// THIS TEST ASSERTED THE OPPOSITE UNTIL quince#661, and it was what pinned the demo to a rule the
+// daemon does not have. `store.CountVersionsByStorage` has no `missing` predicate — qn.6d
+// rung-ruled decision 3: *a version whose artifact has vanished is still history the user should
+// see*. The demo excluded it, so `story7`'s header-equals-sum-of-rows assertion was green here and
+// would have been red against the daemon.
+//
+// Its old justification — that counting it "claims a backup the user cannot restore" — is a real
+// concern answered by `will_be_full` and by the per-device row, NOT by the header. Three questions,
+// three answers; see tallyLocked.
+func TestMissingVersionsAreStillCountedAsHistory(t *testing.T) {
 	p := seededProvider()
 	before := storageByName(t, p, "internal").BackupCount
 
@@ -129,9 +137,52 @@ func TestMissingVersionsAreNotCounted(t *testing.T) {
 	v.Missing = true
 	p.versions[verHL] = v
 
-	if after := storageByName(t, p, "internal").BackupCount; after != before-1 {
-		t.Errorf("marking a version missing moved backup_count %d → %d, want %d — a gone artifact "+
-			"is still being counted as a backup", before, after, before-1)
+	if after := storageByName(t, p, "internal").BackupCount; after != before {
+		t.Errorf("marking a version missing moved backup_count %d → %d, want it UNCHANGED — the "+
+			"header counts history, and the daemon's own query has no `missing` predicate",
+			before, after)
+	}
+}
+
+// AND THE OTHER SIDE OF THE SPLIT, which is what stops the change above from being a blanket "count
+// everything": a missing artifact must still make the next backup a FULL transfer. If this ever
+// follows backup_count, the demo starts telling a user that a 60 GB transfer is an incremental.
+func TestAMissingVersionStillMeansAFullTransfer(t *testing.T) {
+	p := seededProvider()
+
+	// EVERY version this device has on `internal`, not just one. The first version of this test
+	// marked a single version missing and asserted a full transfer — false, and rightly so: the
+	// phone has a dozen versions there, so one dead artifact leaves plenty to seed from. What
+	// `will_be_full` answers is "is there ANY usable version here", and only emptying the set
+	// exercises it.
+	var target string
+	for id, v := range p.versions {
+		if v.StorageID != nil && *v.StorageID == demoStorageInternal && v.UDID == udidPhone {
+			v.Missing = true
+			p.versions[id] = v
+			target = v.UDID
+		}
+	}
+	if target == "" {
+		t.Fatal("no versions for the phone on `internal` — the fixture changed and this asserts nothing")
+	}
+
+	var checked bool
+	for _, s := range p.Storages(target) {
+		if s.Name != "internal" {
+			continue
+		}
+		checked = true
+		if s.WillBeFull == nil {
+			t.Fatal("will_be_full is null on a device-scoped fetch")
+		}
+		if !*s.WillBeFull {
+			t.Error("a storage whose versions for this device are ALL missing reported an " +
+				"incremental — every artifact is gone, so everything transfers again")
+		}
+	}
+	if !checked {
+		t.Fatal("the `internal` storage was not in the device-scoped list, so nothing was asserted")
 	}
 }
 

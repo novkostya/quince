@@ -59,9 +59,15 @@ function DeviceLabel({ udid }: { udid: string }) {
 function VersionRow({ version, showDevice }: { version: Version; showDevice?: boolean }) {
   // A missing version's artifact is GONE — the row survives (history isn't silently shrunk, (cr)) but
   // it makes NO size claim, offers no Unlock/browse, and gets an "artifact gone — remove?" action.
+  // `data-testid="version-missing"` so a gate can COUNT these rather than match on prose
+  // (quince#661). The storage page's header-minus-restorable invariant needs the number of missing
+  // versions, and deriving it from the copy would break the moment the copy is reworded.
   if (version.missing) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-card border border-dashed border-line bg-card p-4 opacity-80">
+      <div
+        data-testid="version-missing"
+        className="flex items-center justify-between gap-3 rounded-card border border-dashed border-line bg-card p-4 opacity-80"
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <RelativeTime iso={version.created_at} className="text-sm font-medium text-muted" />
