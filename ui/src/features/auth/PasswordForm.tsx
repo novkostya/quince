@@ -50,6 +50,27 @@ export function PasswordForm({
     // the form sits toward the top so the keyboard / Face ID sheet has room below it (dead-centering
     // looks unbalanced once the sheet slides up); on desktop it centers. Safe-area padding keeps it
     // clear of the status bar / side notch (qn.6a soak fixes).
+    //
+    // `dvh` IS RIGHT HERE, AND THE UNIT IS NOT THE THING TO CHANGE (quince#659). An issue was filed
+    // saying the opposite — that `dvh` with the toolbars hidden is "larger than the visible area" —
+    // and that is the definition of `lvh`. Per CSS Values 4 the dynamic viewport equals the SMALL
+    // viewport when the toolbars are expanded and the LARGE one when they retract, so it tracks what
+    // is visible in BOTH states:
+    //
+    //     svh   toolbars retracted: SHORTER than visible  |  expanded: equals visible
+    //     lvh   toolbars retracted: equals visible        |  expanded: TALLER than visible
+    //     dvh   toolbars retracted: equals visible        |  expanded: equals visible
+    //
+    // `min-h-svh` here would make the box shorter than the viewport whenever the toolbars retract —
+    // importing a background band onto the login screen to fix a problem that does not exist.
+    //
+    // WHAT `dvh` CAN DO is lag transiently during the toolbar animation, and whether that lag is a
+    // defect depends on the SCROLL STRUCTURE around it rather than on the unit. `/setup`, `/login`
+    // and `/onboarding/https` are siblings of the `AppLayout` route rather than children
+    // (`router.tsx`), so the DOCUMENT scrolls here and the worst a lag costs is a brief scroll that
+    // resolves itself. In the authed shell — `overflow-hidden`, no document scroll — the same lag
+    // puts content where no scroller reaches it. That is quince#649, and it is a property of that
+    // structure rather than of this unit.
     <div className="flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6">
       <form onSubmit={submit} className="w-full max-w-sm rounded-card border border-line bg-card p-6">
         <div className="text-lg font-semibold tracking-tight">quince</div>
