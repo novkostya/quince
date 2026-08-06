@@ -199,6 +199,10 @@ func (Empty) Versions(string) []wire.Version                { return []wire.Vers
 type StorageReader interface {
 	Storages(udid string) []wire.Storage
 	Recheck(name string) (wire.Storage, bool)
+	// JobsOn reports the jobs currently bound to a storage, so `DELETE /api/config/storage/{name}`
+	// can refuse while a backup is running on it (qn.6g, Operator ruling 2026-08-06 — quince#577).
+	// A READ, which is why it sits here rather than on JobControl.
+	JobsOn(storageID string) []string
 }
 
 // UnavailableStorages stands in when no storage subsystem is wired: an empty list rather than a
@@ -210,3 +214,7 @@ func (UnavailableStorages) Storages(string) []wire.Storage { return nil }
 func (UnavailableStorages) Recheck(string) (wire.Storage, bool) {
 	return wire.Storage{}, false
 }
+
+// No storage subsystem means no jobs bound to one, so a forget is never refused for liveness here.
+// Nil rather than an error, for the same reason the reads above degrade rather than fail.
+func (UnavailableStorages) JobsOn(string) []string { return nil }

@@ -133,3 +133,7 @@ func TestAnEmptyPathSegmentRedirectsAndIsWhyRoutesAreKeyedOnName(t *testing.T) {
 		t.Errorf("the cleaned path must not serve; got %q", status)
 	}
 }
+
+// No jobs — this fake exists for the recheck-by-name path (quince#610) and nothing here runs a
+// backup. Present so it satisfies StorageReader after qn.6g added the liveness read.
+func (s *idlessStorages) JobsOn(string) []string { return nil }

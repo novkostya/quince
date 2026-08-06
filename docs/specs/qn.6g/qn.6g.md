@@ -226,7 +226,48 @@ interface fact 6's windows rather than narrowing them. Removing the current defa
 refused** with a `422` by `qn.6d`'s ruling, so nothing can promote a different storage by removing
 index 0 — that ruling is load-bearing for this rung and is cited, not rebuilt.
 
-## PROPOSED (gap): a live forget KILLS a running backup, and this spec claimed the opposite
+## RULED (was `PROPOSED (gap)`): a forget is REFUSED with a `422` while a backup runs on that storage
+
+**Operator ruling 2026-08-06, option (b)**, relayed by architect session `arch1` —
+[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5208632711). Cited by
+comment URL and self-declared role rather than by login, per quince#47.
+
+`DELETE /api/config/storage/{name}` asks which jobs are bound to that storage and refuses before
+writing: **`storage.Manager.JobsOn(storageID)`**, surfaced on `httpapi.StorageReader` and called in
+`handleConfigStorageDelete`. **In the handler rather than in `config.Service`**, because putting it
+there would make the config package depend on the storage subsystem — backwards, since this rung's
+seam runs storage-subscribes-to-config.
+
+**(a) was ruled out.** The Operator was content with (b) or a cancel-then-forget variant and asked
+for whichever was easier — and that is (b), for a reason about correctness rather than effort:
+cancellation is **asynchronous**, so cancel-then-forget must wait for every affected job to reach a
+terminal state inside an HTTP handler, with a timeout whose expiry lands the forget mid-phase. **A
+mechanism whose failure mode is the bug it fixes is the wrong mechanism.**
+
+**(c) would have amended ROLL-FORWARD, not a retry footnote.** `VerifyWork`, `CommitJob` and
+`Discard` all resolve through `jobSlot`; a forget landing between verify passing and commit
+completing leaves `CommitJob` unable to resolve its slot, and restart-time recovery fails identically
+because the storage is gone from the declaration. `Discard` needs it too, so even the cleanup path
+disappears — a job stranded mid-commit with no way forward or back.
+
+**The cost, accepted rather than discovered: this is the FIRST `422` on that endpoint about
+LIVENESS.** Every other refusal there answers *is this a valid set of storages?*; this one answers
+*is quince busy?*. Both seats named it as the real objection and the ruling was taken with it in
+view. Written into contracts §1 so the next reader meets it as a decision.
+
+**Residual, stated rather than solved:** a job can bind between the check and the write. The window
+is the width of an HTTP handler and the failure is the pre-existing one, so it is accepted — and if
+it is ever worth closing, the way is to make the check and the write share the lock, never to add a
+retry.
+
+**Story 6 changes meaning, and G5 with it.** *A job running on a storage that is forgotten mid-job*
+becomes *a forget that is refused while a job is running*. **The paragraph this block replaced —
+*forgotten and no-longer-in-use differ for the duration of a job* — does NOT come back: under (b)
+they never differ.**
+
+---
+
+### The question as it was asked, kept because the reasoning that lost is what makes a ruling checkable later
 
 **This paragraph asserted the wrong thing, and PR 4 measured it.** It read:
 
@@ -254,8 +295,10 @@ where no job can be in flight. Live apply is what makes it reachable mid-transfe
 `working/` so a retry resumes without re-transferring."* A job killed this way loses the phase it was
 in, and Wi-Fi is the primary transport under the assisted model — the case where hours are at stake.
 
-**PR 4 is HELD.** The wiring is written and is not being merged behind this: shipping the applier
-turns an unreachable refusal into a reachable one, which is a regression introduced by the fix.
+**PR 4 was HELD** — the wiring was written and not merged behind this, because shipping the applier
+alone turns an unreachable refusal into a reachable one, which is a regression introduced by the fix.
+**RELEASED by the ruling above:** PR 4 carries the wiring and the `422` in one diff, so the reachable
+refusal never exists in a merged tree.
 
 - **(a) `ApplyStorages` retains a slot with in-flight jobs bound to it**, dropping it when the last
   finishes. The storage leaves the wire immediately (the user sees it forgotten) while the running
@@ -278,10 +321,15 @@ is ruled, and under (a) or (b) its G5 becomes assertable rather than aspirationa
 
 ---
 
-**Once ruled, the paragraph this replaces becomes true again**, and the consequence it names is the
-one worth keeping: **forgotten and no-longer-in-use differ for the duration of a job**. The storage
-leaves the list immediately; what happens to the job in flight is what the ruling decides. Story 6
-and G5.
+**The paragraph this block replaced does NOT come back.** It survived here for one draft as *"once
+ruled, it becomes true again — forgotten and no-longer-in-use differ for the duration of a job"*, and
+that sentence was written expecting (a). **(b) was ruled**, and under (b) the two never differ: a
+forget either happens, in which case no job was running on it, or it is refused, in which case
+nothing left the list. There is no interval to describe.
+
+Kept as a correction rather than deleted, because *"it becomes true again"* is exactly the shape a
+later reader would restore in good faith — a sentence the spec once asserted, marked as merely
+pending. It is not pending; it lost.
 
 ### The per-setting answer — the actual deliverable
 
@@ -398,8 +446,11 @@ changed no slice.)*
 4. **A retention change takes effect at the next prune**, with no restart.
 5. **A storage added while holding existing backups shows them.** Its versions are reconciled on
    add, not at the next restart.
-6. **A job running on a storage that is forgotten mid-job completes against that storage**, and the
-   storage is gone from the list the whole time.
+6. **A forget is refused while a backup is running on that storage.** `422`, naming the job, and the
+   storage stays in the list and stays declared — the config file is not written. The remedy is in
+   the message: wait, or cancel the job, then forget. (Ruled 2026-08-06, option (b) — this story
+   read *"a job … completes against that storage, and the storage is gone from the list the whole
+   time"* until the gap block above was resolved, and that behaviour was never built.)
 7. **`require_encryption` applies to the next job**, and not to one already running.
 8. **The settings screen only says "restart to apply" when that is true** — for the fields in the
    restart bin, and never for the live ones. Forget's dialog and confirmation stop mentioning a
@@ -417,7 +468,7 @@ changed no slice.)*
 | **G2** | `DELETE /api/config/storage/{name}` → it leaves `GET /api/storages`, a job naming it is refused, and **the tree is asserted untouched** — on the filesystem, not on the API. | CI (Go) |
 | **G3** | Forgetting the default still `422`s, single-storage case included. | CI (Go) |
 | **G4** | A retention edit changes what the next `Prune` keeps, with no restart. | CI (Go) |
-| **G5** | A job started on storage X completes against X after X is forgotten mid-job; the version lands where the job began. | CI (Go) |
+| **G5** | Forgetting a storage with a job bound to it is refused `422`, the message names the job, **and the config file is unchanged** — asserted on the file, not on the response, because a refusal that still writes is the failure this gate exists to catch. The same forget succeeds once the job reaches a terminal state. | CI (Go) |
 | **G6** | `require_encryption` flipped mid-flight: the running job keeps its answer, the next job gets the new one. | CI (Go) |
 | **G7** | A storage added hot, whose root already holds committed backups, has them **visible without a restart**. | CI (Go) |
 | **G8** | The settings screen's restart copy matches the table: present for a restart-bin field, absent for a live one; Forget's copy carries no restart. | ui-e2e |
@@ -466,7 +517,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 | **A rung starts from a spec** | This document, PR 1, reviewed before any code exists. |
 | **Don't improvise architecture** | The one thing the rung ruling did not cover — file-watch versus D12's dated plan — was raised as a gap rather than decided, and is now **RULED (a), 2026-08-04**: propagation only. Nothing was built on it while it was pending, and the ruling changed no slice. The rung letter and the order against quince#591 were handed to the spec explicitly and are recorded as rung-ruled. **The ruling's two canon obligations are carried in PR 6, not treated as discharged by this flip** — a gap answered is not a gap acted on. |
 | **Contracts are stop-and-ask** | No route changes, no wire object changes, no new event kind (decision 4). What *does* change is contracts §6's restart claim, and it changes in the PR that makes it false — which is the docs rule, not a contract gap. |
-| **Never mutate a committed version** | **The rung's sharpest near-miss.** Forgetting a storage removes it from a list; it touches no tree. G2 asserts on the **filesystem**. A job in flight keeps its slot and finishes its commit — roll-forward is preserved exactly, and G5 asserts it rather than assuming it. |
+| **Never mutate a committed version** | **The rung's sharpest near-miss, and the one it got wrong on the first draft.** Forgetting a storage removes it from a list; it touches no tree. G2 asserts on the **filesystem**. This row read *"a job in flight keeps its slot and finishes its commit — roll-forward is preserved exactly"*, and that was **false**: every phase re-resolves through `Manager.jobSlot`, so a live forget strands a job mid-commit with `CommitJob` unable to resolve and `Discard` gone too. Roll-forward is preserved by **refusing the forget** (ruling (b), above), not by the engine holding a copy. G5 asserts the refusal. |
 | **State honesty** | The per-setting table has **three** bins because two would force a false answer for five keys (fact 9). *"Restart to apply"* stops appearing where it is untrue and stays where it is true. An applier that cannot complete emits a warning rather than logging success. Two of the issue's own citations are corrected in fact 5 rather than repeated. |
 | **No silent caps or fallbacks** | This rung exists to close one. Applier warnings ride the `warnings` channel the endpoints already return. The settings that stay restart-required are **named individually with a reason**, which is D12's *"unless the spec says why"* discharged per key rather than in the aggregate. |
 | **Config tidiness (D12)** | The whole point. No new key, no secret, no UI-only state. **Near-miss declared:** `devices.*` and `tls.*` remain restart-required, and D12 permits that only with a stated why — both have one, in the table and in the Boundary. |
@@ -502,11 +553,14 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 
 ## Known gaps and open questions
 
-0. **OPEN AND BLOCKING PR 4: what happens to a job running on a storage that is forgotten.** The
-   `PROPOSED (gap)` above, raised 2026-08-04 by PR 4 and **measured** rather than reasoned — a live
-   forget makes the running job's next phase refuse. This spec claimed the opposite, so the paragraph
-   it replaces was wrong rather than merely incomplete. PR 4 is written and held; PRs 5–7 are
-   unaffected.
+0. **What happens to a job running on a storage that is forgotten** — **RULED 2026-08-06**, option
+   (b): `DELETE /api/config/storage/{name}` refuses `422` while a job is bound to that storage,
+   naming the job. Raised 2026-08-04 by PR 4 and **measured** rather than reasoned — a live forget
+   makes the running job's next phase refuse — so the paragraph it replaced was wrong rather than
+   merely incomplete. No longer open, and no longer blocking: PR 4 carries the ruling in the same
+   diff that flips the block above. **It leaves one canon obligation** — the liveness `422` is a new
+   *kind* of refusal on that endpoint and is written into contracts §1 here, in PR 4, rather than
+   deferred to PR 6, because the code that emits it lands in this diff.
 1. **File-watch** — **RULED 2026-08-04**, option (a): propagation only, file-watch its own rung, its
    letter unallocated. No longer open. The two canon obligations it leaves — re-dating D12 and
    stating the cost in contracts §6 — travel with **PR 6**, and the second is the one this spec
@@ -529,21 +583,27 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 Each carries one reviewable claim and its own proof.
 
 1. **This spec.** **Not** code-owned — `/docs/specs/**` is one of `CODEOWNERS`' declared omissions,
-   so the architect approves it. Only PR 6 below needs `@novkostya`.
+   so the architect approves it. PRs **4** and **6** need `@novkostya`; the rest do not.
 2. **The seam** — `Applier`, `Subscribe`, notify from `Replace` and `ForgetStorage`, warning
    plumbing. No consumer yet, so the claim is *the mechanism exists and fires exactly once per
    write*. Proof: Go tests, including open question 2.
 3. **`Manager` survives a moving list** — `ApplyStorages`, `renderSlot` by name, the three missing
    empty-list guards. **No wiring yet**, so this PR is provable in isolation. Proof: **G9**.
-4. **Storage is wired, AND retention with it** — the applier in `live.go`, including the reconcile on
-   add. Proof: G1, G2, G3, **G4**, G5, G7.
+4. **Storage is wired, AND retention with it, AND the forget is refused while a job runs on it** —
+   the applier in `live.go` including the reconcile on add, plus `Manager.JobsOn` and the `422`.
+   Proof: G1, G2, G3, **G4**, G5, G7.
+
+   **Three claims rather than one, and the bundling is forced.** Shipping the applier alone makes an
+   unreachable refusal reachable mid-transfer — a regression introduced by the fix — so the `422`
+   cannot follow in a later PR. **This makes item 4 code-owned** (it edits `docs/contracts.md` §1)
+   and therefore `@novkostya`'s to approve, which the line under item 1 said only PR 6 would be.
 
    **Retention moved here from item 5, and it is a dependency rather than a preference.** It lives on
    `Slot.Retention` (`slot.go:29`) and `policyFor` reads it off the slot list (`subsystem.go:518`),
    so it reaches `Prune` only through `ApplyStorages` — which is this item. It cannot land earlier.
    **G4 travels with it.**
 
-   **HELD** on the in-flight-forget `PROPOSED (gap)` above.
+   ~~**HELD** on the in-flight-forget `PROPOSED (gap)` above.~~ **Released 2026-08-06 by the ruling.**
 5. **`require_encryption` and `preferred_transport`** — the second and third consumers, which is what
    proves the mechanism is general rather than a storage hook wearing a general name: a different
    package, a different lock, a different shape of state. Proof: G6.

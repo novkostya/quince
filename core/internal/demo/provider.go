@@ -325,3 +325,40 @@ const (
 	demoStorageInternal = "01JSTORAGEDEMOINTERNAL00"
 	demoStorageShuttle  = "01JSTORAGEDEMOSHUTTLE000"
 )
+
+// JobsOn reports which demo jobs are bound to a storage, so the demo answers the liveness refusal
+// the daemon does (qn.6g, quince#577 — a forget is refused while a backup runs on that storage).
+//
+// The demo binds a job's storage the same way the live path does: `Job.storage_id` is set when the
+// job is created and the row survives until it terminates. So "running" here is exactly the states
+// the live Manager's binding map represents — a job that has not reached a terminal state.
+func (p *Provider) JobsOn(storageID string) []string {
+	if storageID == "" {
+		return nil
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var out []string
+	for _, j := range p.jobs {
+		if j.StorageID == nil || *j.StorageID != storageID || terminalJobState(j.State) {
+			continue
+		}
+		out = append(out, j.ID)
+	}
+	// SORTED, because map iteration order is random and this id lands in a user-facing 422. Unsorted
+	// it would name a different job run to run — the same nondeterminism the live Manager's JobsOn
+	// sorts away, for the same reason.
+	sort.Strings(out)
+	return out
+}
+
+// terminalJobState is the demo's copy of "this job is over". The wire enum is
+// `queued … succeeded/failed/cancelled/connection_lost` (wire/objects.go:56); the last four end a
+// job, everything before them means it is still bound to its storage.
+func terminalJobState(state string) bool {
+	switch state {
+	case "succeeded", "failed", "cancelled", "connection_lost":
+		return true
+	}
+	return false
+}

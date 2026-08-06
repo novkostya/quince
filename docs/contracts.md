@@ -364,24 +364,33 @@ Three decided points:
    *make another storage default first*. Exactly one storage is `default`, so on a single-storage
    install the only storage *is* the default; this subsumes the last-storage case that
    `config.Service.Replace`'s `CheckStorages` floor already covers.
-3. **The restart is SURFACED, never silent.** The response carries the same `warnings` the config
-   endpoints already return and the UI shows them — never a silent success over a card that then
-   lingers with no explanation.
+3. **Whatever did not take effect is SURFACED, never silent.** The response carries the same
+   `warnings` the config endpoints already return and the UI shows them — never a silent success
+   over a card that then lingers with no explanation.
 
-**Recheck after a Forget reports RUNTIME TRUTH, marked pending.** `POST
-/api/storages/{name}/recheck` keeps answering for the slot the process is still serving, and the
-card carries *"forgotten · restart to apply"*. Chosen because it is the only answer that stays true
-under **both** models: today the config says gone while the process still serves the disk, so
-runtime truth is exactly right; if live-apply lands later the pending window never arises and the
-same rule `404`s naturally because the slot is gone. A `404`-on-config-edit would be a lie today
-and redundant afterwards.
+   **This point read *"the restart is SURFACED"* until `qn.6g`**, and the change of subject is the
+   whole point: with the applier wired the storage is already gone by the time the response is
+   written, so there is no restart to surface. What the channel carries now is anything an applier
+   could **not** take. The rule is unchanged; the thing it names is.
 
-**General config live-apply is a SEPARATE RUNG and explicitly not `qn.6d`.** The Operator wants hot
-add/remove without a restart; it is scoped as project-wide config→runtime propagation with storage
-as its first consumer. `config.Service` has no `Apply`, `Reload`, `onChange` or `Subscribe` at all,
-so restart-to-apply is the status quo for **every** setting rather than a storage decision — which
-is where D12's *"needs no restart unless the spec says why"* is already being deviated from
-systematically.
+**Recheck after a Forget: THE PENDING WINDOW NEVER ARISES, and this paragraph predicted that.** It
+read *"`POST /api/storages/{name}/recheck` keeps answering for the slot the process is still
+serving, and the card carries `forgotten · restart to apply` … if live-apply lands later the pending
+window never arises and the same rule `404`s naturally because the slot is gone."* Live-apply landed
+in `qn.6g`, so the second limb is the live one: the slot is gone at the moment of the write and
+recheck `404`s. Kept rather than replaced because a rule written to stay true under both models,
+which then did, is worth more as a record than as a tidy sentence.
+
+**General config live-apply was a SEPARATE RUNG and explicitly not `qn.6d`. It is `qn.6g`
+(quince#577), and it has landed** — project-wide config→runtime propagation, with storage as its
+first consumer. This paragraph read *"`config.Service` has no `Apply`, `Reload`, `onChange` or
+`Subscribe` at all, so restart-to-apply is the status quo for **every** setting"*; it now has
+`Subscribe`, and storage is wired to it.
+
+**Restart-to-apply is therefore no longer the blanket status quo, and §6 does not yet say what
+replaced it.** The per-setting verdict — which keys are live, which remain restart-required, and the
+stated why D12 requires for each of the second kind — is owed to §6 by `qn.6g` PR 6. Named here as
+owed rather than left as a gap a reader has to notice.
 
 Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 
@@ -395,8 +404,31 @@ DELETE /api/config/storage/{name}
                   → forget one storage: 200 {config, warnings, source} | 404 | 422.
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
                     see the gap B ruling above for what a reconstructed full document
-                    silently loses. The 200's `warnings` carry the restart notice.
+                    silently loses.
 ```
+
+**Its `422` answers TWO different questions, and the second one is new** (qn.6g, Operator ruling
+2026-08-06 on quince#577). The original asks *is this a valid set of storages?* — forgetting the
+default, or the only storage, is refused. The addition asks *is quince busy?*: **a forget is refused
+while a backup is running on that storage**, and the message names the job so the remedy — wait for
+it, or cancel it — is actionable.
+
+Stated here as a decision rather than left to be met as an inconsistency, because a liveness refusal
+on a config endpoint is otherwise a surprise: every other refusal on this route is a statement about
+the document, and this one is a statement about the moment. It is the same `{errors:[{path,message}]}`
+shape, at `path: "storage"`, so a client that renders one renders the other.
+
+**The alternative was letting the running job die, and it is forbidden by design §4.** Every write
+phase re-resolves its storage from the job's binding, so a forget landing between verify passing and
+commit completing leaves the commit unable to resolve — and restart-time recovery fails identically,
+because the storage is no longer declared. *"A commit failure must not destroy a multi-hour Wi-Fi
+transfer"* is the rule that decides it.
+
+**The 200 carries NO restart notice as of qn.6g.** It used to, and had to: the storage stayed served
+until the process restarted. `config.Service` now propagates the write to the storage subsystem
+before the response is written, so the storage is already gone from `GET /api/storages`. The
+`warnings` channel still carries anything an applier could **not** take — that is what keeps the
+degraded case from being silent.
 
 ### Automation (shape frozen now; implemented in qn.12 — the assisted-backup flow, stack D13)
 
@@ -1212,8 +1244,11 @@ zfs `parent_dataset` would create the same `<parent>/<udid>` per device and each
 which voids every per-storage guarantee this rung adds. quince refuses to serve and names both
 storages and the remedy.
 
-A **restart** is still required to pick up a `storage:` change — D12 permits that only if the spec
-says why, and `docs/specs/qn.6c/qn.6c.md` says why.
+~~A **restart** is still required to pick up a `storage:` change — D12 permits that only if the spec
+says why, and `docs/specs/qn.6c/qn.6c.md` says why.~~ **NO LONGER TRUE as of `qn.6g` (quince#577):
+a `storage:` change — the list, a path, a backend, a zfs block, or retention — takes effect in the
+running process.** The deviation D12 permitted is spent rather than renewed; `docs/specs/qn.6c` still
+says why it was taken, which is the record of a cost that has since been paid off.
 **RULED (was `PROPOSED (gap)`): `storage:` becomes a list of fully-specified storages; `auto`
 REMAINS LEGAL and its removal is descoped to `qn.6e` — `qn.6c`, quince#473, quince#502.** Operator
 ruling 2026-08-02, relayed by architect session `arch1` on quince#500 — a **relay of an out-of-band
