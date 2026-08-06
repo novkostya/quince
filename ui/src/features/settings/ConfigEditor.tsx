@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Config, ConfigFieldError } from "@/lib/types";
@@ -10,11 +10,38 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+// Field pairs a visible <Label> with its control, and ASSOCIATES THEM (quince#629).
+//
+// The label had no `htmlFor` and the controls had no `aria-label`, so nothing connected the two: a
+// screen reader reaching this form announced a combobox with its options and no indication of what
+// it sets. EVERY field here had it, not only the two selects the issue named.
+//
+// `children` IS A FUNCTION, and that is what makes the association possible without touching any
+// primitive. `Field` cannot put an id on an opaque `ReactNode`, so it mints one with `useId()` and
+// hands it down; `Input` and `Select` already spread their props onto the native element, so `id`
+// forwards unchanged and neither needed a change.
+//
+// NOT by nesting the control inside the <label>. Radix associates implicitly that way, but it would
+// restructure every field in the form to fix an attribute — a redesign where an id was asked for
+// (architect ruling 2026-08-04).
+//
+// THE INLINE SELECTS ELSEWHERE KEEP THEIR `aria-label`, AND THAT IS NOT AN INCONSISTENCY.
+// `StorageSelect` and `BackupControls` have no visible <Label> to associate with, so `aria-label` is
+// the right mechanism THERE. Each control uses the one that fits it; do not "unify" them.
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: (id: string) => ReactNode;
+}) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={id}>{label}</Label>
+      {children(id)}
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </div>
   );
@@ -64,25 +91,30 @@ export function ConfigEditor({ config }: { config: Config }) {
           what it does and the hint below says what it does NOT do. No `auto`: as a preference it
           would mean "prefer whatever is already preferred". */}
       <Field label="Preferred transport" error={errFor("backup.preferred_transport")}>
-        <Select
-          value={draft.backup.preferred_transport}
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              backup: { ...draft.backup, preferred_transport: e.target.value },
-            })
-          }
-        >
-          {["usb", "wifi"].map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </Select>
-        <p className="mt-1 text-xs text-muted">
-          Used when a device is reachable over both. A device on only one is always backed up over
-          that one.
-        </p>
+        {(id) => (
+          <>
+            <Select
+              id={id}
+              value={draft.backup.preferred_transport}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  backup: { ...draft.backup, preferred_transport: e.target.value },
+                })
+              }
+            >
+              {["usb", "wifi"].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1 text-xs text-muted">
+              Used when a device is reachable over both. A device on only one is always backed up
+              over that one.
+            </p>
+          </>
+        )}
       </Field>
 
       <label className="flex items-center gap-2 text-sm">
@@ -105,18 +137,26 @@ export function ConfigEditor({ config }: { config: Config }) {
           Editing a storage is quince#443's surface (`qn.6d` — storage becomes visible), and a
           read-only list here would be a second place to keep in step with it. What Settings shows
           instead is nothing, which is honest: this page never edited storages, only the global. */}
+      {/* The id goes on the <p> here rather than a control, because there is no control — this
+          field is read-only prose. `htmlFor` pointing at a non-labelable element is inert rather
+          than wrong, and the alternative (a Field variant with no association) would be a second
+          shape to keep in step for one call site. */}
       <Field label="Storages" error={errFor("storage")}>
-        <p className="text-xs text-muted">
-          {draft.storage === null
-            ? "none declared — quince refuses to start without one (config.yml `storage:`)"
-            : `${draft.storage.length} declared in config.yml — ${draft.storage
-                .map((s) => `${s.name || s.path} (${s.backend})`)
-                .join(", ")}`}
-        </p>
+        {(id) => (
+          <p id={id} className="text-xs text-muted">
+            {draft.storage === null
+              ? "none declared — quince refuses to start without one (config.yml `storage:`)"
+              : `${draft.storage.length} declared in config.yml — ${draft.storage
+                  .map((s) => `${s.name || s.path} (${s.backend})`)
+                  .join(", ")}`}
+          </p>
+        )}
       </Field>
 
       <Field label="Session TTL (minutes)" error={errFor("sessions.ttl_minutes")}>
+        {(id) => (
         <Input
+          id={id}
           type="number"
           min={1}
           value={draft.sessions.ttl_minutes}
@@ -133,21 +173,25 @@ export function ConfigEditor({ config }: { config: Config }) {
             })
           }
         />
+        )}
       </Field>
 
       <Field label="Theme" error={errFor("ui.theme")}>
-        <Select
-          value={draft.ui.theme}
-          // Same shape as above. `ui:` has one key today so nothing is lost yet — which is
-          // precisely why it is worth fixing now rather than when it is a bug.
-          onChange={(e) => setDraft({ ...draft, ui: { ...draft.ui, theme: e.target.value } })}
-        >
-          {["system", "light", "dark"].map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </Select>
+        {(id) => (
+          <Select
+            id={id}
+            value={draft.ui.theme}
+            // Same shape as above. `ui:` has one key today so nothing is lost yet — which is
+            // precisely why it is worth fixing now rather than when it is a bug.
+            onChange={(e) => setDraft({ ...draft, ui: { ...draft.ui, theme: e.target.value } })}
+          >
+            {["system", "light", "dark"].map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </Select>
+        )}
       </Field>
 
       <div className="flex items-center gap-3">

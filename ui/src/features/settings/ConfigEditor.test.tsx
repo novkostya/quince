@@ -77,3 +77,46 @@ describe("ConfigEditor with a flattened storage list", () => {
     expect(screen.queryByText(/^Storage backend$/)).toBeNull();
   });
 });
+
+// quince#629 — EVERY FIELD'S VISIBLE LABEL IS ASSOCIATED WITH ITS CONTROL.
+//
+// The <Label> had no `htmlFor` and the controls had no `aria-label`, so nothing connected them: a
+// screen reader reaching this form announced a combobox with its options and no indication of what
+// it sets. The issue named the two selects; every field in the form had it.
+//
+// ASSERTED THROUGH getByLabelText, WHICH IS THE THING THE USER GETS. A snapshot of `htmlFor` would
+// pass on an id that matches nothing. jsdom computes the accessible name from the `htmlFor`/`id`
+// pair, so this is reachable at the unit layer and needs no browser (architect ruling 2026-08-04).
+describe("ConfigEditor labels are associated with their controls", () => {
+  it("resolves every labelled control by its visible label", () => {
+    renderEditor(config([entry()]));
+    // The two the issue named…
+    expect(screen.getByLabelText("Preferred transport")).toBeInTheDocument();
+    expect(screen.getByLabelText("Theme")).toBeInTheDocument();
+    // …and the Input, which had the same gap and which the issue did not name.
+    expect(screen.getByLabelText("Session TTL (minutes)")).toBeInTheDocument();
+  });
+
+  // The association must reach the RIGHT element, not merely resolve. An id pointing at a wrapper
+  // would still satisfy getByLabelText in some shapes while leaving the control unnamed.
+  it("names the control itself, not a wrapper", () => {
+    renderEditor(config([entry()]));
+    expect(screen.getByLabelText("Preferred transport").tagName).toBe("SELECT");
+    expect(screen.getByLabelText("Theme").tagName).toBe("SELECT");
+    expect(screen.getByLabelText("Session TTL (minutes)").tagName).toBe("INPUT");
+  });
+
+  // Each field mints its OWN id. `useId` guarantees it, and asserting it here is what stops a later
+  // "simplify" from hoisting one id into the parent — which would silently point three labels at one
+  // control and read as fixed.
+  it("gives each field a distinct id", () => {
+    renderEditor(config([entry()]));
+    const ids = [
+      screen.getByLabelText("Preferred transport").id,
+      screen.getByLabelText("Theme").id,
+      screen.getByLabelText("Session TTL (minutes)").id,
+    ];
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((i) => i !== "")).toBe(true);
+  });
+});
