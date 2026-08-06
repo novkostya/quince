@@ -132,8 +132,17 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
           data-testid="storage-counts"
           className="mt-3 flex flex-wrap gap-x-3 text-xs text-subtle"
         >
+          {/* "ever made", not bare "backups" (quince#661). `backup_count` INCLUDES versions whose
+              artifact has vanished — qn.6d rung-ruled decision 3: *a version whose artifact has
+              vanished is still history the user should see*. The storage page's per-device figure
+              counts what is RESTORABLE and is labelled so; the difference between the two is the
+              number of missing versions rather than a discrepancy.
+
+              Two numbers measuring different things were rendered as though one should sum to the
+              other, and an e2e asserted exactly that — green only because the demo implemented the
+              opposite rule from the daemon. */}
           <span>
-            {storage.backup_count} {storage.backup_count === 1 ? "backup" : "backups"}
+            {storage.backup_count} {storage.backup_count === 1 ? "backup" : "backups"} ever made
           </span>
           <span>
             {storage.device_count} {storage.device_count === 1 ? "device" : "devices"}

@@ -179,12 +179,27 @@ test("a device with nothing on this storage is still listed, and carries no deri
 //
 // It also gives qn.6d's G3 something to fail on. G3 asserts a storage page's lists are SCOPED to
 // their storage, and while every device read zero it passed whether the filter worked or not.
-test("the storage header's count equals the sum of its per-device rows", async ({ page }) => {
+// quince#661 — THE HEADER AND THE ROWS MEASURE DIFFERENT THINGS, AND THEIR DIFFERENCE IS THE NUMBER
+// OF MISSING VERSIONS.
+//
+// This asserted `summed === headerBackups`, which ENCODES THE ASSUMPTION THAT WAS WRONG. The header
+// (`backup_count`) counts every version ever committed here, missing artifacts included — the
+// daemon's `CountVersionsByStorage` has no `missing` predicate (qn.6d rung-ruled decision 3). The
+// per-device rows count what is RESTORABLE, excluding missing (quince#624). Both rules are ruled and
+// both are right; equality only ever held because the DEMO implemented the header's rule the other
+// way, so this gate was green over a real disagreement with the daemon.
+//
+// The invariant below is the true one. It is exactly zero when nothing is missing, so it still
+// catches the drift the original was written for — and unlike equality it FAILS IN BOTH DIRECTIONS:
+// if the header stops counting missing, or if the rows start counting them.
+test("the storage header counts history, the rows count what is restorable, and the gap is the missing versions", async ({
+  page,
+}) => {
   await authenticate(page);
 
   const internal = page.locator('[data-testid="storage-card"][data-storage-name="internal"]');
   const header = await internal.getByTestId("storage-counts").textContent();
-  const headerBackups = Number(/(\d+)\s+backups?/.exec(header ?? "")?.[1]);
+  const headerBackups = Number(/(\d+)\s+backups?\s+ever\s+made/.exec(header ?? "")?.[1]);
   expect(headerBackups, "the card must state a backup count").not.toBeNaN();
 
   await internal.locator("a").first().click();
@@ -194,29 +209,33 @@ test("the storage header's count equals the sum of its per-device rows", async (
   await expect(rows.first()).toBeVisible();
 
   // READ THE COUNT ELEMENT, never the row's text. `textContent` concatenates siblings with no
-  // separator, so the model line's trailing "iOS 26.0.1" runs into "15 backups here" and a regex
-  // over the row reads 115. That is not hypothetical — it is what the first version of this
-  // assertion did, and it summed to 189 against a header of 18.
+  // separator, so the model line's trailing "iOS 26.0.1" runs into the count and a regex over the
+  // row reads 115. That is not hypothetical — it is what the first version of this assertion did,
+  // and it summed to 189 against a header of 18.
   const counts = page.getByTestId("storage-device-count");
   await expect(counts.first()).toBeVisible();
   expect(await counts.count(), "every device row states a count").toBe(await rows.count());
 
-  let summed = 0;
+  let restorable = 0;
   for (const cell of await counts.all()) {
     const text = (await cell.textContent()) ?? "";
     // Every row states its own count, INCLUDING the zeros — devices with nothing here are listed
     // rather than filtered, so the sum is over all rows and not just the non-empty ones.
-    const n = Number(/^(\d+)\s+backups?\s+here$/.exec(text.trim())?.[1]);
+    const n = Number(/^(\d+)\s+restorable$/.exec(text.trim())?.[1]);
     expect(n, `a device row must state a count, got: ${text}`).not.toBeNaN();
-    summed += n;
+    restorable += n;
   }
 
-  expect(
-    summed,
-    "the storage header and its per-device rows are computed from different sources again",
-  ).toBe(headerBackups);
-});
+  // The page renders every version for this storage, dead ones explicitly dead (qn.6a), so the
+  // missing count is on screen rather than inferred.
+  const missing = await page.getByTestId("version-missing").count();
 
+  expect(
+    headerBackups - restorable,
+    "the header minus the restorable rows must equal the number of missing versions — if it does " +
+      "not, the two counts have been computed from different rules again",
+  ).toBe(missing);
+});
 // quince#639 — PRESSING `Back up now` ON A STORAGE PAGE MUST SHOW SOMETHING.
 //
 // It started a backup and showed nothing: `busy` is "the POST is in flight", not "a job is
