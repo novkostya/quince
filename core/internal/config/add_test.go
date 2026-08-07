@@ -253,3 +253,47 @@ func TestAddStorageInheritsTheParentDatasetCheck(t *testing.T) {
 		t.Errorf("the inherited refusal lost its reasoning: %+v", errs)
 	}
 }
+
+// THE FIRST STORAGE, WHICH NO OTHER TEST IN THIS FILE ADDS.
+//
+// Every case above seeds `oneGoodStorage` and adds a SECOND storage — where an existing
+// `default: true` already satisfies validateStorages' exactly-one-default rule. So all of them
+// passed while the FIRST add was impossible, which is the one the entire first-run path is made of.
+//
+// The defect: AddStorage appended `entry.Resolved()`, which fills an entry's own defaults but not
+// the rule that is a property of the LIST — a lone storage is default by implication, and that lives
+// in ResolveStorages at parse time. A one-entry list assembled in memory therefore carried
+// `Default: false` and was refused with "exactly one storage must be marked `default: true`".
+//
+// FOUND BY RUNNING A REAL STORAGELESS CONTAINER, not by reading the code. This test is that
+// measurement brought back in-tree, and it FAILS on the unfixed version.
+func TestAddStorageCanAddTheVeryFirstOne(t *testing.T) {
+	// No `storage:` key at all — a fresh install, which is what quince now starts on.
+	svc, path := serviceOver(t, "backup:\n  preferred_transport: usb\n")
+
+	outcome, errs, _, err := svc.AddStorage(newEntry(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != AddDone || len(errs) > 0 {
+		t.Fatalf("THE FIRST STORAGE WAS REFUSED: %+v — a fresh install cannot finish setup, which "+
+			"is the whole of the first-run path", errs)
+	}
+
+	list := *svc.Current().Storage
+	if len(list) != 1 {
+		t.Fatalf("want 1 storage, got %d", len(list))
+	}
+	// AND IT IS THE DEFAULT, by implication rather than by the caller claiming it — `validateAddition`
+	// refuses an entry that sets `default` itself, so quince has to infer it or nobody can.
+	if !list[0].Default {
+		t.Errorf("the only storage is not default; a backup naming no storage would resolve to nothing")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "default: true") {
+		t.Errorf("the implied default was not written to the file:\n%s", b)
+	}
+}
