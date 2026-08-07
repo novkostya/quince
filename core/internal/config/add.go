@@ -64,8 +64,24 @@ func (s *Service) AddStorage(entry StorageEntry) (AddOutcome, []wire.ConfigError
 	next := cur
 	list := make([]StorageEntry, 0, len(existing)+1)
 	list = append(list, existing...)
-	list = append(list, entry.Resolved())
-	next.Storage = &list
+	list = append(list, entry)
+
+	// RESOLVED AS A LIST, NOT ENTRY BY ENTRY, and that is the whole of the first-storage fix.
+	//
+	// This appended `entry.Resolved()`, which fills a single entry's own defaults — name, backend,
+	// zfs mode, retention. It does NOT apply the one rule that is a property of the LIST: exactly
+	// one storage is default, and it is IMPLIED when there is exactly one. That lives in
+	// ResolveStorages, which runs at PARSE time, so a list assembled in memory never received it.
+	//
+	// THE CONSEQUENCE WAS THAT THE FIRST STORAGE COULD NEVER BE ADDED. Against an empty config the
+	// new list is a single entry with `Default: false`, and validateStorages refuses it: "exactly
+	// one storage must be marked `default: true`". Every existing test seeded a storage first, so
+	// all of them added a SECOND one — where an existing default already satisfies the rule — and
+	// none exercised the case the whole first-run path is made of.
+	//
+	// Found by running a real storageless container rather than by reading, which is the only
+	// reason it did not ship (qn.6e).
+	next.Storage = ResolveStorages(&list)
 
 	errs, warns, err := s.replaceLocked(next)
 	switch {
