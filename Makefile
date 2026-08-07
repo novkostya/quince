@@ -373,6 +373,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/gh-analyst \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
+                   deploy/storageless-smoke \
                    deploy/fly-deploy \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
@@ -857,3 +858,7 @@ forge-watch-postmerge-test: ## Post-merge housekeeping does not wake; a post-mer
 loop-drift-test: ## The loop commands inlined in the skills still match loop-protocol.md (quince#54)
 	@bin/loop-drift-test
 	@bin/loop-drift
+
+.PHONY: storageless-smoke
+storageless-smoke: image ## A REAL container from a fresh install to a working storage (qn.6e)
+	@IMAGE=$(IMAGE_NAME):$(APP_TAG) RUNTIME=$(RUNTIME) deploy/storageless-smoke
