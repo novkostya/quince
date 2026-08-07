@@ -1,0 +1,93 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function authenticate(page: Page): Promise<void> {
+  await page.goto("/");
+  await page.waitForURL(/\/(setup|login|devices)/);
+  if (page.url().includes("/setup")) {
+    await page.getByLabel("Password").fill("demo");
+    await page.getByRole("button", { name: /set password/i }).click();
+  } else if (page.url().includes("/login")) {
+    await page.getByLabel("Password").fill("demo");
+    await page.getByRole("button", { name: /sign in/i }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+}
+
+// qn.6e G11 — the add flow end to end, and G10's `+ Add storage` half.
+//
+// THE PROBE RUNS AGAINST A REAL DIRECTORY INSIDE THE DEMO CONTAINER, not a fabricated response.
+// qn.6d's requirement is inherited verbatim: *a fixture that fabricates a value the live code never
+// produces makes its gate a lie.* `--demo` fabricates its STORAGE LIST, but `storage.Inspect` is the
+// live code path here, so the report a user sees is genuinely produced by the daemon statting a
+// path. `/tmp` exists in the container and is writable, which is all the probe needs.
+test("Add storage sits at the foot of Storage, probes a real path, and reports the daemon's own reason", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  // G10's add half: the button is at the foot of its own section, below the cards.
+  const add = page.getByTestId("add-storage");
+  await expect(add).toBeVisible();
+  const storageHeading = page.getByRole("heading", { name: "Storage", level: 2 });
+  const headingBox = await storageHeading.boundingBox();
+  const addBox = await add.boundingBox();
+  expect(headingBox).not.toBeNull();
+  expect(addBox).not.toBeNull();
+  expect(addBox!.y).toBeGreaterThan(headingBox!.y);
+
+  await add.click();
+  await expect(page.getByRole("heading", { name: /add a storage/i })).toBeVisible();
+
+  // Nothing is offered before a probe: the form is probe-first, so there is nothing to save yet.
+  await expect(page.getByTestId("add-storage-save")).toBeDisabled();
+
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+
+  // THE RECOMMENDATION CARRIES THE DAEMON'S OWN SENTENCE, which names the path it probed
+  // (quince#514). Asserted on the path appearing in the reason rather than on a fixed string,
+  // because the backend the demo container's /tmp resolves to depends on its filesystem — and
+  // pinning that would make this gate assert the CI box rather than the product.
+  const select = page.getByTestId("backend-select");
+  await expect(select).toBeVisible();
+  await expect(page.getByText(/\/tmp/).first()).toBeVisible();
+  await expect(page.getByTestId("add-storage-save")).toBeEnabled();
+});
+
+// A REFUSAL ARRIVES AS AN ANSWER, in the same place as a success — which is the whole reason the
+// endpoint returns 200 for it (contracts §1). The user sees the daemon's sentence, beside the same
+// field, and the save stays disabled.
+test("a path that does not exist is answered, not errored, and cannot be saved", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/definitely-not-here");
+  await page.getByTestId("probe-check").click();
+
+  const refusal = page.getByTestId("probe-refusal");
+  await expect(refusal).toBeVisible();
+  await expect(refusal).toContainText("/definitely-not-here");
+  // The sentence that is the whole point of this branch: quince cannot fix a disk that was never
+  // mounted in, and this is the only moment the user is looking.
+  await expect(refusal).toContainText(/inside the container/i);
+
+  await expect(page.getByTestId("backend-select")).toHaveCount(0);
+  await expect(page.getByTestId("add-storage-save")).toBeDisabled();
+});
+
+// THE TIER-3 CONSTRAINT, asserted where it can actually be violated: the rendered page. `zfs: none`
+// means NO SIGNAL, and in hook mode a negative reading is a guaranteed false negative for the
+// supported containerised topology — so the product must never say ZFS is unavailable.
+test("nothing in the add flow claims ZFS is unsupported", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await expect(page.getByTestId("backend-select")).toBeVisible();
+
+  const body = (await page.textContent("body")) ?? "";
+  for (const banned of [/zfs (is )?not supported/i, /zfs unsupported/i, /zfs (is )?unavailable/i]) {
+    expect(body).not.toMatch(banned);
+  }
+});
