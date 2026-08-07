@@ -447,7 +447,17 @@ to any other storage.
   actions — *plug the disk in* versus *this path is readable but it is not your backup medium*.
   `missing_medium` remains the more alarming of the two and its reason says why.
 - **Reachability may change WITHOUT a restart** — re-probe on demand; *plug the disk in and press the
-  button*. The storage **list** still needs a restart (rung decision 1, untouched).
+  button*. ~~The storage **list** still needs a restart (rung decision 1, untouched).~~ **THE LIST IS
+  LIVE AS OF `qn.6g`** (quince#577): a `storage:` edit — membership, a path, a backend, a zfs block or
+  retention — reaches the running `storage.Manager` through the config applier, rebuilt by the same
+  `resolveSlot` a restart uses, so a live apply and a restart cannot disagree about what a storage is.
+  `qn.6c`'s rung decision 1 is **spent rather than overturned**: it was a scope call for that rung,
+  and this is the rung that paid it off. Which keys are live and which are not is contracts §6's
+  per-key table.
+  **One refusal came with it:** forgetting a storage is refused `422` while a backup is running on it,
+  because every write phase re-resolves through the job's binding — so a forget between verify
+  passing and commit completing would strand a job with no way forward and no cleanup path
+  (contracts §1; *a commit failure must not destroy a multi-hour Wi-Fi transfer*).
 
 **The one hard refusal that survives is a config declaring NO storages at all** — a configuration
 error nothing at runtime fixes, whose remedy is editing a file. That is G7, unchanged.
