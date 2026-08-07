@@ -583,7 +583,7 @@ its fresh-install half missing.**
 | **G7** | The written entry's `backend` is one of `zfs\|reflink\|hardlink\|copy` — read back from the YAML, for every branch including an explicit user override. | CI (Go) |
 | **G8** | `Test helper` against **the real `quince-zfs-helper` script**, with `zfs` stubbed: all four outcomes of fact 8, and **empty `list` output reported as success**. | CI (Go) |
 | **G9** | **The string "ZFS not supported" (and its variants) appears nowhere in the built UI bundle** — asserted against the build output, not against a rendered state, because tier 3 is the state that never renders in a test. | CI (UI) |
-| **G10** | The buttons: `+ Add storage` at the foot of Storage **with zero storages declared**, `Rescan` at the foot of Devices, page header text is only *"Home"*, and Rescan's accessible name is unchanged while pending. | ui-e2e |
+| **G10** | The buttons: `+ Add storage` at the foot of Storage **with zero storages declared**, `Rescan` at the foot of Devices, page header text is only *"Home"*, and Rescan's accessible name is unchanged while pending. **SPLIT with PR 7: the Rescan half is `story10-home-actions.spec.ts` and is GREEN; the add half travels with PR 6.** | ui-e2e |
 | **G11** | The add flow end to end in the demo: type a path, Check, see a recommendation and its reason, save, see the card. | ui-e2e |
 | **G12** | A daemon started with no storage serves the storage step and refuses the other APIs; adding one from it needs no restart. | CI (Go) + ui-e2e |
 | **G13** | `make privacy-check REF=origin/main...HEAD TEXT=<file under $HOME/scratch/<runner>/>` | host |
@@ -700,7 +700,10 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
    the hole for the add route only"* until the review pointed at a ruling that predated the spec.
 5. **`zfs.mode: exec` is undeployable with the shipped image** (fact 3) while `Resolved()` still
    defaults to it. This rung works around it in the form and does **not** change the default, which
-   would be a config break. Worth its own issue; filed with PR 2 rather than fixed here.
+   would be a config break. **FILED AS [quince#697](https://github.com/novkostya/quince/issues/697).**
+   This line said *"worth its own issue; filed with PR 2"* while no issue existed and PR 2 had
+   merged — quince#320's defect in miniature, since a deferral aimed at nothing is one nobody can
+   pick up. The issue carries the two measurements and three candidate shapes, and rules none.
 
 ---
 
@@ -717,14 +720,32 @@ Each carries one reviewable claim and its own proof. **Branch each from `main` �
 | **4** | **`POST /api/storages/probe/hook`** — the two-verb helper test and its four outcomes. contracts §1. | **G8** | **`@novkostya`** |
 | **5** | **`POST /api/config/storage`** — `config.AddStorage` mirroring `ForgetStorage`, the refusal order, a concrete backend always. **Carries quince#683's `replaceLocked` edit if that has not landed first**; adds no per-route check either way. contracts §1. | G5, G6, G7 | **`@novkostya`** |
 | **6** | **The add form** — one field, Check, three branches, the zfs sub-form. | G9, G11 | architect |
-| **7** | **The two buttons move** — Rescan to the foot of Devices, `+ Add storage` to the foot of Storage, empty state included. Independent of 2–6. | G10 | architect |
+| **7** | **`Rescan` moves** to the foot of Devices; the page header keeps only *"Home"*. **MERGED** as quince#695. Independent of 2–6, and it went first. | G10, Rescan half | architect |
+| **7b** | **`+ Add storage`** at the foot of Storage, empty state included. **MOVED INTO PR 6** — see below. | G10, add half | architect |
 | **8** | **Canon: `auto` is absorbed** — `contracts.md:1339-1344` and `:1407-1409`, `schema.go:76-81`, design §9's guided-check sentence, `deploy/storage.md`'s note on what the form fires. | review | **`@novkostya`** |
 | **9** | **The first-run path** — the zero-storage serve mode and the onboarding storage step, at `/onboarding/storage` (decision 3). **Released 2026-08-07 by the ruling**; was held. | G12 | architect |
 
-**Order.** 2 → 3 → 4 → 5 → 6. **7 is independent and can go first**, which is worth doing: it is the
-smallest, it is entirely UI, and it settles the placement the form has to land into. 8 lands with or
-after 5, because it must not claim `auto` is absorbed before the code that absorbs it exists —
-`CLAUDE.md`'s most-filed defect, in the direction that matters least but is still wrong.
+**Order.** 2 → 3 → 4 → 5 → 6. **7 was independent and went first**, which was worth doing: smallest,
+entirely UI, and it settled the placement the form lands into. 8 lands with or after 5, because it
+must not claim `auto` is absorbed before the code that absorbs it exists — `CLAUDE.md`'s most-filed
+defect, in the direction that matters least but is still wrong.
+
+**WHY PR 7 SPLIT, recorded because the split contradicts what this table said when it was written.**
+The row read *"the two buttons move"*, and quince#695 moved one. **`+ Add storage` has nowhere to go
+until the form exists**, and a button that opens nothing is a dead affordance — in a rung whose whole
+subject is not asserting what the product cannot support. The empty state it needs is also
+undesignable in isolation, because its copy points at the button.
+
+The original argument for bundling them — that PR 7 *"settles the placement the form has to land
+into"* — still holds for the half that has somewhere to go, and that half landed. So the cost is a
+row in this table, not a design decision.
+
+**Sequencing, not stacking, is why 4, 5, 8 and 9 wait.** Each touches `server.go` or
+`docs/contracts.md`, and PR 3 (quince#696) touches both — so branching any of them from `main` while
+it is open guarantees a conflict, and branching from *its* head is stacking, which quince#388 ruled
+against. Canon accepts exactly this trade: sequencing costs one review cycle, stacking can cost the
+pull request. Recorded here because the table reads as a set of independent items and four of them
+are not.
 
 **9 no longer gates the rung and no longer risks it either.** This read *"if the gap is unruled at
 close, the rung ships with the add flow working on every install that already has a storage, and
