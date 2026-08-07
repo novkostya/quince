@@ -263,6 +263,80 @@ type StorageResponse struct {
 	Storage Storage `json:"storage"`
 }
 
+// StorageProbeRequest is POST /api/storages/probe (qn.6e): what IS this path?
+type StorageProbeRequest struct {
+	Path string `json:"path"`
+}
+
+// StorageProbe answers it. IT IS NOT A Storage AND MUST NOT BECOME ONE — a Storage is declared, has
+// an identity and is being served; this describes a candidate that may never be declared at all.
+// Sharing the object would mean either lying about `id` and `default` or making them nullable on a
+// resource where they are guarantees.
+//
+// Every refusal is carried IN this object rather than as an HTTP status, because "that path does not
+// exist" is the ANSWER to the question asked, not a failure to answer it. Only a malformed question
+// — no path, or one that is not absolute — is a 422. See handleStorageProbe for where that line is
+// drawn and why.
+type StorageProbe struct {
+	// Path is what the client sent, verbatim; CleanPath is filepath.Clean of it. Both, because the
+	// user should see their own typing back and quince acts on the cleaned form.
+	Path      string `json:"path"`
+	CleanPath string `json:"clean_path"`
+
+	// Outcome is the verdict: adopt | new | missing | not_a_directory | unwritable |
+	// corrupt_marker | unreadable. FROZEN — a client renders different prose and a different next
+	// action for each, so adding one is a contract change.
+	Outcome string `json:"outcome"`
+	// Reason is the daemon's own sentence and ALWAYS NAMES THE PATH (quince#514). A client shows it
+	// rather than composing its own, for the reason Storage.unreachable_reason gives: quince knows
+	// which path and which marker, and a client's copy of an enum cannot.
+	Reason string `json:"reason"`
+
+	// Backend is the recommendation (new) or the marker's recorded value (adopt), and is EMPTY on
+	// every refusal. BackendReason is the sentence behind it.
+	//
+	// On adopt it is not a recommendation at all: a storage's backend is written at its creation
+	// moment and is immutable, so the form shows it and offers no selector.
+	Backend       string `json:"backend"`
+	BackendReason string `json:"backend_reason"`
+
+	// Marker is present whenever one was readable, ON ANY OUTCOME — so a client can say "this IS
+	// storage X, and the path is read-only" rather than only the second half. Null otherwise.
+	Marker *StorageProbeMarker `json:"marker"`
+
+	// NonEmpty reports data at the path that is not quince's own. It is a FACT, never a refusal: a
+	// path holding backups from before storage markers existed has no marker and is not empty, and
+	// is exactly what an upgrading operator types.
+	NonEmpty bool `json:"non_empty"`
+
+	// ZFS is path | host | none.
+	//
+	// `none` MEANS NO SIGNAL AND MUST NEVER BE RENDERED AS "ZFS NOT SUPPORTED". In hook mode the
+	// container holds no zfs userland at all and zfs works perfectly through the host helper, so a
+	// negative reading is a guaranteed false negative for the supported containerised topology.
+	// "Not detected", or silence.
+	ZFS string `json:"zfs"`
+
+	// FILESYSTEM, NOT STORAGE, and the names carry that (contracts §2, ruled 2026-08-03). Two
+	// candidate paths on one disk return identical figures and nothing here distinguishes them.
+	// Both zero when the path could not be stat'd.
+	FilesystemFreeBytes  uint64 `json:"filesystem_free_bytes"`
+	FilesystemTotalBytes uint64 `json:"filesystem_total_bytes"`
+}
+
+// StorageProbeMarker is the identity quince found at the path. A SUBSET of the on-disk marker: the
+// checksum is an integrity detail of the file and app_version is quince's own history, neither of
+// which a form has anything to do with.
+type StorageProbeMarker struct {
+	StorageID string `json:"storage_id"`
+	Backend   string `json:"backend"`
+	CreatedAt string `json:"created_at"`
+}
+
+type StorageProbeResponse struct {
+	Probe StorageProbe `json:"probe"`
+}
+
 // HTTPSDetected names WHY step 1 is or is not complete. Values are frozen: a client renders
 // different prose for each, and adding one is a contract change.
 const (

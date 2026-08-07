@@ -113,6 +113,11 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/jobs/{id}/log", deps.handleJobLog())
 	apiMux.HandleFunc("GET /api/storages", deps.handleStorages())
 	apiMux.HandleFunc("POST /api/storages/{name}/recheck", deps.handleStorageRecheck())
+	// NOT auth-exempt, and that is the whole of what has to be said about it: the exempt set is five
+	// literal method+path strings above and this is not one of them, so the guard covers it by
+	// default. GET /api/onboarding/https is pre-auth BY EXACT PATH because you cannot log in without
+	// https; nothing about a storage probe is a prerequisite of logging in.
+	apiMux.HandleFunc("POST /api/storages/probe", deps.handleStorageProbe())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

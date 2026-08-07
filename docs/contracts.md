@@ -287,8 +287,50 @@ Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Addi
 GET  /api/storages                                        → {storages: Storage[]}
 GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
 POST /api/storages/{name}/recheck                          → 200 {storage} | 404
+POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
+
+**RULED and IMPLEMENTED: `POST /api/storages/probe` — what IS this path? (`qn.6e`, quince#502.)**
+
+The add-a-storage probe. It answers one question about a path that is **not declared and may never
+be**, and it answers it **without changing the path**: it never creates a directory and never mints a
+storage marker. Creating and declaring are separate, explicit acts a user takes after seeing the
+answer. `storage.Inspect` carries that guarantee — quince#415's *"NOBODY CREATES A STORAGE ROOT"*,
+reached from the form rather than from startup.
+
+**`probe` is not a `Storage`, and must not become one.** A `Storage` is declared, has an identity and
+is being served. Sharing the object would mean lying about `id` and `default`, or making them
+nullable on a resource where they are guarantees. §2 carries the shape.
+
+**THE 422 LINE IS DRAWN AT THE QUESTION, NOT AT THE ANSWER, and this is the part most likely to be
+"corrected" later.** A `422` means the **question was malformed** — no body, no `path`, or a path
+that is not absolute. Everything the probe can say about a real absolute path is a **`200`, refusals
+included**: *that path does not exist*, *that is a file*, *quince cannot write there* are the answer
+to what-is-this-path, not a failure to answer it.
+
+Three reasons, in the order they decide it:
+
+1. **A form renders a refusal beside the same field, in the same place, as a success.** Statuses
+   would make the client branch twice on one thing.
+2. **A refusal still carries facts** — `marker` and the filesystem figures are reported on refusals
+   too, so a client can say *"this IS storage X, and the path is read-only"* rather than only the
+   second half. A `404` would discard them.
+3. **The non-absolute case is on the `422` side on purpose**, matching `config`'s `validate.go`: a
+   relative path is not one quince could ever store, so the form's refusal and the config's refusal
+   say the same thing about the same string instead of disagreeing.
+
+The `422` body is the shared `{errors: [{path, message}]}` at `path: "path"`, so a client that
+renders one renders this one.
+
+**Not auth-exempt.** `authExempt` is five literal method+path strings and this is not one of them.
+`GET /api/onboarding/https` is pre-auth **by exact path** because you cannot log in without https;
+nothing about a storage probe is a prerequisite of logging in. Stated because the probe touches the
+filesystem on a caller-supplied path, so the guard is load-bearing rather than incidental.
+
+**`probe` is a literal segment beside `/{name}/recheck` and does not shadow it** — they differ in
+segment count, so a storage may even be *named* `probe`. Gated, because a literal added beside a
+wildcard is exactly the shape that bites.
 
 **The `?udid=` form and the re-probe were BUILT by `qn.6c` and never listed here** — they existed
 only in the prose below and in §2's `will_be_full` comment. Listing them is a drift correction, not
@@ -871,6 +913,66 @@ and this section has never documented `unreachable_code` — whose declared valu
 second way, see quince#569.
 
 Spec: `docs/specs/qn.6d/qn.6d.md`, gap A.
+
+### StorageProbe (`qn.6e`)
+
+`POST /api/storages/probe`'s answer. **A candidate, not a resource** — see §1 for why it is not a
+`Storage`.
+
+```jsonc
+{
+  "path":       "/mnt/nas-backups",       // what the client sent, verbatim
+  "clean_path": "/mnt/nas-backups",       // filepath.Clean of it; quince acts on this one
+
+  "outcome": "new",                       // adopt | new | missing | not_a_directory
+                                          // | unwritable | corrupt_marker | unreadable
+  "reason":  "/mnt/nas-backups is usable and holds no quince storage yet",
+
+  "backend":        "reflink",            // "" on every refusal
+  "backend_reason": "FICLONE independence probe passed on /mnt/nas-backups",
+
+  "marker":   null,                       // {storage_id, backend, created_at} when one was readable
+  "non_empty": false,                     // data at the path that is not quince's own
+  "zfs":       "none",                    // path | host | none
+
+  "filesystem_free_bytes":  1800000000000,
+  "filesystem_total_bytes": 2000000000000
+}
+```
+
+**`outcome` is FROZEN.** A client renders different prose *and a different next action* for each, so
+adding a value is a contract change. Five of the seven are refusals and they are deliberately not
+collapsed: *missing* and *unwritable* have different remedies, and a single *unusable* would tell a
+user nothing they could not already see.
+
+**`reason` is the daemon's sentence and always names the path** (quince#514). A client shows it
+rather than composing its own, for the reason `unreachable_reason` gives one section up: quince knows
+which path and which marker, and a client's copy of an enum cannot.
+
+**`marker` is reported on ANY outcome**, not only on `adopt` — so a form can say *"this IS storage X,
+and the path is read-only"* rather than only the second half. It is a **subset** of the on-disk
+marker: no `checksum`, no `app_version`. Those are quince's own integrity detail and version history,
+and publishing them would freeze them into a form's contract.
+
+**`backend` on `adopt` is not a recommendation.** A storage's backend is written at its creation
+moment and is immutable; a later probe that disagrees is a remount, not a re-selection. The form
+shows it and offers no selector.
+
+**`non_empty` is a FACT, never a refusal.** A path holding backups from before storage markers
+existed has no marker and is not empty, and is exactly what an upgrading operator types.
+
+**`zfs: "none"` MEANS NO SIGNAL AND MUST NEVER BE RENDERED AS *"ZFS not supported"*.** In `hook` mode
+the container holds no `zfs` userland at all and zfs works perfectly through the host helper, so a
+negative reading is a **guaranteed false negative for the supported containerised topology** — the
+one most deployments use. *Not detected*, or silence; never a capability claim. This is the
+no-silent-caps rule pointed the other way: **do not assert an absence you cannot observe.**
+
+**The filesystem prefix carries the same meaning as on `Storage`** and for the same reason: two
+candidate paths on one disk return identical figures and nothing here distinguishes them. Both are
+`0` when the path could not be stat'd — a probe of a missing path has nothing to measure, and unlike
+`Storage` there is no reachable/unreachable axis to hang a `null` on.
+
+Spec: `docs/specs/qn.6e/qn.6e.md`.
 
 ## 3. WebSocket (`/api/ws`)
 
