@@ -348,7 +348,7 @@ else
 	printf '       %s\n' "$LAYER_OUT" | head -n 3
 fi
 if printf '%s\n' "$LAYER_OUT" | grep -q "$CODER" &&
-	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-arch'; then
+	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-review, gh-arch'; then
 	ok "the refusal names the credential found and the wrappers tried"
 else
 	bad "the refusal does not say what it found or what it tried"
@@ -380,16 +380,61 @@ else
 fi
 # The control, and the reason (c) is not vacuous: with only gh-arch usable the username must CHANGE.
 # A hardcoded `x-access-token` would satisfy the assertion above and break the architect box.
+#
+# `mkwrapper gh-review 1` IS EXPLICIT rather than relying on the file's absence (quince#674). Before
+# `gh-review` joined the search list this row passed because the fixture never created it; that made
+# the control's meaning depend on an omission, so adding the wrapper anywhere above would have
+# silently turned it into a different test.
 clear_creds
 place "$ARCH"
 place "$REVIEW"
 mkwrapper gh-coder 1
+mkwrapper gh-review 1
 mkwrapper gh-arch 0
 runl arch
 if printf '%s\n' "$LAYER_OUT" | grep -q 'username novkostya'; then
 	ok "a working gh-arch selects the PAT username instead (the control)"
 else
 	bad "the username did not follow the wrapper — the arch seat would break"
+	printf '       %s\n' "$LAYER_OUT" | head -n 4
+fi
+
+# (c2) THE ARCH BOX AS IT ACTUALLY IS — quince#674, and the row this change exists for.
+#
+# No `gh-coder` (decisions/0007: the box that approves must not hold the identity that authors) and
+# no architect PAT (the Operator deleted it on 2026-08-06). Before this change `layer_wrapper`
+# searched only those two, found neither, and the private layer's clone was left on a hand-written
+# helper reading a token that no longer exists — unable to fetch, so the privacy pattern list froze
+# while the gate went on reporting `clean`.
+clear_creds
+place "$REVIEW"
+mkwrapper gh-coder 1
+mkwrapper gh-review 0
+mkwrapper gh-arch 1
+runl arch
+if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token' &&
+	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-review'; then
+	ok "the arch box's real shape — only gh-review usable — selects it, as an App"
+else
+	bad "gh-review was the only usable wrapper and was not selected; the private layer stays frozen"
+	printf '       %s\n' "$LAYER_OUT" | head -n 4
+fi
+
+# (c3) ORDER: THE APP WINS OVER THE PAT WHEN BOTH WORK, so a box still carrying the architect token
+# MIGRATES on its next provision instead of pinning itself to a credential that is being deleted
+# (quince#676). This is the half a plain "gh-review is in the list" change would not give: appending
+# it AFTER `gh-arch` satisfies (c2) — where gh-arch is broken — and fails here.
+clear_creds
+place "$ARCH"
+place "$REVIEW"
+mkwrapper gh-coder 1
+mkwrapper gh-review 0
+mkwrapper gh-arch 0
+runl arch
+if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token'; then
+	ok "with BOTH usable the App is preferred, so a re-provision migrates off the PAT"
+else
+	bad "the PAT won over the App — a re-provision would re-pin the box to a credential being deleted"
 	printf '       %s\n' "$LAYER_OUT" | head -n 4
 fi
 
