@@ -383,7 +383,8 @@ live mounted filesystems and uploads whatever is there. The rule:
   `working/` and the exchange. Offsite on zfs must read a snapshot mount instead, and quince must be
   excluded from a general whole-host rclone job and handled separately. **The Operator accepted this
   explicitly**: the tolerance requirement *"is probably not worth the complexity it brought to
-  users."* Building the snapshot-sourced path is roadmap M5 point 3, not the ruling.
+  users."* **Building the snapshot-sourced path is NOT the ruling and is tracked on quince#735** —
+  which also records that nothing else tracked it, so an accepted cost had no owner.
 
   ```
   --filter "- /iphone-backup/*/working/**"
