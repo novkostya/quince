@@ -10,6 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { addStorage, checkStorageHook, configKey, probeStorage } from "@/lib/config";
+import { DocLink } from "@/components/DocLink";
 import { APIError } from "@/lib/api";
 import type { ConfigFieldError, StorageHookCheck, StorageProbe } from "@/lib/types";
 
@@ -94,7 +95,7 @@ function ProbeResult({ probe }: { probe: StorageProbe }) {
       {probe.zfs === "host" ? (
         <div className="mt-2 text-muted">
           This host has ZFS. A storage on a ZFS dataset gets snapshot versioning with no copy at
-          commit — see deploy/storage.md.
+          commit — see <DocLink path="deploy/storage.md" />.
         </div>
       ) : null}
     </div>
@@ -315,7 +316,7 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
             <div className="text-sm">
               quince can&apos;t run <code>zfs</code> from inside its container — that&apos;s normal.
               It calls a helper on the host over SSH instead, which you install first: see{" "}
-              <code>deploy/storage.md</code>.
+              <DocLink path="deploy/storage.md" />.
             </div>
 
             <label className="mt-3 block text-sm font-medium" htmlFor="zfs-parent">
