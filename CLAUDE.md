@@ -133,13 +133,19 @@ repo is not a message bus, and no human is an RPC layer.
      head and **that base has merged AND its branch was deleted**, the forge reports `DIRTY` and
      **the PR is already closed** — GitHub closes a dependent whose base branch is gone rather than
      retargeting it. Nothing is owed to a resolver, because there are no lines to choose between.
-     **The deletion is the trigger, not the merge** — `gh pr merge --rebase` without
-     `--delete-branch` leaves the base standing and the dependent open, which is why §6's guard is
-     written against `--delete-branch` specifically. Stated precisely because the only measurement
-     confounds them: quince#384 closed one second after quince#377 merged with `--rebase
-     --delete-branch`, a single act. Canon behaves as though deletion is the cause because that is
-     what §6 guards; nobody has separated them experimentally, and the instruction below is correct
-     either way (quince#402 review).
+     **The deletion is the trigger, not the merge** — but **OMITTING `--delete-branch` DOES NOT SAVE
+     A DEPENDENT ON THIS REPOSITORY, and reaching for that as a mitigation is the trap** (devlog#214).
+     `delete_branch_on_merge` is **`true` repo-wide on `novkostya/quince`**, so the head branch is
+     deleted on **every** merge whatever flags you pass — measured 2026-08-07, and demonstrated the
+     same day when quince#684 was merged **without** the flag and its branch was gone seconds later,
+     taking an in-flight push with it. This paragraph read *"`gh pr merge --rebase` without
+     `--delete-branch` leaves the base standing and the dependent open"* until then; it is true of
+     `novkostya/quince-devlog`, where the setting is `false`, and false here. **Retarget the dependent
+     first — §6's guard is the only thing that works.** Stated precisely because the only measurement
+     of the *trigger* confounds them: quince#384 closed one second after quince#377 merged with
+     `--rebase --delete-branch`, a single act. Canon behaves as though deletion is the cause because
+     that is what §6 guards; nobody has separated **that** experimentally, and the instruction below
+     is correct either way (quince#402 review).
      **The author's natural next action destroys it**: rebasing onto the new `main` is correct for a
      stacked branch whose base landed, and it force-pushes the head, after which no seat can reopen
      the PR — `state cannot be changed. The <head> branch was force-pushed or recreated`. Routing
@@ -237,12 +243,11 @@ repo is not a message bus, and no human is an RPC layer.
    from an exit code) and merged **unattended** at `12:50:50Z`, four minutes later, when the checks
    went green.
 
-   **This paragraph read `(unmeasured)` for eighty minutes after the ruling that created it**, while
-   seven PRs were merged with the pre-ruling verb by the seat that could have cleared it — the
-   Operator asking *"did you probe auto-merge?"* is the only reason it was. **A `(unmeasured)` is a
-   debt, not a decoration**: it names an experiment nobody has run, and the seat that meets one should
-   run it rather than route around it. Kept because the instruction it carried — *first use measures
-   it* — is exactly what did not happen on its own.
+   **A `(unmeasured)` is a DEBT, not a decoration.** It names an experiment nobody has run, and the
+   seat that meets one should run it rather than route around it — a marker left standing is a
+   question that stays open by default, because the seat able to close it is the one already busy
+   working past it. There is a live instance in this file: the App's write under
+   `.github/workflows/**` is `(unmeasured)`, and one `PUT` settles it.
 
    **Arm it on a PR that is APPROVED WITH CHECKS RUNNING.** That is the case it exists for, and the
    probe made the boundaries clear: **auto-merge does not rebase**, so one armed on a `BEHIND` branch
@@ -275,11 +280,17 @@ repo is not a message bus, and no human is an RPC layer.
   at `~/.config/quince/quince-bot.token`. Never print a token or put one in argv, a
   remote URL, a commit, or a PR body; feed it to git through a credential helper and to
   `gh` through `GH_TOKEN`.
-- The token is scoped to this repo and has **no `workflow` scope** — and **neither does the
-  architect's**. Measured (quince#113): a `PUT` under `.github/workflows/**` returns `403
-  Resource not accessible by personal access token`, while an ordinary contents write to the
-  same branch succeeds. **No PAT seat can push a workflow** — neither the implementer's nor the
-  architect's. The Operator always can (an SSH push consults no OAuth scope). `quince-review[bot]`
+- The token is scoped to this repo and has **no `workflow` scope**. Measured (quince#113): a `PUT`
+  under `.github/workflows/**` returns `403 Resource not accessible by personal access token`, while
+  an ordinary contents write to the same branch succeeds. **No PAT seat can push a workflow.**
+  **THE ARCHITECT IS NO LONGER ONE OF THEM, and this bullet asserted it was until 2026-08-07**: it
+  read *"neither does the architect's … neither the implementer's nor the architect's"*, which was a
+  claim about a PAT the Operator has since deleted (quince#676). **The architect seat now holds
+  `quince-review[bot]` and nothing else**, so the live question is the App's grant, immediately below
+  — not a PAT refusal. Corrected rather than deleted because a session that reads a present-tense
+  `403` here concludes it is blocked and follows this bullet's own escalation, which would now be
+  unnecessary work against a seat that may hold the grant.
+  The Operator always can (an SSH push consults no OAuth scope). `quince-review[bot]`
   **declares `workflows: write`** — measured 2026-07-29 by asking `GET /app` with a JWT signed from
   the reviewer key, which returns the App's permission set; note that `bin/gh-review` cannot make
   that call, because it mints *installation* tokens and the endpoint wants a JWT. That is the
@@ -293,7 +304,11 @@ repo is not a message bus, and no human is an RPC layer.
   the PR thread, say plainly in the PR that the check is built and **unwired**, and open an
   issue for the wiring — rather than working around it, or escalating to a seat that cannot
   do it either.
-- The architect reviews/approves/merges as the repo owner; the Operator is admin of last
+- The architect reviews/approves/merges **as `quince-review[bot]`, not as the repo owner** — this
+  read *"as the repo owner"* until 2026-08-07, which was true only while `bin/gh-arch` gave that seat
+  the `novkostya` login (quince#676). It matters rather than being a wording fix: an architect acting
+  as the repo owner **cannot** review a PR the Operator authored (GitHub refuses an author's own
+  approval, quince#47), which is the deadlock the App exists to break. The Operator is admin of last
   resort and the approver for architect-authored docs.
 
 **RULED (was `PROPOSED (gap)`): a third forge identity for the supervisor seat — `quince-analyst`
