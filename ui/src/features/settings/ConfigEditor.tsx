@@ -159,11 +159,19 @@ export function ConfigEditor({ config }: { config: Config }) {
           field is read-only prose. `htmlFor` pointing at a non-labelable element is inert rather
           than wrong, and the alternative (a Field variant with no association) would be a second
           shape to keep in step for one call site. */}
+      {/* THE ZERO-STORAGE COPY WAS FALSE FROM THE MOMENT qn.6e LANDED. It read "quince refuses
+          to start without one", which was true until the Operator ruled that any zero-storage
+          start IS the onboarding state (2026-08-07, quince#502): quince now SERVES and refuses
+          every API outside setup instead of exiting.
+
+          Reachable, and by the one reader most likely to be misled: this branch renders only
+          when `storage` is null, which is exactly the first-run install now able to reach
+          Settings at all. Before the ruling it was nearly dead code. */}
       <Field label="Storages" error={errFor("storage")}>
         {(id) => (
           <p id={id} className="text-xs text-muted">
             {draft.storage === null
-              ? "none declared — quince refuses to start without one (config.yml `storage:`)"
+              ? "none declared — quince is serving SETUP ONLY until you add one (config.yml `storage:`)"
               : `${draft.storage.length} declared in config.yml — ${draft.storage
                   .map((s) => `${s.name || s.path} (${s.backend})`)
                   .join(", ")}`}
