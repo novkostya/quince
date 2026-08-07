@@ -57,9 +57,14 @@ is not built, quince keeps working exactly as it does today.
 - **The version model.** Markers, verify, retention, adopt, prune, browse and
   reconcile-from-snapshots are unchanged, because the snapshot still contains `latest/`, byte for
   byte the tree it contains today. This rung changes only how `latest/` gets filled.
-- **Data migration.** Operator note, 2026-08-08: sole user, no `v0.1` tag. Existing `@quince-*`
-  snapshots keep working **without a compatibility path**, because the layout inside a snapshot does
-  not move. The one migration is a single hand-edit of the host helper, and it is unavoidable.
+- **Data migration, and a migration PROCEDURE for the helper.** Operator ruling relayed 2026-08-08:
+  *"I am the only quince user for now and there was no v0.1 release tag yet — so migration is out of
+  the table."* Existing `@quince-*` snapshots keep working **without a compatibility path**, because
+  the layout inside a snapshot does not move. **There is no fleet**, so quince#591's build item 5 —
+  *"the reference helper, and a migration note"* — is discharged by a **one-line changed-verbs note**
+  (`seed)` out, `rollback)` in) rather than an upgrade procedure. `deploy/storage.md`'s `qn.5b`
+  `mirror)` → `seed)` block is the shape **not** to copy: that was written for operators who did not
+  exist.
 - **A btrfs-native twin.** The sibling named in the **(cl) storage epic's point 8**
   (`quince-devlog/roadmap.md:696` onward — **not** M5, which has no numbered points and no storage
   items). No snapshot-capable non-zfs tester exists.
@@ -277,19 +282,64 @@ is why it has its own story and its own gate.
 
 ### D4 — Sub-question 2: rollback under load
 
-**Not asserted, and deliberately not designed around.** The ruling requires this measured on the real
-topology, and no session can measure it. What is settled without the measurement:
+**The question, stated plainly.** Does `zfs rollback` succeed against a device dataset that is
+**mounted into a running container, with quince live and possibly holding open handles under it**?
+
+**The measurement is OWED and this spec does not assert either answer** — Operator ruling,
+2026-08-08, relayed on quince#591. The 2026-08-04 ruling asked for this answered *in the spec*, which
+was unsatisfiable by the seat holding the work: quince#730 records that no agent seat can reach a
+real ZFS host, `zfs` is stubbed in every test, and the gate's owner is *"whoever has the ZFS host."*
+**What moved is only where the empirical answer lands: the measurement is declared owed here and
+BLOCKS the implementation PR; the spec is complete without it.**
+
+**So both answers are designed for, as behaviour rather than as an error path discovered later.**
+That is the ruling's requirement and it is a stronger guarantee than measuring one case and assuming
+it generalises.
+
+**What is settled regardless of the outcome:**
 
 - **quince's own writer can never race it** (fact 11): reset is already `409`ed while a backup runs.
-- **quince's readers mostly are not there**: browse on zfs reads `.zfs/snapshot/...`, never `latest/`
-  (fact 12), so the obvious open-handle source is absent by construction.
-- **There is no force flag** (fact 9): `-f` forces an unmount of *clones*, under `-R` only.
-- Therefore the design treats a rollback as fallible and surfaces the failure (D3), which is correct
-  whichever way the measurement lands.
+- **quince's readers are largely absent**: browse on zfs reads `.zfs/snapshot/…`, never `latest/`
+  (fact 12), so the obvious open-handle source is gone by construction.
+- **There is no force flag** (fact 9): `-f` forces an unmount of *clones*, under `-R` only. Neither
+  answer can be engineered around with a flag.
 
-**What the measurement decides** is only whether a *retry* or an operator-facing remedy is worth
-building. **Gate H2 below is owed, and its owner is the Operator** — it needs the staging stand.
-Until it runs, this spec claims nothing about whether a rollback succeeds against a mounted dataset.
+#### Answer A — the rollback SUCCEEDS
+
+Reset behaves as D3 describes: the head returns to the newest committed version, `working/` and the
+sentinel are gone (the rollback removes them, since they were not in the snapshot), `202`, one audit
+line. **Nothing further is built.**
+
+#### Answer B — the rollback FAILS
+
+Two shapes, one outcome. **B1**: it fails fast — `dataset is busy` or similar on stderr. **B2**: it
+blocks and is cut off by `zfsOpTimeout` (60 s), so the failure is a timeout. Both produce:
+
+- **non-2xx from `RepairWorking`, carrying the reason verbatim** — the helper's or `zfs`'s own words,
+  not a paraphrase, because the operator's next action depends on which it was;
+- **the head left dirty and the sentinel left in place.** Nothing is half-undone, and the job's
+  resume state survives — which matters, because a failed reset must not cost what a failed *job* is
+  guaranteed to keep;
+- **no audit line**, since nothing was discarded;
+- **no automatic retry.** A retry is the identical call against the identical mount and would only
+  spend the timeout again. If the cause is transient the operator repeats the action; quince does not
+  decide that on their behalf.
+
+**The remedy is named in the message and it is an operator action on the host**, because there is no
+in-product one: stop or restart the container so the dataset is not mounted, then reset. Saying so is
+the whole of quince's job here — *no silent caps or fallbacks*.
+
+**Rejected under answer B: emptying `latest/` in-container as a fallback.** It is available, it is
+non-destructive to versions (the committed content is in the snapshot), and it would make reset
+"work" — and it is wrong twice. It silently converts an abandon into a state where the next backup is
+a **full multi-hour transfer**, and it does so at the moment the user asked for the cheap operation.
+A refusal that names the remedy is better than a success that costs tens of gigabytes without saying
+so.
+
+**What the measurement therefore decides** is not the design but two narrower things: whether the
+answer-B path is dead code or the common case, and whether 60 s is the right bound for a verb that
+may block on a busy mount. **Gate H2 is owed, its owner is the Operator, and it blocks the
+implementation PR** — see the PR slicing table.
 
 ### D5 — Sub-question 3: `Info.plist`
 
@@ -380,8 +430,10 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
    afterwards equals the newest committed version.
 6. **Reset with no snapshot empties the head**, having asserted from `ListSnapshots` that no
    committed version exists — not having assumed it.
-7. **A failed rollback is surfaced, never swallowed.** Non-2xx, the reason in the message, the head
-   still dirty, the sentinel still present, and no audit line claiming a discard.
+7. **A failed rollback is surfaced, never swallowed** — D4 answer B. Non-2xx, `zfs`'s own reason
+   quoted verbatim rather than paraphrased, the head still dirty, the sentinel still present, no
+   audit line, **no automatic retry**, and the message names the operator action that is the only
+   remedy. Both failure shapes: a fast `dataset is busy`, and a block cut off by `zfsOpTimeout`.
 8. **`Info.plist` in the committed version is the one the tool wrote for that job**, with no
    capture/restore step and with `--gate` not passed.
 9. **The namespace backends are untouched.** Seed, exchange, archive, `--gate` and Finding B's
@@ -405,7 +457,7 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
 | **G2** | The snapshot contains **only** `latest/` — asserted on the filesystem after commit, not on the API. | CI (Go) |
 | **G3** | A killed job leaves the head dirty and the shim in place; the next `PrepareWork` resumes it, and nothing calls rollback. | CI (Go) |
 | **G4** | `RepairWorkingCopy` on zfs issues exactly one `zfs rollback <newest @quince-*>` — asserted on the recorded argv, so `-r` can never creep in. | CI (Go, fake `zfsCLI`) |
-| **G5** | A rollback that fails ⇒ non-2xx from `RepairWorking`, the reason propagated, the sentinel and `working/` still present, and **no audit line**. This is the state-honesty gate. | CI (Go) |
+| **G5** | **D4 answer B, both shapes.** A rollback that fails fast and one that exceeds `zfsOpTimeout` ⇒ non-2xx from `RepairWorking`, `zfs`'s reason propagated **verbatim**, the sentinel and `working/` still present, **no audit line**, **exactly one** rollback attempt recorded, and the message naming the operator remedy. This is the state-honesty gate, and it is the one that must pass before H2 is known. | CI (Go) |
 | **G6** | Reset on a device with zero `@quince-*` snapshots empties the head and answers `202`; reset on a device **with** snapshots never takes that branch. | CI (Go) |
 | **G7** | The committed `Info.plist` is the job's fresh one, and `supervise` was called with an empty `gatePath` on zfs. | CI (Go) |
 | **G8** | The shim is a symlink to `../../latest`, is the only entry in `working/`, and `TreePath` resolves through it to the head. | CI (Go) |
@@ -423,7 +475,7 @@ and the rung is not done until they have.
 | id | what it proves |
 | --- | --- |
 | **H1** | An in-place Wi-Fi backup end to end: transfer into `latest/`, verify, snapshot, browse the committed version. |
-| **H2** | **Rollback under load** — a reset against a dirty head with the container running and the dataset mounted into it. Records the outcome, success or failure, and the exact error. This is sub-question 2 and it is the one measurement the ruling explicitly demands. |
+| **H2** | **Rollback under load — BLOCKS PR 3** (Operator ruling, 2026-08-08). A reset against a dirty head with the container running and the dataset mounted into it. Records which of D4's two answers holds, and **the exact error text verbatim** if it is B, because answer B's message quotes it rather than paraphrasing. It also decides whether `zfsOpTimeout`'s 60 s is the right bound. |
 | **H3** | The seed latency is gone: time from passcode entry to first bytes, against `qn.6b`'s measured baseline (~17.5 s warm, past 60 s cold, on a 133k-file / 34 GB device). |
 | **H4** | The host-helper hand-edit: `seed)` removed, `rollback)` added, and the four surviving verbs still answer. |
 
@@ -510,8 +562,11 @@ byte size.
 
 ## Known gaps and open questions
 
-1. **Rollback under load is unmeasured** (D4). Gate H2, owner Operator. This is the ruling's own
-   sub-question 2 and the only one this spec answers conditionally.
+1. **Rollback under load is unmeasured** (D4). Gate H2, owner Operator, **and it blocks PR 3** —
+   Operator ruling 2026-08-08, which moved the empirical answer out of the spec and onto the
+   implementation PR after quince#730 established that no agent seat can take it. The spec is
+   complete without it because **both answers are designed for**; what is open is which one is dead
+   code.
 2. **`storage.zfs.seed` on a backend that does not seed.** It stays valid and meaningful for the
    namespace backends, so it is not deleted; what a zfs storage should report for it — ignored,
    omitted, or an explicit *not applicable* — is a `qn.6g` contracts §6 shape question. **Not decided
@@ -546,8 +601,14 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 | **1** | **this spec** | architect review; `/docs/specs/**` is not code-owned |
 | **2** | **quince can ask the host to roll back, and the parse bounds it.** `zfscli.Seed` → `Rollback`; the reference helper gains `rollback)` and **keeps** `seed)`. Purely additive — the exchange model still runs, nothing changes behaviour. Landing it first is what lets the Operator do the host edit before the change that needs it. | G4 (argv), G11 (helper), G12 |
 | **3** | **zfs writes in place and commits by snapshot.** The shim, the deleted seed path, the deleted exchange, the new commit sequence, and reset-by-rollback. One PR because splitting it ships a broken intermediate: writing in place while still exchanging would swap `latest/` with a symlink, and switching the write path without switching reset would leave reset claiming a discard it did not perform. **D7's browse guard is in this PR, not a later one** — the fallback becomes live-tree-reading in the same commit that makes `latest/` mutable, so shipping it separately means shipping the hazard. | G1, G2, G3, G5, G6, G7, G8, G9, G10, G12, G13, G14 |
-| **4** | **the helper stops carrying quince's lifecycle.** `seed)` deleted from `deploy/storage.md`, the hand-edit note, the offsite exclusion note, `contracts.md`'s reset failure. | G11, G12, G13 |
+| **4** | **the helper stops carrying quince's lifecycle.** `seed)` deleted from `deploy/storage.md`, the **one-line changed-verbs note** (not a procedure), the offsite exclusion note, `contracts.md`'s reset failure. | G11, G12, G13 |
 | **5** | **the hardware evidence.** H1–H4 recorded on the rung issue, and whatever H2 decides about the timeout bound. Not a code PR unless H2 says it is. | Operator |
+
+**PR 3 DOES NOT MERGE UNTIL H2 HAS RUN** — Operator ruling, 2026-08-08. PR 2 is unaffected: it adds
+the verb without calling it, so nothing can perform a rollback until PR 3 lands. **That ordering is
+now load-bearing rather than convenient**: PR 2 first means the Operator can do the host hand-edit
+*and* take H2's measurement against a helper that already answers `rollback`, before any code depends
+on the outcome.
 
 **PR 3 is the one that cannot be sliced further, and that is a claim worth checking at review rather
 than accepting.** If a reviewer can name a smaller intermediate that is honest on `main`, it should
