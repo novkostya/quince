@@ -28,9 +28,7 @@ type Options struct {
 // reflink, link()+inode identity → hardlink, else copy. The choice + reason is returned for
 // onboarding and logged (never silent — a copy fallback is a surfaced degraded mode).
 func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, string, string) {
-	wantZFS := opts.Backend == BackendZFS ||
-		(opts.Backend == "auto" && (opts.ZFSParent != "" || opts.ZFSHookCmd != ""))
-	if wantZFS {
+	if WantZFS(opts.Backend, opts.ZFSParent, opts.ZFSHookCmd) {
 		cli := newZFSCLI(opts.ZFSParent, opts.ZFSMode, opts.ZFSHookCmd, "")
 		reason := "storage.zfs configured (parent dataset / hook set)"
 		if opts.Backend == BackendZFS {
