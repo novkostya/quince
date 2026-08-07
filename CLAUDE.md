@@ -939,10 +939,32 @@ the box started, and the last privacy sweep before a merge therefore ran a match
 the canary nor the case-sensitive list — while reporting `clean`. The two boxes were running
 materially different privacy gates and neither could tell.
 
-Until `preflight` asserts that the clone can **fetch** and not merely exist, a box's private
-layer can be silently stale. **Read the gate's own banner rather than its exit code**: it names
-the lists it loaded and whether the canary proved the matcher, and those lines are the only
-thing that distinguishes *swept* from *compiled the lists and matched nothing*.
+**`preflight` NOW ASSERTS THAT THE CLONE CAN FETCH** (quince#675, 2026-08-07). The line that stood
+here — *"until `preflight` asserts that the clone can **fetch** and not merely exist, a box's private
+layer can be silently stale"* — was carried out: the check attempts `git ls-remote` against the
+layer's own remote and reports what the remote said, rather than reading a credential helper out of
+`.git/config` and calling that an answer. **It still does not assert the clone is CURRENT** — a fetch
+that *would* succeed is not a fetch that *has* happened — so the journal-clone freshness paragraph
+higher up this file is untouched.
+
+**What it REFUSES on is narrower than "cannot fetch", and that gap is the thing to know.** `bad` —
+the box does not start — only on `Authentication failed`, which is a credential that was supplied and
+rejected. Everything else is a loud **note**: DNS, a refused connection, a wrapper that failed to
+mint an installation token this once, and a timeout. So **a note on this line means the layer is
+UNPROVEN, not proven stale**, and *"the forge was down when the box booted"* is indistinguishable
+from *"this box can never advance again"* for one restart. **A note that persists across restarts is
+the frozen case wearing a transient face.** The fail-closed step before it is unchanged: a clone with
+no credential helper at all never reaches the probe and is still refused outright.
+
+**A live fetch was rejected for months on a premise nobody measured** — that `ls-remote` *"fails
+identically for 'no credential' and 'network is down'"*. It does not. Every failure exits 128, so the
+**exit code** discriminates nothing and the **stderr** discriminates cleanly. A check written against
+the exit code would have been exactly the false refusal that was feared, which is why the rejected
+design and the shipped one are not the same design.
+
+**Read the gate's own banner rather than its exit code**: it names the lists it loaded and whether
+the canary proved the matcher, and those lines are the only thing that distinguishes *swept* from
+*compiled the lists and matched nothing*.
 
 **What that means, stated rather than implied:** each box carries the complete private
 record — ~610 KB across 8 files, including the lab topology and the external review
