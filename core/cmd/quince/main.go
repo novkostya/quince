@@ -199,8 +199,39 @@ func serve(args []string) error {
 		// from an absent key (quince#508). `Current()` alone cannot: a failed parse yields
 		// `Default()`, and its nil `Storage` reads identically to a file that declares nothing.
 		_, cfgWarnings, _ := cfgSvc.Snapshot()
-		if req := config.CheckStorages(cfgSvc.Current(), os.Environ(), cfgWarnings); !req.OK() {
+		req := config.CheckStorages(cfgSvc.Current(), os.Environ(), cfgWarnings)
+
+		// RULED 2026-08-07 (quince#502, option (a)): ANY ZERO-STORAGE START IS THE ONBOARDING STATE.
+		// quince serves, refusing every API outside setupAllowed, and renders the storage step.
+		//
+		// What that replaced was a hard exit whose own words were "a quince that comes up with
+		// nowhere to put backups looks healthy and silently protects nothing". THE HONESTY CHANGES
+		// CHANNEL RATHER THAN BEING LOST: it does not look healthy — it refuses its own API and says
+		// what is missing, in the UI, instead of on a stderr stream nobody sees. Serving is what
+		// makes the remedy reachable at all, because /data/config.yml does not exist on a fresh
+		// install and the alternative was: start → exit → hand-write YAML into a bind mount →
+		// start again.
+		//
+		// THE COST WAS NAMED AND ACCEPTED, not discovered: *onboarding* and *misconfigured* are
+		// byte-identical here, so a config whose `storage:` list someone emptied by hand gets the
+		// setup page rather than a refusal. Ruled not a state-honesty downgrade, because the page is
+		// true in both cases — there is no storage, and here is how to add one — and the daemon
+		// becomes fixable from a browser instead of a shell.
+		//
+		// MALFORMED STILL REFUSES, and that is the ruling's own carve-out rather than caution. A
+		// file that could not be PARSED is not an empty declaration: Load() falls back to Default()
+		// on a parse failure, so serving here would silently ignore whatever the operator actually
+		// wrote and invite them to add a storage to a document that already has one it cannot read
+		// (quince#508).
+		if req.Malformed {
 			return req.Explain(os.Stderr, cfgPath)
+		}
+		// LegacyEnv is not fatal and never was — OK() excludes it — so it keeps flowing through as
+		// the warning it is.
+		storageless := req.Missing || req.Empty
+		if storageless {
+			log.Warn("no storage declared — SERVING SETUP ONLY until one is added",
+				"config", cfgPath, "reachable", "auth, onboarding, config and the storage probes")
 		}
 		// TWO STORAGES THAT ARE ONE STORAGE cannot be served (quince#458). A zfs collision is
 		// not a degraded mode to surface — every per-storage guarantee this rung added is void
@@ -233,6 +264,13 @@ func serve(args []string) error {
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages,
+		// READ LIVE, NOT CAPTURED. `storageless` above is the state at STARTUP; this closure is the
+		// state NOW, and they stop agreeing the instant setup succeeds. Capturing the boolean would
+		// leave a freshly-configured daemon refusing its own API until someone restarted it — the
+		// exact restart this rung exists to remove.
+		//
+		// Nil in demo mode, where `--demo` fabricates its storages and the mode never applies.
+		StorageRequired: storageRequired(demoMode, cfgSvc),
 	})
 
 	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
@@ -661,4 +699,24 @@ func reportableResetMinutes(minutes int, public bool, log *slog.Logger) int {
 			"is shown", "minutes", minutes)
 	}
 	return 0
+}
+
+// storageRequired reports, per request, whether quince still has no storage declared — the
+// first-run setup state (qn.6e, Operator ruling 2026-08-07, option (a)).
+//
+// IT ASKS THE CONFIG SERVICE RATHER THAN REMEMBERING, which is what makes the mode self-clearing:
+// adding a storage ends it with no restart and nothing to reset, because there is no stored flag to
+// go stale. "The zero-storage condition IS the state" is the ruling's own phrasing and this is the
+// whole of its implementation.
+//
+// Nil in demo mode: `--demo` fabricates its storages and never reaches the live stack, so a guard
+// there would refuse a mode that has nothing to configure.
+func storageRequired(demoMode bool, cfgSvc *config.Service) func() bool {
+	if demoMode {
+		return nil
+	}
+	return func() bool {
+		scfg := cfgSvc.Current().Storage
+		return scfg == nil || len(*scfg) == 0
+	}
 }

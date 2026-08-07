@@ -34,6 +34,18 @@ type Deps struct {
 	Ops              DeviceOps
 	WorkingReset     WorkingReset
 	AllowedOrigins   []string
+	// StorageRequired reports whether quince has NO storage declared, in which case it is in the
+	// first-run setup state and setupGuard refuses everything outside setupAllowed (qn.6e, Operator
+	// ruling 2026-08-07).
+	//
+	// A FUNCTION, NOT A BOOL, because the condition CLEARS WHILE THE PROCESS RUNS: adding a storage
+	// through POST /api/config/storage ends the mode with no restart, and a value captured at wiring
+	// time would leave the daemon refusing its own API after setup had succeeded. Read from the live
+	// config on each request, which is what makes "the zero-storage condition IS the state" true
+	// rather than aspirational.
+	//
+	// NIL MEANS NEVER REQUIRED, so --demo and every test that does not wire it are unaffected.
+	StorageRequired func() bool
 	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
 	// "trust nobody", which is the shipping default and today's behaviour.
 	Proxies *auth.TrustedProxies

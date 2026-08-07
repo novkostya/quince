@@ -127,7 +127,12 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 
-	apiHandler := chain(apiMux, bodyLimit, deps.authGuard, deps.csrfGuard)
+	// setupGuard runs AFTER authGuard and csrfGuard, not before, and the order is the point: an
+	// unauthenticated caller must get a 401 rather than being told what state the daemon is in.
+	// Setup mode is a fact about a configured-but-unfinished install, and it is the operator's to
+	// see — leaking it to anyone who can reach the port would say "this quince is not set up yet",
+	// which is precisely what a stranger should not learn.
+	apiHandler := chain(apiMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
 
 	wsHandler := ws.Handler(deps.Bus,
 		func(sessionID string) error { _, err := deps.Auth.Authenticate(sessionID); return err },

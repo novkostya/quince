@@ -129,14 +129,32 @@ func TestBrowseRootIsEmptyForAnUnattributedRowOnAnAttributedManager(t *testing.T
 	}
 }
 
-// NewManager panics on an empty slot list rather than producing an index-out-of-range three calls
-// later. config.CheckStorages refuses to serve without a declared storage, so reaching here with
-// none is a programming error, not a state to degrade through.
-func TestNewManagerRefusesNoSlots(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Error("NewManager must panic on an empty slot list")
-		}
-	}()
-	NewManager(nil, nil, nil, nil, nil, nil)
+// NewManager ACCEPTS AN EMPTY SLOT LIST, and this test is the inversion of one that required it to
+// panic (qn.6e, Operator ruling 2026-08-07).
+//
+// The old test read: "NewManager panics on an empty slot list rather than producing an
+// index-out-of-range three calls later. config.CheckStorages refuses to serve without a declared
+// storage, so reaching here with none is a programming error, not a state to degrade through."
+//
+// ITS PREMISE WAS RETIRED, NOT ITS CAUTION. CheckStorages no longer refuses a zero-storage start: a
+// first run has no `storage:` key at all, and quince serves so one can be added from the UI. Zero
+// slots is therefore the FIRST-RUN state, and a panic there would be a crash on the one path every
+// new user takes.
+//
+// The caution it protected is intact and lives at CALL time instead — qn.6g moved it there because
+// the list can be replaced while the process runs, so "non-empty at construction" was already
+// worthless as a guarantee. movinglist_test.go gates every reader on an empty list; this asserts
+// only that CONSTRUCTING one is allowed.
+// THIS ASSERTS CONSTRUCTION ONLY, and deliberately does not call a method on the result. Every
+// dependency here is nil — as it was in the panic test this replaces — so a reader would segfault on
+// the nil Registry rather than on anything to do with the empty list, and a one-slot Manager built
+// the same way would fail identically. That would be a test about its own fixture.
+//
+// "An empty Manager ANSWERS rather than merely existing" is the claim that matters, and it is gated
+// where real dependencies exist: `TestBuildStorageServesWithNoStoragesDeclared` in cmd/quince drives
+// `Storages` and `ResolveChoice` through the constructor the daemon actually uses.
+func TestNewManagerAcceptsNoSlots(t *testing.T) {
+	if m := NewManager(nil, nil, nil, nil, nil, nil); m == nil {
+		t.Fatal("NewManager returned nil for an empty slot list")
+	}
 }

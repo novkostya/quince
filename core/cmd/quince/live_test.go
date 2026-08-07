@@ -110,3 +110,38 @@ func TestResolveSlotInventsNoIDForAStorageItHasNeverKnown(t *testing.T) {
 			"seen would make the UI claim a history that does not exist", slot.StorageID)
 	}
 }
+
+// qn.6e PR 9a — ZERO STORAGES IS A LEGITIMATE STARTUP STATE.
+//
+// `buildStorage` used to return an error here, with a comment calling the case "unreachable past
+// config.CheckStorages … if it ever gets here the guard upstream has stopped working". The Operator
+// ruling of 2026-08-07 (option (a)) makes it reachable on purpose: a first run has no `storage:` key
+// at all, and quince serves so the storage can be added from the UI.
+//
+// THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE HALF-DONE VERSION. Relaxing only `main.go` moves
+// the exit here — same dead daemon, different error string — so the claim worth gating is that a
+// Manager BUILDS and ANSWERS on zero, not merely that the startup check was loosened.
+func TestBuildStorageServesWithNoStoragesDeclared(t *testing.T) {
+	cfgSvc := config.NewService(filepath.Join(t.TempDir(), "config.yml"), quietLog())
+	st := testStore(t)
+
+	mgr, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, nil, quietLog())
+	if err != nil {
+		t.Fatalf("buildStorage refused an empty declaration: %v — zero storages is the first-run "+
+			"state since qn.6e, not a configuration error", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildStorage returned no manager and no error")
+	}
+
+	// AND IT ANSWERS HONESTLY on zero rather than merely existing. These are qn.6g's empty-list
+	// guards, re-asserted through the constructor this rung newly routes into them.
+	if got := mgr.Storages(""); len(got) != 0 {
+		t.Errorf("Storages() on an empty manager returned %d entries", len(got))
+	}
+	// A job that names nowhere to go is REFUSED, which is what keeps "serving" from meaning
+	// "pretending to work".
+	if _, status, _ := mgr.ResolveChoice(""); status != 409 {
+		t.Errorf("ResolveChoice on an empty manager = %d, want 409", status)
+	}
+}
