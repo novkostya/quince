@@ -136,9 +136,9 @@ Operator merge because *a merge carries no verdict*, the judgement being the app
 structurally the App's; auto-merge executes it **as the App**, so the attribution is preserved on the
 primary path and spent only on the backstop.
 
-**Two things to know before reaching for it.** `allow_auto_merge` is `true` on `novkostya/quince`
-and **`false` on `novkostya/quince-devlog`** — enabling it there is an Operator action, so the
-devlog's path is retry-then-Operator until then. And **the App CAN enable auto-merge — measured
+**Two things to know before reaching for it.** `allow_auto_merge` is **`true` on BOTH
+`novkostya/quince` and `novkostya/quince-devlog`** — the Operator enabled the devlog's on 2026-08-07,
+so there is no repo left where the path is retry-then-Operator. And **the App CAN enable auto-merge — measured
 2026-08-07 on quince#692**, `enabledBy: quince-review`, `mergeMethod: REBASE`, read back through the
 API rather than inferred from an exit code. **It also FIRED**, merging 4m23s later with no session
 awake, which is the half worth knowing: the ladder's primary rung works unattended.
