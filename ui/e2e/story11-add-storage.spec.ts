@@ -155,3 +155,30 @@ test("the zfs branch explains the helper instead of offering a mode nobody can u
   // No mode selector anywhere: the choice does not exist, so neither does the control.
   await expect(page.getByLabel(/mode/i)).toHaveCount(0);
 });
+
+// A REPO PATH PRINTED AT A USER IS A DEAD END DRESSED AS HELP. Someone running quince from a
+// container image may have no checkout at all, so `deploy/storage.md` as bare text points at a file
+// they cannot open. Every docs reference in the add flow is a real link.
+//
+// Operator-reported from a screenshot of the shipped 6a form, which printed it twice as plain text.
+test("docs references in the add flow are links, not bare repo paths", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await page.getByTestId("backend-select").selectOption("zfs");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("deploy/storage.md");
+
+  // EVERY occurrence is inside an anchor, asserted by counting rather than by finding one — a
+  // single linked instance beside an unlinked one is the exact state this test exists to catch.
+  const mentions = await dialog.getByText("deploy/storage.md").count();
+  const links = await dialog.locator('a[href*="deploy/storage.md"]').count();
+  expect(links).toBe(mentions);
+  expect(links).toBeGreaterThan(0);
+
+  const href = await dialog.locator('a[href*="deploy/storage.md"]').first().getAttribute("href");
+  expect(href).toMatch(/^https:\/\/github\.com\/novkostya\/quince\/blob\/main\//);
+});
