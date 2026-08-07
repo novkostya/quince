@@ -22,14 +22,15 @@ export function DashboardPage() {
 
   return (
     <section>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Home</h1>
-          <p className="mt-1 text-sm text-muted">
-            Your devices and where their backups live.
-          </p>
-        </div>
-        <RescanButton />
+      {/* THE PAGE HEADER CARRIES NO ACTION (Operator ruling, qn.6e). `Rescan` used to sit here, and
+          it concerns DEVICES only — but Home is two sections now, and Storage has its own re-probe
+          (`POST /api/storages/{name}/recheck`, surfaced on the card). A page-level control invites
+          the reading that it does both. It does not. */}
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Home</h1>
+        <p className="mt-1 text-sm text-muted">
+          Your devices and where their backups live.
+        </p>
       </div>
 
       {/* `Devices` becomes a SECTION heading now that the page is `Home` — it stopped being the
@@ -53,6 +54,13 @@ export function DashboardPage() {
           })}
         </div>
       )}
+
+      {/* AT THE FOOT OF ITS OWN SECTION, which is where the thing it acts on is. It renders in both
+          branches above deliberately: the empty state is when you most want to rescan, and a
+          control that disappears exactly when it is needed is worse than none. */}
+      <div className="mt-3">
+        <RescanButton />
+      </div>
 
       {/* STORAGE SITS BESIDE DEVICES ON HOME, not in a third nav tab (Operator ruling, quince#443).
           Below the devices rather than above: a household opens quince to see whether its phones

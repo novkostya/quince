@@ -50,8 +50,19 @@ export function RescanButton({
   return (
     <div className="flex items-center gap-2">
       <Button
-        variant="outline"
+        // GHOST AT A SECTION FOOT, matching WifiSyncControl's quiet arm and JobHistory's `Show all
+        // N` (qn.6e). It was `outline` while it sat in the page header, where it was the only
+        // control on the page and carried its weight.
+        //
+        // `-ml-3` IS NOT AN INDENT FIX, it is the cancellation of one. A ghost button has no
+        // background, so its TEXT sits at the size's px-3 inset while every neighbour's visible
+        // left edge — the section heading above, the cards beside it — is at the column margin. It
+        // reads as a stray indent rather than as a quieter control. `outline` does not need this:
+        // it has a border at the margin already. Same reasoning, verbatim, as
+        // WifiSyncControl.tsx's own comment; the two must not drift.
+        variant="ghost"
         size="sm"
+        className="-ml-3"
         onClick={onClick}
         disabled={status === "busy" || status === "external"}
         title={
