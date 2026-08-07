@@ -316,8 +316,8 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
-# and GraphQL fetch paths against the real API, and its wrapper loop tries `gh-coder`, `gh-arch`,
-# `gh-review` in turn. None of that is hermetic in bare Alpine, and it never will be. It stays a
+# and GraphQL fetch paths against the real API, and its wrapper loop tries `gh-coder` then
+# `gh-review`. None of that is hermetic in bare Alpine, and it never will be. It stays a
 # host-run suite, deliberately outside this ladder — its own header says so — and it remains in
 # SH_ENTRYPOINTS, so shellcheck still reads it.
 #
@@ -358,7 +358,7 @@ print-sh-suite-image:
 #
 # The same variable is what the container sets for itself, so the recipe cannot recurse into another
 # container: inside, the suites are already in the right environment and run directly.
-SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot bin/gh-arch \
+SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    deploy/runner/preflight-test deploy/runner/provision-guard-test \
                    deploy/runner/pre-push-shim deploy/runner/pre-push-shim-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \

@@ -210,10 +210,10 @@ RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
 # a suite: on a real box `/usr/local/bin/gh-coder` exists AND works, so without this seam the
 # no-usable-credential path could never be exercised anywhere it matters.
 LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
-# `gh-review` IS IN THIS LIST, BEFORE `gh-arch`, AND THE ORDER IS THE FIX (quince#674). The arch box
-# has no `gh-coder` by design (`decisions/0007`: the box that approves must not hold the identity that
-# authors), so this loop fell through to `gh-arch` — the PAT the Operator DELETED on 2026-08-06 when
-# ruling that wrapper legacy. The private layer's clone on that box has been unable to fetch since,
+# `gh-review` IS IN THIS LIST AND `gh-arch` IS GONE FROM IT (quince#674, then quince#676). The arch
+# box has no `gh-coder` by design (`decisions/0007`: the box that approves must not hold the identity
+# that authors), so this loop used to fall through to `gh-arch` — the PAT the Operator DELETED on
+# 2026-08-06 when ruling that wrapper legacy. The private layer's clone on that box could not fetch,
 # which freezes the privacy pattern list while the gate goes on reporting `clean` (quince#121,
 # quince#220).
 #
@@ -223,11 +223,13 @@ LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
 # `gh-review auth token` works for the same reason `gh-coder auth token` does, and this loop was the
 # only thing that could not see it.
 #
-# SEARCHING THE APP FIRST means a box still carrying the PAT migrates to the App on its next
-# provision rather than pinning itself to a credential that is going away — which is the direction
-# quince#676 wants: one shape on both boxes, zero PATs.
+# THE LIST IS NOW ZERO PATs, which is what quince#676 was for: one shape on both boxes. quince#674
+# ordered the App BEFORE the PAT so a box still carrying `quince-arch.token` would migrate on its
+# next provision instead of re-pinning to a credential that was going away. It has gone, so what was
+# an ordering is now simply the list — and a box that still holds that token gets it ignored rather
+# than preferred, which is the same outcome the ordering bought.
 layer_wrapper() {
-	for _lw_n in gh-coder gh-review gh-arch; do
+	for _lw_n in gh-coder gh-review; do
 		for _lw_d in $LAYER_WRAPPER_DIRS; do
 			_lw_p="$_lw_d/$_lw_n"
 			[ -x "$_lw_p" ] || continue
@@ -244,8 +246,14 @@ LAYER_WRAPPER=$(layer_wrapper || true)
 # act rather than on the role, so the username cannot disagree with the credential actually used.
 # BOTH APPS TAKE `x-access-token`, and the arm is shared rather than duplicated because the rule is
 # about the CREDENTIAL KIND, not the seat: an installation token authenticates as that user whichever
-# App minted it. `gh-arch` is the only PAT left, so the default arm now covers exactly one wrapper —
-# which is what quince#676 is about to remove.
+# App minted it.
+#
+# THE DEFAULT ARM NOW COVERS NOTHING THIS SCRIPT CAN SELECT, and it is kept anyway (quince#676).
+# `gh-arch` was the last PAT and it is deleted, so `layer_wrapper` can only ever return an App —
+# which means `*) LAYER_USER=novkostya` is unreachable today. It stays because the arm answers
+# *"what username does a NON-App credential want"*, and deleting it would make the next PAT-shaped
+# wrapper silently inherit `x-access-token` and authenticate as the wrong user. An unreachable
+# default that is correct costs a line; a missing one costs a debugging session.
 case ${LAYER_WRAPPER##*/} in
 gh-coder | gh-review) LAYER_USER=x-access-token ;;
 *) LAYER_USER=novkostya ;;
@@ -269,7 +277,7 @@ if [ -z "$LAYER_WRAPPER" ] && [ -n "$_have_own" ]; then
 	die "a $ROLE credential is present but NO wrapper could authenticate with it, so the private
     layer could not be placed or kept current. Refusing before touching this box.
       credential(s) present: $_have_own
-      wrappers tried:        gh-coder, gh-review, gh-arch — in /usr/local/bin, then $RUNNER_DIR/bin
+      wrappers tried:        gh-coder, gh-review — in /usr/local/bin, then $RUNNER_DIR/bin
     Causes, in the order worth checking: the credential is invalid or unreadable; the identity moved
     and this box still holds the old one; the forge is unreachable from here.
     This is a REFUSAL rather than a note because 'no credential yet' and 'the identity moved' want
@@ -304,7 +312,7 @@ layer_helper_shape() { # <helper-string>
 	_lhs=$1
 	case $_lhs in *'!f('*) _lhs_out="inline shell function" ;; *) _lhs_out="not an inline function" ;; esac
 	case $_lhs in *gh-coder*) _lhs_out="$_lhs_out; mentions gh-coder" ;; esac
-	case $_lhs in *gh-arch*) _lhs_out="$_lhs_out; mentions gh-arch" ;; esac
+	case $_lhs in *gh-arch*) _lhs_out="$_lhs_out; mentions gh-arch (RETIRED wrapper)" ;; esac
 	case $_lhs in *quince-bot*) _lhs_out="$_lhs_out; mentions quince-bot (RETIRED identity)" ;; esac
 	case $_lhs in *quince-arch.token*) _lhs_out="$_lhs_out; mentions quince-arch.token" ;; esac
 	case $_lhs in *x-access-token*) _lhs_out="$_lhs_out; uses x-access-token" ;; esac

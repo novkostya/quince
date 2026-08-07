@@ -119,8 +119,8 @@ usage: forge-watch <verb>
   A watcher passes --watcher-pid and --interval so its cadence is on disk; a tick that was due and
   did not happen then emits `event=tick-overdue` instead of being absorbed.
 
-  --gh defaults to FORGE_GH, else plain `gh`. The runner passes gh-bot; the arch box passes
-  gh-arch. The tool does not pick an identity for you — a monitor that hard-coded one could not
+  --gh defaults to FORGE_GH, else plain `gh`. The runner passes gh-coder; the arch box passes
+  gh-review. The tool does not pick an identity for you — a monitor that hard-coded one could not
   run on the box that most needs it.
 
   `owed` answers the OTHER half of quince#62. `watch` fixes a loop built wrong; it does nothing for a
@@ -2834,7 +2834,7 @@ require_gh() {
 	# and exit **0**, so the probe passes. Real unauthenticated `gh` on a session box exits **4**. The
 	# two are cleanly separated, which is what makes this safe to put in a shared helper.
 	_rg_why=$("$1" api rate_limit -q '.rate.remaining' 2>&1) ||
-		die "the gh command '$1' exists but cannot authenticate, so a watch armed with it would arm cleanly and see nothing (quince#429). It reported — $(printf '%s' "$_rg_why" | head -n 2 | tr '\n' ' ') Pass the wrapper your seat actually uses: --gh \"\$PWD/bin/gh-coder\" on the implementer box, bin/gh-arch or bin/gh-review on the architect box, bin/gh-analyst on the supervisor box. Bare 'gh' stays the default because this tool must not pick an identity for you — and on a session box it is deliberately unauthenticated."
+		die "the gh command '$1' exists but cannot authenticate, so a watch armed with it would arm cleanly and see nothing (quince#429). It reported — $(printf '%s' "$_rg_why" | head -n 2 | tr '\n' ' ') Pass the wrapper your seat actually uses: --gh \"\$PWD/bin/gh-coder\" on the implementer box, bin/gh-review on the architect box, bin/gh-analyst on the supervisor box. Bare 'gh' stays the default because this tool must not pick an identity for you — and on a session box it is deliberately unauthenticated."
 }
 
 # ---------------------------------------------------------------------------
@@ -4115,17 +4115,31 @@ owed_role() {
 		# right: the box is identified by its live credential. This chooses only what that box should
 		# READ through, which is a separate question with a separate answer.
 		#
-		# PREFER THE PAT WHILE IT EXISTS, and fall back rather than refuse. `gh-arch` caches; when it
-		# is retired the fallback is correct-but-slow rather than broken, and that is the honest
-		# degradation — the fix for it is a token cache, which is *"a second secret at rest with a
-		# lifetime to manage"* and a decision nobody has made.
-		if [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
-			printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
-		else
-			printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
-		fi
+		# THE PAT IS RETIRED, SO THIS IS `gh-review` UNCONDITIONALLY (quince#676). This arm used to
+		# PREFER the PAT while it existed and fall back to the App — *"`gh-arch` caches; when it is
+		# retired the fallback is correct-but-slow rather than broken, and that is the honest
+		# degradation."* That fallback is now the only path, and the retirement arrived with the
+		# measurement the old comment was waiting for: **451 ticks across a full session on
+		# `gh-review`, zero credential failures, ~11% of an installation token's hourly budget** at a
+		# parked-only declared set. Correct-but-slow measured as correct-and-fine.
+		#
+		# THE LATENCY ABOVE IS NOT RETRACTED — ~1.84 s per call is still what it costs, and a tick's
+		# call count still rises with the declared set. A token cache remains the fix if a heavier set
+		# bites; what changed is that it is an optimisation rather than a prerequisite (quince#676).
+		printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
 	elif [ -f "${QUINCE_ARCH_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-arch.token}" ]; then
-		printf 'architect %s/bin/gh-arch all\n' "$(repo_root)"
+		# THE CREDENTIAL IS RETIRED AND THIS ARM IS NOT — same reason the `gh-bot` arm below is kept:
+		# a box still HOLDING `quince-arch.token` must get a ROLE rather than `none`, and the wrapper
+		# it is handed must be one that works. So the test is unchanged and the answer is now
+		# `gh-review` (quince#676).
+		#
+		# DELETING THIS ARM IS THE TEMPTING EDIT AND IT IS WRONG. `none` costs that box the `Stop`
+		# hook's assertion that a watch is owed — quince#238's whole finding — silently. Measured
+		# while making exactly that mistake here: `forge-watch-actor-test` reported *"architect woke
+		# on its OWN comment on a declared issue — quince#307 is not fixed"*, because `owed_role=none`
+		# fails both self-caused suppression arms open. **The failure named the suppression, not the
+		# role**, which is how deleting one line presents as an unrelated regression two features away.
+		printf 'architect %s/bin/gh-review all\n' "$(repo_root)"
 	elif [ -f "${QUINCE_BOT_TOKEN_FILE:-$HOME_DIR/.config/quince/quince-bot.token}" ]; then
 		# LAST, AND IT NAMES gh-coder RATHER THAN gh-bot. `quince-bot` was suspended on 2026-07-28, so
 		# the old arm handed back a wrapper that cannot authenticate — a remedy the reader would run

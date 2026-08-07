@@ -1,9 +1,11 @@
 #!/bin/sh
 # gh-review — run `gh` as the reviewer identity: a GitHub App, not a person.
 #
-# The third wrapper, and the first whose identity is not a user account. bin/gh-bot runs as the
-# implementer, bin/gh-arch runs as the architect — and quince#47 is the finding that the second of
-# those is indistinguishable from the Operator, because they are the same login. A reader of a
+# The first wrapper whose identity is not a user account, and since quince#676 the architect seat's
+# ONLY one. It arrived third: bin/gh-bot ran as the implementer, bin/gh-arch as the architect — and
+# quince#47 is the finding that the second of those is indistinguishable from the Operator, because
+# they are the same login. That wrapper is now deleted, which is this one's own argument carried to
+# its conclusion rather than a separate decision. A reader of a
 # ruling cannot tell a subordinate's verdict from its principal's, and on quince#115 that stopped
 # being a record-keeping annoyance and became a refusal: GitHub would not let the architect review
 # a PR the Operator authored, since it was the same account.

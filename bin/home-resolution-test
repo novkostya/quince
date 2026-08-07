@@ -82,7 +82,7 @@ while IFS=: read -r w args; do
 	# their credential path in USAGE, and usage comes after their `command -v gh` dependency check —
 	# so on a host without `gh` they die first, the path never prints, and this assertion reports
 	# `inconclusive`, which is scored as a FAILURE. Measured in a bare alpine:3.24 container:
-	# 10 passed / 2 failed, the two being `gh-bot` and `gh-arch`.
+	# 10 passed / 2 failed, the two being `gh-bot` and `gh-arch` (the latter retired by quince#676).
 	#
 	# That gave `gates-sh` an UNDECLARED HOST REQUIREMENT on `gh`, contradicting `Makefile:8`
 	# ("`make` + a container runtime with BuildKit") — and green CI could never catch it, because
@@ -147,7 +147,6 @@ while IFS=: read -r w args; do
 	esac
 done <<'TARGETS'
 bin/gh-bot:
-bin/gh-arch:
 bin/gh-review:
 bin/forge-watch:status --repo novkostya/quince
 TARGETS
