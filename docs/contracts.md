@@ -1320,13 +1320,18 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
                             # auto: zfs when this entry's zfs block is configured, else probe
                             # reflink → hardlink → copy on THIS path.
                             #
-                            # `auto` IS STILL LEGAL AND IS NOT AN OVERSIGHT. The 2026-08-02
-                            # direction that only a CONCRETE backend may land in this file is
-                            # DEFERRED, not withdrawn — homed on quince#502 (`qn.6e`). Do not
-                            # tidy it out: `auto` is the ONLY thing that checks a declaration
-                            # against the medium (storage.Select returns an explicit backend
-                            # WITHOUT probing), so removing it early would make
-                            # quince-storage.json record a guess and fail at seed time.
+                            # `auto` IS STILL LEGAL, AND NOW BY RULING RATHER THAN BY
+                            # DEFERRAL. The 2026-08-02 direction that only a CONCRETE
+                            # backend may land here was ruled ABSORBED, NOT REMOVED
+                            # (quince#502, 2026-08-07). The loader is unchanged; what
+                            # changed is that the ADD FLOW writes the concrete backend it
+                            # probed, refusing an empty or `auto` one with a 422.
+                            # Do not tidy it out: `auto` is the ONLY thing that checks a
+                            # declaration against the medium (storage.Select returns an
+                            # explicit backend WITHOUT probing), so removing it would make
+                            # quince-storage.json record a guess and fail at seed time —
+                            # and this file's own one-line form, which the startup
+                            # refusal teaches, IS `auto`.
     zfs:                    # THIS storage's zfs settings. No global to inherit from and none to
                             # opt out of, so the `zfs: {}` idiom is gone with quince#458 — a
                             # second storage can no longer be handed a parent dataset that was
@@ -1546,12 +1551,33 @@ about inheritance:
   would reintroduce quince#458's actual hazard by a different route, which is the opposite of what
   the flattening is for.
 
-**What is DEFERRED, and this is the half that changed:** *"only a specific backend can land in
-settings.yaml"* is deferred, **not withdrawn**. It is homed on **quince#502 (`qn.6e`)**, an explicit
-placeholder. **`backend: auto` is still legal in `config.yml` and is not an oversight** — a reader
-meeting it after a direction that said *concrete backends only* should not tidy it out. **Nothing is
-built to compensate**; in particular the creation-time probe-and-refuse this block recommended is
-**not** wanted.
+**RULED (was DEFERRED): `auto` is ABSORBED, NOT REMOVED** — Operator, 2026-08-07 on quince#502:
+*"I don't care as long as I'm the only user of quince, do whatever is the easiest."* Built in
+`qn.6e`.
+
+**The loader does not change.** `Resolved()` still defaults `Backend` to `auto`, so **`backend:
+auto` remains legal in `config.yml`** and the one-line declaration the startup refusal itself teaches
+— `storage:` / `  - path: /backups` — still works. That declaration **is** `auto`, which is why
+removing it would break the shortest form in the product, taught by quince's own error message.
+
+**What changed is that quince writes a concrete backend when it adds one.**
+`POST /api/config/storage` refuses an empty or `auto` backend with a `422` rather than defaulting it,
+so the add flow records the value the probe just showed and an omission cannot become an `auto` by
+the back door.
+
+**THE REACHABLE GOAL IS NARROWER THAN *"quince never writes `auto`"*, and that sentence is false.**
+`replaceLocked` marshals the whole **resolved** document, so any save materialises every default for
+every entry — including ones the user never touched, and including `ForgetStorage` and
+`PUT /api/config`. A hand-written minimal declaration acquires `backend: auto` and `zfs.seed: auto`
+the first time anything writes the config. Measured in `qn.6e`; nothing is broken, because the
+materialised value means exactly what the omitted one did.
+
+**So the guarantee is about the ADD, not about the file.** Stated this way because the broader claim
+was written into the `qn.6e` spec, found false by a test, and corrected there (quince#702) — the same
+sentence would have aged the same way here.
+
+**The creation-time probe-and-refuse this block originally recommended is still NOT wanted**, and
+that has not changed with the ruling.
 
 **The measurement below is what decided it, and it is kept verbatim for that reason.**
 `core/internal/storage/probe.go:42-48`:
@@ -1614,9 +1640,11 @@ deliverable now has two steps**, because this is the second config break in one 
 naming it the most important piece left of `qn.6c` (2026-08-02).** Recorded because it was listed as
 undecided and a later reader will look for where it went.
 
-**Not ruled here:** `qn.6e`'s scope, which quince#502 leaves open by instruction; and whether `auto`
-removal ultimately sits in `qn.6e` or travels with quince#443's add-storage flow, which would be a
-scoping decision rather than a reversal.
+**Both of this block's open questions are now closed.** It read *"Not ruled here: `qn.6e`'s scope,
+which quince#502 leaves open by instruction; and whether `auto` removal ultimately sits in `qn.6e` or
+travels with quince#443's add-storage flow."* **`qn.6e` was scoped on 2026-08-07** (quince#502, spec
+at `docs/specs/qn.6e/qn.6e.md`), and **`auto` removal happens in neither place** — it was ruled
+*absorbed* rather than removed, above.
 
 **RULED and IMPLEMENTED (was `PROPOSED (gap)`): ONE port, both protocols, routed by the first byte
 of the connection, vendored rather than `cmux`. Plain HTTP gets a `301` to `https://<same host>:<same
