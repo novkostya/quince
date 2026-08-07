@@ -190,38 +190,50 @@ test("docs references in the add flow are links, not bare repo paths", async ({ 
 // sent to a PAGE, and that the page runs the same form as the dialog rather than a second copy.
 //
 // `/api/config` IS INTERCEPTED, and that is legitimate rather than a fabricated fixture: the state
-// under test belongs to the CLIENT — where does it route, and what does it render — and an empty
-// `storage` list is exactly what the live daemon returns on a first run. The demo has storages by
-// construction, so intercepting is the only way to reach the branch at all; the alternative is a
-// gate that never runs.
-test("a storageless install is sent to the first-run storage page", async ({ page }) => {
-  await authenticate(page);
-
-  await page.route("**/api/config", async (route) => {
-    const res = await route.fetch();
-    const body = await res.json();
-    body.config.storage = [];
-    await route.fulfill({ response: res, json: body });
+// under test belongs to the CLIENT — where does it route, and what does it render.
+//
+// BOTH SHAPES ARE DRIVEN, and the first version of this test drove only one. `Config.storage` is a
+// POINTER server-side, so an ABSENT key serialises as `null` and an emptied list as `[]`. A fresh
+// install — the case this whole page exists for — is `null`, and the intercept fabricated `[]`:
+// the one shape that made the test pass. It went green over a guard that ignored `null`, and an
+// Operator on a real stand walked straight onto Home.
+//
+// That is qn.6d's rule turned on its author — *a fixture that fabricates a value the live code
+// never produces makes its gate a lie* — quoted approvingly in the PR that added this test.
+//
+// The demo has storages by construction, so intercepting is the only way to reach the branch at
+// all; the alternative is a gate that never runs.
+for (const empty of [null, []]) {
+  const shape = empty === null ? "null (a fresh install: no `storage:` key)" : "[] (a list emptied by hand)";
+  test(`a storageless install is sent to the first-run storage page — storage: ${shape}`, async ({ page }) => {
+    await authenticate(page);
+  
+    await page.route("**/api/config", async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+        body.config.storage = empty;
+      await route.fulfill({ response: res, json: body });
+    });
+  
+    await page.goto("/");
+    await page.waitForURL(/\/onboarding\/storage/);
+  
+    await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+  
+    // THE SAME FORM, not a second copy — the probe, its three branches and the helper check all come
+    // from `AddStorageForm`. Asserted by driving it here: a divergent copy would not answer.
+    await page.getByLabel("Path").fill("/tmp");
+    await page.getByTestId("probe-check").click();
+    await expect(page.getByTestId("backend-select")).toBeVisible();
+    await expect(page.getByTestId("add-storage-save")).toBeEnabled();
+  
+    // AND THERE IS NO WAY OUT BUT FORWARD. A cancel would return the user to a Home that cannot
+    // render against a daemon refusing every API outside setup.
+    await expect(page.getByRole("button", { name: /^cancel$/i })).toHaveCount(0);
+    // It is a page, not a modal: nothing to dismiss, and no dialog role in the tree.
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
-
-  await page.goto("/");
-  await page.waitForURL(/\/onboarding\/storage/);
-
-  await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
-
-  // THE SAME FORM, not a second copy — the probe, its three branches and the helper check all come
-  // from `AddStorageForm`. Asserted by driving it here: a divergent copy would not answer.
-  await page.getByLabel("Path").fill("/tmp");
-  await page.getByTestId("probe-check").click();
-  await expect(page.getByTestId("backend-select")).toBeVisible();
-  await expect(page.getByTestId("add-storage-save")).toBeEnabled();
-
-  // AND THERE IS NO WAY OUT BUT FORWARD. A cancel would return the user to a Home that cannot
-  // render against a daemon refusing every API outside setup.
-  await expect(page.getByRole("button", { name: /^cancel$/i })).toHaveCount(0);
-  // It is a page, not a modal: nothing to dismiss, and no dialog role in the tree.
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-});
+}
 
 // A CONFIGURED INSTALL IS NOT SENT THERE, which is the assertion that stops the gate above from
 // passing on a redirect that always fires.

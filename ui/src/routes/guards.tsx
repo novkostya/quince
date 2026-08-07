@@ -50,11 +50,27 @@ export function LoginGate({ children }: { children: ReactNode }) {
 // because a request failed would be the worst possible false positive: it tells someone whose
 // quince is fully configured that it is not. The daemon is the authority — it refuses what it
 // refuses — and this gate only decides where to point someone, so it fails toward the ordinary app.
+//
+// `null` AND `[]` BOTH MEAN NO STORAGE, and this gate shipped treating only `[]` as the state —
+// so a genuine first run walked straight past it onto a Home with no Storage section at all
+// (Operator-reported from a fresh stand).
+//
+// `Config.storage` is `*[]StorageEntry` server-side, a POINTER on purpose so that an ABSENT key is
+// distinguishable from an empty list (`schema.go`). A fresh install has no `storage:` key at all,
+// so it serialises as `null`; a list someone emptied by hand serialises as `[]`. That distinction
+// is real and worth keeping — but it is NOT the distinction this gate cares about. Both are
+// "quince has nowhere to put backups", which is why the daemon's own predicate is
+// `scfg == nil || len(*scfg) == 0`.
+//
+// TWO IMPLEMENTATIONS OF ONE PREDICATE, AND THEY DISAGREED. That is the hazard `storage.WantZFS`
+// is commented against, arriving here instead: the server decides whether to REFUSE, this decides
+// where to POINT someone, and a first run fell in the gap between them.
 export function RequireStorage({ children }: { children: ReactNode }) {
   const { data, isLoading, isError } = useConfig();
   if (isLoading || isError) return <>{children}</>;
-  const storages = data?.config.storage;
-  if (storages !== undefined && storages !== null && storages.length === 0) {
+  if (data === undefined) return <>{children}</>;
+  const storages = data.config.storage;
+  if (storages === null || storages.length === 0) {
     return <Navigate to="/onboarding/storage" replace />;
   }
   return <>{children}</>;
