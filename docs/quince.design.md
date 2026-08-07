@@ -246,6 +246,45 @@ whole-tree offsite sync — D5a):
 per-job `working/<udid>` seeded from `latest/`, verifies it, and **atomically exchanges** it into
 `latest/`. The models differ only in what a *version* is (a snapshot vs a directory).
 
+**RULED (was `PROPOSED (gap)`): on the `zfs` backend that unification ENDS — writes go straight into
+`latest/`, and there is no seed, no `working/` and no exchange.** Operator ruling 2026-08-04, relayed
+by the architect seat on
+[quince#591](https://github.com/novkostya/quince/issues/591#issuecomment-5176994037); rung `qn.6h`.
+**`RULED`, not implemented — everything from the diagram down still describes what runs today, on
+every backend including zfs.** Commit becomes verify → `zfs snapshot`; `Seed` returns the live tree
+and seeds nothing; `PhaseExchanged` stops occurring there. The host helper loses `seed` and gains
+`rollback`.
+
+**The version model does NOT move, and `never mutate a committed version` survives — that
+distinction is what made this rulable rather than forbidden.** A committed version on zfs is a
+`@quince-*` snapshot and COW leaves it untouched; the snapshot still contains `latest/`, byte for
+byte the tree it contains today; browse already reads *every* version, the newest included, from
+`.zfs/snapshot/<snap>/latest/` rather than from `latest/`. What stops being true is a **different**
+sentence sitting in the same paragraph as that rule: `latest/` *is* the newest committed version's
+content. Under in-place writes it is the **mutable head**, and the newest version is a snapshot **of**
+it. A reader who conflates the two concludes this change is forbidden by canon and drops it.
+
+Three consequences the ruling accepted knowingly, recorded so they are not re-litigated as findings:
+
+- **rclone loses its stable whole-tree source on zfs.** `latest/` is torn mid-backup, so offsite must
+  read a snapshot mount and quince must be excluded from a general whole-host rclone job. D5a's
+  one-uniform-offsite-contract paragraph directly below then holds for the namespace backends only.
+- **Two lifecycles again.** qn.5b's one-lifecycle property is partly undone on purpose: one-time
+  engineering, against a seed tax otherwise paid on every backup forever (~17.5 s warm, past 60 s
+  cold, for a 133k-file device).
+- **`rollback` is for ABANDON, never the failure default.** Canon's *a failed job keeps its dirty
+  `working/` so a retry resumes* means that in place **the dirty head IS the resume state** — so a
+  rollback on failure discards a partial transfer and makes retries strictly worse than the model it
+  replaces. It fires only on a head that never became a version, never once verify has passed, and it
+  can **fail** (a dataset mounted into a running container with open handles): a real outcome, never a
+  formality.
+
+**Three questions the SPEC answers, not the implementation** (ruling condition 2): what `reset.go`,
+`worksentinel.go` and the `WorkingReset` surface do on a backend with no working directory — note the
+seed state machine lives in shared `workdir.go`, which **both** backends call, not in `zfs.go`;
+whether rollback under load succeeds, which no seat here can measure (quince#730); and how the
+`Info.plist` capture-and-restore step re-derives when there is no clone to restore it over.
+
 ```
 all backends — /backups/<udid>/ (zfs: a child dataset mounted here; namespace: plain dirs)
 ├── latest/            ← REAL DIR: the newest verified backup = the version content; the SOLE
@@ -263,7 +302,9 @@ all backends — /backups/<udid>/ (zfs: a child dataset mounted here; namespace:
 ```
 
 `latest/` is a real directory on every backend, never a symlink — one uniform offsite
-contract (stack D5a): include `latest/`, exclude `working/` and `versions/` — via ANCHORED
+contract (stack D5a) **for the namespace backends; `qn.6h` above ends it for zfs, where `latest/`
+is torn mid-backup and offsite must read a snapshot mount instead**: include `latest/`, exclude
+`working/` and `versions/` — via ANCHORED
 filter rules only (unanchored name matches would silently drop same-named dirs inside
 backup content; exact block in stack D5a).
 

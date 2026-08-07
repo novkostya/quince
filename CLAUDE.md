@@ -13,7 +13,10 @@ of the displaced tree into `versions/<ts>/`. `latest/` is a real directory on ev
 never unoccupied, and is the sole whole-tree rclone offsite-sync source; a version is a
 `@quince-*` snapshot on zfs (one child dataset per device, browsed via
 `.zfs/snapshot/<snap>/latest/`, so between backups the dataset holds only `latest/`) or a
-`versions/<ts>/` dir on the reflink (FICLONE) / hardlink / copy backends. Commit is
+`versions/<ts>/` dir on the reflink (FICLONE) / hardlink / copy backends. **RULED and NOT YET
+BUILT — `qn.6h` ends that one lifecycle for zfs**: writes go straight into `latest/`, with no seed,
+no `working/` and no exchange, and commit becomes verify → `zfs snapshot` (quince#591, design §5).
+Everything above still describes what runs. Commit is
 journaled and startup reconciliation is first-class. Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is
 no unattended mode and no auto-retry: opportunity signal → push → one unlock+confirm;
@@ -897,6 +900,12 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   that version (older versions come from snapshots or version dirs). A failed job **keeps**
   its dirty `working/` so a retry resumes without re-transferring, while a seed killed
   mid-flight is caught by the seed-in-progress sentinel and re-seeded rather than resumed.
+  **THE RULE ITSELF SURVIVES `qn.6h`; ONE SENTENCE ABOVE IT DOES NOT** (ruled 2026-08-04,
+  quince#591, not yet built). When zfs writes in place, a committed version is a `@quince-*`
+  snapshot and COW leaves it untouched — so *never mutate a committed version* still holds. What
+  stops being true on that backend is *`latest/` is not scratch space*: it becomes the **mutable
+  head**, and the newest version is a snapshot **of** it. Read those two as one claim and this
+  ruling looks forbidden by canon.
   Roll-forward: once verify has passed and the immutable artifact exists, recovery completes
   the remaining commit phases — it never unwinds them, because a commit failure must not
   destroy a multi-hour Wi-Fi transfer. Any storage-touching change re-proves these
