@@ -65,10 +65,12 @@ a probe that **reports** rather than resolves, and never creates.
   This rung builds **the second one only**. The usbmuxd and Wi-Fi checks are accepted proposals **P1
   and P1b** in the devlog ledger, homed at "qn.6" and **not at a letter**; they are not this rung's,
   and this rung must not grow an onboarding framework on their behalf.
-- **`PUT /api/config`'s missing `CheckStorageBackends`.** Filed as
-  [quince#683](https://github.com/novkostya/quince/issues/683) and **stays open after this rung** —
-  the add endpoint runs the check because it must, and that closes the hole for *one* route. Stated
-  here so nobody reads G5 as closing #683.
+- **`PUT /api/config`'s missing `CheckStorageBackends` — out of scope, and a DEPENDENCY rather than
+  a hole this rung leaves open.** [quince#683](https://github.com/novkostya/quince/issues/683) was
+  **ruled 2026-08-07T10:01Z**, ninety minutes before this spec opened: the check goes in
+  **`replaceLocked`**, beside the existing `CheckStorages` call — not in `Validate`, which would make
+  `Load` discard the config and fall back to `Default()`, reproducing quince#508. The ruling says
+  *"land this before or with `qn.6e`."* See PR 5.
 
 ---
 
@@ -132,7 +134,10 @@ wantZFS := opts.Backend == BackendZFS ||
 
 Point today's auto-probe at a ZFS dataset and it answers **reflink** (2.2 block cloning) or
 **hardlink**, and never says the word zfs. The same predicate is duplicated verbatim at
-`storagereq.go:191-192`. **A third copy in the add path would make three** — factor it in PR 2.
+`storagereq.go:191-192`. The duplication is **semantic rather than literal** — `probe.go` spells it
+`BackendZFS`, `storagereq.go` spells it `"zfs"` — which is worse, not better: two spellings of one
+predicate will not be caught by a grep for either. **A third copy in the add path would make three**
+— factor it in PR 2.
 
 **5. The marker overrides the selector, and the comparison already exists.**
 `storagemarker.go:38-41`: backend is *"recorded at the storage's creation moment and is IMMUTABLE
@@ -162,9 +167,12 @@ echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
 exit 1
 ```
 
-Every arm is `case "$target" in "$PARENT"…` — a target outside the baked-in `$PARENT` falls through
-to that refusal. So `list <typed parent>` **does** discriminate: it proves the key, the forced
-command, and that the operator's `$PARENT` matches what the user typed.
+Every **path-guarded** arm — `create`, `snapshot`, `destroy`, `list`, `seed` — is
+`case "$target" in "$PARENT"…`, so a target outside the baked-in `$PARENT` falls through to that
+refusal. So `list <typed parent>` **does** discriminate: it proves the key, the forced command, and
+that the operator's `$PARENT` matches what the user typed. (**`capacity` is the exception and has no
+guard**, because it takes no caller argument at all — the next bullet is about exactly that, and an
+earlier draft said *"every arm"* while asserting the exception two lines later.)
 
 **Two traps in that, both measured off the script rather than reasoned:**
 
@@ -184,9 +192,11 @@ in exactly the state it exists for.
 
 **10. There is no onboarding state machine, no step enum, and no `GET /api/onboarding` index.** Two
 unlinked signals: `OnboardingHTTPS.complete`, computed per request from the connection itself
-(`handlers_onboarding.go:46-56`), and `AuthState = needs_setup | needs_login | authenticated`
-(`auth/service.go:23-24`). `authExempt` is **five exact method+path strings**
-(`middleware.go:75-79`) with no prefix support.
+(`handlers_onboarding.go:46-56`), and the first-run auth state — `needs_setup` / `needs_login` /
+`authenticated`, which on the Go side is **three bare string consts and no type**
+(`auth/service.go:23-25`). `AuthState` is the **TypeScript** union (`ui/src/lib/types.ts:136`); the
+two are not the same artifact and only one of them is checked by a compiler. `authExempt` is **five
+exact method+path strings** (`middleware.go:75-79`) with no prefix support.
 
 **11. The onboarding path names its SUBJECT, not a position** — Operator ruling 2026-08-02,
 contracts §1. And per [quince#558](https://github.com/novkostya/quince/issues/558), **§9 names no
@@ -202,8 +212,14 @@ ordinal nobody has fixed.**
 ### 1. `storage.Inspect` — a report, not a resolution
 
 New, in `core/internal/storage/`. It **never creates**, **never mints a marker**, and **never
-constructs a `Backend`**. `Select` does all three and is therefore the wrong tool
-(`probe.go:30-69`).
+constructs a `Backend`**. `Select` **creates and constructs** — `probeNamespace`'s `MkdirAll`
+(`probe.go:83`) and a live `Backend` on every return path — which is why it is the wrong tool.
+
+**`Select` does NOT mint a marker, and an earlier draft of this line said it did.** Measured:
+`WriteStorageMarker` has exactly one non-test caller, `creation.go:206` inside `ResolveStorage`, and
+`probe.go:30-69` contains no marker reference at all. The correction matters beyond the sentence —
+an implementer who believes markers are minted on the probe path will model storage creation
+wrongly, and that is storage semantics rather than prose (quince#687 review).
 
 ```go
 // Inspect reports what a candidate storage path IS, without changing it.
@@ -217,8 +233,10 @@ with the **existing reason sentence**, which already names the path it probed (q
 
 Order, and the order is the contract:
 
-1. `Clean` and require absolute — the same rule `validate.go:99-100` enforces, so the form's refusal
-   and the config's refusal cannot disagree.
+1. `Clean` and require absolute — the same two rules the config enforces, so the form's refusal and
+   the config's refusal cannot disagree. They are **separate sites**: the absolute check is
+   `validate.go:99-100`, and `filepath.Clean` is `:102`, in the `default:` arm that also does the
+   duplicate-path comparison.
 2. `Stat`. Missing → **refuse and stop.** Not a directory → refuse and stop. This is where
    `MkdirAll` would have been, and it is deliberately not there.
 3. `ReadStorageMarker`. Present and valid → **adopt branch**; the recommendation is not offered at
@@ -332,9 +350,29 @@ and seed enums, exactly-one-default) → `CheckStorageBackends` (`storagereq.go:
 with no parent dataset, and **two storages on one parent dataset**) → the write. All `422
 {errors:[{path,message}]}` at `storage[i].<field>`, the shape a client already renders.
 
-**The add endpoint runs `CheckStorageBackends`, and that is a floor rather than a fix.**
-`main.go:208` is its only non-test caller today, so `PUT /api/config` can still write a config the
-daemon refuses to start on. This rung closes it for **one route**. quince#683 stays open.
+**The add endpoint does NOT get its own `CheckStorageBackends` call — it inherits one, and this
+paragraph asserted the opposite until quince#687's review.** `AddStorage` mirrors `ForgetStorage`,
+which delegates to `s.replaceLocked(next)` (`forget.go:133`), and **quince#683's ruling puts the
+check in `replaceLocked`**. So the add path is covered the moment that lands, `PUT /api/config` is
+covered by the same edit, and **both doors become one door**.
+
+The draft said the add endpoint runs the check itself and that *"this rung closes it for one route;
+quince#683 stays open"*. That was written from the issue and not from the ruling, which had landed
+ninety minutes earlier — a spec asserting an outcome a ruling had already changed. Recorded rather
+than silently corrected, because the same mistake is available to any PR in this rung: **the issue
+is the input, the ruling is the state.**
+
+**The dependency, stated so PR 5 is buildable either way.** If quince#683's fix has landed when PR 5
+is written, PR 5 adds no check and asserts the inherited one. If it has not, **PR 5 lands the
+`replaceLocked` edit itself** — that is what *"before or with `qn.6e`"* permits, and it is one call
+beside an existing one rather than a new mechanism. Either way the ruling's condition travels with
+it: the message must name **both** storages and the shared dataset, matching the duplicate-name and
+duplicate-path messages in shape and tone, which means adapting `CheckStorageBackends`' bare strings
+to `wire.ConfigError{Path, Message}` rather than mechanically wrapping them.
+
+**A per-route call as defence in depth was considered and is NOT wanted.** Two call sites for one
+invariant is how they diverge, and the reason `main.go:208` keeps its startup call is that it covers
+a path `Replace` never sees — a hand-edited file — not that duplication is good.
 
 ### 6. `auto` — RULED: absorbed, not removed
 
@@ -386,10 +424,16 @@ now, and Storage has its own re-probe (`POST /api/storages/{name}/recheck`, surf
 `StorageProblem.tsx:49-59`) — so a page-level *Rescan* invites the reading that it does both.
 
 **The idiom exists twice; reuse it verbatim including the `-ml-3`:**
-`WifiSyncControl.tsx:61-72` (`variant="ghost" size="sm"`, `-ml-3` so the text starts at the column
-margin — a ghost button has no background, so its text sits at the size's `px-3` inset while its
-neighbours' visible edges are at the margin) and `JobHistory.tsx:64-72` (`Show all N`, ghost +
-`self-start`, no `-ml-3` because it is a flex-column child).
+`WifiSyncControl.tsx:61-72` and `JobHistory.tsx:64-72` (`Show all N`, ghost + `self-start`, no
+`-ml-3` because it is a flex-column child, not aligned against a text margin).
+
+**`WifiSyncControl` is the CONDITIONAL form and the values must be read off its `on` branch, not
+copied flat.** All three props are ternaries — `variant={on ? "ghost" : "outline"}`,
+`size={on ? "sm" : "md"}`, `className={on ? "-ml-3" : undefined}` — because that control deliberately
+changes weight with direction. **A section-foot button has no such branch**, so it takes the ghost
+half unconditionally: `variant="ghost" size="sm" className="-ml-3"`. The `-ml-3` is what the comment
+at `:63-68` explains — a ghost button has no background, so its text sits at the size's `px-3` inset
+while every neighbour's visible left edge is at the margin, and it reads as a stray indent.
 
 **Do not put them in one row.** Rescan is idempotent and free; Add storage is a config write. Same
 weight and size is right; adjacency implies they are the same kind of act.
@@ -417,10 +461,18 @@ in as many words, and an implementer must not read the two as one.
 > *"REFUSING to start. A quince that comes up with nowhere to put backups looks healthy and silently
 > protects nothing, which is worse than one that did not start."*
 
-And `/data/config.yml` does not exist on a fresh install — `deploy/compose.nas.yml` mounts no config
-at all, and `Default()` deliberately carries no storage block (`schema.go:293-297`). **So today's
-genuine first run is:** start container → **it exits** → read stderr → hand-write YAML into a Docker
-volume → start again → *then* onboarding. That is not the Plex bar design §9 promises, and it means
+And `/data/config.yml` does not exist on a fresh install. `deploy/compose.nas.yml:44-47` **bind-mounts
+a host directory** — `./quince/data:/data` — rather than declaring a named Docker volume, and it
+creates no config file in it; `Default()` deliberately carries no storage block
+(`schema.go:293-297`). **So today's genuine first run is:** start container → **it exits** → read
+stderr → hand-write YAML into `./quince/data/config.yml` beside the compose file → start again →
+*then* onboarding.
+
+**The bind mount is the one mercy in that sequence and is worth stating precisely**, because it is
+what makes the hand-edit *possible* at all: the file is on the host filesystem next to
+`compose.yml`, not inside a volume the user would have to `docker cp` into. An earlier draft called
+it a Docker volume, which would have made the workaround materially worse than it is (quince#687
+review). That is not the Plex bar design §9 promises, and it means
 the storage step cannot be appended to onboarding: it must run **while quince has no storage**,
 which is precisely the state the refusal exists to forbid.
 
@@ -503,7 +555,7 @@ and says which half is missing.
 | **G3** | `Inspect` on a dir holding a valid marker returns adopt, with the marker's backend, **even when the live probe disagrees**; a corrupt marker is its own outcome, not "absent". | CI (Go) |
 | **G4** | `statfs` tier: a fake/injected `f_type` yields the zfs recommendation with no `zfs` binary on `PATH`. Plus a **host gate** re-running the fact-1 measurement in the built image. | CI (Go) + host |
 | **G5** | `POST /api/config/storage` → `GET /api/storages` lists it in one process, a job can target it, and a root holding committed versions has them visible. No restart. | CI (Go) |
-| **G6** | The add's refusals, **each asserted on the config FILE being unchanged**, not on the response: non-absolute path, duplicate name, duplicate cleaned path, bad enum, and **two storages on one `zfs.parent_dataset`**. A refusal that still writes is what this gate exists to catch. | CI (Go) |
+| **G6** | The add's refusals, **each asserted on the config FILE being unchanged**, not on the response: non-absolute path, duplicate name, duplicate cleaned path, bad enum, and **two storages on one `zfs.parent_dataset`** — the last of which is quince#683's own owed reproduction, reached through `Replace` and therefore covering `PUT /api/config` in the same assertion. A refusal that still writes is what this gate exists to catch. | CI (Go) |
 | **G7** | The written entry's `backend` is one of `zfs\|reflink\|hardlink\|copy` — read back from the YAML, for every branch including an explicit user override. | CI (Go) |
 | **G8** | `Test helper` against **the real `quince-zfs-helper` script**, with `zfs` stubbed: all four outcomes of fact 8, and **empty `list` output reported as success**. | CI (Go) |
 | **G9** | **The string "ZFS not supported" (and its variants) appears nowhere in the built UI bundle** — asserted against the build output, not against a rendered state, because tier 3 is the state that never renders in a test. | CI (UI) |
@@ -617,7 +669,10 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 3. **Interface fact 2 is unmeasured and stays unmeasured.** Named so a later rung that wants
    `parent_dataset` derivation starts by measuring it rather than by reading this spec's descope as
    a verdict on the flag.
-4. **quince#683 stays open.** G6 closes the `CheckStorageBackends` hole for the add route only.
+4. **quince#683 is RULED, not open, and this rung depends on it rather than working around it.**
+   The check goes in `replaceLocked`, so the add path and `PUT /api/config` close together. PR 5
+   lands that edit if it has not landed already. This item read *"quince#683 stays open — G6 closes
+   the hole for the add route only"* until the review pointed at a ruling that predated the spec.
 5. **`zfs.mode: exec` is undeployable with the shipped image** (fact 3) while `Resolved()` still
    defaults to it. This rung works around it in the form and does **not** change the default, which
    would be a config break. Worth its own issue; filed with PR 2 rather than fixed here.
@@ -635,7 +690,7 @@ Each carries one reviewable claim and its own proof. **Branch each from `main` �
 | **2** | **`storage.Inspect`** — non-creating inspection, adopt branch, recommendation, the `statfs` ZFS tier, and the factored `wantZFS`. No HTTP. | G1, G2, G3, G4 | architect |
 | **3** | **`POST /api/storages/probe`** + the wire object. contracts §1/§2. | Go handler tests | **`@novkostya`** |
 | **4** | **`POST /api/storages/probe/hook`** — the two-verb helper test and its four outcomes. contracts §1. | **G8** | **`@novkostya`** |
-| **5** | **`POST /api/config/storage`** — `config.AddStorage` mirroring `ForgetStorage`, the refusal order, `CheckStorageBackends` on the write path, a concrete backend always. contracts §1. | G5, G6, G7 | **`@novkostya`** |
+| **5** | **`POST /api/config/storage`** — `config.AddStorage` mirroring `ForgetStorage`, the refusal order, a concrete backend always. **Carries quince#683's `replaceLocked` edit if that has not landed first**; adds no per-route check either way. contracts §1. | G5, G6, G7 | **`@novkostya`** |
 | **6** | **The add form** — one field, Check, three branches, the zfs sub-form. | G9, G11 | architect |
 | **7** | **The two buttons move** — Rescan to the foot of Devices, `+ Add storage` to the foot of Storage, empty state included. Independent of 2–6. | G10 | architect |
 | **8** | **Canon: `auto` is absorbed** — `contracts.md:1339-1344` and `:1407-1409`, `schema.go:76-81`, design §9's guided-check sentence, `deploy/storage.md`'s note on what the form fires. | review | **`@novkostya`** |
