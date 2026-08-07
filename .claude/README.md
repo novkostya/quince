@@ -175,8 +175,9 @@ Nothing in the current workflow needs either.
     because git has no idea what an App is: it is both a credential *helper* (what `/kickoff` §3
     wires into a clone) and a `git` wrapper you can call directly, and either way the installation
     token reaches git on a pipe rather than in a push URL.
-  - `bin/gh-arch` — the **architect**. `bin/gh-review` — the **reviewer** App, which is also how
-    canon is authored (`/architect` §1).
+  - `bin/gh-review` — the **architect**, a GitHub App: the seat's only credential, so it reads,
+    authors canon, casts verdicts and merges (`/architect` §1). It was one of two until quince#676
+    retired `bin/gh-arch`, and the split between them is gone rather than reassigned.
   - `bin/gh-bot` — the **retired** implementer machine account, suspended 2026-07-28. Its entries
     are inert: the token cannot authenticate. They stay because `quince-devlog` `decisions/0014`
     condition 1 is that nothing is tidied away — the intact record is what makes the good-faith

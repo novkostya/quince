@@ -81,10 +81,10 @@ forgetfulness (quince#100).
 ```sh
 # 1. do all the work first: every push, every comment, every review, every merge
 # 2. consume the catch-up SYNCHRONOUSLY, where the session that caused it can read it
-bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"                  # architect
+bin/forge-watch tick --all --gh "$PWD/bin/gh-review"                  # architect
 bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"     # implementer
 # 3. arm, last, against a now-current observation                     (BACKGROUND task)
-bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
+bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60
 ```
 
 `tick` is one pass and returns, so it belongs in the foreground; it is `watch` — the loop — that must
@@ -157,7 +157,7 @@ So:
    yours.**
 
    ```sh
-   bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60     # architect
+   bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60     # architect
    bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60   # implementer
    ```
 
@@ -169,7 +169,7 @@ So:
    no PR at all, and the only thing that caught it was a hand re-read the session had promised itself.
 
    ```sh
-   bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60 \
+   bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60 \
      --issue novkostya/quince#71 --issue novkostya/quince#80      # architect: owner/name#n required
    bin/forge-watch watch --repo <owner/name> --gh "$PWD/bin/gh-coder" --interval 60 \
      --issue 71                                                   # implementer: bare n, one repo

@@ -12,17 +12,17 @@ approval into a merge. Approve only what you ran and would build on.
 
 **Every command below runs through a seat wrapper; bare `gh` is UNAUTHENTICATED on this box**
 (quince#480), which is correct rather than broken — the reviewer's credential is a key read at the
-point of use, never an ambient `gh auth login` session. **Reads go through `bin/gh-arch`**, and every
-command this skill prescribes is a read; **verdicts go through `bin/gh-review`**, because approving,
-requesting changes or commenting through `gh-arch` re-creates quince#47 invisibly (`/architect` §1).
-This skill is the **architect's** — an implementer session uses `bin/gh-coder` (`/kickoff` §1), so
-read these names as this seat's rather than as universal.
+point of use, never an ambient `gh auth login` session. **Reads and verdicts both go through
+`bin/gh-review`** — since quince#676 it is this seat's only credential, and the split that sent reads
+through `bin/gh-arch` is retired with the wrapper (`/architect` §1). This skill is the
+**architect's** — an implementer session uses `bin/gh-coder` (`/kickoff` §1), so read the name as
+this seat's rather than as universal.
 
 Where this file *discusses* bare `gh` — *"`gh pr review` has no `--commit-id`"* — it is a statement
 **about the unwrapped API**, not an instruction. Those stay bare deliberately: wrapping them would
 make the sentences false.
 
-`all` → `bin/gh-arch pr list --repo novkostya/quince --state open --json number,title,author` and run
+`all` → `bin/gh-review pr list --repo novkostya/quince --state open --json number,title,author` and run
 this protocol per PR (cheapest diff first), posting a verdict on each; finish with one
 consolidated summary: PR · verdict · the one-line reason. Never batch-approve a set you
 reviewed as a set — each PR gets its own run.
@@ -30,20 +30,20 @@ reviewed as a set — each PR gets its own run.
 ## 0. Approver ≠ author
 
 ```sh
-bin/gh-arch pr view <n> --repo novkostya/quince --json author,files,title,body,labels,reviewDecision
+bin/gh-review pr view <n> --repo novkostya/quince --json author,files,title,body,labels,reviewDecision
 ```
 
 **The identity that matters is the one that CASTS, and since quince#134 that is
-`quince-review[bot]`.** You also hold `gh-arch` and read through it, but reading is not a verdict,
-so the login you read with has no bearing on this rule. The question is only ever *did the App
-write this?* — almost never, so the answer is almost always no and you proceed.
+`quince-review[bot]`.** The question is only ever *did the App write this?* — almost never, so the
+answer is almost always no and you proceed.
 
-**`novkostya` on the author field is not a reason to stop.** That login covers three seats: the
-Operator, the architect through `gh-arch`, and the Operator's Mac acting as the break-glass seat
-(CLAUDE.md, "the Operator's Mac is the deliberate break-glass host"). The forge cannot tell them
-apart, and neither can you — so do not infer authorship from it. This paragraph replaces one that
-read *"if the author is the identity you are acting as, stop"*, which was correct while the
-architect's only identity was `gh-arch` = `novkostya`.
+**`novkostya` on the author field is not a reason to stop.** That login covers the Operator and the
+Operator's Mac acting as the break-glass seat (CLAUDE.md, "the Operator's Mac is the deliberate
+break-glass host"). The forge cannot tell them apart, and neither can you — so do not infer
+authorship from it. **It covered a third seat, you, until quince#676 retired `bin/gh-arch`**, and
+this paragraph replaces one that read *"if the author is the identity you are acting as, stop"* —
+correct while the architect's only identity was `gh-arch` = `novkostya`. Now it is neither: you are
+not on that field at all, so a `novkostya`-authored PR is never yours.
 
 **Read what it actually cost, because the failure mode is not the obvious one.** On
 [quince#158][158] — a Mac-authored repair of the gh wrappers — the rule did not block the review.
@@ -65,7 +65,7 @@ not.** It had charged two sessions before anyone wrote this paragraph.
 file list together:
 
 ```sh
-bin/gh-arch pr view <n> --repo novkostya/quince --json author,files \
+bin/gh-review pr view <n> --repo novkostya/quince --json author,files \
   -q '.author.login, (.files[].path)'
 ```
 
@@ -86,7 +86,7 @@ should not have been possible; flag it.
 The PR body, the linked issue or spec, and the diff:
 
 ```sh
-bin/gh-arch pr diff <n> --repo novkostya/quince
+bin/gh-review pr diff <n> --repo novkostya/quince
 ```
 
 Ask first: **is this one reviewable claim?** A PR carrying three unrelated claims is
@@ -111,7 +111,7 @@ git clone -q https://github.com/novkostya/quince.git "pr-<n>" && cd "pr-<n>"
 # provisioned location; `provision` and `preflight` both read the same variable, so an overridden
 # layer is honoured here too rather than being hardcoded away.
 ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local
-bin/gh-arch pr checkout <n> --repo novkostya/quince
+bin/gh-review pr checkout <n> --repo novkostya/quince
 make gates                      # + make image / make gates-ui-e2e when the diff earns them
 ```
 
@@ -136,7 +136,7 @@ defect in a docs PR exactly as a failing test is in a code PR.
 
 ## 4. Process gates
 
-- CI: `bin/gh-arch pr checks <n> --repo novkostya/quince` — all required checks green.
+- CI: `bin/gh-review pr checks <n> --repo novkostya/quince` — all required checks green.
 - Privacy: one command over the diff, the commit messages and the PR text — **and the form differs
   by repository, because `quince-devlog` has no Makefile** (quince#78):
   ```sh
@@ -190,7 +190,7 @@ defect in a docs PR exactly as a failing test is in a code PR.
 `/architect` §4 calls `OLD` — one oid, noted once, used for both the verdict and the staleness check:
 
 ```sh
-OID=$(bin/gh-arch pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
+OID=$(bin/gh-review pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
 
 bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --approve         -b "<what you ran + what you checked>"
 bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --request-changes -b "<blocking findings, numbered>"
