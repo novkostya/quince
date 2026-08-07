@@ -95,10 +95,12 @@ chmod 600 "$SPLIT_LAYER/privacy-patterns.txt" "$SPLIT_LAYER/privacy-patterns-cs.
 ABSENT_LAYER="$TMP/layer-missing" # deliberately never created
 
 # Two GIT-CLONE layers for quince#121: present and readable, differing only in whether they can ever
-# ADVANCE. Built with `git init` rather than a real clone so the suite stays offline and needs no
-# credential — which is possible precisely because preflight asserts the LOCAL wiring rather than
-# attempting a fetch. A fetch-based check could not be fixtured this way, and would refuse a box over
-# a flaky link.
+# ADVANCE. Built with `git init` rather than a real clone so the suite stays offline.
+#
+# EVERY CASE BELOW THAT REACHES A WIRED LAYER MUST PASS `QUINCE_LAYER_FETCH_PROBE` (quince#675).
+# preflight now asks the remote instead of reading the config, so a case that forgets the stub makes
+# a REAL NETWORK CALL to `zz-synthetic.invalid` from a unit test — and still goes green, because the
+# failure lands in the note arm. Green, slow, and different on a box with no route out.
 ZZ_REMOTE="https://github.com/zz-synthetic/zz-synthetic.git"
 
 # UNSCOPED wiring — what `provision` writes: `credential.helper`, applying to every URL.
@@ -169,6 +171,83 @@ SSH_SCP_LAYER="$TMP/layer-git-ssh-scp"
 SSH_URL_LAYER="$TMP/layer-git-ssh-url"
 FILE_URL_LAYER="$TMP/layer-git-file-url"
 
+# --- fetch-probe stubs (quince#675) ------------------------------------------------------------
+# THE SUITE STAYS OFFLINE, and the comment above the layer fixtures said that could not survive a
+# fetch-based check — "possible precisely because preflight asserts the LOCAL wiring rather than
+# attempting a fetch. A fetch-based check could not be fixtured this way." That was true of a
+# hard-wired `git ls-remote`, and it is why preflight now takes the probe through
+# QUINCE_LAYER_FETCH_PROBE. These stubs are the reason the sentence is no longer a constraint:
+# nothing here touches a network, and every case below still exercises the real classifier.
+#
+# THE STDERR IS COPIED FROM A MEASUREMENT, NOT INVENTED. git 2.54.0, 2026-08-07 — each of these is
+# the shape that command actually produced, with the hostnames made synthetic. A fixture that
+# guessed at the text would pin the classifier to a string git never emits, and the test would go
+# green on a box where the check cannot work.
+PROBE_BIN="$TMP/probe"
+mkdir -p "$PROBE_BIN"
+
+# Success. Also writes to STDOUT, because `ls-remote` prints the resolved SHA there and preflight
+# must discard it: a commit id has no business in /var/log/quince-runner.log, and stdout reaching
+# the classifier would make every successful probe carry text the `bad` arm greps.
+cat >"$PROBE_BIN/ok" <<'EOF'
+#!/bin/sh
+echo "zz00000000000000000000000000000000000000	HEAD"
+exit 0
+EOF
+
+# The credential was supplied and REJECTED — quince#674's exact shape, and the ONLY one that refuses.
+cat >"$PROBE_BIN/authfail" <<'EOF'
+#!/bin/sh
+echo "remote: Invalid username or token. Password authentication is not supported for Git operations." >&2
+echo "fatal: Authentication failed for 'https://zz-synthetic.invalid/zz-synthetic.git/'" >&2
+exit 128
+EOF
+
+# The network, not the credential. Same exit 128 as the case above — which is the whole reason the
+# classifier reads stderr and not the exit code.
+cat >"$PROBE_BIN/dns" <<'EOF'
+#!/bin/sh
+echo "fatal: unable to access 'https://zz-synthetic.invalid/zz-synthetic.git/': Could not resolve host: zz-synthetic.invalid (Domain name not found)" >&2
+exit 128
+EOF
+
+# The helper ran and produced no credential. NOT a refusal, deliberately: a wrapper that failed to
+# mint an installation token once looks exactly like this, and it is transient.
+cat >"$PROBE_BIN/noprompt" <<'EOF'
+#!/bin/sh
+echo "fatal: could not read Username for 'https://zz-synthetic.invalid': terminal prompts disabled" >&2
+exit 128
+EOF
+
+# Timed out: a non-zero exit with NOTHING on stderr, which is the one shape that leaves the message
+# with no observation to quote. busybox `timeout` exits 143 where GNU coreutils exits 124 (measured);
+# 143 is used here and the classifier must not care, because it reads neither.
+cat >"$PROBE_BIN/timedout" <<'EOF'
+#!/bin/sh
+exit 143
+EOF
+
+# A remote URL carrying inline credentials. git 2.54.0 redacts userinfo from its own messages, but
+# that is one version's behaviour and this output goes to a logfile, so preflight strips it again.
+# This stub is what proves the strip rather than the git version.
+cat >"$PROBE_BIN/leaky" <<'EOF'
+#!/bin/sh
+echo "fatal: unable to access 'https://zzuser:zzsupersecretzz@zz-synthetic.invalid/zz-synthetic.git/': Could not resolve host: zz-synthetic.invalid" >&2
+exit 128
+EOF
+# Writes to stdout AFTER stderr, and fails. The ONLY stub that can prove stdout is discarded rather
+# than merged: on the success path nothing is quoted regardless, so a `2>&1` there is invisible, and
+# a stub that wrote stdout FIRST would still leave the `fatal:` last. Mutation-tested — merging the
+# two streams passes every other case in this file and fails this one.
+cat >"$PROBE_BIN/noisy" <<'EOF'
+#!/bin/sh
+echo "fatal: unable to access 'https://zz-synthetic.invalid/zz-synthetic.git/': Could not resolve host: zz-synthetic.invalid" >&2
+echo "zzstdoutleakzz"
+exit 128
+EOF
+chmod +x "$PROBE_BIN/ok" "$PROBE_BIN/authfail" "$PROBE_BIN/dns" "$PROBE_BIN/noprompt" \
+	"$PROBE_BIN/timedout" "$PROBE_BIN/leaky" "$PROBE_BIN/noisy"
+
 # preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
 # from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
 # a synthetic floor every passing case here would be asserting the size of the Operator’s list —
@@ -214,11 +293,18 @@ chmod 644 "$LOOSE_LAYER/privacy-patterns.txt"
 # The seventh variable arrived one PR after that sentence was written: QUINCE_PRIVATE_LAYER
 # (quince#44). It is added here and nowhere else, which is exactly what the single list was for.
 #
+# The ninth and tenth arrived with quince#675: QUINCE_LAYER_FETCH_PROBE and
+# QUINCE_LAYER_PROBE_TIMEOUT. The first is the one that matters — left un-neutralised, a box that
+# exported it would have every layer case probing through somebody else's stub, which is the
+# read-the-box defect this list exists to remove, aimed for the first time at the arm that decides
+# whether a box starts.
+#
 # Unquoted on purpose: this is a list of separate arguments, not one word.
 # shellcheck disable=SC2086
 PF_UNSET="-u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
 	-u ANTHROPIC_BASE_URL -u QUINCE_RUNNER_ROLE \
-	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK -u PRIVACY_FLOOR_FILE"
+	-u QUINCE_PRIVATE_LAYER -u QUINCE_PRIVACY_CHECK -u PRIVACY_FLOOR_FILE \
+	-u QUINCE_LAYER_FETCH_PROBE -u QUINCE_LAYER_PROBE_TIMEOUT"
 # QUINCE_BOT_TOKEN_FILE is NOT unset here any more, deliberately. Unsetting a PATH does not mean
 # "absent" — it means "fall back to the real one under /root/.config/quince". The suite-wide export
 # above pins it to a nonexistent file inside $TMP, which is what "absent" was always meant to say,
@@ -461,9 +547,110 @@ expect "…and names provision as the fix" 1 "run deploy/runner/provision" -- \
 
 # The mirror, and it is what stops the refusal above from being vacuous: the SAME layer, wired,
 # passes. Without this a check that refused every git clone would look correct.
+#
+# THE STUB IS NOW REQUIRED HERE, and its absence would be a bug in the suite rather than a detail:
+# a wired layer reaches the probe, and with no override the probe would make a REAL NETWORK CALL to
+# `zz-synthetic.invalid` from a unit test. It would still pass — the failure lands in the note arm —
+# but it would pass for the wrong reason, slowly, and differently on a box with no route out.
 expect "a wired git layer passes and says it can advance" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER"
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
+
+# …and it says the fetch HAPPENED rather than that the config looks right. This is quince#675's
+# whole claim in one substring: the old message read "a credential helper resolves for its http(s)
+# remote", which is a property of a file, printed under a heading that promises a property of the
+# remote. Pinned so the wording cannot drift back to describing the config.
+expect "…and says it MEASURED the remote, not the config" 0 "reached and authenticated just now" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
+
+# QUINCE#675, THE DEFECT ITSELF: a helper that RESOLVES and a credential that is REJECTED. Every
+# local fact this check used to read is identical to the passing case directly above — same layer
+# shape, same wiring — and the box was reported healthy for it while `git fetch` returned 128 in the
+# same minute (quince#674, arch box, 2026-08-06). Only asking the remote separates the two.
+expect "a wired layer whose credential is REJECTED refuses" 1 "CREDENTIAL IT NAMES WAS REJECTED" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/authfail"
+
+# …and quotes what the remote SAID. preflight's own rule is that a check names what it OBSERVED
+# rather than that something is wrong; "the private layer cannot fetch" is a claim nobody can act on
+# without the server's own line under it.
+expect "…and quotes the remote's own line" 1 "Authentication failed for" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/authfail"
+
+# THE FALSE-REFUSAL GUARD, and it is the reason this check is allowed to touch the network at all.
+# The paragraph in `preflight` that rejected a live fetch was afraid of exactly this: a box taken out
+# of service because DNS was slow. Same exit 128 as the refusing case, opposite verdict, and the
+# ONLY difference is the text — so if anyone ever reclassifies on the exit code, this fails.
+expect "a probe that fails on the NETWORK notes and does not refuse" 0 "not a rejected credential" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/dns"
+
+# The tempting over-reach. "The helper produced no credential" LOOKS permanent and is not: a wrapper
+# that could not mint an installation token this once produces it, and so does a forge outage. It is
+# also already covered fail-closed one step earlier — a layer with no helper at all never reaches
+# here. Pinned because widening the refusal to this string is the obvious next edit and it would
+# make a GitHub incident into a box that will not boot.
+expect "a probe with NO credential produced notes and does not refuse" 0 "not a rejected credential" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/noprompt"
+
+# A timeout is a non-zero exit with an EMPTY stderr, so the message has no observation to quote and
+# must say so rather than printing "observed — " and stopping. It also pins that nothing reads the
+# timeout's exit code: this stub returns busybox's 143, GNU coreutils returns 124 for the same
+# event, and a classifier that discriminated on either would be correct on one platform only.
+expect "a TIMED-OUT probe notes, and says so without an observation to quote" 0 "it timed out after" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/timedout"
+
+# PRIVACY, on the one path where being wrong is a credential in a logfile. `git remote get-url` hands
+# back userinfo verbatim, and preflight runs as root writing to /var/log/quince-runner.log. git 2.54.0
+# redacts its own messages — measured — but that is one version's behaviour, so the strip is asserted
+# here against a stub that does NOT redact. Presence and absence both: `expect` can only prove a
+# substring is there, and the claim that matters is that a substring is GONE.
+expect "a probe whose output carries inline credentials still notes" 0 "userinfo-redacted" -- \
+	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/leaky"
+
+out=$(run_preflight QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/leaky") || true
+if printf '%s\n' "$out" | grep -q 'zzsupersecretzz'; then
+	printf 'FAIL the probe must not print an inline credential from the remote URL\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+else
+	printf 'ok   …and the secret itself does NOT appear in the output\n'
+	pass=$((pass + 1))
+fi
+
+# STDOUT IS DISCARDED, NOT MERGED — and this is asserted on the FAILING path because that is the
+# only place it is observable. `ls-remote` writes the resolved SHA to stdout on success, but the
+# success arm quotes nothing, so a `2>&1` there changes no output at all: an assertion against the
+# `ok` stub passes whether the streams are merged or not, which is a test that looks strong and
+# proves nothing (mutation-tested, and that is exactly what it did).
+#
+# The `noisy` stub fails, writes its `fatal:` to stderr, and writes to stdout LAST. Merged, the note
+# quotes the stdout line; discarded, it quotes the `fatal:`. Both halves are checked, because
+# "quotes the right thing" and "does not quote the wrong thing" are different claims and only the
+# second one is about the stream.
+#
+# It matters beyond tidiness: the classifier greps this text for `Authentication failed`, so merging
+# stdout would let whatever a remote puts there sit in front of a boot-blocking decision.
+out=$(run_preflight QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$WIRED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/noisy") || true
+if printf '%s\n' "$out" | grep -q 'zzstdoutleakzz'; then
+	printf 'FAIL the probe must discard stdout; the stub stdout reached the classifier\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+elif ! printf '%s\n' "$out" | grep -q 'Could not resolve host'; then
+	printf 'FAIL stdout was discarded but so was the stderr the note must quote\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+else
+	printf 'ok   the probe discards stdout and quotes stderr — no stdout in the classifier\n'
+	pass=$((pass + 1))
+fi
 
 # THE REGRESSION TEST FOR THIS CHECK'S OWN FIRST VERSION. A URL-scoped helper is a different config
 # KEY from an unscoped one, and `config --get credential.helper` cannot see it — so the first draft
@@ -472,7 +659,7 @@ expect "a wired git layer passes and says it can advance" 0 "can advance" -- \
 # machine is worse than the staleness it guards against.
 expect "a URL-SCOPED helper also counts as wired" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$URLSCOPED_LAYER"
+	"QUINCE_PRIVATE_LAYER=$URLSCOPED_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
 
 # A helper with no remote to apply to cannot fetch. Asserted separately because `--get-urlmatch`
 # needs a URL: without an explicit refusal here the code would have to invent one, and a check that
@@ -488,32 +675,50 @@ expect "a git layer with a helper but NO remote refuses" 1 "NO 'origin' remote" 
 # anyone cloned the layer over SSH — and the message it would have handed them was actively wrong,
 # since `provision` writes an HTTPS helper, so "run provision" would have repaired a working box by
 # replacing its transport.
-expect "an SSH (scp-style) layer is not asked for a helper" 0 "nothing to assert" -- \
+expect "an SSH (scp-style) layer is not asked for a helper" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER"
+	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
 
 # The sibling that un-masking the stderr would NOT have fixed, which is why it is asserted
 # separately rather than folded into the case above. `ssh://` is a valid URL, so `--get-urlmatch`
 # does not fatal on it: it exits 1 with empty output and prints nothing. There was never an error to
 # discard here — the old code simply read a true answer to the wrong question and refused.
-expect "an ssh:// layer is not asked for a helper" 0 "nothing to assert" -- \
+expect "an ssh:// layer is not asked for a helper" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$SSH_URL_LAYER"
+	"QUINCE_PRIVATE_LAYER=$SSH_URL_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
 
 # `file://` behaves as `ssh://` does and is pinned so the fix is not read as SSH-specific. One
 # scheme dispatch covers every non-http(s) transport; without this, a later reader could narrow the
 # `*)` arm to SSH and break local-path clones with every test still passing.
-expect "a file:// layer is not asked for a helper" 0 "nothing to assert" -- \
+expect "a file:// layer is not asked for a helper" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$FILE_URL_LAYER"
+	"QUINCE_PRIVATE_LAYER=$FILE_URL_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
 
-# …and the non-http(s) arm must not quietly claim the box is FRESH. It says what it did not
-# establish: an ssh key is not a local fact preflight can read. Pinned because the tempting message
-# here is "can advance", which would be the check reporting a property it never checked — the exact
-# shape quince#121 was filed about, arrived at from the opposite side.
-expect "…and does not claim the layer can advance" 0 "whether it can fetch depends on" -- \
+# THE THREE CASES ABOVE CHANGED THEIR EXPECTED SUBSTRING, AND THE OLD ONE IS WORTH SAYING OUT LOUD:
+# they asserted "nothing to assert", beside a fourth case pinning "whether it can fetch depends on"
+# — a deliberate refusal to claim freshness, because an ssh key was not a local fact preflight could
+# read. That was right while the check was local. quince#675 makes it non-local, and a probe does
+# not care about the scheme, so the honest report for these is the same measured `can advance` the
+# http(s) arm gives. The fourth case is DELETED rather than inverted: it existed to stop the check
+# claiming a property it never checked, and the property is now checked.
+#
+# WHAT MUST NOT COME BACK WITH IT is the helper demand. These schemes still get NO wiring check —
+# that is quince#121's fix and it is untouched. The case below is what pins it, and it pins it in
+# the only way that survives the arms being merged: by the message a helper refusal would carry.
+expect "…and non-http(s) is still never asked for a credential helper" 0 "can advance" -- \
 	QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
-	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER"
+	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok"
+
+out=$(run_preflight QUINCE_RUNNER_ROLE=arch "QUINCE_BOT_TOKEN_FILE=$ABSENT_TOKEN" \
+	"QUINCE_PRIVATE_LAYER=$SSH_SCP_LAYER" "QUINCE_LAYER_FETCH_PROBE=$PROBE_BIN/ok") || true
+if printf '%s\n' "$out" | grep -q 'NO credential helper'; then
+	printf 'FAIL an scp-style remote must never be asked for a credential helper (quince#121)\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+else
+	printf 'ok   …and no credential-helper refusal is raised for it\n'
+	pass=$((pass + 1))
+fi
 
 # A HAND-PLACED layer is not a clone and has no remote to be wired to. preflight's own refusal text
 # prescribes hand-placement as a documented path, so refusing it here would forbid the fallback this

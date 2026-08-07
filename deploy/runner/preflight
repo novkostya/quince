@@ -21,6 +21,11 @@ bad() {
 	fail=1
 }
 ok() { printf 'preflight: ok — %s\n' "$*"; }
+# The third verdict, for a check that OBSERVED something worth saying and did not establish a
+# refusal. Five call sites already write this shape by hand and are deliberately NOT converted
+# here: they are unrelated to quince#675's claim, and a mechanical sweep of them belongs to its own
+# diff rather than buried in a boot-blocking check's.
+note() { printf 'preflight: note — %s\n' "$*"; }
 
 # --- credentials that must NOT be set -------------------------------------------------------
 # Names only. A preflight that echoed a credential to fix a credential problem would be its own
@@ -424,11 +429,42 @@ else
 		# history. The runner looked healthy solely because a session had hand-configured the helper
 		# to push and had not registered that it was patching a bug.
 		#
-		# WHY THE WIRING AND NOT A LIVE FETCH. `git ls-remote` fails identically for "no credential"
-		# and "network is down", so refusing on it would take a box out over a flaky link — a false
-		# refusal in the one check that decides whether the box starts at all. The credential helper
-		# is a LOCAL, deterministic fact and it is precisely what quince#121 was: a box with a helper
-		# and no network is fine and will catch up; a box with no helper can never catch up.
+		# THE WIRING **AND** A LIVE FETCH, in that order — and this paragraph used to say the fetch
+		# was rejected outright (quince#675). Its premise was that `git ls-remote` "fails identically
+		# for 'no credential' and 'network is down'", so refusing on it would take a box out over a
+		# flaky link. **The premise is false and was never measured.** Those two fail with different
+		# stderr, and every failure shape is exit 128, so it is the TEXT that discriminates and the
+		# exit code that does not. Measured on git 2.54.0, 2026-08-07, stderr's last line:
+		#
+		#   credential supplied and REJECTED  → fatal: Authentication failed for '<url>'
+		#   helper produced nothing           → fatal: could not read Username for '<host>': terminal prompts disabled
+		#   DNS                               → fatal: unable to access '<url>': Could not resolve host: …
+		#   TCP                               → fatal: unable to access '<url>': Failed to connect to … Could not connect to server
+		#
+		# WHAT THE WIRING CHECK CANNOT SEE, which is the whole of quince#675: a helper STRING can
+		# resolve while the credential it names does not exist. That is not hypothetical either — it
+		# is quince#674, measured on the arch box on 2026-08-06, where the helper `cat`ed a token file
+		# the Operator had deleted, emitted an empty password, and got `Authentication failed` — while
+		# THIS check reported `ok — private layer can advance` in the same minute. quince#121's own
+		# lesson, recurring inside the check written to enforce it: a property of the config file was
+		# asserted where a property of the remote was claimed.
+		#
+		# The reviewer arm above is the precedent. It does not stat the key file; it asks the
+		# credential to MINT, "because a key can be present and unusable in ways a file test cannot
+		# see". This is the same question asked of the same kind of credential.
+		#
+		# SO BOTH, AND THE ORDER IS LOAD-BEARING. The wiring check is local, free and deterministic,
+		# and a box with no helper can never catch up — it keeps its refusal and runs FIRST, so a box
+		# that is already refusing never pays a network round trip. The probe runs only when the
+		# wiring says a fetch would at least be attempted.
+		#
+		# AND THE PROBE REFUSES ON ONE SHAPE ONLY. `bad` on `Authentication failed`; a loud `note` on
+		# everything else INCLUDING the timeout, which is the shape the architect named on quince#675
+		# and it is the conservative direction on purpose. The old paragraph's CONCLUSION was wrong
+		# but its FEAR was right: this is the check that decides whether the box starts at all, so a
+		# refusal must rest on a positively-identified, permanent, local cause. "The forge is down"
+		# and "the helper failed to mint this once" both reach the note, so this adds exactly one new
+		# way for a box to refuse to start, and it is the way that was silently frozen before.
 		#
 		# WHY REFUSE RATHER THAN REPORT, when the permission-bit note above deliberately does not.
 		# That one is cosmetic and a refusal would turn a one-command fix into an outage. This one is
@@ -484,6 +520,79 @@ else
 		# claiming freshness it cannot see: an ssh key or a filesystem path is not a local fact this
 		# script can read, so the honest report is that the check does not cover the box, not that
 		# the box is fine.
+		# layer_fetch_probe — ask the remote, and classify what it says. Calls ok/bad/note itself.
+		#
+		# GIT_TERMINAL_PROMPT=0 IS NOT OPTIONAL. Without it, the "helper produced nothing" shape does
+		# not fail — it PROMPTS for a username, and preflight runs as root from start_pre, so the box
+		# would hang at boot on a read from a terminal nobody is at. Measured: with the variable set
+		# the same case fails in milliseconds with `terminal prompts disabled`.
+		#
+		# BOUNDED, AND SKIPPED RATHER THAN UNBOUNDED IF IT CANNOT BE. `timeout` is in coreutils and
+		# busybox both, so its absence is real news — but it is news that costs a note here, not a
+		# refusal, which is where this differs from the mktemp branch above. That one refuses because
+		# its absence would make preflight WRITE Operator-private lines somewhere world-readable;
+		# this one only means a check cannot be bounded, and a boot-time hang is a worse answer than
+		# an unproven fetch. NOTHING READS THE TIMEOUT EXIT CODE: busybox exits 143 and GNU coreutils
+		# exits 124 for the same event (measured on this box, busybox: 143), and a check that
+		# discriminated on it would be right on one platform. The classification is the stderr text,
+		# and a timed-out probe produces no `Authentication failed`, so it lands in the note arm on
+		# both platforms without anybody having to know which one this is.
+		#
+		# GIT_TERMINAL_PROMPT=0 covers git's OWN prompt and not ssh's, and `timeout` is deliberately
+		# what covers the rest rather than a forced `-o BatchMode=yes`. Setting GIT_SSH_COMMAND would
+		# override a box's `core.sshCommand`, so it could make the probe fail where a real fetch
+		# succeeds — a false report, on the arm whose whole purpose is to stop reporting a fetch it
+		# did not perform. A host-key prompt therefore costs one bounded interval and a note.
+		#
+		# STDOUT IS DISCARDED, stderr alone is classified — `ls-remote` prints the resolved SHA on
+		# success and there is no reason for a commit id to reach /var/log/quince-runner.log. It is
+		# also what keeps remote-controlled text out of the `Authentication failed` grep that decides
+		# whether this box starts.
+		#
+		# ONE INVOCATION, NOT TWO, and that is a testability fix rather than a tidiness one. The
+		# override and the real call were separate command substitutions with separate redirections,
+		# so the suite — which is offline and never reaches the git line — could only ever assert the
+		# override's. Mutation-tested: merging the streams on the REAL path passed the whole suite.
+		# Selecting into "$@" leaves exactly one redirection to get right and one that is covered.
+		#
+		# `origin HEAD` rather than a bare `origin`: it is the same single round trip, and a ref
+		# pattern that matches nothing STILL EXITS 0 (measured), so this asks "can I reach and
+		# authenticate to the remote" without also asserting anything about what is in it.
+		#
+		# THE REMOTE URL IS NEVER PRINTED FROM `remote get-url`, and that is a privacy rule rather
+		# than a style one: an https URL can carry `//user:password@` inline, and this output goes to
+		# a log. git redacts userinfo from its OWN messages (measured, 2.54.0 — an embedded secret did
+		# not appear in the `Authentication failed` line), but that is a behaviour of one version, so
+		# the line below strips userinfo again before anything is printed. Belt over braces, on the
+		# one path where being wrong is a credential in a logfile.
+		LAYER_PROBE_TIMEOUT="${QUINCE_LAYER_PROBE_TIMEOUT:-15}"
+		layer_fetch_probe() {
+			# QUINCE_LAYER_FETCH_PROBE names an executable run INSTEAD of the git call, and exists
+			# so preflight-test can drive both arms offline. The suite's own header says a
+			# fetch-based check "could not be fixtured this way" — that was true of a hard-wired
+			# call and is why the hook is here rather than the assertion going untested. Same shape
+			# and same precedent as QUINCE_PRIVACY_CHECK, which overrides the entire privacy gate.
+			if [ -n "${QUINCE_LAYER_FETCH_PROBE:-}" ]; then
+				set -- "${QUINCE_LAYER_FETCH_PROBE}"
+			elif ! command -v timeout >/dev/null 2>&1; then
+				note "the private layer's fetch was NOT attempted: \`timeout\` is not installed, and preflight will not run an unbounded network call from start_pre — a box that hangs at boot is worse than one whose layer is unproven. So this box's clone is wired but UNMEASURED: it may or may not be able to advance (quince#675). Fix: install coreutils or busybox."
+				return 0
+			else
+				set -- timeout "$LAYER_PROBE_TIMEOUT" \
+					git -C "$PRIVATE_LAYER" ls-remote --quiet origin HEAD
+			fi
+			_lperr=$(GIT_TERMINAL_PROMPT=0 "$@" 2>&1 >/dev/null) && _lprc=0 || _lprc=$?
+			# One line, userinfo stripped. The last line is the `fatal:` — the one that names the
+			# cause; earlier lines are the server's own remarks.
+			_lpwhy=$(printf '%s\n' "$_lperr" | grep -v '^[[:space:]]*$' | tail -n 1 | sed 's#//[^/@]*@#//<userinfo-redacted>@#g')
+			if [ "$_lprc" -eq 0 ]; then
+				ok "private layer can advance — its remote was reached and authenticated just now, not inferred from the config (quince#675)"
+			elif printf '%s\n' "$_lperr" | grep -q 'Authentication failed'; then
+				bad "the private layer at $PRIVATE_LAYER has a credential helper wired AND THE CREDENTIAL IT NAMES WAS REJECTED, so it can never fetch until that is fixed: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box (quince#674, quince#675). The remote said — ${_lpwhy:-no reason reported}. Fix: run deploy/runner/provision, which rebuilds the helper around a wrapper that is present on this box, and re-run this. Refusing rather than warning for the same reason the no-helper case does: this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
+			else
+				note "the private layer's fetch did NOT succeed, and preflight is NOT refusing on it because the cause is not a rejected credential — a forge outage, DNS, or a helper that failed to mint this once all look like this, and none of them means the clone can never advance. It observed — ${_lpwhy:-no output, which on a bounded probe means it timed out after ${LAYER_PROBE_TIMEOUT}s}. So this box's layer is UNPROVEN rather than frozen: if this note persists across restarts it is the frozen case wearing a transient face, and quince#675 is where that trade is written down."
+			fi
+		}
 		if [ -d "$PRIVATE_LAYER/.git" ]; then
 			layer_remote=$(git -C "$PRIVATE_LAYER" remote get-url origin 2>/dev/null || true)
 			case "$layer_remote" in
@@ -491,14 +600,29 @@ else
 				bad "the private layer at $PRIVATE_LAYER is a git clone with NO 'origin' remote, so it can never fetch: it is frozen at whatever it holds now (quince#121). Fix: run deploy/runner/provision, or re-clone the layer."
 				;;
 			http://* | https://*)
-				if [ -n "$(git -C "$PRIVATE_LAYER" config --get-urlmatch credential.helper "$layer_remote")" ]; then
-					ok "private layer can advance — a credential helper resolves for its http(s) remote"
-				else
+				if [ -z "$(git -C "$PRIVATE_LAYER" config --get-urlmatch credential.helper "$layer_remote")" ]; then
 				bad "the private layer at $PRIVATE_LAYER is a git clone with NO credential helper for its remote, so it can never fetch: it is frozen at whatever it holds now, and no future pattern, canary or case-sensitive list will reach this box. Present is not fresh (quince#121). Fix: run deploy/runner/provision, which persists the helper with \`git config\` instead of \`git -c\`, and re-run this. Refusing rather than warning because this box's privacy sweep is the last gate before public history, and a frozen gate reports \`clean\` exactly like a current one."
+				else
+					layer_fetch_probe
 				fi
 				;;
 			*)
-				ok "private layer remote is not http(s), so no credential helper applies and this check has nothing to assert about it — whether it can fetch depends on an ssh key or a filesystem path, neither of which is a local fact preflight can read (quince#121)"
+				# NO WIRING CHECK HERE — a credential helper is an http(s) mechanism and an ssh or
+				# filesystem remote fetches forever without one, which is why demanding one from
+				# every scheme was a box that would not start (quince#121). But the PROBE is
+				# scheme-agnostic: git knows how to reach each of these, so the question this arm
+				# used to call unanswerable — "whether it can fetch depends on an ssh key or a
+				# filesystem path, neither of which is a local fact preflight can read" — stops
+				# being unanswerable the moment the check stops being local. Asking is strictly
+				# better than the `ok` that stood here, which claimed nothing and read like a pass.
+				#
+				# NOTHING NEW CAN REFUSE ON THIS PATH. `bad` fires only on `Authentication failed`,
+				# which is a git-over-http(s) string; ssh says `Permission denied (publickey)` and
+				# lands in the note arm. So this converts an unconditional `ok` into a measurement
+				# whose worst outcome is a loud note — deliberately, because nobody runs the layer
+				# over ssh today and a boot-blocking refusal invented for an untested path is how
+				# this check has twice before stopped a working machine.
+				layer_fetch_probe
 				;;
 			esac
 		fi
