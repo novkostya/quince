@@ -158,7 +158,7 @@ host. A protocol that checks the wrong thing fails closed — the right directio
 a failure.)
 
 **`bin/gh-review` IS THIS SEAT'S ONLY CREDENTIAL — reads, verdicts, canon authorship and merges all
-go through it.** Operator ruling 2026-08-07 (quince#676): `bin/gh-arch` is retired and deleted, and
+go through it.** Operator ruling 2026-08-07 (quince#676): `bin/gh-arch` is retired, and
 where the App cannot do something, `gh-review` is what gets fixed.
 
 **There is no read/write split to observe any more, and that is the change to notice.** This section
