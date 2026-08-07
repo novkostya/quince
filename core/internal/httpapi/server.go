@@ -118,6 +118,10 @@ func NewRouter(deps Deps) http.Handler {
 	// default. GET /api/onboarding/https is pre-auth BY EXACT PATH because you cannot log in without
 	// https; nothing about a storage probe is a prerequisite of logging in.
 	apiMux.HandleFunc("POST /api/storages/probe", deps.handleStorageProbe())
+	// Likewise not exempt — and it matters more here than for the probe, because this one EXECUTES A
+	// REQUEST-SUPPLIED ARGV. See handleStorageHookCheck for why that adds no capability an
+	// authenticated admin lacks, and what bounds it.
+	apiMux.HandleFunc("POST /api/storages/probe/hook", deps.handleStorageHookCheck())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

@@ -364,3 +364,34 @@ type OnboardingHTTPS struct {
 	Complete bool   `json:"complete"`
 	Detected string `json:"detected"` // tls | forwarded_proto | none
 }
+
+// StorageHookCheckRequest is POST /api/storages/probe/hook (qn.6e): does the operator's constrained
+// ZFS helper actually work, and does it agree about the parent dataset?
+type StorageHookCheckRequest struct {
+	ParentDataset string `json:"parent_dataset"`
+	HookCmd       string `json:"hook_cmd"`
+}
+
+// StorageHookCheck is the verdict. FOUR outcomes rather than ok/failed, because the remedies differ
+// and a user cannot guess between them — a missing helper, an un-migrated helper and a mistyped
+// parent dataset all present as "it did not work".
+type StorageHookCheck struct {
+	// Outcome is ok | not_migrated | parent_mismatch | unreachable. FROZEN: a client renders a
+	// different remedy for each, so adding one is a contract change.
+	Outcome string `json:"outcome"`
+	// Reason is quince's own sentence, safe to render anywhere.
+	Reason string `json:"reason"`
+	// Detail is the transport's own output, verbatim — ssh's "Permission denied (publickey)" is the
+	// whole answer to why a key does not work, and quince cannot improve on it.
+	//
+	// IT MAY NAME THE OPERATOR'S HOST. It is shown to the authenticated admin in their own browser
+	// and MUST NEVER be logged, put in a fixture, or pasted into a PR or an issue — which is the
+	// privacy gate's actual scope (committed files, commit messages, forge text) rather than a
+	// redaction rule on a running product. THE ARGV IS NEVER INCLUDED: `hook_cmd` carries
+	// `user@host` by construction, where the transport's output only sometimes does.
+	Detail string `json:"detail"`
+}
+
+type StorageHookCheckResponse struct {
+	Check StorageHookCheck `json:"check"`
+}

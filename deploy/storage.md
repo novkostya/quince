@@ -116,6 +116,25 @@ Nothing else breaks: backups, commits, snapshots and retention are untouched, an
 number rather than showing a wrong one — which is why this is a migration note rather than a
 release blocker.
 
+**`Test helper` in the UI now TELLS YOU whether you did this** (`qn.6e`). Adding a storage on the
+zfs backend fires two of the arms above — `capacity` (no argument) then `list <your parent dataset>`
+— and distinguishes four states rather than working/not-working:
+
+| what happens | what it means |
+| --- | --- |
+| both answer | the key, the forced command and the parent all line up |
+| `capacity` refused, `list` answers | **you have not applied the migration above** |
+| `capacity` answers, `list` refused | the dataset you typed is not the `PARENT` set in this script |
+| neither answers | the key, the forced command in `authorized_keys`, or the host |
+
+**An empty answer from `list` is SUCCESS, not a failure.** It returns the `@quince-*` snapshots
+under the parent, and a storage with no backups yet has none — so a correct, freshly-installed
+helper answers with nothing at all.
+
+Both verbs are read-only and path-guarded, which is why quince is willing to fire them from a form.
+Nothing quince sends can create, destroy or write, and that is a property of the `case` arms above
+rather than of quince's restraint — which is the point of a forced command.
+
 **Why a new verb rather than letting `list` take flags** — Operator ruling 2026-08-03 (quince#600).
 quince first shipped this read as `list -H -p -o used,available "$PARENT"`, which assumes the
 helper forwards argv to `zfs`. **It does not, and that is the entire point of a forced command.**

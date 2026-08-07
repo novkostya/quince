@@ -128,3 +128,58 @@ func probeToWire(r storage.Report) wire.StorageProbe {
 	}
 	return p
 }
+
+// handleStorageHookCheck serves POST /api/storages/probe/hook → 200 {check} | 422 (contracts §1,
+// qn.6e).
+//
+// `Test helper` — the load-bearing control of the zfs branch. Without it, "did I install the helper
+// correctly?" is answered by a failed multi-hour Wi-Fi transfer at commit time: the key, the forced
+// command in authorized_keys, and the $PARENT baked into the helper are three things that must line
+// up, and none of them is observable from the path.
+//
+// IT RUNS TWO READ-ONLY, PATH-GUARDED VERBS and can create, destroy or write nothing —
+// `capacity` (no caller argument at all) then `list <typed parent>` (guarded by
+// `case "$target" in "$PARENT"|"$PARENT"/*`). That is what makes it safe to fire from a form.
+//
+// THE 422 LINE IS THE PROBE'S, unchanged: a malformed QUESTION — no parent dataset, or no hook
+// command — is a 422; every verdict about a real pair, refusals included, is a 200 carrying the
+// outcome. A user who has not installed the helper has asked a perfectly good question.
+//
+// DECLARED, because it is the sharpest thing in this rung: THIS ENDPOINT EXECUTES A
+// REQUEST-SUPPLIED ARGV. It adds no capability an authenticated admin lacks — `PUT /api/config`
+// already stores a `hook_cmd` that quince execs at the next job — but it shortens the loop from
+// *next backup* to *now*. It is behind authGuard and csrfGuard, adds nothing to the five-entry
+// exempt set, runs an argv ARRAY and never a shell string, is bounded by a timeout, and its
+// subprocess is killed by process group on cancellation.
+func (d Deps) handleStorageHookCheck() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req wire.StorageHookCheckRequest
+		if err := decodeJSON(r, &req); err != nil {
+			hookCheck422(w, d, "parent_dataset", "expected a JSON object with `parent_dataset` and `hook_cmd`")
+			return
+		}
+		if req.ParentDataset == "" {
+			hookCheck422(w, d, "parent_dataset", "must not be empty — quince cannot ask the helper about nothing")
+			return
+		}
+		if req.HookCmd == "" {
+			hookCheck422(w, d, "hook_cmd", "must not be empty — this is the command that reaches the helper")
+			return
+		}
+
+		c := storage.CheckHook(r.Context(), req.ParentDataset, req.HookCmd)
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageHookCheckResponse{
+			Check: wire.StorageHookCheck{
+				Outcome: string(c.Outcome),
+				Reason:  c.Reason,
+				Detail:  c.Detail,
+			},
+		})
+	}
+}
+
+func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
+	writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
+		Errors []wire.ConfigError `json:"errors"`
+	}{Errors: []wire.ConfigError{{Path: path, Message: msg}}})
+}
