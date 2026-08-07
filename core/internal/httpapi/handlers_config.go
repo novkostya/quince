@@ -9,6 +9,27 @@ import (
 )
 
 // configGetResponse is GET /api/config: {config, warnings, source} (contracts §1).
+// configResponse builds it with a NON-NIL warnings list, always.
+//
+// A NIL SLICE MARSHALS AS `null`, NOT `[]`, and the wire type says array — so a client doing
+// the obvious thing crashes. `ConfigView` reads `data.warnings.length` and TypeScript offered
+// no protection, because `ConfigResponse.warnings` is declared non-nullable and was telling
+// the truth about the CONTRACT while the server broke it.
+//
+// IT IS REACHED BY THE ORDINARY PATH, not an edge: `Service.Snapshot` returns
+// `append([]Warning(nil), s.warnings...)`, which is nil when there are none, and `Replace`
+// CLEARS the warnings on every successful write. So the first save on a clean config hands
+// the next reader a `null` — Operator-reported as an Unexpected Application Error on Settings
+// that went away on refresh, because a refetch of an unwritten config had warnings again.
+//
+// The same treatment `handleStorages` already gives its list, for the same reason.
+func configResponse(cfg config.Config, warns []config.Warning, src config.Source) configGetResponse {
+	if warns == nil {
+		warns = []config.Warning{}
+	}
+	return configGetResponse{Config: cfg, Warnings: warns, Source: src}
+}
+
 type configGetResponse struct {
 	Config   config.Config    `json:"config"`
 	Warnings []config.Warning `json:"warnings"`
@@ -18,10 +39,7 @@ type configGetResponse struct {
 func (d Deps) handleConfigGet() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, warns, src := d.Config.Snapshot()
-		if warns == nil {
-			warns = []config.Warning{}
-		}
-		writeJSON(w, d.Log, http.StatusOK, configGetResponse{Config: cfg, Warnings: warns, Source: src})
+		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg, warns, src))
 	}
 }
 
@@ -54,10 +72,7 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 		// This cited `ForgetRestartWarning` as the precedent, and that function is DELETED in the
 		// same diff. The precedent outlives it: `config/forget.go` carries the note where it stood.
 		warns = append(append([]config.Warning{}, warns...), applied...)
-		if warns == nil {
-			warns = []config.Warning{}
-		}
-		writeJSON(w, d.Log, http.StatusOK, configGetResponse{Config: cfg2, Warnings: warns, Source: src})
+		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, warns, src))
 	}
 }
 
@@ -127,7 +142,7 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 		// for a problem that no longer exists.
 		warns = append(warns, applied...) // qn.6g: anything an applier could not take
 		d.Log.Info("storage forgotten", "storage", name, "applier_warnings", len(applied))
-		writeJSON(w, d.Log, http.StatusOK, configGetResponse{Config: cfg2, Warnings: warns, Source: src})
+		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, warns, src))
 	}
 }
 
@@ -195,8 +210,6 @@ func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
 		cfg2, loadWarns, src := d.Config.Snapshot()
 		// APPENDED to the load's own warnings, exactly as the delete does: an applier warning says
 		// "saved, but not applied" — a fact about THIS response rather than about the file.
-		writeJSON(w, d.Log, http.StatusOK, configGetResponse{
-			Config: cfg2, Warnings: append(loadWarns, warns...), Source: src,
-		})
+		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, append(loadWarns, warns...), src))
 	}
 }
