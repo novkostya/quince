@@ -93,10 +93,15 @@ die() {
 
 # IDENTITY BEFORE DEPENDENCIES (quince#157), AND THE BOUNDARY RUNS THE OTHER WAY HERE.
 #
-# `gh-review` and `gh-arch` refuse when the IMPLEMENTER identity is present, because those seats can
-# approve and must not also author. This wrapper IS the authoring seat, so the credentials it must
-# refuse to sit beside are the APPROVING ones: the reviewer App key and the architect token. Same
-# property, `approver ≠ author`, asserted from the third corner.
+# `gh-review` refuses when the IMPLEMENTER identity is present, because that seat can approve and
+# must not also author. This wrapper IS the authoring seat, so the credentials it must refuse to sit
+# beside are the APPROVING ones: the reviewer App key and the architect token. Same property,
+# `approver ≠ author`, asserted from the third corner.
+#
+# THE ARCHITECT TOKEN STAYS IN THAT LIST THOUGH ITS WRAPPER IS GONE (quince#676). `bin/gh-arch` was
+# deleted and the credential retired — but a box can still be CARRYING the file, and this check is
+# about what is on the disk rather than about what can run it. Dropping the check would make this
+# wrapper assert less than it did while looking like tidy-up.
 #
 # Ordered above the dependency loop for the reason quince#157 records: an environment refusal invites
 # a repair, and a session repairing its way past this one ends up holding both identities on one box.
@@ -113,7 +118,8 @@ ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 if [ -f "$ARCH_TOKEN" ]; then
 	die "an ARCHITECT CREDENTIAL is present at $ARCH_TOKEN." \
 		"That seat merges. A box that can author and merge is the whole of what the two-seat design" \
-		"exists to prevent. Remove it, or run gh-arch on the architect box."
+		"exists to prevent. REMOVE IT: that credential is retired and no wrapper reads it any more" \
+		"(quince#676), so its presence here is a leftover file rather than a seat in the wrong place."
 fi
 # THE THIRD SEAT CAN APPROVE, WHICH IS WHY IT BELONGS IN THIS LIST (quince#375). The checks above
 # refuse the APPROVING credentials, because this wrapper authors. `pull_requests: write` lets the

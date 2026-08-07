@@ -58,7 +58,7 @@ ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 if [ -f "$ARCH_TOKEN" ]; then
 	printf 'gh-bot: an ARCHITECT CREDENTIAL is present at %s.\n' "$ARCH_TOKEN" >&2
 	printf 'gh-bot: That seat merges. A box that can author and merge is the whole of what the two-seat\n' >&2
-	printf 'gh-bot: design exists to prevent. Remove it, or run gh-arch on the architect box.\n' >&2
+	printf 'gh-bot: design exists to prevent. REMOVE IT: retired credential, no wrapper reads it (quince#676).\n' >&2
 	exit 1
 fi
 # THE THIRD SEAT CAN APPROVE (quince#375), so it joins the two above for the same reason they are

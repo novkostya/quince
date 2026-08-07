@@ -181,19 +181,19 @@ rm -rf "$RT"
 # is a read-only comparison that any reading seat can make.
 # `gh-coder` FIRST, and it may not exist yet. This is a read-only comparison that any seat holding a
 # forge credential can make, and the implementer box is the one where this suite is most likely to
-# be run — but `gh-arch` and `gh-review` both REFUSE there, because that box holds the implementer
+# be run — but `gh-review` REFUSES there, because that box holds the implementer
 # identity and their boundary check fires. Without a candidate the implementer can actually use,
 # this suite skipped on the one seat that would run it, which is a skip that looks like coverage.
 # The loop tests `-x` before use, so naming a path that does not exist yet costs nothing.
 GH=''
-for cand in ${QUINCE_GH:-} bin/gh-coder /usr/local/bin/gh-coder bin/gh-arch bin/gh-review; do
+for cand in ${QUINCE_GH:-} bin/gh-coder /usr/local/bin/gh-coder bin/gh-review; do
 	[ -n "$cand" ] || continue
 	[ -x "$cand" ] || continue
 	if "$cand" api rate_limit --jq .resources.graphql.used >/dev/null 2>&1; then GH=$cand; break; fi
 done
 if [ -z "$GH" ]; then
 	skip "no wrapper on this box can reach the forge — the comparison needs the live API"
-	skip "  (tried \$QUINCE_GH, bin/gh-arch, bin/gh-review; each must answer api rate_limit)"
+	skip "  (tried \$QUINCE_GH, bin/gh-coder, bin/gh-review; each must answer api rate_limit)"
 	skip "  this is NOT a pass: the equivalence is unproven here and is owed on a box with access"
 	printf '\nforge-fetch-equivalence-test: %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
 	exit 0

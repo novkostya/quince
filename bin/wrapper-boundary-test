@@ -1,9 +1,9 @@
 #!/bin/sh
 # wrapper-boundary-test — a BOUNDARY refusal must outrank an ENVIRONMENT refusal (quince#157).
 #
-# WHY THIS EXISTS. `bin/gh-review` and `bin/gh-arch` both refuse to run on a box that holds the
-# implementer identity: one box that can author and approve dissolves `approver ≠ author`, which
-# is the property the whole two-seat design is built on. Both also refuse when their dependencies
+# WHY THIS EXISTS. `bin/gh-review` refuses to run on a box that holds the implementer identity: one
+# box that can author and approve dissolves `approver ≠ author`, which is the property the whole
+# two-seat design is built on. It also refuses when its dependencies
 # are missing. Until 2026-07-29 the dependency check came FIRST, and on the implementer host — a bot
 # token present, no `openssl` — the message that actually spoke was:
 #
@@ -17,6 +17,18 @@
 #
 # So the rule this suite pins is one sentence: **an environment can be fixed and a boundary must
 # not be, so the boundary speaks first.**
+#
+# IT ASSERTS LESS THAN IT DID, AND EXACTLY WHERE (quince#676). `bin/gh-arch` was the architect's
+# second wrapper and this suite drove it through every case beside `gh-review` — 69 cases, of which
+# **13 were its**. That wrapper is deleted, so those 13 are gone and nothing replaces them. Recorded
+# rather than left to a `git log`, because the issue that ordered the deletion named this file as
+# "the one to think about rather than edit: it must not quietly assert less once a wrapper is gone."
+#
+# WHAT MUST NOT GO WITH THEM IS THE ARCHITECT CREDENTIAL AS A FOREIGN IDENTITY. `gh-coder`, `gh-bot`
+# and `gh-analyst` still refuse beside `quince-arch.token`, and those cases are untouched. The
+# credential is retired, but **a box can still be CARRYING the file**, and a wrapper that stopped
+# refusing beside it would assert less about a boundary that still holds. Deleting a wrapper narrows
+# the SUBJECTS this suite covers; it must never narrow the CREDENTIALS they are tested against.
 #
 # WHAT IT DRIVES, and why a reading of the source would not do. Ordering is the property, and
 # ordering is invisible to any check that inspects the two blocks separately — both are present and
@@ -43,13 +55,15 @@
 # the boundary correctly, `bin/gh-bot` asserted it NOT AT ALL — no stale check, no check. It is the
 # legacy implementer wrapper and its account is suspended, so the hole was not live; it is closed
 # anyway, because a boundary check is a claim about THE BOX and not about whether a credential
-# currently authenticates. Parts 10-12 drive it. The count that matters: this suite now covers all
-# six wrappers, and the omission it just closed was invisible precisely because the neighbours were
-# thorough.
+# currently authenticates. Parts 10-12 drive it. The count that matters: this suite covers **every**
+# wrapper in `bin/`, and the omission it just closed was invisible precisely because the neighbours
+# were thorough. (That count was SIX and is now FIVE — `bin/gh-arch` was deleted by quince#676. The
+# word to keep is *every*, not the number: a literal count is what goes stale when a wrapper is added
+# or removed, and this file has now been wrong about it in both directions.)
 #
-# THE SIXTH IS THE FIRST WHOSE SEAT DOES BOTH (quince#375). `bin/gh-analyst` authors pull requests
-# AND can cast a verdict, so unlike the other five there is no half of the boundary it can name: its
-# rule is that ANY other seat's credential is a refusal, and part 14 drives all four. What keeps that
+# THE LAST OF THEM IS THE FIRST WHOSE SEAT DOES BOTH (quince#375). `bin/gh-analyst` authors pull
+# requests AND can cast a verdict, so unlike the others there is no half of the boundary it can name:
+# its rule is that ANY other seat's credential is a refusal, and part 14 drives all four. What keeps that
 # honest is not a separation within one box — it is that the box holds exactly one identity, which is
 # `deploy/runner/preflight`'s supervisor allowlist (quince#380) and is what this part is the
 # wrapper-side half of. `preflight-test` drives the other half, including the case that the analyst
@@ -118,7 +132,11 @@ run() {
 
 # --- 1. BOUNDARY WINS: a bot token present AND the dependencies absent ------------------------
 printf 'a bot token\n' >"$TOKEN"
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"BOT TOKEN is present"*)
@@ -141,7 +159,11 @@ done
 # credentials are removed, not just the bot token — with the App key check now in these wrappers,
 # clearing only one would leave the boundary live and this control would prove nothing.
 rm -f "$TOKEN" "$CKEY"
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"is not installed"*)
@@ -162,7 +184,11 @@ done
 # is the other refusal that could plausibly be reached first — `gh-review` exits 2 on no arguments,
 # and a box that is holding the wrong identity should be told THAT rather than how to call the tool.
 printf 'a bot token\n' >"$TOKEN"
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w")
 	case "$out" in
 	*"BOT TOKEN is present"*)
@@ -187,7 +213,11 @@ done
 # failure mode is identical and, on the box where it bites, so is the wrong repair.
 rm -f "$TOKEN" "$CKEY"
 printf 'an implementer app key\n' >"$CKEY"
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"IMPLEMENTER APP KEY is present"*)
@@ -207,7 +237,11 @@ done
 # --- 5. The App-key boundary outranks the usage message too ------------------------------------
 # Part 3's assertion, for the second credential. `gh-review` exits 2 on no arguments, and a box
 # holding the wrong identity should be told THAT rather than how to call the tool.
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w")
 	case "$out" in
 	*"IMPLEMENTER APP KEY is present"*)
@@ -228,7 +262,11 @@ done
 # refusal persist, and conclude the guard is broken. Asserted because both wrappers now claim in a
 # comment that the App key is checked first, and an ordering claim nothing drives is a comment.
 printf 'a suspended bot token\n' >"$TOKEN"
-for w in bin/gh-review bin/gh-arch; do
+# shellcheck disable=SC2043  # One element BY ARITHMETIC, not by a quoting slip: the architect seat
+# had two wrappers and quince#676 left it one. The loop shape is kept so a second approving wrapper
+# is a one-word edit rather than a restructure, and so these parts stay uniform with the multi-
+# wrapper loops below. shellcheck cannot tell "narrowed to one" from "meant to expand and did not".
+for w in bin/gh-review; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"IMPLEMENTER APP KEY is present"*)
@@ -245,7 +283,7 @@ for w in bin/gh-review bin/gh-arch; do
 done
 
 # --- 7. gh-coder: THE SAME PROPERTY, ASSERTED FROM THE THIRD CORNER --------------------------
-# `gh-review` and `gh-arch` refuse when the IMPLEMENTER identity is present. `gh-coder` IS the
+# `gh-review` refuses when the IMPLEMENTER identity is present. `gh-coder` IS the
 # implementer, so the credentials it must refuse to sit beside are the APPROVING ones. Both
 # directions are driven, because a wrapper that refused only one of them would pass a test written
 # only for the other, and the box that would then hold two identities is the authoring box.
@@ -454,7 +492,7 @@ done
 
 # --- 14. gh-analyst: THE SEAT THAT DOES BOTH, SO IT REFUSES ALL FOUR (quince#375) -------------
 # Every wrapper above names ONE HALF of the boundary, because every seat above is one half of it.
-# `gh-review`/`gh-arch` approve, so they refuse the implementer identity; `gh-coder`/`gh-bot` author,
+# `gh-review` approves, so it refuses the implementer identity; `gh-coder`/`gh-bot` author,
 # so they refuse the approving ones. The analyst seat authors pull requests AND can cast a verdict on
 # somebody else's, so it has no half to name — its rule is that any other seat's credential is a
 # refusal, and that is the wrapper-side half of `deploy/runner/preflight`'s supervisor allowlist
@@ -568,7 +606,7 @@ esac
 #
 # DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, like every other part, because the ordering claim is half
 # the assertion: the wrong repair here is to install the missing tool and then place a second key.
-for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+for w in bin/gh-review bin/gh-coder bin/gh-bot; do
 	rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
 	printf 'an analyst app key\n' >"$NKEY"
 	out=$(run "$w" pr view 1)
@@ -592,7 +630,7 @@ done
 # the dependency refusal must still speak — proving the analyst check was added AHEAD of it rather
 # than in place of it, in every one of the four.
 rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
-for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+for w in bin/gh-review bin/gh-coder bin/gh-bot; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"is not installed"*)
@@ -614,7 +652,7 @@ done
 # on no arguments, and a box holding two identities should be told THAT rather than how to call the
 # tool — which is the message a session is most likely to act on without thinking.
 printf 'an analyst app key\n' >"$NKEY"
-for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot; do
+for w in bin/gh-review bin/gh-coder bin/gh-bot; do
 	out=$(run "$w")
 	case "$out" in
 	*"ANALYST APP KEY is present"*)
@@ -632,8 +670,12 @@ rm -f "$NKEY"
 #
 # quince#316 found `bin/gh-arch` had no `forge-ledger` call at all, so an act performed through it
 # recorded nothing and the next tick woke the seat that performed it — silently, because the ledger
-# fails open and an extra wake looks like an ordinary one. `CLAUDE.md` makes that wrapper the
-# STANDING merge fallback, so it is a documented path rather than an exotic one.
+# fails open and an extra wake looks like an ordinary one. That wrapper was canon's STANDING merge
+# fallback at the time, so it was a documented path rather than an exotic one.
+#
+# **THE WRAPPER IS GONE (quince#676) AND THIS CASE IS NOT.** The bug was never about `gh-arch`: it was
+# that a wrapper can be added, or edited, without the ledger call and nothing notices. The subject is
+# retired; the detector applies to every wrapper that remains and to the next one somebody writes.
 #
 # THE RULING DECLINED THE REFACTOR AND NAMED THE GAP THIS CLOSES. Shape (2) — one sourced block all
 # wrappers share — was rejected on the measurement: at most 3 of 58 merges could have taken the
@@ -649,7 +691,7 @@ rm -f "$NKEY"
 # quince#316's ruling was waiting for — its declared revisit trigger was *a fourth wrapper appearing*
 # — and it is a seat that can cast a verdict, so an unrecorded `pr review` through it would wake the
 # analyst's own watch. Adding the name below is the whole cost, which is the case the ruling made.
-for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-analyst; do
+for w in bin/gh-coder bin/gh-review bin/gh-analyst; do
 	if grep -q '_ledger" classify' "$w" && grep -q '_ledger" record' "$w"; then
 		ok "$w consults the ledger and records on success"
 	else
@@ -669,7 +711,7 @@ done
 # header claims "ANY other seat's credential here is a refusal" while implementing four pathnames.
 #
 # DRIVEN AGAINST LIVE DEPENDENCY REFUSALS, like every part above: the ordering claim is half of it.
-for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot bin/gh-analyst; do
+for w in bin/gh-review bin/gh-coder bin/gh-bot bin/gh-analyst; do
 	rm -f "$TOKEN" "$RKEY" "$ATOK" "$CKEY" "$NKEY"
 	out=$(PATH="$STUB" HOME="$WORK" GH_TOKEN=ghp_zzsyntheticzz \
 		QUINCE_BOT_TOKEN_FILE="$TOKEN" QUINCE_REVIEW_KEY_FILE="$RKEY" \
@@ -691,7 +733,7 @@ done
 
 # THE NEGATIVE CONTROL. Without it, a wrapper that refused unconditionally would pass all five rows.
 # With NO environment token and no credential file, the dependency refusal must still speak.
-for w in bin/gh-review bin/gh-arch bin/gh-coder bin/gh-bot bin/gh-analyst; do
+for w in bin/gh-review bin/gh-coder bin/gh-bot bin/gh-analyst; do
 	out=$(run "$w" pr view 1)
 	case "$out" in
 	*"is not installed"*)
@@ -727,7 +769,7 @@ done
 # THE DETECTOR, the same shape as the ledger loop below and for the same reason (quince#316): a
 # SIXTH wrapper added without this check would be invisible, because the five neighbours are right.
 # It asserts PRESENCE, not behaviour — the rows above are the behaviour.
-for w in bin/gh-coder bin/gh-review bin/gh-arch bin/gh-bot bin/gh-analyst; do
+for w in bin/gh-coder bin/gh-review bin/gh-bot bin/gh-analyst; do
 	if grep -q 'GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN' "$w"; then
 		ok "$w enumerates the environment credentials"
 	else

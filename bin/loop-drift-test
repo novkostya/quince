@@ -55,8 +55,8 @@ run() {
 	set -e
 }
 
-ARCH_TICK='bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"'
-ARCH_WATCH='bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60'
+ARCH_TICK='bin/forge-watch tick --all --gh "$PWD/bin/gh-review"'
+ARCH_WATCH='bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60'
 IMPL_TICK='bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-coder"'
 IMPL_TICK_OLD='bin/forge-watch tick --repo <owner/name> --gh "$PWD/bin/gh-bot"'
 
@@ -152,7 +152,7 @@ else
 	bad "a line continuation registered as drift (rc=$rc)"
 fi
 
-d=$(build ws "$ARCH_TICK" "  bin/forge-watch   tick  --all   --gh \"\$PWD/bin/gh-arch\"")
+d=$(build ws "$ARCH_TICK" "  bin/forge-watch   tick  --all   --gh \"\$PWD/bin/gh-review\"")
 run "$d"
 if [ "$rc" -eq 0 ]; then
 	ok "whitespace runs and indentation do not make a command differ"

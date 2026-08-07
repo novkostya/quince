@@ -1,10 +1,11 @@
 #!/bin/sh
 # gh-analyst — run `gh` as the analyst identity: a GitHub App, on the supervisor box.
 #
-# THE FIFTH WRAPPER, AND THE FIRST WHOSE SEAT BOTH AUTHORS AND APPROVES. `gh-bot` and `gh-coder` are
-# the implementer, `gh-arch` and `gh-review` are the architect. Those two seats are deliberately
-# disjoint: one writes, the other judges, and `approver ≠ author` is a property of which box holds
-# which key. This seat is neither of them.
+# THE FOURTH WRAPPER, AND THE FIRST WHOSE SEAT BOTH AUTHORS AND APPROVES. `gh-bot` and `gh-coder`
+# are the implementer, `gh-review` is the architect. Those two seats are deliberately disjoint: one
+# writes, the other judges, and `approver ≠ author` is a property of which box holds which key. This
+# seat is neither of them. (The FIFTH until quince#676 retired `bin/gh-arch`, the architect's second
+# wrapper — the seat count is unchanged, the wrapper count is not.)
 #
 # WHAT IT IS FOR. The supervisor box is where the Operator and a session talk — it studies the
 # system, files what does not match, and works a problem space into specified work items. It had NO
@@ -53,9 +54,9 @@ die() {
 
 # IDENTITY BEFORE DEPENDENCIES (quince#157), AND THIS SEAT REFUSES BESIDE ALL FOUR.
 #
-# The other wrappers each refuse beside ONE SIDE of the boundary: `gh-review` and `gh-arch` refuse
-# the implementer identity because they approve; `gh-coder` and `gh-bot` refuse the approving
-# identities because they author. Every one of them can name the half it is not.
+# The other wrappers each refuse beside ONE SIDE of the boundary: `gh-review` refuses the implementer
+# identity because it approves; `gh-coder` and `gh-bot` refuse the approving identities because they
+# author. Every one of them can name the half it is not.
 #
 # This seat can do BOTH — it authors pull requests and it can cast a verdict on somebody else's — so
 # there is no half to name. What keeps it honest is not a separation of powers within one box; it is
@@ -110,7 +111,8 @@ ARCH_TOKEN="${QUINCE_ARCH_TOKEN_FILE:-$_home/.config/quince/quince-arch.token}"
 if [ -f "$ARCH_TOKEN" ]; then
 	die "an ARCHITECT CREDENTIAL is present at $ARCH_TOKEN." \
 		"That seat merges. A box that can author and merge is the whole of what the seat separation" \
-		"exists to prevent. Remove it, or run gh-arch on the architect box."
+		"exists to prevent. REMOVE IT: that credential is retired and no wrapper reads it any more" \
+		"(quince#676), so its presence here is a leftover file rather than a seat in the wrong place."
 fi
 BOT_TOKEN="${QUINCE_BOT_TOKEN_FILE:-$_home/.config/quince/quince-bot.token}"
 if [ -f "$BOT_TOKEN" ]; then

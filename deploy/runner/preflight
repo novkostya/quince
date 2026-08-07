@@ -152,10 +152,20 @@ arch)
 	# reads as "credential installed" to a check that looks at the filesystem.
 	REVIEW_KEY="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
 	if [ ! -f "$REVIEW_KEY" ]; then
-		# NOT `bad`. A box provisioned before the App existed is a correct box that predates a
-		# change, and refusing to start it would strand the seat that reviews everything. gh-arch
-		# still works; what is lost is that verdicts are distinguishable from the Operator's.
-		printf 'preflight: role arch: no reviewer key at %s — verdicts will post as the Operator (quince#47 unfixed on this box). Run deploy/runner/provision to install it.\n' "$REVIEW_KEY"
+		# NOT `bad`, AND THE REASON IT IS NOT HAS EXPIRED (quince#676). The argument was: a box
+		# provisioned before the App existed is a correct box that predates a change, refusing to
+		# start it would strand the seat that reviews everything, and *"gh-arch still works; what is
+		# lost is that verdicts are distinguishable from the Operator's."*
+		#
+		# `bin/gh-arch` IS DELETED AND ITS CREDENTIAL RETIRED, so a box in this state has lost the
+		# fallback that note assumed. What it is missing is no longer distinguishability — it is
+		# **any way to reach the forge at all**. The message below says that instead.
+		#
+		# THE VERDICT IS DELIBERATELY UNCHANGED, because turning a note into a refusal is a
+		# boot-blocking decision and this change is a sweep. It is a live question for the architect:
+		# `preflight` refuses a box that cannot run the privacy gate, and a review seat that cannot
+		# review is arguably the same class. Filed rather than decided.
+		printf 'preflight: role arch: no reviewer key at %s — and bin/gh-arch is retired (quince#676), so this box has NO forge credential: it can neither read the queue nor cast a verdict. Run deploy/runner/provision to install it.\n' "$REVIEW_KEY"
 	elif ! command -v openssl >/dev/null 2>&1; then
 		bad "a reviewer key is present at $REVIEW_KEY but openssl is not installed, so no token can be signed from it. A minimal Alpine image does not ship openssl. Fix: apk add openssl. Refusing rather than starting a box whose reviewer identity would fail at the first verdict."
 	elif review_why=$("$(dirname "$0")/../../bin/gh-review" api /installation/repositories -q '.total_count' 2>&1); then

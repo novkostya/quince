@@ -114,7 +114,6 @@ STUB
 	chmod +x "$WRAPDIR/$1"
 }
 mkwrapper gh-coder 0
-mkwrapper gh-arch 0
 
 run() {
 	# $1 role, rest: extra argv. EVERY credential path is overridden, not only the one a row is
@@ -336,7 +335,6 @@ clear_creds
 rm -rf "$LAYER_FIX"
 place "$CODER"
 mkwrapper gh-coder 1
-mkwrapper gh-arch 1
 runl implementer
 if [ "$LAYER_RC" -eq 0 ]; then
 	bad "a credential present with NO usable wrapper exited 0 — the quince#236 defect"
@@ -348,7 +346,7 @@ else
 	printf '       %s\n' "$LAYER_OUT" | head -n 3
 fi
 if printf '%s\n' "$LAYER_OUT" | grep -q "$CODER" &&
-	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-review, gh-arch'; then
+	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-review'; then
 	ok "the refusal names the credential found and the wrappers tried"
 else
 	bad "the refusal does not say what it found or what it tried"
@@ -370,7 +368,6 @@ fi
 clear_creds
 place "$CODER"
 mkwrapper gh-coder 0
-mkwrapper gh-arch 1
 runl implementer
 if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token'; then
 	ok "a working gh-coder selects the App username x-access-token"
@@ -378,26 +375,23 @@ else
 	bad "gh-coder was usable but the username is not x-access-token"
 	printf '       %s\n' "$LAYER_OUT" | head -n 4
 fi
-# The control, and the reason (c) is not vacuous: with only gh-arch usable the username must CHANGE.
-# A hardcoded `x-access-token` would satisfy the assertion above and break the architect box.
+# THE CONTROL FOR (c) IS GONE, AND WHAT IT PROVED IS NOW UNPROVEN (quince#676).
 #
-# `mkwrapper gh-review 1` IS EXPLICIT rather than relying on the file's absence (quince#674). Before
-# `gh-review` joined the search list this row passed because the fixture never created it; that made
-# the control's meaning depend on an omission, so adding the wrapper anywhere above would have
-# silently turned it into a different test.
-clear_creds
-place "$ARCH"
-place "$REVIEW"
-mkwrapper gh-coder 1
-mkwrapper gh-review 1
-mkwrapper gh-arch 0
-runl arch
-if printf '%s\n' "$LAYER_OUT" | grep -q 'username novkostya'; then
-	ok "a working gh-arch selects the PAT username instead (the control)"
-else
-	bad "the username did not follow the wrapper — the arch seat would break"
-	printf '       %s\n' "$LAYER_OUT" | head -n 4
-fi
+# It placed a working `gh-arch`, expected `username novkostya`, and its point was that the username
+# FOLLOWS THE WRAPPER rather than being hardcoded: *"with only gh-arch usable the username must
+# CHANGE. A hardcoded `x-access-token` would satisfy the assertion above and break the architect
+# box."*
+#
+# `bin/gh-arch` is deleted and `layer_wrapper` now searches `gh-coder gh-review` — two Apps — so
+# **no fixture reachable through the public path can produce a non-App credential**, and this control
+# cannot be rebuilt. `provision`'s `*) LAYER_USER=novkostya` arm is consequently unreachable AND
+# untested. It is kept deliberately, so the next PAT-shaped wrapper cannot silently inherit
+# `x-access-token` and authenticate as the wrong user — but nothing here holds it to that, and the
+# assertion above is now satisfiable by a hardcoded string.
+#
+# RECORDED RATHER THAN DELETED QUIETLY, which is the same rule quince#676 set for
+# `bin/wrapper-boundary-test`: removing a wrapper narrows what a suite can assert, and the narrowing
+# has to be legible. If a non-App wrapper is ever added, this control comes back with it.
 
 # (c2) THE ARCH BOX AS IT ACTUALLY IS — quince#674, and the row this change exists for.
 #
@@ -410,7 +404,6 @@ clear_creds
 place "$REVIEW"
 mkwrapper gh-coder 1
 mkwrapper gh-review 0
-mkwrapper gh-arch 1
 runl arch
 if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token' &&
 	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-review'; then
@@ -420,23 +413,18 @@ else
 	printf '       %s\n' "$LAYER_OUT" | head -n 4
 fi
 
-# (c3) ORDER: THE APP WINS OVER THE PAT WHEN BOTH WORK, so a box still carrying the architect token
-# MIGRATES on its next provision instead of pinning itself to a credential that is being deleted
-# (quince#676). This is the half a plain "gh-review is in the list" change would not give: appending
-# it AFTER `gh-arch` satisfies (c2) — where gh-arch is broken — and fails here.
-clear_creds
-place "$ARCH"
-place "$REVIEW"
-mkwrapper gh-coder 1
-mkwrapper gh-review 0
-mkwrapper gh-arch 0
-runl arch
-if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token'; then
-	ok "with BOTH usable the App is preferred, so a re-provision migrates off the PAT"
-else
-	bad "the PAT won over the App — a re-provision would re-pin the box to a credential being deleted"
-	printf '       %s\n' "$LAYER_OUT" | head -n 4
-fi
+# (c3) IS RETIRED WITH ITS SUBJECT (quince#676). It asserted that THE APP WINS OVER THE PAT when both
+# work, so a box still carrying `quince-arch.token` would migrate on its next provision instead of
+# re-pinning to a credential that was being deleted. It was the half a plain "gh-review is in the
+# list" change would not have given — appending the App AFTER the PAT satisfies (c2), where the PAT
+# is broken, and fails here.
+#
+# The credential it defended against is deleted and `layer_wrapper` no longer looks for it, so there
+# is no ordering left to get wrong: a box still holding that token simply has it ignored. The case is
+# unbuildable rather than merely redundant, which is why it is removed instead of kept as a control.
+#
+# WHAT REPLACES IT IS (c2), UNCHANGED. That row still drives the arch box's real shape — only
+# `gh-review` usable — and still fails if the App is not selected.
 
 # (d) A HELPER THIS RUN DID NOT WRITE IS NOT OVERWRITTEN (ruling item 3). Previously unconditional,
 # and a no-op on the arch box only BY COINCIDENCE. Had a bot token been placed on an implementer box,
@@ -446,7 +434,6 @@ fi
 clear_creds
 place "$CODER"
 mkwrapper gh-coder 0
-mkwrapper gh-arch 1
 rm -rf "$LAYER_FIX"
 mkdir -p "$LAYER_FIX"
 git -C "$LAYER_FIX" init -q -b main
