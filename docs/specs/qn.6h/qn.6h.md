@@ -226,6 +226,14 @@ and `finishCommit` does two things where it used to do three:
    and a snapshot taken with the scaffolding still present would carry it forever. Today's code
    already removes them before snapshotting (`zfs.go:242-243` then `:245`); the ordering is
    inherited, not invented.
+
+   **The CALL is inherited; the OBJECT is not, and that must be a written property rather than a
+   lucky one.** Today `os.RemoveAll(workingParent)` deletes a real directory of superseded content.
+   After this rung it deletes a directory containing a **symlink to the committed tree**. Go's
+   `RemoveAll` is `lstat`-based, so it unlinks the symlink and does not traverse it — the code is
+   correct. **The failure if it were not is deleting every backup at every commit**, so G1 asserts
+   `latest/` still holds the committed tree after `finishCommit`, and the property is stated here so
+   nobody "simplifies" the traversal later.
 2. **`Snapshot`** → `PhaseSnapshotCreated`.
 
 `PhaseExchanged` stops occurring. The enum keeps its shape — per-backend phase sets are already the
@@ -535,6 +543,19 @@ byte size.
   30-minute `zfsSeedTimeout` is deleted with the seed; a rollback is a metadata operation and takes
   the 60-second bound. **Near-miss named:** if H2 shows a rollback blocking on a busy mount, 60
   seconds may be the wrong bound — that is a thing H2 decides, not something this spec assumes.
+- **D5a: `latest/` is a real directory, never a symlink.** `docs/quince.stack.md:347-349`, an
+  accepted external-review point whose stated reason is that *"symlink behavior under rclone depends
+  on flags and would make the offsite contract fragile."* **This is the rung that puts a symlink in
+  the storage tree, so the rule is checked rather than assumed to be untouched.** It holds, for two
+  independent reasons: the rule binds **`latest/`**, and under D1 `latest/` stays a real directory —
+  the shim is at `working/<udid>`, a different path; and that path is **anchored-excluded from rclone
+  already** (fact 10, `- /<subdir>/*/working/**`), so the flag-dependent behaviour the rule was
+  written against is structurally out of reach rather than merely unlikely. The shim also does not
+  survive a commit, so no snapshot contains one.
+  **Named here because getting it wrong in the other direction has already happened**: the rule was
+  reached for on quince#591 to rule the shim out, on the reading that the target directory *is* the
+  offsite tree. It is not. A reader who reaches for D5a and finds no answer here will either repeat
+  that or conclude the rule was missed.
 - **Every bug found on hardware becomes a replay fixture.** Standing; nothing found yet.
 - **Config tidiness.** `storage.zfs.seed` (`auto|reflink|copy`) becomes meaningless on zfs and
   **keeps meaning for the namespace backends**, which is a `qn.6g` contracts §6 question rather than
@@ -593,7 +614,14 @@ byte size.
    keeps `latest/`'s layout byte-identical, so old snapshots keep working and `browseRoot` needs no
    change at all. *Migration is out of the table* (Operator, 2026-08-08) is licence not to **build** a
    migration path; the shim is the option that does not need one.
-5. **Whether a zfs version row can actually hold a nil `ZFSSnapshot`** is unresolved, and D7 is
+5. **`SweepWork` is `return nil` today, and quince#731 makes reconciliation SCHEDULED — nothing
+   sequences the two.** That issue already records that a future sweep must tell a live job's
+   `working/` from an orphan. **Under this rung the object such a sweep would remove is the shim**,
+   so removing it mid-job breaks the tool's target *immediately* rather than merely wasting a clone
+   — a strictly worse failure than the one quince#731 is written against. `reconcile.go` is
+   deliberately not in this rung's Boundary and quince#731 has no rung number, so this is recorded
+   rather than built: whichever lands second owes the other a check.
+6. **Whether a zfs version row can actually hold a nil `ZFSSnapshot`** is unresolved, and D7 is
    deliberately built so the answer does not matter: browse refuses rather than falling back. If
    somebody later establishes the nil case is unreachable, D7's guard becomes belt-and-braces and
    should be **kept** — the cost is one branch, and the failure it prevents is serving a
