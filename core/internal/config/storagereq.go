@@ -187,7 +187,17 @@ func CheckStorageBackends(storages *[]StorageEntry) []string {
 	for _, e := range *storages {
 		// `auto` still resolves to zfs when zfs intent is declared — interface fact 4: zfs intent
 		// is config-side and never probed. Keeping that here is what makes `auto` legal without
-		// making it a hole (quince#502 owns removing it).
+		// making it a hole. `auto` is ABSORBED rather than removed (quince#502, Operator ruling
+		// 2026-08-07): the loader is unchanged and the add flow writes a concrete backend, so
+		// quince never writes `auto` and a human still may.
+		//
+		// THIS PREDICATE IS DUPLICATED, and semantically rather than literally: storage.WantZFS is
+		// the same rule spelled with BackendZFS where this spells "zfs", so a grep for either
+		// spelling finds only one of them. That is worse than a literal copy, not better. It is not
+		// collapsed here because the two packages deliberately do not import each other — storage's
+		// Options exists precisely so that package need not import config — and reversing that edge
+		// is a layering decision, not a tidy-up. qn.6e PR 2 factored the storage side and stopped
+		// at the boundary on purpose.
 		isZFS := e.Backend == "zfs" ||
 			(e.Backend == "auto" && (e.ZFS.ParentDataset != "" || e.ZFS.HookCmd != ""))
 		if isZFS && e.ZFS.ParentDataset == "" {
