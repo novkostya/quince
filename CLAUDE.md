@@ -14,11 +14,12 @@ never unoccupied, and is the sole whole-tree rclone offsite-sync source; a versi
 `@quince-*` snapshot on zfs (one child dataset per device, browsed via
 `.zfs/snapshot/<snap>/latest/`, so between backups the dataset holds only `latest/`) or a
 `versions/<ts>/` dir on the reflink (FICLONE) / hardlink / copy backends. Commit is
-journaled and startup reconciliation is first-class. **Both statements above about `latest/` — that
-it is the newest committed version's content, and that it is the sole whole-tree offsite source —
-are RULED to stop holding for `zfs`, which writes into `latest/` IN PLACE: no seed, no working copy,
-no exchange, commit = verify → `zfs snapshot`. Design §5's block at the end of the section is the
-ruling; nothing is built, and the hard rule below carries what survives it.** Wi-Fi backup is the PRIMARY use case
+journaled and startup reconciliation is first-class. **The bolded claim above — *one lifecycle across
+all backends since qn.5b*, and the seed-and-exchange sentence that defines it — is RULED to END for
+`zfs`, which writes into `latest/` IN PLACE: no seed, no working copy, no exchange, commit = verify →
+`zfs snapshot`. `latest/` also stops being a whole-tree offsite source on that backend, because it is
+torn mid-backup. It stays a real directory and stays NEVER UNOCCUPIED — more so than before, not
+less. Design §5's block at the end of the section is the ruling; nothing is built.** Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is
 no unattended mode and no auto-retry: opportunity signal → push → one unlock+confirm;
 failures become `user action required`. Core value: Plex-grade setup, OpenWrt/PVE-grade
