@@ -500,9 +500,27 @@ be read as having proven it.
 **No new transcripts.** This rung changes where bytes land, not what the tool says, so the existing
 replay transcripts in `core/internal/backup/testdata/transcripts/` cover the parser unchanged.
 
-**Extended: the fake `zfsCLI`** — it must record argv per call, so G4 can assert that a rollback is
-issued with exactly one argument and never `-r`. Recording argv rather than asserting a call count is
-deliberate: a count would pass on a rollback with the wrong target.
+**Extended: `fakeZFS` gains a `rollback` case — and NOTHING ELSE, because argv recording already
+exists.** `helpers_test.go:67` is `f.calls = append(f.calls, argv)`, unconditional and first, and the
+type's comment already says *"It records every argv so tests can assert exact commands (argv arrays,
+no shell) and inject failures."* So G4 needs the `switch` arm, not a fixture change. **Corrected
+2026-08-08**: this paragraph asked for the recording to be added, which was an unmeasured claim about
+the fixture in a spec whose standard is that facts about the code are measured — and the eleven
+interface facts about *production* code all check out, so the one that did not was about the test
+harness.
+
+G4 still asserts on **argv rather than a call count**: a count passes on a rollback with the wrong
+target. What `rollback` must do in the fake is delete `.zfs/snapshot/` entries newer than the target
+and restore `latest/` from it, so answer A is exercised end-to-end; `failOp` already covers answer B.
+
+**Two things PR 3 must change in the same fixture**, recorded here because it is the file every Go
+gate runs on and neither is a Boundary entry:
+
+- **its doc comment describes the exchange model** — *"the exchange already moved the verified tree
+  into latest/ before the snapshot"* — which goes stale in the commit that deletes the exchange;
+- **its `seed` case** is the host-side verb PR 4 deletes. It must **outlive PR 3** — the namespace
+  backends do not use `fakeZFS`, but PR 3 must not remove a verb the reference helper still declares
+  — and die with `seed)`.
 
 **New: a shell fixture for G11** — the reference helper's text, extracted from `deploy/storage.md`
 rather than duplicated, driven with a stub `zfs` on `PATH` that records its argv. Extracted rather
