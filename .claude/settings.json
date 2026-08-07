@@ -44,6 +44,7 @@
       "Bash(make gates-vault)",
       "Bash(make gates-ui)",
       "Bash(make gates-ui-e2e)",
+      "Bash(make storageless-smoke)",
       "Bash(make image)",
       "Bash(make image *)",
       "Bash(make push *)",

@@ -1,0 +1,128 @@
+#!/bin/sh
+# storageless-smoke — drive a REAL container through the whole first-run path (qn.6e).
+#
+# WHY THIS EXISTS, and it is not "more coverage". The first-run path was proven in two halves that
+# never met: the daemon's refusal in Go, the client's routing in Playwright with `/api/config`
+# intercepted. Nothing started a real quince with no config and used it.
+#
+# THAT GAP HID TWO BUGS IN ONE DAY, both found by hand rather than by a gate:
+#
+#   1. An Operator following a PR's click-list got `no such endpoint: /api/config/storage` — the
+#      demo had been rebuilt from a branch that predated the route.
+#   2. `POST /api/config/storage` returned 422 on a fresh install, so THE FIRST STORAGE COULD NEVER
+#      BE ADDED and the entire first-run path was unreachable. Six green unit tests covered that
+#      endpoint; every one of them seeded a storage first, so none added the first.
+#
+# The second is the shape this guards: a missing STARTING STATE, which no amount of reading the test
+# list reveals, because each test looks complete and the fixture they share is what is wrong.
+#
+# IT REFUSES RATHER THAN SKIPS when it cannot run, which is the same discipline privacy-check and
+# gates-sh follow: exit 2 is DID NOT RUN and is never a clean result.
+set -eu
+
+RUNTIME="${RUNTIME:-}"
+if [ -z "$RUNTIME" ]; then
+	for c in nerdctl docker podman; do
+		if command -v "$c" >/dev/null 2>&1; then RUNTIME=$(command -v "$c"); break; fi
+	done
+fi
+if [ -z "$RUNTIME" ]; then
+	echo "storageless-smoke: DID NOT RUN — no container runtime (nerdctl/docker/podman)." >&2
+	echo "  This is NOT a clean result. Nothing was smoked." >&2
+	exit 2
+fi
+
+IMAGE="${IMAGE:-quince:local}"
+NAME="storageless-smoke-$$"
+WORK=$(mktemp -d)
+PORT="${PORT:-0}"
+
+cleanup() {
+	"$RUNTIME" rm -f "$NAME" >/dev/null 2>&1 || true
+	rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+if [ "$PORT" = "0" ]; then
+	# A FREE PORT, not a fixed one: two runners share this box, and a fixed port makes one smoke
+	# fail as though the product were broken — the most expensive possible disguise.
+	PORT=$(awk 'BEGIN{srand();print 20000+int(rand()*20000)}')
+fi
+
+mkdir -p "$WORK/data" "$WORK/cache"
+
+fail() {
+	echo "storageless-smoke: FAILED — $1" >&2
+	echo "--- container log ---" >&2
+	"$RUNTIME" logs "$NAME" 2>&1 | tail -30 >&2
+	exit 1
+}
+
+# status URL OUTFILE [JAR] — the JAR is not optional decoration: without it an "authenticated"
+# check is anonymous and answers 401, which reads as the guard working when it is the test that is
+# broken. Cost me one run to find, which is the argument for naming it here.
+status() {
+	if [ -n "${3:-}" ]; then curl -s -b "$3" -o "$2" -w "%{http_code}" "$1"; else curl -s -o "$2" -w "%{http_code}" "$1"; fi
+}
+
+echo "storageless-smoke: image=$IMAGE port=$PORT data=$WORK/data (EMPTY — no config.yml)"
+
+# NO config.yml, WHICH IS THE POINT. A fresh install has none, and quince used to refuse to start.
+"$RUNTIME" run -d --name "$NAME" -p "$PORT":8968 \
+	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
+	-v "$WORK/data":/data -v "$WORK/cache":/cache \
+	"$IMAGE" serve >/dev/null || fail "could not start the container"
+
+# Wait for the port rather than sleeping a guess: a slow box must not read as a broken daemon.
+i=0
+while [ "$i" -lt 60 ]; do
+	if [ "$(status "http://127.0.0.1:$PORT/api/health" /dev/null)" = "200" ]; then break; fi
+	i=$((i + 1))
+	sleep 1
+done
+[ "$i" -lt 60 ] || fail "the daemon never answered /api/health — it exited rather than serving"
+echo "  ok  it SERVES with no storage declared, rather than exiting"
+
+# The setup state must not leak to a stranger: the guard runs after auth, deliberately.
+code=$(status "http://127.0.0.1:$PORT/api/devices" /dev/null)
+[ "$code" = "401" ] || fail "unauthenticated /api/devices = $code, want 401 (setup state must not be public)"
+echo "  ok  an unauthenticated caller gets 401, not the setup state"
+
+JAR="$WORK/jar"
+csrf() { curl -s -b "$JAR" -c "$JAR" "http://127.0.0.1:$PORT/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/'; }
+
+t=$(csrf)
+curl -s -b "$JAR" -c "$JAR" -o /dev/null -X POST -H 'Content-Type: application/json' \
+	-H "X-CSRF-Token: $t" -d '{"password":"smoketest1"}' \
+	"http://127.0.0.1:$PORT/api/auth/setup" || fail "could not set the admin password"
+t=$(csrf)
+
+code=$(status "http://127.0.0.1:$PORT/api/devices" "$WORK/dev.json" "$JAR")
+[ "$code" = "503" ] || fail "authenticated /api/devices = $code, want 503 while storageless"
+grep -q storage_required "$WORK/dev.json" || fail "the 503 did not carry storage_required"
+echo "  ok  the API refuses outside setup, with storage_required"
+
+code=$(curl -s -b "$JAR" -o "$WORK/probe.json" -w '%{http_code}' -X POST \
+	-H 'Content-Type: application/json' -H "X-CSRF-Token: $t" \
+	-d '{"path":"/cache"}' "http://127.0.0.1:$PORT/api/storages/probe")
+[ "$code" = "200" ] || fail "the storage probe = $code, want 200 — the form cannot work without it"
+echo "  ok  the probe answers, so the first-run form can be filled in"
+
+# THE WRITE THAT ENDS THE MODE, and the case six unit tests never covered: the FIRST storage, into a
+# config that has none.
+code=$(curl -s -b "$JAR" -o "$WORK/add.json" -w '%{http_code}' -X POST \
+	-H 'Content-Type: application/json' -H "X-CSRF-Token: $t" \
+	-d '{"name":"first","path":"/cache","backend":"copy"}' \
+	"http://127.0.0.1:$PORT/api/config/storage")
+[ "$code" = "200" ] || fail "adding THE FIRST storage = $code, want 200 — $(cat "$WORK/add.json")"
+echo "  ok  the FIRST storage can be added"
+
+# NO RESTART. The mode is derived from the live config, so it clears in the same process.
+code=$(status "http://127.0.0.1:$PORT/api/devices" /dev/null "$JAR")
+[ "$code" = "200" ] || fail "/api/devices after the add = $code, want 200 — the mode did not clear"
+echo "  ok  the setup mode ends in the SAME PROCESS, with no restart"
+
+grep -q 'default: true' "$WORK/data/config.yml" || fail "the lone storage was not written as default"
+echo "  ok  the lone storage is default by implication, written to config.yml"
+
+echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart"
