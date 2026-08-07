@@ -775,6 +775,22 @@ variant in comments). First-run onboarding in the UI: set admin password → gui
 picked and why; usbmuxd reachable; optional Wi-Fi toggle) — every choice written into
 `config.yml`, every check re-runnable later from Settings.
 
+**Of those four, the BACKEND PROBE is built (`qn.6e`).** *Add storage* takes a typed path, reports
+what is there **without changing it**, and writes the concrete backend it recommended — the
+probe's own sentence is the plain-language explanation this paragraph asks for, and it names the
+path it probed. The **backups-dir-writable** check is folded into the same probe rather than being
+separate: an unwritable path is one of its outcomes, with its own remedy.
+
+**The other two are not built and are not `qn.6e`'s.** *usbmuxd reachable* and the *Wi-Fi toggle*
+are accepted proposals P1 and P1b in the devlog ledger, homed at "qn.6" and **not at a letter** —
+so a reader should not take this sentence as describing shipped behaviour for them.
+
+**These four are UNNUMBERED and stay that way.** quince#558 found canon claiming twice that "§9
+already names steps 2 and 3" when it names no numbered steps at all, and the correction was to
+strike the claim rather than invent the numbering. Onboarding surfaces are therefore named for
+their **subject** — `GET /api/onboarding/https`, and `/onboarding/storage` when the first-run path
+lands — which is the 2026-08-02 ruling in contracts §1.
+
 - **PVE LXC lab shape** (the Operator's own setup; specifics in `local/environment.md`,
   gitignored): Alpine LXC, USB passthrough, zfs backend with a parent dataset (one
   child per device, bind-mounted into `/backups` via an `rbind,rslave` mount entry so

@@ -73,12 +73,20 @@ type BackupConfig struct {
 // `BackendFor`, `ZFSFor` and the `zfs: {}` opt-out idiom went with it, and quince#468 — choosing
 // between remedies that named a global — cannot exist without something to inherit from.
 //
-// `backend: auto` IS STILL LEGAL AND IS NOT AN OVERSIGHT. The direction also said only a CONCRETE
-// backend may land in the file; that half is DEFERRED to `qn.6e` (quince#502), because `auto` is
-// not a convenience default — it is the only thing that checks a declaration against the medium.
-// `storage.Select` returns an explicit namespace backend WITHOUT probing, so a hand-written guess
-// would be accepted at startup, frozen into `quince-storage.json` where the marker is the
-// authority, and fail at SEED TIME. Do not remove it here.
+// `backend: auto` IS STILL LEGAL, AND IT IS NOW LEGAL BY RULING RATHER THAN BY DEFERRAL. The
+// 2026-08-02 direction that only a CONCRETE backend may land in the file was ruled ABSORBED, NOT
+// REMOVED — Operator, 2026-08-07 on quince#502, built in qn.6e.
+//
+// So the loader is unchanged and `auto` stays the default. What changed is one layer up: the add
+// flow (POST /api/config/storage) refuses an empty or `auto` backend with a 422 rather than
+// defaulting it, so quince records the value its probe just showed.
+//
+// The original reason for keeping it stands, and is why removal was never the cheap option: `auto`
+// is the only thing that checks a declaration against the medium. `storage.Select` returns an
+// explicit namespace backend WITHOUT probing, so a hand-written guess would be accepted at startup,
+// frozen into `quince-storage.json` where the marker is the authority, and fail at SEED TIME. And
+// the startup refusal itself teaches `storage:` / `- path: /backups`, which IS `auto`. Do not
+// remove it here.
 type StorageEntry struct {
 	// Name is the stable identity across replug, where a path is not; it keys the DB row.
 	//
