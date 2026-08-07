@@ -84,6 +84,58 @@ GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_pro
      // complete = this origin is already encrypted, so nothing needs doing.
 ```
 
+**RULED and IMPLEMENTED: the FIRST-RUN SETUP STATE — quince serves with no storage (`qn.6e`).**
+Operator ruling 2026-08-07 on quince#502, option (a): **any zero-storage start IS the onboarding
+state.**
+
+quince used to **refuse to start** without a declared storage. On a fresh install `/data/config.yml`
+does not exist, so the genuine first run was: start → exit → hand-write YAML into a bind mount →
+start again. It now serves, and **refuses every API outside the setup surface with `503
+storage_required`**:
+
+```
+503 {"error":{"code":"storage_required","message":"quince has no storage declared yet — …"}}
+```
+
+**Reachable while storageless, BY EXACT PATH** — a prefix would silently widen this every time a
+route is added:
+
+```
+GET  /api/health                    GET/PUT /api/config
+GET  /api/auth/status               POST    /api/config/storage
+POST /api/auth/{setup,login,logout} POST    /api/storages/probe
+GET  /api/onboarding/https          POST    /api/storages/probe/hook
+```
+
+**The two probes are not an afterthought.** The storage step's whole job is to let a user check a
+path and a helper *before* declaring anything, so a mode that refused them would serve a form that
+cannot fill itself in. `POST /api/config/storage` is likewise inside the surface: it is the one write
+that **ends** the mode.
+
+**There is no flag, no persisted step and no new endpoint.** The condition is read from the live
+config per request, so the mode clears the instant a storage is added — no restart, nothing to reset.
+A client asks `GET /api/config` and looks at `storage`; **`/api/onboarding/storage` deliberately does
+not exist.** `https` needed an endpoint because its *evidence* (`detected`) is a property of the
+connection and appears in no other payload; storage emptiness is already in one the client fetches,
+so a second source of truth for one boolean would be the thing that goes stale.
+
+**503, and it is a statement about the SERVER rather than the request** — the condition clears when
+the operator finishes setup, not when the client changes anything. `409`/`422` would say the caller
+did something wrong.
+
+**The guard runs AFTER auth**, so an unauthenticated caller gets `401` and never learns the install
+is unfinished. That is a disclosure decision, not an ordering detail.
+
+**MALFORMED STILL REFUSES TO START**, and every other refusal in `CheckStorages` stands. A file that
+could not be **parsed** is not an empty declaration: `Load()` falls back to `Default()`, so serving
+would silently ignore what the operator wrote and invite them to add a storage to a document that
+already has one it cannot read (quince#508).
+
+**The accepted cost, recorded as accepted:** *onboarding* and *misconfigured* are byte-identical at
+startup, so a config whose `storage:` list someone emptied by hand gets the setup page rather than a
+refusal. Ruled **not** a state-honesty downgrade — the page is true in both cases, and the daemon
+becomes fixable from a browser instead of a shell.
+
 **The path names its SUBJECT, not a position** — Operator ruling 2026-08-02. An ordinal would be
 anchored to nothing: design §9 describes first-run onboarding as *guided checks* and names four of
 them, unnumbered — backups dir writable, backend probe, usbmuxd reachable, optional Wi-Fi toggle —

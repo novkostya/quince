@@ -94,17 +94,30 @@ type Manager struct {
 // NewManager wires the subsystem. audit may be nil (skipped).
 //
 // slots is every storage this Manager speaks for, in declaration order; slots[0] is the DEFAULT.
-// It must be non-empty — `config.CheckStorages` refuses to serve without a declared storage, so a
-// Manager with no slots is a programming error rather than a state to degrade through, and the
-// panic says so rather than producing an index-out-of-range three calls later.
+//
+// IT MAY BE EMPTY, AND THE CONSTRUCTION PANIC THAT SAID OTHERWISE IS GONE (qn.6e, Operator ruling
+// 2026-08-07). That comment read: "It must be non-empty — config.CheckStorages refuses to serve
+// without a declared storage, so a Manager with no slots is a programming error rather than a state
+// to degrade through." Its premise stopped being true: CheckStorages no longer refuses a
+// zero-storage start, because a first run has no `storage:` key at all and quince now serves so one
+// can be added from the UI.
+//
+// REMOVING IT IS SAFE BECAUSE qn.6g ALREADY DID THE WORK, not because the risk was re-argued. That
+// rung moved the non-empty guarantee FROM CONSTRUCTION TIME TO CALL TIME — see defaultSlot below —
+// precisely because the list can be REPLACED while the process runs, so "non-empty when it was
+// built" already said nothing about "non-empty now". Every reader guards, and movinglist_test.go
+// gates all of them on zero: defaultSlot, BackendName, storageIDPtr, policyFor, Storages,
+// RecheckStorage and ResolveChoice. The panic was the last remnant of an invariant its own callers
+// had stopped relying on.
+//
+// ApplyStorages still refuses an EMPTY list, so a Manager cannot be MOVED to zero — only built that
+// way, on a first run, before anything has been declared.
+//
 // THE GLOBAL RetentionPolicy PARAMETER IS GONE (quince#473): retention is per-storage, so it
 // arrives on each Slot. A Manager-wide policy would have been a number the config file no longer
 // has a place to say.
 func NewManager(slots []Slot, reg Registry, audit Auditor, b *bus.Bus,
 	newID func() string, log *slog.Logger) *Manager {
-	if len(slots) == 0 {
-		panic("storage: NewManager needs at least one Slot — config.CheckStorages should have refused first")
-	}
 	return &Manager{
 		slots: slots, reg: reg, audit: audit, bus: b,
 		log: log, newID: newID, now: func() time.Time { return time.Now().UTC() },

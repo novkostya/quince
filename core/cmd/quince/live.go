@@ -177,11 +177,24 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*storage.Manager, error) {
 	scfg := cfgSvc.Current().Storage
 	entries := declaredStorages(scfg)
+	// ZERO STORAGES IS NOW A LEGITIMATE STARTUP STATE, and this is where that stops being a
+	// contradiction. This returned an error whose comment read "unreachable past
+	// config.CheckStorages … if it ever gets here the guard upstream has stopped working" — true
+	// while the daemon refused to start on an empty list, and false since qn.6e's ruling (option
+	// (a), 2026-08-07): a first run has no `storage:` key at all, and quince serves anyway so the
+	// storage can be added from the UI.
+	//
+	// A Manager with NO SLOTS is safe rather than merely tolerated, and that was proven before this
+	// rung needed it. qn.6g's empty-list guards make defaultSlot, BackendName, storageIDPtr,
+	// policyFor, Storages, RecheckStorage and ResolveChoice all answer honestly on zero —
+	// ResolveChoice 409s, which is exactly right for a job that names nowhere to go — and
+	// movinglist_test.go gates every one of them.
+	//
+	// THE MODE ENDS WITHOUT A RESTART. ApplyStorages refuses an EMPTY list and keeps what it has,
+	// but empty→non-empty is an ordinary add, so the applier brings the first storage live the
+	// moment it is declared. Nothing here is re-run.
 	if len(entries) == 0 {
-		// Unreachable past config.CheckStorages, which refuses to serve on an absent or empty list.
-		// Asserted rather than assumed: the ONE surviving hard refusal is "no storages declared"
-		// (quince#435), so if it ever gets here the guard upstream has stopped working.
-		return nil, fmt.Errorf("no storages declared — config.CheckStorages should have refused first")
+		log.Warn("storage subsystem starting with NO STORAGES — setup only until one is added")
 	}
 
 	// EVERY DECLARED STORAGE IS RESOLVED, AND ONE THAT CANNOT BE OPENED IS LISTED RATHER THAN FATAL
