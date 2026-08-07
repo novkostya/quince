@@ -861,4 +861,18 @@ loop-drift-test: ## The loop commands inlined in the skills still match loop-pro
 
 .PHONY: storageless-smoke
 storageless-smoke: image ## A REAL container from a fresh install to a working storage (qn.6e)
+# IT SKIPS WITH THE IMAGE, exactly as gates-ui-e2e does, and for the same reason: `image` declines to
+# build under a scope it does not match, and a recipe that ran anyway would drive a container from an
+# image that does not exist. Without this the target is BROKEN for every scoped invocation — measured
+# on quince#718, where `image: SKIPPED` was followed by `pull access denied for quince` and a red
+# `e2e` (quince#713).
+#
+# SKIPPING COSTS NO COVERAGE. `e2e`'s scope is `core/ ui/ vault/ deploy/` plus the shared pins — the
+# whole product tree — and this smoke's subject lives inside it: the startup path is `core/`, the
+# script is `deploy/`. A change that could break a fresh install therefore TRIGGERS this rather than
+# skipping it. What skips is docs, `.claude/` and `.github/`-only diffs, which cannot.
+ifeq ($(E2E_NEEDED),3)
+	@echo "storageless-smoke: SKIPPED — nothing the image is built from changed in $(SCOPE). Same coverage as image, so the two skip together and this never runs against an image that was not built."
+else
 	@IMAGE=$(IMAGE_NAME):$(APP_TAG) RUNTIME=$(RUNTIME) deploy/storageless-smoke
+endif

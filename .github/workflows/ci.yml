@@ -76,3 +76,17 @@ jobs:
       # (stories 1-2) in the official Playwright container against it.
       - name: Playwright e2e (demo mode)
         run: make gates-ui-e2e SCOPE="$SCOPE"
+      # Drives a REAL container from a fresh install (no config.yml) to a working storage: it serves
+      # rather than exiting, refuses the API with `storage_required`, answers the probe, accepts THE
+      # FIRST storage, and clears setup mode in the same process (qn.6e, quince#713).
+      #
+      # `SCOPE` IS PASSED EXPLICITLY, exactly as the step above does, so the scope this runs under is
+      # visible here rather than inherited from the workflow `env:` twenty lines up. It also skips
+      # with the image, which the Makefile enforces.
+      #
+      # It exists because the first-run path was proven in two halves that never met, and that gap
+      # hid two bugs in one day: a click-list hitting a route that did not exist, and quince#712 —
+      # `POST /api/config/storage` returning 422 on a fresh install, so the first storage could never
+      # be added at all.
+      - name: Storageless first-run smoke
+        run: make storageless-smoke SCOPE="$SCOPE"
