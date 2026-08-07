@@ -210,8 +210,24 @@ RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
 # a suite: on a real box `/usr/local/bin/gh-coder` exists AND works, so without this seam the
 # no-usable-credential path could never be exercised anywhere it matters.
 LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
+# `gh-review` IS IN THIS LIST, BEFORE `gh-arch`, AND THE ORDER IS THE FIX (quince#674). The arch box
+# has no `gh-coder` by design (`decisions/0007`: the box that approves must not hold the identity that
+# authors), so this loop fell through to `gh-arch` — the PAT the Operator DELETED on 2026-08-06 when
+# ruling that wrapper legacy. The private layer's clone on that box has been unable to fetch since,
+# which freezes the privacy pattern list while the gate goes on reporting `clean` (quince#121,
+# quince#220).
+#
+# NO NEW MECHANISM WAS NEEDED, and that is worth stating because the issue expected one: `gh-review`
+# already exposes a token exactly as `gh-coder` does. Neither wrapper implements an `auth` verb —
+# both export `GH_TOKEN` and `exec gh "$@"`, and `gh auth token` prints `$GH_TOKEN` verbatim. So
+# `gh-review auth token` works for the same reason `gh-coder auth token` does, and this loop was the
+# only thing that could not see it.
+#
+# SEARCHING THE APP FIRST means a box still carrying the PAT migrates to the App on its next
+# provision rather than pinning itself to a credential that is going away — which is the direction
+# quince#676 wants: one shape on both boxes, zero PATs.
 layer_wrapper() {
-	for _lw_n in gh-coder gh-arch; do
+	for _lw_n in gh-coder gh-review gh-arch; do
 		for _lw_d in $LAYER_WRAPPER_DIRS; do
 			_lw_p="$_lw_d/$_lw_n"
 			[ -x "$_lw_p" ] || continue
@@ -226,8 +242,12 @@ layer_wrapper() {
 LAYER_WRAPPER=$(layer_wrapper || true)
 # `x-access-token` for an App installation token, the login for a PAT. Keyed on WHICH WRAPPER can
 # act rather than on the role, so the username cannot disagree with the credential actually used.
+# BOTH APPS TAKE `x-access-token`, and the arm is shared rather than duplicated because the rule is
+# about the CREDENTIAL KIND, not the seat: an installation token authenticates as that user whichever
+# App minted it. `gh-arch` is the only PAT left, so the default arm now covers exactly one wrapper —
+# which is what quince#676 is about to remove.
 case ${LAYER_WRAPPER##*/} in
-gh-coder) LAYER_USER=x-access-token ;;
+gh-coder | gh-review) LAYER_USER=x-access-token ;;
 *) LAYER_USER=novkostya ;;
 esac
 
@@ -249,7 +269,7 @@ if [ -z "$LAYER_WRAPPER" ] && [ -n "$_have_own" ]; then
 	die "a $ROLE credential is present but NO wrapper could authenticate with it, so the private
     layer could not be placed or kept current. Refusing before touching this box.
       credential(s) present: $_have_own
-      wrappers tried:        gh-coder, gh-arch — in /usr/local/bin, then $RUNNER_DIR/bin
+      wrappers tried:        gh-coder, gh-review, gh-arch — in /usr/local/bin, then $RUNNER_DIR/bin
     Causes, in the order worth checking: the credential is invalid or unreadable; the identity moved
     and this box still holds the old one; the forge is unreachable from here.
     This is a REFUSAL rather than a note because 'no credential yet' and 'the identity moved' want
