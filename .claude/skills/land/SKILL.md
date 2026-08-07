@@ -138,8 +138,16 @@ primary path and spent only on the backstop.
 
 **Two things to know before reaching for it.** `allow_auto_merge` is `true` on `novkostya/quince`
 and **`false` on `novkostya/quince-devlog`** — enabling it there is an Operator action, so the
-devlog's path is retry-then-Operator until then. And **whether the App can enable auto-merge is
-UNMEASURED**: first use probes it and records the result on quince#676.
+devlog's path is retry-then-Operator until then. And **the App CAN enable auto-merge — measured
+2026-08-07 on quince#692**, `enabledBy: quince-review`, `mergeMethod: REBASE`, read back through the
+API rather than inferred from an exit code. **It also FIRED**, merging 4m23s later with no session
+awake, which is the half worth knowing: the ladder's primary rung works unattended.
+
+**Pick the target deliberately — the probe made this the useful part.** Arm it on a PR that is
+**approved with checks running**; that is the case it exists for. A **`BEHIND`** branch is the one to
+avoid: auto-merge does **not** rebase, so under `strict: true` an auto-merge armed on one waits
+forever. Rebase first, then arm — which also binds your approval to the head that will actually merge
+(§4). A PR that is already `CLEAN` is not a probe target either; just merge it.
 
 **Run §2's stacked-PR check at ENABLE time, not at merge time.** Auto-merge fires later and
 unattended, and `delete_branch_on_merge = true` repo-wide means the branch goes on every merge

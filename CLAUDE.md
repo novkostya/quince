@@ -229,12 +229,25 @@ repo is not a message bus, and no human is an RPC layer.
    to it when the checks finish.** Check completion does not move `updatedAt` — hence
    `event=mergeability status=CLEAN` (quince#65), and quince#63 sitting landable for sixteen minutes.
 
-   **Two things measured, and one deliberately not.** `allow_auto_merge` is `true` on
-   `novkostya/quince` and **`false` on `novkostya/quince-devlog`** — enabling it there is an Operator
-   action, since no agent identity holds `administration`, so **the devlog's path is retry, then the
-   Operator**. And **whether the App can ENABLE auto-merge is `(unmeasured)`**: nobody has run it,
-   `pull_requests: write` is the plausible grant, and this project probes rather than reading a
-   settings page. First use measures it and records the result on quince#676.
+   **Three things measured.** `allow_auto_merge` is `true` on `novkostya/quince` and **`false` on
+   `novkostya/quince-devlog`** — enabling it there is an Operator action, since no agent identity
+   holds `administration`, so **the devlog's path is retry, then the Operator**. And **the App CAN
+   enable auto-merge, and it FIRES**: measured 2026-08-07 on quince#692 — armed at `12:46:27Z`
+   (`enabledBy: quince-review`, `mergeMethod: REBASE`, read back through the API rather than inferred
+   from an exit code) and merged **unattended** at `12:50:50Z`, four minutes later, when the checks
+   went green.
+
+   **This paragraph read `(unmeasured)` for eighty minutes after the ruling that created it**, while
+   seven PRs were merged with the pre-ruling verb by the seat that could have cleared it — the
+   Operator asking *"did you probe auto-merge?"* is the only reason it was. **A `(unmeasured)` is a
+   debt, not a decoration**: it names an experiment nobody has run, and the seat that meets one should
+   run it rather than route around it. Kept because the instruction it carried — *first use measures
+   it* — is exactly what did not happen on its own.
+
+   **Arm it on a PR that is APPROVED WITH CHECKS RUNNING.** That is the case it exists for, and the
+   probe made the boundaries clear: **auto-merge does not rebase**, so one armed on a `BEHIND` branch
+   waits forever under `strict: true` — rebase first, then arm, which also binds the approval to the
+   head that will actually merge. An already-`CLEAN` PR wants a plain merge, not this.
 
    **AND §6's STACKED-PR CHECK MOVES TO ENABLE TIME.** Auto-merge fires later and unattended, so a
    check run "immediately before merging" has no moment to run in. Worse, it stops being a check over
