@@ -243,3 +243,57 @@ test("an install with a storage stays on Home", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   expect(page.url()).not.toContain("/onboarding/storage");
 });
+
+// THE ADD MUST LAND YOU ON HOME, and this is the assertion that was missing when the redirect loop
+// shipped. Operator-reported: "added my first storage but still on /onboarding/storage".
+//
+// The loop was a CACHE ordering bug, not a routing one: `invalidateQueries` marks the config stale
+// and refetches, but `RequireStorage` mounts on `/` and react-query hands it the CACHED pre-add
+// value synchronously — `storage: null` — so it bounced straight back. The form had already reset,
+// so from the outside nothing had happened.
+//
+// It is gated end to end rather than at the guard, because every part in isolation was already
+// correct: the POST succeeded, the guard's predicate was right, the navigate fired. Only the ORDER
+// was wrong, and order is only visible in the whole flow.
+test("adding the first storage lands on Home and does not bounce back", async ({ page }) => {
+  await authenticate(page);
+
+  // A first run as the daemon actually serves it: `storage: null`, and the add returns the new
+  // document. The route stays installed after the POST, so a subsequent GET would still answer
+  // `null` — which is what makes this a real test of the ordering rather than of a refetch.
+  let added = false;
+  await page.route("**/api/config", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (!added) body.config.storage = null;
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.route("**/api/config/storage", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    added = true;
+    // The shape the real endpoint returns: the config-endpoint body, carrying the NEW list.
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        config: { storage: [{ name: "first", path: "/tmp", default: true, backend: "copy" }] },
+        warnings: [],
+        source: { path: "/data/config.yml", mtime: new Date().toISOString() },
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.waitForURL(/\/onboarding\/storage/);
+
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await expect(page.getByTestId("add-storage-save")).toBeEnabled();
+  await page.getByTestId("add-storage-save").click();
+
+  // ON HOME, and STILL on Home — a bounce would show up as a URL that comes back.
+  await page.waitForURL((u) => !u.pathname.startsWith("/onboarding"), { timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(page.url()).not.toContain("/onboarding/storage");
+});

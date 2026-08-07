@@ -171,7 +171,7 @@ export function AddStorageForm({
     setSaving(true);
     setError("");
     try {
-      await addStorage({
+      const saved = await addStorage({
         path: probe.clean_path,
         backend: backend as "zfs" | "reflink" | "hardlink" | "copy",
         // `mode: hook` because `exec` cannot work in the shipped image (quince#697), and `seed:
@@ -189,9 +189,18 @@ export function AddStorageForm({
             }
           : {}),
       });
-      // Refetch rather than splice: the server owns the resulting document, and the storage list is
-      // a separate resource that the applier has just changed. Same rule ForgetStorage follows.
-      await qc.invalidateQueries({ queryKey: configKey });
+      // THE RESPONSE IS WRITTEN INTO THE CACHE, NOT INVALIDATED — and the difference is a redirect
+      // loop rather than a preference.
+      //
+      // `invalidateQueries` marks the config STALE and refetches; it does not make the cache correct
+      // BEFORE this returns. `RequireStorage` then mounts on `/`, react-query hands it the cached
+      // value synchronously — still the pre-add `storage: null` — and it bounces the user straight
+      // back to this page. Operator-reported: "added my first storage but still on
+      // /onboarding/storage". The form had already reset, so it looked like nothing happened.
+      //
+      // The add endpoint RETURNS the resulting document, so there is nothing to re-fetch and no
+      // race to lose: write it in and every reader is correct on the next render.
+      qc.setQueryData(configKey, saved);
       // The storage LIST is a separate resource with its own hook (not react-query), so its
       // owner is asked to refetch rather than a key being invalidated. The applier has already
       // made the storage live server-side; this is the client catching up.
