@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DocLink } from "@/components/DocLink";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
 
 // The onboarding HTTPS check (qn.6f). Reachable with no session and with no password in
@@ -208,28 +209,6 @@ function Tiers() {
   );
 }
 
-// DocLink turns a repo path into something a reader can actually open. This page is read on a
-// phone more than anywhere else in quince, and a phone cannot open `deploy/tls.md` — printing a
-// filename at someone who is stuck is a dead end dressed as help.
-//
-// `blob/main` rather than a pinned commit or tag: the reader wants the CURRENT instructions for
-// the quince they are running, and a pinned link rots into describing an older one. The cost is
-// that a very old deployment may read newer docs, which is the better failure of the two.
-//
-// The first external link in the UI, so the styling is here rather than in a shared component —
-// one instance is not a pattern. If a second page needs it, that is when it moves.
-function DocLink({ path }: { path: string }) {
-  return (
-    <a
-      className="text-accent underline underline-offset-2"
-      href={`https://github.com/novkostya/quince/blob/main/${path}`}
-      target="_blank"
-      rel="noreferrer"
-    >
-      {path}
-    </a>
-  );
-}
 
 function Tier({
   title,
