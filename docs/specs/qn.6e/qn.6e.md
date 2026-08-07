@@ -423,10 +423,7 @@ become an `auto` by the back door — which is the property that mattered. The b
 proxy for it, and the proxy was wrong.
 
 **Nothing is broken and nothing is proposed here.** The materialised value is identical in meaning to
-the omitted one and `auto` is legal by ruling, so this is a false claim rather than a defect. It is
-pinned by a test (`TestSavingMaterialisesAutoForPreexistingEntries`) that **fails** if the behaviour
-changes, so that a future fix is obliged to correct this paragraph in the same diff rather than
-leaving it stale in the other direction.
+the omitted one and `auto` is legal by ruling, so this is a false claim rather than a defect.
 
 **This discharges the placeholder's one homed deferral by absorption.** Do not open a removal PR
 against it. Two canon sites assert the deferral is still live and both are corrected in PR 8:
