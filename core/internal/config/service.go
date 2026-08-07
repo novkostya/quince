@@ -391,6 +391,25 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 		}
 		return []wire.ConfigError{{Path: "storage", Message: msg}}, nil, nil
 	}
+	// THE SAME ARGUMENT, ONE CHECK LATER (quince#683, ruled 2026-08-07).
+	//
+	// CheckStorageBackends refuses two storages that are one storage — a shared zfs parent_dataset,
+	// where each device's dataset would be created twice and each storage would believe it owned it
+	// (quince#458). It was enforced ONLY at startup, so PUT /api/config could write a document the
+	// daemon then refuses to boot on, while the running process kept serving happily until something
+	// restarted it. A save that produces an unstartable file is the silent acceptance
+	// `no silent caps or fallbacks` forbids, reached through the surface D12 makes primary.
+	//
+	// It goes HERE and not in Validate, for the reason the paragraph above already gives for its
+	// sibling: Load() discards a config that fails Validate and falls back to Default(), which would
+	// trade a refusal naming the dataset and both storages for a daemon running on defaults —
+	// quince#508's defect in a new guise. Replace returns the errors and writes NOTHING.
+	//
+	// Both doors are now one door: qn.6e's add endpoint writes through Replace too, so it inherits
+	// this rather than carrying its own copy. Two call sites for one invariant is how they diverge.
+	if errs := CheckStorageBackendErrors(c.Storage); len(errs) > 0 {
+		return errs, nil, nil
+	}
 	data, err := Marshal(c)
 	if err != nil {
 		return nil, nil, err

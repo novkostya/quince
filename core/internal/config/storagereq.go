@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/novkostya/quince/core/internal/wire"
 )
 
 // RequireStorages is the qn.6c startup gate: quince refuses to serve without at least one
@@ -178,51 +180,98 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 // three-way split is deleted and the refusal keeps its subject.
 //
 // Returns one message per collision, empty when the config is coherent.
+//
+// THIS IS THE STARTUP RENDERING. Its structured twin is CheckStorageBackendErrors, which the write
+// path uses; both are built from checkStorageBackendProblems so the two refusals cannot describe the
+// same config differently. main.go prints these to stderr, where a NAME is more use to a human than
+// an index — which is why the string form survived rather than being replaced (quince#683).
 func CheckStorageBackends(storages *[]StorageEntry) []string {
+	probs := checkStorageBackendProblems(storages)
+	if len(probs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(probs))
+	for _, p := range probs {
+		out = append(out, p.Message)
+	}
+	return out
+}
+
+// StorageBackendProblem is one incoherent storage declaration, located.
+//
+// The INDEX is what the string form could not carry, and it is what a form needs: `wire.ConfigError`
+// is keyed on a path like `storage[1].zfs.parent_dataset`, and a client highlights the field it
+// names. Both renderings below are built from this, so the startup refusal and the save refusal
+// cannot drift into describing the same config differently.
+type StorageBackendProblem struct {
+	Index   int    // which storage[i]
+	Field   string // the key within the entry, e.g. "zfs.parent_dataset"
+	Message string
+}
+
+// checkStorageBackendProblems is the single source of truth behind CheckStorageBackends and
+// CheckStorageBackendErrors. See CheckStorageBackends for the invariant and why it exists.
+func checkStorageBackendProblems(storages *[]StorageEntry) []StorageBackendProblem {
 	if storages == nil {
 		return nil
 	}
-	seen := map[string]string{} // parent dataset → the storage that claimed it
-	var out []string
-	for _, e := range *storages {
-		// `auto` still resolves to zfs when zfs intent is declared — interface fact 4: zfs intent
-		// is config-side and never probed. Keeping that here is what makes `auto` legal without
-		// making it a hole. `auto` is ABSORBED rather than removed (quince#502, Operator ruling
-		// 2026-08-07): the loader is unchanged and the add flow writes a concrete backend, so
-		// quince never writes `auto` and a human still may.
-		//
-		// THIS PREDICATE IS DUPLICATED, and semantically rather than literally: storage.WantZFS is
-		// the same rule spelled with BackendZFS where this spells "zfs", so a grep for either
-		// spelling finds only one of them. That is worse than a literal copy, not better. It is not
-		// collapsed here because the two packages deliberately do not import each other — storage's
-		// Options exists precisely so that package need not import config — and reversing that edge
-		// is a layering decision, not a tidy-up. qn.6e PR 2 factored the storage side and stopped
-		// at the boundary on purpose.
+	type claim struct {
+		name  string
+		index int
+	}
+	seen := map[string]claim{} // parent dataset → the storage that claimed it
+	var out []StorageBackendProblem
+	for i, e := range *storages {
 		isZFS := e.Backend == "zfs" ||
 			(e.Backend == "auto" && (e.ZFS.ParentDataset != "" || e.ZFS.HookCmd != ""))
 		if isZFS && e.ZFS.ParentDataset == "" {
-			// A ZFS BACKEND WITH NO PARENT DATASET is not a degraded mode, it is an incoherent
-			// declaration: `Select` would build a zfs backend with nothing to create datasets
-			// under. ONE remedy now, because there is one key it could be.
-			out = append(out, fmt.Sprintf(
+			out = append(out, StorageBackendProblem{Index: i, Field: "zfs.parent_dataset", Message: fmt.Sprintf(
 				"storage %q resolves to the zfs backend but has no `zfs.parent_dataset` — set it in "+
 					"that storage's own `zfs:` block, or give the storage a namespace backend "+
 					"(`backend: reflink`, `hardlink` or `copy`)",
-				e.Name))
+				e.Name)})
 			continue
 		}
 		if !isZFS {
 			continue
 		}
 		if first, dup := seen[e.ZFS.ParentDataset]; dup {
-			out = append(out, fmt.Sprintf(
-				"storages %q and %q are both zfs on parent dataset %q — they would create the same "+
-					"dataset per device and each believe it owned it. Give one of them its own "+
-					"`zfs.parent_dataset`, or a namespace backend",
-				first, e.Name, e.ZFS.ParentDataset))
+			out = append(out, StorageBackendProblem{Index: i, Field: "zfs.parent_dataset", Message: fmt.Sprintf(
+				"storages %q and %q are both zfs on parent dataset %q (also storage[%d]) — they would "+
+					"create the same dataset per device and each believe it owned it. Give one of "+
+					"them its own `zfs.parent_dataset`, or a namespace backend",
+				first.name, e.Name, e.ZFS.ParentDataset, first.index)})
 			continue
 		}
-		seen[e.ZFS.ParentDataset] = e.Name
+		seen[e.ZFS.ParentDataset] = claim{name: e.Name, index: i}
+	}
+	return out
+}
+
+// CheckStorageBackendErrors is CheckStorageBackends for a WRITE path — the same problems, located
+// and shaped as the `{errors: [{path, message}]}` every config refusal already uses.
+//
+// RULED 2026-08-07 (quince#683): this check belongs in `replaceLocked`, beside `CheckStorages`, and
+// NOT in `Validate`. `Load()` DISCARDS a config that fails `Validate` and falls back to `Default()`,
+// so putting it there would turn a named, actionable refusal — this dataset, these two storages —
+// into a daemon running on defaults, which is quince#508's defect in a new guise. `Replace` has the
+// opposite property: it returns the errors and writes NOTHING, so the hazard that justifies the
+// exclusion is absent from this path. That is the same argument, word for word, that `CheckStorages`
+// already carries in `replaceLocked`.
+//
+// The startup call in main.go is untouched and keeps its own rendering: a config that was
+// hand-edited into a collision still refuses to start, naming the dataset.
+func CheckStorageBackendErrors(storages *[]StorageEntry) []wire.ConfigError {
+	probs := checkStorageBackendProblems(storages)
+	if len(probs) == 0 {
+		return nil
+	}
+	out := make([]wire.ConfigError, 0, len(probs))
+	for _, p := range probs {
+		out = append(out, wire.ConfigError{
+			Path:    fmt.Sprintf("storage[%d].%s", p.Index, p.Field),
+			Message: p.Message,
+		})
 	}
 	return out
 }
