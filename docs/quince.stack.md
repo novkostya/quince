@@ -271,9 +271,11 @@ differently (Operator ruling: no hardlink games under ZFS):
      cost quarantined to the replica); or a content-addressed offsite channel
      (restic/borg) instead of send. The D5a PRIMARY channel (rclone of `latest/`,
      file-level, mtime-preserved by `cp -a`) is delta-efficient and unaffected.
-     The mutate-in-place lifecycle that WOULD make sends delta-sized is banked as
-     the epic-(cl) `zfs-native` mode candidate — a post-freeze redesign, not a
-     tweak; (3) *the unprivileged
+     The mutate-in-place lifecycle that WOULD make sends delta-sized is **RULED** —
+     Operator, 2026-08-04, quince#591; design §5, end of section — and **NOT BUILT**.
+     It sat here as the epic-(cl) `zfs-native` candidate and *"a post-freeze redesign,
+     not a tweak"*; the freeze lifted 2026-07-30 and the candidate is now the ruling,
+     so this clause defers nothing and must not be read as parking it; (3) *the unprivileged
      user-namespace blocks FICLONE outright (`EPERM`)* — measured in the exact
      production shape (rpool child rbind'd into an unprivileged CT, and the OCI
      container inside it), so in-container reflink is unavailable in the
@@ -371,6 +373,17 @@ live mounted filesystems and uploads whatever is there. The rule:
 - `zfs`: rclone includes `<udid>/latest/` (the verified mirror — and with reflink
   builds, a backup running concurrently in `working/` cannot perturb it) and excludes
   the mutable/local trees with **anchored** filter rules, e.g. syncing `/rpool/userdata`:
+
+  **THE PARENTHESIS IS RULED TO STOP HOLDING FOR THIS BACKEND, AND IT IS THE ARGUMENT THE WHOLE
+  CHANNEL RESTS ON** (Operator, 2026-08-04, quince#591; design §5, end of section; **not built**).
+  Under in-place writes there is no `working/` to run concurrently *in*: the backup writes into
+  `latest/`, so `latest/` is torn mid-backup and a walk can capture a half-transferred tree. The
+  rule above — *the live namespace always presents a consistent last-verified backup per device* —
+  is what fails, and it fails for `zfs` alone; the namespace backends keep it, because they keep
+  `working/` and the exchange. Offsite on zfs must read a snapshot mount instead, and quince must be
+  excluded from a general whole-host rclone job and handled separately. **The Operator accepted this
+  explicitly**: the tolerance requirement *"is probably not worth the complexity it brought to
+  users."* Building the snapshot-sourced path is roadmap M5 point 3, not the ruling.
 
   ```
   --filter "- /iphone-backup/*/working/**"

@@ -139,6 +139,15 @@ sync-facing namespace is consistent at every instant: any snapshot, syncoid pass
 filtered rclone walk captures a complete verified `latest/`, immutable versions, and at
 worst a dirty mutable area that the offsite filter never reads (stack D5a).
 
+**THIS PARAGRAPH IS RULED TO END FOR `zfs` — BOTH SENTENCES, AND IT IS THE STRONGEST STATEMENT OF
+THE DYING INVARIANT IN THE CORPUS** (Operator, 2026-08-04, quince#591; §5, end of section; **not
+built**). On that backend `idevicebackup2` writes into `latest/` directly — the clause naming
+`working/` *as* zfs's mutable area is the clause that stops being true — and the sync-facing
+consistency goes with it, because a torn `latest/` is exactly what the second sentence promises
+cannot happen. **Both hold unchanged for the namespace backends**, which keep `working/` and the
+exchange. Marked here rather than left to §5's block, because this sits above it and a reader who
+stops at *the invariant above all* never reaches the ruling.
+
 - **preflight**: device present on chosen transport, `validate` passes, disk headroom
   checked, encryption state checked against policy (§3): `WillEncrypt=false` under
   `require_encryption: true` fails the job *actionably* — the error links straight to
@@ -146,7 +155,10 @@ worst a dirty mutable area that the offsite filter never reads (stack D5a).
   version is permanently marked `encrypted: false` — and
   backend `Seed()` done (namespace backends: populate `work/<job-id>/` from `latest` so
   MobileBackup2 runs a true incremental; zfs: no-op — `working/` already holds the
-  previous state).
+  previous state). **The zfs arm stays a no-op under the ruling and its REASON changes** —
+  there is nothing to seed because the tool writes into `latest/`, not because `working/`
+  already holds anything. Flagged because a clause that is still true for a different reason
+  is the kind that survives a rewrite unexamined.
 - **backing_up**: supervisor runs `idevicebackup2 [-n] backup` into the backend's
   working area. The `*** Waiting for passcode ***` output line is detected and surfaced
   as a `waiting_for_passcode` progress phase — **the liveness clock pauses there** (the

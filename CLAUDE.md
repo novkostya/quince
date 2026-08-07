@@ -19,7 +19,8 @@ all backends since qn.5b*, and the seed-and-exchange sentence that defines it �
 `zfs`, which writes into `latest/` IN PLACE: no seed, no working copy, no exchange, commit = verify →
 `zfs snapshot`. `latest/` also stops being a whole-tree offsite source on that backend, because it is
 torn mid-backup. It stays a real directory and stays NEVER UNOCCUPIED — more so than before, not
-less. Design §5's block at the end of the section is the ruling; nothing is built.** Wi-Fi backup is the PRIMARY use case
+less. Design §5's block at the end of the section is the ruling; nothing is built, and the
+*Never mutate a committed version* hard rule below names the three sentences it costs there.** Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is
 no unattended mode and no auto-retry: opportunity signal → push → one unlock+confirm;
 failures become `user action required`. Core value: Plex-grade setup, OpenWrt/PVE-grade
@@ -906,16 +907,21 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   the remaining commit phases — it never unwinds them, because a commit failure must not
   destroy a multi-hour Wi-Fi transfer. Any storage-touching change re-proves these
   invariants.
-  **THE RULE ITSELF SURVIVES THE zfs IN-PLACE RULING; ONE SENTENCE IN IT DOES NOT** (design §5,
-  end of section; ruled 2026-08-04, quince#591, **not built**). On zfs a committed version is a
-  `@quince-*` snapshot and copy-on-write leaves it untouched, so writing into `latest/` cannot reach
-  one — *never mutate a committed version* holds literally. What stops holding on that backend is
-  *`latest/` is not scratch space — it is the newest committed version's content*: it becomes the
-  mutable head, and the newest version becomes a snapshot **of** it. Read those two as separate
-  claims, because conflating them is what makes the change look forbidden when it is ruled. Also on
-  zfs: there is no seed and therefore no seed-in-progress sentinel to catch, and the dirty **head**
-  is what a failed job keeps. The new `rollback` verb discards it and is for **abandon** only —
-  never the failure default, never after verify has passed.
+  **THE HEADLINE SURVIVES THE zfs IN-PLACE RULING. THREE OF THE SENTENCES UNDER IT DO NOT, AND THEY
+  ARE THE THREE AN IMPLEMENTER ACTS ON** (design §5, end of section; ruled 2026-08-04, quince#591,
+  **not built**). On zfs a committed version is a `@quince-*` snapshot and copy-on-write leaves it
+  untouched, so writing into `latest/` cannot reach one — *never mutate a committed version* holds
+  literally. What stops holding on that backend, named rather than counted:
+  **(a)** *`idevicebackup2` writes only into the per-job `working/<udid>`* — on zfs it writes into
+  `latest/`, and this is the one that otherwise reads as forbidding the rung outright;
+  **(b)** *`latest/` changes only by the marker-guarded `renameat2(RENAME_EXCHANGE)` at commit* —
+  there is no exchange; commit is verify → `zfs snapshot`;
+  **(c)** *`latest/` is not scratch space — it is the newest committed version's content* — it
+  becomes the mutable head, and the newest version becomes a snapshot **of** it.
+  Read (c) as separate from the headline, because conflating them is what makes the change look
+  forbidden when it is ruled. Also on zfs: there is no seed and therefore no seed-in-progress
+  sentinel to catch, and the dirty **head** is what a failed job keeps. The new `rollback` verb
+  discards it and is for **abandon** only — never the failure default, never after verify has passed.
 - **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off,
   adapter-failed, cache-dropped, truncated list) are surfaced in the UI and the logs.
 - **Config tidiness is a feature** (stack D12): every setting lives in `config.yml` with
