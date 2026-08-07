@@ -1,8 +1,9 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "./AppLayout";
-import { LoginGate, RequireAuth, SetupGate } from "./guards";
+import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
+import { OnboardingStoragePage } from "@/pages/OnboardingStoragePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DeviceDetailsPage } from "@/pages/DeviceDetailsPage";
@@ -40,10 +41,34 @@ export const router = createBrowserRouter([
       </LoginGate>
     ),
   },
+  // THE FIRST-RUN STORAGE STEP (qn.6e). Behind `RequireAuth` and OUTSIDE the `AppLayout` shell —
+  // both halves deliberate.
+  //
+  // Behind auth, unlike `/onboarding/https`: that step is pre-auth because you cannot log in
+  // without https, which is a genuine deadlock. Nothing about declaring a storage is a prerequisite
+  // of logging in, so this takes the ordinary guard and the exempt set stays at five.
+  //
+  // Outside the shell, and NOT under `RequireStorage`, because the shell is exactly what cannot
+  // render here: the daemon is refusing every API outside setup, so the sidebar's device list and
+  // Home's storage list would both 503. Putting it inside its own gate would also be a redirect
+  // loop — this is the page that gate points AT.
+  {
+    path: "/onboarding/storage",
+    element: (
+      <RequireAuth>
+        <OnboardingStoragePage />
+      </RequireAuth>
+    ),
+  },
   {
     element: (
       <RequireAuth>
-        <AppLayout />
+        {/* RequireStorage sits INSIDE RequireAuth, so an unauthenticated visitor goes to login
+            rather than to a first-run step they cannot complete — and the config query it reads
+            needs a session anyway. */}
+        <RequireStorage>
+          <AppLayout />
+        </RequireStorage>
       </RequireAuth>
     ),
     children: [
