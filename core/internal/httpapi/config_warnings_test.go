@@ -59,12 +59,26 @@ func TestConfigResponsesNeverSendNullWarnings(t *testing.T) {
 	del := newReq(t, http.MethodDelete, srv.URL+"/api/config/storage/second", "")
 	del.Header.Set(auth.CSRFHeaderName, csrf())
 
+	// PUT IS THE FOURTH, AND THIS DIFF MADE IT THE MOST EXPOSED OF THEM. It was one of the two
+	// paths that carried the guard INLINE; centralising removed that, so its correctness now rests
+	// entirely on `configResponse` — and it is the full-document write, so it is also the path
+	// most likely to produce the null in the field. The first version of this test said "the four
+	// responses" and listed three (quince#729 review).
+	putBody := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
+		`"storage":` + oneStorage + `,` +
+		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"ui":{"theme":"system"}}`
+	put := newReq(t, http.MethodPut, srv.URL+"/api/config", putBody)
+	put.Header.Set(auth.CSRFHeaderName, csrf())
+
 	for _, tc := range []struct {
 		name string
 		req  *http.Request
 	}{
 		{"POST /api/config/storage", add},
 		{"DELETE /api/config/storage/{name}", del},
+		{"PUT /api/config", put},
 		{"GET /api/config", newReq(t, http.MethodGet, srv.URL+"/api/config", "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
