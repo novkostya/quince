@@ -288,6 +288,7 @@ GET  /api/storages                                        → {storages: Storage
 GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
 POST /api/storages/{name}/recheck                          → 200 {storage} | 404
 POST /api/storages/probe {path}                            → 200 {probe} | 422
+POST /api/storages/probe/hook {parent_dataset, hook_cmd}   → 200 {check} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -331,6 +332,56 @@ filesystem on a caller-supplied path, so the guard is load-bearing rather than i
 **`probe` is a literal segment beside `/{name}/recheck` and does not shadow it** — they differ in
 segment count, so a storage may even be *named* `probe`. Gated, because a literal added beside a
 wildcard is exactly the shape that bites.
+
+**RULED and IMPLEMENTED: `POST /api/storages/probe/hook` — `Test helper` (`qn.6e`, quince#502.)**
+
+The zfs branch's load-bearing control. Without it, *"did I install the helper correctly?"* is
+answered by a failed multi-hour Wi-Fi transfer at commit time: the key, the forced command in
+`authorized_keys`, and the `$PARENT` baked into the helper are three things that must line up, and
+**none of them is observable from the path**. That is also why `qn.6e` descoped *deriving*
+`parent_dataset` — derivation proves what the filesystem thinks, and this proves what the **helper**
+was configured with.
+
+**Two read-only verbs, in this order, and the order is part of the answer.** `capacity` first —
+it takes **no caller argument at all** (`deploy/storage.md` calls that *"TIGHTER than the arms
+above"*), so a failure there is unambiguously about reachability. Then `list <typed parent>`, whose
+`case "$target" in "$PARENT"|"$PARENT"/*` guard is the only thing that can see a parent
+disagreement. Reversed, one refusal would be two hypotheses. Nothing here can create, destroy or
+write.
+
+**Four outcomes, frozen, because the remedies differ and a user cannot guess between them:**
+
+| `outcome` | means | remedy |
+| --- | --- | --- |
+| `ok` | both verbs answered | none |
+| `not_migrated` | `capacity` refused, `list` answered | add the `capacity)` case — `qn.6d`'s operator migration. Cards read *"free space unavailable"*; backups are unaffected |
+| `parent_mismatch` | `capacity` answered, `list` refused | the typed dataset is not the helper's `$PARENT` |
+| `unreachable` | neither answered | key, forced command, or host |
+
+**AN EMPTY `list` IS SUCCESS.** `list` returns the `@quince-*` snapshots under the parent, and a
+storage with no backups yet has none — so the correct, working, freshly-installed case answers exit
+`0` with **nothing on stdout**. Reading emptiness as failure fails on first run and only on first
+run, which is the one day this button matters most. Gated.
+
+**`detail` carries the transport's own output** — ssh's *"Permission denied (publickey)"* is the
+whole answer and quince cannot improve on it. **It may name the operator's host**, so: shown to the
+authenticated admin in their own browser, and **never logged, never in a fixture, never pasted into a
+PR or an issue**. That is the privacy gate's actual scope rather than a redaction rule on a running
+product. **The argv is never included** — `hook_cmd` carries `user@host` by construction, where the
+output only sometimes does.
+
+**DECLARED: this endpoint EXECUTES A REQUEST-SUPPLIED ARGV.** It adds no capability an authenticated
+admin lacks — `PUT /api/config` already stores a `hook_cmd` that quince execs at the next job — but
+it shortens the loop from *next backup* to *now*. Bounds: behind `authGuard` and `csrfGuard`, nothing
+added to the five-entry exempt set, an argv **array** and never a shell string, the dataset name
+validated against `datasetPattern` before anything runs, a bounded timeout, and the subprocess killed
+by process group on cancellation.
+
+The `422` line is the probe's, unchanged: a malformed **question** — no `parent_dataset`, or no
+`hook_cmd` — is a `422`; every verdict about a real pair, `unreachable` included, is a `200`. A user
+who has not installed the helper has asked a perfectly good question.
+
+**§2 carries `StorageHookCheck`.** Spec: `docs/specs/qn.6e/qn.6e.md`, G8.
 
 **The `?udid=` form and the re-probe were BUILT by `qn.6c` and never listed here** — they existed
 only in the prose below and in §2's `will_be_full` comment. Listing them is a drift correction, not
@@ -973,6 +1024,27 @@ candidate paths on one disk return identical figures and nothing here distinguis
 `Storage` there is no reachable/unreachable axis to hang a `null` on.
 
 Spec: `docs/specs/qn.6e/qn.6e.md`.
+
+### StorageHookCheck (`qn.6e`)
+
+`POST /api/storages/probe/hook`'s answer. §1 carries the verb order, the four outcomes and their
+remedies; this is the shape.
+
+```jsonc
+{
+  "outcome": "ok",          // ok | not_migrated | parent_mismatch | unreachable — FROZEN
+  "reason":  "the helper answered and its parent dataset matches — quince can snapshot here",
+  "detail":  "10\t20"       // the TRANSPORT'S own output, verbatim
+}
+```
+
+**`detail` may name the operator's host.** Shown to the authenticated admin in their own browser;
+**never logged, never in a fixture, never pasted into a PR or an issue.** The argv is never included
+— `hook_cmd` carries `user@host` by construction. See §1 for why blanking it would be worse: ssh's
+own message is the whole answer to why a key does not work.
+
+**`reason` is quince's sentence and is safe to render anywhere**, which is the split: `reason` for
+the UI, `detail` for the user's eyes on their own machine.
 
 ## 3. WebSocket (`/api/ws`)
 
