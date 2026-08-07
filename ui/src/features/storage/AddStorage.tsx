@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -260,9 +262,9 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
           Path
         </label>
         <div className="mt-1 flex gap-2">
-          <input
+          <Input
             id="add-storage-path"
-            className="h-9 flex-1 rounded-lg border border-line bg-card px-3 text-sm"
+            className="flex-1"
             value={path}
             placeholder="/backups"
             onChange={(e) => {
@@ -288,9 +290,9 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
             <label className="block text-sm font-medium" htmlFor="add-storage-backend">
               Backend
             </label>
-            <select
+            <Select
               id="add-storage-backend"
-              className="mt-1 h-9 w-full rounded-lg border border-line bg-card px-2 text-sm"
+              className="mt-1"
               value={backend}
               onChange={(e) => setBackend(e.target.value)}
               data-testid="backend-select"
@@ -303,7 +305,7 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
                   {b === probe?.backend ? " — recommended" : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         ) : null}
 
@@ -322,9 +324,9 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
             <label className="mt-3 block text-sm font-medium" htmlFor="zfs-parent">
               Parent dataset
             </label>
-            <input
+            <Input
               id="zfs-parent"
-              className="mt-1 h-9 w-full rounded-lg border border-line bg-card px-3 text-sm"
+              className="mt-1"
               value={parentDataset}
               placeholder="pool/backups"
               onChange={(e) => {
@@ -336,9 +338,9 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
             <label className="mt-3 block text-sm font-medium" htmlFor="zfs-hook">
               Helper command
             </label>
-            <input
+            <Input
               id="zfs-hook"
-              className="mt-1 h-9 w-full rounded-lg border border-line bg-card px-3 text-sm"
+              className="mt-1"
               value={hookCmd}
               placeholder="ssh -i /data/keys/zfs -o BatchMode=yes user@host"
               onChange={(e) => {
