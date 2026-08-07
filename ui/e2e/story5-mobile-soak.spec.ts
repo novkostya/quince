@@ -75,3 +75,57 @@ test("a dead version renders explicitly dead with a Remove action", async ({ pag
   await expect(page.getByText(/artifact gone/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /^remove$/i })).toBeVisible();
 });
+
+// qn.6e — ADD STORAGE ON A PHONE. Operator-reported from a live device: the dialog zoomed on focus,
+// and once the zfs branch opened it grew taller than the screen with no way to scroll, so the
+// buttons at its foot could not be reached at all.
+//
+// Both were regressions against fixes this codebase already had. The zoom is quince#616 —
+// `fieldBase` carries `text-base sm:text-sm` and the add form used raw `<input>`/`<select>` with
+// `text-sm`, bypassing it. The height had no fix because no dialog had ever been tall enough to
+// need one; `DialogContent` now bounds and scrolls, which repairs every dialog rather than this one.
+test("the add-storage dialog is usable on a phone, zfs branch included", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  // 16px MINIMUM ON EVERY FOCUSABLE FIELD. Below it, iOS Safari zooms the page to `16 / fontSize`
+  // on focus — measured on the COMPUTED style, because the class that produces it is the thing that
+  // regressed and asserting the class would pass on a copy of it.
+  const pathField = page.getByLabel("Path");
+  const pathSize = await pathField.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(pathSize).toBeGreaterThanOrEqual(16);
+
+  await pathField.fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  const backend = page.getByTestId("backend-select");
+  await expect(backend).toBeVisible();
+  const selectSize = await backend.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(selectSize).toBeGreaterThanOrEqual(16);
+
+  // THE TALL CASE. zfs adds two fields, a button and a verdict — the state that broke.
+  await backend.selectOption("zfs");
+  await expect(page.getByTestId("zfs-fields")).toBeVisible();
+
+  const parent = page.getByLabel("Parent dataset");
+  const parentSize = await parent.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(parentSize).toBeGreaterThanOrEqual(16);
+
+  // THE DIALOG FITS THE VIEWPORT, and its content scrolls inside it rather than running off the
+  // edges. Asserted on the box against the window, because "fits" is what the user experiences and
+  // a max-height class could be present and overridden.
+  const box = await dialog.boundingBox();
+  const viewportH = page.viewportSize()?.height ?? 0;
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewportH);
+
+  // AND THE FOOT IS REACHABLE. This is the failure as the Operator met it: Save existed, and could
+  // not be got to. Scrolling within the dialog must bring it into view and it must be clickable.
+  const save = page.getByTestId("add-storage-save");
+  await save.scrollIntoViewIfNeeded();
+  await expect(save).toBeVisible();
+  await expect(page.getByTestId("test-helper")).toBeVisible();
+});
