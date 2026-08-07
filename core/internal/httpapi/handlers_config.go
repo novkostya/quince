@@ -148,3 +148,55 @@ func (d Deps) jobsRunningOn(name string) []string {
 	}
 	return nil
 }
+
+// POST /api/config/storage: add one storage (contracts §1, qn.6e).
+// → 200 {config, warnings, source} | 422.
+//
+// FORGET'S MIRROR, deliberately and in every respect that matters: a config mutation rather than a
+// resource-create, returning the config-endpoint body rather than a 201, because what changed is the
+// document. The client re-renders from the same payload GET, PUT and DELETE hand it.
+//
+// A NARROW ROUTE RATHER THAN `PUT /api/config`, for the identical reason gap B gave for the delete:
+// it splices SERVER-SIDE, so it cannot drop a sibling entry's `zfs:` or `retention:` keys. A
+// full-document PUT decodes into a zero-valued config.Config, so a client that reconstructs the list
+// rather than splicing a fetched one silently resets every key it did not render — and no UI surface
+// renders `zfs:` or `retention:`.
+//
+// NO PER-ROUTE `CheckStorageBackends` CALL, and its absence is the design. quince#683's ruling put
+// that check in `replaceLocked`, which `config.AddStorage` writes through, so this path inherits it
+// along with `Validate` and `CheckStorages`. Two call sites for one invariant is how they diverge.
+//
+// THE 422 CARRIES THE FIELD THE CALLER TYPED — `path`, `name`, `backend`, `default` — not
+// `storage[i].…`. A caller adding ONE entry cannot map an index in the merged list back to its own
+// input. `replaceLocked`'s document-wide errors still arrive in the indexed form underneath, so the
+// shape a client renders is unchanged; only the addressing differs, and it differs toward the
+// question that was asked.
+func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var entry config.StorageEntry
+		if err := decodeJSON(r, &entry); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
+			return
+		}
+
+		outcome, errs, warns, err := d.Config.AddStorage(entry)
+		switch {
+		case err != nil:
+			d.Log.Error("config write failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not write config")
+			return
+		case outcome == config.AddRefused:
+			writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
+				Errors []wire.ConfigError `json:"errors"`
+			}{Errors: errs})
+			return
+		}
+
+		cfg2, loadWarns, src := d.Config.Snapshot()
+		// APPENDED to the load's own warnings, exactly as the delete does: an applier warning says
+		// "saved, but not applied" — a fact about THIS response rather than about the file.
+		writeJSON(w, d.Log, http.StatusOK, configGetResponse{
+			Config: cfg2, Warnings: append(loadWarns, warns...), Source: src,
+		})
+	}
+}

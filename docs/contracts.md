@@ -497,12 +497,48 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 GET /api/config   → {config, warnings: [], source: {path, mtime}}
 PUT /api/config   → full-document replace; validated then atomically written to
                     /data/config.yml; 422 {errors: [{path, message}]} on invalid
+POST /api/config/storage
+                  → add one storage: 200 {config, warnings, source} | 422.
+                    Splices SERVER-SIDE, for the identical reason the DELETE does.
 DELETE /api/config/storage/{name}
                   → forget one storage: 200 {config, warnings, source} | 404 | 422.
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
                     see the gap B ruling above for what a reconstructed full document
                     silently loses.
 ```
+
+**RULED and IMPLEMENTED: `POST /api/config/storage` — the add (`qn.6e`, quince#502).**
+
+**Forget's mirror in every respect that matters**, and the shape follows from the same reading: it is
+a **config mutation, not a resource-create**, so it returns the config-endpoint body rather than a
+`201`, and the client re-renders from the payload `GET`, `PUT` and `DELETE` already hand it.
+
+**A narrow route rather than `PUT /api/config`** — gap B's argument, unchanged: it splices
+server-side, so it **cannot** drop a sibling entry's `zfs:` or `retention:` keys. A full-document
+`PUT` decodes into a zero-valued `config.Config`, so a client that reconstructs the list rather than
+splicing a fetched one silently resets every key it did not render, and **no UI surface renders
+`zfs:` or `retention:`**.
+
+**THE 422 CARRIES THE FIELD THE CALLER TYPED** — `path`, `name`, `backend`, `default` — **not
+`storage[i].…`**. A caller adding one entry cannot map an index in the merged list back to its own
+input. `replaceLocked`'s document-wide errors still arrive in the indexed form underneath, so the
+`{errors: [{path, message}]}` shape a client renders is unchanged; only the addressing differs, and
+it differs toward the question that was asked.
+
+**IT CARRIES NO `CheckStorageBackends` CALL OF ITS OWN, and the absence is the design.**
+quince#683's ruling put that check in `replaceLocked`, which `config.AddStorage` writes through — so
+this path inherits it along with `Validate` and `CheckStorages`. Two call sites for one invariant is
+how they diverge.
+
+**Two fields are refused rather than defaulted, and both refusals are load-bearing:**
+
+- **`backend` must be concrete** — `zfs | reflink | hardlink | copy`. An empty value is a **`422`**,
+  not an `auto`: the add flow exists to record the backend quince just probed and showed, so
+  defaulting an omission would hide a client bug and reintroduce `auto` as stored state by the back
+  door. (`auto` itself remains legal in a hand-written file — *absorbed, not removed*.)
+- **`default` cannot be claimed.** The first storage is default by implication, and a later one must
+  not steal it: honouring the flag would silently re-point every backup that names no storage.
+  Re-designation is a separate edit on an existing storage and this rung does not build it.
 
 **Its `422` answers TWO different questions, and the second one is new** (qn.6g, Operator ruling
 2026-08-06 on quince#577). The original asks *is this a valid set of storages?* — forgetting the
