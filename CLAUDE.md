@@ -198,22 +198,51 @@ repo is not a message bus, and no human is an RPC layer.
    the dependent is still open and impossible one second after it is not, which is the whole
    window. Deleting the branch is not the defect and branch hygiene is worth keeping; doing it
    while a dependent is open is.
-   **This ladder is the ARCHITECT's, and only the architect can climb it.** Both wrappers are
-   architect-seat tools and both refuse on the implementer box — `gh-arch` because a bot token is
-   present (devlog#7: the box that authors must not hold the identity that approves), and
-   `gh-review` because it carries the same assertion. **An implementer session that meets those
-   refusals is seeing the boundary work, not a broken box, and must stop rather than repair it** —
+   **This ladder is the ARCHITECT's, and only the architect can climb it.** `bin/gh-review` is an
+   architect-seat tool and refuses on the implementer box, because a bot token is present there
+   (devlog#7: the box that authors must not hold the identity that approves). It was one of **two**
+   such wrappers, refusing for the same reason, until quince#676 retired `bin/gh-arch`.
+   **An implementer session that meets that refusal is seeing the boundary work, not a broken box,
+   and must stop rather than repair it** —
    installing the missing tool or placing a key would put the reviewer credential on the authoring
    host and dissolve `approver ≠ author` entirely, which §5 states and this clause must not appear
    to override (devlog#61).
-   **Architect, on a refused merge: retry once; if it is refused again, merge through `bin/gh-arch`
-   and say so on the PR.** The fallback exists because the harness classifier refuses the merge
-   verb *intermittently* and leaves no trace on the forge, so the next session to meet it
+   **Architect, on a refused merge: retry once; then AUTO-MERGE; then the OPERATOR merges.**
+   Operator ruling 2026-08-07 (quince#676). A ladder exists because the harness classifier refuses
+   the merge verb *intermittently* and leaves no trace on the forge, so the next session to meet it
    would otherwise conclude the App cannot merge and escalate — which is the pattern named
-   under "a refusal is not a reason to escalate to another seat". `gh-arch` rather than an
-   Operator merge, because **a merge carries no verdict**: the judgement is the approval,
-   structurally the App's, and the merge only executes it — so merging as `novkostya` costs a
-   timestamp, not an authority (devlog#52).
+   under "a refusal is not a reason to escalate to another seat".
+
+   1. **`bin/gh-review pr merge <n> --repo <r> --auto --rebase`**, issued at approval time —
+      GitHub merges when the required checks pass.
+   2. **The Operator merges**, when auto-merge cannot be enabled or is not appropriate.
+
+   **This REPLACES devlog#52's `bin/gh-arch` fallback rather than overturning its reasoning.** That
+   ruling chose a second architect credential over an Operator merge because **a merge carries no
+   verdict**: the judgement is the approval, structurally the App's, and the merge only executes it,
+   so merging as `novkostya` costs a timestamp rather than an authority. Auto-merge executes it **as
+   the App**, so the attribution devlog#52 was protecting is *preserved* on the primary path and
+   spent only on the backstop — strictly better than what it replaces. The wrapper it named no longer
+   exists, which is why the shape had to change at all.
+
+   It also fixes a cost this project already pays: **a PR approved while CI runs has nothing happen
+   to it when the checks finish.** Check completion does not move `updatedAt` — hence
+   `event=mergeability status=CLEAN` (quince#65), and quince#63 sitting landable for sixteen minutes.
+
+   **Two things measured, and one deliberately not.** `allow_auto_merge` is `true` on
+   `novkostya/quince` and **`false` on `novkostya/quince-devlog`** — enabling it there is an Operator
+   action, since no agent identity holds `administration`, so **the devlog's path is retry, then the
+   Operator**. And **whether the App can ENABLE auto-merge is `(unmeasured)`**: nobody has run it,
+   `pull_requests: write` is the plausible grant, and this project probes rather than reading a
+   settings page. First use measures it and records the result on quince#676.
+
+   **AND §6's STACKED-PR CHECK MOVES TO ENABLE TIME.** Auto-merge fires later and unattended, so a
+   check run "immediately before merging" has no moment to run in. Worse, it stops being a check over
+   an instant: **a PR stacked after auto-merge is enabled and before it fires is covered by no
+   guard.** `delete_branch_on_merge = true` is set repo-wide here, so the deletion §6 guards against
+   happens on every merge regardless of flags — quince-devlog#214, which also records that §6's
+   stated mitigation (omit `--delete-branch`) does not work on this repository. Rung 1's
+   do-not-stack rule is what keeps the exposure narrow; it does not make it zero.
 7. **Definition of done** — CI green · privacy swept · review approved · a dev-deploy URL
    in the PR · a ≤5-line what-to-click list · a devlog journal entry. The deploy is
    automatic (`make demo`, which is what `/report` runs by default), and the URL is the
@@ -288,10 +317,12 @@ carrying the truth the API could not. That misattributes supervisor reasoning to
 writes code, and quince-devlog#139 filed it.
 
 **The fact that decides the shape, and it is not convenience.** The seat holds root ssh to both
-working boxes, so it already reaches **all three** identities — measured 2026-07-31:
+working boxes, so it already reaches **every other** identity — measured 2026-07-31:
 `bin/gh-coder` on the implementer box returns `app/quince-coder`, and on the architect box
-`bin/gh-review` answers `/installation/repositories` and `bin/gh-arch api user` returns
-`novkostya`. **So "the supervisor cannot author or approve" is already false.** What bounds this
+`bin/gh-review` answers `/installation/repositories`. (`bin/gh-arch api user` returned `novkostya`
+at that measurement; the wrapper is retired and its credential deleted — quince#676 — so the reach
+is now two credentials rather than three, and the argument is unchanged.) **So "the supervisor
+cannot author or approve" is already false.** What bounds this
 seat today is its own restraint — unbounded, unattributed and unrecorded. quince-devlog#139
 understated this and is owed a correction.
 
@@ -441,15 +472,32 @@ around a refusal. The table runs in one direction with **three** exceptions, all
 | identity | cannot |
 | --- | --- |
 | **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — RETIRED 2026-07-31, Discussions disabled; see below (devlog#30) |
-| **architect** — on the arch box | push under `.github/workflows/**` (same 403) · register a review verdict on a PR the Operator authored (shared login, quince#47) · `git pull` the private layer, until its clone is wired to the credential it already holds (quince#121) · **re-run a workflow run** — `run rerun` answers `Resource not accessible by personal access token` (quince#141) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
 | **`quince-analyst`** — the supervisor seat, a GitHub App | push under `.github/workflows/**` — measured at the ceremony, 2026-07-31: `403` while an ordinary write to the same branch succeeded seconds later, so quince#113's rule holds for a third identity · **merge** — it holds no `administration`. It **`CAN`** author code and open pull requests (`contents: write` + `pull_requests: write`, quince#375), which is what distinguishes it from every earlier description of this seat |
 | **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
 
-**NO AGENT SEAT CAN RE-RUN A WORKFLOW RUN, and `workflows:` is not `actions:`.** All three refuse.
-**`quince-analyst` is a fourth agent identity and is `(unmeasured)` here** — its declared grant has no
+**THIS TABLE LOST A ROW ON 2026-08-07, AND THE SEAT IT DESCRIBED DID NOT GO WITH IT.** There was an
+**architect** row here, for a personal access token used through `bin/gh-arch`. The Operator deleted
+that credential on 2026-08-06 and ruled the wrapper retired (quince#676), so **the architect seat now
+holds exactly one identity — `quince-review[bot]`, the row directly above.** Read that row as the
+architect's, not merely the reviewer's: it reads, authors canon, casts verdicts and merges.
+
+**So there are THREE agent forge identities, not four**, and the sentence below this table says so.
+The dropped row's four refusals are not lost knowledge worth preserving — three were PAT-shaped facts
+about a credential that no longer exists, and the fourth (*"`git pull` the private layer"*) was fixed
+by quince#674 and would have been stale regardless.
+
+**What DOES survive, because it is a property of the seat rather than of the credential:** the
+architect **cannot register a review verdict on a PR the Operator authored** — GitHub refuses an
+author's approval of their own PR, and the architect and the Operator shared the `novkostya` login
+(quince#47). That is why `quince-review[bot]` exists at all, and it is stated in full under *"The
+reviewer's approval satisfies branch protection on its own"* below.
+**NO AGENT SEAT CAN RE-RUN A WORKFLOW RUN, and `workflows:` is not `actions:`.**
+**`quince-analyst` is the THIRD agent identity and is `(unmeasured)` here** — its declared grant has no
 `actions:` at all, so it almost certainly refuses too, but nobody has run it and "almost certainly" is
-not what the rest of this table means. Measured 2026-07-29, both remaining agent identities, within
+not what the rest of this table means. It read *"a fourth agent identity"* until quince#676: the
+architect's PAT was one of four, and retiring it leaves `quince-coder`, `quince-review` and
+`quince-analyst`. Measured 2026-07-29, the two that were measurable, within
 minutes of each other:
 
 ```
