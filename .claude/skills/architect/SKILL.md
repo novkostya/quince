@@ -157,21 +157,29 @@ before the wrappers existed, and hard-stopped the first architect session on a c
 host. A protocol that checks the wrong thing fails closed — the right direction to fail, and still
 a failure.)
 
-**`bin/gh-arch` is not retired, and is not the verdict path.** Two things still hold it in place,
-and both are named so nobody assumes it is legacy that can simply be deleted:
+**`bin/gh-review` IS THIS SEAT'S ONLY CREDENTIAL — reads, verdicts, canon authorship and merges all
+go through it.** Operator ruling 2026-08-07 (quince#676): `bin/gh-arch` is retired and deleted, and
+where the App cannot do something, `gh-review` is what gets fixed.
 
-1. the private layer's git credential helper reads the architect PAT, not the App;
-2. **`forge-watch` still reads through it** (§6). `gh-review` mints a fresh installation token per
-   call and caches nothing, which is right for a handful of verdicts per turn and wrong for a
-   watcher making several calls every 60 seconds. Moving the watch onto the App needs a cache
-   first, and a cache is a second secret at rest with a lifetime to manage — so it is its own
-   change, not a line in this one.
+**There is no read/write split to observe any more, and that is the change to notice.** This section
+used to route *reads* through `gh-arch` and *writes* through `gh-review`, because two architect
+credentials existed and only one of them could cast a verdict without re-creating quince#47. One
+credential means one wrapper: **nothing you do on this seat needs you to pick.** If you find a skill
+still naming `gh-arch`, it is stale — say so rather than working around it.
 
-**Do not cast verdicts with `gh-arch`.** Reading through it is fine and is what §6 does; approving,
-requesting changes, merging or commenting through it re-creates quince#47 on the box built to end
-it, and does so invisibly, because the output looks identical.
+**The two reasons canon gave for keeping it were tested, and neither survived.** Recorded because
+they read as blockers and a session meeting them would otherwise stop:
 
-**AUTHOR canon through `bin/gh-review` too — commit and `pr create` as the App, not as `gh-arch`.**
+1. *the private layer's git credential helper reads the architect PAT* — **was true and is fixed**
+   (quince#674). `provision` searches `gh-coder`, `gh-review`, then the PAT, so the layer
+   authenticates with the App.
+2. *`forge-watch` needs a token cache before it can read through the App* — **contradicted by
+   measurement**: 451 ticks over a full session on `gh-review`, zero credential failures, roughly
+   11% of an installation token's hourly budget at a parked-only declared set. A cache is an
+   optimisation, not a prerequisite. (Bounded to that set size: canon records a tick at ~40 s
+   against 45 issues, where the call count rises with the set.)
+
+**AUTHOR canon through `bin/gh-review` — commit and `pr create` as the App, never as `@novkostya`.**
 Operator ruling on quince#137, 2026-07-27. The App holds `contents: write` and `pull_requests:
 write`, so an architect-authored canon PR can be authored by `quince-review[bot]` rather than by
 `@novkostya` — and that is what lets `@novkostya` approve it as **code owner** under
@@ -180,7 +188,7 @@ canon as `@novkostya` is what would make the code-owner requirement unsatisfiabl
 load-bearing for the file rather than a stylistic preference.
 
 **This is not a missing capability you have to work around; it is a habit.** quince-devlog#51 was
-authored through `gh-arch` and merged with `reviews: []`, while quince-devlog#53 — filed the same
+authored as `@novkostya` and merged with `reviews: []`, while quince-devlog#53 — filed the same
 hour — was authored by `app/quince-review`. Nothing in canon said which wrapper authors, so the one
 that was reached for first won.
 
@@ -221,7 +229,7 @@ just the open ones. A reviewer who does not know what landed yesterday will re-l
 
 ```sh
 for r in $(sed 's/#.*//' .claude/forge-set | grep -v '^[[:space:]]*$'); do
-  bin/gh-arch pr list -R "$r" --json number,title,author,reviewDecision,updatedAt,mergeStateStatus
+  bin/gh-review pr list -R "$r" --json number,title,author,reviewDecision,updatedAt,mergeStateStatus
 done
 ```
 
@@ -291,7 +299,7 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   # BEFORE YOU READ, not before you submit: taking it at submission time pins to a head that may
   # already have moved while you were reading, which is the race this whole section exists for.
   OLD=<the full 40-char oid you noted before reading the diff>
-  NEW=$(bin/gh-arch pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
+  NEW=$(bin/gh-review pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)
   git fetch origin "$OLD" "$NEW"                 # both, by full oid
   git range-diff "origin/main...$OLD" "origin/main...$NEW"    # THREE-DOT, whole branch
   ```
@@ -353,7 +361,7 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   **The fallback, when a head really is unreachable** — a deleted fork, or an object the forge has
   since collected — is to compare patches through the API, which needs no local object at all:
   ```sh
-  bin/gh-arch api repos/novkostya/quince/compare/"$OLD"..."$NEW"      # or …/commits/<oid> per side
+  bin/gh-review api repos/novkostya/quince/compare/"$OLD"..."$NEW"      # or …/commits/<oid> per side
   ```
   Prefer `range-diff`: it is rebase-aware and tells you *which* commit changed, where a patch
   comparison only tells you *that* something did.
@@ -366,9 +374,10 @@ Per PR, follow `/review-pr`. Four things belong here because each was learned th
   not good enough: route it to the Operator.
 
   **Substance cuts both ways, and the second direction is the one that misfired.** A
-  `novkostya`-authored PR is not yours by default. That login covers the Operator, you through
-  `gh-arch`, and the Mac acting as the break-glass seat — three seats, one author field, no way to
-  tell them apart from the forge. On [quince#158](https://github.com/novkostya/quince/pull/158), a
+  `novkostya`-authored PR is not yours by default. That login covers the Operator and the Mac acting
+  as the break-glass seat — and, until quince#676, you as well, through `gh-arch`. **Retiring that
+  wrapper removes one of the three claimants rather than the ambiguity**: two seats still share the
+  field, and you are no longer one of them, so a `novkostya`-authored PR is now *never* yours. On [quince#158](https://github.com/novkostya/quince/pull/158), a
   Mac-authored repair of the gh wrappers, this bullet and `/review-pr` §0 together charged a full
   authorship investigation on a PR no seat of yours had written — reboot timing, `/etc/init.d`, the
   staged wrappers, quince#134 and #136 on attribution, and finally the PR's own prose. **You reached
@@ -397,18 +406,50 @@ same value §4 calls `OLD`: one oid, noted once, used for the verdict and for th
 re-swept over the whole branch, rebase-merge, then tidy up. A branch that is behind gets rebased,
 re-run and re-approved, not merged around.
 
-**Merge through `bin/gh-review`. On a refusal: retry once, then merge through `bin/gh-arch` and say
-so on the PR.** Operator ruling, devlog#52. The primary path works — every merge since the App's
-first, quince#135 at `2026-07-27T21:53:23Z` (then #138, #142, devlog#54, #57), reads `mergedBy:
-app/quince-review`; everything merged earlier that day was `novkostya`'s — and the fallback exists
-because the harness classifier refuses
-the merge verb **intermittently**, leaving no trace on the forge. Without it written down the next
-session to meet a refusal concludes the App cannot merge and escalates, which is §1's own warning
-arriving from a new direction. `gh-arch` rather than the Operator, because **a merge carries no
-verdict**: the judgement is the approval, which is structurally the App's, and the merge only
-executes it — so the attribution costs a timestamp rather than an authority. This is the one place
-`gh-arch` may act where §1 otherwise forbids it, and it is narrow: merging only, never approving,
-requesting changes, or commenting.
+**Merge through `bin/gh-review`. The ladder on a refusal is AUTO-MERGE, then the OPERATOR** —
+Operator ruling 2026-08-07 (quince#676), replacing devlog#52's `gh-arch` fallback, which named a
+credential that no longer exists.
+
+1. **`bin/gh-review pr merge --auto --rebase`**, issued at approval time. GitHub executes the merge
+   when required checks pass.
+2. **The Operator merges.** Honest, guaranteed, and it costs the timestamp devlog#52 was avoiding.
+   Reached when auto-merge cannot be enabled or is not appropriate.
+
+The primary path works — every merge since the App's first, quince#135 at `2026-07-27T21:53:23Z`
+(then #138, #142, devlog#54, #57), reads `mergedBy: app/quince-review`; everything merged earlier
+that day was `novkostya`'s. A ladder exists at all because the harness classifier refuses the merge
+verb **intermittently**, leaving no trace on the forge, and without it written down the next session
+to meet a refusal concludes the App cannot merge and escalates — §1's own warning arriving from a new
+direction.
+
+**Auto-merge fits devlog#52's reasoning rather than overturning it.** That ruling chose a second
+architect credential over an Operator merge because **a merge carries no verdict**: the judgement is
+the approval, structurally the App's, and the merge only executes it, so the attribution costs a
+timestamp rather than an authority. Auto-merge executes it **as the App**, so the attribution
+devlog#52 was protecting is *preserved* by the primary path and spent only on the backstop.
+
+It also fixes something this seat already pays for: **a PR approved while CI runs has nothing happen
+to it when the checks finish.** Check completion does not move `updatedAt` — which is why
+`event=mergeability status=CLEAN` had to be invented (quince#65), and why quince#63 sat landable for
+sixteen minutes.
+
+**TWO THINGS TO GET RIGHT BEFORE USING IT, both measured rather than assumed.**
+
+- **`allow_auto_merge` is `true` on `novkostya/quince` and `false` on `novkostya/quince-devlog`.**
+  Enabling it there is an Operator action — it is a repository setting and no agent identity holds
+  `administration`. **Until then the devlog's path is retry, then the Operator.**
+- **Whether the App can ENABLE auto-merge is UNMEASURED.** Nobody has run it. `pull_requests: write`
+  is the plausible grant, but this project probes rather than reads a settings page. **First use
+  measures it and records the result on quince#676.**
+
+**AND THE STACKED-PR CHECK MOVES WITH IT.** §6/`CLAUDE.md` §6 requires the merging seat to look for
+PRs stacked on this one *immediately before* merging, because deleting the head branch closes a
+dependent irrecoverably (quince#388, quince#400). Under auto-merge the merge happens **later and
+unattended**, so **run that check at ENABLE time** — and know that it stops being a check over an
+instant: a PR stacked after auto-merge is enabled and before it fires is covered by no guard.
+`novkostya/quince` has `delete_branch_on_merge = true` repo-wide, so the deletion happens on every
+merge regardless of flags (quince-devlog#214). §1's do-not-stack rule is what keeps this exposure
+narrow; it does not make it zero.
 
 **Nobody can re-run a red check — not you, not the App, and not the implementer** (quince#141).
 `run rerun` is refused for every agent seat, worded for an integration and exiting **`1`**, not the
@@ -423,10 +464,10 @@ head *and* clears `BEHIND`, and it beats a re-run because it also revalidates ag
 exclusivity: an author may rebase its own PR too, and `CLAUDE.md` §5 says so (from an implementer
 box that is `bin/gh-coder pr update-branch --rebase`, per `/kickoff` §1).
 
-**`gh-review`, not `gh-arch`, because it is a WRITE** — it moves the branch. The command *feels*
-mechanical, and §5 itself calls a `BEHIND` rebase *"tree-preserving, no decision in it"*; that is
-true of its effect on the **tree** and says nothing about which credential may perform it. Routing
-it to the read wrapper on the strength of that phrasing is the mistake this note exists to stop.
+**It is a WRITE** — it moves the branch — and that used to decide *which wrapper*. With one
+credential it decides nothing about tooling, and it still decides **whose turn it is**: §5 calls a
+`BEHIND` rebase *"tree-preserving, no decision in it"*, which is true of its effect on the **tree**
+and is not a licence to move a branch somebody else is still holding.
 
 **On a branch that is already current the rebase is a no-op.** Then it is `CLAUDE.md` §5's rung 3 —
 close and reopen, which re-triggers CI with no commit and no history. And rung 1 comes first,
@@ -465,9 +506,9 @@ tool, not to you. **Arm it LAST, as the final action of the turn, after a foregr
 git -C "$PWD" pull --ff-only          # the watch set is this checkout's copy
 # 1. do all the work first: every review, every merge, every comment
 # 2. consume the catch-up SYNCHRONOUSLY, where you can read it   (FOREGROUND — one pass, returns)
-bin/forge-watch tick --all --gh "$PWD/bin/gh-arch"
+bin/forge-watch tick --all --gh "$PWD/bin/gh-review"
 # 3. arm, last, against a now-current observation                (BACKGROUND task)
-bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60
+bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60
 ```
 
 **THE ARM MUST BE A SINGLE, UNCOMPOUNDED INVOCATION — nothing before it, nothing after it, no `;`,
@@ -537,7 +578,7 @@ only reason a ruling on it was ever seen was a hand re-read the session had comm
 the issue. That is a human-remembers mitigation at the head of the escalation channel:
 
 ```sh
-bin/forge-watch watch --all --gh "$PWD/bin/gh-arch" --interval 60 \
+bin/forge-watch watch --all --gh "$PWD/bin/gh-review" --interval 60 \
   --issue novkostya/quince#71 --issue novkostya/quince#80
 ```
 

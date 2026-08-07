@@ -18,31 +18,32 @@ this skill** (quince#480), and that is correct rather than broken: the reviewer'
 read at the point of use, never an ambient `gh auth login` session, deliberately, so it cannot leak
 into one. `/architect` §1 says a reviewer host is *expected* to look unauthenticated.
 
-Which wrapper is decided by **read versus write**, not by convenience — `/architect` §1:
+**Everything on this seat goes through `bin/gh-review`** — reads, writes and the merge alike
+(`/architect` §1). There is nothing to choose.
 
-| | wrapper | why |
-| --- | --- | --- |
-| **reads** — `pr view`, `pr checks`, `pr list` | `bin/gh-arch` | *"Reading through it is fine"* |
-| **writes** — `api -X PATCH`, `issue close --comment` | `bin/gh-review` | approving, merging **or commenting** through `gh-arch` re-creates quince#47 on the box built to end it, **invisibly, because the output looks identical** |
-| **the merge itself** | `bin/gh-review` | with the one documented fallback, in §3 |
+**There USED to be a choice, and losing it is the point rather than a tidy-up.** This section carried
+a read-versus-write table: reads through `bin/gh-arch`, writes through `bin/gh-review`, because
+approving, merging or commenting through the PAT re-created quince#47 on the box built to end it —
+*invisibly, because the output looks identical*. `bin/gh-arch` is retired (quince#676, Operator
+ruling 2026-08-07), so **one credential means one wrapper, and the class of error that table existed
+to prevent can no longer be committed on this seat.**
 
-**`bin/gh-coder` is NOT one of the options here, and it used to appear in §2.** It is the implementer
-wrapper and it **refuses outright** on this box — `bin/gh-coder:57,63` dies if a reviewer App key or
-an architect token is present, which is the definition of the architect box, and its own refusal
-text says *"run gh-arch on the architect box"*. That refusal is the two-seat boundary working, so a
-session meeting it must not "fix" it by moving a credential; it must use the wrapper above.
+**`bin/gh-coder` is NOT an option here, and it used to appear in §2.** It is the implementer wrapper
+and it **refuses outright** on this box: it dies if a reviewer App key or an architect token is
+present, which is the definition of the architect box. **That refusal is the two-seat boundary
+working**, so a session meeting it must not "fix" it by moving a credential — it must use
+`bin/gh-review`.
 
 **This skill is written for the ARCHITECT seat**, which is whose action merging is. An implementer
-session uses `bin/gh-coder` for everything (`/kickoff` §1) — so do not read these wrapper names as
-universal; read them as *this seat's*. Substituting the wrong one is not a style error: `gh-arch`
-casting a write is the failure quince#47 exists to prevent.
+session uses `bin/gh-coder` for everything (`/kickoff` §1) — so do not read the wrapper name as
+universal; read it as *this seat's*.
 
 ## 1. Preconditions, checked not assumed
 
 ```sh
-bin/gh-arch pr view <n> --repo novkostya/quince \
+bin/gh-review pr view <n> --repo novkostya/quince \
   --json number,title,author,reviewDecision,mergeStateStatus,mergeable,isDraft,files
-bin/gh-arch pr checks <n> --repo novkostya/quince
+bin/gh-review pr checks <n> --repo novkostya/quince
 ```
 
 Land only when all of these hold:
@@ -64,13 +65,13 @@ commit-time gate:
 
 ```sh
 # in quince
-bin/gh-arch pr checkout <n> --repo novkostya/quince
+bin/gh-review pr checkout <n> --repo novkostya/quince
 git fetch origin main
 make privacy-check REF=origin/main...HEAD
 
 # in quince-devlog — no Makefile exists there. Run the product checkout's script FROM the devlog
 # clone; do NOT pass --patterns, which defaults to ./local and so finds this clone's own symlink.
-bin/gh-arch pr checkout <n> --repo novkostya/quince-devlog
+bin/gh-review pr checkout <n> --repo novkostya/quince-devlog
 git fetch origin main
 /path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD
 ```
@@ -98,16 +99,13 @@ stacked PR **silently closes it** — one second later, no warning, nothing in t
 leave alone. One command, and it costs nothing when the answer is empty:
 
 ```sh
-bin/gh-arch pr list -R novkostya/quince --json number,baseRefName \
+bin/gh-review pr list -R novkostya/quince --json number,baseRefName \
   -q '.[] | select(.baseRefName=="<this PR head branch>") | .number'
 ```
 
 **If it returns anything, retarget those PRs to `main` FIRST** — `bin/gh-review api -X PATCH
 repos/novkostya/quince/pulls/<n> -f base=main` — and only then merge. Retargeting is legal while the
 dependent is still open and **impossible one second after it is not**, which is the whole window.
-The retarget is a **write**, so it is `gh-review` and not `gh-arch`, even though the check one line
-above is `gh-arch` — that is the split in §0, at the one place the two commands sit adjacent.
-
 **It is irrecoverable the moment that author pushes**, which is their natural next action once the
 base lands: two `422`s close the door in sequence, and recreating the base ref only reveals the
 second one. The commits survive; the pull request and its verdict do not. Measured on quince#384,
@@ -123,13 +121,30 @@ doing it while a dependent is open is.
 bin/gh-review pr merge <n> --repo novkostya/quince --rebase --delete-branch
 ```
 
-**On a refusal: retry once, then merge through `bin/gh-arch` and say so on the PR** — Operator
-ruling, devlog#52. This is the ONE place `gh-arch` may act where §0 otherwise forbids it, and it is
-narrow: **merging only**, never approving, requesting changes, or commenting. It exists because the
-harness classifier refuses the merge verb *intermittently* and leaves no trace on the forge, so
-without it a session concludes the App cannot merge and escalates. `gh-arch` rather than the
-Operator, because **a merge carries no verdict** — the judgement is the approval, which is
-structurally the App's, and the merge only executes it.
+**On a refusal the ladder is AUTO-MERGE, then the OPERATOR** — Operator ruling 2026-08-07
+(quince#676), replacing devlog#52's `bin/gh-arch` fallback, which named a credential that no longer
+exists:
+
+1. **`bin/gh-review pr merge <n> --repo <r> --auto --rebase`** — GitHub merges when required checks
+   pass;
+2. **the Operator merges**, when auto-merge cannot be enabled or is not appropriate.
+
+A ladder exists because the harness classifier refuses the merge verb *intermittently* and leaves no
+trace on the forge, so without one a session concludes the App cannot merge and escalates.
+**Auto-merge keeps devlog#52's reasoning rather than overturning it** — that ruling avoided an
+Operator merge because *a merge carries no verdict*, the judgement being the approval, which is
+structurally the App's; auto-merge executes it **as the App**, so the attribution is preserved on the
+primary path and spent only on the backstop.
+
+**Two things to know before reaching for it.** `allow_auto_merge` is `true` on `novkostya/quince`
+and **`false` on `novkostya/quince-devlog`** — enabling it there is an Operator action, so the
+devlog's path is retry-then-Operator until then. And **whether the App can enable auto-merge is
+UNMEASURED**: first use probes it and records the result on quince#676.
+
+**Run §2's stacked-PR check at ENABLE time, not at merge time.** Auto-merge fires later and
+unattended, and `delete_branch_on_merge = true` repo-wide means the branch goes on every merge
+regardless of flags (quince-devlog#214). A PR stacked after you enable and before it fires is
+covered by no guard.
 
 Rebase-and-merge is the default; squash is acceptable for a noisy branch; merge commits are
 disabled. If GitHub refuses because the branch is behind, rebase the **branch** on fresh
@@ -151,8 +166,7 @@ range — the journal entry cites it.
 - Devlog: flip the **one-line state** and the rung's dashboard row; make sure the journal
   entry cites the merged PR number and the landed commit range (`/report` step 6 covers who
   can commit it and how to check).
-- Close the issue this PR resolved (`bin/gh-review issue close <n> --comment "landed in #<pr>"` —
-  a **comment**, so `gh-review`, not `gh-arch`), and file follow-ups for anything the review
-  deferred, so nothing survives only in a session.
+- Close the issue this PR resolved (`bin/gh-review issue close <n> --comment "landed in #<pr>"`),
+  and file follow-ups for anything the review deferred, so nothing survives only in a session.
 - Delete the scratch clone. The next unit of work starts from a fresh one.
 - Report in one line: what landed, the commit range, what is still owed and by whom.

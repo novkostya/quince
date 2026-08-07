@@ -80,11 +80,19 @@ the index and then what the frontier rung touches.
 # selection handed it an impossible question (quince#149 review).
 #
 # So ask which wrapper this box's credential lets ACT. Each fails closed when it is not this seat's,
-# so at most three cheap calls settle it. `bin/gh-review` is deliberately absent: it is the verdict
-# path, not a read path (`/architect` §1), and /onboard must never reach for it.
-if   ./bin/gh-coder api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-coder
-elif ./bin/gh-arch  api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-arch
-elif gh             api /rate_limit >/dev/null 2>&1; then GH=gh
+# so at most three cheap calls settle it.
+#
+# `bin/gh-review` IS THE ARCHITECT'S READ PATH, and this comment said the opposite until quince#676 —
+# that it was *"deliberately absent: it is the verdict path, not a read path, and /onboard must never
+# reach for it"*. True while `bin/gh-arch` existed to do the reading; it is that seat's ONLY
+# credential now, so a ladder that skips it leaves the architect box with no probe that can succeed
+# and /onboard reports "no forge credential" about a box holding one.
+#
+# READING IS NOT A VERDICT — that is what makes this safe rather than a relaxation. The rule was
+# always about which wrapper CASTS, and `api /rate_limit` casts nothing.
+if   ./bin/gh-coder  api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-coder
+elif ./bin/gh-review api /rate_limit >/dev/null 2>&1; then GH=./bin/gh-review
+elif gh              api /rate_limit >/dev/null 2>&1; then GH=gh
 else GH=""; fi                     # no usable credential — web URLs, and SAY SO
 for r in $(sed 's/#.*//' .claude/forge-set | grep -v '^[[:space:]]*$'); do
   [ -n "$GH" ] || { printf 'no forge credential — read %s on the web, and report that\n' "$r"; continue; }
@@ -100,7 +108,7 @@ done
 | who | bare `gh` | what they hold |
 | --- | --- | --- |
 | a cold stranger — the resurrection test | fails, no credential | nothing; web URLs are genuinely the answer |
-| the architect box | `exit=4`, empty stdout, *"please run: gh auth login"* | a working `bin/gh-arch` |
+| the architect box | `exit=4`, empty stdout, *"please run: gh auth login"* | a working `bin/gh-review` |
 | **the runner box** | **`exit=4`, empty stdout, same message** (gh 2.93.0, 2026-07-29) | a working `bin/gh-coder` |
 
 The runner row was open until 2026-07-29 — quince#149 filed it as *"unmeasured — I hold no bot token
