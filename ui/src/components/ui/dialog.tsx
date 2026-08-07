@@ -34,7 +34,23 @@ export function DialogContent({
           margin on all four sides rather than being flush to the top and bottom edges. */}
       <DialogPrimitive.Content
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2",
+          // TOP-ANCHORED ON A PHONE, CENTRED FROM `sm` UP — because vertical centring depends on a
+          // viewport height that LIES while the on-screen keyboard is open.
+          //
+          // iOS does not shrink the LAYOUT viewport when the keyboard appears; it shrinks the VISUAL
+          // one and scrolls. So `top-1/2` + `-translate-y-1/2` centres against a height that still
+          // counts the area now hidden behind the keyboard, and the dialog sits too low —
+          // Operator-reported, twice. Dismissing the keyboard and refocusing LOOKS like a fix
+          // because Safari then scrolls the focused field into view; the position was never
+          // corrected, which is exactly why it only comes right on the second focus.
+          //
+          // Anchoring to the top removes the dependency: the dialog starts at a fixed offset and
+          // grows downward, so where it BEGINS does not depend on how tall the viewport currently
+          // claims to be. `max-h` + `overflow-y-auto` below carry the rest.
+          //
+          // Desktop is unchanged — from `sm` up it centres exactly as before.
+          "fixed left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2",
+          "top-4 sm:top-1/2 sm:-translate-y-1/2",
           "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain",
           "rounded-card border border-line bg-card p-6 shadow-xl focus:outline-none",
           className,
