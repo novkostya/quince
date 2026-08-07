@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Config, ConfigResponse } from "./types";
+import type {
+  Config,
+  ConfigResponse,
+  StorageAddition,
+  StorageProbeResponse,
+} from "./types";
 
 export const configKey = ["config"] as const;
 
@@ -29,4 +34,23 @@ export function updateConfig(config: Config): Promise<ConfigResponse> {
 // defaults to the PATH (quince#504), so on a single-storage install it usually IS one.
 export function forgetStorage(name: string): Promise<ConfigResponse> {
   return api.del<ConfigResponse>(`/api/config/storage/${encodeURIComponent(name)}`);
+}
+
+// probeStorage asks what a typed path IS, WITHOUT CHANGING IT (contracts §1, qn.6e).
+//
+// EVERY REFUSAL COMES BACK AS A 200 carrying `outcome`, not as an error status: "that path does not
+// exist" is the ANSWER to the question, not a failure to answer it, and the form renders it beside
+// the same field as a success. Only a malformed question — no path, or a relative one — is a 422,
+// which arrives as an APIError like every other config refusal.
+export function probeStorage(path: string): Promise<StorageProbeResponse> {
+  return api.post<StorageProbeResponse>("/api/storages/probe", { path });
+}
+
+// addStorage splices ONE storage into the declaration (contracts §1, qn.6e).
+//
+// A NARROW ENDPOINT rather than updateConfig, for the identical reason forgetStorage gives: a
+// full-document PUT rebuilt from what this client rendered drops every entry's `zfs:` and
+// `retention:`, which no storage surface renders. The server splices instead.
+export function addStorage(entry: StorageAddition): Promise<ConfigResponse> {
+  return api.post<ConfigResponse>("/api/config/storage", entry);
 }

@@ -5,6 +5,7 @@ import { DeviceCard } from "@/features/devices/DeviceCard";
 import { RescanButton } from "@/features/devices/RescanButton";
 import { VersionList } from "@/features/versions/VersionList";
 import { StorageCard } from "@/features/storage/StorageCard";
+import { AddStorage } from "@/features/storage/AddStorage";
 import { useStorages } from "@/features/jobs/useStorages";
 
 export function DashboardPage() {
@@ -66,18 +67,40 @@ export function DashboardPage() {
           Below the devices rather than above: a household opens quince to see whether its phones
           backed up; where those backups live answers the next question, not the first.
 
-          Hidden while loading or failed. The selector already surfaces a storages-load failure where
-          it costs the user something — it decides where a backup lands — and repeating it here would
-          put an error banner on Home for a section that is informational. */}
-      {loadedStorages.length > 0 ? (
+          IT NOW RENDERS WHEN THE LIST IS EMPTY, which it did not before (qn.6e). The condition was
+          `length > 0`, so a zero-storage install showed nothing here — and that is precisely the
+          state `Add storage` exists for. A section that vanishes when its one affordance is most
+          needed is worse than an empty one.
+
+          Still hidden while LOADING or FAILED, and that half is unchanged: the selector already
+          surfaces a storages-load failure where it costs the user something — it decides where a
+          backup lands — and repeating it here would put an error banner on Home for a section that
+          is informational. `loaded` is therefore checked EXPLICITLY rather than inferred from the
+          list being non-empty; those were the same condition until this rung and are not any more. */}
+      {storages.state.status === "loaded" ? (
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-muted">Storage</h2>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {loadedStorages.map((s) => (
-              // Keyed by NAME, not id: an unreachable storage's id is EMPTY (quince#570), so two
-              // unplugged disks would collide on "". Name is the config's own key and always exists.
-              <StorageCard key={s.name} storage={s} showDefault={loadedStorages.length > 1} />
-            ))}
+          {loadedStorages.length > 0 ? (
+            <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {loadedStorages.map((s) => (
+                // Keyed by NAME, not id: an unreachable storage's id is EMPTY (quince#570), so two
+                // unplugged disks would collide on "". Name is the config's own key and always exists.
+                <StorageCard key={s.name} storage={s} showDefault={loadedStorages.length > 1} />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-card border border-dashed border-line bg-card p-10 text-center">
+              <div className="text-sm font-medium">No storage yet</div>
+              <div className="mt-1 text-sm text-muted">
+                quince needs somewhere to keep backups. Add a folder it can reach.
+              </div>
+            </div>
+          )}
+          {/* At the FOOT of its own section, matching Rescan under Devices. Not in a row with it:
+              Rescan is idempotent and free, this writes config, and adjacency would imply they are
+              the same kind of act. */}
+          <div className="mt-3">
+            <AddStorage onAdded={storages.reload} />
           </div>
         </div>
       ) : null}

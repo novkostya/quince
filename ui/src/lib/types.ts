@@ -294,3 +294,52 @@ export interface OnboardingHTTPS {
   complete: boolean;
   detected: "tls" | "forwarded_proto" | "none";
 }
+
+// StorageProbe is POST /api/storages/probe (contracts §2, qn.6e) — what IS this path?
+//
+// NOT A `Storage`, deliberately: a Storage is declared, has an identity and is being served, where
+// this describes a candidate that may never be declared at all. Sharing the type would mean `id`
+// and `default` nullable on a resource where they are guarantees.
+export interface StorageProbe {
+  path: string;
+  clean_path: string;
+  // FROZEN. A client renders different prose AND a different next action for each, so adding a
+  // value is a contract change.
+  outcome:
+    | "adopt"
+    | "new"
+    | "missing"
+    | "not_a_directory"
+    | "unwritable"
+    | "corrupt_marker"
+    | "unreadable"
+    | "invalid_path";
+  // The daemon's own sentence, always naming the path. Rendered rather than re-composed: quince
+  // knows which path and which marker, and a client's copy of an enum cannot.
+  reason: string;
+  backend: string;
+  backend_reason: string;
+  marker: { storage_id: string; backend: string; created_at: string } | null;
+  non_empty: boolean;
+  // `none` MEANS NO SIGNAL. It must NEVER be rendered as "ZFS not supported" — in hook mode the
+  // container holds no zfs userland and zfs works perfectly through the host helper, so a negative
+  // reading is a guaranteed false negative for the supported containerised topology.
+  zfs: "path" | "host" | "none";
+  filesystem_free_bytes: number;
+  filesystem_total_bytes: number;
+}
+
+export interface StorageProbeResponse {
+  probe: StorageProbe;
+}
+
+// StorageAddition is POST /api/config/storage's request. `default` is deliberately absent: the
+// first storage is default by implication and a later one must not steal it, so the server refuses
+// an entry that claims it.
+export interface StorageAddition {
+  name?: string;
+  path: string;
+  // CONCRETE, never `auto` — the add flow records the backend quince probed and showed.
+  backend: "zfs" | "reflink" | "hardlink" | "copy";
+  zfs?: { parent_dataset: string; mode: "hook" | "exec"; hook_cmd: string; seed: string };
+}
