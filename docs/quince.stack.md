@@ -575,6 +575,13 @@ page for safe keys, restart-required for the rest. Generated doc-comments and th
 transparent-editor UX land with qn.6 (the release gated on onboarding anyway). The
 contract (file-first, no secrets, no UI-only state) binds from day one.
 
+**`restart-required for the rest` DESCRIBES qn.1's PAYLOAD AND IS NO LONGER THE STATE OF THE
+PRODUCT.** `qn.6g` (quince#577) built propagation, so D12's *"needs no restart unless the spec says
+why"* is now discharged **per key** rather than in the aggregate: contracts §6 carries the table,
+with the stated why for each key that stays restart-required, and a third bin for the five keys
+nothing reads. Corrected beside the sentence rather than inside it — that sentence is a true record
+of what qn.1 shipped, and this paragraph is a staging decision rather than a status line.
+
 **FILE-WATCH LIVE RELOAD IS SPLIT OUT OF qn.6, AND ITS RUNG IS UNALLOCATED** — Operator ruling
 2026-08-04, option (a), relayed by architect session `arch1` on
 [quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911). The sentence

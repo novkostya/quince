@@ -358,7 +358,7 @@ bins impossible to fill honestly.
 
 | key | verdict | why |
 | --- | --- | --- |
-| `backup.transport` | **nothing reads it** | quince#654. The job's transport comes from the POST body. |
+| ~~`backup.transport`~~ | **THE KEY NO LONGER EXISTS** | This read *"nothing reads it — quince#654"*, true the day it was written. quince#654 **renamed** it `preferred_transport` and gave it a consumer four days later, and PR 5 wired it live. **The canonical table is contracts §6**, which is where PR 6 put it; this row stays struck rather than deleted because PR 5's own note points at it. |
 | `backup.require_encryption` | **live** | Read per job (fact 8); the applier swaps one synchronized field. A running job keeps its answer. |
 | `storage[]` (membership) | **live** | The ruled first consumer. |
 | `storage[].path` / `.backend` / `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses (fact 4). What happens to an in-flight job is the `PROPOSED (gap)` above. |

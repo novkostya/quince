@@ -387,10 +387,14 @@ first consumer. This paragraph read *"`config.Service` has no `Apply`, `Reload`,
 `Subscribe` at all, so restart-to-apply is the status quo for **every** setting"*; it now has
 `Subscribe`, and storage is wired to it.
 
-**Restart-to-apply is therefore no longer the blanket status quo, and §6 does not yet say what
-replaced it.** The per-setting verdict — which keys are live, which remain restart-required, and the
-stated why D12 requires for each of the second kind — is owed to §6 by `qn.6g` PR 6. Named here as
-owed rather than left as a gap a reader has to notice.
+**Restart-to-apply is therefore no longer the blanket status quo, and §6 now says what replaced it:**
+[the per-key table](#which-settings-apply-live--the-per-key-answer). Three bins rather than two,
+because five keys are read by nothing and calling those *restart-required* would promise that
+restarting makes them work.
+
+This paragraph said the table was **owed**, which it was for two PRs. Narrowed in the diff that
+landed it, rather than left to age into a false claim that canon is incomplete — the inverse of the
+defect `CLAUDE.md` names, and just as misleading to a session deciding what is safe to build on.
 
 Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 
@@ -1011,8 +1015,45 @@ condition the ruling was accepted on, and a document describing a wider reality 
 exists is this project's most-filed defect. Until file-watch lands, a hand-edit is picked up at the
 next start.
 
-**Which settings apply live at all is a PER-KEY answer, not a blanket one**, and lands with `qn.6g`'s
-per-setting table.
+### Which settings apply live — the per-key answer
+
+**THREE BINS, NOT TWO, and the third is why this is a table rather than a sentence.** *Live* and
+*restart-required* cannot classify these keys honestly, because **five of them are read by nothing at
+all**. A two-bin table would have to file those under one heading or the other, and both are false:
+calling an unread key *restart-required* promises that restarting makes it work.
+
+Verdicts measured against the code rather than read off the schema (`qn.6g`, quince#577).
+
+| key | verdict | why |
+| --- | --- | --- |
+| `backup.preferred_transport` | **live** | The backup applier swaps one synchronized field; read per job, so a running job keeps the answer it started with. |
+| `backup.require_encryption` | **live** | Same applier, same guarantee. |
+| `storage[]` membership | **live** | The storage applier — `qn.6g`'s first consumer. An **add** also reconciles, so a disk that already holds backups shows them without a restart. |
+| `storage[].path` · `.backend` · `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses, so a live apply and a restart cannot disagree about what a storage IS. |
+| `storage[].retention.*` | **live** | Rides the storage applier: `policyFor` reads retention off the slot list, so `ApplyStorages` is the only path by which an edit can reach `Prune`. |
+| `storage[].default` | **live** | Position decides it — re-ordering moves `slots[0]`. Safe only because forgetting the default is refused; a *re-designation* takes effect for the next unbound job. |
+| `devices.manage_muxer` · `.usbmuxd_socket` · `.netmuxd_addr` | **restart** | **D12 requires this sentence:** a netmuxd restart tears a live Wi-Fi backup, and Wi-Fi is the primary transport — so applying these live means first ruling on what happens to a running transfer. Out of scope for `qn.6g`, named rather than silent. |
+| `tls.cert_file` · `.key_file` | **paths: restart · contents: already live** | `tlsx.Keeper` re-reads the files on rotation, so a renewal already needs no restart. Changing the *paths*, or turning TLS on or off, needs a socket rebind. |
+| `sessions.allow_insecure_transport` | **restart** | Two consumers, both start-time: it decides the plain-half handler at bind, and `applyInsecureTransportOptIn` calls the auth service's setter once. **A settable field is not a live setting** — that setter runs only at startup and only ever with `true`, so nothing turns the opt-in back off in a running process. Stated because the setter's existence reads like half-liveness. |
+| `sessions.ttl_minutes` | **nothing reads it** | Validated and never consumed — **quince#656**. Its label says *"Session TTL"* on a page reached from a login, which is what makes it worse than a merely unused key. |
+| `automation.staleness_days` · `.reminder_cooldown_hours` | **nothing reads it (declared)** | `qn.12`'s — declared debt rather than a defect. |
+| `ui.theme` | **already live** | Client-side, applied from the `PUT` response. |
+
+**`backup.transport` IS ABSENT BECAUSE THE KEY NO LONGER EXISTS.** `qn.6g`'s spec listed it as
+*"nothing reads it"*, true when written and false four days later: quince#654 renamed it
+`preferred_transport` and gave it a consumer. Recorded here because the spec still carries the stale
+row and points at this table for the correction.
+
+**A key in the third bin is not made to work by a restart**, which is the whole reason that bin
+exists. Both of its occupants have an issue and neither is fixed by this rung: live-apply cannot make
+an unread field take effect, and folding the fix in would let this table claim a key works when
+nothing consumes it.
+
+**THE UI RENDERS THIS VERDICT AND STORES NOTHING.** *"Restart to apply"* appears where this table
+says **restart** and nowhere else — which today means it appears on no field the Settings form
+renders, since every key that form edits is live or unread. That is why the notice was deleted rather
+than made conditional; if a **restart** key is ever added to that form, it comes back attached to
+that field.
 
 Schema v0:
 
