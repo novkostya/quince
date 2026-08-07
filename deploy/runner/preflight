@@ -585,6 +585,20 @@ else
 			# One line, userinfo stripped. The last line is the `fatal:` — the one that names the
 			# cause; earlier lines are the server's own remarks.
 			_lpwhy=$(printf '%s\n' "$_lperr" | grep -v '^[[:space:]]*$' | tail -n 1 | sed 's#//[^/@]*@#//<userinfo-redacted>@#g')
+			# THE GREP BELOW READS SERVER-CONTROLLED TEXT, AND MATCHING ALL OF STDERR IS A CHOICE
+			# rather than an oversight — recorded because the architect's review of quince#684 found
+			# the decision implicit, not because anything is wrong with it. `remote:` lines are
+			# written by the far end, so a remote could in principle contribute the string that stops
+			# this box booting. Bounded, and only in the safe direction:
+			#
+			#   - exit 0 is tested FIRST, so no remote text can manufacture a false `ok`;
+			#   - the only reachable direction is a false REFUSAL, which fails closed;
+			#   - and matching the whole of stderr survives the `fatal:` line moving, where anchoring
+			#     on it would silently stop refusing — a false `ok`, the direction that must not fail.
+			#
+			# So the trade is deliberately the other way round from where the paranoia points. If this
+			# is ever narrowed to the `fatal:` line, the mutation suite must gain a case for it: it
+			# currently pins stderr-versus-exit-code and NOT whole-stderr-versus-one-line.
 			if [ "$_lprc" -eq 0 ]; then
 				ok "private layer can advance — its remote was reached and authenticated just now, not inferred from the config (quince#675)"
 			elif printf '%s\n' "$_lperr" | grep -q 'Authentication failed'; then
