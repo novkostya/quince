@@ -9,9 +9,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { addStorage, configKey, probeStorage } from "@/lib/config";
+import { addStorage, checkStorageHook, configKey, probeStorage } from "@/lib/config";
 import { APIError } from "@/lib/api";
-import type { ConfigFieldError, StorageProbe } from "@/lib/types";
+import type { ConfigFieldError, StorageHookCheck, StorageProbe } from "@/lib/types";
 
 // serverSentence pulls the daemon's own words out of a 422. Same rule ForgetStorage states: the
 // refusal names the field AND the remedy, and re-wording it client-side drops the half that tells
@@ -107,13 +107,16 @@ function ProbeResult({ probe }: { probe: StorageProbe }) {
 // declared — and the answer arrives without changing the path, which is the rung's central
 // guarantee (quince#415: "NOBODY CREATES A STORAGE ROOT").
 //
-// THE ZFS SUB-FORM IS NOT HERE. When the probe recommends zfs the form says so and refuses to save,
-// naming the two keys a zfs storage needs. That is a SURFACED limitation rather than a silent one:
-// a zfs storage needs `parent_dataset` and a helper command, and the control that makes those
-// safe to type — `Test helper`, which fires the helper's two read-only verbs — is its own
-// interaction with four outcomes and lands next. Offering a zfs save without it would let a user
-// commit a configuration whose helper nobody has checked, which is the failure the whole branch
-// exists to prevent.
+// THE ZFS BRANCH DEFAULTS TO `hook` MODE, AND THAT IS A MEASUREMENT RATHER THAN A PREFERENCE.
+// `zfs` is not in the runtime image at all — the only runtime `apk add` does not install it — while
+// the schema defaults `zfs.mode` to `exec`, which execs that binary (quince#697). So `exec` is
+// undeployable with what we ship, and the form neither offers it nor pretends the choice is open.
+//
+// `Test helper` IS THE LOAD-BEARING CONTROL of this branch. The key, the forced command in
+// `authorized_keys` and the `$PARENT` baked into the helper are three things that must line up, and
+// NONE of them is observable from the path — which is also why this rung descoped deriving
+// `parent_dataset`. Without the button, "did I install the helper right?" is answered by a failed
+// multi-hour Wi-Fi transfer at commit time.
 export function AddStorage({ onAdded }: { onAdded: () => void }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -124,11 +127,33 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const [parentDataset, setParentDataset] = useState("");
+  const [hookCmd, setHookCmd] = useState("");
+  const [hookCheck, setHookCheck] = useState<StorageHookCheck | null>(null);
+  const [hookChecking, setHookChecking] = useState(false);
+
   function reset() {
     setPath("");
     setProbe(null);
     setBackend("");
     setError("");
+    setParentDataset("");
+    setHookCmd("");
+    setHookCheck(null);
+  }
+
+  async function testHelper() {
+    setHookChecking(true);
+    setHookCheck(null);
+    setError("");
+    try {
+      const res = await checkStorageHook(parentDataset.trim(), hookCmd.trim());
+      setHookCheck(res.check);
+    } catch (e) {
+      setError(serverSentence(e, "could not run the helper check"));
+    } finally {
+      setHookChecking(false);
+    }
   }
 
   async function check() {
@@ -154,6 +179,20 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
       await addStorage({
         path: probe.clean_path,
         backend: backend as "zfs" | "reflink" | "hardlink" | "copy",
+        // `mode: hook` because `exec` cannot work in the shipped image (quince#697), and `seed:
+        // auto` because in hook mode the host-side `seed` verb does the reflink and the key is
+        // moot — the schema's own comment says so. Neither is asked for; both would be a field
+        // whose only honest answer is the one quince already knows.
+        ...(backend === "zfs"
+          ? {
+              zfs: {
+                parent_dataset: parentDataset.trim(),
+                mode: "hook" as const,
+                hook_cmd: hookCmd.trim(),
+                seed: "auto",
+              },
+            }
+          : {}),
       });
       // Refetch rather than splice: the server owns the resulting document, and the storage list is
       // a separate resource that the applier has just changed. Same rule ForgetStorage follows.
@@ -173,9 +212,24 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
 
   const canAdopt = probe?.outcome === "adopt";
   const isNew = probe?.outcome === "new";
-  // zfs needs keys this form does not yet collect — see the note on this component.
-  const zfsUnsupportedHere = isNew && backend === "zfs";
-  const canSave = (canAdopt || isNew) && !zfsUnsupportedHere && backend !== "";
+  const needsZFS = isNew && backend === "zfs";
+
+  // A ZFS STORAGE CANNOT BE SAVED UNTIL THE HELPER HAS ANSWERED, and `ok` is not the only answer
+  // that clears it.
+  //
+  // `not_migrated` means the helper WORKS and lacks only the `capacity)` arm: backups, commits,
+  // snapshots and retention are untouched, and the cost is a card reading "free space unavailable".
+  // Blocking on it would refuse a working configuration over a cosmetic gap, which is a harsher
+  // rule than the daemon's own.
+  //
+  // `parent_mismatch` and `unreachable` block, because both mean the storage would fail at commit
+  // time — the exact failure this button exists to move forward from a multi-hour transfer to now.
+  const helperUsable = hookCheck?.outcome === "ok" || hookCheck?.outcome === "not_migrated";
+  const zfsReady =
+    parentDataset.trim() !== "" && hookCmd.trim() !== "" && helperUsable;
+
+  const canSave =
+    (canAdopt || (isNew && backend !== "")) && (!needsZFS || zfsReady);
 
   return (
     <Dialog
@@ -252,11 +306,83 @@ export function AddStorage({ onAdded }: { onAdded: () => void }) {
           </div>
         ) : null}
 
-        {zfsUnsupportedHere ? (
-          <div className="mt-3 text-sm text-muted" data-testid="zfs-not-here">
-            A ZFS storage also needs a parent dataset and a helper command on the host, and quince
-            cannot check those from this form yet. Declare this one in <code>config.yml</code> for
-            now — see <code>deploy/storage.md</code>.
+        {needsZFS ? (
+          <div className="mt-3 rounded-card border border-line bg-elevated p-3" data-testid="zfs-fields">
+            {/* THE MODE IS NOT A CHOICE, and saying so is more honest than a disabled dropdown.
+                `exec` runs `zfs` inside the container, and the runtime image does not contain it
+                (quince#697) — so offering the option would be offering something that cannot work.
+                This is the ordinary unprivileged-container case, not a degraded one. */}
+            <div className="text-sm">
+              quince can&apos;t run <code>zfs</code> from inside its container — that&apos;s normal.
+              It calls a helper on the host over SSH instead, which you install first: see{" "}
+              <code>deploy/storage.md</code>.
+            </div>
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="zfs-parent">
+              Parent dataset
+            </label>
+            <input
+              id="zfs-parent"
+              className="mt-1 h-9 w-full rounded-lg border border-line bg-card px-3 text-sm"
+              value={parentDataset}
+              placeholder="pool/backups"
+              onChange={(e) => {
+                setParentDataset(e.target.value);
+                setHookCheck(null);
+              }}
+            />
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="zfs-hook">
+              Helper command
+            </label>
+            <input
+              id="zfs-hook"
+              className="mt-1 h-9 w-full rounded-lg border border-line bg-card px-3 text-sm"
+              value={hookCmd}
+              placeholder="ssh -i /data/keys/zfs -o BatchMode=yes user@host"
+              onChange={(e) => {
+                setHookCmd(e.target.value);
+                setHookCheck(null);
+              }}
+            />
+
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void testHelper()}
+                disabled={
+                  hookChecking || parentDataset.trim() === "" || hookCmd.trim() === ""
+                }
+                data-testid="test-helper"
+              >
+                Test helper
+              </Button>
+            </div>
+
+            {hookCheck !== null ? (
+              <div className="mt-3 text-sm" data-testid="hook-result" data-outcome={hookCheck.outcome}>
+                {/* THE DAEMON'S SENTENCE, VERBATIM, for all four outcomes. Each has a different
+                    remedy — install the helper, add the `capacity)` arm, fix the dataset, fix the
+                    key — and a client that re-worded them would drop the half that says what to do. */}
+                <div>{hookCheck.reason}</div>
+                {hookCheck.detail !== "" ? (
+                  // THE TRANSPORT'S OWN OUTPUT. ssh's "Permission denied (publickey)" is the whole
+                  // answer to why a key does not work, and quince cannot improve on it. It may name
+                  // this operator's host, so it is shown here and nowhere else — never logged,
+                  // never in a fixture, never pasted into a PR.
+                  <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs text-muted">
+                    {hookCheck.detail}
+                  </pre>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-3 text-sm text-muted">
+                Test the helper before saving. quince only sends two read-only commands, and it is
+                the only way to find out that the key, the forced command and the dataset all agree
+                — before a backup does.
+              </div>
+            )}
           </div>
         ) : null}
 

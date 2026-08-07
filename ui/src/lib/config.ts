@@ -4,6 +4,7 @@ import type {
   Config,
   ConfigResponse,
   StorageAddition,
+  StorageHookCheckResponse,
   StorageProbeResponse,
 } from "./types";
 
@@ -53,4 +54,22 @@ export function probeStorage(path: string): Promise<StorageProbeResponse> {
 // `retention:`, which no storage surface renders. The server splices instead.
 export function addStorage(entry: StorageAddition): Promise<ConfigResponse> {
   return api.post<ConfigResponse>("/api/config/storage", entry);
+}
+
+// checkStorageHook fires the constrained helper's two READ-ONLY verbs — `capacity`, then
+// `list <parent dataset>` — and classifies the result (contracts §1, qn.6e).
+//
+// Nothing it sends can create, destroy or write: both arms are path-guarded inside the operator's
+// own forced command, which is the property that makes this safe to fire from a form.
+//
+// Every verdict is a 200, `unreachable` included: a user who has not installed the helper yet has
+// asked a perfectly good question. Only a malformed question — no dataset, or no command — is a 422.
+export function checkStorageHook(
+  parentDataset: string,
+  hookCmd: string,
+): Promise<StorageHookCheckResponse> {
+  return api.post<StorageHookCheckResponse>("/api/storages/probe/hook", {
+    parent_dataset: parentDataset,
+    hook_cmd: hookCmd,
+  });
 }

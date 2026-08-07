@@ -343,3 +343,21 @@ export interface StorageAddition {
   backend: "zfs" | "reflink" | "hardlink" | "copy";
   zfs?: { parent_dataset: string; mode: "hook" | "exec"; hook_cmd: string; seed: string };
 }
+
+// StorageHookCheck is POST /api/storages/probe/hook (contracts §2, qn.6e) — does the operator's
+// constrained ZFS helper actually work, and does it agree about the parent dataset?
+export interface StorageHookCheck {
+  // FROZEN. Four outcomes rather than ok/failed, because the REMEDIES differ and a user cannot
+  // guess between them: a missing helper, an un-migrated helper and a mistyped parent dataset all
+  // present as "it did not work".
+  outcome: "ok" | "not_migrated" | "parent_mismatch" | "unreachable";
+  // quince's own sentence, safe to render anywhere.
+  reason: string;
+  // THE TRANSPORT'S OWN OUTPUT, and it MAY NAME THE OPERATOR'S HOST. Shown to the authenticated
+  // admin in their own browser; never logged, never in a fixture, never pasted into a PR or issue.
+  detail: string;
+}
+
+export interface StorageHookCheckResponse {
+  check: StorageHookCheck;
+}
