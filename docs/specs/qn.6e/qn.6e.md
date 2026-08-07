@@ -449,11 +449,34 @@ empty state rather than the button moving out of it.
 
 ---
 
-## PROPOSED (gap): serving with zero storages, so the first-run path is reachable at all
+## RULED (was `PROPOSED (gap)`): ANY zero-storage start IS the onboarding state — option (a)
 
-**Not ruled. Nothing below may be built on until the Operator rules at spec review.** *"All in one
-rung"* settled **where** this lives, not **whether** the refusal may be relaxed — quince#502 says so
-in as many words, and an implementer must not read the two as one.
+**Operator ruling, 2026-08-07**, relayed by architect session `arch1` on
+[quince#502](https://github.com/novkostya/quince/issues/502) — cite the issue and the self-declared
+role rather than the login (quince#47). **PR 9 is no longer held.**
+
+**What was decided.** quince may **serve with zero storages**, refusing every API except auth,
+onboarding and config, and render the storage step instead of Home. **The hard refusal stays for
+every other case.** No persisted onboarding flag, no step enum, no UI-only state: **the zero-storage
+condition *is* the state**, which is why it needs nothing to remember it.
+
+**The cost was named and ACCEPTED rather than discovered.** *Onboarding* and *misconfigured* are
+byte-identical at startup, so a daemon started from a hand-edited `config.yml` whose `storage:` list
+someone emptied gets the friendly page rather than the refusal. **Ruled not a state-honesty
+downgrade**, because the page is true in both cases — there is no storage, and here is how to add one
+— and the daemon becomes fixable from a browser instead of a shell.
+
+**What the ruling does NOT license**, carried from the relay so it is not re-derived later:
+
+- **Not a general relaxation of the startup gate.** Every other refusal in `CheckStorages` /
+  `Explain` stands, the malformed-config case included (quince#508).
+- **It does not make zero storages reachable through the API.** Forgetting the default is refused
+  `422`, so only a hand-edit gets there — which is why the accepted edge is a hand-edit edge.
+- **It says nothing about `auto`**, already ruled absorbed, or about interface fact 2, which stays
+  unmeasured by design.
+
+**The question as it was asked is kept below, because the reasoning that lost is what makes a ruling
+checkable later.** (b) and (c) were rejected on this spec's own analysis of them.
 
 **The blocking fact.** quince refuses to **start** with no storage. `main.go:201-204` →
 `config.CheckStorages` → `StorageRequirement.Explain` (`storagereq.go:100-159`), closing:
@@ -511,10 +534,11 @@ to zero storages. Forgetting the default is refused with `422`, and on a single-
 only storage *is* the default (contracts §1, `forget.go:95-109`). Only a hand-edit can, which is why
 the edge above is a hand-edit edge.
 
-**What this rung does if the gap is not ruled.** PR 9 is **HELD**. PRs 2–8 do not depend on it: the
+**What the hold bought, recorded because it was the point of holding.** PR 9 was held and PRs 2–8
+were written not to depend on it, so the rung was never blocked while the question was open — the
 probe, the endpoints, the form and the buttons are all reachable on an install that already has a
-storage, which is every existing install. The rung ships useful and incomplete rather than blocked,
-and says which half is missing.
+storage, which is every existing install. **PR 9 is now buildable and the rung no longer ships with
+its fresh-install half missing.**
 
 ---
 
@@ -541,7 +565,7 @@ and says which half is missing.
 10. **The buttons are where the ruling puts them** — `+ Add storage` at the foot of Storage
     (including when there are no storages), `Rescan` at the foot of Devices, page header only
     *"Home"*, and Rescan's label never changes while it spins.
-11. **(HELD on the gap.)** A fresh install with no `config.yml` serves the storage step, and adding
+11. A fresh install with no `config.yml` serves the storage step, and adding
     a storage from it leaves a running quince with a working storage and no restart.
 
 ---
@@ -561,7 +585,7 @@ and says which half is missing.
 | **G9** | **The string "ZFS not supported" (and its variants) appears nowhere in the built UI bundle** — asserted against the build output, not against a rendered state, because tier 3 is the state that never renders in a test. | CI (UI) |
 | **G10** | The buttons: `+ Add storage` at the foot of Storage **with zero storages declared**, `Rescan` at the foot of Devices, page header text is only *"Home"*, and Rescan's accessible name is unchanged while pending. | ui-e2e |
 | **G11** | The add flow end to end in the demo: type a path, Check, see a recommendation and its reason, save, see the card. | ui-e2e |
-| **G12** | **(HELD on the gap.)** A daemon started with no storage serves the storage step and refuses the other APIs; adding one from it needs no restart. | CI (Go) + ui-e2e |
+| **G12** | A daemon started with no storage serves the storage step and refuses the other APIs; adding one from it needs no restart. | CI (Go) + ui-e2e |
 | **G13** | `make privacy-check REF=origin/main...HEAD TEXT=<file under $HOME/scratch/<runner>/>` | host |
 
 **G1 and G6 are the gates this rung stands or falls on**, and both assert on the **filesystem**
@@ -618,7 +642,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 | rule | how this plan complies |
 | --- | --- |
 | **A rung starts from a spec** | This document, PR 1, reviewed before any code exists. |
-| **Don't improvise architecture** | One gap — the zero-storage startup refusal — is written above as `PROPOSED (gap)` with three options and no preference asserted as ruled, and **PR 9 is HELD** on it. Nothing is built on it while pending. Descoping `parent_dataset` derivation is not a gap: it is a measurement (facts 2, 3) recorded in the spec, rung-local. |
+| **Don't improvise architecture** | One gap — the zero-storage startup refusal — went up as `PROPOSED (gap)` with three options and no preference asserted as ruled, with **PR 9 held** on it and PRs 2–8 written not to depend on it. **RULED 2026-08-07, option (a)**; nothing was built on it while it was pending, and the flip narrowed the heading in the same diff that changed the body (quince#408). Descoping `parent_dataset` derivation is not a gap: it is a measurement (facts 2, 3) recorded in the spec, rung-local. |
 | **Contracts are stop-and-ask** | **Three new routes** — this is the rung's largest contract surface and it is deliberate, not incidental. They land in contracts §1 in the PRs that build them, and `wire` gains a probe object (§2). Shapes and refusal ORDER are inherited from Forget rather than re-invented, so no ruled question is reopened. PRs 3, 4, 5 and 8 are therefore code-owned. |
 | **Never mutate a committed version** | **The rung's sharpest near-miss.** The probe writes to a path the user typed. `Inspect` never creates (G1), refuses before touching anything absent, and the two dotfile probes clean up (G2, fact 6). It **never mints a marker** — creation stays `ResolveStorage`'s, at the creation moment, once. An adopt path is never re-probed into a new backend (fact 5, G3). No `latest/`, `versions/` or `working/` tree is read or written by anything in this rung. |
 | **State honesty** | The recommendation reports what was probed, with the probe's own path-naming sentence. Tier 3 says *not detected*, never *not supported* (G9). `Test helper` distinguishes four outcomes rather than ok/failed, and an empty `list` is success rather than a false negative. The zfs branch says `exec` cannot work in the shipped image instead of offering it as a peer. |
@@ -659,8 +683,9 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 
 ## Known gaps and open questions
 
-1. **The zero-storage startup refusal** — `PROPOSED (gap)` above, **unruled**, ruled at spec review.
-   PR 9 is held on it. Three options stated; none is asserted as preferred canon.
+1. **The zero-storage startup refusal** — **RULED 2026-08-07, option (a)**: any zero-storage start
+   IS the onboarding state. No longer open, and **PR 9 is no longer held**. The block above carries
+   the ruling, what it does not license, and the losing options as they were argued.
 2. **A non-empty directory with no marker** — someone else's data. Legal today (quince creates
    `<udid>/` beneath it) and the probe would recommend a backend for it happily. Warn and allow, or
    refuse? **Rung-local, settled in PR 2**, flagged here because the obvious implementation does
@@ -694,13 +719,16 @@ Each carries one reviewable claim and its own proof. **Branch each from `main` �
 | **6** | **The add form** — one field, Check, three branches, the zfs sub-form. | G9, G11 | architect |
 | **7** | **The two buttons move** — Rescan to the foot of Devices, `+ Add storage` to the foot of Storage, empty state included. Independent of 2–6. | G10 | architect |
 | **8** | **Canon: `auto` is absorbed** — `contracts.md:1339-1344` and `:1407-1409`, `schema.go:76-81`, design §9's guided-check sentence, `deploy/storage.md`'s note on what the form fires. | review | **`@novkostya`** |
-| **9** | **The first-run path** — onboarding storage step. **HELD** on the gap. | G12 | tbd |
+| **9** | **The first-run path** — the zero-storage serve mode and the onboarding storage step, at `/onboarding/storage` (decision 3). **Released 2026-08-07 by the ruling**; was held. | G12 | architect |
 
 **Order.** 2 → 3 → 4 → 5 → 6. **7 is independent and can go first**, which is worth doing: it is the
 smallest, it is entirely UI, and it settles the placement the form has to land into. 8 lands with or
 after 5, because it must not claim `auto` is absorbed before the code that absorbs it exists —
 `CLAUDE.md`'s most-filed defect, in the direction that matters least but is still wrong.
 
-**9 does not gate the rung.** If the gap is unruled at close, the rung ships with the add flow
-working on every install that already has a storage, and says plainly that the fresh-install path is
-the half that is missing.
+**9 no longer gates the rung and no longer risks it either.** This read *"if the gap is unruled at
+close, the rung ships with the add flow working on every install that already has a storage, and
+says plainly that the fresh-install path is the half that is missing."* The ruling landed on
+2026-08-07, so that contingency is spent — but the slicing it produced is what made it survivable,
+and that is the part worth keeping: **9 was written last and depended on by nothing**, so an unruled
+gap would have cost the rung one story rather than the rung.
