@@ -96,6 +96,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
+	apiMux.HandleFunc("POST /api/config/storage", deps.handleConfigStorageAdd())
 	apiMux.HandleFunc("DELETE /api/config/storage/{name}", deps.handleConfigStorageDelete())
 	apiMux.HandleFunc("GET /api/devices", deps.handleDevices())
 	apiMux.HandleFunc("POST /api/devices/rescan", deps.handleRescan())
