@@ -14,7 +14,11 @@ never unoccupied, and is the sole whole-tree rclone offsite-sync source; a versi
 `@quince-*` snapshot on zfs (one child dataset per device, browsed via
 `.zfs/snapshot/<snap>/latest/`, so between backups the dataset holds only `latest/`) or a
 `versions/<ts>/` dir on the reflink (FICLONE) / hardlink / copy backends. Commit is
-journaled and startup reconciliation is first-class. Wi-Fi backup is the PRIMARY use case
+journaled and startup reconciliation is first-class. **Both statements above about `latest/` — that
+it is the newest committed version's content, and that it is the sole whole-tree offsite source —
+are RULED to stop holding for `zfs`, which writes into `latest/` IN PLACE: no seed, no working copy,
+no exchange, commit = verify → `zfs snapshot`. Design §5's block at the end of the section is the
+ruling; nothing is built, and the hard rule below carries what survives it.** Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is
 no unattended mode and no auto-retry: opportunity signal → push → one unlock+confirm;
 failures become `user action required`. Core value: Plex-grade setup, OpenWrt/PVE-grade
@@ -901,6 +905,16 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   the remaining commit phases — it never unwinds them, because a commit failure must not
   destroy a multi-hour Wi-Fi transfer. Any storage-touching change re-proves these
   invariants.
+  **THE RULE ITSELF SURVIVES THE zfs IN-PLACE RULING; ONE SENTENCE IN IT DOES NOT** (design §5,
+  end of section; ruled 2026-08-04, quince#591, **not built**). On zfs a committed version is a
+  `@quince-*` snapshot and copy-on-write leaves it untouched, so writing into `latest/` cannot reach
+  one — *never mutate a committed version* holds literally. What stops holding on that backend is
+  *`latest/` is not scratch space — it is the newest committed version's content*: it becomes the
+  mutable head, and the newest version becomes a snapshot **of** it. Read those two as separate
+  claims, because conflating them is what makes the change look forbidden when it is ruled. Also on
+  zfs: there is no seed and therefore no seed-in-progress sentinel to catch, and the dirty **head**
+  is what a failed job keeps. The new `rollback` verb discards it and is for **abandon** only —
+  never the failure default, never after verify has passed.
 - **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off,
   adapter-failed, cache-dropped, truncated list) are surfaced in the UI and the logs.
 - **Config tidiness is a feature** (stack D12): every setting lives in `config.yml` with
