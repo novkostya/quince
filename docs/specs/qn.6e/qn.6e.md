@@ -397,8 +397,36 @@ startup refusal teaches the one-line form itself (`storagereq.go:138-145`):
 ```
 
 — which **is** `auto`. Removing it would break the shortest declaration in the product, taught by
-quince's own error message. **The reachable goal is: quince never writes `auto`; a human still
-may.**
+quince's own error message.
+
+**THE REACHABLE GOAL IS NARROWER THAN THIS SPEC FIRST STATED, and the difference is measured.** It
+read: *"quince never writes `auto`; a human still may."* **The first half is false**, and it was
+false before this rung began.
+
+`replaceLocked` marshals the whole **resolved** document (`Marshal(c)` over `s.Current()`, which
+`Parse` already ran `ResolveStorages` on), so **any save materialises every default for every entry,
+including ones the user never touched**. A hand-written minimal declaration —
+
+```yaml
+    storage:
+      - path: /backups
+```
+
+— acquires `backend: auto` and `zfs.seed: auto` the first time *anything* writes the config. Measured
+through `AddStorage`; the path is `replaceLocked` → `Marshal`, which `ForgetStorage` and
+`PUT /api/config` share identically, so this is not the add flow's doing and predates it.
+
+**What is actually reachable, and what the rung genuinely delivers:** *a storage ADDED through the
+flow records the concrete backend that was probed and shown, and an omission is refused rather than
+defaulted.* `validateAddition` refuses an empty or `auto` backend outright, so an omission cannot
+become an `auto` by the back door — which is the property that mattered. The broader sentence was a
+proxy for it, and the proxy was wrong.
+
+**Nothing is broken and nothing is proposed here.** The materialised value is identical in meaning to
+the omitted one and `auto` is legal by ruling, so this is a false claim rather than a defect. It is
+pinned by a test (`TestSavingMaterialisesAutoForPreexistingEntries`) that **fails** if the behaviour
+changes, so that a future fix is obliged to correct this paragraph in the same diff rather than
+leaving it stale in the other direction.
 
 **This discharges the placeholder's one homed deferral by absorption.** Do not open a removal PR
 against it. Two canon sites assert the deferral is still live and both are corrected in PR 8:
