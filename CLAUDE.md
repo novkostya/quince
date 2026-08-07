@@ -133,15 +133,16 @@ repo is not a message bus, and no human is an RPC layer.
      head and **that base has merged AND its branch was deleted**, the forge reports `DIRTY` and
      **the PR is already closed** — GitHub closes a dependent whose base branch is gone rather than
      retargeting it. Nothing is owed to a resolver, because there are no lines to choose between.
-     **The deletion is the trigger, not the merge** — but **OMITTING `--delete-branch` DOES NOT SAVE
-     A DEPENDENT ON THIS REPOSITORY, and reaching for that as a mitigation is the trap** (devlog#214).
-     `delete_branch_on_merge` is **`true` repo-wide on `novkostya/quince`**, so the head branch is
-     deleted on **every** merge whatever flags you pass — measured 2026-08-07, and demonstrated the
-     same day when quince#684 was merged **without** the flag and its branch was gone seconds later,
-     taking an in-flight push with it. This paragraph read *"`gh pr merge --rebase` without
-     `--delete-branch` leaves the base standing and the dependent open"* until then; it is true of
-     `novkostya/quince-devlog`, where the setting is `false`, and false here. **Retarget the dependent
-     first — §6's guard is the only thing that works.** Stated precisely because the only measurement
+     **The deletion is the trigger, not the merge** — but **OMITTING `--delete-branch` DOES NOT SAVE A
+     DEPENDENT, ON EITHER REPOSITORY, and reaching for it as a mitigation is the trap** (devlog#214).
+     `delete_branch_on_merge` is **`true` repo-wide on BOTH `novkostya/quince` and
+     `novkostya/quince-devlog`**, so the head branch is deleted on **every** merge whatever flags you
+     pass — measured 2026-08-07, and demonstrated the same day when quince#684 was merged **without**
+     the flag and its branch was gone seconds later, taking an in-flight push with it. This paragraph
+     read *"`gh pr merge --rebase` without `--delete-branch` leaves the base standing and the dependent
+     open"* until then. **The devlog was the one place that stayed true, and it closed the same day**:
+     that setting read `false` at `12:30Z` and `true` at `13:12Z`. **Retarget the dependent first —
+     §6's guard is the only thing that works.** Stated precisely because the only measurement
      of the *trigger* confounds them: quince#384 closed one second after quince#377 merged with
      `--rebase --delete-branch`, a single act. Canon behaves as though deletion is the cause because
      that is what §6 guards; nobody has separated **that** experimentally, and the instruction below
@@ -235,13 +236,13 @@ repo is not a message bus, and no human is an RPC layer.
    to it when the checks finish.** Check completion does not move `updatedAt` — hence
    `event=mergeability status=CLEAN` (quince#65), and quince#63 sitting landable for sixteen minutes.
 
-   **Three things measured.** `allow_auto_merge` is `true` on `novkostya/quince` and **`false` on
-   `novkostya/quince-devlog`** — enabling it there is an Operator action, since no agent identity
-   holds `administration`, so **the devlog's path is retry, then the Operator**. And **the App CAN
-   enable auto-merge, and it FIRES**: measured 2026-08-07 on quince#692 — armed at `12:46:27Z`
-   (`enabledBy: quince-review`, `mergeMethod: REBASE`, read back through the API rather than inferred
-   from an exit code) and merged **unattended** at `12:50:50Z`, four minutes later, when the checks
-   went green.
+   **Measured, and `allow_auto_merge` is now `true` on BOTH repositories** — the Operator enabled it
+   on `novkostya/quince-devlog` on 2026-08-07, so **there is no longer a repo where the path is
+   retry-then-Operator.** Enabling it is an Operator action either way, since no agent identity holds
+   `administration`. And **the App CAN enable auto-merge, and it FIRES**: measured 2026-08-07 on
+   quince#692 — armed at `12:46:27Z` (`enabledBy: quince-review`, `mergeMethod: REBASE`, read back
+   through the API rather than inferred from an exit code) and merged **unattended** at `12:50:50Z`,
+   four minutes later, when the checks went green.
 
    **A `(unmeasured)` is a DEBT, not a decoration.** It names an experiment nobody has run, and the
    seat that meets one should run it rather than route around it — a marker left standing is a
