@@ -578,8 +578,21 @@ byte size.
    side**: a walk crossing a backup uploads a half-transferred tree as though it were verified. That
    is why PR 4 carries the `deploy/storage.md` wording rather than leaving it to quince#735.
 4. **Whether the real `idevicebackup2` tolerates a symlink at its `<target>/<udid>`** is read from
-   source (fact 3) and not run. H1 is the first execution. If it does not, D1's rejected alternative
-   (c) — a sixth patch — is the fallback, and it is a spec change, not an implementation detail.
+   source (fact 3) and not run. **H1 is the first execution**, and it is the shim's whole risk.
+   **If it does not, the fallback is D1's alternative (a)** — `latest/` becomes the target and the
+   tree is `latest/<udid>/` — **not** a sixth libimobiledevice patch. Corrected 2026-08-08 after the
+   Operator raised the `<target>/<UDID>` constraint on quince#591: this item named the patch, and a
+   patch is strictly more expensive than a shape that is available today and needs no upstream
+   change. Either way it is a spec change rather than an implementation detail, because it moves
+   where committed content sits inside a snapshot.
+
+   **The trade between the two is one fact and it is worth having written down**, since a future
+   reader meeting a symlink will ask why: (a) has no runtime uncertainty, and it moves the content to
+   `latest/<udid>/`, so **every snapshot taken before `qn.6h` stops being browsable** — silently,
+   because `browseRoot` resolving to an absent path is an empty browse and not an error. The shim
+   keeps `latest/`'s layout byte-identical, so old snapshots keep working and `browseRoot` needs no
+   change at all. *Migration is out of the table* (Operator, 2026-08-08) is licence not to **build** a
+   migration path; the shim is the option that does not need one.
 5. **Whether a zfs version row can actually hold a nil `ZFSSnapshot`** is unresolved, and D7 is
    deliberately built so the answer does not matter: browse refuses rather than falling back. If
    somebody later establishes the nil case is unreachable, D7's guard becomes belt-and-braces and
