@@ -1279,9 +1279,10 @@ and both were wrong for the same reason — the argument priced a population of 
 does not exist.
 
 **Everything else**: `/data/config.yml` — single source of truth, edited by the UI and
-by hand equally (stack D12: atomic validated writes, canonical order + generated
-doc-comments, file-watch pickup, invalid edits keep last-good + UI banner, no secrets
-ever).
+by hand equally (stack D12: atomic validated writes, canonical order, **only the keys the user set
+and no generated annotation** — ruled 2026-08-08, quince#728; this line said *"canonical order +
+generated doc-comments"* until then — file-watch pickup, invalid edits keep last-good + UI banner, no
+secrets ever).
 
 **THE TWO EDITING PATHS DIFFER TODAY, AND THAT IS A RULING'S COST RATHER THAN AN OVERSIGHT.**
 A setting changed **through the UI applies immediately**; the **same setting hand-edited in
