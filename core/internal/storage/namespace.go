@@ -112,7 +112,7 @@ func (b *namespaceBackend) Commit(req CommitReq) (Committed, error) {
 		Encrypted: req.Verify.Encrypted, StructureVerifiedAt: fmtRFC(svAt),
 		LogicalBytes: req.Verify.LogicalBytes, JobDir: tree, PrevTS: prevTS,
 	}
-	if err := writeJournal(dev, j); err != nil {
+	if err := writeJournal(nsJournal(dev), j); err != nil {
 		return Committed{}, err
 	}
 	if err := b.finishRotation(&j); err != nil {
@@ -141,7 +141,7 @@ func (b *namespaceBackend) finishRotation(j *Journal) error {
 			}
 		}
 		j.Phase = PhaseExchanged
-		if err := writeJournal(dev, *j); err != nil {
+		if err := writeJournal(nsJournal(dev), *j); err != nil {
 			return err
 		}
 	}
@@ -162,19 +162,30 @@ func (b *namespaceBackend) finishRotation(j *Journal) error {
 			}
 		}
 		_ = os.RemoveAll(workingParent(b.backups, j.UDID))
-		removeWorkState(b.backups, j.UDID)
+		removeWorkStateAt(nsWorkSentinel(b.backups, j.UDID))
 		j.Phase = PhaseArchived
-		if err := writeJournal(dev, *j); err != nil {
+		if err := writeJournal(nsJournal(dev), *j); err != nil {
 			return err
 		}
 	}
 
-	return removeJournal(dev)
+	return removeJournal(nsJournal(dev))
+}
+
+// latestHasVersion reports whether latest/ already carries the given version's marker — the
+// idempotency guard for the non-idempotent exchange (a re-run must not swap twice).
+//
+// It lived in zfs.go until qn.6h, which is where it was born and where it stopped being needed: in
+// place there is no exchange to make idempotent, so the zfs commit path dropped both the exchange
+// and the guard. This is now purely the namespace backends' and lives with them.
+func latestHasVersion(latest, versionID string) bool {
+	m, err := ReadMarker(latest)
+	return err == nil && m.VersionID == versionID
 }
 
 func (b *namespaceBackend) ResumeCommit(j Journal) (Committed, bool, error) {
 	if j.Phase == PhaseArchived {
-		_ = removeJournal(deviceDir(b.backups, j.UDID))
+		_ = removeJournal(nsJournal(deviceDir(b.backups, j.UDID)))
 		c, err := b.committedFromLatest(j.UDID)
 		return c, true, err
 	}
@@ -212,7 +223,7 @@ func (b *namespaceBackend) RepairWorkingCopy(udid string) error {
 	if err := os.RemoveAll(workingParent(b.backups, udid)); err != nil {
 		return err
 	}
-	removeWorkState(b.backups, udid)
+	removeWorkStateAt(nsWorkSentinel(b.backups, udid))
 	b.log.Info("storage: reset — discarded dirty working copy", "backend", b.name, "udid", udid)
 	return nil
 }

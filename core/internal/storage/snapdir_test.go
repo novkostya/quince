@@ -31,9 +31,12 @@ func TestBrowseRootNeverResolvesToTheLiveTreeOnZFS(t *testing.T) {
 		}
 	})
 
-	t.Run("a snapshot still resolves into .zfs", func(t *testing.T) {
+	// The version's content is the SNAPSHOT ROOT with no trailing component (D7) — the tree is the
+	// dataset root, so a snapshot of it IS the tree. It was <snap>/latest until qn.6h, which is why
+	// pre-qn.6h snapshots are not browsable: ruled, with no dual-read fallback.
+	t.Run("a snapshot resolves to the snapshot ROOT", func(t *testing.T) {
 		snap := "tank/b/" + udid + "@quince-2026-08-08-0000"
-		want := filepath.Join(root, udid, ".zfs", "snapshot", "quince-2026-08-08-0000", "latest")
+		want := filepath.Join(root, udid, ".zfs", "snapshot", "quince-2026-08-08-0000")
 		if got := browseRoot(root, udid, BackendZFS, &snap, true, when); got != want {
 			t.Errorf("browseRoot = %q, want %q", got, want)
 		}

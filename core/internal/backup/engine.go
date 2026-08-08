@@ -304,11 +304,19 @@ func (e *Engine) CancelJob(id string) (wire.Job, int, string) {
 	return jobToWire(row), http.StatusAccepted, ""
 }
 
-// ResetWorking discards a device's dirty working/ so the next backup starts clean from latest/ (the
-// qn.5b Reset action, contracts §1 POST /api/devices/{udid}/reset-working). It refuses 409 while a
-// backup is running for the device — resetting mid-backup would yank the tree from under
-// idevicebackup2 — and 404s an unknown device. Idempotent: a device with no working/ is already
-// clean (→ 202). It NEVER touches a committed version (Reset only discards the mutable working/).
+// ResetWorking discards a device's dirty work area so the next backup starts clean (the qn.5b Reset
+// action, contracts §1 POST /api/devices/{udid}/reset-working). What "discard" MEANS is the
+// backend's: the seeding backends remove working/, and zfs rolls the dataset back to the newest
+// @quince-* snapshot (qn.6h). It 404s an unknown device, and is idempotent — a device with nothing
+// to abandon is already clean (→ 202). It NEVER touches a committed version.
+//
+// THE 409 BELOW IS LOAD-BEARING FOR CORRECTNESS, NOT TIDINESS, and it reads like a politeness check,
+// which is exactly why this says so. Measured on real ZFS 2026-08-08: a `zfs rollback` removes files
+// from under an ACTIVE WRITER and gives an error to NEITHER side — a loop that reopened its path
+// every 50 ms had its file deleted and recreated it immediately, silently. So the safety of
+// resetting a mounted dataset is quince's guard, not ZFS's. If this check regressed, the symptom
+// would be a rolled-back tree instantly re-dirtied with nothing logged anywhere: a backup that goes
+// on to report success over a tree missing everything written before the reset.
 func (e *Engine) ResetWorking(udid, storageID string) (int, string) {
 	if !validUDID(udid) {
 		return http.StatusNotFound, "unknown device"
@@ -631,14 +639,16 @@ type runningTool struct {
 	cmd     *exec.Cmd
 	ss      *superviseState
 	readers *sync.WaitGroup
-	tree    string // working/<udid> — where Manifest.db churns; the sampler watches this
+	tree    string // <target>/<UDID> — where Manifest.db churns; the sampler watches this
 }
 
 // startTool builds + starts idevicebackup2 (with --gate when gatePath != "") and begins draining its
 // stdout/stderr. The caller MUST eventually call runToolLoop (which Waits + maps the outcome) OR call
 // rt.cancel() + rt.readers.Wait() + rt.cmd.Wait() on an abort — else the child and its context leak.
-// qn.5b: target IS the working/ parent handed to idevicebackup2; the tool writes the tree into
-// <target>/<UDID> by its own convention (no symlink stub; free-space statfs truthful by construction).
+// TARGET IS WHATEVER THE BACKEND HANDED BACK, and the tool writes the tree into <target>/<UDID> by
+// its own convention — no symlink stub, and free-space statfs truthful by construction because the
+// target is inside the storage. qn.5b made that the working/ parent; qn.6h makes it the PARENT
+// DATASET on zfs, so the tool's own convention lands the tree in the child dataset root.
 func (e *Engine) startTool(parent context.Context, lj *liveJob, target, gatePath string) (*runningTool, error) {
 	udid := lj.row.UDID
 	runCtx, cancel := context.WithCancel(parent)

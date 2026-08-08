@@ -29,7 +29,8 @@ func validUDID(udid string) bool { return udidPattern.MatchString(udid) }
 // deviceDir is <backupsRoot>/<udid> — the device's storage root on every backend.
 func deviceDir(backupsRoot, udid string) string { return filepath.Join(backupsRoot, udid) }
 
-// Unified layout (qn.5b — the two version models collapse toward one). Every backend now shares:
+// THE NAMESPACE layout (reflink / hardlink / copy). qn.5b collapsed the two version models toward
+// one and qn.6h moved zfs back out of it, so this is no longer "unified" — see the zfs block below.
 //
 //	latestDir      <deviceDir>/latest          the newest committed version's live directory;
 //	                                            permanent between backups; the sole rclone payload.
@@ -41,13 +42,24 @@ func deviceDir(backupsRoot, udid string) string { return filepath.Join(backupsRo
 //	                                            on failure so a retry resumes.
 //	workingTree    <deviceDir>/working/<udid>  where idevicebackup2 writes and quince verifies;
 //	                                            exchanged into latestDir at commit.
-//	workSentinel   <deviceDir>/.quince-work.json   records whether working was seeded from an
+//	nsWorkSentinel <deviceDir>/.quince-work.json   records whether working was seeded from an
 //	                                            existing latest/ (⇒ the authoritative full|
 //	                                            incremental kind); survives crash/resume; lives
 //	                                            OUTSIDE working/ so it never rides into latest/.
 //
-// Namespace backends additionally keep versions/<ts>/ for rotated-out prior versions (zfs versions
-// are snapshots, so there is no versions/ dir — between backups the dataset holds only latest/).
+// Namespace backends additionally keep versions/<ts>/ for rotated-out prior versions.
+//
+// THE ZFS layout (qn.6h D1, Operator ruling 2026-08-08) has none of the above. `deviceDir` IS the
+// backup tree — the child dataset's mountpoint — and idevicebackup2's target is the PARENT:
+//
+//	<backups>/                            the parent dataset; the tool's target
+//	<backups>/<udid>/                     the child dataset root == deviceDir == THE TREE
+//	<backups>/.quince-work-<udid>.json    zfsWorkSentinel — in the PARENT, so it can never
+//	                                       ride into a snapshot
+//	<backups>/.quince-commit-<udid>.json  zfsJournal — same reason, same place
+//
+// A version is a @quince-* snapshot of the child, so there is no latest/, no working/ and no
+// versions/ dir: between backups the dataset holds only the backup tree and its marker.
 func latestDir(backupsRoot, udid string) string {
 	return filepath.Join(deviceDir(backupsRoot, udid), "latest")
 }
@@ -57,8 +69,44 @@ func workingParent(backupsRoot, udid string) string {
 func workingTree(backupsRoot, udid string) string {
 	return filepath.Join(workingParent(backupsRoot, udid), udid)
 }
-func workSentinel(backupsRoot, udid string) string {
+func nsWorkSentinel(backupsRoot, udid string) string {
 	return filepath.Join(deviceDir(backupsRoot, udid), workSentinelName)
+}
+
+// zfsWorkSentinel puts the work sentinel in the PARENT dataset (qn.6h D3). On zfs `deviceDir` is the
+// backup tree itself, so the namespace path would drop quince's bookkeeping into the directory the
+// tool writes, an external reader treats as an iTunes backup, and the snapshot captures. Here it is
+// outside the child dataset entirely, which is why commit no longer has to remove it before
+// snapshotting for the snapshot to be clean.
+//
+// The tool never touches it either: idevicebackup2 writes only under <target>/<UDID>, and this sits
+// beside that directory rather than in it.
+func zfsWorkSentinel(backupsRoot, udid string) string {
+	return filepath.Join(backupsRoot, zfsSidecarPrefix+"work-"+udid+".json")
+}
+
+// zfsJournal is the commit journal's zfs path, in the PARENT for exactly zfsWorkSentinel's reason.
+//
+// NOT IN THE SPEC'S BOUNDARY, WHICH LISTS journal.go AS DOC-ONLY — and that is an omission rather
+// than a decision. D2 says the child dataset holds "only the tree and its marker", and the journal is
+// written BEFORE the snapshot and removed after it, so left at <deviceDir>/.quince-commit.json it
+// rides into every committed version. It is the same class of object as the sentinel, moved for the
+// same reason, so the ruled invariant decides it.
+func zfsJournal(backupsRoot, udid string) string {
+	return filepath.Join(backupsRoot, zfsSidecarPrefix+"commit-"+udid+".json")
+}
+
+// zfsSidecarPrefix names the parent-level per-device sidecars, so a scan can find them and a human
+// can see at a glance which files in the parent are quince's bookkeeping rather than a dataset.
+const zfsSidecarPrefix = ".quince-"
+
+// workSentinelFor is the sentinel path WITHOUT a Backend in hand — seedKind asks from the Manager,
+// which holds slots rather than backends.
+func workSentinelFor(backend, backupsRoot, udid string) string {
+	if backend == BackendZFS {
+		return zfsWorkSentinel(backupsRoot, udid)
+	}
+	return nsWorkSentinel(backupsRoot, udid)
 }
 func nsVersions(backupsRoot, udid string) string {
 	return filepath.Join(deviceDir(backupsRoot, udid), "versions")
@@ -96,14 +144,23 @@ func browseRoot(backupsRoot, udid, backend string, zfsSnapshot *string, isLatest
 		if zfsSnapshot == nil {
 			return ""
 		}
-		// qn.5b: the version content lives at latest/ INSIDE the snapshot (was working/) — the
-		// commit exchanges the tree into latest/ before snapshotting, so the snapshot IS latest/.
-		return filepath.Join(deviceDir(backupsRoot, udid), ".zfs", "snapshot", snapName(*zfsSnapshot), "latest")
+		return zfsSnapRoot(backupsRoot, udid, snapName(*zfsSnapshot))
 	}
 	if isLatest {
 		return latestDir(backupsRoot, udid)
 	}
 	return nsVersionDir(backupsRoot, udid, createdAt)
+}
+
+// zfsSnapRoot is a committed version's content inside its snapshot: the SNAPSHOT ROOT, with no
+// trailing component (qn.6h D7). The tree is the dataset root, so a snapshot of it is the tree.
+//
+// PRE-qn.6h SNAPSHOTS HOLD THEIR CONTENT AT <snap>/latest/ AND ARE NOT BROWSABLE. Ruled 2026-08-08
+// with no dual-read fallback: a marker read here finds nothing and the snapshot is skipped — which
+// must be LOGGED (story 14), because an unbrowsable version that says nothing is indistinguishable
+// from one that was never taken.
+func zfsSnapRoot(backupsRoot, udid, snap string) string {
+	return filepath.Join(deviceDir(backupsRoot, udid), snapdirName, "snapshot", snap)
 }
 
 // dirSize sums regular-file sizes under root (best-effort; errors → what we could count). Used

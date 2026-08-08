@@ -332,7 +332,7 @@ func (m *Manager) SeedWork(udid, jobID string) error {
 // the sentinel is missing it infers from whether the device already has a committed version, never
 // from Status.plist.IsFullBackup (which the lab proved lies).
 func (m *Manager) seedKind(s Slot, udid string) string {
-	if w, ok, err := readWorkState(s.Root, udid); err == nil && ok {
+	if w, ok, err := readWorkStateAt(workSentinelFor(s.BackendName, s.Root, udid)); err == nil && ok {
 		return w.kindOf()
 	}
 	// SCOPED TO THIS STORAGE, and this is the line story 8's claim rests on. "Does this device
