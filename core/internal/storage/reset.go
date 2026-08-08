@@ -66,7 +66,7 @@ func (m *Manager) RepairWorking(udid, storageID string) (int, string) {
 
 	switch len(dirty) {
 	case 0:
-		return http.StatusAccepted, "nothing to reset — no working copy on any storage" + notInspected(blind)
+		return http.StatusAccepted, "nothing to reset — no backup in progress on any storage" + notInspected(blind)
 	case 1:
 		status, reason := m.repairOn(dirty[0], udid)
 		if status == http.StatusAccepted {
@@ -87,9 +87,17 @@ func (m *Manager) repairOn(s Slot, udid string) (int, string) {
 	}
 	// A DESTRUCTIVE ACTION WHOSE LOG DOES NOT SAY WHICH DISK is not much of a record.
 	m.appendAudit("working.reset", fmt.Sprintf("udid=%s storage=%s (%s)", udid, s.Name, s.StorageID))
-	m.log.Info("storage: reset — discarded dirty working copy",
+	// SAYS WHAT HAPPENED, NOT HOW — because the how differs per backend and this line does not know
+	// it. The seeding backends remove a working/ directory; zfs rolls the dataset back to its newest
+	// snapshot and has no working copy at all. Each backend logs its own mechanism immediately above
+	// this, so the shared line only has to be TRUE of both.
+	//
+	// It said "discarded the working copy" until quince#747, and on the staging stand that sentence
+	// was printed for a rollback — a real action described by a mechanism that does not exist on that
+	// backend, in the words the user reads to learn what happened to their data.
+	m.log.Info("storage: reset — discarded the in-progress backup",
 		"udid", udid, "storage", s.Name, "storage_id", s.StorageID)
-	return http.StatusAccepted, "discarded the working copy on storage " + s.Name
+	return http.StatusAccepted, "discarded the in-progress backup on storage " + s.Name
 }
 
 func nameList(ss []Slot) string {

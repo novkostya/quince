@@ -101,15 +101,34 @@ func (b *zfsBackend) Provision(udid string) error {
 // condition the skips exist for is live on this dataset, so a reader of the logs can tell the
 // "safe by luck" case from the "safe because we skip" one.
 //
-// Statting the directory is the whole probe. Reading the ZFS property would need a `get` verb the
-// constrained helper does not have, and adding one would cost an operator hand-edit to learn
-// something the filesystem already answers.
+// IT MUST BE A readdir, NOT A stat, AND THAT IS THE WHOLE CORRECTNESS OF THIS FUNCTION. `.zfs` is
+// reachable by explicit path on EVERY zfs dataset — `snapdir=hidden` removes it from directory
+// LISTINGS and nothing else — so `os.Stat` succeeds regardless of the setting and cannot tell the
+// two cases apart. This shipped as a stat in quince#745 and printed "snapdir is visible" against a
+// `hidden` dataset on the staging stand within the hour. Measured there 2026-08-08:
+//
+//	ls -d <dev>/.zfs            → <dev>/.zfs      (stat succeeds)
+//	ls -a <dev> | grep -c .zfs  → 0               (not listed: hidden)
+//
+// A listing is also what "visible" MEANS to ZFS and what the hazard depends on: a walker finds `.zfs`
+// by reading the directory, so a `.zfs` that no readdir returns cannot be walked into.
+//
+// Reading the ZFS property itself would need a `get` verb the constrained helper does not have, and
+// adding one would cost an operator hand-edit to learn something the filesystem already answers.
 func (b *zfsBackend) assertSnapdir(udid, dev string) {
-	if _, err := os.Stat(filepath.Join(dev, snapdirName)); err == nil {
+	entries, err := os.ReadDir(dev)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.Name() != snapdirName {
+			continue
+		}
 		b.log.Info("storage: zfs snapdir is visible on this dataset — quince's tree walkers skip "+
 			"the snapshot directory explicitly (qn.6h condition 2), so verify, logical_bytes and the "+
 			"first-backup check do not descend into snapshots",
 			"udid", udid, "snapdir", filepath.Join(dev, snapdirName))
+		return
 	}
 }
 

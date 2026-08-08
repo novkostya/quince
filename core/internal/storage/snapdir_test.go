@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +95,54 @@ func TestWalkersStepOverTheSnapshotDirectory(t *testing.T) {
 		}
 		if n := dirSize(tree); n != 100 {
 			t.Errorf("dirSize = %d, want 100 — the skip must not hide real content", n)
+		}
+	})
+}
+
+// D8 condition 2's ASSERTION, as opposed to the skips it announces (quince#747).
+//
+// The claim under test is narrow and was got wrong once: the probe must key on whether `.zfs` is
+// RETURNED BY A DIRECTORY READ, not on whether it can be stat'd. Every zfs dataset can stat it —
+// `snapdir=hidden` removes it from listings only — so a stat-based probe says "visible" about every
+// dataset in existence, which is what shipped and what a staging log caught.
+//
+// WHAT THIS FIXTURE CAN AND CANNOT PROVE, said plainly: on an ordinary filesystem a directory entry
+// that exists is always listed, so the HIDDEN case — stat succeeds, readdir omits — cannot be built
+// here. What it proves is that the probe now reads the listing, which is the property that
+// discriminates; that a listing is what ZFS means by `visible` is a fact about ZFS, measured on the
+// staging stand rather than asserted here.
+func TestSnapdirProbeReadsTheListingRatherThanStatting(t *testing.T) {
+	logs := &strings.Builder{}
+	be := &zfsBackend{log: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))}
+
+	t.Run("a listed .zfs is announced", func(t *testing.T) {
+		dev := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dev, snapdirName, "snapshot"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		logs.Reset()
+		be.assertSnapdir(testUDID, dev)
+		if !strings.Contains(logs.String(), "snapdir is visible") {
+			t.Error("a .zfs that appears in the listing must be announced — that is the case the " +
+				"walker skips exist for")
+		}
+	})
+
+	t.Run("a dataset with no .zfs says nothing", func(t *testing.T) {
+		dev := t.TempDir()
+		goodEncryptedFull(t, dev)
+		logs.Reset()
+		be.assertSnapdir(testUDID, dev)
+		if strings.Contains(logs.String(), "snapdir") {
+			t.Errorf("nothing to announce, but it said: %s", logs.String())
+		}
+	})
+
+	t.Run("an unreadable device dir is silent, not a crash", func(t *testing.T) {
+		logs.Reset()
+		be.assertSnapdir(testUDID, filepath.Join(t.TempDir(), "does-not-exist"))
+		if logs.String() != "" {
+			t.Errorf("an absent dir must produce no claim either way: %s", logs.String())
 		}
 	})
 }
