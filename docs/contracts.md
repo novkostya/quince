@@ -278,10 +278,25 @@ POST /api/devices/{udid}/wifi-sync
      // unconfirmed does NOT appear on the one path where an unreadable read-back is EXPECTED:
      // disabling over Wi-Fi severs the connection the read-back would use, so there the op
      // SUCCEEDS and the value becomes wifi_sync: "unknown" (ruled quince#363).
-POST /api/devices/{udid}/reset-working {storage_id?} → 202 {note} | 404 | 409 | 503
+POST /api/devices/{udid}/reset-working {storage_id?} → 202 {note} | 404 | 409 | 500 | 503
+     // qn.6h ADDS A FAILURE THE ZFS BACKEND CAN RETURN, and it is the one code here that means
+     // "nothing happened": 500 {note} when the backend REFUSED to abandon. Reset is a `zfs
+     // rollback` on that backend, and ZFS can decline it — most often because a snapshot NEWER
+     // than the one quince would restore exists (a host snapshotter firing every few minutes is
+     // enough), less often because the mount is busy. The note carries `zfs`'s own words verbatim
+     // and names the remedy for THE FAILURE THAT OCCURRED — for a newer snapshot, destroy the
+     // intervening ones or do nothing because the head is still resumable; for a busy mount, stop
+     // the container. Offering the wrong one is a state-honesty failure, since stopping the
+     // container does nothing in the first case. On this path the head stays dirty, the work
+     // sentinel stays, NO audit line is written (nothing was discarded), and quince does NOT
+     // retry — a retry is the identical call against the identical mount.
+     //
      // qn.5b Reset (accepted contract proposal, decisions (co)): DISCARD the device's dirty
-     // working/ so the next backup starts clean from latest/ — losing only the partial, NEVER a
-     // committed version. Idempotent (a device with no working/ is already clean → 202). 409 while
+     // work area so the next backup starts clean — losing only the partial, NEVER a committed
+     // version. WHAT "discard" MEANS IS THE BACKEND'S: reflink/hardlink/copy remove working/;
+     // zfs rolls the dataset back to its newest @quince-* snapshot (qn.6h), or empties the head
+     // when the device has no committed version to roll back to.
+     // Idempotent (a device with nothing to abandon is already clean → 202). 409 while
      // a backup is running for the device (single-flight; cancel it first); 404 unknown device;
      // 503 no backup engine wired (--demo). The backend op is RepairWorkingCopy (CLI:
      // `quince device reset-working <udid>`). The honest COMPANION of a kept-dirty working/: on
@@ -302,7 +317,11 @@ POST /api/devices/{udid}/reset-working {storage_id?} → 202 {note} | 404 | 409 
      // REFUSE AND NAME RATHER THAN GUESS WELL: a dirty working/ is a resumable multi-hour
      // partial, so "reset all" would discard a transfer on a disk the user was not
      // thinking about — the same answer quince#435 gave a job that names no storage.
-     // "Dirty" is `working/<udid>` existing, INCLUDING a killed seed. Unreachable storages
+     // "DIRTY" IS A BACKEND QUESTION SINCE qn.6h and the two no longer agree: on
+     // reflink/hardlink/copy it is `working/<udid>` existing, INCLUDING a killed seed; on zfs it
+     // is the WORK SENTINEL existing, because the tree is the dataset root and there is no
+     // working/ to stat. A populated zfs head is NOT dirty by itself — that is the steady state
+     // between backups. Unreachable storages
      // are NAMED as not-inspected, never silently skipped. CLI: `--storage <name>`.
      // No deployment with one storage can reach the new refusal.
 GET  /api/ops/{op_id}                  → Op

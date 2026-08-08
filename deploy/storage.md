@@ -84,13 +84,20 @@ client — the client cannot escape it):
 ```sh
 #!/bin/sh
 # Constrained ZFS helper for quince. Allows ONLY:
-#   snapshot|destroy|list on @quince-* snapshots under $PARENT, create of children of $PARENT,
-#   and `seed` (clone latest/ → working/<udid> host-side — the mutable work area, never a snapshot).
+#   snapshot|destroy|rollback on @quince-* snapshots under $PARENT, list under $PARENT,
+#   create of children of $PARENT, and capacity (which takes no argument at all).
 # Dataset destroy is intentionally NOT reachable.
-# qn.5b MIGRATION: the old `mirror` verb (rebuild latest/ from working/) is REPLACED by `seed`
-#   (clone latest/ → working/<udid>) — the reflink moved from commit-time to job-start. The atomic
-#   latest/ swap is now an in-container renameat2(RENAME_EXCHANGE) done by quince (no privilege).
-#   Operators upgrading MUST replace the mirror) case below with the seed) case.
+#
+# EVERY VERB IS NOW O(1) AND LIFECYCLE-INDEPENDENT, which is qn.6h's prize: this script no longer
+# contains any of quince's backup lifecycle, so quince can change how it writes without asking
+# anyone to hand-edit a file on a machine it does not manage.
+#
+# CHANGED VERBS, for an operator upgrading an existing helper — two edits, no procedure:
+#   - DELETE the `seed)` case (qn.5b's clone of latest/ → working/<udid>). quince no longer seeds
+#     on this backend: the tool writes straight into the dataset root.
+#   - ADD the `rollback)` case below. It is what Reset uses, and until it is present the FIRST
+#     reset a user asks for fails with this script's own `refused:` line on stderr.
+# Nothing else changes, and backups keep working across the gap: only reset needs the new verb.
 set -eu
 PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
 CTUID=0   # container's mapped root uid: 0 for privileged/native; the userns base (e.g. 100000)
@@ -115,28 +122,6 @@ case "$op" in
             # i.e. committed versions. So this verb structurally cannot lose one.
             case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-  seed)     # qn.5b: clone latest/ → working/<udid> HOST-side (where FICLONE works even when the
-            # container's unprivileged userns forbids it — gate-12 finding), then chown it so the
-            # in-container idevicebackup2 can WRITE it and quince can EXCHANGE it. Touches ONLY the
-            # mutable working area, NEVER a snapshot or the committed latest/: bounded blast radius.
-            # Reports SHARED/COPIED so quince makes an honest space claim (stack D5 (bi)/(bk)).
-            case "$target" in "$PARENT"/*)
-              mp=$(zfs get -H -o value mountpoint "$target") || exit 1
-              [ -d "$mp/latest" ] || { echo "no latest/ to seed from" >&2; exit 1; }
-              udid=${target##*/}
-              rm -rf "$mp/working/$udid"; mkdir -p "$mp/working"
-              # Chown the PARENT only: mkdir makes it root-owned, but `cp -a` below PRESERVES
-              # latest/'s ownership (already the container uid), so a recursive chown is redundant —
-              # and it is NOT free: it re-walks every file (measured 4.7 s on a 133k-file tree, and
-              # it grows with file count). Hardware finding (cs).
-              chown "$CTUID:$CTUID" "$mp/working"
-              a0=$(zfs get -Hp -o value available "$target")
-              cp -a --reflink=always "$mp/latest" "$mp/working/$udid"   # reflink seed under the job lock
-              zpool sync "${PARENT%%/*}" 2>/dev/null || sync            # settle txg accounting
-              a1=$(zfs get -Hp -o value available "$target")
-              sz=$(du -sb "$mp/working/$udid" | cut -f1); drop=$((a0 - a1))
-              [ "$drop" -lt $((sz / 2)) ] && echo SHARED || echo COPIED # pool-level sharing verdict
-              exit 0 ;; esac ;;
   capacity) # qn.6d: the storage card's free-of-total. NO caller argument reaches zfs — the verb
             # takes none, and $PARENT is the helper's own. That makes it TIGHTER than the arms
             # above, which accept a pattern-guarded $target.
@@ -147,7 +132,7 @@ exit 1
 ```
 
 **⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case above**, the same way the header
-records the `qn.5b` `mirror)` → `seed)` replacement. Without it every zfs storage card reads *"free
+records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
 space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
 Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
 number rather than showing a wrong one — which is why this is a migration note rather than a
@@ -181,29 +166,33 @@ Teaching `list` to forward flags was the tempting fix and was refused: the same 
 arbitrary `zfs list` arguments, and *"dataset destroy is intentionally NOT reachable"* would stop
 being checkable by reading these five case arms.
 
-**The `seed` verb is DEAD CODE ON THE HOST as of qn.6h and quince never calls it.** There is no
-job-start clone on this backend any more — the tool writes into the dataset root — so the paragraph
-below describes a verb that still sits in your script and is never invoked. Removing it from the
-helper (and this text with it) is a one-line follow-up, deliberately kept separate from the code
-change so the host edit is not required on the same day.
+**The `rollback` verb (qn.6h) is what Reset uses**, and it is the only verb that changes a device's
+live data. It returns the device dataset to its newest `@quince-*` snapshot, discarding whatever a
+failed job left in the head. **It structurally cannot lose a committed version, and that is a
+property of the parse rather than of quince's restraint:** the helper discards every flag, so
+`rollback -r <snap>` reaches `zfs` as a plain `zfs rollback <snap>` — and a plain rollback refuses
+any snapshot but the most recent, while `-r`/`-R` are exactly what destroy newer ones. Measured
+through this script on real ZFS, 2026-08-08: `-r` was discarded and the newer snapshot survived; a
+non-`@quince-*` target was refused; `destroy <dataset>` with no `@` was refused.
 
-The `seed` verb (qn.5b, replacing `mirror`): with a hook configured, quince delegates the job-start
-clone of `latest/` → `working/<udid>` to the host, where block cloning is not blocked by the
-unprivileged user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb
-touches only the mutable, rebuildable `working/` area — never a snapshot, never the committed
-`latest/` — so even a buggy verb cannot damage a canonical version. It emits `SHARED`/`COPIED` so
-quince reports an honest space claim rather than assuming zero-space. **Sizing (hardware-measured,
-(cs)):** the seed is **O(file count + blocks cloned)**, never O(1) — reflink makes it *space*-free,
-not *time*-free, because every file still costs `open`+`create`+`FICLONE`+metadata. A 133k-file /
-34 GB device clones in ~17.5 s warm (~7.6k files/s) and takes longer cold or when a previous
-`working/` must be removed first. quince therefore bounds the seed with its own generous
-`zfsSeedTimeout`, **not** the 60 s metadata-op timeout — reusing that one SIGKILLed a real 34 GB
-seed mid-clone. Budget minutes for large devices. **The atomic `latest/` swap
-itself is NOT in the hook** — at commit quince does an in-container `renameat2(RENAME_EXCHANGE)`
-(working/<udid> ⇄ latest/, no privilege, no window) and then the hook `snapshot`. Hookless
-deployments fall through the in-container seed ladder (reflink → copy; **never hardlink** — a
-hardlink seed would alias the committed `latest/`, gate 12c), reporting sharing UNVERIFIED where no
-measurement channel is available.
+**It cannot be probed, which is a stated cost.** `Test helper` fires `capacity` and `list` because
+both are harmless; there is no harmless way to test a rollback, since testing it means performing
+one. So a helper that never got the new case surfaces at the **first reset a user asks for**, as this
+script's own `quince-zfs-helper: refused: rollback …` on stderr. quince's job is to make that legible
+rather than to pretend it can be caught earlier.
+
+**`zfs rollback` also refuses whenever ANY newer snapshot exists — including a foreign one.** That is
+why the host snapshotter must be excluded (see REQUIRED SETUP above): an automatic snapshotter firing
+every few minutes means a `@quince-*` snapshot stops being the most recent within minutes of being
+taken, and from then on reset is refused. quince surfaces that refusal with `zfs`'s own words and
+tells the operator the dirty head is still resumable — it does not, and must not, destroy somebody
+else's snapshots to clear the path.
+
+**The old `seed` verb is GONE.** quince has no job-start clone on this backend any more: the tool
+writes straight into the dataset root, so there is nothing to seed from and nothing to seed into.
+Delete the case from your script — nothing calls it, and leaving it is a `cp -a --reflink` and an
+`rm -rf` reachable by a key that no longer needs them. Hookless deployments are likewise unaffected:
+the in-container seed ladder is not reached on zfs either.
 
 Then `storage.zfs.hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes zfsuser@zfshost"` (the helper
 runs regardless of the command text; quince appends the operation + target as argv).
