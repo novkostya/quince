@@ -614,9 +614,10 @@ onboarding, file-first truth.
 **Staged delivery** (external-review point, accepted): the full subsystem is the
 destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed config,
 YAML as source of truth, atomic canonical writes, `config validate`, a small Settings
-page for safe keys, restart-required for the rest. Generated doc-comments and the full
-transparent-editor UX land with qn.6 (the release gated on onboarding anyway). The
-contract (file-first, no secrets, no UI-only state) binds from day one.
+page for safe keys, restart-required for the rest. **Generated doc-comments are CANCELLED by the
+ruling above and land nowhere** — this sentence promised them "with qn.6" until 2026-08-08. The rest
+of the transparent-editor UX still lands with qn.6; file-watch is post-v0.1 and unallocated
+(quince#727). The contract (file-first, no secrets, no UI-only state) binds from day one.
 
 **`restart-required for the rest` DESCRIBES qn.1's PAYLOAD AND IS NO LONGER THE STATE OF THE
 PRODUCT.** `qn.6g` (quince#577) built propagation, so D12's *"needs no restart unless the spec says

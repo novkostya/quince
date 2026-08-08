@@ -46,7 +46,7 @@ and the only network listener.
 | `vault manager` | Spawns/kills `quince-vault` processes; owns session lifecycle (unlock → TTL/lock → wipe scratch); brokers RPC. |
 | `event bus` | In-process pub/sub; every state change is an event; WS handler fans out to subscribers with per-client send buffers (slow client → dropped connection, never a blocked publisher). |
 | `http api` | REST + WS per `contracts.md`; auth middleware (session cookie); serves embedded UI. |
-| `config` | Owns `/data/config.yml` (source of truth for all non-bootstrap settings, stack D12): schema+defaults, validation, atomic canonical writes with generated doc-comments, file watch → apply-or-keep-last-good with a UI banner; serves `GET/PUT /api/config`. |
+| `config` | Owns `/data/config.yml` (source of truth for all non-bootstrap settings, stack D12): schema+defaults, validation, atomic canonical writes of **only the keys the user set, with no generated annotation** (ruled 2026-08-08, quince#728; this row said *"with generated doc-comments"* until then), file watch → apply-or-keep-last-good with a UI banner; serves `GET/PUT /api/config`. |
 
 ## 3. Device model
 
