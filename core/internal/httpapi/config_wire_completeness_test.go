@@ -49,12 +49,12 @@ func TestGetConfigCarriesEveryGoField(t *testing.T) {
 		t.Fatalf("unmarshal config doc: %v", err)
 	}
 
-	missing := missingJSONKeys(reflect.TypeOf(config.Config{}), doc, "")
+	missing := missingJSONKeys(t, reflect.TypeOf(config.Config{}), doc, "")
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		t.Fatalf("GET /api/config is missing %d key(s) the Go type declares:\n  %s\n\n"+
-			"If this is an `omitempty` added to a `json:` tag, remove it — the yaml half is what "+
-			"qn.6j needs and the two are independent keys on one line. A sparse wire response makes "+
+			"If this is an `omitempty` or `omitzero` added to a `json:` tag, remove it — the "+
+			"WIRE must stay complete whatever the written file does. A sparse response makes "+
 			"the UI spread a partial document, and PUT then zeroes every key it did not carry "+
 			"(quince#493).", len(missing), strings.Join(missing, "\n  "))
 	}
@@ -68,14 +68,30 @@ func TestGetConfigCarriesEveryGoField(t *testing.T) {
 // this test's purposes only if the key itself is absent. `retention: null` is a value the client can
 // see and reason about; a dropped `retention` is not, and that is the distinction quince#493 turns
 // on.
-func missingJSONKeys(t reflect.Type, doc map[string]any, prefix string) []string {
-	t = derefType(t)
+//
+// AN ANONYMOUS FIELD IS A HARD FAILURE, NOT A SKIP. Go inlines an embedded struct's fields into the
+// parent object, which this walk does not model — so skipping one would silently stop covering part
+// of the type, inside the guard whose entire job is to notice a key nobody is checking. There are no
+// embedded fields in `config.Config` today; making it loud turns the day somebody adds one into a
+// failing test rather than a quiet hole. `jsonOmittingFields` handles inlining by recursing, so the
+// two walks would otherwise disagree about the same field.
+func missingJSONKeys(t *testing.T, typ reflect.Type, doc map[string]any, prefix string) []string {
+	t.Helper()
+	typ = derefType(typ)
 	var missing []string
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if f.Anonymous {
+			t.Fatalf("%s%s is an EMBEDDED field and this walk does not model json inlining — its "+
+				"keys appear in the parent object and nothing here checks them. Teach the walk, or "+
+				"give the field an explicit json name.", prefix, f.Name)
+		}
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "" || name == "-" {
+		if name == "-" {
 			continue
+		}
+		if name == "" {
+			name = f.Name // encoding/json falls back to the Go field name; so does this walk
 		}
 		path := prefix + name
 		v, ok := doc[name]
@@ -87,7 +103,7 @@ func missingJSONKeys(t reflect.Type, doc map[string]any, prefix string) []string
 		switch ft.Kind() {
 		case reflect.Struct:
 			if sub, ok := v.(map[string]any); ok {
-				missing = append(missing, missingJSONKeys(ft, sub, path+".")...)
+				missing = append(missing, missingJSONKeys(t, ft, sub, path+".")...)
 			}
 		case reflect.Slice:
 			elem := derefType(ft.Elem())
@@ -99,7 +115,7 @@ func missingJSONKeys(t reflect.Type, doc map[string]any, prefix string) []string
 				continue
 			}
 			if first, ok := items[0].(map[string]any); ok {
-				missing = append(missing, missingJSONKeys(elem, first, fmt.Sprintf("%s[0].", path))...)
+				missing = append(missing, missingJSONKeys(t, elem, first, fmt.Sprintf("%s[0].", path))...)
 			}
 		}
 	}
@@ -124,33 +140,56 @@ func derefType(t reflect.Type) reflect.Type {
 // failure is named after**, and a guard that misses its own headline example is worth less than it
 // reads.
 //
-// It also established something worth knowing before anyone reaches for the tag: **`omitempty` on a
-// STRUCT field is a no-op in encoding/json** — a struct is never "empty" — so `json:"zfs,omitempty"`
-// changes nothing at all. The droppable kinds are bool, string, numeric, pointer, slice and map. So
-// the hazard is real and NARROWER than "any key could vanish": the `zfs:` block cannot leave the
-// wire this way, and `manage_muxer` can.
+// TWO TAGS, TWO MECHANISMS, AND BOTH ARE REFUSED ON THE `json:` SIDE. This is the whole reason the
+// check greps the type rather than the file, and the second tag is the one that actually bites.
 //
-// This walks the TYPE and never a value, so it cannot be fooled by a fixture. It replaces the
-// `grep -c omitempty schema.go` the qn.6j spec proposed as G6, which cannot tell a `yaml:` tag from
-// a `json:` one — and qn.6j WANTS `omitempty` on the yaml side, so a grep would have to be
-// suppressed on the very PR it exists to guard.
-func TestNoJSONTagInConfigCarriesOmitempty(t *testing.T) {
-	offenders := jsonOmitemptyFields(reflect.TypeOf(config.Config{}), "", map[reflect.Type]bool{})
+//   - `omitempty` omits false, 0, "", a nil pointer/interface, and an empty slice/map/string.
+//     **NOT structs** — a struct is never "empty" — so `json:"zfs,omitempty"` changes nothing.
+//   - `omitzero` (Go 1.24; `core/go.mod` is at 1.25.0) omits the **zero value of the type, structs
+//     included**, and honours an `IsZero() bool` method if the type has one.
+//
+// **So `omitzero` is strictly more dangerous here, and it is also the tag a careful person reaches
+// for.** Asked to make a document carry *only what was set*, `omitzero` is what actually means
+// "unset"; `omitempty` is the older approximation that `qn.6j`'s D4 spends a paragraph rejecting. A
+// guard that matched only `omitempty` would be aimed at the option a reader would discard and blind
+// to the one they would choose.
+//
+// Measured, both of them, at this head:
+//
+//	json:"zfs,omitempty"  → the block STAYS on the wire (no-op on a struct)
+//	json:"tls,omitzero"   → the WHOLE `tls` object disappears from GET /api/config
+//
+// The response walk caught that `tls` case only because TLS happens to be zero in the fixture. On a
+// deployment with a certificate configured it would not have, which is `manage_muxer`'s escape in a
+// second guise — and the argument for having both checks.
+//
+// **`gopkg.in/yaml.v3` has no `omitzero`**, so refusing both costs the yaml half nothing.
+//
+// THIS DOES NOT REPLACE THE SPEC'S G6, and an earlier version of this comment said it did on a false
+// premise — that `qn.6j` wants `omitempty` on the yaml side, so a grep would have to be suppressed.
+// **D4 forbids the tag on BOTH sides**: *"No struct tag in `schema.go` gains `omitempty` in this
+// rung."* So G6's grep is correct for `qn.6j` and never needs suppressing. What this test adds is
+// that it stays correct for a rung that DOES want a yaml-side tag, where a grep could not tell the
+// two halves apart — and that a grep for `omitempty` would never have seen `omitzero` at all.
+func TestNoJSONTagInConfigOmitsAnything(t *testing.T) {
+	offenders := jsonOmittingFields(reflect.TypeOf(config.Config{}), "", map[reflect.Type]bool{})
 	if len(offenders) > 0 {
 		sort.Strings(offenders)
-		t.Fatalf("%d `json:` tag(s) carry `omitempty`:\n  %s\n\n"+
+		t.Fatalf("%d `json:` tag(s) can drop a key:\n  %s\n\n"+
 			"The WIRE must stay complete. A sparse GET /api/config makes the UI spread a partial "+
 			"document and PUT then zeroes every absent key (quince#493) — `devices.manage_muxer` "+
-			"going false stops quince supervising its muxers. qn.6j's tidy file is the `yaml:` "+
-			"half of the same tag line and is unaffected by this rule.",
+			"going false stops quince supervising its muxers. Neither `omitempty` nor `omitzero` "+
+			"belongs on a `json:` tag here; qn.6j's tidy file is a property of the WRITTEN DOCUMENT "+
+			"(the declared set, spec D2), not of either encoding tag.",
 			len(offenders), strings.Join(offenders, "\n  "))
 	}
 }
 
-// jsonOmitemptyFields reports every json-tagged field carrying `omitempty`, recursing through nested
-// structs and slice/pointer element types. `seen` guards against a recursive type; there is none
-// today and a test that hangs is a worse failure than one that reports.
-func jsonOmitemptyFields(t reflect.Type, prefix string, seen map[reflect.Type]bool) []string {
+// jsonOmittingFields reports every json-tagged field carrying an option that can drop the key —
+// `omitempty` or `omitzero` — recursing through nested structs and slice/pointer element types.
+// `seen` guards against a recursive type; there is none today and a test that hangs is a worse
+// failure than one that reports.
+func jsonOmittingFields(t reflect.Type, prefix string, seen map[reflect.Type]bool) []string {
 	t = derefType(t)
 	if t.Kind() != reflect.Struct || seen[t] {
 		return nil
@@ -168,7 +207,7 @@ func jsonOmitemptyFields(t reflect.Type, prefix string, seen map[reflect.Type]bo
 		}
 		path := prefix + name
 		for _, o := range strings.Split(opts, ",") {
-			if o == "omitempty" {
+			if o == "omitempty" || o == "omitzero" {
 				out = append(out, path)
 			}
 		}
@@ -176,7 +215,7 @@ func jsonOmitemptyFields(t reflect.Type, prefix string, seen map[reflect.Type]bo
 		if ft.Kind() == reflect.Slice || ft.Kind() == reflect.Array {
 			ft = derefType(ft.Elem())
 		}
-		out = append(out, jsonOmitemptyFields(ft, path+".", seen)...)
+		out = append(out, jsonOmittingFields(ft, path+".", seen)...)
 	}
 	return out
 }
