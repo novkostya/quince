@@ -136,12 +136,24 @@ func TestResetOnAnUnreachableStorageRefusesWithItsReason(t *testing.T) {
 // UNREACHABLE STORAGES ARE NAMED, NEVER SILENTLY SKIPPED. One that cannot be read cannot be
 // inspected for dirtiness, so a successful reset must not imply the others were checked and found
 // clean — "no silent caps" applies to what we could not look at.
+//
+// IT ALSO GUARDS A PANIC, and that second duty is written down because it is not in the name. The
+// slot appended below is unreachable and therefore has a NIL Backend (`slot.go`: "BACKEND IS NIL
+// WHEN THIS IS FALSE"). Since dirtiness became `s.Backend.Dirty(udid)` rather than a free function
+// over a path, reaching it before `Usable()` is a nil dereference in the reset path — where the old
+// code merely stat'd a path that did not exist and returned false.
+//
+// Established by mutation rather than by reading: moving the `Dirty` call above the `!s.Usable()`
+// guard makes THIS test panic with a nil pointer dereference. If you are ever tempted to tidy that
+// loop, this is what stops you.
 func TestResetSaysWhichStoragesItCouldNotInspect(t *testing.T) {
 	m, _, rootB := twoUsable(t)
 	makeDirty(t, rootB, testUDID)
 	m.slots = append(m.slots, Slot{
 		StorageID: "01JSTORAGEC00000000000000", Name: "gamma", Root: "/nowhere",
 		Reachable: false, UnreachableCode: "path_unreachable",
+		// Backend deliberately left NIL — that is what unreachable means structurally, and it is
+		// the value that makes this a panic guard as well as a message assertion.
 	})
 
 	status, reason := m.RepairWorking(testUDID, "")
