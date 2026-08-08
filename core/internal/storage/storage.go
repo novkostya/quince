@@ -121,4 +121,20 @@ type Backend interface {
 	// SweepWork removes orphaned working areas for a device (design §5: swept only AFTER
 	// reconciliation completes). namespace: rm work/<*>; zfs: no-op (working/ is the live copy).
 	SweepWork(udid string) error
+
+	// Dirty reports whether this device has an abandonable work state on this storage — what Reset
+	// acts on, and the question RepairWorking asks each slot before deciding whether there is
+	// anything to reset at all.
+	//
+	// IT IS A BACKEND QUESTION BECAUSE THE BACKENDS STOP AGREEING ON WHAT "DIRTY" MEANS. Today both
+	// answer "a working/ exists", and this is a pure lift of reset.go's isDirty with no behaviour
+	// change. Under qn.6h the zfs backend has no working/ at all — the tree IS the dataset root — so
+	// that same stat would return false forever and Reset would report nothing to do on a device
+	// whose head is mid-transfer. **That failure is invisible**: "nothing to reset" is exactly what a
+	// clean device also says, so it cannot be told from success by looking.
+	//
+	// It answers a QUESTION rather than performing an action, so unlike RepairWorkingCopy it is safe
+	// to call on every slot — which is what RepairWorking does to decide between 202, 409 and a
+	// single repair.
+	Dirty(udid string) bool
 }

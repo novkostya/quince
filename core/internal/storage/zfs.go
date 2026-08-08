@@ -381,3 +381,12 @@ func (b *zfsBackend) Capacity() (free, total uint64, err error) {
 	defer cancel()
 	return b.cli.Capacity(ctx)
 }
+
+// Dirty: a working/ exists — the same answer namespace gives, and the same one reset.go's isDirty
+// gave for both backends before this became a backend question. qn.6h changes what it reads (the
+// work sentinel, in the PARENT dataset, because the tree becomes the child dataset root and there is
+// no working/ to stat); it does not change what it MEANS.
+func (b *zfsBackend) Dirty(udid string) bool {
+	_, err := os.Stat(workingParent(b.backups, udid))
+	return err == nil
+}

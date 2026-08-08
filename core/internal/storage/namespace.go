@@ -298,3 +298,12 @@ func mustParseTSOrNow(ts string) time.Time {
 	}
 	return time.Now().UTC()
 }
+
+// Dirty: a working/ exists. Unchanged from reset.go's isDirty, and the killed-seed case is INCLUDED
+// deliberately — a tree whose sentinel still says seed_in_progress is exactly what Reset is for, so
+// it counts as dirty rather than being skipped as incomplete. That is why this stats the directory
+// rather than reading the sentinel.
+func (b *namespaceBackend) Dirty(udid string) bool {
+	_, err := os.Stat(workingParent(b.backups, udid))
+	return err == nil
+}

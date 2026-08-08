@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -60,7 +59,7 @@ func (m *Manager) RepairWorking(udid, storageID string) (int, string) {
 			blind = append(blind, s)
 			continue
 		}
-		if isDirty(s.Root, udid) {
+		if s.Backend.Dirty(udid) {
 			dirty = append(dirty, s)
 		}
 	}
@@ -91,16 +90,6 @@ func (m *Manager) repairOn(s Slot, udid string) (int, string) {
 	m.log.Info("storage: reset — discarded dirty working copy",
 		"udid", udid, "storage", s.Name, "storage_id", s.StorageID)
 	return http.StatusAccepted, "discarded the working copy on storage " + s.Name
-}
-
-// isDirty reports whether this storage holds a working/ for the device.
-//
-// IT INCLUDES THE KILLED-SEED CASE deliberately: a tree whose sentinel still says `seed_in_progress`
-// is exactly what Reset is for, so it counts as dirty rather than being skipped as incomplete. That
-// is why this stats the directory rather than reading the sentinel.
-func isDirty(root, udid string) bool {
-	_, err := os.Stat(workingParent(root, udid))
-	return err == nil
 }
 
 func nameList(ss []Slot) string {
