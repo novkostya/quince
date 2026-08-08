@@ -40,11 +40,11 @@ is not built, quince keeps working exactly as it does today.
 
 | tree | what changes |
 | --- | --- |
-| `core/internal/storage/zfs.go` | the tool's target becomes `<backups>` and the tree the child dataset root; `PrepareWork`/`SeedWork`/`WorkDir` stop delegating to the shared seed machine; `seedWorking`, `seedInContainer`, `seedClosure`, `Provision`'s `latest/` mkdir and the exchange in `finishCommit` all go; `RepairWorkingCopy` per open question 9 |
+| `core/internal/storage/zfs.go` | the tool's target becomes `<backups>` and the tree the child dataset root; `PrepareWork`/`SeedWork`/`WorkDir` stop delegating to the shared seed machine; `seedWorking`, `seedInContainer`, `seedClosure`, `Provision`'s `latest/` mkdir and the exchange in `finishCommit` all go; `RepairWorkingCopy` becomes a `rollback` (ruled 08-08) |
 | `core/internal/storage/zfscli.go` | the `seed` verb becomes `rollback` |
 | `core/internal/storage/journal.go` | doc only — `PhaseExchanged` stops occurring on zfs; the enum keeps its shape. **Specifically `:20-26`**: the *"both models share the atomic exchange as their pivot"* block, and `PhasePrepared`'s *"marker written into `working/<udid>`"* |
 | `core/internal/storage/layout.go` | `browseRoot`'s zfs arm loses its trailing `latest` component and can no longer return the live tree (D7); `isEmptyDir` must ignore `.zfs` (D8); the work-sentinel path becomes backend-dependent (D3) |
-| `deploy/storage.md` | the reference helper loses `seed)`, gains `rollback)`; the offsite note; the one hand-edit |
+| `deploy/storage.md` | the reference helper loses `seed)`, gains `rollback)`; **the snapshotter exclusion as REQUIRED setup** (D6); the offsite note; the one hand-edit |
 | `docs/quince.design.md`, `CLAUDE.md` | the ruling — **a separate, prerequisite PR** |
 | `docs/contracts.md` | `POST /api/devices/{udid}/reset-working` gains a failure the zfs backend can return |
 
@@ -323,16 +323,20 @@ operators set in order to browse snapshots by hand — a device with zero backup
 *non-empty*, and its first backup would be recorded `incremental`. Silent, and wrong in the field
 rather than in CI.
 
-#### `RepairWorkingCopy` on zfs — **UNRULED**, see open question 9
+#### `RepairWorkingCopy` on zfs — **RULED 2026-08-08: `zfs rollback`, and answer C is a refusal**
 
-Under D4's answer C, `zfs rollback` is refused whenever any newer snapshot exists, which on a host
-with ordinary snapshot hygiene is most of the time. What reset does then is the open fork: accept the
-refusal, restore from the snapshot by full copy, restore by delta, or add the unfiltered snapshot
-view so the refusal can at least be predicted. **This spec does not choose**, and PR 3 cannot be
-written until it is chosen, because reset-by-rollback was D3's other half.
+Reset rolls the dataset back to the newest `@quince-*` snapshot. It is `rollback`'s only caller,
+abandon-only, never after verify, never the failure default.
 
-**What is settled regardless of that fork:** a failed reset returns non-2xx with `zfs`'s own words,
-leaves the head dirty and the sentinel in place, writes no audit line, and does not retry.
+**When answer C blocks it, reset refuses and says so** — non-2xx carrying `zfs`'s own words, head
+left dirty, sentinel left in place, no audit line, no automatic retry, and **C's remedy named rather
+than B's** (G5c). The full-copy and delta restores, and question 7's unfiltered view, were all
+considered and **not taken**; open question 9 records shape 4 and why it lost.
+
+**The condition the ruling attaches is REQUIRED SETUP rather than a tip**: quince's datasets must be
+excluded from whatever snapshotter the host runs. D6 carries the wording and the reason, and the
+reason is not reset.
+
 ### D4 — Sub-question 2: rollback under load
 
 **The question, stated plainly.** Does `zfs rollback` succeed against a device dataset that is
@@ -488,6 +492,29 @@ itself bad, the recovery is `destroy` then `rollback`: two explicit acts, each b
 
 **`argv()` needs no exec/hook branch**, unlike `capacity` (`zfscli.go:193-196`), because `rollback`
 takes a target and the generic `argv(op, args...)` composes correctly for both modes.
+
+#### REQUIRED SETUP: exclude quince's datasets from the host snapshotter
+
+**Ruled 2026-08-08 as part of the reset decision, and `deploy/storage.md` must carry it as required
+setup in the words an operator reads — not as a tip.**
+
+```sh
+zfs set com.sun:auto-snapshot=false <parent-dataset>
+```
+
+**Written snapshotter-AGNOSTICALLY.** That property is `zfs-auto-snapshot`'s specifically —
+confirmed from its man page: *"by default `zfs-auto-snapshot` will snapshot all datasets except for
+those in which the user-property `com.sun:auto-snapshot` is set to `false`"*. sanoid, zrepl and
+`pve-zsync` each need their own exclusion, so the instruction is **exclude quince's datasets from
+whatever snapshotter you run**, with the command above as the worked example. Setting it on the
+**parent** covers every per-device child, now and future, because ZFS user properties inherit.
+
+**The reason is NOT reset, and that is what makes this a fix rather than a shim for answer C.** A
+snapshot taken by another tool alongside a `@quince-*` one **pins the same blocks**, so destroying
+the quince snapshot frees nothing: quince's retention would run, report versions removed, and
+reclaim no space. **That is a live defect today, unrelated to this rung**, and it is quince#738. With
+the exclusion in place, answer C stops being the field case and becomes the misconfiguration case —
+the reset benefit is a side effect of a setting that was already correct.
 
 **The hand-edit is NOT detectable, and that is a stated cost.** `hookcheck` fires `capacity` and
 `list` — both harmless. `rollback` cannot be probed, because probing it means performing it. So an
@@ -811,19 +838,24 @@ byte size.
    PVE with `rbind` propagation. Answers A and C are facts about that host; nothing here establishes
    that a different topology — a NAS, a privileged container, a different ZFS release — behaves the
    same. Answer B is retained for exactly this reason.
-9. **UNRULED AND BLOCKING PR 3: what reset DOES when rollback is refused.** Answer C turns an
-   operation that is unconditional today — `RemoveAll` on a directory quince owns, refusable by
-   nothing — into one that **usually refuses** on any host with ordinary snapshot hygiene. The
-   2026-08-04 ruling licensed `rollback` as *available but destructive-if-misused*; C makes it **safe
-   and mostly absent**, which is the opposite failure and was not contemplated.
-   **The mitigation in D4 answered the wrong case and is withdrawn**: *"do nothing, the head is
-   resumable"* is the **retry** path, and reset exists for when the head is **bad**. Four shapes are
-   on the table — accept C with a documented `com.sun:auto-snapshot=false` recommendation; a
-   full-copy restore from `.zfs/snapshot/<newest @quince-*>/` as a fallback; the unfiltered
-   snapshot view of question 7 so quince can refuse *before* the attempt; or a **delta** restore that
-   makes reset unconditional at O(delta) data and removes the need for a `rollback` verb at all,
-   shrinking the host hand-edit to a deletion. Raised on quince#736; **the delta size after a torn
-   incremental is asserted and NOT measured**, and that figure is what the fourth option rests on.
+9. **RULED 2026-08-08 (Operator, relayed on quince#736): SHAPE 1 — keep proper `zfs rollback`.** This
+   question blocked PR 3 and no longer does. Reset on zfs rolls the dataset back to the newest
+   `@quince-*` snapshot, exactly as D3 and D6 have it; **answer C is accepted as a refusal**, with the
+   message naming C's remedy and not B's (G5c). That is a capability regression against today's
+   unconditional reset — `RemoveAll` on a directory quince owns, refusable by nothing — and it was
+   **taken knowingly** rather than inherited.
+   **The mitigation this spec first offered for C was withdrawn before the ruling and stays
+   withdrawn**: *"do nothing, the head is resumable"* is the **retry** path, and reset exists for when
+   the head is **bad**.
+   **Shape 4 — a delta restore-from-snapshot that would have dropped the `rollback` verb entirely —
+   was DECLINED, and the reasoning is kept because it was sound.** It made reset unconditional, was
+   immune to C by construction, and would have shrunk the host hand-edit to a pure deletion. It lost
+   because **reset is a rare escape hatch** — the normal path after a failed job is a retry that
+   resumes from the dirty head — and shape 4 paid for that rarity with a second restore mechanism,
+   quince-implemented tree-diff logic, a non-atomic operation, and **a delta size nobody measured**.
+   `zfs rollback` is O(1), atomic, and the filesystem doing exactly the right thing. The full-copy
+   variant and question 7's unfiltered view were likewise not taken; question 7 stands on its own
+   merits and is **not** part of this ruling.
 10. **`engine.go:322-324`'s `409` is load-bearing for CORRECTNESS, not tidiness**, and PR 3 owes a
     comment at the guard saying so. A rollback removes files under an active writer with **no error
     to either side** (measured), so a regression there would produce a rolled-back tree immediately
