@@ -54,7 +54,7 @@ func stageNSCommit(t *testing.T, m *Manager, backups, udid, jobID, vid string, p
 		_ = os.RemoveAll(workingParent(backups, udid))
 		j.Phase = PhaseArchived
 	}
-	if err := writeJournal(dev, j); err != nil {
+	if err := writeJournal(nsJournal(dev), j); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -96,7 +96,7 @@ func TestReconcileNamespaceLostRegistryWrite(t *testing.T) {
 	commitGoodTree(t, m, testUDID)
 	stageNSCommit(t, m, backups, testUDID, "job2", "v2lost", PhaseArchived)
 	// Simulate the fs-consistent-but-registry-lost case: clear the journal.
-	if err := removeJournal(deviceDir(backups, testUDID)); err != nil {
+	if err := removeJournal(nsJournal(deviceDir(backups, testUDID))); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Reconcile(context.Background()); err != nil {
@@ -162,44 +162,37 @@ func TestReconcileSkipsCorruptMarker(t *testing.T) {
 
 // --- zfs kill matrix (fake-zfs) ---
 
+// TWO PHASES, NOT THREE, and the missing one is the point: after qn.6h a zfs commit is
+// prepared → snapshot_created, because there is no exchange to journal. The kill matrix keeps its
+// job — a crash at every phase reconciles forward and clears the journal — over the sequence that
+// now exists.
 func TestReconcileZFSKillMatrix(t *testing.T) {
-	phases := []CommitPhase{PhasePrepared, PhaseExchanged, PhaseSnapshotCreated}
+	phases := []CommitPhase{PhasePrepared, PhaseSnapshotCreated}
 	for _, phase := range phases {
 		t.Run(string(phase), func(t *testing.T) {
 			m, be, f, backups, st := newZFSManager(t, generousPolicy())
 			if err := be.Provision(testUDID); err != nil {
 				t.Fatal(err)
 			}
-			tree := workingTree(backups, testUDID)
+			// The tree is the dataset root, marker and all — this IS the pre-snapshot state.
+			tree := deviceDir(backups, testUDID)
 			goodEncryptedFull(t, tree)
 			mustMarker(t, tree, "zv-crash", "job1", testUDID, BackendZFS)
 
 			snap := snapNameFor("zv-crash", created2)
 			full := be.cli.dataset(testUDID) + "@" + snap
-			dev := deviceDir(backups, testUDID)
-			latest := latestDir(backups, testUDID)
 			j := Journal{
 				VersionID: "zv-crash", UDID: testUDID, Backend: BackendZFS, JobID: "job1",
 				Phase: PhasePrepared, CreatedAt: fmtRFC(created2), Kind: "full", Encrypted: true,
 				StructureVerifiedAt: fmtRFC(created2), ZFSSnapshot: full, JobDir: tree,
 			}
-			if phase == PhaseExchanged || phase == PhaseSnapshotCreated {
-				if err := os.MkdirAll(latest, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := exchange(tree, latest); err != nil { // atomic swap: latest ⇄ working/<udid>
-					t.Fatal(err)
-				}
-				j.Phase = PhaseExchanged
-			}
 			if phase == PhaseSnapshotCreated {
-				_ = os.RemoveAll(workingParent(backups, testUDID))
 				if _, err := f.run(context.Background(), []string{"zfs", "snapshot", full}); err != nil {
 					t.Fatal(err)
 				}
 				j.Phase = PhaseSnapshotCreated
 			}
-			if err := writeJournal(dev, j); err != nil {
+			if err := writeJournal(zfsJournal(backups, testUDID), j); err != nil {
 				t.Fatal(err)
 			}
 
@@ -210,7 +203,7 @@ func TestReconcileZFSKillMatrix(t *testing.T) {
 			if !ok || !row.IsLatest || row.ZFSSnapshot == nil {
 				t.Fatalf("phase %s: zv-crash not reconciled (ok=%v latest=%v snap=%v)", phase, ok, row.IsLatest, row.ZFSSnapshot)
 			}
-			if journalExists(backups, testUDID) {
+			if _, jok, _ := readJournal(zfsJournal(backups, testUDID)); jok {
 				t.Fatalf("phase %s: zfs journal not cleared", phase)
 			}
 		})
@@ -248,7 +241,7 @@ func corruptMarker(t *testing.T, dir string) {
 }
 
 func journalExists(backups, udid string) bool {
-	_, ok, _ := readJournal(deviceDir(backups, udid))
+	_, ok, _ := readJournal(nsJournal(deviceDir(backups, udid)))
 	return ok
 }
 

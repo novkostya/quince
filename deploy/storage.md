@@ -10,9 +10,11 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
 
 - **zfs** — chosen when `storage.zfs.parent_dataset` (or a `hook_cmd`) is set, or `backend: zfs`
   is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots.
-  qn.5b: `latest/` IS the backup — a per-job `working/<udid>` (seeded from `latest/` at job start)
-  is verified then atomically exchanged into `latest/`, and the snapshot captures `latest/` = the
-  version. Between backups the dataset holds only `latest/`.
+  qn.6h: **the backup tree IS the child dataset root.** `idevicebackup2`'s target is the parent
+  dataset and it appends the device's UDID itself, so a backup lands at `<parent>/<udid>/Info.plist`
+  and friends — no `latest/`, no working copy, and no clone before the transfer can start. Commit is
+  verify → `zfs snapshot`, and the snapshot IS the version. Between backups the dataset holds only
+  the backup and quince's one marker file.
 - **reflink** — the smart default where `/backups` supports FICLONE (Btrfs/Synology, XFS,
   hookless OpenZFS 2.2+). CoW clones, fully independent files, no host coupling.
 - **hardlink** — for filesystems with neither reflink nor snapshots (ext4 NAS).
@@ -20,6 +22,36 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
   loudly and surfaces it — never a silent fallback.
 
 The chosen backend and *why* are logged at startup and shown in onboarding (qn.6).
+
+## ZFS: REQUIRED SETUP — two settings on the parent dataset
+
+Both are one command, both are on the **parent**, and both are silent to get wrong.
+
+**1. Exclude quince's datasets from whatever snapshotter this host runs.**
+
+```sh
+zfs set com.sun:auto-snapshot=false <parent-dataset>
+```
+
+That property is `zfs-auto-snapshot`'s. **sanoid, zrepl and `pve-zsync` each need their own
+exclusion** — the instruction is *exclude quince's datasets from whatever snapshotter you run*, and
+the command above is the worked example. Setting it on the parent covers every per-device child, now
+and in future, because ZFS user properties inherit.
+
+**The reason is space, not tidiness.** A snapshot taken by another tool alongside a `@quince-*` one
+**pins the same blocks**. Destroy the quince snapshot and nothing is freed: quince's retention runs,
+reports versions removed, and reclaims no space. There is a second effect worth knowing — `zfs
+rollback` refuses while any newer snapshot exists, so an automatic snapshotter firing every few
+minutes makes *reset* refuse too. Reset says so and names this setting when it happens.
+
+**2. Set the quota on the parent dataset, NOT per device.**
+
+**A per-device quota is UNSUPPORTED and will cost you a backup.** `idevicebackup2` asks the
+filesystem how much space is free before it starts, and since qn.6h its target is the **parent**
+dataset — so a quota on the child is invisible to that question. Measured on a real pool,
+2026-08-08: with `quota=10G` on a child, the tool is told **1620 GiB** is available. It then starts a
+backup that cannot fit, and the failure arrives as **ENOSPC part-way through** rather than as a clean
+up-front refusal — which on Wi-Fi costs hours.
 
 ## ZFS: `exec` vs `hook`
 
@@ -149,6 +181,12 @@ Teaching `list` to forward flags was the tempting fix and was refused: the same 
 arbitrary `zfs list` arguments, and *"dataset destroy is intentionally NOT reachable"* would stop
 being checkable by reading these five case arms.
 
+**The `seed` verb is DEAD CODE ON THE HOST as of qn.6h and quince never calls it.** There is no
+job-start clone on this backend any more — the tool writes into the dataset root — so the paragraph
+below describes a verb that still sits in your script and is never invoked. Removing it from the
+helper (and this text with it) is a one-line follow-up, deliberately kept separate from the code
+change so the host edit is not required on the same day.
+
 The `seed` verb (qn.5b, replacing `mirror`): with a hook configured, quince delegates the job-start
 clone of `latest/` → `working/<udid>` to the host, where block cloning is not blocked by the
 unprivileged user-namespace (gate-12 finding: in-container FICLONE returns `EPERM`). The verb
@@ -208,9 +246,20 @@ zfs snapshot -r pool/path/to/iphone-backup@offsite-$(date +%s)   # local restore
 rclone sync /pool/path b2:bucket/quince <the three --filter lines above>
 ```
 
-**There is no non-atomic instant (qn.5b).** `latest/` changes only by a single
-`renameat2(RENAME_EXCHANGE)` — it is never unoccupied, so a walk (or a `zfs snapshot`) crossing a
-commit always sees a complete `latest/`, never a missing one. This replaced the old two-rename swap,
-whose window an `rclone sync` could cross and mirror as a **deletion** of the remote copy (the
-stack-D5 `PROPOSED (gap)`, decisions (cg)). Between backups the dataset holds only `latest/`
-(the per-job `working/` exists only during/after a backup, and is rclone-excluded).
+**There is no non-atomic instant (qn.5b) — ON THE reflink / hardlink / copy BACKENDS.** There
+`latest/` changes only by a single `renameat2(RENAME_EXCHANGE)`, so it is never unoccupied and a walk
+crossing a commit always sees a complete `latest/`, never a missing one. This replaced the old
+two-rename swap, whose window an `rclone sync` could cross and mirror as a **deletion** of the remote
+copy (the stack-D5 `PROPOSED (gap)`, decisions (cg)). Between backups the device dir holds only
+`latest/` (the per-job `working/` exists only during/after a backup, and is rclone-excluded).
+
+⚠ **ON ZFS SINCE qn.6h THAT GUARANTEE IS GONE, AND THE FILTER RULES ABOVE MATCH NOTHING.** The backup
+tree is the dataset root, so there is no `working/`, no `versions/` and no `latest/` — the whole
+device dataset is in scope for a whole-tree walk, and **during a backup it is a half-transferred
+tree**. An rclone job crossing it uploads that as though it were a verified version, and it fails
+silently from the operator's side.
+
+**So a zfs storage must be EXCLUDED from a whole-host rclone job until the snapshot-sourced offsite
+path exists** — that is [quince#735](https://github.com/novkostya/quince/issues/735), which reads
+`.zfs/snapshot/<snap>/` instead of the live tree. The cost was accepted knowingly when the in-place
+shape was ruled; it is stated here rather than left to be discovered.

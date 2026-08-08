@@ -15,7 +15,17 @@ import (
 // RENAME_EXCHANGE — never the old two-rename window — latest/ ALWAYS exists and ALWAYS carries a
 // complete version (v1 then v2), never missing. That missing window is exactly what made an
 // rclone/snapshot crossing it delete the remote (the (cg) defect). This test FAILS against the
-// pre-qn.5b two-rename swap and PASSES against the exchange, on both version models.
+// pre-qn.5b two-rename swap and PASSES against the exchange.
+//
+// NAMESPACE-ONLY SINCE qn.6h, AND THE PROPERTY DID NOT WEAKEN — IT MOVED. There is no latest/ on zfs
+// any more and no exchange to make atomic: the live dataset head is openly the mutable tree a backup
+// writes into. What stops a reader ever seeing a torn version there is that NO READER LOOKS — browse
+// resolves only to .zfs/snapshot/<snap>/ and refuses to fall back to the head, which
+// TestBrowseRootNeverResolvesToTheLiveTreeOnZFS asserts against a deliberately-nil row.
+//
+// The one reader that DOES still cross the live tree is a whole-host rclone job, and that exposure is
+// stated by this rung rather than fixed by it: quince#735 builds the snapshot-sourced offsite path,
+// and until then `deploy/storage.md` tells the operator to exclude quince from such a job.
 func TestCommitLatestNeverGoesMissing(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -23,10 +33,6 @@ func TestCommitLatestNeverGoesMissing(t *testing.T) {
 	}{
 		{"namespace", func(t *testing.T) (*Manager, string, string) {
 			m, _, backups, _ := newNSManager(t, clonetree.Copy, generousPolicy())
-			return m, backups, testUDID
-		}},
-		{"zfs", func(t *testing.T) (*Manager, string, string) {
-			m, _, _, backups, _ := newZFSManager(t, generousPolicy())
 			return m, backups, testUDID
 		}},
 	}

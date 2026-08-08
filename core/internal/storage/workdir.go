@@ -6,13 +6,18 @@ import (
 	"os"
 )
 
-// prepareWorkDir is the Seed lifecycle shared by BOTH backends (qn.5b design §5 + Finding B, (cv)):
-// resume a trustworthy dirty working/<udid>, or (re)seed it — bracketing the clone with a
-// `seed_in_progress` sentinel so a seed killed mid-flight is never silently resumed into.
+// THIS FILE IS THE NAMESPACE BACKENDS' SEED LIFECYCLE. It was shared by both models until qn.6h;
+// zfs now has no seed, no working copy and no latest/ to clone from — it writes into the dataset
+// root — so it prepares its own work state in zfs.go and reaches none of this. Kept as it was rather
+// than generalised: reflink / hardlink / copy are explicitly out of that rung's scope.
 //
-// It returns the idevicebackup2 TARGET (workingParent). seedFn does the backend-specific clone of
-// latest/ → working/<udid> (namespace: clonetree via the safe strategy; zfs: host-side hook `seed`
-// verb or the in-container reflink→copy ladder); it is invoked ONLY when latest/ is non-empty.
+// prepareWorkDir is that lifecycle (qn.5b design §5 + Finding B, (cv)): resume a trustworthy dirty
+// working/<udid>, or (re)seed it — bracketing the clone with a `seed_in_progress` sentinel so a seed
+// killed mid-flight is never silently resumed into.
+//
+// It returns the idevicebackup2 TARGET (workingParent). seedFn does the backend's clone of
+// latest/ → working/<udid> (clonetree via the safe strategy); it is invoked ONLY when latest/ is
+// non-empty.
 //
 // Resume vs re-seed: a non-empty working/<udid> is normally a resumable dirty working (a prior
 // FAILED backup — keep it so a retry resumes, no re-transfer). The EXCEPTION (Finding B) is a tree
@@ -46,7 +51,7 @@ func prepareWorkDirPhase1(backups, udid string, log *slog.Logger) (target string
 	tree := workingTree(backups, udid)
 
 	if !isEmptyDir(tree) {
-		st, ok, _ := readWorkState(backups, udid)
+		st, ok, _ := readWorkStateAt(nsWorkSentinel(backups, udid))
 		if ok && st.SeedInProgress {
 			// A seed was in progress → this tree is a partial clone (killed mid-seed). Discard it
 			// and re-seed; resuming a partial could commit a version missing blobs (Finding B).
@@ -69,7 +74,7 @@ func prepareWorkDirPhase1(backups, udid string, log *slog.Logger) (target string
 	seeded := !isEmptyDir(latestDir(backups, udid))
 	// Mark IN PROGRESS before cloning — a crash/kill before finishSeed clears it leaves this true so
 	// the next WorkDir catches the partial (above) instead of resuming it.
-	if err := writeWorkState(backups, udid, workState{SeededFromLatest: seeded, SeedInProgress: true}); err != nil {
+	if err := writeWorkStateAt(nsWorkSentinel(backups, udid), workState{SeededFromLatest: seeded, SeedInProgress: true}); err != nil {
 		return "", false, err
 	}
 	if !seeded {
@@ -77,7 +82,7 @@ func prepareWorkDirPhase1(backups, udid string, log *slog.Logger) (target string
 		if err := os.MkdirAll(tree, 0o755); err != nil {
 			return "", false, err
 		}
-		if err := writeWorkState(backups, udid, workState{SeededFromLatest: false, SeedInProgress: false}); err != nil {
+		if err := writeWorkStateAt(nsWorkSentinel(backups, udid), workState{SeededFromLatest: false, SeedInProgress: false}); err != nil {
 			return "", false, err
 		}
 		return parent, false, nil
@@ -100,5 +105,5 @@ func finishSeed(backups, udid string, seedFn func() error) error {
 	if err := seedFn(); err != nil {
 		return err
 	}
-	return writeWorkState(backups, udid, workState{SeededFromLatest: true, SeedInProgress: false})
+	return writeWorkStateAt(nsWorkSentinel(backups, udid), workState{SeededFromLatest: true, SeedInProgress: false})
 }

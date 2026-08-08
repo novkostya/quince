@@ -51,11 +51,20 @@ func newNSManager(t *testing.T, strategy clonetree.Strategy, policy RetentionPol
 	return m, be, backups, st
 }
 
-// fakeZFS simulates the host ZFS (qn.5b model): snapshot = copy latest/ → .zfs/snapshot/<snap>/
-// latest/ (the exchange already moved the verified tree into latest/ before the snapshot),
-// list = enumerate .zfs/snapshot/*, destroy = rm the snapshot dir, create = no-op, seed = clone
-// latest/ → working/<udid> host-side (the hook `seed` verb). It records every argv so tests can
+// fakeZFS simulates the host ZFS (qn.6h in-place model): snapshot = copy the DATASET ROOT →
+// .zfs/snapshot/<snap>/ (the tree is written in place, so nothing is exchanged before it),
+// rollback = restore the root from a snapshot and REFUSE when a newer one exists, list = enumerate
+// .zfs/snapshot/*, destroy = rm the snapshot dir, create = no-op. It records every argv so tests can
 // assert exact commands (argv arrays, no shell) and inject failures.
+//
+// `seed` OUTLIVES THE PATH THAT CALLED IT. Nothing in production reaches it after qn.6h; it stays
+// until `seed)` is deleted from the reference helper in `deploy/storage.md`, because a fake must not
+// stop declaring a verb the operator's real script still declares.
+//
+// ITS ONE STRUCTURAL LIE is that snapshots live INSIDE the tree here, where real ZFS keeps them out
+// of the dataset entirely. That is the same lie `.zfs` itself tells at snapdir=visible, so the ops
+// below skip it explicitly wherever the real thing would simply not see it — which is what makes
+// this fixture able to reproduce the walker hazard rather than hide it.
 type fakeZFS struct {
 	backups string
 	parent  string
@@ -78,15 +87,19 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 	case "snapshot":
 		ds, snap := splitFull(argv[len(argv)-1])
 		udid := strings.TrimPrefix(ds, f.parent+"/")
-		src := filepath.Join(f.backups, udid, "latest")
-		dst := filepath.Join(f.backups, udid, ".zfs", "snapshot", snap, "latest")
+		root := filepath.Join(f.backups, udid)
+		dst := filepath.Join(root, ".zfs", "snapshot", snap)
 		if _, err := os.Stat(dst); err == nil {
 			return "already exists", errFake // idempotency path exercised by callers
 		}
-		if err := clonetree.Clone(dst, src, clonetree.Copy); err != nil {
+		// Copying the root into a directory UNDER the root, so .zfs must be skipped or the copy
+		// recurses into the snapshots it is creating.
+		if err := copySkippingSnapdir(dst, root); err != nil {
 			return err.Error(), err
 		}
 		return "", nil
+	case "rollback":
+		return f.rollback(argv[len(argv)-1])
 	case "list":
 		ds := argv[len(argv)-1]
 		udid := strings.TrimPrefix(ds, f.parent+"/")
@@ -121,6 +134,89 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 		return "COPIED", nil // tmpfs → no block sharing
 	}
 	return "", nil
+}
+
+// rollback restores the dataset root from <snap> — and refuses when ANY newer snapshot exists,
+// which is what `zfs rollback` does without -r and is qn.6h's measured answer C.
+//
+// The refusal text is REPRODUCED FROM A REAL ZFS 2026-08-08, not invented, because the production
+// code reads it to choose which remedy to name and a paraphrase here would make that assertion prove
+// nothing. "Newer" is lexicographic over snapshot names, and includes FOREIGN ones: a host
+// snapshotter's `zfs-auto-snap_frequent-*` blocks a rollback exactly as a quince one would, which is
+// the whole reason answer C is the likely field case.
+func (f *fakeZFS) rollback(full string) (string, error) {
+	ds, snap := splitFull(full)
+	udid := strings.TrimPrefix(ds, f.parent+"/")
+	root := filepath.Join(f.backups, udid)
+	src := filepath.Join(root, ".zfs", "snapshot", snap)
+	if _, err := os.Stat(src); err != nil {
+		return "cannot open '" + full + "': dataset does not exist", errFake
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".zfs", "snapshot"))
+	if err != nil {
+		return "cannot open '" + full + "': dataset does not exist", errFake
+	}
+	var newer []string
+	for _, e := range entries {
+		if e.IsDir() && e.Name() > snap {
+			newer = append(newer, ds+"@"+e.Name())
+		}
+	}
+	if len(newer) > 0 {
+		return "cannot rollback to '" + full + "': more recent snapshots or bookmarks exist\n" +
+			"use '-r' to force deletion of the following snapshots and bookmarks:\n" +
+			strings.Join(newer, "\n"), errFake
+	}
+	// Empty the head, then restore it — .zfs is not part of the head on real ZFS, so it survives.
+	head, err := os.ReadDir(root)
+	if err != nil {
+		return err.Error(), err
+	}
+	for _, e := range head {
+		if e.Name() == ".zfs" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+			return err.Error(), err
+		}
+	}
+	if err := copySkippingSnapdir(root, src); err != nil {
+		return err.Error(), err
+	}
+	return "", nil
+}
+
+// copySkippingSnapdir copies src → dst, leaving .zfs behind. Both directions need it: a snapshot
+// copies the root into a child of itself, and a rollback copies a snapshot back over a root that
+// holds one.
+func copySkippingSnapdir(dst, src string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Name() == ".zfs" {
+			continue
+		}
+		s, d := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if err := clonetree.Clone(d, s, clonetree.Copy); err != nil {
+				return err
+			}
+			continue
+		}
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(d, b, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var errFake = &fakeErr{}

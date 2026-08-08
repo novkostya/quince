@@ -12,7 +12,12 @@ import (
 // working/<udid> from a completed seed (`seed_in_progress:false`) OR a legacy sentinel that predates
 // the field (absent → false → resume, so an upgrade never throws away a resumable 34 GB working).
 // The guard must DISCRIMINATE the two — resuming a partial seed could commit a version missing blobs.
-// Proven on BOTH version models (the lifecycle is the shared prepareWorkDir).
+//
+// IT RAN ON BOTH VERSION MODELS UNTIL qn.6h AND IS NOW NAMESPACE-ONLY. zfs no longer seeds: the tool
+// writes into the dataset root, so there is no clone, no partial clone, and nothing for
+// `seed_in_progress` to describe. The zfs arm is dropped rather than kept green against a code path
+// that cannot run — and workState.SeedInProgress carries the warning that comes with it, since
+// repurposing that flag would make this very guard discard a resumable dirty head.
 func TestSeedInProgressGuard(t *testing.T) {
 	backends := []struct {
 		name  string
@@ -22,10 +27,6 @@ func TestSeedInProgressGuard(t *testing.T) {
 			m, _, backups, _ := newNSManager(t, clonetree.Copy, generousPolicy())
 			return m, backups, testUDID
 		}},
-		{"zfs", func(t *testing.T) (*Manager, string, string) {
-			m, _, _, backups, _ := newZFSManager(t, generousPolicy())
-			return m, backups, testUDID
-		}},
 	}
 	scenarios := []struct {
 		name       string
@@ -33,14 +34,14 @@ func TestSeedInProgressGuard(t *testing.T) {
 		wantResume bool                       // true = TAG survives (resumed); false = re-seeded
 	}{
 		{"killed seed → re-seed", func(b, u string) {
-			_ = writeWorkState(b, u, workState{SeededFromLatest: true, SeedInProgress: true})
+			_ = writeWorkStateAt(nsWorkSentinel(b, u), workState{SeededFromLatest: true, SeedInProgress: true})
 		}, false},
 		{"completed seed → resume", func(b, u string) {
-			_ = writeWorkState(b, u, workState{SeededFromLatest: true, SeedInProgress: false})
+			_ = writeWorkStateAt(nsWorkSentinel(b, u), workState{SeededFromLatest: true, SeedInProgress: false})
 		}, true},
 		{"legacy sentinel (no field) → resume", func(b, u string) {
 			// Old-code sentinel: written post-seed, no seed_in_progress field. Must read complete.
-			writeFile(t, workSentinel(b, u), []byte(`{"seeded_from_latest": true}`))
+			writeFile(t, nsWorkSentinel(b, u), []byte(`{"seeded_from_latest": true}`))
 		}, true},
 	}
 

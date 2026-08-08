@@ -122,32 +122,6 @@ func (c *zfsCLI) DestroySnapshot(ctx context.Context, udid, snap string) error {
 	return nil
 }
 
-// Seed runs the constrained host-side `seed` verb (HOOK mode only; qn.5b, replacing the old
-// `mirror` verb): the helper clones latest/ → working/<udid> via `cp -a --reflink=always` under the
-// job lock and chowns it to the container uid, where FICLONE works even though the container's
-// unprivileged userns forbids it (gate-12 (bi)). It touches ONLY the mutable working area, never a
-// snapshot or the committed latest/ (bounded blast radius). The helper reports whether the clone
-// actually shared blocks (host-side, a reliable pool-level channel: `zfs list -o avail` or
-// `zpool get bclone*` delta), printed as SHARED / COPIED; quince maps that to the honest claim.
-func (c *zfsCLI) Seed(ctx context.Context, udid string) (sharingResult, error) {
-	ds := c.dataset(udid)
-	if !datasetPattern.MatchString(ds) {
-		return sharingUnknown, fmt.Errorf("storage: invalid dataset name %q", ds)
-	}
-	out, err := c.run(ctx, c.argv("seed", ds))
-	if err != nil {
-		return sharingUnknown, fmt.Errorf("zfs seed %s: %w: %s", ds, err, strings.TrimSpace(out))
-	}
-	switch {
-	case strings.Contains(out, "SHARED"):
-		return sharingYes, nil
-	case strings.Contains(out, "COPIED"):
-		return sharingNo, nil
-	default:
-		return sharingUnknown, nil // helper gave no verdict → honest UNVERIFIED
-	}
-}
-
 // Rollback rolls <dataset> back to <dataset>@<snap>, discarding everything written since. It is
 // qn.6h's ABANDON path and RepairWorkingCopy is its only caller: never after verify has passed, and
 // never the automatic response to a failed job — a failed job KEEPS its dirty head so a retry
