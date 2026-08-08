@@ -924,9 +924,16 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   discards it and is for **abandon** only — never the failure default, never after verify has passed.
 - **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off,
   adapter-failed, cache-dropped, truncated list) are surfaced in the UI and the logs.
-- **Config tidiness is a feature** (stack D12): every setting lives in `config.yml` with
-  a generated doc-comment and a sane default, is editable in the UI, and needs no restart
-  unless the spec says why. No UI-only state, no secrets in the file.
+- **Config tidiness is a feature** (stack D12): every setting has a sane default, is
+  editable in the UI, and needs no restart unless the spec says why. No UI-only state, no
+  secrets in the file. **`config.yml` CONTAINS ONLY WHAT THE USER SET, and carries NO
+  GENERATED ANNOTATION AT ALL** — Operator, 2026-08-08, quince#728. This bullet required
+  *"a generated doc-comment"* until then, which was D12's headline promise and is now
+  dropped rather than deferred: a file listing every key at its default is noise a reader
+  must filter, and it makes a hand-edit harder to diff, not easier. **`omitempty` does not
+  implement this** — defaults are filled at parse and are non-zero, so it needs
+  declared-vs-resolved tracking; and it must never reach the `json:` tag, or the wire goes
+  sparse and a `PUT` round trip zeroes `devices.manage_muxer` (D12, quince#493).
 - **Secrets discipline.** Backup passwords reach the tool over stdin/pty only — never
   argv, env, or logs. Test fixtures use the password `test`.
 - **Subprocesses**: argv arrays, own process group, supervised, killed on job end.
