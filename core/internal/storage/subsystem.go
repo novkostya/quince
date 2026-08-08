@@ -609,6 +609,14 @@ func (m *Manager) VerifyVersion(id string) (VerifyReport, bool) {
 		return rep, true
 	}
 	tree := browseRoot(slot.Root, row.UDID, row.Backend, row.ZFSSnapshot, row.IsLatest, row.CreatedAt)
+	if tree == "" {
+		// zfs, with no snapshot on the row. browseRoot refuses rather than falling through to the
+		// live tree, so name WHICH thing is missing: verifying "" fails anyway, but with a message
+		// about an unreadable path — which reads like a broken disk rather than an unlocatable
+		// version, and sends the reader to the wrong place.
+		rep.Detail = "version has no snapshot recorded — its content cannot be located, and the live tree is not a version"
+		return rep, true
+	}
 	r := Verify(tree, row.Kind)
 	rep.OK, rep.Detail, rep.Kind, rep.Encrypted, rep.TreePath = r.OK, r.Detail, r.Kind, r.Encrypted, tree
 	return rep, true
