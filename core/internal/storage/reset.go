@@ -66,7 +66,7 @@ func (m *Manager) RepairWorking(udid, storageID string) (int, string) {
 
 	switch len(dirty) {
 	case 0:
-		return http.StatusAccepted, "nothing to reset — no backup in progress on any storage" + notInspected(blind)
+		return http.StatusAccepted, "nothing to reset — no unfinished backup on any storage" + notInspected(blind)
 	case 1:
 		status, reason := m.repairOn(dirty[0], udid)
 		if status == http.StatusAccepted {
@@ -92,12 +92,19 @@ func (m *Manager) repairOn(s Slot, udid string) (int, string) {
 	// snapshot and has no working copy at all. Each backend logs its own mechanism immediately above
 	// this, so the shared line only has to be TRUE of both.
 	//
-	// It said "discarded the working copy" until quince#747, and on the staging stand that sentence
+	// It said "discarded the working copy" until quince#748, and on the staging stand that sentence
 	// was printed for a rollback — a real action described by a mechanism that does not exist on that
 	// backend, in the words the user reads to learn what happened to their data.
-	m.log.Info("storage: reset — discarded the in-progress backup",
+	//
+	// "UNFINISHED", NOT "IN-PROGRESS", and the difference is not stylistic. `engine.go`'s ResetWorking
+	// refuses with 409 while a backup is running, so the tree reset acts on is NEVER in progress —
+	// failed or abandoned is the entire population it can reach. "In-progress" would tell the user
+	// quince stopped something that was running, which is the one thing it structurally cannot have
+	// done: a false claim about STATE, where the old wording was merely a false claim about MECHANISM.
+	// Caught in review of quince#748, which is where the first version of this fix introduced it.
+	m.log.Info("storage: reset — discarded the unfinished backup",
 		"udid", udid, "storage", s.Name, "storage_id", s.StorageID)
-	return http.StatusAccepted, "discarded the in-progress backup on storage " + s.Name
+	return http.StatusAccepted, "discarded the unfinished backup on storage " + s.Name
 }
 
 func nameList(ss []Slot) string {
