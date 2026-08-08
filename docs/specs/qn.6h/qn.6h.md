@@ -722,6 +722,24 @@ byte size.
    PVE with `rbind` propagation. Answers A and C are facts about that host; nothing here establishes
    that a different topology — a NAS, a privileged container, a different ZFS release — behaves the
    same. Answer B is retained for exactly this reason.
+9. **UNRULED AND BLOCKING PR 3: what reset DOES when rollback is refused.** Answer C turns an
+   operation that is unconditional today — `RemoveAll` on a directory quince owns, refusable by
+   nothing — into one that **usually refuses** on any host with ordinary snapshot hygiene. The
+   2026-08-04 ruling licensed `rollback` as *available but destructive-if-misused*; C makes it **safe
+   and mostly absent**, which is the opposite failure and was not contemplated.
+   **The mitigation in D4 answered the wrong case and is withdrawn**: *"do nothing, the head is
+   resumable"* is the **retry** path, and reset exists for when the head is **bad**. Four shapes are
+   on the table — accept C with a documented `com.sun:auto-snapshot=false` recommendation; a
+   full-copy restore from `.zfs/snapshot/<newest @quince-*>/latest/` as a fallback; the unfiltered
+   snapshot view of question 7 so quince can refuse *before* the attempt; or a **delta** restore that
+   makes reset unconditional at O(delta) data and removes the need for a `rollback` verb at all,
+   shrinking the host hand-edit to a deletion. Raised on quince#736; **the delta size after a torn
+   incremental is asserted and NOT measured**, and that figure is what the fourth option rests on.
+10. **`engine.go:322-324`'s `409` is load-bearing for CORRECTNESS, not tidiness**, and PR 3 owes a
+    comment at the guard saying so. A rollback removes files under an active writer with **no error
+    to either side** (measured), so a regression there would produce a rolled-back tree immediately
+    re-dirtied, silently. Recorded here because the reasoning lives in a review thread and the guard
+    reads like a politeness check.
 
 ---
 
