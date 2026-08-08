@@ -131,3 +131,39 @@ func TestTheAddPathStillRefusesAnEmptyBackend(t *testing.T) {
 		t.Errorf("the refusal does not name `backend`: %+v", errs)
 	}
 }
+
+// THE IMPLICATION MUST STAY NARROW ON THE DOOR THIS CHANGE OPENED IT ON.
+//
+// ResolveStorages implies `default: true` on a LONE entry only, so two storages with none marked
+// must still be refused — order is not intent, and a silent pick is the class quince#473 removed.
+// The permissive tests above all use one storage, so without this the guard holds by `len(out) == 1`
+// and by nothing else, and the plausible future edit ("pick the first when none is marked") would
+// soften PUT silently with every other test in this file still green.
+//
+// TestValidateRequiresExactlyOneDefault covers Validate directly; this covers the write path, which
+// is what the change claims to have made honest — validateStorages' own comment is about exactly this
+// case: "defaults == 0 here can only mean several storages and none chosen".
+func TestAPutWithTwoStoragesAndNoDefaultIsStillRefused(t *testing.T) {
+	svc, _ := newServiceOn(t, "storage:\n  - path: /backups\n    backend: hardlink\n")
+
+	errs, _, err := svc.Replace(wireDoc(
+		StorageEntry{Path: "/backups", Backend: "hardlink"},
+		StorageEntry{Path: "/backups2", Backend: "hardlink"},
+	))
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("two storages with neither marked `default: true` were accepted; the implication " +
+			"covers a LONE entry only and a silent pick is what it exists to prevent")
+	}
+	var sawDefault bool
+	for _, e := range errs {
+		if e.Path == "storage" {
+			sawDefault = true
+		}
+	}
+	if !sawDefault {
+		t.Errorf("the refusal does not name `storage`: %+v", errs)
+	}
+}
