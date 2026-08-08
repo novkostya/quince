@@ -143,6 +143,17 @@ func verifyPlainDB(treeDir, dbPath string) string {
 }
 
 // hasNonEmptyShard reports whether treeDir has at least one non-empty two-hex-char blob dir.
+//
+// IT SKIPS ZFS's .zfs BY COINCIDENCE, NOT BY DESIGN, WHICH IS WHY THIS PARAGRAPH EXISTS. Under
+// qn.6h the backup tree becomes the child dataset root, so `.zfs` — and every snapshot beneath it —
+// becomes a child of treeDir. This walker never descends into one only because `hexShardDir` admits
+// exactly two lowercase hex characters, and `.zfs` is not that shape.
+//
+// That predicate was written to FIND blob shards, not to EXCLUDE anything. Widening it — accepting
+// uppercase, or any two-character directory — would silently open the verify path to every snapshot
+// the device has ever had. The ruling's condition 2 says `.zfs` is skipped explicitly by every
+// walker: `dirSize` and `isEmptyDir` do that with `skipSnapdir` (layout.go), and this is the one
+// exception, kept as a written reason rather than a redundant call.
 func hasNonEmptyShard(treeDir string) bool {
 	entries, err := os.ReadDir(treeDir)
 	if err != nil {
