@@ -285,9 +285,40 @@ follow and are owed rather than assumed:
   scoped that out. The slice taken here is **normalization only**, server-side: it does not stop the
   decoder zeroing a non-storage key, which is quince#493's actual subject and stays open.
 
-**Open question 5 asks whether the architect wants this landed here or on quince#754 alone.** My
-recommendation is here, first, because this rung cannot be correct without it — but the defect exists
-on `main` today and is filed separately so it is not buried inside a rung about file tidiness.
+**A third field changes its written form, and the issue lists two.** `Resolved()` fills `Retention`
+as well (`schema.go:157`), so this also stops `retention: null` reaching the file and starts writing
+a full `retention:` block. Harmless, closer to what the file resolves to anyway, and it makes D2's
+diff *cleaner* rather than harder: with both sides resolved, an untouched `retention` is equal on
+both sides and D2 drops it. The pointer still distinguishes absent from zero **at parse**, which is
+where D4's argument actually lives.
+
+**THE ADD PATH KEEPS REFUSING WHAT THIS PATH WILL NOW ACCEPT, AND THE ASYMMETRY IS RULED CORRECT.**
+Architect ruling on quince#754, 2026-08-08. `POST /api/config/storage` refuses an empty `backend`
+rather than defaulting it, deliberately, and `add.go:118` says so:
+
+> `// EMPTY IS REFUSED RATHER THAN DEFAULTED. Resolved() would turn it into `auto`, and the whole`
+> `// point of the add flow is that quince writes the concrete backend it just showed the user`
+> `// (quince#502). An omission here is a client bug, and defaulting it would hide one.`
+
+**The reason the two doors differ is stateable, which is why the difference is kept rather than
+flattened.** `PUT /api/config` is a full-document replace of `config.yml`, so **it must mean what the
+file means**. `POST /api/config/storage` is a narrow add whose caller has just watched quince probe a
+path and name a concrete backend — **an omission there really is a client bug**, and quince#502's
+argument is recent and holds. **Do not "fix" `add.go` to match**, and note the ordering makes this
+free: `validateAddition` runs *before* the list is resolved (`add.go:84`), so the add's own gate
+still fires first and `replaceLocked`'s resolve is an idempotent second pass behind it.
+
+**That is the one line `contracts.md` §6 owes** — why the two doors differ — and PR 2 writes it.
+Without it the difference reads as accidental in both places, which is how a later reader collapses
+it.
+
+**Open question 5 is RULED: it lands HERE, as PR 2**, citing quince#754 as the defect it closes.
+Architect, on quince#753, **reversing** the *"its own PR, not folded into the rung"* ruling posted on
+quince#754 about a minute earlier — the two crossed. The reversal's reason is that the objection was
+about the defect becoming invisible, and quince#754 exists, is measured and is findable, so nothing
+is buried; meanwhile a prerequisite living outside the spec that depends on it is how sequencing gets
+lost. **Recorded with both rulings named** because a reader arriving from quince#754 will otherwise
+find the earlier one and follow it.
 
 ### D3 — `storage:` entries: keyed by name, and the one key quince must write that nobody set
 
@@ -550,10 +581,11 @@ test.
    rather than obviously machine-written. Worth its own issue; not filed yet, because the right
    remedy is probably a UI refusal to save while the banner is up, which is a `qn.6`-family question
    rather than a config-package one.
-5. **Whether D2a lands in this rung or on quince#754 alone.** This rung cannot be correct without it,
-   so my recommendation is here and first. The counter-argument is real: it is a defect on `main`
-   with its own issue, and landing it inside a tidiness rung makes it harder to find later.
-   **Either way the spec is unchanged** — only the PR slicing moves.
+5. ~~**Whether D2a lands in this rung or on quince#754 alone.**~~ **RULED 2026-08-08 (architect,
+   quince#753): here, as PR 2.** Kept rather than deleted because it was ruled *both ways within a
+   minute* — quince#754 said "its own PR, not folded into the rung" and quince#753 reversed it — so a
+   reader who finds the earlier ruling needs this entry to know it was superseded. D2a carries the
+   reasoning.
 
 ---
 
@@ -564,10 +596,8 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 
 | | claim | proof |
 | --- | --- | --- |
-| | claim | proof |
-| --- | --- | --- |
 | **1** | **this spec** | architect review; `docs/specs/**` is not code-owned |
-| **2** | **`replaceLocked` resolves before it validates** (D2a, quince#754). Closes the `422`-stricter-than-the-file half and the `name: ""` half; `contracts.md` §6's `422` text moves with it. **Nothing about marshalling changes** | G4a, G7, and the existing config suites untouched |
+| **2** | **`replaceLocked` resolves before it validates** (D2a), closing quince#754: the `422`-stricter-than-the-file half, the `name: ""` half, and `retention: null` as a third. **Nothing about marshalling changes.** **`docs/contracts.md` is CODE-OWNED by `@novkostya`, so an architect approval cannot merge this PR** — it needs an Operator approval on top. Everything else in the rung waits behind it, so if that wait bites, the contracts line splits into its own tiny PR and the code lands on the architect's approval alone. Decided at authoring time rather than at merge time | G4a, G7, a `curl` reproduction through the running handler, and the existing config suites untouched |
 | **3** | **the declared set exists and round-trips.** `Parse` computes it, `Loaded` and `Service` carry it, the node-prune `Marshal` is written and unit-tested — **and nothing calls it.** `replaceLocked` still writes the full document, so `main` is unchanged in behaviour | G2, G4 against the new function directly |
 | **4** | **the file stops inflating.** `replaceLocked` switches to the declared marshal; the diff against `old` supplies D2 clause 2; the runtime round-trip guard of decision 3 lands with it, sharing G4's comparator; the three false `qn.6` doc-comment comments are corrected | G1, G2, G4, G7 |
 | **5** | **the materialisation gate.** D3's `default: true` rule, plus `AddStorage`/`ForgetStorage` declared-set maintenance, plus story 10's fresh-install path | G3, G4, G7 |
