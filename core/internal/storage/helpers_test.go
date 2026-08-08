@@ -57,9 +57,9 @@ func newNSManager(t *testing.T, strategy clonetree.Strategy, policy RetentionPol
 // .zfs/snapshot/*, destroy = rm the snapshot dir, create = no-op. It records every argv so tests can
 // assert exact commands (argv arrays, no shell) and inject failures.
 //
-// `seed` OUTLIVES THE PATH THAT CALLED IT. Nothing in production reaches it after qn.6h; it stays
-// until `seed)` is deleted from the reference helper in `deploy/storage.md`, because a fake must not
-// stop declaring a verb the operator's real script still declares.
+// `seed` IS GONE, and it went in the same PR that deleted `seed)` from the reference helper in
+// `deploy/storage.md` — a fake must not stop declaring a verb the operator's real script still
+// declares, and must not keep declaring one it no longer does.
 //
 // ITS ONE STRUCTURAL LIE is that snapshots live INSIDE the tree here, where real ZFS keeps them out
 // of the dataset entirely. That is the same lie `.zfs` itself tells at snapdir=visible, so the ops
@@ -119,19 +119,6 @@ func (f *fakeZFS) run(_ context.Context, argv []string) (string, error) {
 		ds, snap := splitFull(argv[len(argv)-1])
 		udid := strings.TrimPrefix(ds, f.parent+"/")
 		return "", os.RemoveAll(filepath.Join(f.backups, udid, ".zfs", "snapshot", snap))
-	case "seed":
-		// Host-side seed verb (qn.5b): clone latest/ → working/<udid>; verdict COPIED on tmpfs.
-		udid := strings.TrimPrefix(argv[len(argv)-1], f.parent+"/")
-		mp := filepath.Join(f.backups, udid)
-		tree := filepath.Join(mp, "working", udid)
-		_ = os.RemoveAll(tree)
-		if err := os.MkdirAll(filepath.Join(mp, "working"), 0o755); err != nil {
-			return err.Error(), err
-		}
-		if err := clonetree.Clone(tree, filepath.Join(mp, "latest"), clonetree.Copy); err != nil {
-			return err.Error(), err
-		}
-		return "COPIED", nil // tmpfs → no block sharing
 	}
 	return "", nil
 }
