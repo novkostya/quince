@@ -40,10 +40,10 @@ is not built, quince keeps working exactly as it does today.
 
 | tree | what changes |
 | --- | --- |
-| `core/internal/storage/zfs.go` | `PrepareWork`/`SeedWork`/`WorkDir` stop delegating to the shared seed machine; `seedWorking`, `seedInContainer`, `seedClosure` and the exchange in `finishCommit` go; `RepairWorkingCopy` becomes a rollback |
+| `core/internal/storage/zfs.go` | the tool's target becomes `<backups>` and the tree the child dataset root; `PrepareWork`/`SeedWork`/`WorkDir` stop delegating to the shared seed machine; `seedWorking`, `seedInContainer`, `seedClosure`, `Provision`'s `latest/` mkdir and the exchange in `finishCommit` all go; `RepairWorkingCopy` per open question 9 |
 | `core/internal/storage/zfscli.go` | the `seed` verb becomes `rollback` |
 | `core/internal/storage/journal.go` | doc only — `PhaseExchanged` stops occurring on zfs; the enum keeps its shape. **Specifically `:20-26`**: the *"both models share the atomic exchange as their pivot"* block, and `PhasePrepared`'s *"marker written into `working/<udid>`"* |
-| `core/internal/storage/layout.go` | `browseRoot` stops being able to return `latestDir()` on zfs (D7) |
+| `core/internal/storage/layout.go` | `browseRoot`'s zfs arm loses its trailing `latest` component and can no longer return the live tree (D7); `isEmptyDir` must ignore `.zfs` (D8); the work-sentinel path becomes backend-dependent (D3) |
 | `deploy/storage.md` | the reference helper loses `seed)`, gains `rollback)`; the offsite note; the one hand-edit |
 | `docs/quince.design.md`, `CLAUDE.md` | the ruling — **a separate, prerequisite PR** |
 | `docs/contracts.md` | `POST /api/devices/{udid}/reset-working` gains a failure the zfs backend can return |
@@ -72,7 +72,7 @@ is not built, quince keeps working exactly as it does today.
 - **A btrfs-native twin.** The sibling named in the **(cl) storage epic's point 8**
   (`quince-devlog/roadmap.md:696` onward — **not** M5, which has no numbered points and no storage
   items). No snapshot-capable non-zfs tester exists.
-- **Making offsite read a snapshot mount.** This rung *states* that `latest/` is torn during a zfs
+- **Making offsite read a snapshot mount.** This rung *states* that the live tree is torn during a zfs
   backup and that quince must be excluded from a general whole-host rclone job; it does not build
   the snapshot-sourced offsite path. **That is quince#735**, filed 2026-08-07 because nothing
   tracked it: the ruling accepted the cost and left it ownerless.
@@ -108,7 +108,7 @@ is not built, quince keeps working exactly as it does today.
 4. **`statvfs(backup_directory)` is what answers the device's free-space question**
    (`idevicebackup2.c:2321`, `DLMessageGetFreeDiskSpace`). qn.4c found what a wrong answer costs: a
    target on the cache filesystem made the device refuse any backup bigger than it. **The tool's
-   target must be inside the backup dataset**, which rules out putting the shim anywhere else.
+   target must be inside the backup dataset**, which is satisfied by construction under D1 — the target IS the parent dataset. Condition 1 in D8 is what this fact costs.
 
 5. **`isDirty` stats the directory, deliberately** — `reset.go:101-104`, *"IT INCLUDES THE
    KILLED-SEED CASE deliberately … That is why this stats the directory rather than reading the
@@ -133,8 +133,11 @@ is not built, quince keeps working exactly as it does today.
    unmount of *clones*, under `-R` only** — there is no flag that forces the unmount of the dataset
    being rolled back.
 
-10. **rclone already excludes `working/`** by an anchored rule — `offsite.go`,
-    `- /<subdir>/*/working/**`. Nothing there needs to change for the shim.
+10. **rclone's rules are EXCLUSIONS only** — `offsite.go`: `working/**`, `versions/**`, the storage
+    marker. `latest/` is synced by *not being excluded*, so its name is not in the executable
+    contract. **After D1 the zfs arm has neither `working/` nor `latest/`**, so those rules simply
+    match nothing on that backend and the whole device dataset is in scope — which is the torn-tree
+    exposure quince#735 tracks, not something this rung fixes.
 
 11. **Reset is already refused while a backup runs** — `engine.go:322-324`, `409` *"a backup is
     running for this device — cancel it before resetting"*. So a rollback can never race quince's own
@@ -143,9 +146,9 @@ is not built, quince keeps working exactly as it does today.
 12. **Browse on zfs reads the snapshot, the newest version included — but only when the registry row
     carries one.** `browseRoot`'s zfs arm is `backend == BackendZFS && zfsSnapshot != nil` and
     **ignores `isLatest`** (`layout.go:82-91`), so the newest version genuinely is read from
-    `.zfs/snapshot/<snap>/latest` today. **When `zfsSnapshot` is nil it falls through to
+    `.zfs/snapshot/<snap>/` today. **When `zfsSnapshot` is nil it falls through to
     `if isLatest { return latestDir(...) }`** — a live-tree read. Harmless today, because on zfs
-    `latest/` is always a complete committed tree; **in place it is the mutable head.** The nil case
+    `latest/` was always a complete committed tree. **Under D1 the fallback resolves to the dataset ROOT, which is the tree being written.** The nil case
     is **representable and NOT shown to occur**: `ZFSSnapshot` is a `*string` off the registry row,
     and `zfs.go:287` handles a nil elsewhere. Found by the architect reviewing the canon PR
     (quince#733), not by this spec's own reading. See D7.
@@ -227,23 +230,23 @@ storage still presents `<udid>/latest/…` where those tools cannot find `Info.p
 prepared → snapshot_created → registry_committed
 ```
 
-`Commit` writes the marker into `TreePath` (the head, through the shim), journals `PhasePrepared`,
-and `finishCommit` does two things where it used to do three:
+`Commit` writes the marker into `TreePath` — which is now the **dataset root itself** — journals
+`PhasePrepared`, and `finishCommit` does **one** thing where it used to do three:
 
-1. **Remove `working/` and the work sentinel.** This happens **before** the snapshot, not after, and
-   the ordering is the whole of it: canon says *between backups the dataset holds only `latest/`*,
-   and a snapshot taken with the scaffolding still present would carry it forever. Today's code
-   already removes them before snapshotting (`zfs.go:242-243` then `:245`); the ordering is
-   inherited, not invented.
+1. **`Snapshot`** → `PhaseSnapshotCreated`.
 
-   **The CALL is inherited; the OBJECT is not, and that must be a written property rather than a
-   lucky one.** Today `os.RemoveAll(workingParent)` deletes a real directory of superseded content.
-   After this rung it deletes a directory containing a **symlink to the committed tree**. Go's
-   `RemoveAll` is `lstat`-based, so it unlinks the symlink and does not traverse it — the code is
-   correct. **The failure if it were not is deleting every backup at every commit**, so G1 asserts
-   `latest/` still holds the committed tree after `finishCommit`, and the property is stated here so
-   nobody "simplifies" the traversal later.
-2. **`Snapshot`** → `PhaseSnapshotCreated`.
+**There is no pre-snapshot cleanup, and that is the ruled shape paying off.** Under D1 the child
+dataset holds only the tree and its marker: `working/` does not exist, and the sentinel lives in the
+**parent** (`<backups>/.quince-work-<udid>.json`), outside the snapshot's path entirely. So canon's
+*between backups the dataset holds only the backup* is satisfied by construction rather than by
+ordering. The sentinel is cleared whenever — before or after the snapshot — because it was never
+capturable.
+
+*(This section said the removal ordering was "the whole of it", and carried a paragraph about
+`os.RemoveAll(workingParent)` being `lstat`-based so it would unlink a symlink rather than traverse
+into the committed tree. Both described the withdrawn shim: **there is no `working/` and no symlink**,
+so the property guards nothing and is deleted rather than reworded. Recorded because it was added at
+a reviewer's request and its disappearance would otherwise look like an oversight.)*
 
 `PhaseExchanged` stops occurring. The enum keeps its shape — per-backend phase sets are already the
 design.
@@ -355,7 +358,7 @@ remains right: the measurement is one host, one pool, one kernel.
 **What is settled regardless of the outcome:**
 
 - **quince's own writer can never race it** (fact 11): reset is already `409`ed while a backup runs.
-- **quince's readers are largely absent**: browse on zfs reads `.zfs/snapshot/…`, never `latest/`
+- **quince's readers are largely absent**: browse on zfs reads `.zfs/snapshot/…`, never the live tree
   (fact 12), so the obvious open-handle source is gone by construction.
 - **There is no force flag** (fact 9): `-f` forces an unmount of *clones*, under `-R` only. Neither
   answer can be engineered around with a flag.
@@ -400,7 +403,7 @@ blocks and is cut off by `zfsOpTimeout` (60 s), so the failure is a timeout. Bot
 in-product one: stop or restart the container so the dataset is not mounted, then reset. Saying so is
 the whole of quince's job here — *no silent caps or fallbacks*.
 
-**Rejected under answer B: emptying `latest/` in-container as a fallback.** It is available, it is
+**Rejected under answer B: emptying the dataset root in-container as a fallback.** It is available, it is
 non-destructive to versions (the committed content is in the snapshot), and it would make reset
 "work" — and it is wrong twice. It silently converts an abandon into a state where the next backup is
 a **full multi-hour transfer**, and it does so at the moment the user asked for the cheap operation.
@@ -455,7 +458,7 @@ the wrong remedy.
 
 **Answered: the capture-and-restore step is not deleted — it stops being reached, on zfs only.**
 `superviseGatedSeed` (`engine.go:770-819`) captures the fresh `Info.plist` the tool wrote and
-restores it over the clone, because the clone overwrites it with `latest/`'s. With no clone there is
+restores it over the clone, because the clone overwrites it with the previous version's. With no clone there is
 nothing to overwrite it. `PrepareWork` returns `seedPending=false`, so `engine.go:458` takes the
 plain `supervise` branch with `gatePath=""`, and `--gate` is not passed. `superviseGatedSeed`,
 `awaitInfoPlist`, `readStableInfo` and the patch all stay, for the seeding backends.
@@ -463,9 +466,9 @@ plain `supervise` branch with `gatePath=""`, and `--gate` is not passed. `superv
 **One consequence, stated because it looks alarming and is not.** The tool does
 `remove_file(info_path)` then writes a fresh one **before** sending the `Backup` request (spike C12,
 `idevicebackup2.c:2242-2243`). On zfs that now rewrites the live head's `Info.plist` before a byte
-transfers. If the job then fails, `latest/` carries a fresh `Info.plist` over the previous version's
+transfers. If the job then fails, the dataset root carries a fresh `Info.plist` over the previous version's
 content — which is the **dirty head**, the resumable state the retain rule protects. The previous
-version is intact in its snapshot, and `quince-version.json` in `latest/` still names the old version
+version is intact in its snapshot, and `quince-version.json` at the root still names the old version
 until commit, which is what keeps adopt and reconciliation honest across the window.
 
 ### D6 — The helper: `seed` out, `rollback` in
@@ -496,7 +499,7 @@ un-migrated helper surfaces at the **first reset**, as the helper's own
 
 **The path loses its trailing component.** Under the 2026-08-08 ruling a version's content is at the
 snapshot root, so `browseRoot`'s zfs arm becomes `.zfs/snapshot/<snap>` — not
-`.zfs/snapshot/<snap>/latest`. `committedFromSnapshot` and `Scan` (`zfs.go:321`, `:353`) move with
+`.zfs/snapshot/<snap>/`. `committedFromSnapshot` and `Scan` (`zfs.go:321`, `:353`) move with
 it. **Measured this session on real ZFS**: that directory is walkable from inside an unprivileged
 LXC, tree and marker both readable, which is the roadmap's *"known minefield (probe first)"* probed.
 
@@ -518,7 +521,7 @@ content cannot be served*. Gate G14 asserts it against a deliberately-nil row, s
 against the case rather than argued away from it.
 
 **Why not simply keep `isLatest` working on zfs.** Because in place there is no moment at which
-`latest/` is known-complete from a row's point of view: between the marker write and the snapshot it
+the live tree is known-complete from a row's point of view: between the marker write and the snapshot it
 is a committed-looking tree that is not yet a version, and after a failure it is a dirty head that
 still carries the *previous* version's marker. Any read that resolves *the newest version* to the
 head is reading a tree whose completeness is a timing question. The snapshot is the only artifact
@@ -555,7 +558,7 @@ in each walker, plus an assertion at `Provision`, which already performs a visib
 **3. `statvfs` measured on the real pool.** Half done above; the quota case is H5.
 
 **`PhasePrepared` and its block comment move with the sequence** (fact 13). The phase keeps its name
-and its position; on zfs it means *marker written into `latest/`*, and `journal.go`'s comment must say
+and its position; on zfs it means *marker written into the dataset root*, and `journal.go`'s comment must say
 so rather than leaving `working/<udid>` as the only definition. Named here because the rung's Boundary
 lists `journal.go` as doc-only, and a doc-only file is the one most easily skipped.
 
@@ -563,12 +566,13 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
 
 ## Stories
 
-1. **A zfs backup writes into `latest/` and no clone is ever made.** Both cases: a first backup
-   (empty `latest/`) and an incremental (populated `latest/`). No `cp`, no reflink, no `seed` verb.
-2. **A committed zfs version is a `@quince-*` snapshot** whose `latest/` is what the tool wrote, and
-   browsing that version reads `.zfs/snapshot/<snap>/latest` exactly as before.
-3. **Between backups the dataset holds only `latest/`.** No snapshot carries `working/` or the work
-   sentinel, because both are removed before the snapshot is taken.
+1. **A zfs backup writes into the DATASET ROOT and no clone is ever made.** Both cases: a first
+   backup (empty root) and an incremental (populated root). No `cp`, no reflink, no `seed` verb, and
+   no `latest/` anywhere on the zfs path.
+2. **A committed zfs version is a `@quince-*` snapshot** whose ROOT is what the tool wrote, and
+   browsing that version reads `.zfs/snapshot/<snap>/` — no trailing component.
+3. **Between backups the dataset holds only the backup tree.** No snapshot carries `working/` or the work
+   sentinel, because neither lives in the child dataset: `working/` does not exist and the sentinel is in the parent.
 4. **A failed zfs job keeps its dirty head and resumes.** The retry re-transfers nothing, and **no
    rollback fires** — the failure path never calls the verb.
 5. **Reset rolls back.** `POST /api/devices/{udid}/reset-working` on zfs answers `202`, and the head
@@ -589,10 +593,15 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
     a target that is not `<PARENT>/*@quince-*` is refused.
 11. **An un-migrated helper produces a legible refusal at reset**, naming the verb and the remedy —
     never a silent success.
-12. **A pre-change real `working/<udid>` is discarded with a log line naming its size**, and the shim
-    replaces it.
-13. **Browse never resolves to the live head on zfs.** A zfs version row with no snapshot is
-    surfaced as unbrowsable with a reason, never as a `browse_root` pointing at `latest/`.
+12. **A pre-change `latest/` or `working/` in the dataset root is discarded, loudly**, with a log line
+    naming its size, before any snapshot can capture it. Under the ruled shape those directories are
+    no longer siblings of the tree — **they are inside it** — so leaving them rides them into every
+    future version and shows them to any external reader.
+13. **Browse never resolves to the live tree on zfs.** A zfs version row with no snapshot is
+    surfaced as unbrowsable with a reason, never as a `browse_root` pointing at the dataset root.
+14. **A pre-`qn.6h` snapshot is skipped with a LOG LINE, not silently.** Its content sits at
+    `<snap>/latest/`, so a marker read at `<snap>/` finds nothing. Skipping is ruled; skipping
+    *quietly* is what *no silent caps or fallbacks* forbids.
 
 ---
 
@@ -600,21 +609,21 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
 
 | id | what it proves | where |
 | --- | --- | --- |
-| **G1** | A zfs commit produces a snapshot whose `latest/` matches the tree the fake tool wrote, with no clone step and no `PhaseExchanged` in the journal. Both first-backup and incremental. | CI (Go) |
-| **G2** | The snapshot contains **only** `latest/` — asserted on the filesystem after commit, not on the API. | CI (Go) |
-| **G3** | A killed job leaves the head dirty and the shim in place; the next `PrepareWork` resumes it, and nothing calls rollback. | CI (Go) |
+| **G1** | A zfs commit produces a snapshot whose ROOT matches the tree the fake tool wrote, with no clone step and no `PhaseExchanged` in the journal. Both first-backup and incremental. | CI (Go) |
+| **G2** | The snapshot contains **only** the backup tree and its marker — no `latest/`, no `working/`, no sentinel — asserted on the filesystem after commit, not on the API. | CI (Go) |
+| **G3** | A killed job leaves the head dirty and the sentinel in place; the next `PrepareWork` resumes it, and nothing calls rollback. | CI (Go) |
 | **G4** | `RepairWorkingCopy` on zfs issues exactly one `zfs rollback <newest @quince-*>` — asserted on the recorded argv, so `-r` can never creep in. | CI (Go, fake `zfsCLI`) |
 | **G5** | **D4 answers B and C.** A rollback that fails fast, one that exceeds `zfsOpTimeout`, and one refused with **the measured answer-C text** (`more recent snapshots or bookmarks exist`) ⇒ non-2xx from `RepairWorking`, `zfs`'s reason propagated **verbatim**, the sentinel and `working/` still present, **no audit line**, **exactly one** rollback attempt recorded. This is the state-honesty gate. | CI (Go) |
 | **G5c** | **The answer-C remedy is C's, not B's.** The message for *more recent snapshots exist* must not tell the operator to stop the container, and must say the dirty head remains resumable. Added because the two failures were one branch in the spec until H2 separated them. | CI (Go) |
 | **G6** | Reset on a device with zero `@quince-*` snapshots empties the head and answers `202`; reset on a device **with** snapshots never takes that branch. | CI (Go) |
 | **G7** | The committed `Info.plist` is the job's fresh one, and `supervise` was called with an empty `gatePath` on zfs. | CI (Go) |
-| **G8** | The shim is a symlink to `../../latest`, is the only entry in `working/`, and `TreePath` resolves through it to the head. | CI (Go) |
-| **G9** | A pre-change real directory at `working/<udid>` is removed and logged with its size. | CI (Go) |
+| **G8** | **The ruled shape, asserted directly.** The tool's target is `<backups>`; the tree lands at the child dataset mountpoint; the child dataset contains the tree and its marker and **nothing else** — no `latest/`, no `working/`, no sentinel. Replaces a gate that asserted the withdrawn shim. | CI (Go) |
+| **G9** | **A pre-change `latest/` (and `working/`) sitting in the dataset root is removed and logged with its size**, before any snapshot can capture it. Under the ruled shape the old layout's directories become *subdirectories of the new tree*, so leaving them would ride them into every future version and show them to any external reader. | CI (Go) |
 | **G10** | Every existing namespace-backend storage test passes unchanged — the diff must not touch their expectations. | CI (Go) |
 | **G11** | The reference helper in `deploy/storage.md` accepts `rollback <parent>/<udid>@quince-*`, refuses every other target, and drops `-r` — run against the real script text with a stub `zfs` on `PATH`. | CI (shell) |
 | **G12** | `make gates` · `make image` · `make gates-ui-e2e` | CI |
 | **G13** | `make privacy-check REF=origin/main...HEAD TEXT=<file under $HOME/scratch/<runner>/>` | host |
-| **G14** | `browseRoot` on the zfs backend **never** returns `latestDir()` — driven with a deliberately-nil `ZFSSnapshot`, so the guard is proven against the case rather than argued away from it. The newest version still resolves to `.zfs/snapshot/<snap>/latest`. | CI (Go) |
+| **G14** | `browseRoot` on the zfs backend **never** returns `latestDir()` — driven with a deliberately-nil `ZFSSnapshot`, so the guard is proven against the case rather than argued away from it. The newest version still resolves to `.zfs/snapshot/<snap>/`. | CI (Go) |
 
 **Hardware gates — OWED, and the owner is the Operator.** None of these can be run by a session;
 they need the staging stand and a real device. **No claim in this spec rests on them having passed**,
@@ -622,7 +631,7 @@ and the rung is not done until they have.
 
 | id | what it proves |
 | --- | --- |
-| **H1** | An in-place Wi-Fi backup end to end: transfer into `latest/`, verify, snapshot, browse the committed version. |
+| **H1** | An in-place Wi-Fi backup end to end: transfer into the dataset root, verify, snapshot, browse the committed version. |
 | ~~**H2**~~ | **DISCHARGED 2026-08-08 — see D4's table.** Answer **A**: rollback succeeded against a dataset bind-mounted into a running unprivileged LXC under read fds, a child's fd, a cwd inside the tree, an active writer and a held write fd. Answer **B** was never observed. Answer **C** — *more recent snapshots or bookmarks exist* — was found instead, and is the likely field case. `zfsOpTimeout`'s 60 s was never approached, so the near-miss it was flagged against did not occur. |
 | **H2b** | **NOT a hardware gate and still owed: does the same hold with quince itself live?** H2 used a hand-built tree and an ssh-driven rollback, not `RepairWorkingCopy` on a real job. The ZFS-level answer will not change; what is unproven is quince's own path through it. Folds into H1. |
 | **H3** | The seed latency is gone: time from passcode entry to first bytes, against `qn.6b`'s measured baseline (~17.5 s warm, past 60 s cold, on a 133k-file / 34 GB device). |
@@ -652,7 +661,7 @@ harness.
 
 G4 still asserts on **argv rather than a call count**: a count passes on a rollback with the wrong
 target. What `rollback` must do in the fake is delete `.zfs/snapshot/` entries newer than the target
-and restore `latest/` from it, so answer A is exercised end-to-end; `failOp` already covers answer B.
+and restore the dataset root from it, so answer A is exercised end-to-end; `failOp` already covers answer B.
 
 **Two things PR 3 must change in the same fixture**, recorded here because it is the file every Go
 gate runs on and neither is a Boundary entry:
@@ -676,8 +685,8 @@ byte size.
 ## Rule check
 
 - **Never mutate a committed version.** Held, and this is the rung that comes nearest. On zfs a
-  committed version is a `@quince-*` snapshot and copy-on-write leaves it untouched; `latest/`
-  becomes the mutable head, which is exactly the sentence the ruling changed and canon now records.
+  committed version is a `@quince-*` snapshot and copy-on-write leaves it untouched, while
+  the dataset root becomes the mutable head — canon's `latest/` sentence is what the 2026-08-04 ruling changed, and the 2026-08-08 shape ruling removes `latest/` from this backend entirely.
   The helper's flag-discarding parse means the new verb **structurally cannot** reach a version
   (facts 8, 9). Roll-forward is preserved: nothing unwinds after verify (D2), and rollback is
   abandon-only with reset as its single caller (D3).
@@ -702,19 +711,17 @@ byte size.
   30-minute `zfsSeedTimeout` is deleted with the seed; a rollback is a metadata operation and takes
   the 60-second bound. **Near-miss named:** if H2 shows a rollback blocking on a busy mount, 60
   seconds may be the wrong bound — that is a thing H2 decides, not something this spec assumes.
-- **D5a: `latest/` is a real directory, never a symlink.** `docs/quince.stack.md:347-349`, an
-  accepted external-review point whose stated reason is that *"symlink behavior under rclone depends
-  on flags and would make the offsite contract fragile."* **This is the rung that puts a symlink in
-  the storage tree, so the rule is checked rather than assumed to be untouched.** It holds, for two
-  independent reasons: the rule binds **`latest/`**, and under D1 `latest/` stays a real directory —
-  the shim is at `working/<udid>`, a different path; and that path is **anchored-excluded from rclone
-  already** (fact 10, `- /<subdir>/*/working/**`), so the flag-dependent behaviour the rule was
-  written against is structurally out of reach rather than merely unlikely. The shim also does not
-  survive a commit, so no snapshot contains one.
-  **Named here because getting it wrong in the other direction has already happened**: the rule was
-  reached for on quince#591 to rule the shim out, on the reading that the target directory *is* the
-  offsite tree. It is not. A reader who reaches for D5a and finds no answer here will either repeat
-  that or conclude the rule was missed.
+- **D5a: `latest/` is a real directory, never a symlink.** `docs/quince.stack.md:347-349`, whose
+  stated reason is that *"symlink behavior under rclone depends on flags and would make the offsite
+  contract fragile."* **The rule is untouched, and after the 2026-08-08 ruling it is MOOT on zfs**:
+  the rung introduces no symlink anywhere, and there is no `latest/` on that backend for the rule to
+  reach. It continues to bind — unchanged and correct — on reflink / hardlink / copy, which this rung
+  does not modify.
+  **Kept in the Rule check rather than dropped, because the entry earned its place twice.** It was
+  added when the design *did* put a symlink in the storage tree, and before that the rule was reached
+  for on quince#591 to argue the shim *out*, on the reading that the tool's target directory **is**
+  the offsite tree. It is not. A reader who meets `latest/`-adjacent changes and finds no D5a entry
+  here will repeat one of those two errors.
 - **Every bug found on hardware becomes a replay fixture.** Standing; nothing found yet.
 - **Config tidiness.** `storage.zfs.seed` (`auto|reflink|copy`) becomes meaningless on zfs and
   **keeps meaning for the namespace backends**, which is a `qn.6g` contracts §6 question rather than
@@ -726,9 +733,11 @@ byte size.
 
 ## Rung-ruled decisions
 
-1. **The shim is a symlink at `working/<udid>` → `../../latest`.** Rung-local: it changes no contract
-   surface, no storage *layout* inside a snapshot, and nothing user-visible. The alternatives and why
-   each loses are in D1.
+1. ~~**The shim is a symlink at `working/<udid>` → `../../latest`.**~~ **SUPERSEDED by the Operator's
+   2026-08-08 shape ruling** — and note it was *never* rung-local as this entry claimed: it was
+   recorded here as changing "no storage layout inside a snapshot", which was true of the shim and is
+   emphatically not true of what replaced it. The ruled shape is D1 and it is an Operator decision,
+   not a rung-ruled one.
 2. **`workState` survives with `SeedInProgress` pinned to `false` on zfs**, rather than being
    replaced by a new head-dirty sentinel. Cheaper, and it keeps facts 5 and 6 true verbatim.
 3. **The `latestHasVersion` idempotency guard is removed** from the zfs commit path, with a comment
@@ -756,27 +765,19 @@ byte size.
    will actually read. **The cost is not hypothetical and it fails silently from the operator's
    side**: a walk crossing a backup uploads a half-transferred tree as though it were verified. That
    is why PR 4 carries the `deploy/storage.md` wording rather than leaving it to quince#735.
-4. **Whether the real `idevicebackup2` tolerates a symlink at its `<target>/<udid>`** is read from
-   source (fact 3) and not run. **H1 is the first execution**, and it is the shim's whole risk.
-   **If it does not, the fallback is D1's alternative (a)** — `latest/` becomes the target and the
-   tree is `latest/<udid>/` — **not** a sixth libimobiledevice patch. Corrected 2026-08-08 after the
-   Operator raised the `<target>/<UDID>` constraint on quince#591: this item named the patch, and a
-   patch is strictly more expensive than a shape that is available today and needs no upstream
-   change. Either way it is a spec change rather than an implementation detail, because it moves
-   where committed content sits inside a snapshot.
-
-   **The trade between the two is one fact and it is worth having written down**, since a future
-   reader meeting a symlink will ask why: (a) has no runtime uncertainty, and it moves the content to
-   `latest/<udid>/`, so **every snapshot taken before `qn.6h` stops being browsable** — silently,
-   because `browseRoot` resolving to an absent path is an empty browse and not an error. The shim
-   keeps `latest/`'s layout byte-identical, so old snapshots keep working and `browseRoot` needs no
-   change at all. *Migration is out of the table* (Operator, 2026-08-08) is licence not to **build** a
-   migration path; the shim is the option that does not need one.
+4. ~~**Whether the real `idevicebackup2` tolerates a symlink at its `<target>/<udid>`.**~~ **CLOSED by
+   the 2026-08-08 shape ruling — there is no symlink.** This was the shim's whole risk and the reason
+   H1 was its first real test; the ruled shape uses the tool's own `<target>/<UDID>` convention
+   directly, so nothing here depends on undocumented tolerance. **Recorded as closed rather than
+   deleted, because it is the clearest thing the ruling bought**: it removed a runtime unknown rather
+   than deferring it.
 5. **`SweepWork` is `return nil` today, and quince#731 makes reconciliation SCHEDULED — nothing
    sequences the two.** That issue already records that a future sweep must tell a live job's
-   `working/` from an orphan. **Under this rung the object such a sweep would remove is the shim**,
-   so removing it mid-job breaks the tool's target *immediately* rather than merely wasting a clone
-   — a strictly worse failure than the one quince#731 is written against. `reconcile.go` is
+   `working/` from an orphan. **Under this rung there is no `working/` on zfs at all**, so such a
+   sweep either finds nothing — harmless — or, if generalised to *job scaffolding*, reaches the
+   sentinel in the **parent** dataset and clears a live job's dirty marker, making a resumable head
+   look clean. A different failure from the one quince#731 is written against, and a quieter one.
+   `reconcile.go` is
    deliberately not in this rung's Boundary and quince#731 has no rung number, so this is recorded
    rather than built: whichever lands second owes the other a check.
 6. **Whether a zfs version row can actually hold a nil `ZFSSnapshot`** is unresolved, and D7 is
@@ -807,7 +808,7 @@ byte size.
    **The mitigation in D4 answered the wrong case and is withdrawn**: *"do nothing, the head is
    resumable"* is the **retry** path, and reset exists for when the head is **bad**. Four shapes are
    on the table — accept C with a documented `com.sun:auto-snapshot=false` recommendation; a
-   full-copy restore from `.zfs/snapshot/<newest @quince-*>/latest/` as a fallback; the unfiltered
+   full-copy restore from `.zfs/snapshot/<newest @quince-*>/` as a fallback; the unfiltered
    snapshot view of question 7 so quince can refuse *before* the attempt; or a **delta** restore that
    makes reset unconditional at O(delta) data and removes the need for a `rollback` verb at all,
    shrinking the host hand-edit to a deletion. Raised on quince#736; **the delta size after a torn
@@ -830,7 +831,7 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 | **0** | *(prerequisite, already open)* canon records the ruling | Operator approval as code owner |
 | **1** | **this spec** | architect review; `/docs/specs/**` is not code-owned |
 | **2** | **quince can ask the host to roll back, and the parse bounds it.** `zfscli.Seed` → `Rollback`; the reference helper gains `rollback)` and **keeps** `seed)`. Purely additive — the exchange model still runs, nothing changes behaviour. Landing it first is what lets the Operator do the host edit before the change that needs it. | G4 (argv), G11 (helper), G12 |
-| **3** | **zfs writes in place and commits by snapshot.** The shim, the deleted seed path, the deleted exchange, the new commit sequence, and reset-by-rollback. One PR because splitting it ships a broken intermediate: writing in place while still exchanging would swap `latest/` with a symlink, and switching the write path without switching reset would leave reset claiming a discard it did not perform. **D7's browse guard is in this PR, not a later one** — the fallback becomes live-tree-reading in the same commit that makes `latest/` mutable, so shipping it separately means shipping the hazard. | G1, G2, G3, G5, G6, G7, G8, G9, G10, G12, G13, G14 |
+| **3** | **zfs writes into the dataset root and commits by snapshot.** The target move, the deleted seed path, the deleted exchange, the new commit sequence, the sentinel's move to the parent, `isDirty` becoming a backend method, the pre-change `latest/`/`working/` cleanup, and reset. One PR because splitting it ships a broken intermediate: writing to the root while still exchanging would exchange the tree with itself, and switching the write path without switching `isDirty` leaves reset silently reporting nothing to do. **D7's browse guard and D8's `.zfs` skips are in this PR, not a later one** — both become live-tree hazards in the same commit that moves the tree. | G1, G2, G3, G5, G5c, G6, G7, G8, G9, G10, G12, G13, G14 |
 | **4** | **the helper stops carrying quince's lifecycle.** `seed)` deleted from `deploy/storage.md`, the **one-line changed-verbs note** (not a procedure), the offsite exclusion note, `contracts.md`'s reset failure. | G11, G12, G13 |
 | **5** | **the hardware evidence.** H1–H4 recorded on the rung issue, and whatever H2 decides about the timeout bound. Not a code PR unless H2 says it is. | Operator |
 
