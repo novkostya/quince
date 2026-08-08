@@ -367,6 +367,39 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, []Warning, error) {
 // entry out, and writes the result — so two concurrent forgets both read the same list and the
 // second write silently restores the entry the first removed.
 func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error) {
+	// RESOLVE FIRST, BEFORE ANYTHING LOOKS AT THE DOCUMENT (quince#754).
+	//
+	// Parse resolves (`cfg.Storage = ResolveStorages(...)`) and AddStorage resolves. This door did
+	// not, and it is the door `PUT /api/config` comes through: handleConfigPut decodes the body into
+	// a zero-valued Config and calls Replace two lines later, with nothing in between. So one of
+	// three write paths handed Validate and Marshal an UNRESOLVED document, and both misbehaved.
+	//
+	// VALIDATE REFUSED DOCUMENTS THE FILE ACCEPTS. `- path: /backups` is the minimal storage
+	// declaration quince's own startup refusal teaches, it is legal in config.yml, and over the wire
+	// it earned three 422s: zfs.mode "", zfs.seed "", and `exactly one storage must be marked
+	// default: true`. validateStorages states the opposite in its own comment — "A LONE STORAGE IS
+	// ALREADY MARKED DEFAULT by ResolveStorages, so defaults == 0 here can only mean several
+	// storages and none chosen" — which was true of the load path and false of this one. The editing
+	// surface disagreeing with the thing it edits contradicts D12, which makes the file the truth.
+	//
+	// AND WHAT VALIDATE DID NOT CATCH REACHED THE DISK. `name` and `retention` are unchecked, so a
+	// successful PUT wrote `name: ""` and `retention: null`. The file self-heals at the next Load;
+	// THE RUNNING PROCESS DOES NOT. `s.cfg` held an empty name until a restart, and GET /api/config
+	// reported it — on the field DELETE /api/config/storage/{name} addresses by.
+	//
+	// `old` WAS NOT RELIABLY RESOLVED EITHER, which is the same defect from the other end: it is
+	// s.cfg, which is post-Parse after a load but whatever Replace was handed after a PUT. So "the
+	// live snapshot is resolved" held only because Validate happened to refuse most unresolved
+	// documents — an invariant resting on a coincidence. It now rests on this line.
+	//
+	// THIS DOES NOT MAKE THE ADD PATH SOFTER, AND IT MUST NOT (ruled, quince#754). AddStorage's
+	// validateAddition refuses an empty `backend` deliberately — see its comment — and runs BEFORE
+	// ResolveStorages, so its strict gate still fires first and this is an idempotent second pass
+	// behind it. A full-document replace must mean what the FILE means; a narrow add whose caller
+	// has just watched quince probe a path and name a concrete backend is a place where an omission
+	// really is a client bug. The asymmetry is preserved by ORDERING rather than by a flag, so
+	// nothing has to remember which door a document came through. contracts §6 says why.
+	c.Storage = ResolveStorages(c.Storage)
 	if errs := Validate(c); len(errs) > 0 {
 		return errs, nil, nil
 	}
