@@ -538,13 +538,24 @@ moving to the dataset root, and each is cheap to honour and silent to get wrong.
 device.* The reason is measured rather than argued. `engine.go:524` already statfs's `e.backups` —
 **the parent** — so quince's own preflight is quota-blind today; the only thing honouring a
 per-device quota is the tool's own `statvfs` on a target inside the child, and this ruling moves that
-target up to the parent. **Measured this session:** with no quota set, parent and child report
-identical `statvfs` (13276822 blocks available on both), so the move costs nothing in the ordinary
-case; **the divergence appears only once a quota exists**, and that measurement is owed as H5.
-**The failure mode is what makes this a declaration rather than a footnote**: a per-device quota
-stops producing a clean refusal and starts producing **ENOSPC mid-transfer**, which costs a
-multi-hour Wi-Fi backup. `engine.go:641` names the property being spent — *"free-space statfs
-truthful by construction."*
+target up to the parent.
+
+**MEASURED on the real pool, 2026-08-08, both cases — this condition is discharged, not asserted.**
+
+| child dataset | what the tool sees at the **parent** (ruled shape) | at the **child** (today) |
+| --- | --- | --- |
+| no quota | 1620 GiB | 1620 GiB — **identical** |
+| `quota=10G` | **1620 GiB** | **9 GiB** |
+
+**So the move is free in the ordinary case and catastrophic in the quota case, with nothing in
+between.** With a 10 GiB quota the tool would be told 1620 GiB is available — a **180×
+overstatement** — and would start a backup that cannot fit. **The failure mode is what makes this a
+declaration rather than a footnote:** a per-device quota stops producing a clean up-front refusal by
+the device and starts producing **ENOSPC mid-transfer**, which costs a multi-hour Wi-Fi backup.
+`engine.go:641` names the property being spent — *"free-space statfs truthful by construction"* —
+and `engine.go:524` shows quince's own preflight already statfs's the parent, so **after this rung
+nothing anywhere honours a per-device quota.** That is why `deploy/storage.md` must say *set the
+quota on the parent dataset, not per device*, in words an operator reads.
 
 **2. `.zfs` must be skipped explicitly by every walker, and `snapdir` asserted at `Provision`.**
 Once the tree is the dataset root, `.zfs` is a child of the tree. At the `hidden` default `readdir`
@@ -555,7 +566,7 @@ snapshot**. Silently wrong, and wrong in proportion to how many versions exist. 
 in each walker, plus an assertion at `Provision`, which already performs a visibility probe
 (`zfs.go:99-100`) and is therefore the natural place for it.
 
-**3. `statvfs` measured on the real pool.** Half done above; the quota case is H5.
+**3. `statvfs` measured on the real pool. DONE** — the table under condition 1. Both cases, on the stand that discharged H2. No gate is owed for it.
 
 **`PhasePrepared` and its block comment move with the sequence** (fact 13). The phase keeps its name
 and its position; on zfs it means *marker written into the dataset root*, and `journal.go`'s comment must say
