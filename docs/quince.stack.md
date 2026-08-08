@@ -567,7 +567,7 @@ lives in env (`QUINCE_DATA/CACHE/BACKUPS`, `QUINCE_LISTEN`); **every other setti
 lives in one tidy, hand-editable file** (`/data/config.yml`) that the UI *edits* rather
 than replaces as the source of truth:
 
-- canonical key order, every key annotated with a generated doc-comment;
+- canonical key order, and **ONLY THE KEYS THE USER SET — no generated annotation at all**;
 - atomic validated writes; manual edits picked up by file watch — an invalid edit never
   crashes the app (keep running on last-good, show a UI banner naming the bad key);
 - deterministic regeneration on UI saves (user's own comments aren't preserved — the
@@ -575,6 +575,35 @@ than replaces as the source of truth:
 - **no secrets in the config file, ever** (admin password hash lives in the app DB) — the
   file is safely diffable, shareable, and versionable;
 - `quince config validate` for pre-flight in scripts/CI.
+
+**RULED (was two bullets promising the opposite): the file contains ONLY WHAT WAS SET, and carries
+NO GENERATED ANNOTATION AT ALL.** Operator, 2026-08-08, relayed on
+[quince#728](https://github.com/novkostya/quince/issues/728). Raised by a Settings page that wrote
+back every optional key at its default and called it the user's config.
+
+**Both halves overturn text that stood here, and the second is the sharper reversal.** *"Every key
+annotated with a generated doc-comment"* was D12's headline promise — the OpenWrt/PVE precedent the
+whole decision cites. It is **dropped, not deferred**: there is no smaller annotation to stage
+toward, and quince#727's staging item for it is moot rather than pending.
+
+**What survives is the reason D12 exists.** *Tidy, hand-editable, diffable, no secrets, the UI edits
+the file rather than replacing it* — all unchanged. What was wrong was the belief that a config file
+is more legible for being complete. **A file that lists every key at its default is not
+self-documenting, it is noise a reader has to filter**, and it makes a hand-edit harder to diff
+rather than easier: the signal is what somebody chose, and defaults belong in `--help`, the UI and
+this document.
+
+**IMPLEMENTATION NOTE, because the obvious approach cannot deliver this and the second-obvious one
+breaks a live behaviour.** `omitempty` drops **zero** values, not **default** ones — and
+`ResolveStorages` fills non-zero defaults at parse (`core/internal/config/schema.go`: `backend:
+auto`, `zfs.mode: exec`, `zfs.seed: auto`), with `Marshal` serialising the **resolved** document. So
+`omitempty` tidies empty strings and leaves exactly the keys this ruling is about. *Only what was
+set* is a fact about the **input document** that resolution has already destroyed, so it needs
+declared-vs-resolved tracking, and that tracking has to survive the write path or every UI save
+re-inflates the file. **And `omitempty` must never reach the `json:` tag on the same line**: a sparse
+wire representation makes `GET /api/config` drop keys, the UI spreads a partial document, `PUT` sends
+it, and the decoder zeroes every absent key — `devices.manage_muxer` becomes `false` and quince stops
+supervising its muxers (quince#493's latent defect, made live by a tidying change).
 
 **Why.** The litmus test is what makes an appliance stay installed: PVE and OpenWrt earn
 loyalty because their config is transparent files you can read, edit, and diff, while a
