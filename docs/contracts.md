@@ -631,8 +631,8 @@ strict gate fires first and the write path's resolve is an idempotent second pas
 never resolved — so it refused these fields by omission rather than by policy, and the two endpoints
 agreed for the wrong reason.
 
-**Its `422` answers TWO different questions, and the second one is new** (qn.6g, Operator ruling
-2026-08-06 on quince#577). The original asks *is this a valid set of storages?* — forgetting the
+**THE FORGET's `422` answers TWO different questions, and the second one is new** (qn.6g, Operator
+ruling 2026-08-06 on quince#577). The original asks *is this a valid set of storages?* — forgetting the
 default, or the only storage, is refused. The addition asks *is quince busy?*: **a forget is refused
 while a backup is running on that storage**, and the message names the job so the remedy — wait for
 it, or cancel it — is actionable.
