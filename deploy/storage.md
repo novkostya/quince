@@ -77,6 +77,11 @@ case "$op" in
               exit 0 ;; esac ;;
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
   destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
+  rollback) # qn.6h ABANDON: return the device dataset to its newest @quince-* snapshot. NO -r, and
+            # none can reach here — the parse above discards every flag. Without -r, `zfs rollback`
+            # refuses any snapshot but the most recent, and -r/-R are what destroy NEWER snapshots,
+            # i.e. committed versions. So this verb structurally cannot lose one.
+            case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
   seed)     # qn.5b: clone latest/ → working/<udid> HOST-side (where FICLONE works even when the
             # container's unprivileged userns forbids it — gate-12 finding), then chown it so the

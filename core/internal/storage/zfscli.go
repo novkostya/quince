@@ -148,6 +148,48 @@ func (c *zfsCLI) Seed(ctx context.Context, udid string) (sharingResult, error) {
 	}
 }
 
+// Rollback rolls <dataset> back to <dataset>@<snap>, discarding everything written since. It is
+// qn.6h's ABANDON path and RepairWorkingCopy is its only caller: never after verify has passed, and
+// never the automatic response to a failed job — a failed job KEEPS its dirty head so a retry
+// resumes without re-transferring, and rolling back on failure would discard exactly that.
+//
+// NO -r, EVER, AND THE HELPER ENFORCES IT INDEPENDENTLY. Without -r, `zfs rollback` refuses any
+// snapshot but the most recent, and -r/-R are what destroy NEWER snapshots — i.e. committed
+// versions. The forced-command helper also discards every flag (it rebuilds the command as verb +
+// last arg), so this is guarded on both sides: measured 2026-08-08 on a real pool, `rollback -r
+// <snap>` reached zfs as a plain rollback and the newer snapshot survived.
+//
+// The refusal when a newer snapshot exists is EXPECTED, not exceptional, and its text is returned
+// verbatim rather than folded into a category: `cannot rollback to '<snap>': more recent snapshots
+// or bookmarks exist`. Any snapshotter running on the host produces it — which is why excluding
+// quince's datasets from one is required setup (deploy/storage.md), and why the caller must name
+// THAT remedy rather than a busy-mount one (qn.6h D4 answer C, gate G5c).
+// Rollback validates STRICTLY where its siblings validate safely, and the difference is EXEC MODE.
+// snapShortPattern is deliberately permissive — its comment says why: "adopted/foreign scans see
+// arbitrary ones". That is right for reading and for the verbs a constrained helper re-checks. In
+// hook mode the helper's `case "$target" in "$PARENT"/*@quince-*)` is the backstop; in EXEC mode
+// there is no helper at all — argv goes straight to `zfs` — so this is the only place a foreign
+// snapshot can be refused, and rolling a device dataset back to somebody else's snapshot is not
+// quince's to do. Hence: the quince prefix, and validUDID so a crafted name cannot leave $PARENT.
+func (c *zfsCLI) Rollback(ctx context.Context, udid, snap string) error {
+	if !validUDID(udid) {
+		return fmt.Errorf("storage: invalid udid %q", udid)
+	}
+	ds := c.dataset(udid)
+	if !datasetPattern.MatchString(ds) || !snapShortPattern.MatchString(snap) ||
+		!strings.HasPrefix(snap, "quince-") {
+		return fmt.Errorf("storage: invalid dataset/snapshot %q@%q — rollback targets quince's own snapshots only", ds, snap)
+	}
+	full := ds + "@" + snap
+	// Deliberately NOT swallowing a class of failure the way Snapshot and DestroySnapshot do: every
+	// failure here is something the operator has to see. Rolling back to an absent snapshot is a
+	// real error, and the "more recent snapshots" refusal is the one whose text the caller surfaces.
+	if out, err := c.run(ctx, c.argv("rollback", full)); err != nil {
+		return fmt.Errorf("zfs rollback %s: %w: %s", full, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 // snapNameFor builds quince's snapshot short name: quince-<YYYY-MM-DDTHH-MM>-<versionID> (qn.5b
 // amendment B, decisions (co)). Date-first for readable `zfs list` ordering; the ULID (==
 // versionID) kept as the collision-free tail — two same-minute commits get distinct names, and the
