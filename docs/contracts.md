@@ -611,6 +611,26 @@ how they diverge.
   not steal it: honouring the flag would silently re-point every backup that names no storage.
   Re-designation is a separate edit on an existing storage and this rung does not build it.
 
+**`PUT /api/config` TAKES THE OPPOSITE POLICY ON THE SAME FIELDS, AND THE ASYMMETRY IS DELIBERATE**
+— ruled 2026-08-08 on [quince#754](https://github.com/novkostya/quince/issues/754). A `PUT` body may
+omit `backend`, `zfs.mode`, `zfs.seed` and `default` exactly as `config.yml` may, and the server
+fills them; this endpoint still answers `422`.
+
+**The reason is what each endpoint IS.** `PUT /api/config` is a **full-document replace of the
+file**, so it must mean what the file means — an API that refuses documents `config.yml` accepts is
+the editing surface disagreeing with the thing it edits, which contradicts D12 rather than
+extending it. `POST /api/config/storage` is a **narrow add whose caller has just watched quince probe
+a path and name a concrete backend**: an omission there really is a client bug, and defaulting it
+would hide one.
+
+**It is preserved by ORDERING rather than by a flag**, which is why no handler has to remember which
+door a document came through: `validateAddition` runs before the list is resolved, so the add's
+strict gate fires first and the write path's resolve is an idempotent second pass behind it.
+
+**Stated here because it looked accidental in both places.** Until quince#754 the `PUT` path simply
+never resolved — so it refused these fields by omission rather than by policy, and the two endpoints
+agreed for the wrong reason.
+
 **Its `422` answers TWO different questions, and the second one is new** (qn.6g, Operator ruling
 2026-08-06 on quince#577). The original asks *is this a valid set of storages?* — forgetting the
 default, or the only storage, is refused. The addition asks *is quince busy?*: **a forget is refused
