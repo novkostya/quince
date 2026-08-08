@@ -135,7 +135,12 @@ func TestTheAddPathStillRefusesAnEmptyBackend(t *testing.T) {
 // THE IMPLICATION MUST STAY NARROW ON THE DOOR THIS CHANGE OPENED IT ON.
 //
 // ResolveStorages implies `default: true` on a LONE entry only, so two storages with none marked
-// must still be refused — order is not intent, and a silent pick is the class quince#473 removed.
+// must still be refused — order is not intent, and a silent pick would be a guess.
+//
+// The narrowness is quince#504's, ruled 2026-08-01: `- path: /backups` is the legal short form, so
+// `default` is optional WHEN THERE IS ONE STORAGE and implied only there. NOT quince#473, which is
+// the flattening of `storage:` to fully-specified entries — the right family, the wrong ruling. It
+// said #473 until the review of quince#755 asked me to check a number it could not verify.
 // The permissive tests above all use one storage, so without this the guard holds by `len(out) == 1`
 // and by nothing else, and the plausible future edit ("pick the first when none is marked") would
 // soften PUT silently with every other test in this file still green.
