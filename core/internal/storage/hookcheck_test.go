@@ -232,3 +232,92 @@ func requireSh(t *testing.T) {
 		t.Fatalf("G8 CANNOT RUN: no /bin/sh — this gate refuses rather than skipping")
 	}
 }
+
+// qn.6h gate G11 — the ABANDON verb, against the operator's REAL script text.
+//
+// rollback is the one guarded arm whose guard failing destroys committed versions: -r/-R delete
+// snapshots NEWER than the target, and those are versions. Every other arm is either harmless when
+// mis-guarded (a `list` leaks a listing) or predates this rung.
+//
+// quince's own refusal is pinned in zfscli_rollback_test.go. This pins the OTHER half, which the
+// Rollback doc comment claims — "the helper enforces it independently … guarded on both sides".
+// That was measured once on a real pool, 2026-08-08; the helper is a file operators hand-edit, and
+// quince#593 is the record of flag forwarding being reintroduced by exactly such an edit.
+func TestTheRealHelperBoundsRollback(t *testing.T) {
+	requireSh(t)
+	const parent = "tank/backups"
+	const udid = "AAAABBBBCCCC"
+	snap := parent + "/" + udid + "@quince-2026-08-08-0000"
+
+	run := func(t *testing.T, args ...string) (string, error) {
+		t.Helper()
+		rec := filepath.Join(t.TempDir(), "argv")
+		hook := hookHarness(t, parent, `echo "$*" >> `+rec+"\nexit 0", extractHelper(t))
+		cli := newZFSCLI(parent, "hook", hook, "")
+		_, err := cli.run(context.Background(), cli.argv(args[0], args[1:]...))
+		b, readErr := os.ReadFile(rec)
+		if readErr != nil {
+			return "", err // zfs was never invoked — the helper refused before exec'ing
+		}
+		return string(b), err
+	}
+
+	t.Run("a guarded target reaches zfs as rollback + target and nothing else", func(t *testing.T) {
+		got, err := run(t, "rollback", snap)
+		if err != nil {
+			t.Fatalf("the helper refused a guarded rollback: %v", err)
+		}
+		if want := "rollback " + snap; strings.TrimSpace(got) != want {
+			t.Errorf("zfs saw %q, want exactly %q", strings.TrimSpace(got), want)
+		}
+	})
+
+	t.Run("-r is DISCARDED by the parse", func(t *testing.T) {
+		got, err := run(t, "rollback", "-r", snap)
+		// zfs MUST have been invoked. If the helper refused outright, `got` is empty and the flag
+		// assertion below passes for the wrong reason — a gate that reads identically whether it
+		// bit or was never reached, which is the failure this rung has met twice already.
+		if err != nil || got == "" {
+			t.Fatalf("the helper never exec'd zfs (err=%v) — this subtest proves nothing unless the "+
+				"FLAGGED call reaches zfs stripped", err)
+		}
+		if strings.Contains(got, "-r") {
+			t.Fatalf("THE HELPER FORWARDED -r — that flag destroys snapshots NEWER than the target, "+
+				"which are committed versions. zfs saw %q", got)
+		}
+		if want := "rollback " + snap; strings.TrimSpace(got) != want {
+			t.Errorf("zfs saw %q, want exactly %q", strings.TrimSpace(got), want)
+		}
+	})
+
+	t.Run("a FOREIGN snapshot is refused", func(t *testing.T) {
+		foreign := parent + "/" + udid + "@zfs-auto-snap_frequent-2026-08-08-0345"
+		got, err := run(t, "rollback", foreign)
+		if err == nil {
+			t.Error("the helper accepted a non-@quince-* target — those are not quince's to roll back to")
+		}
+		if got != "" {
+			t.Errorf("zfs was invoked for a refused target: %q", got)
+		}
+	})
+
+	t.Run("a target outside PARENT is refused", func(t *testing.T) {
+		got, err := run(t, "rollback", "rpool/somebody-else@quince-2026-08-08-0000")
+		if err == nil {
+			t.Error("the helper accepted a target outside $PARENT")
+		}
+		if got != "" {
+			t.Errorf("zfs was invoked for a refused target: %q", got)
+		}
+	})
+
+	t.Run("a DATASET, with no @, is refused", func(t *testing.T) {
+		got, err := run(t, "rollback", parent+"/"+udid)
+		if err == nil {
+			t.Error("the helper accepted a dataset rather than a snapshot")
+		}
+		if got != "" {
+			t.Errorf("zfs was invoked for a refused target: %q", got)
+		}
+	})
+}
