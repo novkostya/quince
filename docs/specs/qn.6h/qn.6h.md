@@ -42,7 +42,7 @@ is not built, quince keeps working exactly as it does today.
 | --- | --- |
 | `core/internal/storage/zfs.go` | the tool's target becomes `<backups>` and the tree the child dataset root; `PrepareWork`/`SeedWork`/`WorkDir` stop delegating to the shared seed machine; `seedWorking`, `seedInContainer`, `seedClosure`, `Provision`'s `latest/` mkdir and the exchange in `finishCommit` all go; `RepairWorkingCopy` becomes a `rollback` (ruled 08-08) |
 | `core/internal/storage/zfscli.go` | the `seed` verb becomes `rollback` |
-| `core/internal/storage/journal.go` | doc only — `PhaseExchanged` stops occurring on zfs; the enum keeps its shape. **Specifically `:20-26`**: the *"both models share the atomic exchange as their pivot"* block, and `PhasePrepared`'s *"marker written into `working/<udid>`"* |
+| `core/internal/storage/journal.go` | **NOT doc-only — the journal MOVES to the parent dataset**, for the work sentinel's reason and at the same time: it is on disk when `zfs snapshot` runs, so at `<deviceDir>/` it rides into every committed version. `writeJournal`/`readJournal`/`removeJournal` take a PATH; `scanFlatJournals` reads the parent-level files; `PendingJournals` switches to it. **This row said `doc only` until quince#745 measured otherwise** (86 changed lines, three signatures, one new function) — recorded rather than quietly rewritten, because the Boundary is what the following PRs are planned against. The doc half stands: `:20-26`'s *"both models share the atomic exchange as their pivot"* block, and `PhasePrepared`'s *"marker written into `working/<udid>`"* |
 | `core/internal/storage/layout.go` | `browseRoot`'s zfs arm loses its trailing `latest` component and can no longer return the live tree (D7); `isEmptyDir` must ignore `.zfs` (D8); the work-sentinel path becomes backend-dependent (D3) |
 | `deploy/storage.md` | the reference helper loses `seed)`, gains `rollback)`; **the snapshotter exclusion as REQUIRED setup** (D6); the offsite note; the one hand-edit |
 | `docs/quince.design.md`, `CLAUDE.md` | the ruling — **a separate, prerequisite PR** |
@@ -177,9 +177,18 @@ the device's child dataset root.
     ├── quince-version.json     quince's marker, riding into the snapshot
     └── 00/ a1/ …               backup content
 
-<backups>/.quince-work-<udid>.json   the work sentinel — in the PARENT, outside the child
-                                     dataset, so it can never enter a snapshot
+<backups>/.quince-work-<udid>.json     the work sentinel — in the PARENT, outside the child
+                                       dataset, so it can never enter a snapshot
+<backups>/.quince-commit-<udid>.json   the commit journal — same place, same reason. It exists
+                                       only while a commit is in flight, and a commit's LAST act
+                                       is the snapshot, so this is the one quince file guaranteed
+                                       to be on disk at capture time.
 ```
+
+**Both sidecars, not just the sentinel.** The journal was missed when this diagram was written and
+found in review of the PR that implements it (quince#745): the Boundary called `journal.go` doc-only,
+which was true of the *enum* and false of the *path*. Named here because a reader planning PR 4, or
+reasoning about what a snapshot contains, looks at this diagram rather than at the code.
 
 **This satisfies fact 3 rather than bridging it.** The tool appends `<UDID>` to its target and cannot
 be told not to; give it `<backups>` and its own convention lands the tree at `<backups>/<udid>`,
@@ -236,8 +245,11 @@ prepared → snapshot_created → registry_committed
 1. **`Snapshot`** → `PhaseSnapshotCreated`.
 
 **There is no pre-snapshot cleanup, and that is the ruled shape paying off.** Under D1 the child
-dataset holds only the tree and its marker: `working/` does not exist, and the sentinel lives in the
-**parent** (`<backups>/.quince-work-<udid>.json`), outside the snapshot's path entirely. So canon's
+dataset holds only the tree and its marker: `working/` does not exist, and **both** per-device
+sidecars live in the **parent** — the work sentinel `<backups>/.quince-work-<udid>.json` and the
+commit journal `<backups>/.quince-commit-<udid>.json` — outside the snapshot's path entirely. The
+journal is the sharper of the two: it is written *before* the snapshot and removed *after* it, so it
+is the one file that is certainly on disk at capture time and would be in every version. So canon's
 *between backups the dataset holds only the backup* is satisfied by construction rather than by
 ordering. The sentinel is cleared whenever — before or after the snapshot — because it was never
 capturable.
@@ -648,7 +660,7 @@ lists `journal.go` as doc-only, and a doc-only file is the one most easily skipp
 | id | what it proves | where |
 | --- | --- | --- |
 | **G1** | A zfs commit produces a snapshot whose ROOT matches the tree the fake tool wrote, with no clone step and no `PhaseExchanged` in the journal. Both first-backup and incremental. | CI (Go) |
-| **G2** | The snapshot contains **only** the backup tree and its marker — no `latest/`, no `working/`, no sentinel — asserted on the filesystem after commit, not on the API. | CI (Go) |
+| **G2** | The snapshot contains **only** the backup tree and its marker — no `latest/`, no `working/`, and **neither sidecar**: not the work sentinel and not the commit journal. Asserted on the filesystem after commit, entry by entry, not on the API. | CI (Go) |
 | **G3** | A killed job leaves the head dirty and the sentinel in place; the next `PrepareWork` resumes it, and nothing calls rollback. | CI (Go) |
 | **G4** | `RepairWorkingCopy` on zfs issues exactly one `zfs rollback <newest @quince-*>` — asserted on the recorded argv, so `-r` can never creep in. | CI (Go, fake `zfsCLI`) |
 | **G5** | **D4 answers B and C.** A rollback that fails fast, one that exceeds `zfsOpTimeout`, and one refused with **the measured answer-C text** (`more recent snapshots or bookmarks exist`) ⇒ non-2xx from `RepairWorking`, `zfs`'s reason propagated **verbatim**, the sentinel and `working/` still present, **no audit line**, **exactly one** rollback attempt recorded. This is the state-honesty gate. | CI (Go) |
@@ -874,7 +886,7 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 | **0** | *(prerequisite, already open)* canon records the ruling | Operator approval as code owner |
 | **1** | **this spec** | architect review; `/docs/specs/**` is not code-owned |
 | **2** | **quince can ask the host to roll back, and the parse bounds it.** `zfscli.Seed` → `Rollback`; the reference helper gains `rollback)` and **keeps** `seed)`. Purely additive — the exchange model still runs, nothing changes behaviour. Landing it first is what lets the Operator do the host edit before the change that needs it. | G4 (argv), G11 (helper), G12 |
-| **3** | **zfs writes into the dataset root and commits by snapshot.** The target move, the deleted seed path, the deleted exchange, the new commit sequence, the sentinel's move to the parent, `isDirty` becoming a backend method, the pre-change `latest/`/`working/` cleanup, and reset. One PR because splitting it ships a broken intermediate: writing to the root while still exchanging would exchange the tree with itself, and switching the write path without switching `isDirty` leaves reset silently reporting nothing to do. **D7's browse guard and D8's `.zfs` skips are in this PR, not a later one** — both become live-tree hazards in the same commit that moves the tree. | G1, G2, G3, G5, G5c, G6, G7, G8, G9, G10, G12, G13, G14 |
+| **3** | **zfs writes into the dataset root and commits by snapshot.** The target move, the deleted seed path, the deleted exchange, the new commit sequence, the move of BOTH per-device sidecars to the parent (the work sentinel and the commit journal), `isDirty` becoming a backend method, the pre-change `latest/`/`working/` cleanup, and reset. One PR because splitting it ships a broken intermediate: writing to the root while still exchanging would exchange the tree with itself, and switching the write path without switching `isDirty` leaves reset silently reporting nothing to do. **D7's browse guard and D8's `.zfs` skips are in this PR, not a later one** — both become live-tree hazards in the same commit that moves the tree. | G1, G2, G3, G5, G5c, G6, G7, G8, G9, G10, G12, G13, G14 |
 | **4** | **the helper stops carrying quince's lifecycle.** `seed)` deleted from `deploy/storage.md`, the **one-line changed-verbs note** (not a procedure), the offsite exclusion note, `contracts.md`'s reset failure. | G11, G12, G13 |
 | **5** | **the hardware evidence.** H1–H4 recorded on the rung issue, and whatever H2 decides about the timeout bound. Not a code PR unless H2 says it is. | Operator |
 
