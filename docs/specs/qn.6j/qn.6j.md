@@ -35,6 +35,13 @@ a file whose next `git diff` is noise, which is the property D12 exists to prote
 succeed. If it is not built, quince keeps working exactly as it does today and keeps writing the
 file it writes today.
 
+**And what it costs, which is DECIDED rather than dropped.** This rung shrinks the file, and the same
+2026-08-08 ruling cancelled the generated annotation — so a user opening `config.yml` no longer learns
+that TLS exists by finding an empty key for it. **Discovery moves to Settings and the docs.** Both
+halves are the Operator's, neither is reopened here, and the cost is written down so the next reader
+can see it was accepted. `docs/quince.stack.md` D12 records the same acceptance; the *user-facing*
+key reference that has to exist for it is quince#726's, not this rung's.
+
 ---
 
 ## Boundary
@@ -47,6 +54,7 @@ file it writes today.
 | `core/internal/config/schema.go` | the `Config` type comment's *"qn.6 swaps Marshal for a yaml.Node encoder that also emits generated doc-comments"* — same correction. **No struct tag gains `omitempty`**; see D4 |
 | `core/internal/config/add.go` | `AddStorage` marks the added entry's supplied keys declared, and materialises `default: true` on the incumbent when the list crosses from one entry to two (D3) |
 | `core/internal/config/forget.go` | `ForgetStorage` drops the forgotten entry's declared keys |
+| `core/internal/config/service.go` — `replaceLocked` | **NEW, and it comes first: `c.Storage` is resolved at the top, before `Validate`.** This is quince#754, filed off this review, and it is a prerequisite rather than a companion — see D2a |
 | `docs/quince.stack.md` | **already landed** (quince#752). Nothing owed unless a decision here changes it |
 | `docs/contracts.md` §6 | **only if open question 1 is ruled yes** — `GET /api/config` gains the serialized file text |
 | `ui/src/features/settings/ConfigView.tsx` | **only if open question 1 is ruled yes** — the preview renders YAML instead of `JSON.stringify` |
@@ -58,10 +66,14 @@ file it writes today.
   the ruling deleted the thing it was staging toward.
 - **Generated doc-comments.** **Cancelled**, not deferred. There is no smaller annotation to stage
   toward and nothing in this rung emits one.
-- **Resolution semantics.** `schema.go`'s *"doing it in one place is what lets `- path: /backups`
-  mean what the 2026-08-01 ruling says it means, without any consumer learning that a name might be
-  empty"* survives untouched. `Parse` still resolves; the in-memory document is still the resolved
-  one. **Only what gets MARSHALLED changes**, which is the ruling's own words.
+- **Resolution semantics — WHAT an omitted key means.** `schema.go`'s *"doing it in one place is what
+  lets `- path: /backups` mean what the 2026-08-01 ruling says it means, without any consumer
+  learning that a name might be empty"* survives untouched, and `Resolved()` is not edited.
+  **Only what gets MARSHALLED changes**, which is the ruling's own words.
+  **This bullet said *"`Parse` still resolves; the in-memory document is still the resolved one"* and
+  that second clause was FALSE on the write path** — the architect's review of quince#753 named it
+  and the measurement in facts 9 and 10 confirms it. **WHERE resolution runs is therefore in scope**
+  and is D2a; what it *means* is not.
 - **quince#493 — `PUT /api/config` zeroes any key the client omits.** Independent, and the analyst's
   direction table on quince#728 is why: marshal runs server→disk, the decoder runs wire→server, and
   fixing one cannot fix the other. This rung owes it a **guard**, not a fix — story 6 — because the
@@ -123,6 +135,36 @@ not impossibility**, which is why story 6's guard is a test rather than a mechan
 
 **Fact 8 — `grep -c omitempty core/internal/config/schema.go` → 0.** Unchanged from the issue.
 
+**Fact 9 — resolution does NOT run on the `PUT` path, and the wire is therefore STRICTER than the
+file.** `handlers_config.go:48-55` decodes the body into a zero-valued `config.Config` and calls
+`Replace`; nothing between them touches `Resolved()`. Measured — `Replace` with the minimal storage
+the startup refusal itself teaches returns three `422`s for keys the file accepts:
+
+```
+storage[0].zfs.mode  invalid value ""; must be one of [exec hook]
+storage[0].zfs.seed  invalid value ""; must be one of [auto reflink copy]
+storage              exactly one storage must be marked `default: true` …
+```
+
+An empty `backend` is refused the same way. **`validateStorages` asserts the opposite in its own
+comment** (`validate.go:133`): *"A LONE STORAGE IS ALREADY MARKED DEFAULT by ResolveStorages, so
+`defaults == 0` here can only mean several storages and none chosen."* True on the load path, false
+on this one.
+
+**Fact 10 — `name` and `retention` are not caught by `Validate`, so a successful `PUT` writes
+`name: ""` and leaves it in the running process.** Measured, with the most minimal entry the wire
+will accept:
+
+```
+LIVE SNAPSHOT after the PUT: name="" backend="hardlink" retention_nil=true
+FILE after the PUT:  storage: - name: ""   …   retention: null
+```
+
+The **file** self-heals at the next `Load`; the **running process** does not, and `GET /api/config`
+reports the empty name until a restart. Filed as **quince#754**, because it is a defect on `main`
+rather than something this rung introduces. It is quoted here because facts 9 and 10 together are why
+D2a exists.
+
 ---
 
 ## Design
@@ -143,6 +185,21 @@ re-read what it just wrote.
 re-inflates the file"*** — it survives because the write path writes the declared document, so
 re-parsing it yields the same set. Story 1 is that fixed point stated as a test.
 
+**When there is nothing to derive it from, the declared set is EMPTY, and the four ways that happens
+are not one case.** `Load` returns `Default()` in four branches, and they split two and two:
+
+- **No file yet** (`service.go:156`, `OK: true`). Empty declared set, and the first save therefore
+  writes the storage entry and almost nothing else. **That is the first `config.yml` every user ever
+  sees**, so it is story 10 rather than a consequence nobody looked at. It is also the ruling
+  working: a fresh file that says only what onboarding chose is exactly *"only what was set"*.
+- **Unreadable, invalid YAML, or fails `Validate`** (all `OK: false`). The in-memory config is
+  `Default()` and **not the user's file**, so a save discards what they wrote. **That is
+  pre-existing and this rung does not fix it** — but it gets *less* visible here, because the result
+  now looks deliberately minimal instead of obviously machine-written, where before a user could at
+  least see their file had been replaced by a full dump. Named as a near-miss in the Rule check and
+  as open question 4; not built past, because it is D12's last-good semantics rather than this
+  rung's.
+
 ### D2 — The write rule
 
 > **A key is written iff it is `declared`, OR this write changes its value, OR the file could not be
@@ -156,12 +213,21 @@ Three clauses, and each earns its place:
 2. **changed by this write** — **not optional.** `PUT /api/config` arrives as a *complete* JSON
    document; the request cannot distinguish a key the user touched from one the UI merely echoed
    back. So "what was set" on this path is recoverable only as a **diff against the configuration
-   that was live**, which `replaceLocked` already has in hand as `old`.
+   that was live**, which `replaceLocked` already has in hand as `old`. **Both sides of that diff
+   must be RESOLVED — see D2a, which is a prerequisite and not a detail.**
 3. **required to re-parse** — `storage[].path` on every entry (an entry without it is meaningless),
    and D3's `default: true`.
 
 **A section is written only if something under it is.** Pruning is bottom-up, so a `backup:` with no
 declared leaf does not appear as `backup: {}`.
+
+**THE DECLARED SET ONLY EVER GROWS, and nothing un-declares a key except `ForgetStorage`.** A user
+who switches `ui.theme` to `dark` and back to `system` leaves `theme: system` in the file
+permanently, at its default value. **That is correct under *"only what was set"*** — they did set it,
+twice — and it is stated here so the next reader recognises it as decided rather than filing it. The
+alternative, un-declaring a key when it returns to its default, is D5's rejected rule wearing a
+different hat: it would delete an explicit choice the moment it happened to agree with today's
+default.
 
 **Mechanism.** `Marshal` keeps producing the full canonical document first, then **prunes the
 `yaml.Node` tree** to the written set. Marshalling first is what preserves canonical key order for
@@ -174,6 +240,55 @@ rejected** for the ordering reason above and for a second: it would have to re-d
 names and nesting that `yaml.Marshal` already knows, which is a second implementation of the encoder
 that can disagree with the first.
 
+### D2a — Clause 2 diffs two RESOLVED documents, and `replaceLocked` is where that becomes true
+
+**The question, as the architect put it: which document does clause 2 diff, and if the answer is
+"both resolved", where does the resolution happen?**
+
+**Answer: both resolved, and the resolution happens at the top of `replaceLocked`, before
+`Validate`.** One line — `c.Storage = ResolveStorages(c.Storage)` — and it is the FIRST code PR of
+this rung rather than part of the marshaller's.
+
+**Why it is needed at all.** Facts 9 and 10: resolution runs at `Parse` and inside `AddStorage`, and
+never on the `PUT` path. So `replaceLocked`'s two sides are normalized differently, and clause 2
+would compare a resolved `old` against a raw `next` and call every unfilled key *changed*.
+
+**The review's example, checked rather than accepted, and it splits three ways.** For a `PUT` that
+omits storage keys:
+
+| key | what actually happens today | reaches the file? |
+| --- | --- | --- |
+| `zfs.mode`, `zfs.seed`, `backend` | `Validate` **refuses** the write — `invalid value ""` | **no** |
+| `default` on a lone entry | `Validate` **refuses** — `defaults == 0` | **no** |
+| `name` | `Validate` does not check it | **yes — `name: ""` is written** |
+| `retention` | not checked | **yes — `retention: null` is written** |
+
+**So the hole is narrower than the example and worse than it looks.** Narrower, because `Validate`
+accidentally catches four of six. Worse, because the two it misses are caught by *nothing* and one of
+them is `name` — the identity `DELETE /api/config/storage/{name}` addresses by. And the four it does
+catch, it catches by **refusing a document the file would accept**, which is quince#754's first half.
+
+**`old` is not reliably resolved either, and that is the same defect from the other end.** `old` is
+`s.cfg`, which is post-`Parse` after a load but is *whatever `Replace` was handed* after a `PUT`. So
+"the live snapshot is resolved" holds today only because `Validate` happens to refuse most unresolved
+documents — an invariant resting on a coincidence. Resolving in `replaceLocked` makes it an invariant
+resting on a line of code.
+
+**It is a behaviour change to `PUT /api/config`, and it is recorded as a decision rather than left to
+PR 3.** It is **strictly more permissive** — bodies that `422` today would succeed, and no existing
+client sends those bodies, because the UI re-sends the complete document `GET` handed it. Two things
+follow and are owed rather than assumed:
+
+- **`docs/contracts.md` §6 documents the `422`.** If the set of documents that earn one shrinks, that
+  text moves in the same PR (`Docs are part of the diff`).
+- **It is a slice of quince#493's territory** — what `PUT` does with an omitted key — and this rung
+  scoped that out. The slice taken here is **normalization only**, server-side: it does not stop the
+  decoder zeroing a non-storage key, which is quince#493's actual subject and stays open.
+
+**Open question 5 asks whether the architect wants this landed here or on quince#754 alone.** My
+recommendation is here, first, because this rung cannot be correct without it — but the defect exists
+on `main` today and is filed separately so it is not buried inside a rung about file tidiness.
+
 ### D3 — `storage:` entries: keyed by name, and the one key quince must write that nobody set
 
 **An entry's declared keys are keyed by its `name`, not its index.** Entries are added, forgotten,
@@ -182,7 +297,7 @@ and reordered; `DELETE /api/config/storage/{name}` already treats `name` as the 
 `raw["name"]` if present, else `raw["path"]` — the same rule `Resolved()` applies, computed one step
 earlier.
 
-**Open question 3 records that this is the detail most likely to be wrong.** A rename changes the
+**Open question 2 records that this is the detail most likely to be wrong.** A rename changes the
 identity, and the declared keys of the old name are then orphaned. The proposed handling is that a
 rename arrives as a *changed* `name` on an entry whose `path` is unchanged, so `path` is the join —
 but path is also editable in principle, and nothing today renames a storage through any surface.
@@ -278,6 +393,12 @@ finding 1 is re-filed with this spec's argument attached.
 8. **Nothing about resolution changed.** The existing `flatten_test.go` and
    `storages_validate_test.go` suites pass untouched.
 9. *(open question 1 only)* **The preview is the file.** The panel's text equals the bytes on disk.
+10. **The first file a user ever gets is minimal.** No `config.yml` on disk, onboarding adds one
+    storage → the written file is that storage and nothing else. This is the fresh-install path and
+    it is the file most users will ever read.
+11. **A `PUT` that omits an optional storage key succeeds and writes a resolved value** (D2a). The
+    body that returns three `422`s in fact 9 returns `200`, the file gets `zfs.mode: exec` only if
+    it was declared or changed, and the live snapshot's `name` is the path — never `""`.
 
 ---
 
@@ -293,7 +414,18 @@ Beyond `make gates`:
 - **G4** — **the general round-trip invariant**, over a table of documents: for every case, the
   configuration parsed back from what was written is **deeply equal** to the configuration that was
   written. This is the gate that catches D2 clause-3 omissions the enumeration missed, which is
-  worth more than G3 alone. See rung-ruled decision 3 for whether it also runs at runtime.
+  worth more than G3 alone.
+  **It shares ONE comparator with the runtime check of decision 3 — the architect's condition, and
+  it is a build constraint rather than a style note.** A gate and a runtime guard that can disagree
+  about the same invariant is worse than either alone: the gate goes green, the guard fires in
+  production, and the two are debugged as separate problems. One exported function, two callers,
+  and G4 fails if a second implementation of "deeply equal" appears.
+  **G4 CANNOT catch D2a's hole, and that is why D2a is a design section rather than a gate.**
+  `Resolved()` restores `name`, `zfs.mode` and the rest at the next parse, so a file written with
+  `name: ""` round-trips *deeply equal* and G4 passes green on the exact file quince#728 was filed
+  about. Stated here because a reader who trusts G4 to cover everything will not look for D2a.
+- **G4a** — story 11: the `PUT` body from fact 9 returns `200`, and the live snapshot's storage
+  `name` is the path. The measurement in facts 9 and 10 inverted, in the same way G1 inverts fact 1.
 - **G5** — story 6's reflect walk over `Config`, failing on any field absent from a
   `GET /api/config` body. Also the standing guard against `omitempty` reaching a `json:` tag.
 - **G6** — `grep -n omitempty core/internal/config/schema.go` → still 0 at the end of this rung
@@ -332,8 +464,11 @@ test.
 - **Docs are part of the diff.** `schema.go` and `service.go` carry three comments promising a
   `qn.6` doc-comment encoder; the ruling cancelled it, and they are corrected in the PRs that touch
   those files. `contracts.md` §6 moves in the preview PR if there is one.
-- **Interface facts are looked up live, never remembered.** Facts 1–8 were measured in this checkout
-  at `09beb3a` today; fact 7 is the architect's measurement on quince#728, cited to it.
+- **Interface facts are looked up live, never remembered.** Facts 1–6 and 8–10 were measured in this
+  checkout at `09beb3a` today; fact 7 is the architect's measurement on quince#728, cited to it.
+  **Facts 9 and 10 exist because a review named a mechanism and the spec measured it rather than
+  adopting it** — which is how the narrow half (four keys `Validate` catches) and the sharp half
+  (`name: ""`, which nothing catches) were separated.
 - **Privacy is a commit-time gate.** No host, path, address or device identifier enters this spec or
   any PR under it. `/backups` is quince's own documented default and already appears throughout
   canon.
@@ -346,8 +481,12 @@ test.
 - **Subprocesses.** None added.
 - **Every bug found on hardware becomes a replay fixture.** Standing; nothing found on hardware here.
 - **Don't improvise architecture.** The shape is the Operator's ruling. The design decisions this
-  spec settles are D1–D5 and are rung-local. The one thing that is **not** rung-local — the preview's
-  contract edit — is open question 1 and is not built past.
+  spec settles are D1–D5, D2a included, and are rung-local. **Two things are NOT** and neither is built past:
+  the preview's contract edit (open question 1), and **D2a's change to `PUT /api/config`'s accepted
+  bodies** — user-visible API behaviour, so it is recorded as rung-ruled decision 5, filed as
+  quince#754, and open question 5 asks the architect where it should land. It is named here rather
+  than left in the Design section because *"user-visible behaviour"* is the gap protocol's own
+  trigger word and this is the near-miss.
 - **Coverage is declared.** Each code PR carries its `go test -cover` line for
   `core/internal/config` and an explicit known-untested list.
 
@@ -360,16 +499,31 @@ test.
    already carries, and both of which can disagree with a hand-edit.
 2. **Prune a marshalled node tree; do not emit from a reflect walk.** Canonical key order is
    preserved for free and there is only ever one encoder (D2).
-3. **PROPOSED, and the one thing here I would most like review to overturn or confirm: the
-   round-trip check runs at RUNTIME, not only in tests.** `replaceLocked` re-parses the bytes it is
-   about to write and compares them to the document it holds; on a mismatch it writes the **full
-   resolved document** instead and returns a `Warning` naming the keys that did not survive. Cost is
-   one in-memory parse per save, on a path already doing `fsync` + `rename`. What it buys is that
-   every future marshaller bug in this class degrades into a fat file plus a visible warning, rather
-   than into a config the daemon will not start on. **It is a fallback, so it is admissible only
-   because it is surfaced** — which is exactly the test `no silent caps or fallbacks` sets. If review
-   prefers tests-only, G4 stays and this decision is struck.
-4. **`storage[]` declared keys are identified by `name`.** See D3 and open question 3.
+3. **CONFIRMED by architect review (quince#753, 2026-08-08): the round-trip check runs at RUNTIME,
+   not only in tests.** `replaceLocked` re-parses the bytes it is about to write and compares them to
+   the document it holds; on a mismatch it writes the **full resolved document** instead and returns
+   a `Warning` naming the keys that did not survive. Cost is one in-memory parse per save, on a path
+   already doing `fsync` + `rename`. What it buys is that every future marshaller bug in this class
+   degrades into a fat file plus a visible warning, rather than into a config the daemon will not
+   start on — quince#683's class, which this project has paid for once. **It is a fallback, so it is
+   admissible only because it is surfaced**, which is exactly the test `no silent caps or fallbacks`
+   sets.
+
+   **Two conditions came with the confirmation and both are binding.**
+
+   **(a) One comparator, two callers** — the runtime check and G4 must not be two implementations of
+   *deeply equal*. See G4.
+
+   **(b) It could not ship before D2a, and D2a is why.** The check compares re-parsed bytes — which
+   are resolved — against the document `Service` holds, which on the `PUT` path is **not** resolved
+   (facts 9, 10). So **every partial `PUT` would mismatch**, the fallback would fire on an ordinary
+   request, and the user would get a fat file plus a warning about keys that were never wrong. That
+   is a guard that cries on the happy path, which is worse than no guard: it trains a reader to
+   ignore it. D2a's resolution makes it evaporate, which is the second reason D2a lands first.
+4. **`storage[]` declared keys are identified by `name`.** See D3 and open question 2.
+5. **Resolution moves to `replaceLocked`, and `PUT /api/config` becomes more permissive as a
+   consequence.** D2a. Recorded as a decision rather than an implementation detail because it changes
+   a documented `422`.
 
 ---
 
@@ -390,6 +544,16 @@ test.
 3. **Whether `qn.6i` and this rung owe each other a check.** They touch disjoint trees —
    `config/` here, `reconcile.go` there — so the answer is expected to be no. Recorded because
    `qn.6h` left exactly this item for `qn.6i` and it cost a spec revision to notice.
+4. **A save over an invalid or unreadable file discards the user's document** — D1's `OK: false`
+   branches. Pre-existing, D12's last-good semantics rather than this rung's, and **not fixed here**.
+   Raised because this rung makes it *less* visible: the replacement now looks deliberately minimal
+   rather than obviously machine-written. Worth its own issue; not filed yet, because the right
+   remedy is probably a UI refusal to save while the banner is up, which is a `qn.6`-family question
+   rather than a config-package one.
+5. **Whether D2a lands in this rung or on quince#754 alone.** This rung cannot be correct without it,
+   so my recommendation is here and first. The counter-argument is real: it is a defect on `main`
+   with its own issue, and landing it inside a tidiness rung makes it harder to find later.
+   **Either way the spec is unchanged** — only the PR slicing moves.
 
 ---
 
@@ -400,18 +564,28 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 
 | | claim | proof |
 | --- | --- | --- |
+| | claim | proof |
+| --- | --- | --- |
 | **1** | **this spec** | architect review; `docs/specs/**` is not code-owned |
-| **2** | **the declared set exists and round-trips.** `Parse` computes it, `Loaded` and `Service` carry it, the node-prune `Marshal` is written and unit-tested — **and nothing calls it.** `replaceLocked` still writes the full document, so `main` is unchanged in behaviour | G2, G4 against the new function directly |
-| **3** | **the file stops inflating.** `replaceLocked` switches to the declared marshal; the diff against `old` supplies D2 clause 2; the three false `qn.6` doc-comment comments are corrected | G1, G2, G4, G7 |
-| **4** | **the materialisation gate.** D3's `default: true` rule, plus `AddStorage`/`ForgetStorage` declared-set maintenance | G3, G4, G7 |
-| **5** | **the wire stays complete** — story 6's reflect walk and the `omitempty` grep. Independent of 2–4 and could land first; it is placed here because it is the guard on what 3 and 4 changed | G5, G6 |
-| **6** | *(open question 1 only)* **the preview is YAML** — contracts §6, the handler, `ConfigView.tsx` | G8, and the contract's own review |
-| **7** | devlog: the `progress.md` row and the journal entry | DoD tail |
+| **2** | **`replaceLocked` resolves before it validates** (D2a, quince#754). Closes the `422`-stricter-than-the-file half and the `name: ""` half; `contracts.md` §6's `422` text moves with it. **Nothing about marshalling changes** | G4a, G7, and the existing config suites untouched |
+| **3** | **the declared set exists and round-trips.** `Parse` computes it, `Loaded` and `Service` carry it, the node-prune `Marshal` is written and unit-tested — **and nothing calls it.** `replaceLocked` still writes the full document, so `main` is unchanged in behaviour | G2, G4 against the new function directly |
+| **4** | **the file stops inflating.** `replaceLocked` switches to the declared marshal; the diff against `old` supplies D2 clause 2; the runtime round-trip guard of decision 3 lands with it, sharing G4's comparator; the three false `qn.6` doc-comment comments are corrected | G1, G2, G4, G7 |
+| **5** | **the materialisation gate.** D3's `default: true` rule, plus `AddStorage`/`ForgetStorage` declared-set maintenance, plus story 10's fresh-install path | G3, G4, G7 |
+| **6** | **the wire stays complete** — story 6's reflect walk and the `omitempty` grep. Independent of 2–5 and could land first; it is placed here because it is the guard on what 4 and 5 changed | G5, G6 |
+| **7** | *(open question 1 only)* **the preview is YAML** — contracts §6, the handler, `ConfigView.tsx` | G8, and the contract's own review |
+| **8** | devlog: the `progress.md` row and the journal entry | DoD tail |
 
-**PRs 3 and 4 both touch `replaceLocked`, and 4 is deliberately NOT stacked on 3** — it waits for 3
+**PR 2 is new since the first revision and it is FIRST for two independent reasons**, either of which
+would be enough: D2 clause 2 is undefined until both sides of its diff are normalized, and decision
+3's runtime guard would otherwise fire on every partial `PUT`. It is also the only PR here that fixes
+something users can hit today.
+
+**PRs 4 and 5 both touch `replaceLocked`, and 5 is deliberately NOT stacked on 4** — it waits for 4
 to land and branches from `main`. That costs one review cycle and is the trade quince#388's ruling
-accepts, against the cost of an approved PR being closed by a `--delete-branch`.
+accepts, against the cost of an approved PR being closed by a `--delete-branch`. The same applies to
+2 → 4.
 
-**PR 2 exists so that PR 3 is a one-line switch with a large test.** If a reviewer can show that
-splitting there ships something dishonest on `main` — a marshaller nothing calls is dead code for one
-merge — the two collapse into one PR, and that is a fair thing to ask for at review.
+**PR 3 exists so that PR 4 is a one-line switch with a large test, and review has CONFIRMED the
+split** (quince#753): *"dead code for one merge is honest as long as the PR says so, and collapsing 3
+into 4 would put a new encoder and the switch to it in one diff — which is the shape that makes a
+bisect useless when the file comes out wrong."* PR 3's body must say it in those terms.
