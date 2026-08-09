@@ -5,6 +5,7 @@ import { RouterProvider } from "react-router-dom";
 import { queryClient } from "@/lib/queryClient";
 import { router } from "@/routes/router";
 import { initTheme } from "@/lib/theme";
+import { initKeyboardScrollReset } from "@/lib/keyboardScrollReset";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { authStatusKey } from "@/lib/auth";
 import "./index.css";
@@ -12,6 +13,13 @@ import "./index.css";
 // System-follow theme at boot (ui.design.md principle 6); the Settings editor can override
 // via config.ui.theme once loaded.
 initTheme("system");
+
+// iOS can leave the visual viewport scrolled after the on-screen keyboard closes, which shifts the
+// height-pinned shell up the layout viewport: the page is clipped at the top of the shell and a gap
+// of the same height opens below it, with no scroller that reaches either. quince#649, and the hook
+// carries the mechanism. Here at boot rather than in the shell, because the login and onboarding
+// screens have keyboards too and are not inside `AppLayout`.
+initKeyboardScrollReset();
 
 // A LOST SESSION MUST REACH THE LOGIN SCREEN. `RequireAuth` already redirects — it simply never got
 // the news. `useAuthStatus` refetches on mount or invalidation only, and the guard stays mounted for

@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import { raisesKeyboard } from "./keyboard";
 
 // THE BROWSER'S OWN SCROLL-INTO-VIEW IS `nearest`, AND `nearest` MEANS FLUSH AGAINST THE EDGE.
 //
@@ -55,20 +56,8 @@ const MARGIN = 24; // matches the card's own padding — one comfortable gutter,
 //
 // The correction exists to keep the field the KEYBOARD IS ABOUT TO COVER in view. Nothing that
 // cannot raise a keyboard needs it, so nothing else is moved, and the swallowed-tap class is closed
-// rather than tuned around.
-function raisesKeyboard(el: HTMLElement): boolean {
-  if (el.isContentEditable) return true;
-  if (el instanceof HTMLTextAreaElement) return true;
-  if (el instanceof HTMLInputElement) {
-    // A `<select>` is deliberately absent: iOS answers it with a picker rather than a keyboard, and
-    // it is tapped, so it belongs with the buttons.
-    return !["button", "submit", "reset", "checkbox", "radio", "range", "color", "file", "image"].includes(
-      el.type,
-    );
-  }
-  return false;
-}
-
+// rather than tuned around. `raisesKeyboard` is shared with the shell's scroll reset, which has to
+// make the same judgement — see `keyboard.ts`.
 export function useScrollFocusIntoView(ref: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const container = ref.current;
