@@ -68,6 +68,15 @@ func (r *Runner) Trigger(reason string) {
 	}
 }
 
+// TriggerOnJobEnd wires this runner to a Manager so that every job ending re-triggers a pass.
+//
+// It takes the Manager rather than being wired the other way round because the dependency runs that
+// way already — the runner holds the Manager — and because a Manager that reached for a Runner would
+// put the storage subsystem behind the thing that drives it.
+func (r *Runner) TriggerOnJobEnd(m *Manager) {
+	m.SetOnJobEnd(func(reason string) { r.Trigger(reason) })
+}
+
 // Reconciling reports whether a pass is queued OR running. It is what `GET /api/health` publishes,
 // and its meaning is written down in contracts §1: while true, a version list may be SHORT.
 func (r *Runner) Reconciling() bool {
