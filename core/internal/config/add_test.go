@@ -120,41 +120,6 @@ func TestAddStorageWritesAConcreteBackendForTheAddedEntry(t *testing.T) {
 	}
 }
 
-// MEASURED, AND IT FALSIFIES A CLAIM THE qn.6e SPEC MAKES.
-//
-// The spec's reachable goal for `auto` reads: *"quince never writes `auto`; a human still may."*
-// The first half is FALSE, and not because of the add path — `replaceLocked` marshals the whole
-// RESOLVED document, so any save materialises Resolved()'s defaults for every entry, including ones
-// the user never touched. A hand-written minimal `storage: - path: /backups` acquires
-// `backend: auto` and `zfs.seed: auto` the first time anything saves the config.
-//
-// This test PINS THE ACTUAL BEHAVIOUR rather than asserting the spec's wording, so the next reader
-// meets the truth instead of a claim. Nothing here is broken: the materialised value is identical in
-// meaning to the omitted one, and `auto` is legal by ruling. What is wrong is the sentence, and the
-// correction is owed to the spec rather than to this code.
-//
-// The intent behind that sentence IS satisfied: a storage ADDED through the flow records the
-// concrete backend that was probed and shown, which is the property the rung actually wanted.
-func TestSavingMaterialisesAutoForPreexistingEntries(t *testing.T) {
-	svc, path := serviceOver(t, oneGoodStorage) // declares no `backend:` at all
-
-	if _, errs, _, err := svc.AddStorage(newEntry(nil)); err != nil || len(errs) > 0 {
-		t.Fatalf("add refused: %+v %v", errs, err)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "backend: auto") {
-		// FAILS rather than skips, deliberately. A skip is a silent pass, and the point of this test
-		// is that a change here obliges a spec correction: if quince genuinely stops materialising
-		// `auto`, delete this test AND fix the qn.6e sentence in the same diff.
-		t.Fatalf("quince no longer materialises `auto` on save. If that is deliberate, delete this "+
-			"test and correct the qn.6e spec in the same diff — it claims quince never wrote it, "+
-			"which was false when this test was written.\n%s", b)
-	}
-}
-
 // Duplicate name and duplicate path are refused AT THE FIELD THE CALLER TYPED, not at an index in
 // the merged list. Validate reports the same rule as `storage[i].name`, and a caller adding one
 // entry cannot map `i` to their own input.
@@ -297,3 +262,15 @@ func TestAddStorageCanAddTheVeryFirstOne(t *testing.T) {
 		t.Errorf("the implied default was not written to the file:\n%s", b)
 	}
 }
+
+// `TestSavingMaterialisesAutoForPreexistingEntries` STOOD HERE and is deleted by qn.6j (quince#728).
+//
+// It pinned the fact that any save materialised `Resolved()`'s defaults for every entry, and it was
+// written to FAIL rather than skip if that ever stopped — *"if quince genuinely stops materialising
+// `auto`, delete this test AND fix the qn.6e sentence in the same diff."* The Operator ruled on
+// 2026-08-08 that `config.yml` carries only what was set, the write path stopped materialising, and
+// the test failed on the PR that stopped it. That is the test working, not going stale.
+//
+// Both halves of its instruction are discharged together: the test is gone and
+// `docs/specs/qn.6e/qn.6e.md` records that its own judgement — *"nothing is broken and nothing is
+// proposed here"* — was overturned.

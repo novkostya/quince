@@ -425,6 +425,23 @@ proxy for it, and the proxy was wrong.
 **Nothing is broken and nothing is proposed here.** The materialised value is identical in meaning to
 the omitted one and `auto` is legal by ruling, so this is a false claim rather than a defect.
 
+**THAT LAST JUDGEMENT WAS OVERTURNED AND THE BEHAVIOUR ABOVE NO LONGER HAPPENS.** Operator ruling
+2026-08-08 on [quince#728](https://github.com/novkostya/quince/issues/728): `config.yml` contains
+**only what was set**. So *"any save materialises every default for every entry"* became a **defect
+to fix** rather than a true-but-harmless observation — semantic equivalence was the wrong test,
+because D12 makes the file's content the product's stated interface. `qn.6j` implements it; the
+measurement above is kept unedited, because it is correct and it is what the ruling was taken on.
+
+**`TestSavingMaterialisesAutoForPreexistingEntries` is deleted in the same diff as this edit**, which
+is what its own failure message demanded: *"if quince genuinely stops materialising `auto`, delete
+this test AND fix the qn.6e sentence in the same diff."* It failed on the `qn.6j` PR that stopped the
+behaviour, which is the test working exactly as designed rather than a test that went stale.
+
+**The narrower goal this spec claimed still stands and is untouched**: a storage ADDED through the
+flow records the concrete backend that was probed and shown, and `validateAddition` refuses an empty
+or `auto` backend outright. `qn.6j` changes nothing about the add door — `docs/contracts.md` §6 says
+why the two doors take opposite policies.
+
 **This discharges the placeholder's one homed deferral by absorption.** Do not open a removal PR
 against it. Two canon sites assert the deferral is still live and both are corrected in PR 8:
 `contracts.md:1339-1344` (*"homed on quince#502"*, *"nothing is built to compensate"*) and
