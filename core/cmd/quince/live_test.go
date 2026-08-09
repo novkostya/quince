@@ -125,7 +125,7 @@ func TestBuildStorageServesWithNoStoragesDeclared(t *testing.T) {
 	cfgSvc := config.NewService(filepath.Join(t.TempDir(), "config.yml"), quietLog())
 	st := testStore(t)
 
-	mgr, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, nil, quietLog(), scanSynchronous)
+	mgr, _, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, nil, quietLog(), scanSynchronous)
 	if err != nil {
 		t.Fatalf("buildStorage refused an empty declaration: %v — zero storages is the first-run "+
 			"state since qn.6e, not a configuration error", err)

@@ -39,6 +39,18 @@ const applierUDID = "SYNTHETIC-UDID-6G4B" // udidPattern: [A-Za-z0-9-]{8,64}
 // reachable from the config surface that triggers them.
 func wiredStorage(t *testing.T, entries []config.StorageEntry) (*config.Service, *storage.Manager, *store.Store) {
 	t.Helper()
+	svc, mgr, _, st := wiredStorageMode(t, entries, scanSynchronous)
+	return svc, mgr, st
+}
+
+// wiredStorageMode is wiredStorage with the scan mode exposed, handing back the RUNNER as well.
+//
+// `serve` is the only mode with both a runner and a live config surface, so the storage-added trigger
+// is observable only under `scanDeferred` (qn.6i PR 4). Tests that assert what an ADD does need this;
+// tests that assert what the applier does to the slot list do not, and keep the simpler helper.
+func wiredStorageMode(t *testing.T, entries []config.StorageEntry, mode scanMode) (
+	*config.Service, *storage.Manager, *storage.Runner, *store.Store) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yml")
 
 	cfg := config.Default()
@@ -53,11 +65,11 @@ func wiredStorage(t *testing.T, entries []config.StorageEntry) (*config.Service,
 
 	cfgSvc := config.NewService(path, quietLog())
 	st := testStore(t)
-	mgr, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, bus.New(), quietLog(), scanSynchronous)
+	mgr, runner, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, bus.New(), quietLog(), mode)
 	if err != nil {
 		t.Fatalf("buildStorage: %v", err)
 	}
-	return cfgSvc, mgr, st
+	return cfgSvc, mgr, runner, st
 }
 
 // entry is the short form a test writes; Resolved() fills the rest, the same way load does.
@@ -270,7 +282,8 @@ func TestARetentionEditChangesWhatTheNextPruneKeeps(t *testing.T) {
 // the applier.
 func TestAHotAddedStorageShowsTheBackupsItAlreadyHolds(t *testing.T) {
 	alpha := entry(t, "alpha", true)
-	svc, mgr, _ := wiredStorage(t, []config.StorageEntry{alpha})
+	svc, mgr, runner, _ := wiredStorageMode(t, []config.StorageEntry{alpha}, scanDeferred)
+	runner.Start(context.Background())
 
 	beta := entry(t, "beta", false)
 	created := time.Date(2026, 7, 18, 3, 0, 0, 0, time.UTC)
@@ -291,7 +304,18 @@ func TestAHotAddedStorageShowsTheBackupsItAlreadyHolds(t *testing.T) {
 			applierUDID, got)
 	}
 
+	// THE PROMISE MOVED FROM `AT THE RESPONSE` TO `SHORTLY AFTER IT` (qn.6i PR 4, quince#715). The
+	// applier used to run the scan inline, inside the HTTP handler and under `writeMu`; it now enqueues
+	// one. So the test waits for the pass instead of reading straight after the write — and waits on
+	// the runner rather than sleeping, because a sleep long enough to be reliable is slow and one short
+	// enough to be fast is a flake.
+	//
+	// What must NOT change is the user-visible outcome: no restart. Contracts §6 now says *shortly
+	// after* rather than *without a restart*, and this is what makes that wording true rather than a
+	// hope.
+	done := runner.WaitForPass()
 	replaceStorage(t, svc, []config.StorageEntry{alpha, beta})
+	<-done
 
 	vs := mgr.Versions(applierUDID)
 	if len(vs) != 1 {
@@ -311,7 +335,7 @@ func TestAHotAddedStorageShowsTheBackupsItAlreadyHolds(t *testing.T) {
 func TestAForgetDoesNotTriggerAReconcile(t *testing.T) {
 	alpha := entry(t, "alpha", true)
 	beta := entry(t, "beta", false)
-	svc, mgr, _ := wiredStorage(t, []config.StorageEntry{alpha, beta})
+	svc, mgr, runner, _ := wiredStorageMode(t, []config.StorageEntry{alpha, beta}, scanDeferred)
 
 	created := time.Date(2026, 7, 19, 4, 0, 0, 0, time.UTC)
 	verDir := filepath.Join(alpha.Path, applierUDID, "versions", created.Format("2006-01-02T15-04-05Z"))
@@ -330,6 +354,16 @@ func TestAForgetDoesNotTriggerAReconcile(t *testing.T) {
 		t.Fatalf("ForgetStorage: %v", err)
 	}
 
+	// ASSERTED AT THE TRIGGER NOW, WHICH IS SHARPER THAN THE OBSERVABLE IT REPLACES (qn.6i PR 4).
+	//
+	// The runner is deliberately NOT started, so nothing can consume a trigger: if the forget queued
+	// one it is still queued, and `Reconciling()` says so. The old form — "no version was adopted" —
+	// still holds and is kept below, but on its own it would now pass for the wrong reason, because an
+	// unstarted runner adopts nothing whether or not it was triggered.
+	if runner.Reconciling() {
+		t.Error("a forget queued a reconciliation pass — nothing was added, so there is nothing to " +
+			"scan, and under a schedule a spurious pass per removal is a full walk for no answer")
+	}
 	if got := len(mgr.Versions(applierUDID)); got != 0 {
 		t.Errorf("a forget reconciled (%d versions adopted) — nothing was added, so there is "+
 			"nothing to scan", got)
@@ -371,5 +405,55 @@ func TestAddedStorageIsByNameSoAPathEditIsNotAnAddition(t *testing.T) {
 	if !addedStorage([]config.StorageEntry{a}, []config.StorageEntry{a, entry(t, "beta", false)}) {
 		t.Error("a genuinely new name must read as an addition, or its existing backups stay " +
 			"invisible until a restart")
+	}
+}
+
+// qn.6i PR 4 — THE ADD RETURNS WITHOUT WAITING FOR THE SCAN (quince#715).
+//
+// This is the PR's whole claim, and it needs an assertion that can distinguish "enqueued" from "ran",
+// which no observable about adopted versions can: both end with the version adopted, differing only
+// in when. So the runner is deliberately NOT started. The write returns, a pass is queued, and NOTHING
+// HAS SCANNED — which is precisely the state the old inline code could never be in.
+//
+// WHY IT MATTERS beyond latency: the applier runs inside the HTTP handler with `writeMu` held, so the
+// ~48-second walk did not merely hang the button — it queued every following config write behind it,
+// including a Forget. Enqueuing releases the lock in milliseconds.
+func TestAddingAStorageEnqueuesTheScanRatherThanRunningIt(t *testing.T) {
+	alpha := entry(t, "alpha", true)
+	svc, mgr, runner, _ := wiredStorageMode(t, []config.StorageEntry{alpha}, scanDeferred)
+
+	beta := entry(t, "beta", false)
+	created := time.Date(2026, 7, 20, 5, 0, 0, 0, time.UTC)
+	verDir := filepath.Join(beta.Path, applierUDID, "versions", created.Format("2006-01-02T15-04-05Z"))
+	if err := os.MkdirAll(verDir, 0o755); err != nil {
+		t.Fatalf("mkdir version dir: %v", err)
+	}
+	if err := storage.WriteMarker(verDir, storage.Marker{
+		VersionID: "01VENQUEUED", UDID: applierUDID, Backend: storage.BackendCopy,
+		CreatedAt: created.Format(time.RFC3339), Kind: "full", Encrypted: true,
+		StructureVerifiedAt: created.Format(time.RFC3339), AppVersion: "test",
+	}); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	replaceStorage(t, svc, []config.StorageEntry{alpha, beta})
+
+	if !runner.Reconciling() {
+		t.Fatal("adding a storage queued no reconciliation — a disk that already holds backups would " +
+			"stay invisible until something unrelated triggered a pass")
+	}
+	if got := len(mgr.Versions(applierUDID)); got != 0 {
+		t.Fatalf("the add SCANNED before returning (%d versions adopted) — that is quince#715: the "+
+			"handler holding writeMu across the walk, so the button hangs and the next config write "+
+			"queues behind it", got)
+	}
+
+	// And the enqueued pass really does the work once something runs it.
+	done := runner.WaitForPass()
+	runner.Start(context.Background())
+	<-done
+	if got := len(mgr.Versions(applierUDID)); got != 1 {
+		t.Fatalf("after the queued pass ran, Versions() = %d, want 1 — enqueuing is only honest if "+
+			"the pass actually happens", got)
 	}
 }

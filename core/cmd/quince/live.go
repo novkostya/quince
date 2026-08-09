@@ -77,25 +77,18 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 
 	// Storage subsystem (qn.5): resolve the backend, roll any half-done commit forward, and — for
 	// the CLIs only — scan before returning (qn.6i D2).
-	storageMgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log, scan)
+	// The runner comes back from buildStorage rather than being built here: the storage-added trigger
+	// lives in the config applier, which is registered inside that function (qn.6i PR 4). Nil for the
+	// CLIs. CONSTRUCTED, NOT STARTED — the caller decides when the first pass may begin, which for
+	// `serve` is once the router exists, so the scan and the bind proceed together.
+	storageMgr, runner, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log, scan)
 	if err != nil {
 		return nil, err
 	}
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
 	ls.storages = storageMgr
-	if scan == scanDeferred {
-		// CREATED HERE, STARTED BY THE CALLER. Constructing it starts nothing, so the caller decides
-		// when the first pass may begin — for `serve` that is once the router exists, so the scan and
-		// the bind proceed together rather than one queueing behind the other.
-		ls.reconcile = storage.NewRunner(storageMgr, log)
-		// A JOB ENDING RE-TRIGGERS A PASS, which is what makes a deferral temporary rather than lossy:
-		// a device skipped because a backup was running on it comes back when that backup ends, not
-		// when something unrelated next happens to ask. Wired to `UnbindJob`, which `Engine.release`
-		// calls on EVERY ending — success, failure, cancel, shutdown — so the cancel case is covered
-		// by construction rather than by a second call site somebody has to remember.
-		ls.reconcile.TriggerOnJobEnd(storageMgr)
-	}
+	ls.reconcile = runner
 
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
 	// committed to, which is now the DEFAULT declared storage rather than the retired
@@ -205,7 +198,7 @@ const (
 // muxer supervisor / device registry / enrichment goroutines the full stack spins up. Reconcile runs
 // before returning (same as serve) so adopted/missing versions are reflected.
 func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Service,
-	st *store.Store, eventBus *bus.Bus, log *slog.Logger, scan scanMode) (*storage.Manager, error) {
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger, scan scanMode) (*storage.Manager, *storage.Runner, error) {
 	scfg := cfgSvc.Current().Storage
 	entries := declaredStorages(scfg)
 	// ZERO STORAGES IS NOW A LEGITIMATE STARTUP STATE, and this is where that stops being a
@@ -289,6 +282,28 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		}
 	}
 
+	// THE RUNNER IS BUILT HERE, NOT BY THE CALLER, BECAUSE THE APPLIER BELOW NEEDS IT.
+	//
+	// It was created in `buildLiveStack` while it had one trigger; the storage-added trigger lives in
+	// the config subscriber registered further down, inside this function. Assigning it to a captured
+	// variable after `Subscribe` would work by closure and read as a nil-deref waiting to happen — the
+	// applier can only fire after a config write, which cannot happen before this function returns,
+	// and "cannot happen yet" is exactly the reasoning that stops being true when somebody adds a
+	// caller.
+	//
+	// NIL FOR THE CLIs, and every use of it is nil-guarded: a short-lived process that already ran its
+	// scan synchronously has nothing to trigger, and a runner nobody starts would swallow triggers
+	// rather than run them.
+	var runner *storage.Runner
+	if scan == scanDeferred {
+		runner = storage.NewRunner(storageMgr, log)
+		// A JOB ENDING RE-TRIGGERS A PASS, so a device deferred behind a backup comes back when that
+		// backup ends rather than when something unrelated next asks. `Engine.release` calls
+		// `UnbindJob` on EVERY ending — success, failure, cancel, shutdown — so the cancel case is
+		// covered by construction rather than by a second call site somebody must remember.
+		runner.TriggerOnJobEnd(storageMgr)
+	}
+
 	// THE RE-PROBE BEHIND POST /api/storages/{name}/recheck (quince#435: reachability may change
 	// without a restart; the storage LIST still needs one). It closes over the same resolver the
 	// startup loop used, so a recheck and a restart cannot disagree about what a storage is.
@@ -334,22 +349,27 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 			warns = append(warns, config.Warning{Path: "storage", Message: w})
 		}
 
-		// THE RECONCILE IS THE PART THAT IS EASY TO FORGET, and the spec says so in as many words.
-		// A newly declared disk may ALREADY HOLD committed backups — the adopt path exists — and
-		// without this they stay invisible until a restart, which is this rung's own defect one layer
-		// along. Startup runs Reconcile right after NewManager for exactly this reason.
+		// THE SCAN IS STILL THE PART THAT IS EASY TO FORGET — a newly declared disk may ALREADY HOLD
+		// committed backups, and without a scan they stay invisible until a restart. What changed in
+		// qn.6i is that the request no longer WAITS for it (quince#715): this ran `Reconcile` inline,
+		// inside the HTTP handler, holding `writeMu` across a ~48-second walk, so the button hung and
+		// the next config write — a Forget, say — queued behind it.
 		//
-		// Only when something was ADDED: a forget needs no scan, and reconciling on every unrelated
+		// Only when something was ADDED: a forget needs no scan, and triggering on every unrelated
 		// storage edit would walk every declared tree for nothing.
-		if addedStorage(before, after) {
-			if err := storageMgr.Reconcile(ctx); err != nil {
-				log.Error("storage: reconciliation after a live add failed", "error", err)
-				warns = append(warns, config.Warning{
-					Path: "storage",
-					Message: "the storage list was applied, but scanning for backups already on the " +
-						"new storage failed, so they may not be listed until quince restarts: " + err.Error(),
-				})
-			}
+		//
+		// THE WARNING THIS REPLACED IS DELETED RATHER THAN REWORDED, and that is the honest move.
+		// It said the scan had failed "so they may not be listed until quince restarts" — a claim
+		// about an OUTCOME this handler can no longer observe, because the pass has not run yet when
+		// the response is written. Rewording it into a promise about a future pass would be a claim
+		// with no observation behind it, which is the failure `state honesty` names. What replaces it
+		// is a state a client can actually read: `reconciling` on `GET /api/health`, plus the log.
+		//
+		// NIL RUNNER IS NOT REACHABLE FROM HERE and is guarded anyway: the applier is registered in
+		// every mode, and only `serve` has both a runner and a live config surface. The CLIs ran their
+		// scan synchronously and never serve `PUT /api/config`.
+		if addedStorage(before, after) && runner != nil {
+			runner.Trigger("storage added")
 		}
 		return warns
 	})
@@ -360,7 +380,7 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 		log.Info("storage ready", "storage", s.Name, "path", s.Root, "backend", s.BackendName,
 			"storage_id", s.StorageID, "reachable", s.Reachable)
 	}
-	return storageMgr, nil
+	return storageMgr, runner, nil
 }
 
 // sameStorageDeclaration reports whether two resolved declarations are the same storages, in the

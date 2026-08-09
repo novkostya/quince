@@ -39,7 +39,7 @@ func withStorage(fn func(mgr *storage.Manager) error) error {
 	eventBus := bus.New()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	mgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log, scanSynchronous)
+	mgr, _, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log, scanSynchronous)
 	if err != nil {
 		return err
 	}

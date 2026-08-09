@@ -1390,7 +1390,7 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 | --- | --- | --- |
 | `backup.preferred_transport` | **live** | The backup applier swaps one synchronized field; read per job, so a running job keeps the answer it started with. |
 | `backup.require_encryption` | **live** | Same applier, same guarantee. |
-| `storage[]` membership | **live** | The storage applier — `qn.6g`'s first consumer. An **add** also reconciles, so a disk that already holds backups shows them without a restart. |
+| `storage[]` membership | **live** | The storage applier — `qn.6g`'s first consumer. An **add** also **enqueues a reconciliation pass**, so a disk that already holds backups shows them **shortly after**, without a restart. It used to scan *inline*, inside the request and under `writeMu`, which hung the button for a full walk and queued the next config write behind it (quince#715); `qn.6i` made it a trigger. While that pass is outstanding `GET /api/health` reports `reconciling` — see §1, where what that promises is written down. |
 | `storage[].path` · `.backend` · `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses, so a live apply and a restart cannot disagree about what a storage IS. |
 | `storage[].retention.*` | **live** | Rides the storage applier: `policyFor` reads retention off the slot list, so `ApplyStorages` is the only path by which an edit can reach `Prune`. |
 | `storage[].default` | **live** | Position decides it — re-ordering moves `slots[0]`. Safe only because forgetting the default is refused; a *re-designation* takes effect for the next unbound job. |
