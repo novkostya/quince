@@ -411,14 +411,24 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		m.auditEvent("device.wifi_sync."+action, udid, "failed")
 		return
 	}
-	m.setOp(opID, "succeeded", wifiSyncDoneMsg(action), nil)
-
-	// Publish the value SetWifiSync already read back, rather than re-reading it.
+	// PUBLISH BEFORE ANNOUNCING, and the order is the point rather than the tidiness (quince#529).
 	//
-	// reEnrich would be the obvious call and it is the wrong one here: disabling Wi-Fi sync on a
-	// Wi-Fi-connected device severs the transport, so by the time reEnrich runs, Info() fails, logs
-	// a warning and returns WITHOUT updating — leaving the UI showing `on` for a device that is now
-	// off and gone. Observed on hardware 2026-07-31.
+	// `succeeded` is what a client polls for, and it re-reads the device the moment it sees one. So
+	// announcing first opens a window where the op says the change is done and the registry still
+	// holds the old value — the stale badge this function exists to prevent, reached through the
+	// SUCCESS path rather than the failure path. Narrow, and exactly the symptom that took three
+	// hardware attempts to diagnose (quince#325 / quince#363 / quince#366).
+	//
+	// It is also what made TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes flaky on
+	// branches with no Go changes, up to and including reddening `main` at 1cfd50d: `waitOp` returns
+	// the instant the op reads `succeeded`, so the test read the registry in that window. The test
+	// was right and the ordering was wrong.
+	//
+	// Publish the value SetWifiSync already read back, rather than re-reading it. reEnrich would be
+	// the obvious call and it is the wrong one here: disabling Wi-Fi sync on a Wi-Fi-connected device
+	// severs the transport, so by the time reEnrich runs, Info() fails, logs a warning and returns
+	// WITHOUT updating — leaving the UI showing `on` for a device that is now off and gone. Observed
+	// on hardware 2026-07-31.
 	//
 	// The value here is not a guess: SetWifiSync only returns nil after reading the flag back from
 	// the device and confirming it changed. Enrich replaces the whole identity, so the rest is
@@ -444,6 +454,7 @@ func (m *Manager) runWifiSync(opID, udid, transport, action string) {
 		m.log.Warn("deviceops: wifi_sync applied but NOT published — the registry no longer holds this device",
 			"op", opID, "udid", udid, "action", action, "transport", transport, "wifi_sync", newState)
 	}
+	m.setOp(opID, "succeeded", wifiSyncDoneMsg(action), nil)
 	// Still refresh the rest of the identity when the device is reachable — a USB-connected device
 	// stays put, and this keeps the op's behaviour identical to the other device ops there.
 	if action == "enable" || transport == TransportUSB {
@@ -474,10 +485,10 @@ func (m *Manager) wifiSyncDisableUnreadable(opID, udid, transport string) {
 	m.log.Info("deviceops: wifi_sync disable accepted, read-back unreachable — reporting success with an unknown value",
 		"op", opID, "udid", udid, "action", "disable", "transport", transport)
 
-	m.setOp(opID, "succeeded", wifiSyncDisconnectedMsg(), nil)
-
 	// Publish `unknown` rather than leaving the stale `on` standing: the badge then hides itself
-	// instead of asserting a value quince has not read.
+	// instead of asserting a value quince has not read. BEFORE the announcement, for the reason
+	// runWifiSync gives at length (quince#529) — a client polling `succeeded` re-reads immediately,
+	// and here the stale value it would find is the `on` this whole path exists to retract.
 	if dev, ok := m.devs.Device(udid); ok {
 		m.devs.Enrich(udid, device.Identity{
 			Name: dev.Name, Model: dev.Model, IOSVersion: dev.IOSVersion,
@@ -485,6 +496,7 @@ func (m *Manager) wifiSyncDisableUnreadable(opID, udid, transport string) {
 			WifiSync: "unknown",
 		})
 	}
+	m.setOp(opID, "succeeded", wifiSyncDisconnectedMsg(), nil)
 	m.auditEvent("device.wifi_sync.disable", udid, "ok_unreadable")
 }
 
