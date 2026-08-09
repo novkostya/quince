@@ -225,3 +225,49 @@ func TestASecondStorageMaterialisesTheIncumbentsDefault(t *testing.T) {
 		t.Errorf("want exactly one default after the reload, got %d:\n%s", defaults, got)
 	}
 }
+
+// A FORGOTTEN STORAGE TAKES ITS DECLARED PATHS WITH IT, because a name can come back.
+//
+// While the name is unused the stale paths are inert — the pruner only consults paths for entries
+// the document has. **Re-adding the name ends that**, and re-adding is the unplug-and-replug flow
+// rather than an edge case: `validateAddition` refuses only a name an EXISTING entry holds, and
+// after a forget there is not one.
+//
+// Measured before the fix: forget `b2` (which declared `zfs.mode: hook`, `zfs.seed: copy`), re-add
+// `b2` at the same path declaring neither, and the file came back carrying
+// `zfs: {mode: exec, seed: auto}` — defaults nobody set on the new entry, written from the old
+// entry's surviving paths. Tidiness rather than correctness: every value is the current one.
+func TestForgettingAStorageDropsItsDeclaredPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	svc := NewService(path, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	if _, errs, _, err := svc.AddStorage(StorageEntry{Name: "nas", Path: "/a", Backend: "hardlink"}); err != nil || len(errs) > 0 {
+		t.Fatalf("add nas: %+v %v", errs, err)
+	}
+	// `b2` declares two zfs keys, which are the ones that must not haunt its successor.
+	if _, errs, _, err := svc.AddStorage(StorageEntry{
+		Name: "b2", Path: "/b", Backend: "reflink", ZFS: ZFSConfig{Mode: "hook", Seed: "copy"},
+	}); err != nil || len(errs) > 0 {
+		t.Fatalf("add b2: %+v %v", errs, err)
+	}
+	if _, errs, _, err := svc.ForgetStorage("b2", nil); err != nil || len(errs) > 0 {
+		t.Fatalf("forget b2: %+v %v", errs, err)
+	}
+
+	// The same name at the same path, declaring no zfs at all — what a user does after replugging.
+	if _, errs, _, err := svc.AddStorage(StorageEntry{Name: "b2", Path: "/b", Backend: "reflink"}); err != nil || len(errs) > 0 {
+		t.Fatalf("re-add b2: %+v %v", errs, err)
+	}
+
+	got := readFile(t, path)
+	for _, ghost := range []string{"mode: exec", "seed: auto", "mode: hook", "seed: copy"} {
+		if strings.Contains(got, ghost) {
+			t.Fatalf("the re-added storage inherited %q from the forgotten one's declared paths:\n%s",
+				ghost, got)
+		}
+	}
+	if l := Load(path); !l.OK {
+		t.Fatalf("the written file does not load: %+v", l.Errors)
+	}
+}

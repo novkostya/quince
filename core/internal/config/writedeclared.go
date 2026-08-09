@@ -198,3 +198,55 @@ func lostPaths(want, got Config, perr error) string {
 	}
 	return diff.String()
 }
+
+// forStorages drops declared paths belonging to storage entries the document no longer has.
+//
+// A FORGOTTEN ENTRY'S PATHS ARE INERT ONLY WHILE ITS NAME IS UNUSED, and a name coming back is an
+// ordinary thing rather than an edge case (architect, quince#760). Measured before it was fixed:
+//
+//	add nas + b2 (b2 declaring zfs.mode: hook, zfs.seed: copy)
+//	forget b2                       → the file loses it, `Declared` keeps storage[b2].zfs.*
+//	add b2 again at the same path   → `validateAddition` allows it: no EXISTING entry holds that
+//	                                  name, which is exactly the unplug-and-replug flow
+//	                                → the file gets `zfs: {mode: exec, seed: auto}` — DEFAULTS the
+//	                                  user never set on the new entry, written from the old one's
+//	                                  surviving paths
+//
+// That is this rung's own defect in the flow most likely to meet it twice. It is tidiness rather
+// than correctness — every value written is the current one and the document parses — which is why
+// the fix is a filter rather than a redesign.
+//
+// It is written as "keep only what the document has" rather than "delete what the forget removed",
+// so it needs no coordination with `ForgetStorage` and covers `PUT /api/config` dropping an entry
+// by the same rule. D1's principle, applied to the cache: the declared set describes THE DOCUMENT.
+func (d Declared) forStorages(list *[]StorageEntry) Declared {
+	live := map[string]bool{}
+	if list != nil {
+		for _, e := range *list {
+			live[e.Name] = true
+		}
+	}
+	out := make(Declared, len(d))
+	for path := range d {
+		if name, ok := storageEntryName(path); ok && !live[name] {
+			continue
+		}
+		out[path] = true
+	}
+	return out
+}
+
+// storageEntryName pulls `nas` out of `storage[nas].zfs.mode`, reporting false for any path that is
+// not a storage entry's.
+func storageEntryName(path string) (string, bool) {
+	const prefix = "storage["
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := path[len(prefix):]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		return "", false
+	}
+	return rest[:end], true
+}
