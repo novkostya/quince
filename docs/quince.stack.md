@@ -304,7 +304,10 @@ differently (Operator ruling: no hardlink games under ZFS):
      its worst case is copy COST (reported "unverified"), hardlink's worst case
      is silent `latest/` corruption. The measurement otherwise decides what
      quince honestly *claims* ("zero-space verified" / "sharing unverifiable in
-     this topology — budget full-copy cost" / "copy"). Measurement channels, best available: hook `list` avail-delta →
+     this topology — budget full-copy cost" / "copy"). Measurement channels, best available:
+     **`FIEMAP_EXTENT_SHARED` on the test clone** (`FS_IOC_FIEMAP`, quince#747 — exact,
+     per-file, unaffected by concurrent writers, and the one the NAMESPACE probe uses; btrfs
+     and XFS both answer it, ZFS answers `EOPNOTSUPP`, measured) → hook `list` avail-delta →
      delegated `zfs list -o avail` (exec mode) → syscall-only `statfs(2)`
      `f_bavail` delta around an incompressible test clone (works in any container;
      sync-and-settle for txg accounting lag) → none usable ⇒ report UNVERIFIED,
@@ -354,8 +357,9 @@ copy).
 
 **Auto-selection** (`storage.backend: auto`): explicit zfs intent in config
 (`storage.zfs.parent_dataset`/hook set) → `zfs`; otherwise probe the actual `/backups`
-filesystem at runtime — FICLONE a test file and verify independence → `reflink`; else
-`link()` + inode identity → `hardlink`; else `copy`. Deterministic, logged, explained in
+filesystem at runtime — FICLONE a test file and verify the clone SHARES its extents (and is
+independent of its source) → `reflink`; else `link()` + inode identity → `hardlink`; else
+`copy`. Deterministic, logged, explained in
 plain language during onboarding. All cloning happens in-process via the FICLONE ioctl
 (`golang.org/x/sys/unix`), never by shelling out to `cp --reflink` — busybox userlands
 are irrelevant, and the ioctl passes through container bind mounts to the real

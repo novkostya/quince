@@ -166,26 +166,118 @@ func MutatesInPlace(rel string) bool {
 	return false
 }
 
-// ReflinkProbe reports whether dir's filesystem supports reflinks with true independence: it
-// writes a small source file, FICLONE-clones it, mutates the clone, and verifies the source is
-// unchanged. Cleans up after itself. Used by the storage auto-selection probe.
+// ReflinkResult is what ReflinkProbeDetail found. The three values exist because the two
+// questions the probe asks have different answers on different filesystems, and quince#747 is
+// the record of what collapsing them into a bool costs.
+type ReflinkResult int
+
+const (
+	// ReflinkUnsupported — do NOT use the reflink strategy here. Either FICLONE refused, or it
+	// succeeded and produced a file that shares nothing (a silent full copy), or the clone was
+	// not independent of its source.
+	ReflinkUnsupported ReflinkResult = iota
+	// ReflinkSharing — FICLONE succeeded and the clone DEMONSTRABLY shares extents with its
+	// source. This is the only result that earns the space claim stack D5 makes for reflink.
+	ReflinkSharing
+	// ReflinkSharingUnverifiable — FICLONE succeeded and the clone is independent, but this
+	// filesystem cannot report extent sharing, so the space claim is unproven here. Measured on
+	// the lab rig: ZFS with block cloning enabled accepts FICLONE and implements no FIEMAP.
+	ReflinkSharingUnverifiable
+)
+
+// reflinkProbeSize is how large the probe's source file is, and it is load-bearing rather than
+// arbitrary. btrfs stores a small file INLINE in its metadata, and an inline extent carries no
+// FIEMAP_EXTENT_SHARED flag whether or not the file was cloned — measured on the lab rig, where
+// the 8-byte file this probe used to write comes back `inline` on btrfs after a real
+// `cp --reflink=always`. 1 MiB is far above any filesystem's inline/tail-packing threshold and
+// costs one write, once, per storage at startup.
+const reflinkProbeSize = 1 << 20
+
+// ReflinkProbe reports whether dir's filesystem supports the reflink strategy at all. It is the
+// bool form of ReflinkProbeDetail and deliberately treats "sharing unverifiable" as supported —
+// callers that care about the distinction (and the storage auto-selection probe does, because
+// the distinction is the whole of quince#747) must use ReflinkProbeDetail.
 func ReflinkProbe(dir string) bool {
+	res, _ := ReflinkProbeDetail(dir)
+	return res != ReflinkUnsupported
+}
+
+// ReflinkProbeDetail probes dir's filesystem for reflink support and returns the result plus a
+// sentence naming what was actually observed, for the storage backend's reason string.
+//
+// IT TESTS SHARING, NOT ONLY INDEPENDENCE, and that is quince#747. The old probe wrote 8 bytes,
+// FICLONE-cloned them, mutated the clone and checked the source was intact — which is exactly
+// what a plain `cp` also does. Two independent files with identical content behave identically
+// under mutation, so the probe could tell a clone from a HARDLINK and could not tell a clone
+// from a COPY. `probeNamespace` then selected the reflink backend on that evidence, and stack D5
+// chooses reflink FOR SPACE: a FICLONE that succeeded without sharing would have made every
+// version a full physical copy, silently, with every gate still green.
+//
+// So the order is: clone → ask the filesystem whether the clone SHARES its blocks (FIEMAP) →
+// then mutate and check independence. Sharing is asked first because the mutation is a
+// truncating rewrite, which breaks the sharing it would otherwise be measuring.
+//
+// Cleans up after itself.
+func ReflinkProbeDetail(dir string) (ReflinkResult, string) {
 	src := filepath.Join(dir, ".quince-reflink-src")
 	dst := filepath.Join(dir, ".quince-reflink-dst")
 	defer func() { _ = os.Remove(src); _ = os.Remove(dst) }()
-	if err := os.WriteFile(src, []byte("AAAAAAAA"), 0o600); err != nil {
-		return false
+	if err := os.WriteFile(src, probePattern(reflinkProbeSize), 0o600); err != nil {
+		return ReflinkUnsupported, fmt.Sprintf("cannot write a probe file: %v", err)
 	}
 	if err := reflinkFile(dst, src); err != nil {
-		return false
+		return ReflinkUnsupported, fmt.Sprintf("FICLONE refused: %v", err)
 	}
-	// Mutate the clone; a true CoW clone leaves the source intact.
+
+	// 1. SHARING — the property the backend is chosen for.
+	sharing, why := extentSharing(dst)
+
+	// 2. INDEPENDENCE — still needed, to rule out a hardlink. A true CoW clone leaves the
+	// source intact when the clone is rewritten. Measured AFTER sharing, because this rewrite
+	// truncates the clone and so destroys the sharing it would otherwise be measuring.
 	if err := os.WriteFile(dst, []byte("BBBBBBBB"), 0o600); err != nil {
-		return false
+		return ReflinkUnsupported, fmt.Sprintf("cannot rewrite the probe clone: %v", err)
 	}
 	got, err := os.ReadFile(src)
 	if err != nil {
-		return false
+		return ReflinkUnsupported, fmt.Sprintf("cannot re-read the probe source: %v", err)
 	}
-	return string(got) == "AAAAAAAA"
+	return reflinkVerdict(sharing, why, len(got) == reflinkProbeSize)
+}
+
+// reflinkVerdict turns the probe's two measurements into its answer.
+//
+// PURE, AND THAT IS THE POINT rather than tidiness. The case this whole change exists for — a
+// FICLONE that SUCCEEDS and shares nothing — cannot be produced on demand: it needs a filesystem
+// that accepts the ioctl and lies, and no tier of the lab rig does (btrfs and XFS share, ext4 and
+// exFAT refuse the ioctl outright, ZFS refuses it on a just-written source with EAGAIN). A probe
+// whose verdict lives only inside the syscall path would therefore have its most important branch
+// covered by nothing, in CI and on hardware alike. Split out, the branch is an ordinary table
+// test — see TestReflinkVerdict.
+func reflinkVerdict(sharing Sharing, why error, independent bool) (ReflinkResult, string) {
+	if sharing == SharingUnshared {
+		return ReflinkUnsupported, "FICLONE succeeded but the clone shares no extents with its source — it is a full copy, not a reflink"
+	}
+	if !independent {
+		return ReflinkUnsupported, "rewriting the clone changed the source — these names share an inode, they are not independent files"
+	}
+	if sharing == SharingShared {
+		return ReflinkSharing, "the clone's extents are reported shared (FIEMAP_EXTENT_SHARED) and the clone is independent of its source"
+	}
+	return ReflinkSharingUnverifiable, fmt.Sprintf("the clone is independent of its source, but this filesystem does not report extent sharing (%v)", why)
+}
+
+// probePattern builds n bytes that are neither a hole nor trivially compressible, so the probe
+// file gets real extents on a sparse-aware or compressing filesystem. A deterministic xorshift
+// rather than crypto/rand: the probe must behave the same on every run.
+func probePattern(n int) []byte {
+	b := make([]byte, n)
+	x := uint32(0x9E3779B9)
+	for i := range b {
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		b[i] = byte(x)
+	}
+	return b
 }

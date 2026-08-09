@@ -24,7 +24,7 @@ type Options struct {
 
 // Select resolves the effective backend (stack D5 auto-selection): explicit zfs intent
 // (storage.backend: zfs, or auto with a parent dataset/hook configured) → zfs; an explicit
-// namespace backend → that; else probe the real /backups filesystem — FICLONE-independence →
+// namespace backend → that; else probe the real /backups filesystem — FICLONE clone-SHARING →
 // reflink, link()+inode identity → hardlink, else copy. The choice + reason is returned for
 // onboarding and logged (never silent — a copy fallback is a surfaced degraded mode).
 func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, string, string) {
@@ -47,8 +47,9 @@ func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, s
 	}
 
 	// auto: probe the real /backups filesystem.
-	name, reason := probeNamespace(opts.Backups)
-	if name == BackendCopy {
+	name, reason, degraded := probeNamespaceDetail(opts.Backups)
+	switch {
+	case name == BackendCopy:
 		// A degraded mode — surface it loudly (hard rule: no silent caps/fallbacks).
 		//
 		// THE PATH IS AN ATTRIBUTE, not text (quince#514). This sentence hardcoded `/backups` and is
@@ -60,14 +61,37 @@ func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, s
 		log.Warn("storage backend selected: copy — this path supports neither reflink nor hardlinks; "+
 			"versioning will use full copies (transient 2x space)",
 			"storage_root", opts.Backups, "reason", reason)
-	} else {
+	case degraded:
+		// reflink, chosen on a filesystem that cannot report whether the clone actually shares
+		// blocks. The strategy still works and the clone is still independent; what is unproven
+		// is the SPACE saving, which is the reason D5 picks this backend at all (quince#747). A
+		// space claim nobody can check is exactly the "no silent caps or fallbacks" case.
+		log.Warn("storage backend selected: reflink — but this filesystem cannot report extent "+
+			"sharing, so the space saving is UNVERIFIED on this path",
+			"storage_root", opts.Backups, "reason", reason)
+	default:
 		log.Info("storage backend selected", "backend", name, "storage_root", opts.Backups, "reason", reason)
 	}
 	return newNamespaceBackend(name, strategyFor(name), opts.Backups, opts.AppVersion, log), name, reason
 }
 
-// probeNamespace tests a storage's OWN root for reflink independence, then hardlink+inode
-// identity, else copy.
+// probeNamespace tests a storage's OWN root for reflink SHARING, then hardlink+inode identity,
+// else copy. It is probeNamespaceDetail without the degraded flag, for the callers that only
+// need the backend and its reason.
+func probeNamespace(backups string) (string, string) {
+	name, reason, _ := probeNamespaceDetail(backups)
+	return name, reason
+}
+
+// probeNamespaceDetail is probeNamespace plus whether the choice is a DEGRADED one that the
+// caller must surface loudly rather than log at info.
+//
+// IT ASKS ABOUT SHARING, NOT INDEPENDENCE (quince#747). The reflink reason used to read "FICLONE
+// independence probe passed", which was an honest name for a probe that answered the wrong
+// question: a full copy passes an independence test identically to a clone. The two reflink
+// reasons below are now distinguishable on purpose — one says the sharing was observed, the
+// other says this filesystem cannot be asked — because they are different states and an
+// operator reading a storage card is entitled to know which one they are in.
 //
 // EVERY REASON NAMES THE PATH IT PROBED (quince#514). All four hardcoded the literal `/backups`
 // while taking the real root as a parameter — true while there was exactly one storage and always
@@ -77,17 +101,20 @@ func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, s
 //
 // A reason is a state-honesty artifact, not a debug string: it is what tells an operator why their
 // storage is on the backend it is on, and this rung made "which storage" the load-bearing question.
-func probeNamespace(backups string) (string, string) {
+func probeNamespaceDetail(backups string) (string, string, bool) {
 	if err := os.MkdirAll(backups, 0o755); err != nil {
-		return BackendCopy, fmt.Sprintf("cannot create probe dir at %s: %v", backups, err)
+		return BackendCopy, fmt.Sprintf("cannot create probe dir at %s: %v", backups, err), true
 	}
-	if clonetree.ReflinkProbe(backups) {
-		return BackendReflink, fmt.Sprintf("FICLONE independence probe passed on %s", backups)
+	switch res, detail := clonetree.ReflinkProbeDetail(backups); res {
+	case clonetree.ReflinkSharing:
+		return BackendReflink, fmt.Sprintf("FICLONE clone-sharing probe passed on %s: %s", backups, detail), false
+	case clonetree.ReflinkSharingUnverifiable:
+		return BackendReflink, fmt.Sprintf("FICLONE probe passed on %s but SHARING IS UNVERIFIED: %s", backups, detail), true
 	}
 	if hardlinkProbe(backups) {
-		return BackendHardlink, fmt.Sprintf("reflink unsupported; link()+inode-identity probe passed on %s", backups)
+		return BackendHardlink, fmt.Sprintf("reflink unsupported; link()+inode-identity probe passed on %s", backups), false
 	}
-	return BackendCopy, fmt.Sprintf("neither reflink nor hardlinks supported on %s", backups)
+	return BackendCopy, fmt.Sprintf("neither reflink nor hardlinks supported on %s", backups), true
 }
 
 // hardlinkProbe creates a file, hardlinks it, and confirms both names share one inode.

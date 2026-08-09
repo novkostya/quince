@@ -589,7 +589,7 @@ its fresh-install half missing.**
 1. **A path that does not exist is refused, and still does not exist afterwards.** The probe reports
    the reason; nothing is created.
 2. **A path that exists and is empty gets a recommendation with the reason that names it** — the
-   probe's own sentence, e.g. *"FICLONE independence probe passed on /mnt/…"*, and the two probe
+   probe's own sentence, e.g. *"FICLONE clone-sharing probe passed on /mnt/…"*, and the two probe
    dotfiles are gone when it returns.
 3. **A path holding a `quince-storage.json` is an ADOPT** — the form shows the recorded backend and
    creation date and offers no selector, even when a fresh probe would say something else.
