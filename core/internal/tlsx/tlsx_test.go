@@ -137,8 +137,18 @@ func TestKeeperRotatesWithoutRestart(t *testing.T) {
 
 	// Rewrite IN PLACE, which is what acme.sh does — same paths, new content.
 	newCert, newKey := writePair(t, dir, "second")
-	copyFile(t, newCert, certFile)
-	copyFile(t, newKey, keyFile)
+	renewInPlace(t, newCert, certFile)
+	renewInPlace(t, newKey, keyFile)
+
+	// The premise, asserted rather than assumed: the rewrite is OBSERVABLE. Without renewInPlace's
+	// mtime bump both stamps can be unchanged, and then `changed()` is correctly false, the old
+	// certificate is correctly served, and the assertion below fails for a reason that has nothing
+	// to do with rotation — 13 times in 300 (quince#786). Said here so that if this regresses it
+	// reports what actually went wrong.
+	if !k.changed() {
+		t.Fatal("the rewrite left both (mtime, size) stamps unchanged, so there is nothing for the " +
+			"Keeper to notice — this test would be asserting an event that did not happen (quince#786)")
+	}
 
 	after, err := k.GetCertificate(nil)
 	if err != nil {
@@ -181,14 +191,39 @@ func TestKeeperKeepsServingWhenReloadFails(t *testing.T) {
 	}
 }
 
-func copyFile(t *testing.T, from, to string) {
+// renewInPlace rewrites `to` with the contents of `from` — same path, new content, as acme.sh does
+// — and then moves its mtime a minute forward.
+//
+// THE MTIME BUMP IS THE WHOLE POINT, and this helper's comment used to assert the opposite: "the
+// mtime moves, which is what `changed` reads." It does not reliably move (quince#786). `changed()`
+// compares (mtime, size) per file, and a test compresses into microseconds an interval that is
+// hours or months in production. Two facts then collide:
+//
+//   - an EC private key PEM is ALWAYS exactly the same size — P-256, fixed-length DER — so the key
+//     file can only ever signal a renewal through its mtime;
+//   - Linux stamps inodes from the COARSE clock, which advances once per timer tick, so two writes
+//     milliseconds apart routinely share an mtime. The filesystem stores nanoseconds; the
+//     granularity is the tick, not the precision.
+//
+// Measured over 3000 iterations in the pinned toolchain container: identical key mtime 77% of the
+// time, and BOTH files' stamps unchanged 14% of the time — at which point nothing observable has
+// happened and `changed()` is correctly false. That cost 13/300 failures in
+// TestKeeperRotatesWithoutRestart and 10/300 in TestCertificateDirectoryIsNeverWrittenTo.
+//
+// So this restores the test's TIMING to something production-like rather than faking the mechanism:
+// `statFile` and the real (mtime, size) trigger stay under test, which is exactly what reaching for
+// the `statFn` seam here would have given up.
+func renewInPlace(t *testing.T, from, to string) {
 	t.Helper()
 	b, err := os.ReadFile(from)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Chmod-preserving rewrite; the mtime moves, which is what `changed` reads.
-	if err := os.WriteFile(to, b, 0o600); err != nil {
+	if err := os.WriteFile(to, b, 0o600); err != nil { // chmod-preserving rewrite
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(to, later, later); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -463,8 +498,8 @@ func TestCertificateDirectoryIsNeverWrittenTo(t *testing.T) {
 	// a SEPARATE directory so the snapshot below sees only the two files quince was given.
 	src := t.TempDir()
 	newCert, newKey := writePair(t, src, "rotated")
-	copyFile(t, newCert, certFile)
-	copyFile(t, newKey, keyFile)
+	renewInPlace(t, newCert, certFile)
+	renewInPlace(t, newKey, keyFile)
 
 	// AFTER the rotation, so the test's own write is not what the comparison catches.
 	before := snapshotDir(t, dir)
@@ -499,10 +534,15 @@ func TestCertificateDirectoryIsNeverWrittenTo(t *testing.T) {
 // and CONTENT HASH.
 //
 // The hash is what makes the claim self-evident rather than an argument. Name and size alone
-// would miss a same-length rewrite; modtime closes that in practice, because nothing in tlsx
-// calls os.Chtimes — but that is a claim about the code rather than about the files, and it is
-// the kind of claim that stops being true without anyone noticing. sha256 costs three lines and
-// needs no such argument (review on quince#556).
+// would miss a same-length rewrite; modtime closes that in practice — but only on an argument
+// about what the code does, and that is the kind of claim that stops being true without anyone
+// noticing. sha256 costs three lines and needs no such argument (review on quince#556).
+//
+// IT STOPPED BEING TRUE, which is why the sentence is now written this way. It used to read
+// "because nothing in tlsx calls os.Chtimes", and renewInPlace above now does — deliberately, to
+// make a rotation observable (quince#786). Nothing here breaks, because the snapshot is taken
+// AFTER that rotation; the point is that the clause doing the reassuring outlived its truth by
+// one commit, and the hash is why that cost nothing.
 func snapshotDir(t *testing.T, dir string) string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
