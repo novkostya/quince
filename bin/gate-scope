@@ -48,6 +48,8 @@ usage: gate-scope --list [<git-range>]
 
   <git-range>  anything `git diff --name-only` accepts, e.g. origin/main...HEAD. Omit it and
                every gate is required, which is the offline/no-remote/no-forge default.
+               A range that resolves to NO changed files is exit 2, never 3: that is what you
+               get before committing, and a scope check on nothing says nothing.
 
   gates: gates-go · gates-vault · gates-ui · gates-sh · image · e2e
 
@@ -64,6 +66,25 @@ die() {
 
 # The gate ladder, in `gates`' own order. `gates-sh` is here and is never filtered — see the header.
 ALL_GATES='gates-go gates-vault gates-ui gates-sh'
+
+# cannot_answer — say why, then take the SAFE direction for the mode, and exit 2.
+#
+# ONE FUNCTION RATHER THAN TWO MATCHING BLOCKS, because the two callers are the same decision and
+# the safe direction is not obvious enough to be retyped: `--needed` must exit anything-but-3, and
+# `--list` must additionally print EVERY gate, because an empty list would make `gates` depend on
+# nothing and pass vacuously — the header's second bullet. A future third reason to decline should
+# call this rather than grow a third copy; a copy that drifts here shrinks the ladder silently,
+# which is the one failure this whole file exists to prevent.
+#
+# Distinct from `die`, which also exits 2: `die` is a USAGE error, where printing a gate list would
+# be answering a question nobody managed to ask.
+cannot_answer() {
+	for _l in "$@"; do printf '%s: %s\n' "$ME" "$_l" >&2; done
+	if [ "$MODE" = list ]; then
+		for _g in $ALL_GATES; do printf '%s\n' "$_g"; done
+	fi
+	exit 2
+}
 
 # WHAT EACH GATE COVERS, derived from where the gate actually runs rather than invented: the
 # Makefile mounts /src/core for gates-go, /src/vault for gates-vault, /src/ui for gates-ui. The
@@ -153,12 +174,25 @@ if ! changed_files "$RANGE" >"$TMP" 2>/dev/null; then
 	# The range did not resolve. In CI this is the shape to expect first: `actions/checkout` fetches
 	# ONE ref at depth 1 (measured — `+<sha>:refs/remotes/pull/N/merge`), so `origin/main` does not
 	# exist there without `fetch-depth: 0`. Say what is wrong and take the safe direction.
-	printf '%s: cannot resolve the range "%s" — running every gate.\n' "$ME" "$RANGE" >&2
-	printf '%s: on a CI checkout this usually means the base ref was never fetched (fetch-depth: 0).\n' "$ME" >&2
-	if [ "$MODE" = list ]; then
-		for _g in $ALL_GATES; do printf '%s\n' "$_g"; done
-	fi
-	exit 2
+	cannot_answer "cannot resolve the range \"$RANGE\" — running every gate." \
+		"on a CI checkout this usually means the base ref was never fetched (fetch-depth: 0)."
+fi
+
+# A RANGE THAT RESOLVES TO NO FILES IS NOT AN ANSWER — it is doubt, and the header's safety rule
+# decides doubt (quince#682).
+#
+# An empty range resolves perfectly well: `git diff` succeeds and prints nothing. So it never
+# reached the branch above, fell through to `touches`, and got the literally-true answer that
+# nothing is touched — which reads as "not needed" for EVERY gate, in the direction that skips
+# work, on the most natural way to invoke this: before committing. Measured three times in one
+# session, and it cost a false "e2e not needed" claim in quince#677's PR body, on a PR whose real
+# ordering defect `e2e` then caught.
+#
+# The tool cannot distinguish "nothing changed" from "your work is not committed yet", and the
+# second is the common case. So it declines to answer rather than guessing the cheap way.
+if [ ! -s "$TMP" ]; then
+	cannot_answer "the range \"$RANGE\" contains no changed files — a scope check on nothing says nothing." \
+		"if your work is not committed yet, that is what this means: commit, then ask again."
 fi
 
 if [ "$MODE" = needed ]; then

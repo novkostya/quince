@@ -80,6 +80,35 @@ case "$out" in
 	;;
 esac
 
+# --- 2b. AN EMPTY RANGE IS DOUBT, NOT AN ANSWER (quince#682) ----------------------------------
+# This is the refusal that used to be silent, and it is reached by the most natural way to invoke
+# the tool: BEFORE COMMITTING, when origin/main...HEAD is empty. It resolves perfectly well — git
+# diff succeeds and prints nothing — so it never reached part 2's branch, fell through to the
+# coverage test, and answered "not needed" for every gate. That is the direction that skips work,
+# and it cost a false "e2e not needed" claim in quince#677's PR body, on a PR whose real ordering
+# defect e2e then caught.
+#
+# The repo is on main and clean here, so main...HEAD is empty. Asserted PER GATE rather than in
+# aggregate, because 3 is the only value that skips, so 3 is the value that must be unreachable.
+for g in image e2e gates-go; do
+	got=$(needed "$g" 'main...HEAD')
+	if [ "$got" = 2 ]; then
+		ok "an empty range is could-not-determine for $g, never not-needed"
+	else
+		bad "an empty range answered $got for $g — 3 would silently skip it"
+	fi
+done
+out=$( (cd "$R" && ./bin/gate-scope --list 'main...HEAD' 2>&1) || true )
+case "$out" in
+*"says nothing"*gates-go*gates-vault*gates-ui*gates-sh*)
+	ok "--list on an empty range prints EVERY gate AND says why"
+	;;
+*)
+	bad "--list on an empty range did not fail safe"
+	printf '       %s\n' "$out" | head -n 3
+	;;
+esac
+
 # --- 3. THE SAVING (two assertions, and they are the only two) ---------------------------------
 git -C "$R" checkout -qb docs-only
 printf 'more\n' >>"$R/docs/a.md"
@@ -241,7 +270,37 @@ fi
 # `MAKEFLAGS=''` and not a bare `MAKEFLAGS=`: shellcheck reads the bare form followed by another
 # assignment as SC1007, an accidental assignment with a stray space, and it is right to — the two
 # forms are indistinguishable by eye and only one of them is ever meant.
-if MAKEFLAGS='' SCOPE='HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
+# THE RANGE BELOW WAS `HEAD...HEAD` UNTIL quince#682, AND THAT WAS THE BUG WEARING A FIXTURE.
+# These three assertions need a range for which `image` is genuinely not needed. An empty range
+# used to answer that, and it answered it for the wrong reason — not "this change is docs-only"
+# but "this tool cannot tell", which is now exit 2. So they were passing on the defect these very
+# tests exist to catch.
+#
+# CONSTRUCTED, NOT HUNTED FOR. This file already says a state read is worth less than a state
+# built, three times over; searching history for a docs-only commit would make the suite depend on
+# what happened to land recently. `commit-tree` mints a commit identical to HEAD but for one
+# docs/ file, so the range is docs-only BY CONSTRUCTION.
+#
+# NOTHING IN THE REPOSITORY IS TOUCHED: no ref, no index (GIT_INDEX_FILE points into $WORK), no
+# working tree. It writes a blob, a tree and a commit into the object store, all unreferenced and
+# collectable — the same objects `git stash` would leave behind.
+fixture_blob=$(printf 'gate-scope-test fixture\n' | git hash-object -w --stdin)
+GIT_INDEX_FILE=$WORK/fixture-index git read-tree HEAD
+GIT_INDEX_FILE=$WORK/fixture-index git update-index --add \
+	--cacheinfo "100644,$fixture_blob,docs/zz-gate-scope-fixture.md"
+fixture_tree=$(GIT_INDEX_FILE=$WORK/fixture-index git write-tree)
+DOCS_ONLY="HEAD...$(git commit-tree "$fixture_tree" -p HEAD -m 'gate-scope-test docs-only fixture')"
+
+# The fixture must be non-empty and must skip image — assert it, or a broken fixture would make all
+# three assertions below pass for the reason this change exists to remove.
+if [ -n "$(git diff --name-only "$DOCS_ONLY")" ] &&
+	[ "$(git diff --name-only "$DOCS_ONLY")" = "docs/zz-gate-scope-fixture.md" ]; then
+	ok "the propagation fixture is a NON-EMPTY docs-only range, so a skip means what it says"
+else
+	bad "the propagation fixture is not docs-only: $(git diff --name-only "$DOCS_ONLY" | tr '\n' ' ')"
+fi
+
+if MAKEFLAGS='' SCOPE="$DOCS_ONLY" make -n image 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "an EXPORTED SCOPE reaches make — that is what makes ci.yml's env: block work"
 else
 	bad "an exported SCOPE was ignored; ci.yml's env: block would silently do nothing"
@@ -249,15 +308,21 @@ fi
 # The third channel, pinned because it is the one that bit twice: a command-line override reaches
 # NESTED makes through MAKEFLAGS. `gates-sh` invokes every suite as a sub-make, so this is the path
 # every gate actually runs under in CI.
-if MAKEFLAGS='SCOPE=HEAD...HEAD' make -n image 2>/dev/null | grep -q 'SKIPPED'; then
+if MAKEFLAGS="SCOPE=$DOCS_ONLY" make -n image 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "SCOPE propagates to sub-makes via MAKEFLAGS — the channel env -u cannot close"
 else
 	bad "MAKEFLAGS did not carry SCOPE; the ladder would scope inconsistently between make levels"
 fi
-if make -n image SCOPE='HEAD...HEAD' 2>/dev/null | grep -q 'SKIPPED'; then
+if make -n image SCOPE="$DOCS_ONLY" 2>/dev/null | grep -q 'SKIPPED'; then
 	ok "make image honours SCOPE and announces the skip rather than doing it quietly"
 else
-	bad "make image did not skip on an empty range"
+	bad "make image did not skip a docs-only range"
+fi
+# And the empty range must NOT skip it, which is the whole of quince#682 seen from the Makefile.
+if make -n image SCOPE='HEAD...HEAD' 2>/dev/null | grep -q 'SKIPPED'; then
+	bad "make image SKIPPED on an empty range — gate-scope answered 3 for a question it cannot answer"
+else
+	ok "make image does NOT skip on an empty range — exit 2 is not 3, and the Makefile checks 3"
 fi
 # An empty ladder must be a hard failure, not a quiet pass. Driven by a stub gate-scope that prints
 # nothing — the shape a missing or broken script produces.
