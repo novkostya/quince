@@ -96,6 +96,34 @@ done
 # careful-looking version is the one that does nothing.
 KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}[^A-Za-z0-9_-]#[0-9]+'
 
+# THE URL FORM (quince#701), which the pattern above cannot see because there is no token to see.
+#
+# GitHub resolves a closing keyword followed by an ISSUE URL exactly as it resolves a bare reference.
+# Measured rather than read off the docs: quince#700's body carried a keyword and a markdown link to
+# quince#683's issue URL, and quince#683 went CLOSED/COMPLETED the moment that PR merged — read back
+# off `closingIssuesReferences`, the field GitHub populates.
+#
+# `grep -c github.com bin/closing-refs-check` was 0 before this line. So the gate matched the
+# reference TOKEN and never the LINK, and the two forms it appeared to catch —
+# `<keyword> [<repo>#N](<url>)` and `<keyword> [#N](<url>)` — were caught only because a human
+# happened to put a reference in the link LABEL. Relabel it and the gate went silent while the URL
+# still closed: coverage by coincidence.
+#
+# `/pull/` as well as `/issues/`: GitHub accepts either as a closing reference.
+#
+# THE WINDOW IS `.{0,40}` RATHER THAN `[^.]{0,20}`, and the difference is deliberate twice over. A
+# URL contains dots, and so do this project's own link labels (`qn.6e`), so the sentence-bounding
+# class the token pattern uses would stop at the first one and miss the ordinary case. And the wider
+# window over-fires in the direction this file already argues for: GitHub's parser is not
+# negation-aware, so `does not fix <url>` DOES close — a line that reads as a disclaimer is exactly
+# the instance this gate was built from, and flagging it is right rather than noisy.
+KWURL='(close[sd]?|fix(e[sd])?|resolve[sd]?).{0,40}https?://(www\.)?github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/(issues|pull)/[0-9]+'
+
+# One pattern from here on, so a surface cannot be taught one form and not the other — the shape
+# quince#784 landed for the same reason in the job engine, and the reason the token form and the URL
+# form are not two independent greps threaded through four call sites.
+CLOSING="($KW|$KWURL)"
+
 # THE SECOND DIRECTION (quince#315): a closing keyword whose reference CANNOT BIND.
 #
 # GitHub resolves exactly `#N`, `GH-N` and `owner/repo#N`. This project's citation convention is
@@ -134,6 +162,17 @@ inert_hits() { # <file> -> `<line>:<text>` for each CLOSING LINE whose reference
 			# Intent is not in the text, but the ruling names the surface: a closing LINE. So that is
 			# what this matches, allowing a list bullet and bold markers.
 			if (match($0, /^[ \t]*([-*+][ \t]*)?[*_]{0,2}([Cc][Ll][Oo][Ss][Ee][SsDd]?|[Ff][Ii][Xx]([Ee][SsDd])?|[Rr][Ee][Ss][Oo][Ll][Vv][Ee][SsDd]?)[*_]{0,2}[ \t]/)) {
+				# A LINE CARRYING AN ISSUE URL IS NOT BOUND TO NOTHING — it binds, and this check used to
+				# say the opposite about it (quince#701). `<keyword> [<repo>#N](<url>)` has a shorthand
+				# token in the LABEL, which is what this function tests, and a URL in the target, which
+				# is what GitHub acts on. It reported "the keyword parsed and resolved to NOTHING" about
+				# a reference that demonstrably closed quince#683.
+				#
+				# WRONG IN THE DIRECTION THAT COSTS SOMETHING, which is why it is fixed here rather than
+				# left as noise: a session that wants to reference WITHOUT closing reads "bound to
+				# nothing", believes the merge is safe, and the issue closes anyway. The pattern above
+				# now reports these lines as the closing references they are.
+				if ($0 ~ /https?:\/\/(www\.)?github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(issues|pull)\/[0-9]+/) next
 				win = substr($0, RSTART + RLENGTH, 20)
 				if (match(win, /[A-Za-z][A-Za-z0-9_-]*#[0-9]+/)) {
 					tok = substr(win, RSTART, RLENGTH)
@@ -151,7 +190,7 @@ GREP=${CLOSING_REFS_GREP:-grep}
 command -v "$GREP" >/dev/null 2>&1 || cannot_run "matcher $GREP not found"
 # Prove the matcher can COMPILE the pattern before trusting a no-match answer. A regex this shell
 # accepts and that grep rejects would otherwise read as clean forever (quince#41's shape).
-printf '' | "$GREP" -qiE "$KW" 2>/dev/null || [ $? -eq 1 ] ||
+printf '' | "$GREP" -qiE "$CLOSING" 2>/dev/null || [ $? -eq 1 ] ||
 	cannot_run "matcher $GREP cannot compile the closing-keyword pattern"
 
 FOUND=0
@@ -204,9 +243,9 @@ if [ -n "$REF" ]; then
 		rm -f "$_msgs"
 		cannot_run "git log $_r failed — the range does not resolve"
 	}
-	if "$GREP" -inE "$KW" "$_msgs" >/dev/null 2>&1; then
+	if "$GREP" -inE "$CLOSING" "$_msgs" >/dev/null 2>&1; then
 		printf '%s: CLOSING REFERENCE in a commit message (%s)\n' "$ME" "$_r" >&2
-		"$GREP" -inE "$KW" "$_msgs" | sed "s/^/    /" >&2
+		"$GREP" -inE "$CLOSING" "$_msgs" | sed "s/^/    /" >&2
 		FOUND=1
 	fi
 	_inert=$(inert_hits "$_msgs")
@@ -229,7 +268,7 @@ if [ -n "$TEXT" ]; then
 	# stripped one would show a hole where the code span was and read as a tool bug.
 	_stripped=$(mktemp)
 	strip_code "$TEXT" >"$_stripped"
-	_hits=$("$GREP" -inE "$KW" "$_stripped" | cut -d: -f1 || true)
+	_hits=$("$GREP" -inE "$CLOSING" "$_stripped" | cut -d: -f1 || true)
 	if [ -n "$_hits" ]; then
 		printf '%s: CLOSING REFERENCE in %s\n' "$ME" "$TEXT" >&2
 		for _ln in $_hits; do

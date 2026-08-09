@@ -228,5 +228,66 @@ case "$_both" in
 *) bad "the inert finding masked the bare one — a reader would fix half" ;;
 esac
 
+# --- 5. THE URL FORM (quince#701) --------------------------------------------------------------
+# GitHub binds a closing keyword to an ISSUE URL exactly as it binds one to a bare reference.
+# Measured on quince#700, whose body carried a keyword and a markdown link, and which closed
+# quince#683 on merge — read off `closingIssuesReferences` rather than inferred.
+#
+# The gate had NO CONCEPT OF A URL: `grep -c github.com bin/closing-refs-check` was 0. So the bare
+# form passed clean, and the two link forms that did fail were caught only because a human happened
+# to put a reference in the link LABEL — coverage by coincidence, which the relabel case below is
+# the control for.
+#
+# ASSEMBLED, NEVER WRITTEN, per this file's own rule: a suite about the trap is the file most likely
+# to become the next instance of it.
+U="https://github.com/novkostya/quince/issues/683"
+UP="https://github.com/novkostya/quince/pull/700"
+
+printf 'Fixes %s\n' "$U" >"$WORK/url-bare.md"
+expect "a bare ISSUE URL beside a closing keyword is a closing reference" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/url-bare.md"
+
+printf 'Closes %s\n' "$UP" >"$WORK/url-pull.md"
+expect "a PULL URL binds too, and is flagged" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/url-pull.md"
+
+# quince#700's actual shape. It already exited 1 before this change — for the WRONG reason, the
+# shorthand in the label — and said BOUND TO NOTHING about a reference that closed an issue.
+printf 'Fixes [quince%s683](%s)\n' "$H" "$U" >"$WORK/url-label.md"
+expect "the markdown-link form is a CLOSING REFERENCE" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/url-label.md"
+_lab=$("$CHECK" --text "$WORK/url-label.md" 2>&1 || true)
+case "$_lab" in
+*"BOUND TO NOTHING"*)
+	bad "the link form is still called inert — it BINDS, and that message tells a reader the merge is safe"
+	;;
+*) ok "…and is NOT called bound to nothing, which is the half that sent readers the wrong way" ;;
+esac
+
+# THE CASE WITH NO COVERAGE AT ALL BEFORE. Relabel the link and the old gate went silent while the
+# URL still closed, which is why this could not be fixed by widening the token pattern.
+printf 'Fixes [the storage rung](%s)\n' "$U" >"$WORK/url-relabel.md"
+expect "a link whose LABEL carries no reference is still caught" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/url-relabel.md"
+
+# The parser is not negation-aware, so this closes — the same sentence shape as instances 1 and 2,
+# arriving through the URL. The window is wide enough to catch it deliberately.
+printf 'This does not fix %s — item 1 remains.\n' "$U" >"$WORK/url-disclaim.md"
+expect "a DISCLAIMED URL is still a closing reference" 1 "CLOSING REFERENCE" \
+	"$CHECK" --text "$WORK/url-disclaim.md"
+
+# THE CONTROLS. Without these the section proves only that the gate got louder.
+printf 'Refs %s — see the discussion there.\n' "$U" >"$WORK/url-nokeyword.md"
+expect "a URL with NO closing keyword is clean" 0 "clean" \
+	"$CHECK" --text "$WORK/url-nokeyword.md"
+
+printf 'Fixes %s%s%s\n' "$TICK" "$U" "$TICK" >"$WORK/url-ticked.md"
+expect "a BACKTICKED URL is clean — the advice this gate gives must survive it" 0 "clean" \
+	"$CHECK" --text "$WORK/url-ticked.md"
+
+printf 'Fixes https://example.invalid/novkostya/quince/issues/683\n' >"$WORK/url-other.md"
+expect "a non-GitHub URL is not a closing reference" 0 "clean" \
+	"$CHECK" --text "$WORK/url-other.md"
+
 printf '\nclosing-refs-check-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
