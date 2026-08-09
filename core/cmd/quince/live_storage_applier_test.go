@@ -53,7 +53,7 @@ func wiredStorage(t *testing.T, entries []config.StorageEntry) (*config.Service,
 
 	cfgSvc := config.NewService(path, quietLog())
 	st := testStore(t)
-	mgr, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, bus.New(), quietLog())
+	mgr, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st, bus.New(), quietLog(), scanSynchronous)
 	if err != nil {
 		t.Fatalf("buildStorage: %v", err)
 	}

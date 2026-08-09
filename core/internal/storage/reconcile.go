@@ -19,7 +19,102 @@ import (
 // each device against its own root — an unusable one is skipped, because a scan of a root that is
 // not there cannot conclude anything, and concluding "artifact missing" from it would mark a
 // perfectly good backup as gone the first time somebody unplugged a disk.
+//
+// IT IS NO LONGER WHAT `serve` CALLS (qn.6i). The two halves separate because they answer to
+// different masters: roll-forward must finish before `Engine.Reconcile` judges crash-orphaned job
+// rows, and the scan must not delay the listener. `serve` calls RollForwardAll and hands the scan to
+// the runner; this composed form is what the ADMIN CLIs use, where a synchronous complete pass is
+// exactly what `versions verify` needs and no listener is waiting on it.
 func (m *Manager) Reconcile(ctx context.Context) error {
+	if err := m.RollForwardAll(ctx); err != nil {
+		return err
+	}
+	res, err := m.ReconcileScan(ctx)
+	// A SYNCHRONOUS CALLER IS TOLD WHAT THE PASS DID NOT DO (quince#771 review). Returning nil having
+	// skipped a device is the shape `state honesty` forbids, and `buildStorage` promises its callers a
+	// *reconciled* Manager. Unreachable in a CLI process today — deferrals come from bindings that
+	// process never makes — so this is logged rather than assumed, because that is a property of WHO
+	// CALLS IT and not of this function.
+	if len(res.Deferred) > 0 {
+		m.log.Warn("reconcile: this pass SKIPPED devices whose commit path was live — the registry is "+
+			"reconciled EXCEPT for these", "deferred", res.Deferred)
+	}
+	return err
+}
+
+// RollForwardAll completes every pending commit journal on every usable storage, and scans nothing.
+// It is the half that must run BEFORE `Engine.Reconcile` (design §5, amendment 1): that pass asks
+// `VersionForJob` to tell a rolled-forward commit from an interrupted one, so a job row judged
+// before its commit completes becomes `connection_lost` for a backup that SUCCEEDED.
+//
+// IT IS CHEAP BY CONSTRUCTION RATHER THAN BY MEASUREMENT, and the spec said otherwise until this
+// rung read it. Both backends roll forward in O(1) of tree size: the namespace path is
+// `renameat2(RENAME_EXCHANGE)` then `os.Rename` of the displaced tree into `versions/<prev-ts>/` —
+// same filesystem, both under the backups root, so a directory-entry move on the `copy` backend too,
+// because the clone strategy governs the SEED and not the archive — and zfs is `zfs snapshot`. So
+// keeping this in front of the listener costs a few syscalls, never a copy.
+func (m *Manager) RollForwardAll(ctx context.Context) error {
+	for _, s := range m.usableSlots() {
+		journals, err := s.Backend.PendingJournals()
+		if err != nil {
+			return err
+		}
+		for _, j := range journals {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			m.rollForward(s, j)
+		}
+	}
+	return nil
+}
+
+// ScanResult is what one scan pass did and — the field that matters — what it did NOT do.
+type ScanResult struct {
+	// Deferred names the "<storage>/<udid>" pairs skipped because a commit path was live on them.
+	// A pass with a non-empty Deferred is a PARTIAL pass, and every caller must be able to say so:
+	// health reports `reconciling`, the runner re-triggers, the synchronous path logs.
+	Deferred []string
+}
+
+// ReconcileScan is the per-device half — adopt, mark missing, recompute latest, sweep. It is what
+// moves off the startup path, because it is where the 36-48 seconds are.
+func (m *Manager) ReconcileScan(ctx context.Context) (ScanResult, error) {
+	var res ScanResult
+	for _, s := range m.usableSlots() {
+		// THE DECLARATION IS RE-READ BETWEEN SLOTS (qn.6i D8). `ApplyStorages` can replace the whole
+		// list while a pass runs — that is what qn.6g's live apply IS — so a snapshot taken once at the
+		// top would keep reconciling a disk the user has just forgotten. Mid-slot it finishes the
+		// current device: abandoning one halfway leaves exactly the half-repaired registry this
+		// subsystem exists to remove.
+		if !m.stillDeclared(s.Name) {
+			m.log.Info("reconcile: a storage was undeclared while this pass was running — dropped from "+
+				"the pass rather than reconciling a disk quince no longer serves", "storage", s.Name)
+			continue
+		}
+		for _, udid := range m.reconcileUDIDs() {
+			if ctx.Err() != nil {
+				return res, ctx.Err()
+			}
+			deferred, err := m.reconcileDevice(s, udid)
+			if deferred {
+				res.Deferred = append(res.Deferred, s.Name+"/"+udid)
+				continue
+			}
+			if err != nil {
+				m.log.Error("reconcile: device reconciliation failed",
+					"udid", udid, "storage", s.Name, "error", err)
+			}
+		}
+	}
+	return res, nil
+}
+
+// usableSlots is every declared storage a pass may touch, with the unreachable ones announced and
+// skipped — a scan of a root that is not there cannot conclude anything, and concluding "artifact
+// missing" from it would mark a good backup as gone the first time somebody unplugged a disk.
+func (m *Manager) usableSlots() []Slot {
+	var out []Slot
 	for _, s := range m.slotsSnapshot() {
 		if !s.Usable() {
 			m.log.Info("reconcile: skipping an unreachable storage — its versions keep their last "+
@@ -27,35 +122,23 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 				"storage", s.Name, "code", s.UnreachableCode)
 			continue
 		}
-		if err := m.reconcileSlot(ctx, s); err != nil {
-			return err
-		}
+		out = append(out, s)
 	}
-	return nil
+	return out
 }
 
-func (m *Manager) reconcileSlot(ctx context.Context, s Slot) error {
-	journals, err := s.Backend.PendingJournals()
-	if err != nil {
-		return err
-	}
-	for _, j := range journals {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		m.rollForward(s, j)
-	}
-
-	for _, udid := range m.reconcileUDIDs() {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := m.reconcileDevice(s, udid); err != nil {
-			m.log.Error("reconcile: device reconciliation failed",
-				"udid", udid, "storage", s.Name, "error", err)
+// stillDeclared reports whether a storage NAME is in the list right now. Name rather than id,
+// because the name is the identity the config carries and the one that survives a replug — the same
+// reasoning `SetRefresher`'s closure uses.
+func (m *Manager) stillDeclared(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.slots {
+		if s.Name == name {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // rollForward completes one journal left by a crash, under the commit lease for its device.
@@ -114,7 +197,12 @@ func (m *Manager) rollForward(s Slot, j Journal) {
 		"udid", j.UDID, "version", committed.VersionID, "from_phase", j.Phase)
 }
 
-func (m *Manager) reconcileDevice(s Slot, udid string) error {
+// reconcileDevice reconciles ONE device against ONE storage's root. It reports `deferred` SEPARATELY
+// from `err`, and that separation is the whole of quince#771's review note: a deferral is neither a
+// success nor a failure, and collapsing it into either loses the fact a caller needs. Folded into
+// `nil` it becomes a silent partial pass; folded into `err` it becomes a failure the logs would
+// shout about, for the ordinary and correct case of a backup running.
+func (m *Manager) reconcileDevice(s Slot, udid string) (deferred bool, err error) {
 	// THE PRE-CHECK, AND WHY IT IS NOT REDUNDANT WITH THE LEASE BELOW (qn.6i D3).
 	//
 	// A job holds its lease only across CommitJob — seconds — while its BINDING lasts the whole job,
@@ -128,19 +216,19 @@ func (m *Manager) reconcileDevice(s Slot, udid string) error {
 		m.log.Info("reconcile: deferring this device — a backup is running on this storage for it. "+
 			"Its versions keep their current state; the next trigger reconciles them",
 			"udid", udid, "storage", s.Name, "jobs", jobs)
-		return nil
+		return true, nil
 	}
 	lease := m.leaseFor(s.StorageID, udid)
 	if !lease.TryClaim() {
 		m.log.Info("reconcile: deferring this device — it is committing on this storage right now",
 			"udid", udid, "storage", s.Name)
-		return nil
+		return true, nil
 	}
 	defer lease.Release()
 
 	arts, err := s.Backend.Scan(udid)
 	if err != nil {
-		return err
+		return false, err
 	}
 	onDisk := map[string]Artifact{}
 	for _, a := range arts {
@@ -148,7 +236,7 @@ func (m *Manager) reconcileDevice(s Slot, udid string) error {
 	}
 	rows, err := m.reg.ListVersions(udid)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// ATTRIBUTION HAPPENS HERE, BECAUSE HERE IS WHERE "WHICH STORAGE" IS KNOWN (quince#439).
 	//
@@ -244,7 +332,7 @@ func (m *Manager) reconcileDevice(s Slot, udid string) error {
 		}
 		if r.Missing {
 			if err := m.reg.MarkVersionMissing(id, false); err != nil {
-				return err
+				return false, err
 			}
 			m.log.Info("reconcile: version artifact reappeared", "id", id, "udid", udid)
 		}
@@ -253,17 +341,17 @@ func (m *Manager) reconcileDevice(s Slot, udid string) error {
 	for id, r := range inReg {
 		if _, ok := onDisk[id]; !ok && !r.Missing {
 			if err := m.reg.MarkVersionMissing(id, true); err != nil {
-				return err
+				return false, err
 			}
 			m.log.Warn("reconcile: version artifact missing — kept as `missing`, not dropped", "id", id, "udid", udid)
 		}
 	}
 
 	if err := m.recomputeLatest(udid); err != nil {
-		return err
+		return false, err
 	}
 	// Orphaned work is swept only after reconciliation has completed for the device.
-	return s.Backend.SweepWork(udid)
+	return false, s.Backend.SweepWork(udid)
 }
 
 // adopt registers an on-disk version discovered without a row as ADOPTED (job_id null →

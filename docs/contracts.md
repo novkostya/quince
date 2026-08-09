@@ -193,6 +193,37 @@ double-submit check against the readable `quince_csrf` cookie. The session cooki
 `--demo`, so local/e2e over plain http still works — never in production). Errors are
 `{error: {code, message}}` with sensible HTTP statuses.
 
+### Health — and `reconciling`, the one field with a promise attached
+
+```
+GET  /api/health  → {status, version, mode, demo_reset_minutes?, reconciling, muxers[]}
+```
+
+**`/api/health` is deliberately NOT frozen** — it says so at its own definition, and `qn.6` used that
+to add `mode`. What follows is therefore a promise about *meaning*, not a frozen shape.
+
+**`reconciling: true` means A VERSION LIST MAY BE SHORT** — Operator ruling 2026-08-08 (quince#731,
+blocker 2), built in `qn.6i`. Reconciliation no longer completes before the listener binds, so quince
+can be serving a registry it knows is incomplete: versions present on disk but not yet adopted are
+absent from `GET /api/versions` and from `Storage.backup_count`, and rows whose artifact has vanished
+are not yet marked `missing`.
+
+**IT IS A DECLARED PROVISIONAL STATE, NOT AN EMPTY RESULT.** A client must not conclude *this disk has
+no backups* while it holds. That distinction is why the field exists rather than the window being left
+unannounced: the alternative on the table was refusing to serve until reconciled, and it was rejected
+because it keeps quince#592's dead window and multiplies it by the schedule.
+
+**`false` means the last triggered pass COMPLETED.** It does not mean the disk was read a moment ago;
+the counts remain what the database says, which is what they have always been.
+
+**Daemon-wide, not per storage.** One disk scanning while another is idle is a real distinction quince
+knows and this field does not carry — deliberately deferred rather than dropped, because `Storage`
+already has three fields describing its condition and a fourth is a larger change than the rung needed.
+
+**A boolean rather than a string**, unlike `mode`, which is a string precisely so a third mode needs no
+second field. Here there are two states and no candidate third; a later `deferred` would be a widening,
+and this sentence is the note that says so.
+
 ### Devices
 
 ```

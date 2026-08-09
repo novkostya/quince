@@ -37,11 +37,33 @@ import (
 // the login screen is the one screen that must state it, and health is the only authExempt endpoint
 // that is not frozen. `omitempty` is deliberate — an absent key and a zero are the same fact, "the
 // deployment did not say", and one representation of one fact is fewer than two.
+// qn.6i adds `reconciling`, and it is the half of blocker 2 that faces a client (Operator ruling
+// 2026-08-08 on quince#731: SERVE, and report `reconciling`). Reconciliation no longer finishes
+// before the listener binds, so quince can be serving a registry it knows is incomplete — and
+// `state honesty` allows that only if the state is SURFACED.
+//
+// WHAT IT PROMISES, written here because a state nobody can act on is decoration:
+//
+//	true   a version list may be SHORT. Versions on disk that have not been adopted are absent from
+//	       GET /api/versions and from Storage.backup_count; rows whose artifact vanished are not yet
+//	       marked `missing`. THIS IS A DECLARED PROVISIONAL STATE, NOT AN EMPTY RESULT — a client
+//	       must not conclude "this disk has no backups" while it holds.
+//	false  the last triggered pass COMPLETED. It does not mean the disk was read a moment ago.
+//
+// A BOOLEAN, NOT A STRING — unlike `mode` above, which is a string precisely so a third mode needs
+// no second field. Here there are two states and no candidate third; if one ever appears
+// (`deferred`, say) that is a widening, and this sentence is the note saying so.
+//
+// DAEMON-WIDE, NOT PER STORAGE. One disk scanning while another is idle is a real distinction the
+// daemon knows and this does not carry. Deliberately deferred rather than dropped: `Storage` already
+// has three fields describing its condition (`reachable`, `unreachable_code`, `unreachable_reason`)
+// and a fourth is a bigger contracts change than this rung needs (spec open question 1).
 type HealthResponse struct {
 	Status           string        `json:"status"`
 	Version          string        `json:"version"`
 	Mode             string        `json:"mode"` // normal | demo | public_demo
 	DemoResetMinutes int           `json:"demo_reset_minutes,omitempty"`
+	Reconciling      bool          `json:"reconciling"`
 	Muxers           []MuxerHealth `json:"muxers"`
 }
 
@@ -159,11 +181,20 @@ func (d Deps) handleHealth() http.HandlerFunc {
 		if muxers == nil {
 			muxers = []MuxerHealth{}
 		}
+		// READ LIVE, PER REQUEST — never captured. The whole point of the field is that it changes
+		// while the process runs, and a deploy check polls this endpoint precisely across that
+		// transition. Nil when nothing wired a runner (`--demo`, the admin CLIs, any test router),
+		// which reports `false`: no runner means no asynchronous pass, so nothing is provisional.
+		reconciling := false
+		if d.Reconcile != nil {
+			reconciling = d.Reconcile.Reconciling()
+		}
 		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
 			Status:           "ok",
 			Version:          d.Version,
 			Mode:             mode,
 			DemoResetMinutes: d.DemoResetMinutes,
+			Reconciling:      reconciling,
 			Muxers:           muxers,
 		})
 	}

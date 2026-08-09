@@ -42,7 +42,7 @@ func backupCmd(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log, scanSynchronous)
 	if err != nil {
 		return err
 	}

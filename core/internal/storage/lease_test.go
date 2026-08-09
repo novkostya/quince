@@ -178,7 +178,7 @@ func TestAScanBetweenCommitAndRegisterCollidesOnThePrimaryKey(t *testing.T) {
 	}
 
 	// THE ARTIFACT NOW EXISTS AND HAS NO ROW. This is the window, entered on purpose.
-	if err := m.reconcileDevice(s, testUDID); err != nil {
+	if _, err := m.reconcileDevice(s, testUDID); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	row, adopted, _ := m.reg.GetVersion(committed.VersionID)

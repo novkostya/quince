@@ -33,7 +33,11 @@ type Deps struct {
 	Muxer            MuxerControl
 	Ops              DeviceOps
 	WorkingReset     WorkingReset
-	AllowedOrigins   []string
+	// Reconcile publishes `reconciling` on GET /api/health (qn.6i). Nil wherever no asynchronous
+	// reconciliation exists — `--demo`, the admin CLIs, every test router — and nil reports false,
+	// which is the truth there rather than a default: with no runner there is no provisional state.
+	Reconcile      ReconcileReporter
+	AllowedOrigins []string
 	// StorageRequired reports whether quince has NO storage declared, in which case it is in the
 	// first-run setup state and setupGuard refuses everything outside setupAllowed (qn.6e, Operator
 	// ruling 2026-08-07).
@@ -169,6 +173,19 @@ func (UnmanagedMuxer) Rescan(context.Context) (bool, string) {
 	return false, "no muxer is managed by quince (devices.manage_muxer: false, or --demo)"
 }
 func (UnmanagedMuxer) MuxersHealth() []MuxerHealth { return []MuxerHealth{} }
+
+// ReconcileReporter answers "is a reconciliation pass queued or running" for GET /api/health
+// (qn.6i). Consumer-defined here so httpapi imports no storage subsystem — the same pattern as
+// DeviceReader and MuxerControl. `*storage.Runner` satisfies it.
+//
+// THERE IS NO Unavailable… STAND-IN FOR THIS ONE, unlike every other optional dep above, and the
+// asymmetry is deliberate: those refuse with a 503 because "no subsystem wired" is a degraded answer
+// to a real question. Here the absence IS the answer — a daemon with no runner never serves a
+// provisional registry — so a nil check reporting `false` is honest, where a stand-in type would be
+// ceremony around one boolean.
+type ReconcileReporter interface {
+	Reconciling() bool
+}
 
 // DeviceReader serves the device REST reads.
 type DeviceReader interface {

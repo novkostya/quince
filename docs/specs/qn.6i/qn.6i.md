@@ -124,16 +124,34 @@ produced entirely by step 1 — `VersionForJob` answers from the rows roll-forwa
 produces nothing the job pass reads. So the split preserves the composition exactly, without a
 barrier, a callback, or a promise to sequence two goroutines.
 
-**The cost, stated rather than left to be found.** Roll-forward is *usually* trivial and is not
+~~**The cost, stated rather than left to be found.** Roll-forward is *usually* trivial and is not
 free: on the namespace backends `PhaseArchived` moves the displaced tree into `versions/<ts>/`, which
-on the `copy` backend is a real copy. So **a start after a crash mid-commit can still be slow**, and
-this rung does not make it fast. That is defensible — it is recovery, it is rare, and it is the one
-case where finishing before serving is what protects the data — but it means quince#592's window is
-**closed in the ordinary case and not abolished**. Anyone re-measuring after a crash should expect it.
-Whether that residual deserves its own reporting is open question 2.
+on the `copy` backend is a real copy. So **a start after a crash mid-commit can still be slow**.~~
 
-**Unmeasured, and named as such:** nobody has timed roll-forward with a real pending journal on any
-backend. The 48 s on record is a scan.
+**WRONG, AND CORRECTED IN PR 3 BY READING THE CODE. Roll-forward is O(1) in tree size on BOTH
+backends, so there is no such cost and quince#592's window is closed in the crash case too.** The
+struck-through claim is kept because the whole of D2 was argued as a trade against it, and a reader
+arriving at "keep roll-forward synchronous" deserves to see that the price named at the time was
+imaginary.
+
+| backend | roll-forward | cost |
+| --- | --- | --- |
+| namespace | `exchange` = `renameat2(RENAME_EXCHANGE)`, then `os.Rename` of the displaced tree into `versions/<prev-ts>/` | **two syscalls** — same filesystem by construction, both under the backups root |
+| zfs | `finishCommit` → `zfs snapshot` | **one command** |
+
+**The specific error was reading `copy` as a property of the archive.** It is not: the clone strategy
+— `copy` / `reflink` / `hardlink` — governs the **seed**, where a whole tree really is cloned. The
+archive is a directory-entry move on every backend.
+
+**The one path that IS O(bytes), named rather than glossed:** `os.RemoveAll(workingParent)` after the
+archive. Normally trivial, because the tree has just been renamed away and what is removed is an empty
+parent. It becomes a real recursive delete only when the archive was skipped because
+`versions/<prev-ts>/` already existed — a resume, or a same-second collision — and then it deletes a
+duplicate of content already archived. A delete, never a copy.
+
+**Still unmeasured, and the distinction matters:** this establishes roll-forward's **complexity**,
+from the code. Nobody has timed it with a real pending journal on real hardware, and nothing here
+claims a wall-clock. The 48 s on record is a scan.
 
 ### D3 — Blocker 1, ruled: the lease
 
@@ -374,7 +392,7 @@ Beyond `make gates` / `make image`:
 
 | id | story | how |
 | --- | --- | --- |
-| **G1** | 1 | on the demo container, time from process start to the first `200` on `/api/health`; recorded against the 36 s and 48 s on the issues |
+| **G1** | 1 | **THE DEMO CONTAINER CANNOT MEASURE THIS AND THE SPEC WAS WRONG TO NAME IT.** `make demo` runs `--demo`, which serves fixtures and never touches the storage path — so it would time a startup that had nothing to reconcile and report a pass for a build with the scan still in front of the listener. **Replaced in PR 3 by a direct measurement of the half that moved** (`RollForwardAll` vs `ReconcileScan` over 25/100/400 versions): roll-forward is FLAT at 62–125 µs, the scan grows linearly 22 ms → 100 ms → 297 ms, **231× to 4790×**. The end-to-end wall-clock against the 36 s / 48 s on the issues is **owed at the next staging redeploy**, because those figures came from a real dataset and this box has none |
 | **G2** | 2 | Go test: health reports `true` while a pass is in flight and `false` after; plus the demo observation |
 | **G3** | 3, 4 | Go test on the applier: the subscriber returns without calling the scan, and a second write is not serialised behind one |
 | **G4** | 5 | `go test -race`: a bound job on `(storage, device)` makes the pass defer that device, and it runs after `UnbindJob` |
@@ -444,9 +462,11 @@ replay fixture* rule has nothing to add here.
    another is idle is a real distinction the daemon knows and the wire does not carry. Deliberately
    deferred rather than dropped: it is a `Storage` object change, and that object already carries three
    fields describing its condition.
-2. **A slow roll-forward after a crash still delays the listener** (D2), and nothing reports it. The
-   window is closed in the ordinary case and not abolished. Whether recovery deserves its own reported
-   state is not decided here.
+2. ~~**A slow roll-forward after a crash still delays the listener** (D2), and nothing reports it.~~
+   **CLOSED IN PR 3, by reading rather than measuring: there is no slow case.** Roll-forward is two
+   renames or one snapshot, O(1) in tree size on both backends, so quince#592's window is closed after
+   a crash as well as in the ordinary case. This question existed only because D2 asserted a cost that
+   the code does not have.
 3. ~~**D4 is reasoned, not measured.** G6 settles it.~~ **MEASURED IN PR 2 (quince#771), and the
    answer splits in two — the mechanism is REAL and the RATE is still unknown.** G6a interleaves a
    scan between `Backend.Commit` and `registerCommitted` by hand: the adopt path inserts the version
@@ -459,13 +479,27 @@ replay fixture* rule has nothing to add here.
    things.** The mechanism is what justifies holding the lease across `registerCommitted` rather than
    only across roll-forward. The missing rate is why nobody should claim this rung fixed an observed
    bug: it closed a window that has never been seen to open.
-4. **Roll-forward duration is unmeasured on every backend.** Nobody has timed `ResumeCommit` with a
-   real pending journal, so D2's "usually trivial" is an argument from what the code does, not a
-   measurement.
+4. **Roll-forward duration is unmeasured on every backend, and PR 3 ANSWERED THE QUESTION BEHIND IT
+   WITHOUT MEASURING.** The architect asked for a timing in PR 3's evidence; a timing would have
+   measured the wrong thing. Reading the two `ResumeCommit` implementations settles the *complexity* —
+   two renames, or one snapshot, O(1) in tree size — which is what D2's claim actually rested on. **A
+   stopwatch on two `rename` syscalls would produce a number that bounds nothing.**
+   **What remains open is genuinely open and much narrower:** nobody has run roll-forward with a real
+   pending journal on real hardware, so there is no wall-clock for it on any disk. That is worth having
+   if a crash-recovery start is ever reported as slow; it is not what the async claim depends on.
 5. **`RepairWorkingCopy` is still device-scoped** (`subsystem.go:23`'s standing list) and this rung
    does not fix it. Named because the lease's key is `(storage, device)` and a reader may expect that
    to have resolved it. It does not.
-6. **Whether the UI half is this rung's** (D10).
+6. ~~**Whether the UI half is this rung's** (D10).~~ **RULED at spec review (quince#769): it IS** —
+   PR 6, severable. *No silent caps or fallbacks* names the UI explicitly and a knowably-short version
+   list is a degraded mode, so the indicator ships unless a later constraint forces the rung to end at
+   the wire.
+7. **A pass that DEFERS devices still returns `nil`, and the synchronous caller only logs it**
+   (quince#771 review). `buildStorage` promises a *reconciled* Manager; after PR 3 that means *the
+   pass that was enqueued*, not *the pass that finished*. It cannot bite today — deferrals come from
+   bindings a CLI process never makes — but the honest fix is a synchronous entry that cannot return a
+   partial pass silently, and this rung ships the reporting (`ScanResult.Deferred`, the warning, and
+   `reconciling`) rather than that guarantee.
 
 ---
 

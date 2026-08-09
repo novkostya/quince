@@ -176,6 +176,11 @@ func serve(args []string) error {
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	var ops httpapi.DeviceOps             // assigned in both branches below (demo → provider, else → manager)
 	var workingReset httpapi.WorkingReset // nil in demo → router serves 503 on the reset surface
+	// reconcileReporter stays nil in --demo: fixtures are complete the moment they exist, so there is
+	// no provisional state to declare and `reconciling` is honestly false. Left as the INTERFACE and
+	// assigned only from a non-nil runner — assigning a typed nil pointer would make the interface
+	// itself non-nil and the handler would call through it.
+	var reconcileReporter httpapi.ReconcileReporter
 	if demoMode {
 		// configureDemoAuth owns the mode banner too, so this branch has NO `if *publicDemo` in it.
 		// A second divergence point here would erode what the shared branch buys — see its doc.
@@ -245,13 +250,26 @@ func serve(args []string) error {
 		// The live stack (qn.2 registry + qn.2b muxer supervision + qn.3 device ops + qn.5
 		// storage + qn.4a backup engine), with startup reconciliation run in-order BEFORE serving
 		// (storage → job rows). Shared verbatim with the `backup` CLI.
-		ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log)
+		// scanDeferred: the ~48-second per-device scan does NOT run before the listener binds
+		// (qn.6i, quince#592). Roll-forward still does, synchronously, inside the build — the job-row
+		// reconciler that follows it depends on it, and it costs syscalls rather than a walk.
+		ls, err := buildLiveStack(ctx, bootstrap, cfgSvc, st, eventBus, log, scanDeferred)
 		if err != nil {
 			return err
 		}
 		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
 		storages = ls.storages
+		if ls.reconcile != nil {
+			// TRIGGERED BEFORE THE ROUTER IS BUILT so `reconciling` is already true on the FIRST
+			// request anybody can make. Trigger sets the flag synchronously; the pass itself runs on
+			// the runner's goroutine. A trigger placed after the bind would leave a window in which
+			// health answered `false` about a registry that had not been scanned — the false `false`
+			// this rung exists to remove, reintroduced by ordering.
+			ls.reconcile.Start(ctx)
+			ls.reconcile.Trigger("startup")
+			reconcileReporter = ls.reconcile
+		}
 		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
 			workingReset = ls.engine
 		}
@@ -263,7 +281,7 @@ func serve(args []string) error {
 		Config:           cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
-		Storages: storages,
+		Storages: storages, Reconcile: reconcileReporter,
 		// READ LIVE, NOT CAPTURED. `storageless` above is the state at STARTUP; this closure is the
 		// state NOW, and they stop agreeing the instant setup succeeds. Capturing the boolean would
 		// leave a freshly-configured daemon refusing its own API until someone restarted it — the
