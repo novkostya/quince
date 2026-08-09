@@ -211,3 +211,45 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
   await save.scrollIntoViewIfNeeded();
   await expect(save).toBeVisible();
 });
+
+// quince#762 — FOCUSING A FIELD BELOW THE FOLD MUST NOT LEAVE IT ON THE EDGE OF THE SCROLL REGION.
+// On the Operator's phone `Parent dataset` came to rest half-cut at the bottom of the card and
+// `Helper command` did not come into view at all.
+//
+// THIS TEST PASSES WITH THE CORRECTION REMOVED, and that is recorded here rather than left for the
+// next reader to discover. Measured: `make gates-ui-e2e` exit 0 with `useScrollFocusIntoView`
+// unwired. Chromium's own scroll-into-view already clears this margin at the sizes the suite runs
+// at, so a green result here says nothing about whether our correction ran.
+//
+// It is kept because it exercises the whole path end to end — a real dialog, a real focus, a real
+// scroll container — which the unit test cannot. **The proof of the behaviour is
+// `ui/src/lib/useScrollFocusIntoView.test.ts`**, which states the geometry and fails 3 of 5 when the
+// correction is neutered. Do not read this one as coverage of the fix.
+test("focusing a field below the fold brings it clear of the dialog's edges", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await page.getByTestId("backend-select").selectOption("zfs");
+  await expect(page.getByTestId("zfs-fields")).toBeVisible();
+
+  // The two the Operator named, in the order they are met.
+  for (const label of ["Parent dataset", "Helper command"]) {
+    const field = page.getByLabel(label);
+    await field.focus();
+
+    // Settle: the correction runs on the next animation frame after `focusin`.
+    await expect
+      .poll(async () => {
+        const box = await dialog.boundingBox();
+        const rect = await field.boundingBox();
+        if (!box || !rect) return -1;
+        return Math.min(rect.y - box.y, box.y + box.height - (rect.y + rect.height));
+      })
+      .toBeGreaterThanOrEqual(16);
+  }
+});

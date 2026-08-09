@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/cn";
 import { useVisualViewport } from "@/lib/useVisualViewport";
+import { useScrollFocusIntoView } from "@/lib/useScrollFocusIntoView";
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -16,40 +17,27 @@ export function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" />
-      <VisibleAreaFrame>
-        {/* `max-h-full` is the frame's CONTENT box — the visible height less the safe area — so the
-            card can never exceed what is on screen and the frame's `items-center` can never push its
-            head off the top. Taller content scrolls INSIDE the card instead of running off both
-            edges, which is how a dialog became unreachable rather than merely clipped (qn.6e): the
-            buttons at the foot could not be got to at all. `overscroll-contain` stops that scroll
-            chaining to the page behind the overlay once the card reaches its end, and `p-6` rides
-            inside the scroll region, so there is still a margin below the last control when you
-            reach the bottom. */}
-        <DialogPrimitive.Content
-          className={cn(
-            "pointer-events-auto max-h-full w-full max-w-md overflow-y-auto overscroll-contain",
-            "rounded-card border border-line bg-card p-6 shadow-xl focus:outline-none",
-            className,
-          )}
-        >
-          {children}
-        </DialogPrimitive.Content>
-      </VisibleAreaFrame>
+      <DialogSurface className={className}>{children}</DialogSurface>
     </DialogPrimitive.Portal>
   );
 }
 
-// A SEPARATE COMPONENT SO THE HOOK'S LIFETIME IS THE DIALOG'S VISIBILITY, NOT ITS MOUNT.
+// A SEPARATE COMPONENT SO THE HOOKS' LIFETIME IS THE DIALOG'S VISIBILITY, NOT ITS MOUNT.
 // `DialogContent` is rendered by its consumer whether the dialog is open or shut — Radix decides
-// visibility inside `Portal`, which renders nothing while closed. So a hook called in `DialogContent`
-// would subscribe to viewport events for every dialog in the tree, permanently, and the comment
-// claiming otherwise would be the kind that is checked once and believed after it stops being true.
-// Rendered INSIDE the portal, this mounts only while the dialog is actually on screen.
-function VisibleAreaFrame({ children }: { children: ReactNode }) {
+// visibility inside `Portal`, which renders nothing while closed. Hooks called up there would
+// subscribe to viewport events for every dialog in the tree, permanently, and — worse for the scroll
+// one — would run their effect against a `ref` that is still `null`, then never run again when the
+// dialog actually opened. Rendered INSIDE the portal, these mount only while the dialog is on screen.
+function DialogSurface({ className, children }: { className?: string; children: ReactNode }) {
   // Publishes `--vv-top` / `--vv-height` while this dialog is up. Without it the frame falls back to
   // `100dvh`, which is the visible height in every state except an open keyboard — see the hook for
   // why that one case cannot be done in CSS.
   useVisualViewport();
+
+  // Keeps the focused field off the edges of the scroll region, including after the keyboard has
+  // shrunk it. The card below is the scroll container, so it is the element that must be measured.
+  const card = useRef<HTMLDivElement>(null);
+  useScrollFocusIntoView(card);
 
   return (
     <>
@@ -84,7 +72,24 @@ function VisibleAreaFrame({ children }: { children: ReactNode }) {
           "pt-[max(1rem,var(--safe-top))] pb-[max(1rem,var(--safe-bottom))]",
         )}
       >
-        {children}
+        {/* `max-h-full` is the frame's CONTENT box — the visible height less the safe area — so the
+            card can never exceed what is on screen and the frame's `items-center` can never push its
+            head off the top. Taller content scrolls INSIDE the card instead of running off both
+            edges, which is how a dialog became unreachable rather than merely clipped (qn.6e): the
+            buttons at the foot could not be got to at all. `overscroll-contain` stops that scroll
+            chaining to the page behind the overlay once the card reaches its end, and `p-6` rides
+            inside the scroll region, so there is still a margin below the last control when you
+            reach the bottom. */}
+        <DialogPrimitive.Content
+          ref={card}
+          className={cn(
+            "pointer-events-auto max-h-full w-full max-w-md overflow-y-auto overscroll-contain",
+            "rounded-card border border-line bg-card p-6 shadow-xl focus:outline-none",
+            className,
+          )}
+        >
+          {children}
+        </DialogPrimitive.Content>
       </div>
     </>
   );
