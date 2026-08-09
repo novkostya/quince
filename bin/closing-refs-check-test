@@ -248,7 +248,12 @@ expect "a bare ISSUE URL beside a closing keyword is a closing reference" 1 "CLO
 	"$CHECK" --text "$WORK/url-bare.md"
 
 printf 'Closes %s\n' "$UP" >"$WORK/url-pull.md"
-expect "a PULL URL binds too, and is flagged" 1 "CLOSING REFERENCE" \
+# PRECAUTIONARY, AND THIS NAME SAYS SO. It read "a PULL URL binds too, and is flagged" — a name
+# asserting two things and measuring one. The flagging is measured here; the binding never was, and
+# no URL-based closing syntax is documented at all, so there was nothing to have read. A test name
+# that asserts an unverified interface fact is worse than prose doing it, because inside a guard it
+# reads as established.
+expect "a PULL URL is flagged too — precautionary, its binding is unmeasured" 1 "CLOSING REFERENCE" \
 	"$CHECK" --text "$WORK/url-pull.md"
 
 # quince#700's actual shape. It already exited 1 before this change — for the WRONG reason, the
