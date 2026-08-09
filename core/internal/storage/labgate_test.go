@@ -15,7 +15,9 @@
 //	  -v quince-go-build:/root/.cache/go-build -v quince-go-mod:/go/pkg/mod -e CGO_ENABLED=1 \
 //	  -e QUINCE_LAB_UDID=<udid> \
 //	  -e QUINCE_LAB_ZFS_PARENT=<pool/parent> \
-//	  -e QUINCE_LAB_ZFS_MODE=hook -e QUINCE_LAB_ZFS_HOOK="ssh -i /data/keys/zfs -o BatchMode=yes <user>@<host>" \
+//	  -e QUINCE_LAB_ZFS_MODE=hook -e QUINCE_LAB_ZFS_HOOK="ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=accept-new <user>@<host>" \
+//	  # the two host-key options are load-bearing: BatchMode disables the accept-key prompt, so a
+//	  # container with an empty known_hosts REFUSES every hook call. See deploy/storage.md.
 //	  -e QUINCE_LAB_ZFS_SEED=auto \
 //	  quince-toolchain-go:local go test -tags lab ./internal/storage/ -run TestLabGate12 -v
 //

@@ -194,8 +194,40 @@ Delete the case from your script — nothing calls it, and leaving it is a `cp -
 `rm -rf` reachable by a key that no longer needs them. Hookless deployments are likewise unaffected:
 the in-container seed ladder is not reached on zfs either.
 
-Then `storage.zfs.hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes zfsuser@zfshost"` (the helper
-runs regardless of the command text; quince appends the operation + target as argv).
+Then `storage.zfs.hook_cmd` (the helper runs regardless of the command text; quince appends the
+operation + target as argv):
+
+```yaml
+hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=yes zfsuser@zfshost"
+```
+
+**THE HOST KEY IS NOT OPTIONAL, AND OMITTING IT FAILS EVERY HOOK CALL FROM THE FIRST ONE.**
+`BatchMode=yes` disables the interactive *"are you sure you want to continue connecting?"* prompt —
+that is what makes it safe to run unattended — so ssh cannot accept an unknown host key and refuses
+instead. A container's `known_hosts` is empty on a first install, which is exactly when an operator
+sets this up. Measured on a lab rig, 2026-08-10, with the command shape this document carried until
+now (`-i <key> -o BatchMode=yes user@host`), against a real forced-command helper:
+
+```
+Test helper → outcome: unreachable
+              detail:  Host key verification failed.
+```
+
+The same command with the two options above answers `ok`. **Nothing about the key, the forced
+command or the pool was wrong** — and `unreachable`'s remedy text points at all three, so the one
+cause it cannot be is the one it is.
+
+**Seed `known_hosts` on the host, before the first backup.** This is the recommended form: it pins
+the key you verified, once, and `StrictHostKeyChecking=yes` refuses anything else forever after.
+
+```sh
+ssh-keyscan -t ed25519 zfshost >> /path/to/quince/data/keys/known_hosts   # then EYEBALL it
+```
+
+**`StrictHostKeyChecking=accept-new` is the documented alternative** — it records the key on first
+contact and refuses a *change* thereafter. Strictly better than `no` (which accepts a changed key
+silently, and must never appear here), strictly weaker than seeding: it trusts whatever answers the
+first time. Use it where seeding is impractical, and know which one you chose.
 
 Child-dataset visibility: a dataset created after the container starts appears as an empty stub
 inside a plain bind mount. The host `zfs create` must propagate through **both** hops — into the
