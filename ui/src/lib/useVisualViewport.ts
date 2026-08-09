@@ -30,16 +30,23 @@ import { useEffect } from "react";
 // PWA (quince#762): the dialog was right on first focus, visibly high on re-focus, and most of the
 // way off the top of the screen once the tall zfs form pushed the focused field far down.
 //
-// THE REASON GIVEN FOR IT WAS WRONG, AND THE INSTRUMENT SAID SO. This comment used to assert that
-// iOS shrinks `window.innerHeight` along with the visual viewport, collapsing the difference to zero.
-// Measured in Safari with `?vvdebug`: `inner=714 client=714` while `vv.height=377`. It does not
-// shrink there, so that difference is ~337 and would have clamped nothing.
+// THE REASON GIVEN FOR IT WAS WRONG IN BOTH CONTEXTS, AND THE CHANGE WAS PROBABLY A NO-OP. This
+// comment asserted that iOS shrinks `window.innerHeight` along with the visual viewport, collapsing
+// the bound to zero. Measured with `?vvdebug`, in Safari AND in the standalone PWA where the fault
+// was reported:
 //
-// The two are not in conflict — they are different contexts. The fault was seen in the STANDALONE
-// PWA and the measurement was taken in SAFARI, which have different layout viewports, and the
-// standalone case is still unmeasured. What is known: the change fixed something real, and the
-// stated cause is false in the one context anyone has instrumented. Recorded rather than quietly
-// rewritten, because a fix whose explanation is wrong is how the next person builds on sand.
+//   Safari  inner=714 client=714  while vv.height=377
+//   PWA     inner=812 client=812  while vv.height=471
+//
+// It does not shrink in either. So `innerHeight - height` was ~340 in both, `widest - height` is the
+// same ~340, and the two formulas AGREE on every reading anyone has taken — which means replacing one
+// with the other changed no number and cannot be what improved the symptom. What did is unknown; the
+// improvement was real and reported, and it is not explained by this line.
+//
+// Left in place because it is still the better expression — `widest` is observed rather than assumed
+// and cannot be wrong about a viewport it read itself — but NOT credited with the fix. Recorded at
+// length because a fix whose explanation is wrong is how the next person builds on sand, and this
+// file has now done that twice.
 //
 // So the reference is the WIDEST visible height this dialog has seen, which is observed rather than
 // asked for: `apply()` runs once at mount, before any keyboard, so the first reading IS the

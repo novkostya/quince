@@ -5,7 +5,6 @@ import { RouterProvider } from "react-router-dom";
 import { queryClient } from "@/lib/queryClient";
 import { router } from "@/routes/router";
 import { initTheme } from "@/lib/theme";
-import { initKeyboardScrollReset } from "@/lib/keyboardScrollReset";
 import { initViewportDebug } from "@/lib/viewportDebug";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { authStatusKey } from "@/lib/auth";
@@ -14,13 +13,6 @@ import "./index.css";
 // System-follow theme at boot (ui.design.md principle 6); the Settings editor can override
 // via config.ui.theme once loaded.
 initTheme("system");
-
-// iOS can leave the visual viewport scrolled after the on-screen keyboard closes, which shifts the
-// height-pinned shell up the layout viewport: the page is clipped at the top of the shell and a gap
-// of the same height opens below it, with no scroller that reaches either. quince#649, and the hook
-// carries the mechanism. Here at boot rather than in the shell, because the login and onboarding
-// screens have keyboards too and are not inside `AppLayout`.
-initKeyboardScrollReset();
 
 // TEMPORARY DIAGNOSTIC for quince#762, inert unless the URL carries `?vvdebug`. To be removed with
 // the issue, in its own commit. See the module for why an instrument was reached for at all.
