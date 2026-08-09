@@ -31,15 +31,25 @@ Operator ruling that day: staging stays out of scope *for now*, and it is on the
 things it needs do not exist:
 
 - **`quince-staging` runs no sshd** — port 22 answers `Connection refused`.
-- **The runner holds no private ssh key**, only `authorized_keys`. It cannot reach anything today,
-  and that is the cleanest that axis has ever been.
+- **The runner HOLDS a private ssh key** — `/root/.ssh/id_ed25519`, since 2026-07-31. It is what
+  implementer sessions reach the lab rig with, and it is the credential `pr.6` constraint 2 named as
+  the cost of a push design.
 
-So a push-from-the-runner design costs a **new private key on a box `pr.6` constraint 2 exists to
-keep credentials off** — *"the runner accumulates login + bot token + devct token + ssh key"* — plus
-standing sshd up on the host that runs the soak. A **pull** design costs less: the registry already
-exists (`oci-registry`), the runner already builds images, and staging pulling needs a registry
-credential rather than a shell on the soak host. Neither is built; the trade is recorded so the
-choice is made rather than defaulted into.
+  **This line said the opposite until 2026-08-10** — *"the runner holds no private ssh key, only
+  `authorized_keys`. It cannot reach anything today, and that is the cleanest that axis has ever
+  been."* True when it was written on 2026-07-28, false three days later, and it is a claim about
+  a **credential boundary**, which is the class where a document describing a narrower reality than
+  the one that exists is worth the most. Corrected rather than deleted, because the paragraph below
+  prices a trade against it.
+
+So a push-from-the-runner design **no longer costs a new private key — that cost has already been
+paid**, for a different reason and without this trade being revisited. What remains is standing
+sshd up on the host that runs the soak. `pr.6` constraint 2's concern is unchanged and is now one
+item further along: *"the runner accumulates login + bot token + devct token + ssh key"*, and the
+ssh key is no longer hypothetical. A **pull** design still costs less: the registry already exists
+(`oci-registry`), the runner already builds images, and staging pulling needs a registry credential
+rather than a shell on the soak host. Neither is built; the trade is recorded so the choice is made
+rather than defaulted into.
 
 **Expected contract changes: NONE.** `--demo` mode already exists and is exercised by
 `make gates-ui-e2e`.
