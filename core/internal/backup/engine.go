@@ -739,20 +739,18 @@ func (e *Engine) runToolLoop(lj *liveJob, rt *runningTool) superviseResult {
 	close(sampleDone)
 	waitErr := rt.cmd.Wait()
 
-	lj.mu.Lock()
-	reason := lj.killReason
-	lj.mu.Unlock()
 	rt.ss.mu.Lock()
 	success, failReason := rt.ss.success, rt.ss.failReason
 	rt.ss.mu.Unlock()
 
+	// A kill outranks whatever the process did on its way out: the exit status of a SIGKILLed tool
+	// describes the signal, not the backup. Same question, same answer, as before Start.
+	if res, killed := e.killOutcome(rt.parent, lj); killed {
+		res.backupSuccessful = success
+		return res
+	}
+
 	switch {
-	case reason == "cancel":
-		return superviseResult{kind: outcomeCancel, backupSuccessful: success}
-	case reason == "timeout":
-		return superviseResult{kind: outcomeTimeout, backupSuccessful: success}
-	case rt.parent.Err() != nil:
-		return superviseResult{kind: outcomeShutdown, backupSuccessful: success}
 	case waitErr != nil:
 		// Prefer the tool's OWN last error line over the exit status: a user can act on
 		// "Insufficient free disk space on drive to back up", never on "exit status 151"
@@ -767,12 +765,49 @@ func (e *Engine) runToolLoop(lj *liveJob, rt *runningTool) superviseResult {
 	}
 }
 
+// killOutcome answers ONE question — was this job killed, and if so how should it terminate — for
+// both sides of cmd.Start(). ok=false means nothing killed it and the caller owns the outcome.
+//
+// IT IS ONE FUNCTION RATHER THAN TWO MATCHING SWITCHES ON PURPOSE, and quince#644 is why. A kill
+// means the same thing before Start as after it, but only runToolLoop used to say so: startTool's
+// error path called every failure a process error. `exec.Cmd.Start` returns ctx.Err() having spawned
+// NOTHING when the job context is already done, and run() narrates backing_up — and seeding, on the
+// gated path — BEFORE it reaches Start, so a cancel landing in that window ended the job `failed` /
+// `backup_failed: start idevicebackup2: context canceled`. The user was told their backup failed
+// when they had just cancelled it, against design §4, and TestStoryCancel raced that window as a
+// flake nothing could reproduce except a contended whole-tree run.
+//
+// SO A NEW KILL REASON GOES HERE, and adding one anywhere else re-opens quince#644 for that reason:
+// an unclassified kill falls through to a process error, which is exactly the shape this replaced.
+// ("timeout" is unreachable before Start — the sampler starts with the loop — and is carried rather
+// than special-cased, because the point of one classifier is that it does not know who is asking.)
+func (e *Engine) killOutcome(parent context.Context, lj *liveJob) (res superviseResult, ok bool) {
+	switch reason := e.killReasonOf(lj); {
+	case reason == "cancel":
+		return superviseResult{kind: outcomeCancel}, true
+	case reason == "timeout":
+		return superviseResult{kind: outcomeTimeout}, true
+	case parent.Err() != nil:
+		return superviseResult{kind: outcomeShutdown}, true
+	}
+	return superviseResult{}, false
+}
+
+// startFailure maps a startTool error. A kill that landed before the process existed is not a start
+// failure — see killOutcome, which owns that distinction; anything else genuinely failed to start.
+func (e *Engine) startFailure(parent context.Context, lj *liveJob, err error) superviseResult {
+	if res, killed := e.killOutcome(parent, lj); killed {
+		return res
+	}
+	return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+}
+
 // supervise starts idevicebackup2 (no gate) and runs it to completion — the resume / first-backup
 // path where there is no clone to overlap.
 func (e *Engine) supervise(parent context.Context, lj *liveJob, target string) superviseResult {
 	rt, err := e.startTool(parent, lj, target, "")
 	if err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+		return e.startFailure(parent, lj, err)
 	}
 	return e.runToolLoop(lj, rt)
 }
@@ -792,7 +827,7 @@ func (e *Engine) superviseGatedSeed(ctx context.Context, lj *liveJob, target str
 
 	rt, err := e.startTool(ctx, lj, target, gatePath)
 	if err != nil {
-		return superviseResult{kind: outcomeProcErr, detail: err.Error()}
+		return e.startFailure(ctx, lj, err)
 	}
 
 	// Wait for the tool to write its fresh Info.plist (spike C12: ~1 s after launch, before the

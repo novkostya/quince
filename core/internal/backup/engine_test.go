@@ -904,6 +904,69 @@ func TestStoryCancel(t *testing.T) {
 	}
 }
 
+// Story 8, the window story 8 races (quince#644). run() narrates backing_up — and seeding, on the
+// gated path — BEFORE it reaches cmd.Start(), and `exec.Cmd.Start` returns ctx.Err() having spawned
+// NOTHING when the job context is already done. So a kill landing in that window arrives as a start
+// error, and calling it one ends the job `failed`/`backup_failed` for a backup the user cancelled.
+// TestStoryCancel above cancels the instant it sees backing_up, which is why a contended whole-tree
+// run reproduced this as a flake and 63 targeted iterations never did.
+//
+// Deterministic here because the window is opened by hand — the context is cancelled before
+// supervise is entered — rather than raced against the scheduler.
+func TestKillBeforeToolStartsIsNotAProcessFailure(t *testing.T) {
+	m := loadMeta(t, "silent-stall")
+	h := newHarness(t, m.params(t), m.Transport)
+
+	// A job whose context is already done, killReason as the engine would have recorded it.
+	killed := func(reason string) (context.Context, *liveJob) {
+		ctx, cancel := context.WithCancel(context.Background())
+		lj := &liveJob{
+			row:        store.JobRow{ID: "job-644", UDID: testUDID, Transport: m.Transport},
+			cancel:     cancel,
+			killReason: reason,
+		}
+		cancel()
+		return ctx, lj
+	}
+
+	// THE PREMISE, ASSERTED RATHER THAN ASSUMED. Everything below is about how a startTool error is
+	// classified, so if Start ever stops failing on a done context this test would keep passing
+	// while covering nothing — the shape quince#536 named. Fail loudly instead.
+	ctx, lj := killed("cancel")
+	if rt, err := h.eng.startTool(ctx, lj, t.TempDir(), ""); err == nil {
+		rt.cancel()
+		rt.readers.Wait()
+		_ = rt.cmd.Wait()
+		t.Fatal("premise gone: startTool spawned on a cancelled context, so this guard no longer covers quince#644")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		reason string      // what CancelJob / the sampler / nobody recorded
+		want   outcomeKind // ... and what run() must be told
+		state  string      // the state the user ends up seeing
+	}{
+		{"user cancel", "cancel", outcomeCancel, StateCancelled},
+		{"shutdown", "", outcomeShutdown, StateConnectionLost},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, path := range []struct {
+				name string
+				run  func(context.Context, *liveJob, string) superviseResult
+			}{
+				{"supervise", h.eng.supervise},
+				{"superviseGatedSeed", h.eng.superviseGatedSeed},
+			} {
+				ctx, lj := killed(tc.reason)
+				if got := path.run(ctx, lj, t.TempDir()); got.kind != tc.want {
+					t.Fatalf("%s outcome = %d, want %d — the job would end %s, not %s",
+						path.name, got.kind, tc.want, StateFailed, tc.state)
+				}
+			}
+		})
+	}
+}
+
 // Cancel while still waiting for the device → cancelled (not a misleading connection_lost).
 func TestCancelDuringWaitForDevice(t *testing.T) {
 	m := loadMeta(t, "full-usb-success")
