@@ -50,7 +50,7 @@ func TestG2TheFullTransferClaimIsMadeBeforeAndKeptAfter(t *testing.T) {
 
 	// --- THE BACKUP: bound to B, so every write-path call resolves B ----------------------------
 	const jobID = "01JOBTOSECOND00000000000"
-	if err := m.BindJobStorage(jobID, secondID); err != nil {
+	if err := m.BindJobStorage(jobID, testUDID, secondID); err != nil {
 		t.Fatal(err)
 	}
 	goodEncryptedFull(t, seedTree(t, m, testUDID, jobID))

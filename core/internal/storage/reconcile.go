@@ -43,25 +43,7 @@ func (m *Manager) reconcileSlot(ctx context.Context, s Slot) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		committed, ok, err := s.Backend.ResumeCommit(j)
-		if err != nil {
-			m.log.Error("reconcile: roll-forward failed — left in place, not unwound",
-				"udid", j.UDID, "version", j.VersionID, "phase", j.Phase, "error", err)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if _, exists, _ := m.reg.GetVersion(committed.VersionID); !exists {
-			if err := m.registerCommitted(s, committed); err != nil {
-				m.log.Error("reconcile: register rolled-forward version failed", "version", committed.VersionID, "error", err)
-				continue
-			}
-			row, _, _ := m.reg.GetVersion(committed.VersionID)
-			m.bus.PublishEvent(wire.EventVersionCreated, m.toWire(row))
-		}
-		m.log.Info("reconcile: completed a half-done commit (roll-forward)",
-			"udid", j.UDID, "version", committed.VersionID, "from_phase", j.Phase)
+		m.rollForward(s, j)
 	}
 
 	for _, udid := range m.reconcileUDIDs() {
@@ -76,7 +58,86 @@ func (m *Manager) reconcileSlot(ctx context.Context, s Slot) error {
 	return nil
 }
 
+// rollForward completes one journal left by a crash, under the commit lease for its device.
+//
+// IT IS A FUNCTION SO THE LEASE CAN BE RELEASED BY defer. The loop body it replaces had four
+// `continue` paths, and every one of them would have leaked a claimed lease — which is not a
+// deadlock that shows up in a test, it is a device that silently stops being reconcilable for the
+// life of the process.
+func (m *Manager) rollForward(s Slot, j Journal) {
+	// A JOURNAL A LIVE JOB IS DRIVING IS NOT A JOURNAL LEFT BY A CRASH (qn.6i D3, blocker 1).
+	//
+	// Roll-forward exists to finish a commit whose driver DIED. Resuming one whose driver is still
+	// running puts two actors through the same phase sequence — on the namespace backends through the
+	// same `renameat2(RENAME_EXCHANGE)`. Whether that is harmful was never established, and the
+	// ruling is that it must not be REACHABLE rather than that it be proven safe: such a proof would
+	// be a property of today's phase set, and qn.6h has just changed that set for zfs.
+	//
+	// The journal already carries the fact that decides it (`journal.go:51`), so this needs no new
+	// bookkeeping — only the question, asked.
+	if m.jobIsBound(j.JobID) {
+		m.log.Info("reconcile: skipping a commit journal a LIVE job is still driving — roll-forward "+
+			"is for a commit whose driver died, and this one has not",
+			"udid", j.UDID, "version", j.VersionID, "job", j.JobID, "phase", j.Phase)
+		return
+	}
+	// The same lease the commit path claims, for the same (storage, device) — so a job that binds
+	// between the check above and the resume below cannot overlap this either. TryClaim rather than
+	// Claim: reconciliation never waits, it defers and reports.
+	lease := m.leaseFor(s.StorageID, j.UDID)
+	if !lease.TryClaim() {
+		m.log.Info("reconcile: deferring a commit journal — this device is committing on this "+
+			"storage right now", "udid", j.UDID, "version", j.VersionID, "storage", s.Name)
+		return
+	}
+	defer lease.Release()
+
+	committed, ok, err := s.Backend.ResumeCommit(j)
+	if err != nil {
+		m.log.Error("reconcile: roll-forward failed — left in place, not unwound",
+			"udid", j.UDID, "version", j.VersionID, "phase", j.Phase, "error", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if _, exists, _ := m.reg.GetVersion(committed.VersionID); !exists {
+		if err := m.registerCommitted(s, committed); err != nil {
+			m.log.Error("reconcile: register rolled-forward version failed",
+				"version", committed.VersionID, "error", err)
+			return
+		}
+		row, _, _ := m.reg.GetVersion(committed.VersionID)
+		m.bus.PublishEvent(wire.EventVersionCreated, m.toWire(row))
+	}
+	m.log.Info("reconcile: completed a half-done commit (roll-forward)",
+		"udid", j.UDID, "version", committed.VersionID, "from_phase", j.Phase)
+}
+
 func (m *Manager) reconcileDevice(s Slot, udid string) error {
+	// THE PRE-CHECK, AND WHY IT IS NOT REDUNDANT WITH THE LEASE BELOW (qn.6i D3).
+	//
+	// A job holds its lease only across CommitJob — seconds — while its BINDING lasts the whole job,
+	// which over Wi-Fi is hours. So the lease alone would let a scan start on a device that is
+	// mid-transfer, and the commit arriving later would then WAIT for that scan. Correct, and worse
+	// than not starting: the wait lands on the one path that has a multi-hour transfer behind it.
+	//
+	// Asking the binding instead means the common case never contends at all. The lease is what makes
+	// the remaining window safe rather than unlikely.
+	if jobs := m.JobsOnDevice(s.StorageID, udid); len(jobs) > 0 {
+		m.log.Info("reconcile: deferring this device — a backup is running on this storage for it. "+
+			"Its versions keep their current state; the next trigger reconciles them",
+			"udid", udid, "storage", s.Name, "jobs", jobs)
+		return nil
+	}
+	lease := m.leaseFor(s.StorageID, udid)
+	if !lease.TryClaim() {
+		m.log.Info("reconcile: deferring this device — it is committing on this storage right now",
+			"udid", udid, "storage", s.Name)
+		return nil
+	}
+	defer lease.Release()
+
 	arts, err := s.Backend.Scan(udid)
 	if err != nil {
 		return err

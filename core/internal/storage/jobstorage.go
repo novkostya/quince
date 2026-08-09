@@ -24,7 +24,13 @@ import (
 // currently usable, must not quietly become a job against the default: that would write a backup to
 // a disk the user did not choose, which is the most expensive form of "no silent fallbacks" this
 // rung has.
-func (m *Manager) BindJobStorage(jobID, storageID string) error {
+//
+// IT CARRIES THE UDID AS OF qn.6i, AND THAT IS THE WHOLE OF WHY THE SIGNATURE MOVED. The binding is
+// what tells reconciliation whether a commit path is live, and "a job is running on this storage" is
+// too coarse a question to guard on: it would defer a whole disk's repair pass for one device's
+// backup. With the udid the guard is per (storage, device), which is the granularity the hazard
+// actually has — two devices on one disk commit independently.
+func (m *Manager) BindJobStorage(jobID, udid, storageID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -37,12 +43,19 @@ func (m *Manager) BindJobStorage(jobID, storageID string) error {
 				s.Name, s.UnreachableCode, s.UnreachableReason)
 		}
 		if m.jobStorage == nil {
-			m.jobStorage = map[string]string{}
+			m.jobStorage = map[string]jobBinding{}
 		}
-		m.jobStorage[jobID] = storageID
+		m.jobStorage[jobID] = jobBinding{storageID: storageID, udid: udid}
 		return nil
 	}
 	return fmt.Errorf("no storage with id %q is declared", storageID)
+}
+
+// jobBinding is what a job holds for its whole life: the storage it writes to, and the device it
+// writes for. Both are constant from BindJobStorage to UnbindJob.
+type jobBinding struct {
+	storageID string
+	udid      string
 }
 
 // UnbindJob drops a finished job's binding, so the map does not grow for the life of the process.
@@ -66,7 +79,8 @@ func (m *Manager) UnbindJob(jobID string) {
 // storage was lost.
 func (m *Manager) jobSlot(jobID string) (Slot, error) {
 	m.mu.RLock()
-	want, bound := m.jobStorage[jobID]
+	b, bound := m.jobStorage[jobID]
+	want := b.storageID
 	slots := make([]Slot, len(m.slots))
 	copy(slots, m.slots)
 	m.mu.RUnlock()
@@ -189,11 +203,54 @@ func (m *Manager) JobsOn(storageID string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var out []string
-	for jobID, sid := range m.jobStorage {
-		if sid == storageID {
+	for jobID, b := range m.jobStorage {
+		if b.storageID == storageID {
 			out = append(out, jobID)
 		}
 	}
 	sort.Strings(out) // deterministic: the message names a job, and a set iteration would vary it
 	return out
+}
+
+// JobsOnDevice is JobsOn narrowed to ONE device, and it is the question reconciliation asks before
+// it touches a (storage, device) pair (qn.6i D3).
+//
+// THE NARROWING IS THE POINT, not an optimisation. `JobsOn` answers "is this disk busy", which would
+// defer the repair of every device on a storage because one of them is backing up — and under a
+// SCHEDULED reconcile that is not a rare coincidence, it is most evenings. The hazard is per device:
+// two devices commit to one disk through separate journals, separate trees and separate rows.
+//
+// An EMPTY udid matches nothing and returns nil, deliberately: every caller here has a udid in hand,
+// so an empty one is a bug rather than a wildcard, and answering "no jobs" is the safe direction for
+// a *reconcile* guard to be wrong in only if it is never reached — which is why the reconciler also
+// holds the lease. Belt and braces, and the braces are the lease.
+func (m *Manager) JobsOnDevice(storageID, udid string) []string {
+	if udid == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []string
+	for jobID, b := range m.jobStorage {
+		if b.storageID == storageID && b.udid == udid {
+			out = append(out, jobID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// jobIsBound reports whether a jobID names a job that is LIVE right now.
+//
+// It is what tells a commit journal left by a CRASH from one a running job is currently driving —
+// the distinction quince#731's blocker 1 turns on. The journal carries the JobID that wrote it
+// (`journal.go:51`), so no new bookkeeping is needed to ask.
+func (m *Manager) jobIsBound(jobID string) bool {
+	if jobID == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.jobStorage[jobID]
+	return ok
 }

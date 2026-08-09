@@ -37,7 +37,7 @@ func twoSlotManager(t *testing.T) *Manager {
 // shuttle. A JobsOn that ignored the id would make every forget refuse on a busy install.
 func TestJobsOnReportsOnlyTheJobsBoundToThatStorage(t *testing.T) {
 	m := twoSlotManager(t)
-	if err := m.BindJobStorage("01JOBPOOL", "01STORAGEPOOL"); err != nil {
+	if err := m.BindJobStorage("01JOBPOOL", testUDID, "01STORAGEPOOL"); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestJobsOnReportsOnlyTheJobsBoundToThatStorage(t *testing.T) {
 func TestJobsOnIsSortedSoTheRefusalNamesTheSameJobTwice(t *testing.T) {
 	m := twoSlotManager(t)
 	for _, id := range []string{"01JOBC", "01JOBA", "01JOBB"} {
-		if err := m.BindJobStorage(id, "01STORAGEPOOL"); err != nil {
+		if err := m.BindJobStorage(id, testUDID, "01STORAGEPOOL"); err != nil {
 			t.Fatalf("bind %s: %v", id, err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestJobsOnIsSortedSoTheRefusalNamesTheSameJobTwice(t *testing.T) {
 // true if a finished job stops counting. `UnbindJob` is what the engine calls at job end.
 func TestJobsOnStopsReportingAFinishedJob(t *testing.T) {
 	m := twoSlotManager(t)
-	if err := m.BindJobStorage("01JOBPOOL", "01STORAGEPOOL"); err != nil {
+	if err := m.BindJobStorage("01JOBPOOL", testUDID, "01STORAGEPOOL"); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	m.UnbindJob("01JOBPOOL")
@@ -104,7 +104,7 @@ func TestJobsOnStopsReportingAFinishedJob(t *testing.T) {
 func TestJobsOnAnEmptyStorageIDIsAlwaysNone(t *testing.T) {
 	m := twoSlotManager(t)
 	m.mu.Lock()
-	m.jobStorage = map[string]string{"01JOBGHOST": ""}
+	m.jobStorage = map[string]jobBinding{"01JOBGHOST": {storageID: "", udid: testUDID}}
 	m.mu.Unlock()
 
 	if got := m.JobsOn(""); got != nil {

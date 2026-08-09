@@ -39,7 +39,12 @@ type StorageForJob interface {
 
 	// BindJobStorage records which storage this job writes to, for the life of the job; UnbindJob
 	// drops it. Every write-path call then resolves that storage from the jobID it already carries.
-	BindJobStorage(jobID, storageID string) error
+	//
+	// THE UDID RIDES ALONG AS OF qn.6i, and it is not for resolution — the storage id alone answers
+	// that. It is what lets reconciliation ask "is a commit path live for THIS device on THIS
+	// storage" and defer only that pair, rather than deferring a whole disk's repair because one
+	// device on it is backing up.
+	BindJobStorage(jobID, udid, storageID string) error
 	UnbindJob(jobID string)
 	// RepairWorking discards a device's dirty working/ on ONE storage, resolving WHICH from an
 	// optional storage id — omitted resolves by dirty count (contracts §1, quince#448).
@@ -257,7 +262,7 @@ func (e *Engine) StartBackup(udid, transport, storageID, retryOf string) (wire.J
 	// BIND BEFORE THE ROW EXISTS ANYWHERE OBSERVABLE. Every write-path call resolves the job's
 	// storage from its jobID, so a job that is running but unbound would silently write to the
 	// default — the exact substitution ResolveChoice just refused to make.
-	if err := e.versionQ.BindJobStorage(id, concreteStorage); err != nil {
+	if err := e.versionQ.BindJobStorage(id, udid, concreteStorage); err != nil {
 		e.mu.Unlock()
 		return wire.Job{}, http.StatusConflict, err.Error()
 	}
