@@ -297,6 +297,22 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 	var runner *storage.Runner
 	if scan == scanDeferred {
 		runner = storage.NewRunner(storageMgr, log)
+		runner.SetInterval(reconcileInterval(cfgSvc.Current()))
+		// THE THIRD CONSUMER OF THE CONFIG SEAM (qn.6g). `reconcile.interval_minutes` is LIVE: the
+		// runner re-reads it when it schedules the next wait, and `SetInterval` wakes the scheduler so
+		// a change applies to the CURRENT wait rather than after the old one elapses. Turning six hours
+		// down to fifteen minutes and waiting up to six hours for that to bite would be live in name
+		// only.
+		cfgSvc.Subscribe("reconcile", func(old, next config.Config) []config.Warning {
+			if old.Reconcile == next.Reconcile {
+				return nil // an edit to some other section
+			}
+			runner.SetInterval(reconcileInterval(next))
+			log.Info("reconcile schedule applied without a restart",
+				"interval_minutes", next.Reconcile.IntervalMinutes,
+				"enabled", next.Reconcile.IntervalMinutes > 0)
+			return nil
+		})
 		// A JOB ENDING RE-TRIGGERS A PASS, so a device deferred behind a backup comes back when that
 		// backup ends rather than when something unrelated next asks. `Engine.release` calls
 		// `UnbindJob` on EVERY ending — success, failure, cancel, shutdown — so the cancel case is
@@ -629,4 +645,13 @@ func retentionOf(e config.StorageEntry) storage.RetentionPolicy {
 	return storage.RetentionPolicy{
 		KeepRecent: r.KeepRecent, KeepDaily: r.KeepDaily, KeepWeekly: r.KeepWeekly,
 	}
+}
+
+// reconcileInterval turns the config's integer minutes into a duration, with <= 0 meaning DISABLED
+// (qn.6i). One place, so the schedule and any future reader cannot disagree about what 0 means.
+func reconcileInterval(c config.Config) time.Duration {
+	if c.Reconcile.IntervalMinutes <= 0 {
+		return 0
+	}
+	return time.Duration(c.Reconcile.IntervalMinutes) * time.Minute
 }

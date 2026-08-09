@@ -264,6 +264,39 @@ export function ConfigEditor({ config }: { config: Config }) {
         )}
       </Field>
 
+      {/*
+        qn.6i. LIVE, like everything else on this form — the runner re-reads the interval when it
+        schedules the next wait, so an edit takes effect from the following tick and no restart
+        notice belongs here.
+
+        `min={0}` rather than `min={1}`, because 0 is a MEANING and not a floor: it turns the
+        schedule off. The helper text says which triggers survive it, because a bare number input
+        cannot, and "off" without that sentence reads as "quince stops noticing anything".
+      */}
+      <Field label="Reconciliation interval (minutes)" error={errFor("reconcile.interval_minutes")}>
+        {(id) => (
+          <>
+            <Input
+              id={id}
+              type="number"
+              min={0}
+              value={draft.reconcile.interval_minutes}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  reconcile: { ...draft.reconcile, interval_minutes: Number(e.target.value) },
+                })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              How often quince re-checks its storages for backups added, removed or restored outside
+              quince. <strong>0 turns the schedule off</strong> — starting up, adding a storage, and a
+              backup finishing still trigger a check.
+            </p>
+          </>
+        )}
+      </Field>
+
       <Field label="Theme" error={errFor("ui.theme")}>
         {(id) => (
           <Select

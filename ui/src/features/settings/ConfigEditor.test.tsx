@@ -65,6 +65,7 @@ function config(storage: StorageEntry[] | null): Config {
     storage,
     devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
     sessions: { ttl_minutes: 30 },
+    reconcile: { interval_minutes: 360 },
     automation: { staleness_days: 3, reminder_cooldown_hours: 24 },
     ui: { theme: "system" },
   } as Config;
@@ -348,5 +349,28 @@ describe("ConfigEditor when the config changes while the form is dirty", () => {
     rerenderWith(rerender, refetched);
 
     expect(screen.queryByText(/configuration changed elsewhere/i)).toBeNull();
+  });
+});
+
+// qn.6i — THE RECONCILIATION INTERVAL IS EDITABLE, AND `0` IS A VALUE RATHER THAN A FLOOR.
+//
+// D12 requires every setting to be editable in the UI, so a key that exists in config.yml and not
+// here is half-shipped. The `min` assertion is the one with a real failure behind it: `min={1}`
+// would make the OFF state unreachable from the only surface most users have, while the config file
+// still accepted it — a setting that means something the UI cannot express.
+describe("the reconciliation interval", () => {
+  it("renders the current value and allows 0", () => {
+    renderEditor(config([entry()]));
+    const input = screen.getByLabelText(/reconciliation interval/i) as HTMLInputElement;
+    expect(input.value).toBe("360");
+    expect(input.min).toBe("0");
+  });
+
+  // The helper text is load-bearing, not decoration: "0 turns the schedule off" reads as "quince
+  // stops noticing anything" unless it also says which triggers survive.
+  it("says which triggers survive turning the schedule off", () => {
+    renderEditor(config([entry()]));
+    expect(screen.getByText(/0 turns the schedule off/i)).toBeInTheDocument();
+    expect(screen.getByText(/adding a storage/i)).toBeInTheDocument();
   });
 });
