@@ -97,11 +97,31 @@ repo is not a message bus, and no human is an RPC layer.
    **The timing caveat is the whole of the discipline.** Rebasing yields a clean diff only **after the
    predecessor has landed**: until then its commits are not in `main`, so they are still your
    ancestors and the PR would carry both slices — the mis-scoping rung 1 opens with. So build
-   immediately, and once the predecessor merges rebase **from its tip**, not from `main`:
+   immediately, and once the predecessor merges rebase **from its tip**, not from `main`.
+
+   **NAME THAT TIP BY OID, TAKEN WHEN YOU BRANCH — the branch will not be there.**
+   `delete_branch_on_merge` is `true` repo-wide, so the predecessor's ref is removed on **every**
+   merge whatever flags the merging seat passes (§6, quince-devlog#214) — and
+   `--onto origin/main origin/<predecessor>` then fails `fatal: invalid upstream`, at the one moment
+   the recipe is for:
 
    ```sh
-   git fetch && git rebase --onto origin/main <predecessor-branch>
+   git switch -c <runner>/<slice-2> origin/<predecessor>
+   PRED=$(git rev-parse HEAD)      # free now; not obtainable from the branch name later
+   # … write the slice; the predecessor merges …
+   git fetch && git rebase --onto origin/main "$PRED"
    ```
+
+   **Nothing needs fetching, and no other seat needs to be asked**: the predecessor's commits are
+   your own ancestors, so the oid resolves out of your own object store. Measured 2026-08-09 against
+   a squash-merged, deleted predecessor of one and of three commits — clean both times, carrying one
+   commit.
+
+   **If you did not take it**, the tip is the commit below your first, so `git log` still names it,
+   and the merging seat can post it — in **full 40 characters**, since GitHub serves an arbitrary
+   full oid and refuses an abbreviation (quince#243). A **local** branch of that name would have
+   survived `fetch --prune`, because only the remote-tracking ref goes; that is why this bites some
+   authors and not others, and why rung 2's fresh clone cannot rely on it.
 
    **What waits is `gh pr create`, not the work.**
 
