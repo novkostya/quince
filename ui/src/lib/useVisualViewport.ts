@@ -17,17 +17,34 @@ import { useEffect } from "react";
 // mounted BY THE DIALOG rather than by the app shell: the properties matter only while a portalled
 // surface is on screen, and this way no listener runs in the common case where none is.
 //
-// WHY THE CLAMP, WHICH IS NOT DEFENSIVE PROGRAMMING BUT A NAMED BUG. On iOS 26 `offsetTop` does not
-// return to 0 when the keyboard is dismissed — the visual viewport is restored to full height and
-// the offset is left behind, which strands every fixed element too high up the screen. Reported
-// against physical devices; Apple's own forum thread is the record.
+// WHY THERE IS A CLAMP AT ALL: on iOS 26 `offsetTop` does not return to 0 when the keyboard is
+// dismissed — the visual viewport is restored to full height and the offset is left behind, which
+// strands every fixed element away from where it belongs. Reported against physical devices; Apple's
+// own forum thread is the record.
 //
 //   https://developer.apple.com/forums/thread/800154
 //
-// `innerHeight - height` is how much of the layout viewport is currently hidden, so it is the
-// largest offset that can be legitimate. With the keyboard up it is the keyboard's height and the
-// clamp does nothing; with the keyboard gone it is 0, which is precisely the value iOS 26 fails to
-// restore. The clamp is therefore correct on every version rather than a workaround for one.
+// WHAT IT IS MEASURED AGAINST, AND WHY IT IS NOT `window.innerHeight`. The bound wants "how much of
+// the visible area is hidden right now", and the first version of this file computed it as
+// `innerHeight - height`. THAT IS ZERO ON THE DEVICE THIS WAS WRITTEN FOR. iOS shrinks
+// `window.innerHeight` along with the visual viewport when the keyboard opens, so the difference
+// collapses, every legitimate offset was clamped away, and the dialog stayed pinned to the top of
+// the layout viewport while Safari scrolled the page down under the keyboard. Operator-measured on
+// an iPhone (quince#762): right on first focus, because nothing had scrolled yet and the clamp bound
+// nothing; visibly high on re-focus; most of the way off the top of the screen once the tall zfs
+// form pushed the focused field far down. One wrong reference, three symptoms of increasing size.
+//
+// So the reference is the WIDEST visible height this dialog has seen, which is observed rather than
+// asked for: `apply()` runs once at mount, before any keyboard, so the first reading IS the
+// no-keyboard height. With the keyboard up, `widest - height` is the keyboard and the offset passes
+// through; with it gone the two are equal, the bound is 0, and iOS 26's stale offset is discarded —
+// which is the case the clamp exists for. No second height source, so nothing can disagree with
+// `visualViewport` about what the viewport is.
+//
+// The one case this does not cover: a dialog MOUNTED while the keyboard is already up takes the
+// shrunken height as its widest and will not offset until the keyboard closes once. Every dialog
+// here opens from a button tap, which blurs any field first, so it is unreachable today — recorded
+// because a Sheet or a nested dialog could reach it.
 export function useVisualViewport(): void {
   useEffect(() => {
     const vv = window.visualViewport;
@@ -37,8 +54,10 @@ export function useVisualViewport(): void {
     if (!vv) return;
 
     const root = document.documentElement;
+    let widest = 0;
     const apply = (): void => {
-      const hidden = Math.max(0, window.innerHeight - vv.height);
+      widest = Math.max(widest, vv.height);
+      const hidden = Math.max(0, widest - vv.height);
       const top = Math.min(Math.max(vv.offsetTop, 0), hidden);
       root.style.setProperty("--vv-top", `${top}px`);
       root.style.setProperty("--vv-height", `${vv.height}px`);
