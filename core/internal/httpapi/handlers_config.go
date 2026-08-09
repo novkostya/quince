@@ -23,23 +23,34 @@ import (
 // that went away on refresh, because a refetch of an unwritten config had warnings again.
 //
 // The same treatment `handleStorages` already gives its list, for the same reason.
-func configResponse(cfg config.Config, warns []config.Warning, src config.Source) configGetResponse {
+// A METHOD ON Deps, NOT A FREE FUNCTION, so every response carries the file text through ONE door.
+// Four handlers build this body; a free function taking the text as an argument would be four places
+// to remember, which is how one of them ends up shipping a preview the others do not have.
+func (d Deps) configResponse(cfg config.Config, warns []config.Warning, src config.Source) configGetResponse {
 	if warns == nil {
 		warns = []config.Warning{}
 	}
-	return configGetResponse{Config: cfg, Warnings: warns, Source: src}
+	// READ AT REQUEST TIME, never cached — see config.Service.FileText for why the alternative
+	// contradicts the subtitle this panel sits under.
+	return configGetResponse{Config: cfg, Warnings: warns, Source: src, FileText: d.Config.FileText()}
 }
 
 type configGetResponse struct {
 	Config   config.Config    `json:"config"`
 	Warnings []config.Warning `json:"warnings"`
 	Source   config.Source    `json:"source"`
+	// FileText is config.yml AS IT IS ON DISK (contracts §6, Operator ruling 2026-08-09 on
+	// quince#728). The panel is titled "Current configuration" and its subtitle invites a hand-edit,
+	// so it must show the FILE rather than a re-rendering of the parsed document — and after qn.6j
+	// those are genuinely different documents: `config` is the RESOLVED configuration, every key
+	// filled; this is only what was set. "" when there is no file yet.
+	FileText string `json:"file_text"`
 }
 
 func (d Deps) handleConfigGet() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, warns, src := d.Config.Snapshot()
-		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg, warns, src))
+		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg, warns, src))
 	}
 }
 
@@ -72,7 +83,7 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 		// This cited `ForgetRestartWarning` as the precedent, and that function is DELETED in the
 		// same diff. The precedent outlives it: `config/forget.go` carries the note where it stood.
 		warns = append(append([]config.Warning{}, warns...), applied...)
-		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, warns, src))
+		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, warns, src))
 	}
 }
 
@@ -142,7 +153,7 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 		// for a problem that no longer exists.
 		warns = append(warns, applied...) // qn.6g: anything an applier could not take
 		d.Log.Info("storage forgotten", "storage", name, "applier_warnings", len(applied))
-		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, warns, src))
+		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, warns, src))
 	}
 }
 
@@ -210,6 +221,6 @@ func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
 		cfg2, loadWarns, src := d.Config.Snapshot()
 		// APPENDED to the load's own warnings, exactly as the delete does: an applier warning says
 		// "saved, but not applied" — a fact about THIS response rather than about the file.
-		writeJSON(w, d.Log, http.StatusOK, configResponse(cfg2, append(loadWarns, warns...), src))
+		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, append(loadWarns, warns...), src))
 	}
 }

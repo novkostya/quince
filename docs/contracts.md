@@ -565,7 +565,7 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 ### Config
 
 ```
-GET /api/config   → {config, warnings: [], source: {path, mtime}}
+GET /api/config   → {config, warnings: [], source: {path, mtime}, file_text}
 PUT /api/config   → full-document replace; validated then atomically written to
                     /data/config.yml; 422 {errors: [{path, message}]} on invalid
 POST /api/config/storage
@@ -577,6 +577,35 @@ DELETE /api/config/storage/{name}
                     see the gap B ruling above for what a reconstructed full document
                     silently loses.
 ```
+
+**RULED and IMPLEMENTED: `file_text` — `config.yml` AS IT IS ON DISK** (`qn.6j`, Operator ruling
+2026-08-09 on [quince#728](https://github.com/novkostya/quince/issues/728)). The Settings panel is
+titled *Current configuration* and its subtitle says *"You can edit the file by hand instead"*, so it
+must show the **file**, not a re-rendering of the parsed document.
+
+**`config` and `file_text` are two DIFFERENT documents, not two renderings of one**, and `qn.6j` is
+what made them different. `config` is the **resolved** configuration — every key, defaults filled,
+`backend: auto`, `zfs.mode: exec`. `file_text` is **only what was set**. They answer different
+questions: *what is quince's configuration* versus *what does my file contain*.
+
+**The alternative was the UI serializing YAML client-side, and it is rejected**: the server is the
+only thing that knows what it actually wrote, and after `qn.6j` a client-side serializer would have to
+reproduce Go's **omission** decisions as well as its quoting and ordering.
+
+**IT IS READ AT REQUEST TIME AND NEVER CACHED**, which is a condition of the ruling rather than an
+implementation detail. There is no reload path — `Load` runs at construction and nothing re-reads the
+file (quince#727, post-`v0.1`) — so a cached copy of what quince last *wrote* goes stale the moment
+somebody hand-edits the file, under a subtitle inviting exactly that edit.
+
+**So it can show a file quince has not adopted**, and that is the point: after a bad hand-edit the
+running configuration is last-good while the file on disk is the broken one, which is precisely when a
+user needs to see what is on disk. `warnings` and `source` are how a client says so. `""` when there
+is no file yet, which `source.mtime` being empty already distinguishes.
+
+**A later switch to an attributes view costs no contract change.** `config` is already on the wire and
+quince#756 gates that every field of it is present in every response; an attributes view is a UI change
+against data that already exists. What it would cost is removing `file_text`, which is the breaking
+direction — nearly free today (one user, no `v0.1` tag) and more expensive after release.
 
 **RULED and IMPLEMENTED: `POST /api/config/storage` — the add (`qn.6e`, quince#502).**
 

@@ -1,9 +1,17 @@
 import type { ConfigResponse } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 
-// The PVE-style "current configuration" view: the live config as the source of truth, plus
-// a banner when a hand-edit was rejected or an unknown key was seen (ui.design.md principle
-// 8). Exact YAML-with-comments text is a qn.6 refinement (D12 staging).
+// The PVE-style "current configuration" view: THE FILE ITSELF, plus a banner when a hand-edit was
+// rejected or an unknown key was seen (ui.design.md principle 8).
+//
+// This rendered `JSON.stringify(data.config)` until qn.6j (quince#728, Operator ruling 2026-08-09).
+// The panel's subtitle says "You can edit the file by hand instead", and what sat beside that
+// sentence was not the language of the file — anyone comparing this against their editor was
+// translating between two syntaxes.
+//
+// `file_text` is NOT a rendering of `data.config`, and since qn.6j they are genuinely different
+// documents: `config` is the RESOLVED configuration with every key filled, `file_text` is only what
+// the user set. Rendering the former here would show a document the file does not contain.
 export function ConfigView({ data }: { data: ConfigResponse }) {
   return (
     <div>
@@ -38,8 +46,11 @@ export function ConfigView({ data }: { data: ConfigResponse }) {
 
           Same idiom and same reason as `JobLogPane`, which got this right during the qn.6a mobile
           pass and says so in its own comment. */}
+      {/* An empty string is a REAL STATE, not a loading one: a fresh install has no config.yml until
+          the first save. Saying so beats an empty box, and `source.mtime` says the same thing in the
+          line below — this is the sentence a first-run user reads. */}
       <pre className="overflow-auto rounded-card border border-line bg-bg p-4 font-mono text-xs whitespace-pre-wrap break-words text-muted">
-        {JSON.stringify(data.config, null, 2)}
+        {data.file_text || "No config.yml yet — it is written on your first save."}
       </pre>
       {/* The path is arbitrary-length too, and it is the other thing on this page that can be
           longer than a phone is wide. */}
