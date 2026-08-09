@@ -24,6 +24,31 @@
 /* Dark mode is driven by the `.dark` class on <html> (system-follow set in main.tsx). */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* THE VISIBLE AREA, FOR SURFACES THAT ESCAPE THE SHELL (quince#762).
+ *
+ * `AppLayout` pads itself by `env(safe-area-inset-*)` so the app clears the notch and the home
+ * indicator. A Radix portal renders into <body>, so a dialog is NOT a descendant of `AppLayout` and
+ * inherits none of it — which is why every dialog in the product sat under the Dynamic Island while
+ * every other surface did not. That is a property of PORTALLING, not of dialogs: anything else
+ * portalled to <body> later (a Select, Popover, Toast, Sheet) has the same gap and should use these.
+ *
+ * Declared here rather than inline in the component for two reasons. The insets are needed by any
+ * portalled surface, so one declaration beats one per component; and a custom property can be
+ * OVERRIDDEN BY A TEST, where `env()` cannot — headless browsers report every inset as 0, so a
+ * regression test written against `env()` directly can only ever prove the fallback. `ui/e2e`
+ * overrides these to stand a simulated Dynamic Island up in CI.
+ *
+ * `--vv-*` describe the VISIBLE viewport and are written by `useVisualViewport` while a dialog is
+ * open; the values below are what holds when nothing has published better ones. `100dvh` is the
+ * whole visible height, which is right in every case except an open keyboard — the one case only
+ * JavaScript can see. `dvh` not `vh`, ruled on quince#659. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --vv-top: 0px;
+  --vv-height: 100dvh;
+}
+
 html,
 body,
 #root {

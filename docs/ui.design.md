@@ -91,5 +91,19 @@ that matters. Concretely —
   single WebSocket bridge multiplexes the event stream into the stores; TanStack Query
   for REST reads; TanStack Virtual for long lists; components stay presentational.
 - Icons: one line-icon set (lucide), 16/20 px, muted by default.
+- **A PORTALLED SURFACE MUST POSITION ITSELF AGAINST THE VISIBLE AREA, AND `AppLayout` CANNOT DO IT
+  FOR IT** (quince#762). `AppLayout` pads by `env(safe-area-inset-*)`, so everything rendered inside
+  the shell clears the notch and the home indicator for free. A Radix portal renders into `<body>`
+  and is not a descendant of it, so it inherits none of that — which is how every dialog in the
+  product came to sit under the Dynamic Island while no other surface did. It is a property of
+  portalling, not of dialogs: a Select, Popover, Tooltip, Toast or Sheet added later inherits the
+  same gap. Use `--safe-top` / `--safe-bottom` and `--vv-top` / `--vv-height` from `index.css`, which
+  exist for exactly this, and centre within that box rather than within the layout viewport.
+- **The layout viewport is not what the user can see, and on iOS only JavaScript knows the
+  difference.** `viewport-fit=cover` extends the layout viewport under the notch, and iOS does not
+  shrink it when the keyboard opens — it shrinks the *visual* viewport. So `position: fixed` plus
+  `top: 50%` centres against a box that is partly off-screen and partly behind a keyboard. There is
+  no CSS-only fix today; `useVisualViewport` publishes the real box as custom properties and the
+  stylesheet does the arithmetic. Heights stay in `dvh`, never `vh` (quince#659).
 - Screenshots for README/releases come from `quince serve --demo` with fixture data —
   keep fixture data presentable (real-looking device names, plausible sizes).
