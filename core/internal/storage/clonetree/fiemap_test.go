@@ -178,3 +178,33 @@ func TestSharingString(t *testing.T) {
 		}
 	}
 }
+
+// A GENUINELY CLONED FILE MUST NEVER BE REPORTED AS A FULL COPY, at any size — and this is the test
+// that fails on the pre-review code (quince#787), on btrfs, for the reason its comment claimed to
+// guard against.
+//
+// btrfs stores a small file INLINE in its metadata. An inline extent carries no SHARED flag even
+// after a real FICLONE, so it must classify as SharingUnknown ("the filesystem cannot answer") and
+// never as SharingUnshared ("this is a full copy") — the second downgrades btrfs to hardlink. With
+// fiemapExtentDataInline transcribed as 0x0008 (which is ENCODED) the inline flag was never masked,
+// the extent fell straight through to the SHARED test, and this returned SharingUnshared.
+//
+// The probe itself writes 1 MiB and so never reaches this, which is exactly why the branch needs
+// its own test: the size masks the bug, and a size is a thing a later change can lower.
+func TestATinyCloneIsNeverReportedAsAFullCopy(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	if err := os.WriteFile(src, []byte("AAAAAAAA"), 0o600); err != nil {
+		t.Fatalf("seed src: %v", err)
+	}
+	if err := reflinkFile(dst, src); err != nil {
+		t.Skipf("FICLONE unsupported on the test filesystem: %v", err)
+	}
+	sharing, why := extentSharing(dst)
+	if sharing == SharingUnshared {
+		t.Fatalf("an 8-byte FICLONE clone reports sharing = unshared, which would downgrade this "+
+			"filesystem out of the reflink backend (%v)", why)
+	}
+	t.Logf("8-byte clone → sharing = %s (%v)", sharing, why)
+}

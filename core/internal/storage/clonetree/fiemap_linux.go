@@ -55,12 +55,41 @@ const (
 	// answer SharingUnknown on every filesystem including the ones that work.
 	fiemapFlagSync = 0x0001
 
+	// The extent flags, transcribed from <linux/fiemap.h>. TestFiemapConstantsMatchTheHeader
+	// carries the header excerpt they were transcribed from, so a wrong one is checkable by eye
+	// against a source that is not this file.
+	//
+	// fiemapExtentDataInline read 0x0008 until the architect caught it on review — 0x0008 is
+	// ENCODED and DATA_INLINE is 0x0200, and the mistake was wrong in both directions at once.
+	// The inline guard this file's comment is written for was INERT: an inline extent fell
+	// through to the SHARED test, carried no SHARED flag, and returned "unshared" — the exact
+	// false negative the guard exists to prevent, masked only by reflinkProbeSize. And compressed
+	// btrfs, which sets ENCODED on every extent, was silently excluded from measurement.
 	fiemapExtentLast       = 0x0001
 	fiemapExtentUnknown    = 0x0002
 	fiemapExtentDelalloc   = 0x0004
-	fiemapExtentDataInline = 0x0008
+	fiemapExtentEncoded    = 0x0008
+	fiemapExtentDataInline = 0x0200
+	fiemapExtentDataTail   = 0x0400
 	fiemapExtentShared     = 0x2000
 )
+
+// notABlockMapping is the set of flags meaning "nothing can be concluded about sharing from this
+// extent". It is named so that what is IN it is reviewable, because the interesting decision is
+// what is OUT.
+//
+// ENCODED IS DELIBERATELY EXCLUDED, and that is measured rather than reasoned. ENCODED means the
+// physical offset cannot be used to read the data — on btrfs it marks a compressed extent — and it
+// says nothing about sharing, which the kernel reports independently. Measured on the lab rig with
+// btrfs remounted `compress=zstd`: a `cp --reflink=always` clone comes back `encoded,shared`, and a
+// plain copy of the same file comes back `encoded` alone. Excluding ENCODED would turn a correct,
+// observable answer into SharingUnknown and warn that the space saving is UNVERIFIED on one of the
+// commonest btrfs configurations there is.
+//
+// DATA_INLINE and DATA_TAIL are both tail-packing — the bytes live in metadata, or share a block
+// with another file — so there is no extent that could be shared and the flag is the whole answer.
+const notABlockMapping = fiemapExtentUnknown | fiemapExtentDelalloc |
+	fiemapExtentDataInline | fiemapExtentDataTail
 
 // fiemapHeader mirrors `struct fiemap` — 32 bytes, 8-aligned.
 type fiemapHeader struct {
@@ -126,11 +155,12 @@ func extentSharing(path string) (Sharing, error) {
 	sawLast := false
 	for i := uint32(0); i < n; i++ {
 		fl := q.extents[i].flags
-		// These three all mean "this is not a real block mapping", so nothing can be concluded
-		// about sharing from them. btrfs INLINES a small file into its metadata and reports
-		// exactly this — measured on the lab rig, where an 8-byte file (the size the old probe
-		// used) comes back `inline` with no `shared` flag even when it was genuinely cloned.
-		if fl&(fiemapExtentDataInline|fiemapExtentUnknown|fiemapExtentDelalloc) != 0 {
+		// Nothing can be concluded about sharing from these — see notABlockMapping for what is in
+		// the set and, more importantly, what is out. btrfs INLINES a small file into its
+		// metadata and reports exactly this: measured on the lab rig, an 8-byte file (the size
+		// the old probe used) comes back `inline` with no `shared` flag even when it was
+		// genuinely cloned.
+		if fl&notABlockMapping != 0 {
 			return SharingUnknown, fmt.Errorf("%s: extent %d is not a block mapping (flags 0x%x)", path, i, fl)
 		}
 		if fl&fiemapExtentShared == 0 {
@@ -141,9 +171,12 @@ func extentSharing(path string) (Sharing, error) {
 		}
 	}
 	if !sawLast {
-		// More extents than slots: every one we saw was shared, but we did not see them all.
-		// Saying so beats reporting a whole-file property from a prefix of it.
-		return SharingUnknown, fmt.Errorf("%s: more than %d extents; sharing observed only on the first %d", path, fiemapExtentSlots, n)
+		// Every extent we saw was shared, but we did not see the one flagged LAST — so this is a
+		// prefix, and reporting a whole-file property from a prefix would be worse than saying so.
+		// Worded without asserting a count: the ordinary cause is more extents than slots, but a
+		// filesystem returning fewer than the slots without ever setting LAST lands here too, and
+		// the old message claimed "more than 32 extents" while n was under 32.
+		return SharingUnknown, fmt.Errorf("%s: the extent list ended without FIEMAP_EXTENT_LAST (%d of at most %d slots); sharing observed only on what was returned", path, n, fiemapExtentSlots)
 	}
 	return SharingShared, nil
 }
