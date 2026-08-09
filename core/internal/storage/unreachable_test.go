@@ -225,17 +225,17 @@ func TestBindJobStorageRefusesUnknownAndUnreachable(t *testing.T) {
 	m.slots = append(m.slots, unreachableSlot("shuttle", "missing_medium"))
 	m.slots[1].StorageID = "01JSTORAGEGONE0000000000"
 
-	if err := m.BindJobStorage("job-1", "01JSTORAGENOSUCH00000000"); err == nil {
+	if err := m.BindJobStorage("job-1", testUDID, "01JSTORAGENOSUCH00000000"); err == nil {
 		t.Error("binding a job to an undeclared storage must refuse")
 	}
-	err := m.BindJobStorage("job-2", "01JSTORAGEGONE0000000000")
+	err := m.BindJobStorage("job-2", testUDID, "01JSTORAGEGONE0000000000")
 	if err == nil {
 		t.Fatal("binding a job to an unreachable storage must refuse")
 	}
 	if !strings.Contains(err.Error(), "shuttle") || !strings.Contains(err.Error(), "missing_medium") {
 		t.Errorf("the refusal must name the storage and the code, got %q", err)
 	}
-	if err := m.BindJobStorage("job-3", "01JSTORAGEOK000000000000"); err != nil {
+	if err := m.BindJobStorage("job-3", testUDID, "01JSTORAGEOK000000000000"); err != nil {
 		t.Errorf("binding to a usable storage must succeed, got %v", err)
 	}
 }
@@ -253,7 +253,7 @@ func TestBoundJobResolvesToItsOwnStorage(t *testing.T) {
 		BackendName: BackendCopy,
 	})
 
-	if err := m.BindJobStorage("job-1", "01JSTORAGESECOND00000000"); err != nil {
+	if err := m.BindJobStorage("job-1", testUDID, "01JSTORAGESECOND00000000"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := m.jobSlot("job-1")
@@ -284,7 +284,7 @@ func TestABindingToADisappearedStorageRefuses(t *testing.T) {
 	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
 	m.slots[0].StorageID = "01JSTORAGEDEFAULT0000000"
 	m.mu.Lock()
-	m.jobStorage = map[string]string{"job-1": "01JSTORAGEVANISHED000000"}
+	m.jobStorage = map[string]jobBinding{"job-1": {storageID: "01JSTORAGEVANISHED000000", udid: testUDID}}
 	m.mu.Unlock()
 
 	if _, err := m.jobSlot("job-1"); err == nil {
@@ -370,7 +370,7 @@ func TestCommitRecordsTheVersionOnTheJOBsStorage(t *testing.T) {
 	})
 
 	const jobID = "01JOBONSECOND00000000000"
-	if err := m.BindJobStorage(jobID, secondID); err != nil {
+	if err := m.BindJobStorage(jobID, testUDID, secondID); err != nil {
 		t.Fatal(err)
 	}
 	s, err := m.jobSlot(jobID)
@@ -434,7 +434,7 @@ func TestSeedKindIsFullForAFirstBackupToASECONDStorage(t *testing.T) {
 	}
 
 	const jobID = "01JOBTOSECOND00000000000"
-	if err := m.BindJobStorage(jobID, secondID); err != nil {
+	if err := m.BindJobStorage(jobID, testUDID, secondID); err != nil {
 		t.Fatal(err)
 	}
 	s, err := m.jobSlot(jobID)

@@ -42,7 +42,7 @@ func TestG1OneDeviceToTwoStoragesLeavesTheFirstUntouched(t *testing.T) {
 
 	// --- backup to A ----------------------------------------------------------------------------
 	const jobA = "01JOBTOALPHA000000000000"
-	if err := m.BindJobStorage(jobA, idA); err != nil {
+	if err := m.BindJobStorage(jobA, testUDID, idA); err != nil {
 		t.Fatal(err)
 	}
 	goodEncryptedFull(t, seedTree(t, m, testUDID, jobA))
@@ -59,7 +59,7 @@ func TestG1OneDeviceToTwoStoragesLeavesTheFirstUntouched(t *testing.T) {
 
 	// --- backup to B ----------------------------------------------------------------------------
 	const jobB = "01JOBTOBETA0000000000000"
-	if err := m.BindJobStorage(jobB, idB); err != nil {
+	if err := m.BindJobStorage(jobB, testUDID, idB); err != nil {
 		t.Fatal(err)
 	}
 	goodEncryptedFull(t, seedTree(t, m, testUDID, jobB))

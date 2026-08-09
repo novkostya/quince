@@ -87,8 +87,13 @@ type Manager struct {
 	now     func() time.Time
 	refresh Refresher
 
-	// jobStorage maps jobID → storageID for jobs in flight. Guarded by mu.
-	jobStorage map[string]string
+	// jobStorage maps jobID → the storage and device a job in flight is bound to. Guarded by mu.
+	jobStorage map[string]jobBinding
+
+	// leases are the per-(storage, device) commit leases (qn.6i D3). Guarded by mu; the lease's own
+	// mutex is what the two actors contend on, and it is deliberately NOT mu — holding mu across a
+	// device's scan would block every reader of the slot list, including the HTTP handlers.
+	leases map[string]*commitLease
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).
@@ -363,6 +368,25 @@ func (m *Manager) CommitJob(udid, jobID string) (wire.Version, error) {
 	if err != nil {
 		return wire.Version{}, err
 	}
+	// THE COMMIT PATH CLAIMS THE LEASE AND WAITS FOR IT (qn.6i D3). It is the only claimer that
+	// waits: reconciliation TryClaims and defers. The wait is bounded by one device's scan and is
+	// LOGGED rather than silent — a commit that paused is a degraded mode, and this project does not
+	// have unsurfaced ones.
+	//
+	// IT SPANS registerCommitted, not just Backend.Commit, and that span is the point. The artifact
+	// exists on disk the moment Commit returns; the row does not exist until registerCommitted
+	// inserts it. A scan reaching the tree inside that gap finds an artifact with no row and ADOPTS
+	// it — and `Store.InsertVersion` is a plain INSERT, so the engine's own insert then fails on the
+	// primary key and a COMPLETED backup is reported failed. Holding the lease across both closes
+	// the window that produces it.
+	lease := m.leaseFor(s.StorageID, udid)
+	if !lease.TryClaim() {
+		m.log.Info("storage: commit is waiting for a reconciliation pass to finish with this device",
+			"udid", udid, "job", jobID, "storage", s.Name)
+		lease.Claim()
+	}
+	defer lease.Release()
+
 	tree := s.Backend.TreePath(udid, jobID)
 	vr := Verify(tree, m.seedKind(s, udid))
 	if !vr.OK {
