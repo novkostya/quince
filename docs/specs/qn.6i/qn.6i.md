@@ -379,7 +379,7 @@ Beyond `make gates` / `make image`:
 | **G3** | 3, 4 | Go test on the applier: the subscriber returns without calling the scan, and a second write is not serialised behind one |
 | **G4** | 5 | `go test -race`: a bound job on `(storage, device)` makes the pass defer that device, and it runs after `UnbindJob` |
 | **G5** | 6 | a pending journal whose `JobID` is bound is skipped; the same journal with an unbound id is rolled forward |
-| **G6** | 7 | `go test -race` driving `CommitJob` and a scan of the same device concurrently — the D4 measurement. **This gate may retire the finding**, and if it does, PR 2 says so in its own text |
+| **G6** | 7 | **SPLIT IN THREE BY PR 2, because one test could not do the job.** **G6a** interleaves a scan between `Backend.Commit` and `registerCommitted` deterministically — the D4 measurement, and a permanent tripwire on the seam. **G6b** runs a commit and a scan concurrently under `-race` — a regression net, *not* a proof: it passed 5/5 with the guard removed. **G6c** holds the lease exactly as `CommitJob` does and asserts the scan declines to enter — the only one of the three that is red without the lease |
 | **G7** | 8 | fake clock: N passes in M intervals; `0` produces none |
 | **G8** | 9 | the existing crash-mid-commit fixture, restarted, asserting `succeeded` — red if the ordering is inverted |
 | **G9** | 10 | `versions verify` against a fixture with an unadopted on-disk version still reports it |
@@ -447,8 +447,18 @@ replay fixture* rule has nothing to add here.
 2. **A slow roll-forward after a crash still delays the listener** (D2), and nothing reports it. The
    window is closed in the ordinary case and not abolished. Whether recovery deserves its own reported
    state is not decided here.
-3. **D4 is reasoned, not measured.** G6 settles it. If the window proves unreachable, the finding is
-   withdrawn in PR 2's text — not quietly dropped from this spec.
+3. ~~**D4 is reasoned, not measured.** G6 settles it.~~ **MEASURED IN PR 2 (quince#771), and the
+   answer splits in two — the mechanism is REAL and the RATE is still unknown.** G6a interleaves a
+   scan between `Backend.Commit` and `registerCommitted` by hand: the adopt path inserts the version
+   and the engine's own insert then collides on the primary key, so a completed backup is reported
+   failed. That is now a deterministic gate. **What is NOT established is that a real scheduler ever
+   lands there**: the first attempt at G6 raced a commit against a scan loop and **passed 5/5 with the
+   guard removed**, because the window is microseconds wide. So the finding is **confirmed as a seam
+   property and unconfirmed as a field event**, and nobody has a rate.
+   **Recorded rather than collapsed into "measured", because the two halves license different
+   things.** The mechanism is what justifies holding the lease across `registerCommitted` rather than
+   only across roll-forward. The missing rate is why nobody should claim this rung fixed an observed
+   bug: it closed a window that has never been seen to open.
 4. **Roll-forward duration is unmeasured on every backend.** Nobody has timed `ResumeCommit` with a
    real pending journal, so D2's "usually trivial" is an argument from what the code does, not a
    measurement.
