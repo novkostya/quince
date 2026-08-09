@@ -18,7 +18,7 @@ import (
 
 func parseStorages(t *testing.T, raw string) []StorageEntry {
 	t.Helper()
-	cfg, _, err := Parse([]byte(raw))
+	cfg, _, _, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

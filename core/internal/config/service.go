@@ -25,7 +25,10 @@ type Source struct {
 // Loaded is the full result of reading config.yml from disk. OK is false when parsing or
 // validation failed — the caller keeps last-good and surfaces Warnings/Errors.
 type Loaded struct {
-	Config   Config
+	Config Config
+	// Declared is what the file actually carried (qn.6j). Empty when there is no file, which is
+	// why a fresh install writes a minimal one rather than a full dump.
+	Declared Declared
 	Warnings []Warning
 	Errors   []wire.ConfigError
 	Source   Source
@@ -35,10 +38,12 @@ type Loaded struct {
 // Parse decodes YAML over the defaults (missing keys keep their default) and collects
 // unknown-key warnings (typo guard, contracts §6 — a key the app doesn't know is a
 // warning, never an error). A YAML syntax error is returned as err.
-func Parse(raw []byte) (Config, []Warning, error) {
+// The DECLARED SET rides out with it (qn.6j) — see Declared. It is computed from the same
+// decoded mapping the typo guard already walks, so a key path means the same thing to both.
+func Parse(raw []byte) (Config, Declared, []Warning, error) {
 	cfg := Default()
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return Default(), nil, err
+		return Default(), nil, nil, err
 	}
 	// PER-ENTRY DEFAULTS ARE APPLIED HERE, once, rather than at each read (quince#473,
 	// quince#504). `storage:` entries do not exist until the file is decoded, so unlike every
@@ -48,11 +53,13 @@ func Parse(raw []byte) (Config, []Warning, error) {
 	cfg.Storage = ResolveStorages(cfg.Storage)
 	var rawMap map[string]any
 	if err := yaml.Unmarshal(raw, &rawMap); err != nil || rawMap == nil {
-		return cfg, nil, nil // empty doc or non-mapping root: no unknown keys to report
+		return cfg, Declared{}, nil, nil // empty doc or non-mapping root: nothing declared, nothing unknown
 	}
 	warnings := unknownKeys(rawMap, reflect.TypeOf(Config{}), "")
 	sort.Slice(warnings, func(i, j int) bool { return warnings[i].Path < warnings[j].Path })
-	return cfg, warnings, nil
+	declared := Declared{}
+	declaredKeys(rawMap, reflect.TypeOf(Config{}), "", declared)
+	return cfg, declared, warnings, nil
 }
 
 // unknownKeys walks a decoded YAML mapping against the struct's yaml tags, reporting any
@@ -164,7 +171,7 @@ func Load(path string) Loaded {
 			Warnings: []Warning{{Path: path, Message: "cannot read config: " + err.Error()}},
 		}
 	}
-	cfg, warnings, perr := Parse(data)
+	cfg, declared, warnings, perr := Parse(data)
 	if perr != nil {
 		return Loaded{
 			Config: Default(), Source: src, OK: false,
@@ -177,7 +184,7 @@ func Load(path string) Loaded {
 		}
 		return Loaded{Config: Default(), Warnings: warnings, Errors: errs, Source: src, OK: false}
 	}
-	return Loaded{Config: cfg, Warnings: append(warnings, degradedModeWarnings(cfg)...), Source: src, OK: true}
+	return Loaded{Config: cfg, Declared: declared, Warnings: append(warnings, degradedModeWarnings(cfg)...), Source: src, OK: true}
 }
 
 // degradedModeWarnings surfaces settings that are VALID and deliberately weaker than the
@@ -229,10 +236,13 @@ type Service struct {
 	// THE ONE RULE IT CREATES: an Applier must not call Replace or ForgetStorage. See Applier.
 	writeMu sync.Mutex
 
-	mu       sync.RWMutex
-	path     string
-	log      *slog.Logger
-	cfg      Config
+	mu   sync.RWMutex
+	path string
+	log  *slog.Logger
+	cfg  Config
+	// declared is the file's own record of what the user set, refreshed on every load and every
+	// write. Read under mu like cfg; nothing outside this package needs it yet.
+	declared Declared
 	warnings []Warning
 	source   Source
 
@@ -332,7 +342,7 @@ func NewService(path string, log *slog.Logger) *Service {
 	for _, w := range l.Warnings {
 		log.Warn("config warning", "path", w.Path, "message", w.Message)
 	}
-	return &Service{path: path, log: log, cfg: l.Config, warnings: l.Warnings, source: l.Source}
+	return &Service{path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings, source: l.Source}
 }
 
 // Snapshot returns the live config, its warnings, and its source (for GET /api/config).

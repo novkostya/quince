@@ -141,6 +141,13 @@ func TestTheAddPathStillRefusesAnEmptyBackend(t *testing.T) {
 // `default` is optional WHEN THERE IS ONE STORAGE and implied only there. NOT quince#473, which is
 // the flattening of `storage:` to fully-specified entries — the right family, the wrong ruling. It
 // said #473 until the review of quince#755 asked me to check a number it could not verify.
+//
+// AND quince#504 WAS THIS DEFECT AT THE LOAD DOOR; IT WAS FIXED THERE AND NOT HERE. Its own
+// reproduction reads `PROBE REJECTED → storage.storages[0].name must not be empty` and `→
+// storage.storages exactly one storage must be marked default: true` — the same two error strings
+// this file's tests assert against, a week later, on the write door nobody re-checked. A fix applied
+// where a defect is FOUND closes an instance; only a fix at the invariant closes the class.
+//
 // The permissive tests above all use one storage, so without this the guard holds by `len(out) == 1`
 // and by nothing else, and the plausible future edit ("pick the first when none is marked") would
 // soften PUT silently with every other test in this file still green.

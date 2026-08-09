@@ -168,7 +168,7 @@ storage:
     pathh: /backups
     default: true
 `)
-	_, warns, err := Parse(raw)
+	_, _, warns, err := Parse(raw)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -184,7 +184,7 @@ storage:
 }
 
 func TestParseDistinguishesAbsentStoragesFromEmpty(t *testing.T) {
-	absent, _, err := Parse([]byte("backup:\n  transport: auto\n"))
+	absent, _, _, err := Parse([]byte("backup:\n  transport: auto\n"))
 	if err != nil {
 		t.Fatalf("parse absent: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestParseDistinguishesAbsentStoragesFromEmpty(t *testing.T) {
 		t.Errorf("an absent storages key must stay nil, got %+v", absent.Storage)
 	}
 
-	empty, _, err := Parse([]byte("storage: []\n"))
+	empty, _, _, err := Parse([]byte("storage: []\n"))
 	if err != nil {
 		t.Fatalf("parse empty: %v", err)
 	}

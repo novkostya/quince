@@ -1,0 +1,163 @@
+package config
+
+import (
+	"reflect"
+	"testing"
+)
+
+// The declared set and the marshaller that reads it (qn.6j, quince#728). NOTHING IN PRODUCTION
+// CALLS MarshalDeclared YET — replaceLocked still writes the full document — so these drive it
+// directly. The switch is spec PR 4 and carries its own proof.
+
+func parseDeclared(t *testing.T, raw string) (Config, Declared) {
+	t.Helper()
+	cfg, d, _, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return cfg, d
+}
+
+// The declared set is what the FILE said, never what Resolved() filled in. This is the whole
+// distinction the rung turns on: `- path: /backups` declares one key, and the entry it produces
+// carries six.
+func TestDeclaredRecordsOnlyWhatTheFileSaid(t *testing.T) {
+	_, d := parseDeclared(t, "storage:\n  - path: /backups\n")
+
+	for _, want := range []string{"storage", "storage[/backups].path"} {
+		if !d.Has(want) {
+			t.Errorf("declared is missing %q; it has %v", want, keysOf(d))
+		}
+	}
+	// Every one of these is present in the RESOLVED entry and absent from the file.
+	for _, unwanted := range []string{
+		"storage[/backups].name", "storage[/backups].backend", "storage[/backups].default",
+		"storage[/backups].zfs", "storage[/backups].retention", "backup", "tls",
+	} {
+		if d.Has(unwanted) {
+			t.Errorf("declared claims %q, which the file never wrote", unwanted)
+		}
+	}
+}
+
+// An entry is keyed by NAME when it has one, so a declared path survives the entry moving in the
+// list. Keyed by index it would silently re-point on any insertion.
+func TestDeclaredKeysAnEntryByItsName(t *testing.T) {
+	_, d := parseDeclared(t,
+		"storage:\n  - name: nas\n    path: /a\n    backend: reflink\n    default: true\n"+
+			"  - name: usb\n    path: /b\n    backend: hardlink\n")
+
+	for _, want := range []string{"storage[nas].backend", "storage[usb].backend", "storage[nas].default"} {
+		if !d.Has(want) {
+			t.Errorf("declared is missing %q; it has %v", want, keysOf(d))
+		}
+	}
+	if d.Has("storage[0].backend") || d.Has("storage[usb].default") {
+		t.Errorf("declared is keyed wrongly: %v", keysOf(d))
+	}
+}
+
+// THE FIXED POINT, and it is the property the whole design rests on: what MarshalDeclared writes,
+// re-parsed, declares the same set and resolves to the same config. That is what makes the record
+// survive a restart without anything being persisted — the file IS the record.
+func TestAMinimalFileIsAFixedPoint(t *testing.T) {
+	const raw = "storage:\n    - path: /backups\n"
+	cfg, d := parseDeclared(t, raw)
+
+	out, err := MarshalDeclared(cfg, d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != raw {
+		t.Fatalf("not a fixed point.\n got: %q\nwant: %q", out, raw)
+	}
+
+	// And again, from what was just written — twice in a row, because a rule that converges on the
+	// second pass would still re-inflate the file once per save.
+	cfg2, d2 := parseDeclared(t, string(out))
+	out2, err := MarshalDeclared(cfg2, d2)
+	if err != nil {
+		t.Fatalf("marshal 2: %v", err)
+	}
+	if string(out2) != raw {
+		t.Fatalf("second pass diverged.\n got: %q\nwant: %q", out2, raw)
+	}
+}
+
+// An explicitly-written default SURVIVES, which is the clause that makes the rule "only what was
+// set" rather than "only what differs from the default" — spec D5. Deleting it would change the
+// user's file's meaning the day a default changes.
+//
+// THE INPUT HERE IS IN CANONICAL KEY ORDER AND THAT IS NOT INCIDENTAL. A fixed point is only a
+// fixed point for a file already in struct-field order: write `ui:` above `storage:` by hand and
+// the first save reorders it, because struct field order IS the key order (D12's deterministic
+// regeneration). Measured while writing this test, which had it the other way round and failed
+// on the reorder rather than on the value.
+func TestAnExplicitlySetDefaultValueIsKept(t *testing.T) {
+	const raw = "storage:\n    - path: /backups\nui:\n    theme: system\n"
+	cfg, d := parseDeclared(t, raw)
+
+	out, err := MarshalDeclared(cfg, d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != raw {
+		t.Fatalf("an explicitly-written default was not preserved.\n got: %q\nwant: %q", out, raw)
+	}
+}
+
+// THE GENERAL ROUND-TRIP INVARIANT (spec G4): for every document, what comes back from what was
+// written is deeply equal to what was written. This is the gate that catches an omission the
+// case-by-case tests missed, which is worth more than any one of them.
+func TestWhatIsWrittenParsesBackToTheSameConfig(t *testing.T) {
+	for _, raw := range []string{
+		"storage:\n  - path: /backups\n",
+		"storage:\n  - path: /backups\n    backend: hardlink\n",
+		"backup:\n  require_encryption: false\nstorage:\n  - path: /backups\n",
+		"storage:\n  - name: nas\n    path: /a\n    default: true\n  - name: usb\n    path: /b\n",
+		"sessions:\n  allow_insecure_transport: true\nstorage:\n  - path: /backups\n",
+		"storage:\n  - path: /backups\n    retention:\n      keep_recent: 0\n",
+		"storage:\n  - path: /backups\n    zfs:\n      parent_dataset: tank/q\n      mode: hook\n",
+	} {
+		cfg, d := parseDeclared(t, raw)
+		out, err := MarshalDeclared(cfg, d)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", raw, err)
+		}
+		back, _, _, err := Parse(out)
+		if err != nil {
+			t.Fatalf("re-parse of %q: %v\nwritten: %q", raw, err, out)
+		}
+		if !reflect.DeepEqual(cfg, back) {
+			t.Errorf("round trip changed the config for %q\nwritten: %q\n got: %+v\nwant: %+v",
+				raw, out, back, cfg)
+		}
+	}
+}
+
+// A storage entry ALWAYS keeps its path, whatever the declared set says — an entry without one is
+// not a storage, it is a mapping the next parse would refuse. The "could not be re-parsed without
+// it" clause of the write rule, not an exception to it.
+func TestAnEntryKeepsItsPathEvenWhenNothingDeclaresIt(t *testing.T) {
+	cfg, _ := parseDeclared(t, "storage:\n  - path: /backups\n    backend: hardlink\n")
+
+	out, err := MarshalDeclared(cfg, Declared{"storage": true}) // deliberately declares no leaf
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	back, _, _, err := Parse(out)
+	if err != nil {
+		t.Fatalf("re-parse: %v\nwritten: %q", err, out)
+	}
+	if back.Storage == nil || len(*back.Storage) != 1 || (*back.Storage)[0].Path != "/backups" {
+		t.Fatalf("the entry lost its path and the document no longer describes a storage: %q", out)
+	}
+}
+
+func keysOf(d Declared) []string {
+	out := make([]string, 0, len(d))
+	for k := range d {
+		out = append(out, k)
+	}
+	return out
+}

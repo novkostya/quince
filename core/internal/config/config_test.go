@@ -15,7 +15,7 @@ func TestDefaultRoundTripIsStableAndAtomicWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal defaults: %v", err)
 	}
-	cfg, warns, err := Parse(m1)
+	cfg, _, warns, err := Parse(m1)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestParseKeepsDefaultsForMissingKeys(t *testing.T) {
 	// NON-DEFAULT value on purpose, so this test still proves that setting one key keeps the others'
 	// defaults. With `usb` (now the default) the assertion below would pass whether the key was read
 	// or ignored, which is the shape of check this repository keeps filing bugs about.
-	cfg, warns, err := Parse([]byte("backup:\n  preferred_transport: wifi\n"))
+	cfg, _, warns, err := Parse([]byte("backup:\n  preferred_transport: wifi\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestUnknownKeysWarn(t *testing.T) {
 	// (quince#473). unknownKeys already recursed into slices of structs, which is why this needed
 	// no new machinery — measured before the flatten was written rather than discovered after.
 	raw := "nonsense: 1\nstorage:\n  - path: /backups\n    bogus: 2\n    zfs:\n      typo: 3\n"
-	_, warns, err := Parse([]byte(raw))
+	_, _, warns, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestBootstrapParsesTrustedProxies(t *testing.T) {
 // Asserted through the PARSER rather than by grepping the struct: what matters is that a user who
 // writes the old key is TOLD, not that a field is absent.
 func TestConfigHasNoServerSection(t *testing.T) {
-	_, warns, err := Parse([]byte("server:\n  trusted_proxies: [203.0.113.5]\n"))
+	_, _, warns, err := Parse([]byte("server:\n  trusted_proxies: [203.0.113.5]\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestPreferredTransportRoundTripsUnderItsNewName(t *testing.T) {
 	if strings.Contains(string(data), "\n  transport:") {
 		t.Errorf("marshalled config still carries the OLD `transport:` key:\n%s", data)
 	}
-	back, _, err := Parse(data)
+	back, _, _, err := Parse(data)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestPreferredTransportRefusesAuto(t *testing.T) {
 // is a known, filed defect and not this change's to fix. What matters here is that the value does not
 // silently take effect under a name that no longer means anything.
 func TestTheOldTransportKeyIsNowUnknown(t *testing.T) {
-	_, warns, err := Parse([]byte("backup:\n  transport: wifi\n"))
+	_, _, warns, err := Parse([]byte("backup:\n  transport: wifi\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
