@@ -135,7 +135,7 @@ func TestExplainWritesNothingWhenSatisfied(t *testing.T) {
 func TestAParseFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
 	// The exact shape every pre-quince#473 deployment has.
 	raw := "storage:\n    storages:\n        - name: local\n          path: /backups\n          default: true\n    backend: zfs\n"
-	cfg, warnings, perr := Parse([]byte(raw))
+	cfg, _, warnings, perr := Parse([]byte(raw))
 	if perr == nil {
 		t.Fatal("the old nested shape must fail to parse against the flattened schema")
 	}
