@@ -94,12 +94,27 @@ repo is not a message bus, and no human is an RPC layer.
    dependency exists on the forge for anything to close. *"Branch each PR from `main`"* above is a
    statement about the branch you OPEN, not about where your fingers start.
 
-   **The timing caveat is the whole of the discipline.** A rebase onto `main` yields a clean diff only
-   **after the predecessor has landed**: until then its commits are not in `main`, so they are still
-   your ancestors and the PR would carry both slices — the mis-scoping rung 1 opens with. So build
-   immediately, `git fetch && git rebase origin/main` once the predecessor merges (its commits drop
-   out of the range as already-upstream), and open then. **What waits is `gh pr create`, not the
-   work.**
+   **The timing caveat is the whole of the discipline.** Rebasing yields a clean diff only **after the
+   predecessor has landed**: until then its commits are not in `main`, so they are still your
+   ancestors and the PR would carry both slices — the mis-scoping rung 1 opens with. So build
+   immediately, and once the predecessor merges rebase **from its tip**, not from `main`:
+
+   ```sh
+   git fetch && git rebase --onto origin/main <predecessor-branch>
+   ```
+
+   **What waits is `gh pr create`, not the work.**
+
+   **`--onto` IS LOAD-BEARING, not a flourish.** It replays only the commits *after*
+   `<predecessor-branch>`, so it never touches the predecessor's own work. The plain
+   `git rebase origin/main` is correct only when the predecessor was **rebase-merged** — and §6 permits
+   **squash**, which collapses that slice into one commit with a new patch-id, so nothing matches,
+   nothing drops, and the rebase replays commits whose content is already in `main` and conflicts
+   against it. Measured both ways on 2026-08-09 (quince#773, found by the analyst seat and reproduced
+   independently): plain rebase → `CONFLICT (content) … could not apply <the predecessor's own
+   commit>`; `--onto` → clean, carrying one commit and a one-file diff. **Resolving that conflict
+   wrongly ships a silent revert of the slice that just landed**, which is why the form that cannot
+   reach it is the documented one.
 
    **If you cannot wait, the answer is still no.** Opening before the predecessor lands leaves `base:`
    as either its branch — the stacked PR this rung forbids — or `main` with a diff carrying somebody
