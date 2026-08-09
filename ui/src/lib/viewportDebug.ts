@@ -26,59 +26,116 @@ const LOG_LINES = 9;
 // real insets are — CANNOT be answered from Safari at all. The instrument has to be reachable from
 // the installed app or it cannot measure the thing it was built for.
 //
-// So: FIVE TAPS IN THE TOP-LEFT CORNER, within three seconds. No UI, no route, no component touched,
-// and it lives and dies with this file. It is also remembered, so a reload or a navigation inside the
-// app does not lose it — tap five times again to turn it off.
-const CORNER = 64; // px square in the top-left
+// THE FIRST ATTEMPT AT THIS DID NOT WORK ON THE DEVICE, for two reasons, either of which was enough:
+//
+//  - it watched the top-left 64px square, which on an iPhone is UNDER THE STATUS BAR. iOS keeps that
+//    strip for itself — a tap there means "scroll to top" — so most of those taps never reached the
+//    page at all. The region is now well inside the content area;
+//  - the handler touched `localStorage` UNWRAPPED. Boot-time access was already in a `try`, and the
+//    gesture's was not, so a store that refuses in standalone would throw inside the listener and the
+//    gesture would do nothing, silently. Everything that touches storage is wrapped now.
+//
+// It also no longer reloads: the overlay starts and stops in place, so turning it on cannot depend on
+// the flag surviving a page load. Remembering it is now a convenience rather than the mechanism.
+//
+// TWO WAYS IN, because a gesture that does not work is worse than no gesture:
+//
+//  - THREE FINGERS ON THE SCREEN AT ONCE, anywhere. Position-independent, so nothing about safe
+//    areas or overlays can swallow it.
+//  - FIVE TAPS in the top-left of the CONTENT, below the status bar.
+//
+// Either toggles. No UI, no route, no component touched; it lives and dies with this file.
 const TAPS = 5;
 const WINDOW_MS = 3000;
+const FINGERS = 3;
 const REMEMBERED = "quince.vvdebug";
 
+function remembered(): boolean {
+  try {
+    return localStorage.getItem(REMEMBERED) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function remember(on: boolean): void {
+  try {
+    localStorage.setItem(REMEMBERED, on ? "1" : "0");
+  } catch {
+    // A blocked store makes the choice forgetful, never broken.
+  }
+}
+
 export function initViewportDebug(): () => void {
-  const armCorner = (): void => {
-    let count = 0;
-    let first = 0;
-    document.addEventListener(
-      "pointerdown",
-      (e) => {
-        if (e.clientX > CORNER || e.clientY > CORNER) {
-          count = 0;
-          return;
-        }
-        const now = e.timeStamp;
-        if (count === 0 || now - first > WINDOW_MS) {
-          count = 1;
-          first = now;
-          return;
-        }
-        if (++count < TAPS) return;
-        count = 0;
-        const on = localStorage.getItem(REMEMBERED) === "1";
-        localStorage.setItem(REMEMBERED, on ? "0" : "1");
-        location.reload();
-      },
-      true,
-    );
+  let stop: (() => void) | null = null;
+  const toggle = (): void => {
+    if (stop) {
+      stop();
+      stop = null;
+      remember(false);
+      return;
+    }
+    stop = start();
+    remember(true);
   };
-  armCorner();
+
+  // Three fingers down together. `pointerdown` fires once per finger, so this counts how many are
+  // currently down rather than looking for a single event.
+  const down = new Set<number>();
+  const onDown = (e: PointerEvent): void => {
+    down.add(e.pointerId);
+    if (down.size >= FINGERS) {
+      down.clear();
+      toggle();
+    }
+  };
+  const onUp = (e: PointerEvent): void => {
+    down.delete(e.pointerId);
+  };
+
+  // Five taps in the top-left of the CONTENT. The band starts below the status bar and is generous,
+  // because the point is that it can be hit, not that it is precise.
+  let taps = 0;
+  let first = 0;
+  const onTap = (e: PointerEvent): void => {
+    const inside = e.clientX < 140 && e.clientY > 96 && e.clientY < 420;
+    if (!inside) {
+      taps = 0;
+      return;
+    }
+    if (taps === 0 || e.timeStamp - first > WINDOW_MS) {
+      taps = 1;
+      first = e.timeStamp;
+      return;
+    }
+    if (++taps < TAPS) return;
+    taps = 0;
+    toggle();
+  };
+
+  document.addEventListener("pointerdown", onDown, true);
+  document.addEventListener("pointerup", onUp, true);
+  document.addEventListener("pointercancel", onUp, true);
+  document.addEventListener("pointerdown", onTap, true);
 
   const flagged =
     typeof location !== "undefined" && new URLSearchParams(location.search).has("vvdebug");
-  let remembered = false;
-  try {
-    remembered = localStorage.getItem(REMEMBERED) === "1";
-  } catch {
-    // Private mode or a blocked store — the URL flag still works.
+  if (flagged || remembered()) {
+    stop = start();
+    remember(true);
   }
-  if (flagged) {
-    try {
-      localStorage.setItem(REMEMBERED, "1");
-    } catch {
-      // Not being able to remember it is not a reason to refuse to show it.
-    }
-  }
-  if (!flagged && !remembered) return () => {};
 
+  return () => {
+    document.removeEventListener("pointerdown", onDown, true);
+    document.removeEventListener("pointerup", onUp, true);
+    document.removeEventListener("pointercancel", onUp, true);
+    document.removeEventListener("pointerdown", onTap, true);
+    stop?.();
+    stop = null;
+  };
+}
+
+function start(): () => void {
   const vv = window.visualViewport;
   if (!vv) return () => {};
 
@@ -87,7 +144,7 @@ export function initViewportDebug(): () => void {
   box.style.cssText = [
     "position:fixed",
     "left:0",
-    "top:0",
+    "top:env(safe-area-inset-top,0px)",
     "z-index:2147483647",
     "pointer-events:none",
     "font:9px/1.25 ui-monospace,monospace",
