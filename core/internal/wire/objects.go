@@ -250,6 +250,13 @@ type Storage struct {
 	// MISSING versions are counted (qn.6d rung-ruled decision 3), matching UDIDsWithVersions and
 	// deliberately unlike Slot.hasVersionFor, which excludes them because "will the next backup be
 	// full" depends on a usable artifact.
+	//
+	// SINCE qn.6i THEY CAN ALSO BE INCOMPLETE, WHICH IS A DIFFERENT THING FROM STALE. The ruling above
+	// is untouched — there is still no timestamp, because the counts are not a last-known reading —
+	// but reconciliation now runs asynchronously, so between a start and the first pass finishing
+	// these are counts of a registry quince KNOWS it has not finished reading. That window is declared
+	// on `GET /api/health` as `reconciling`, and contracts §1 states what it promises: while it holds,
+	// a count may be short, and short is not zero-meaning-none.
 	BackupCount int `json:"backup_count"`
 	DeviceCount int `json:"device_count"`
 }

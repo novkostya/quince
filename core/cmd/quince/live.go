@@ -31,6 +31,9 @@ type liveStack struct {
 	muxer        httpapi.MuxerControl
 	ops          httpapi.DeviceOps
 	engine       *backup.Engine
+	// reconcile is the qn.6i runner, non-nil only when the scan was DEFERRED (serve). The CLIs get
+	// nil because they ran the scan synchronously and have nothing left to report about.
+	reconcile *storage.Runner
 }
 
 // buildLiveStack constructs the live subsystems (muxer supervision qn.2b, device registry qn.2,
@@ -39,7 +42,7 @@ type liveStack struct {
 // (amendment 1: a commit that rolled forward is visible to the job reconciler) — BEFORE returning,
 // so the caller serves / drives only a reconciled system. Shared by `serve` and `backup`.
 func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *config.Service,
-	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*liveStack, error) {
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger, scan scanMode) (*liveStack, error) {
 	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
@@ -72,14 +75,21 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	go deviceops.NewEnrichDriver(tools, reg, eventBus, log).Run(ctx)
 	log.Info("device ops ready (pair/encryption/enrichment)")
 
-	// Storage subsystem (qn.5): resolve the backend + reconcile before anything serves.
-	storageMgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log)
+	// Storage subsystem (qn.5): resolve the backend, roll any half-done commit forward, and — for
+	// the CLIs only — scan before returning (qn.6i D2).
+	storageMgr, err := buildStorage(ctx, bootstrap, cfgSvc, st, eventBus, log, scan)
 	if err != nil {
 		return nil, err
 	}
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
 	ls.storages = storageMgr
+	if scan == scanDeferred {
+		// CREATED HERE, STARTED BY THE CALLER. Constructing it starts nothing, so the caller decides
+		// when the first pass may begin — for `serve` that is once the router exists, so the scan and
+		// the bind proceed together rather than one queueing behind the other.
+		ls.reconcile = storage.NewRunner(storageMgr, log)
+	}
 
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
 	// committed to, which is now the DEFAULT declared storage rather than the retired
@@ -168,13 +178,28 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	return ls, nil
 }
 
+// scanMode says whether the per-device reconciliation scan runs INSIDE the build (the admin CLIs
+// and `quince backup`, which are short-lived processes that want a complete registry before they do
+// anything) or is left to the runner (`serve`, where it must not delay the listener — quince#592).
+//
+// AN EXPLICIT PARAMETER RATHER THAN A DEFAULT, because both answers are correct for their caller and
+// the wrong one is silent in both directions: a CLI that skipped the scan would report on a registry
+// nobody repaired, and a `serve` that ran it would keep the ~48 s of connection-refused this rung
+// exists to remove. A default would make one of those the thing you get by not thinking about it.
+type scanMode int
+
+const (
+	scanSynchronous scanMode = iota // run the scan before returning — CLIs
+	scanDeferred                    // leave it to the runner — serve
+)
+
 // buildStorage resolves the qn.5 backend and returns a reconciled *storage.Manager. It is the
 // storage half of buildLiveStack, factored out so the read-only admin CLIs (`versions verify`,
 // `device repair-working-copy`) can operate on a truthful, reconciled registry WITHOUT starting the
 // muxer supervisor / device registry / enrichment goroutines the full stack spins up. Reconcile runs
 // before returning (same as serve) so adopted/missing versions are reflected.
 func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Service,
-	st *store.Store, eventBus *bus.Bus, log *slog.Logger) (*storage.Manager, error) {
+	st *store.Store, eventBus *bus.Bus, log *slog.Logger, scan scanMode) (*storage.Manager, error) {
 	scfg := cfgSvc.Current().Storage
 	entries := declaredStorages(scfg)
 	// ZERO STORAGES IS NOW A LEGITIMATE STARTUP STATE, and this is where that stops being a
@@ -231,12 +256,31 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 
 	storageMgr := storage.NewManager(slots, st, st, eventBus, id.New, log)
 
-	// Attribution happens INSIDE Reconcile now, per storage, from what Scan found (quince#439).
+	// Attribution happens INSIDE the scan now, per storage, from what Scan found (quince#439).
 	// A loud comment about statement order stood here until then, protecting the sweep that had
 	// to run first. That call is DELETED, not merely moved, so there is no ordering left to
 	// protect — the hazard is structurally gone rather than unlikely.
-	if err := storageMgr.Reconcile(ctx); err != nil {
-		log.Error("storage: startup reconciliation failed", "error", err)
+	//
+	// THE PASS IS SPLIT AS OF qn.6i, AND WHICH HALF RUNS HERE IS THE RUNG'S CENTRAL DECISION (D2).
+	//
+	// ROLL-FORWARD ALWAYS RUNS HERE, SYNCHRONOUSLY, WHATEVER THE MODE. `Engine.Reconcile` — forty
+	// lines up in buildLiveStack — decides `succeeded` vs `connection_lost` for crash-orphaned job
+	// rows by asking `VersionForJob`, so a job judged BEFORE its commit is rolled forward is written
+	// to the database as *interrupted by a restart* for a backup that actually finished. That is the
+	// sharpest state-honesty defect this rung could have introduced, and it would have been
+	// introduced BY the fix. It costs a few syscalls: roll-forward is O(1) in tree size on both
+	// backends (see RollForwardAll).
+	//
+	// THE SCAN is what took the 36-48 seconds, and it is the half that moves. In `serve` it goes to
+	// the runner and this function returns without it; the admin CLIs keep the whole synchronous
+	// pass, because `versions verify` needs a complete registry and no listener is waiting on it.
+	if err := storageMgr.RollForwardAll(ctx); err != nil {
+		log.Error("storage: startup roll-forward failed", "error", err)
+	}
+	if scan == scanSynchronous {
+		if _, err := storageMgr.ReconcileScan(ctx); err != nil {
+			log.Error("storage: startup reconciliation scan failed", "error", err)
+		}
 	}
 
 	// THE RE-PROBE BEHIND POST /api/storages/{name}/recheck (quince#435: reachability may change

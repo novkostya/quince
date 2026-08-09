@@ -337,7 +337,23 @@ write the registry row — rather than unwinding them; the only exception is an 
 `quince-version.json` marker is missing or fails its hash check. A commit failure must
 never destroy a successfully transferred multi-hour Wi-Fi backup.
 
-On startup the disk is the source of truth; every half-state has a defined repair:
+**RECONCILIATION IS NO LONGER A STARTUP-ONLY STEP** — Operator ruling 2026-08-08 (quince#731), built
+in `qn.6i`. It splits in two, and which half runs where is the whole of the decision:
+
+- **roll-forward** — complete any commit journal — stays **synchronous and ahead of the listener**,
+  because the job-row reconciler that follows it decides `succeeded` vs `connection_lost` by asking
+  whether a commit completed. Judging a job before its commit rolls forward writes *interrupted by a
+  restart* for a backup that succeeded. It is O(1) in tree size on both backends — two renames, or a
+  snapshot — so it costs syscalls rather than a walk.
+- **the per-device scan** — adopt, mark missing, recompute latest, sweep — runs **asynchronously** on
+  a runner with three triggers: startup, storage-added, and a schedule. This is where the 36–48
+  seconds were, and moving it is what closes quince#592 and quince#715.
+
+While a scan has not finished the registry is knowably incomplete, and quince **says so** on
+`GET /api/health` (`reconciling`, contracts §1) rather than serving a short list silently. A scan never
+runs against a `(storage, device)` whose commit path is live: it defers that device and reports it.
+
+The disk is the source of truth; every half-state has a defined repair:
 half-rotated `latest`/`versions` → finish the rename pair by journal phase; version on
 disk/in snapshots without a DB record → adopt (protected from retention); DB record
 without its dir/snapshot → mark `missing`, never silently drop; stale tmp dir → remove;
