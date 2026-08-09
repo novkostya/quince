@@ -15,7 +15,7 @@
 // TEMPORARY. This is a diagnostic, not a feature: it exists to answer one question on one device and
 // should be dropped once quince#762 is closed, in its own commit, so removing it cannot disturb the
 // fix. It ships inert either way — the flag is absent from every link quince produces.
-const LOG_LINES = 6;
+const LOG_LINES = 9;
 
 export function initViewportDebug(): () => void {
   if (typeof location === "undefined" || !new URLSearchParams(location.search).has("vvdebug")) {
@@ -74,6 +74,27 @@ export function initViewportDebug(): () => void {
     paint();
   };
 
+  // FOCUS IS LOGGED TOO, because the keyboard's next/previous chevrons stopped moving between fields
+  // and nothing in the source says why (quince#762). The taps register — the chevrons highlight — and
+  // focus stays put. This distinguishes the three possibilities that look identical from outside: iOS
+  // never attempts the move (no events at all), it attempts it and something sends focus back (a
+  // focusin on the new field followed immediately by one on the old), or it lands and the field is
+  // simply not where the eye expects.
+  const name = (t: EventTarget | null): string => {
+    if (!(t instanceof HTMLElement)) return "-";
+    return t.id || `${t.tagName.toLowerCase()}${t.getAttribute("data-testid") ? `#${t.getAttribute("data-testid")}` : ""}`;
+  };
+  const onFocusIn = (e: FocusEvent): void => {
+    note(`focin ${name(e.target)}`);
+    paint();
+  };
+  const onFocusOut = (e: FocusEvent): void => {
+    note(`focout ${name(e.target)}`);
+    paint();
+  };
+  document.addEventListener("focusin", onFocusIn, true);
+  document.addEventListener("focusout", onFocusOut, true);
+
   // Also repaint every frame: the interesting values change between events (the browser paints its
   // own scroll before it reports one), and a per-frame readout is what makes a recording legible.
   let frame = requestAnimationFrame(function tick() {
@@ -90,6 +111,8 @@ export function initViewportDebug(): () => void {
     cancelAnimationFrame(frame);
     vv.removeEventListener("resize", onResize);
     vv.removeEventListener("scroll", onScroll);
+    document.removeEventListener("focusin", onFocusIn, true);
+    document.removeEventListener("focusout", onFocusOut, true);
     box.remove();
   };
 }

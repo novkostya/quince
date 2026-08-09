@@ -168,12 +168,23 @@ async function visibleHeightPublished(page: Page, px: number): Promise<void> {
     .toBe(`${px}px`);
 }
 
-async function expectCentredInVisibleArea(page: Page, visibleH: number): Promise<void> {
+// `bottomInset` is what the frame reserves at the foot, and it is NOT always the home indicator.
+// While the keyboard is up the indicator is BEHIND it, so reserving it would take a strip out of the
+// space above the keyboard for nothing — measured on the Operator's recording as a dead gap between
+// the card's foot and the keyboard's accessory bar (quince#762). With a keyboard, the reservation is
+// the plain 1rem gutter.
+const GUTTER = 16;
+
+async function expectCentredInVisibleArea(
+  page: Page,
+  visibleH: number,
+  bottomInset: number,
+): Promise<void> {
   const box = await page.getByRole("dialog").boundingBox();
   expect(box).not.toBeNull();
 
   const above = box!.y - ISLAND_TOP; // gap between the notch and the top of the card
-  const below = visibleH - HOME_INDICATOR - (box!.y + box!.height); // card foot to the home indicator
+  const below = visibleH - bottomInset - (box!.y + box!.height); // card foot to what is reserved there
 
   // CLEARS BOTH. This is the reported bug: `above` was negative, so the card's head was under the
   // island. Asserted on the rendered box rather than on a class, because a class can be present and
@@ -195,7 +206,7 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
   await page.getByTestId("add-storage").click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await visibleHeightPublished(page, 844);
-  await expectCentredInVisibleArea(page, 844);
+  await expectCentredInVisibleArea(page, 844, HOME_INDICATOR);
 
   // THE KEYBOARD, as the visual viewport sees it: the visible area shrinks and the dialog must
   // re-centre in what is left rather than staying put against a layout viewport that never moved.
@@ -203,7 +214,8 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
   // keyboard, coming right only on a second focus.
   await page.setViewportSize({ width: 390, height: 400 });
   await visibleHeightPublished(page, 400);
-  await expectCentredInVisibleArea(page, 400);
+  // The keyboard is up now, so the home indicator is behind it and only the gutter is reserved.
+  await expectCentredInVisibleArea(page, 400, GUTTER);
 
   // AND THE FOOT IS STILL REACHABLE once the card is bounded by a much smaller visible area — the
   // case where centring and scrolling have to hold at the same time.
