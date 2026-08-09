@@ -18,8 +18,20 @@ import { raisesKeyboard } from "./keyboard";
 // `dvh`/toolbar mismatch makes the shell TALLER THAN THE SCREEN and clips with no gap. A gap is the
 // signature of a shift.
 //
-// THE FIX IS TO PUT IT BACK. `window.scrollTo(0, 0)` resets it — on iOS the window scroll offset is
-// the visual viewport's, which is why this works on a document that has nothing to scroll.
+// THE FIX IS TO PUT IT BACK — AND THIS MAY NOT DO IT. `window.scrollTo(0, 0)` was chosen on the
+// belief that on iOS the window scroll offset IS the visual viewport's, so it would work on a
+// document with nothing to scroll.
+//
+// MEASURED IN SAFARI WITH `?vvdebug`, AND IT CONTRADICTS THAT: `scrollY=0` throughout, while
+// `visualViewport.offsetTop` ran 153 → 43 → 6 → 0. The two are plainly different quantities there,
+// so `scrollTo(0, 0)` has nothing to undo and this reset is probably INERT.
+//
+// It is kept, and labelled, rather than deleted or quietly left claiming to work. The gap was seen
+// in the home-screen PWA and the measurement was taken in Safari; whether `scrollY` tracks the
+// offset in standalone is unmeasured, and one run of `?vvdebug` from the PWA settles it. Until then
+// this is an UNVERIFIED fix for quince#649 and must not be reported as one. Its unit tests prove the
+// decision logic — when it fires and when it declines — and prove nothing about whether the call
+// moves anything.
 //
 // WHY IT WAITS FOR THE FOCUS RATHER THAN A TIMER. Moving between two fields with the keyboard up
 // makes iOS report full height for a frame, as though the keyboard had closed. Resetting the scroll
