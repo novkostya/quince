@@ -5,7 +5,6 @@ import { RouterProvider } from "react-router-dom";
 import { queryClient } from "@/lib/queryClient";
 import { router } from "@/routes/router";
 import { initTheme } from "@/lib/theme";
-import { initViewportDebug } from "@/lib/viewportDebug";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { authStatusKey } from "@/lib/auth";
 import "./index.css";
@@ -13,10 +12,6 @@ import "./index.css";
 // System-follow theme at boot (ui.design.md principle 6); the Settings editor can override
 // via config.ui.theme once loaded.
 initTheme("system");
-
-// TEMPORARY DIAGNOSTIC for quince#762, inert unless the URL carries `?vvdebug`. To be removed with
-// the issue, in its own commit. See the module for why an instrument was reached for at all.
-initViewportDebug();
 
 // A LOST SESSION MUST REACH THE LOGIN SCREEN. `RequireAuth` already redirects — it simply never got
 // the news. `useAuthStatus` refetches on mount or invalidation only, and the guard stays mounted for
