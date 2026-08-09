@@ -227,6 +227,14 @@ export interface ConfigResponse {
   config: Config;
   warnings: ConfigWarning[];
   source: ConfigSource;
+  /**
+   * `config.yml` AS IT IS ON DISK — read at request time, never cached (contracts §6).
+   *
+   * NOT a rendering of `config`. Since qn.6j the two are different documents: `config` is the
+   * RESOLVED configuration with every key filled, this is only what the user set. Empty when there
+   * is no file yet.
+   */
+  file_text: string;
 }
 
 export interface ConfigFieldError {

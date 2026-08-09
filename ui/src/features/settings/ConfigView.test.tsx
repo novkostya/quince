@@ -26,6 +26,7 @@ function response(over: Partial<ConfigResponse> = {}): ConfigResponse {
       ui: { theme: "system" },
     },
     warnings: [],
+    file_text: "storage:\n    - path: /backups\n",
     source: { path: "/data/config.yml", mtime: null },
     ...over,
   } as ConfigResponse;
@@ -71,5 +72,35 @@ describe("ConfigView does not widen the page", () => {
       />,
     );
     expect(container.querySelector("ul")?.className ?? "").toContain("break-words");
+  });
+});
+
+// THE PANEL SHOWS THE FILE (qn.6j story 9, Operator ruling 2026-08-09 on quince#728).
+//
+// It rendered `JSON.stringify(data.config)` beside a subtitle saying "You can edit the file by hand
+// instead". These assert the two halves of the fix: the file text is what appears, and the parsed
+// document is NOT re-rendered alongside it.
+//
+// WORTH KNOWING WHY THE TESTS ABOVE DID NOT CATCH THIS. They assert CSS classes rather than content,
+// and the fixture ends `as ConfigResponse` — so a missing `file_text` compiled fine and every test
+// passed against a panel showing the wrong document. The cast is what made the type useless here,
+// which is quince#493's shape one layer up.
+describe("ConfigView shows the file rather than the parsed document", () => {
+  it("renders file_text verbatim", () => {
+    const { container } = render(<ConfigView data={response()} />);
+    expect(container.querySelector("pre")?.textContent).toBe("storage:\n    - path: /backups\n");
+  });
+
+  // The resolved document must not leak in beside it. `backup.preferred_transport` is in the fixture's
+  // `config` and NOT in its `file_text`, which is exactly the difference qn.6j created.
+  it("does not render the resolved config", () => {
+    const { container } = render(<ConfigView data={response()} />);
+    expect(container.querySelector("pre")?.textContent).not.toContain("preferred_transport");
+  });
+
+  // A fresh install has no file until the first save. An empty box would read as broken.
+  it("says so when there is no file yet", () => {
+    const { container } = render(<ConfigView data={response({ file_text: "" })} />);
+    expect(container.querySelector("pre")?.textContent).toContain("No config.yml yet");
   });
 });

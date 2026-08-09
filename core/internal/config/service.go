@@ -569,3 +569,32 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// the stored state. Same reason the applier warnings are never stored.
 	return nil, append(guardWarnings, s.notify(old, c)...), nil
 }
+
+// FileText returns the bytes currently on disk, for the Settings panel's "Current configuration"
+// preview (contracts §6; Operator ruling 2026-08-09 on quince#728).
+//
+// IT READS AT REQUEST TIME AND IS NEVER CACHED, which is the ruling's own condition rather than an
+// implementation choice. There is no reload path — `Load` runs at construction and nothing re-reads
+// the file (quince#727, post-`v0.1`) — so a cached copy of what quince last WROTE goes stale the
+// moment somebody hand-edits `config.yml`. The panel sits under the subtitle *"You can edit the file
+// by hand instead"*, so showing a document that is not the file would contradict the sentence next
+// to it.
+//
+// IT CAN THEREFORE SHOW A FILE QUINCE HAS NOT ADOPTED, and that is the point rather than a wart.
+// After a bad hand-edit the running configuration is still last-good (`OK: false`) while the file on
+// disk is the broken one — which is exactly when a user needs to see what is on disk. The response
+// already carries `warnings` and `source` to say so.
+//
+// An unreadable or absent file is "" and no error: a fresh install has no file yet, and the panel's
+// job is to show what is there rather than to diagnose. `source.mtime` is empty in that case, which
+// is how a client already distinguishes "not written yet".
+func (s *Service) FileText() string {
+	s.mu.RLock()
+	path := s.path
+	s.mu.RUnlock()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
