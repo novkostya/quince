@@ -92,6 +92,33 @@ describe("useScrollFocusIntoView moves a field only when it needs moving, and on
     expect(container.scrollTop).toBe(44); // no await — the work is done by the time focus() returns
   });
 
+  it("does not move for a button, because that swallows the tap that focused it", async () => {
+    // A button is focused BY A TAP. Scrolling inside that tap moves it out from under the finger
+    // between mousedown and mouseup, they land on different elements, and no `click` is fired at
+    // all. `gates-ui-e2e` caught this deterministically: `Test helper` was pressed and its handler
+    // never ran, so the result it produces never appeared.
+    const container = document.createElement("div");
+    const button = document.createElement("button");
+    container.appendChild(button);
+    document.body.appendChild(container);
+    container.getBoundingClientRect = () => ({ top: 100, height: 300 }) as DOMRect;
+    button.getBoundingClientRect = () => ({ top: 380, height: 40 }) as DOMRect;
+    container.scrollTop = 0;
+    renderHook(() => useScrollFocusIntoView({ current: container }));
+
+    button.focus();
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("does not move for a checkbox either — nothing that cannot raise a keyboard", async () => {
+    const { container, field } = stand(380);
+    field.type = "checkbox";
+    renderHook(() => useScrollFocusIntoView({ current: container }));
+
+    field.focus();
+    expect(container.scrollTop).toBe(0);
+  });
+
   it("leaves the region alone when the focus is outside it", async () => {
     const { container } = stand(380);
     const outside = document.createElement("input");

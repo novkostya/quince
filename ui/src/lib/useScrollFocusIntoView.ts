@@ -45,6 +45,30 @@ import { useEffect, type RefObject } from "react";
 // to clear the keyboard, and two parties moving it is how a field ends up somewhere neither intended.
 const MARGIN = 24; // matches the card's own padding — one comfortable gutter, not a magic number
 
+// ONLY THINGS THAT RAISE A KEYBOARD, AND THIS IS A CORRECTNESS BOUND RATHER THAN A TIDY-UP.
+//
+// Focus lands on buttons too, and a button is usually focused BY A TAP. Scrolling the card inside
+// that tap moves the button out from under the finger between `mousedown` and `mouseup`, the two
+// land on different elements, and the browser therefore fires no `click` at all — the press is
+// silently swallowed. Caught by `gates-ui-e2e`, deterministically, on both the attempt and the
+// retry: `Test helper` was pressed and its result never appeared, because its handler never ran.
+//
+// The correction exists to keep the field the KEYBOARD IS ABOUT TO COVER in view. Nothing that
+// cannot raise a keyboard needs it, so nothing else is moved, and the swallowed-tap class is closed
+// rather than tuned around.
+function raisesKeyboard(el: HTMLElement): boolean {
+  if (el.isContentEditable) return true;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    // A `<select>` is deliberately absent: iOS answers it with a picker rather than a keyboard, and
+    // it is tapped, so it belongs with the buttons.
+    return !["button", "submit", "reset", "checkbox", "radio", "range", "color", "file", "image"].includes(
+      el.type,
+    );
+  }
+  return false;
+}
+
 export function useScrollFocusIntoView(ref: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const container = ref.current;
@@ -54,6 +78,7 @@ export function useScrollFocusIntoView(ref: RefObject<HTMLElement | null>): void
     const centreFocused = (): void => {
       const el = document.activeElement;
       if (!(el instanceof HTMLElement) || el === container || !container.contains(el)) return;
+      if (!raisesKeyboard(el)) return;
 
       const box = container.getBoundingClientRect();
       const field = el.getBoundingClientRect();
