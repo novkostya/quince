@@ -129,3 +129,85 @@ test("the add-storage dialog is usable on a phone, zfs branch included", async (
   await expect(save).toBeVisible();
   await expect(page.getByTestId("test-helper")).toBeVisible();
 });
+
+// quince#762 — A DIALOG IS CENTRED IN THE VISIBLE AREA, NOT THE LAYOUT VIEWPORT. Operator-reported
+// from a phone with screenshots: every dialog in the product sat against the top of the screen with
+// its head under the Dynamic Island.
+//
+// WHAT THIS CAN AND CANNOT PROVE, because the difference is the whole reason the CSS is written the
+// way it is. A headless browser reports every `env(safe-area-inset-*)` as 0 and has no keyboard, so
+// a test written against `env()` directly could only ever exercise the fallback — it would pass just
+// as happily on the broken build. Both inputs are therefore read through custom properties that this
+// test can stand up itself: `--safe-*` is overridden here to raise a simulated Dynamic Island, and
+// `--vv-height` is driven for real by shrinking the viewport, which is what the keyboard does to the
+// visual viewport. THAT IOS ACTUALLY REPORTS THOSE INSETS IS OWED TO A DEVICE and is not claimed
+// here; what is claimed is that when something reports them, the dialog lands inside them.
+const ISLAND_TOP = 59; // iPhone-class portrait. The exact figure is not the claim — clearing it is.
+const HOME_INDICATOR = 34;
+
+async function fakeSafeArea(page: Page, top: number, bottom: number): Promise<void> {
+  await page.evaluate(
+    ([t, b]) => {
+      document.documentElement.style.setProperty("--safe-top", `${t}px`);
+      document.documentElement.style.setProperty("--safe-bottom", `${b}px`);
+    },
+    [top, bottom],
+  );
+}
+
+// The hook publishes the visible height asynchronously (a visualViewport event), so measuring the
+// dialog before it lands would measure the fallback. Waiting on the published value rather than on a
+// timeout also proves the hook RAN: on a build where it is absent this never settles.
+async function visibleHeightPublished(page: Page, px: number): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--vv-height").trim(),
+      ),
+    )
+    .toBe(`${px}px`);
+}
+
+async function expectCentredInVisibleArea(page: Page, visibleH: number): Promise<void> {
+  const box = await page.getByRole("dialog").boundingBox();
+  expect(box).not.toBeNull();
+
+  const above = box!.y - ISLAND_TOP; // gap between the notch and the top of the card
+  const below = visibleH - HOME_INDICATOR - (box!.y + box!.height); // card foot to the home indicator
+
+  // CLEARS BOTH. This is the reported bug: `above` was negative, so the card's head was under the
+  // island. Asserted on the rendered box rather than on a class, because a class can be present and
+  // overridden — and because "is it under the notch" is what the user actually sees.
+  expect(above).toBeGreaterThanOrEqual(0);
+  expect(below).toBeGreaterThanOrEqual(0);
+
+  // AND IS CENTRED BETWEEN THEM, which is what the Operator asked for over merely clearing them.
+  // Equal gaps, to a pixel of rounding.
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
+}
+
+test("a dialog centres in the visible area, clear of the notch and the home indicator", async ({
+  page,
+}) => {
+  await authenticate(page);
+  await fakeSafeArea(page, ISLAND_TOP, HOME_INDICATOR);
+
+  await page.getByTestId("add-storage").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await visibleHeightPublished(page, 844);
+  await expectCentredInVisibleArea(page, 844);
+
+  // THE KEYBOARD, as the visual viewport sees it: the visible area shrinks and the dialog must
+  // re-centre in what is left rather than staying put against a layout viewport that never moved.
+  // That is the failure the Operator reported twice before quince#762 — an input behind the
+  // keyboard, coming right only on a second focus.
+  await page.setViewportSize({ width: 390, height: 400 });
+  await visibleHeightPublished(page, 400);
+  await expectCentredInVisibleArea(page, 400);
+
+  // AND THE FOOT IS STILL REACHABLE once the card is bounded by a much smaller visible area — the
+  // case where centring and scrolling have to hold at the same time.
+  const save = page.getByTestId("add-storage-save");
+  await save.scrollIntoViewIfNeeded();
+  await expect(save).toBeVisible();
+});
