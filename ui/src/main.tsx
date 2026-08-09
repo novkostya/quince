@@ -6,6 +6,7 @@ import { queryClient } from "@/lib/queryClient";
 import { router } from "@/routes/router";
 import { initTheme } from "@/lib/theme";
 import { initKeyboardScrollReset } from "@/lib/keyboardScrollReset";
+import { initViewportDebug } from "@/lib/viewportDebug";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { authStatusKey } from "@/lib/auth";
 import "./index.css";
@@ -20,6 +21,10 @@ initTheme("system");
 // carries the mechanism. Here at boot rather than in the shell, because the login and onboarding
 // screens have keyboards too and are not inside `AppLayout`.
 initKeyboardScrollReset();
+
+// TEMPORARY DIAGNOSTIC for quince#762, inert unless the URL carries `?vvdebug`. To be removed with
+// the issue, in its own commit. See the module for why an instrument was reached for at all.
+initViewportDebug();
 
 // A LOST SESSION MUST REACH THE LOGIN SCREEN. `RequireAuth` already redirects — it simply never got
 // the news. `useAuthStatus` refetches on mount or invalidation only, and the guard stays mounted for
