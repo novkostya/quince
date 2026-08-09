@@ -499,6 +499,20 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// of an ordinary client. A guard that cries during normal use is worse than no guard, because it
 	// teaches the reader to ignore it.
 	//
+	// THE DEGRADATION IS STICKY ACROSS A RESTART, AND THEN IT IS SILENT. Within this process it is
+	// well-behaved: `s.declared` keeps the PRUNED set, so the next save re-attempts the short form
+	// and warns again if it still fails. A restart ends that. The fallback wrote the full document,
+	// `Load` derives `declared` FROM THE FILE, so now every key is declared — the tidy write and the
+	// full write become the same bytes, the guard passes, and no warning is ever emitted again.
+	// Measured at this head: 639 bytes written by the fallback, 639 after the restart, guard silent.
+	//
+	// **The file then stays long forever and nothing says so**, which is the one place this mechanism
+	// fails `no silent caps or fallbacks` — after a restart the degraded mode is in neither the UI
+	// nor the logs. It is not a correctness bug: the document is self-consistent, and by the
+	// derivation rule those keys really are set now. **Recovery is a hand-trim** — delete the keys
+	// you did not write and save again. If you are reading this because a `config.yml` is
+	// mysteriously long, that is what happened, and nothing else would have told you.
+	//
 	// One in-memory parse per save, on a path already doing `fsync` + `rename`.
 	var guardWarnings []Warning
 	if back, _, _, perr := Parse(data); perr != nil || !SameConfig(back, c) {
@@ -514,7 +528,8 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 			Path: "",
 			Message: "your configuration was saved correctly, but quince could not write it in the " +
 				"short form and wrote every key instead — the file is larger than it needs to be and " +
-				"nothing else is wrong. Differing: " + lost,
+				"nothing else is wrong. It will STAY long, including after a restart, until you trim " +
+				"the keys you did not write and save again. Differing: " + lost,
 		}}
 	}
 
