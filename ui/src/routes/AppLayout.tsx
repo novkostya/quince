@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
+import { ReconcilingNotice } from "@/components/ReconcilingNotice";
 import { Sidebar } from "@/components/Sidebar";
 import { close, connect } from "@/ws/client";
 
@@ -26,6 +27,13 @@ export function AppLayout() {
     <div className="flex h-full flex-col overflow-hidden bg-bg pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-fg sm:h-auto sm:min-h-screen sm:flex-row sm:overflow-visible">
       <Sidebar />
       <main className="min-w-0 flex-1 overflow-y-auto overscroll-y-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:overflow-visible sm:p-8">
+        {/*
+          IN THE SHELL RATHER THAN PER PAGE (qn.6i). The state is daemon-wide and affects every
+          surface that counts or lists versions — Devices, a device's versions, the storage cards —
+          so one notice above the outlet covers them all and cannot drift page by page. It renders
+          nothing when false, which is almost always.
+        */}
+        <ReconcilingNotice />
         <Outlet />
       </main>
     </div>

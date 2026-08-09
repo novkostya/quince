@@ -294,6 +294,12 @@ export interface Health {
   // the server omits it when the deployment did not say — quince runs no timer and performs no
   // reset, so this is a fact it is told rather than one it knows (public-demo spec story 6).
   demo_reset_minutes?: number;
+  // reconciling: quince is re-reading its storages, so a version list or a backup count MAY BE
+  // SHORT (qn.6i, contracts §1). A DECLARED PROVISIONAL STATE, NOT AN EMPTY RESULT — a client must
+  // not conclude "this disk has no backups" while it holds. Optional so a UI newer than its server
+  // reads `undefined` rather than a false `false`: absent means the server predates the field, and
+  // a server that predates it also reconciled before it served anything.
+  reconciling?: boolean;
 }
 
 // --- onboarding (qn.6f) ---
