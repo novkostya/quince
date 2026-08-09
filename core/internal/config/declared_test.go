@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -178,7 +179,7 @@ func TestAKeptKeyDoesNotJumpToTheFrontOfItsEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	name, path := indexOfKey(string(out), "name:"), indexOfKey(string(out), "path:")
+	name, path := strings.Index(string(out), "name:"), strings.Index(string(out), "path:")
 	if name < 0 || path < 0 {
 		t.Fatalf("expected both keys in the output, got: %q", out)
 	}
@@ -191,11 +192,37 @@ func TestAKeptKeyDoesNotJumpToTheFrontOfItsEntry(t *testing.T) {
 	}
 }
 
-func indexOfKey(doc, key string) int {
-	for i := 0; i+len(key) <= len(doc); i++ {
-		if doc[i:i+len(key)] == key {
-			return i
+// THE TWO ENTRY KEYS MUST AGREE, and until now only the round-trip tests would have noticed if they
+// stopped (architect note, quince#758).
+//
+// `entryKey` runs at PARSE, over the raw document, where `name` may be absent. `nodeEntryKey` runs at
+// MARSHAL, over a node tree that `Resolved()` has already filled. If they ever disagree, the declared
+// set records paths under one identity and the pruner looks them up under another — every key reads
+// as undeclared, and the file silently loses everything the user wrote. Asserted directly, because
+// the indirect version does not survive a refactor.
+func TestTheParseAndMarshalEntryKeysAgree(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"storage:\n  - path: /backups\n", "/backups"},                 // no name: both fall back to path
+		{"storage:\n  - name: nas\n    path: /backups\n", "nas"},       // a name: both take it
+		{"storage:\n  - name: \"\"\n    path: /backups\n", "/backups"}, // an EMPTY name is not a name
+	} {
+		cfg, d := parseDeclared(t, tc.raw)
+		if !d.Has("storage[" + tc.want + "].path") {
+			t.Errorf("parse side keyed %q as something else: %v", tc.want, keysOf(d))
+		}
+		// The marshal side agrees iff the document round-trips carrying its path — which it can only
+		// do if the pruner found the same identity the declared set used.
+		out, err := MarshalDeclared(cfg, d)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", tc.raw, err)
+		}
+		back, _, _, err := Parse(out)
+		if err != nil {
+			t.Fatalf("re-parse %q: %v", tc.raw, err)
+		}
+		if !SameConfig(back, cfg) {
+			t.Errorf("the two entry keys disagree for %q — the pruner looked the declared paths up "+
+				"under a different identity\nwritten: %q", tc.raw, out)
 		}
 	}
-	return -1
 }

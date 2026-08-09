@@ -254,12 +254,30 @@ func TestAddStorageCanAddTheVeryFirstOne(t *testing.T) {
 	if !list[0].Default {
 		t.Errorf("the only storage is not default; a backup naming no storage would resolve to nothing")
 	}
+	// THE FILE MUST NOT CARRY IT, AND THE RELOAD MUST STILL SEE IT (qn.6j, quince#728).
+	//
+	// This asserted `default: true` was WRITTEN. Under the 2026-08-08 ruling that is exactly wrong:
+	// a lone storage's default is IMPLIED, nobody set it, so the file does not say it — and
+	// ResolveStorages re-implies it on the next parse. Writing it would be quince inventing a line
+	// the user never wrote, which is the defect this rung exists to remove.
+	//
+	// The intent survives and is tested harder. The old check proved the implication reached DISK;
+	// this proves it reaches the RUNNING CONFIG after a full round trip, which is the property
+	// anything actually depends on — a backup naming no storage has to resolve to something.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "default: true") {
-		t.Errorf("the implied default was not written to the file:\n%s", b)
+	if strings.Contains(string(b), "default: true") {
+		t.Errorf("quince wrote an implied default nobody set:\n%s", b)
+	}
+	reloaded := Load(path)
+	if !reloaded.OK {
+		t.Fatalf("the written file does not load: %+v", reloaded.Errors)
+	}
+	if back := *reloaded.Config.Storage; len(back) != 1 || !back[0].Default {
+		t.Errorf("after a reload the only storage is not default; the implication did not survive "+
+			"the round trip:\n%s", b)
 	}
 }
 
