@@ -94,6 +94,11 @@ type Manager struct {
 	// mutex is what the two actors contend on, and it is deliberately NOT mu — holding mu across a
 	// device's scan would block every reader of the slot list, including the HTTP handlers.
 	leases map[string]*commitLease
+
+	// onJobEnd is called when a job binding is dropped, so a device deferred behind that job is
+	// reconciled without waiting for an unrelated trigger (qn.6i D3). Wiring-time only; see
+	// SetOnJobEnd.
+	onJobEnd func(reason string)
 }
 
 // NewManager wires the subsystem. audit may be nil (skipped).

@@ -61,9 +61,41 @@ type jobBinding struct {
 // UnbindJob drops a finished job's binding, so the map does not grow for the life of the process.
 func (m *Manager) UnbindJob(jobID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	_, wasBound := m.jobStorage[jobID]
 	delete(m.jobStorage, jobID)
+	notify := m.onJobEnd
+	m.mu.Unlock()
+
+	// A DEVICE DEFERRED BEHIND THIS JOB BECOMES RECONCILABLE THE MOMENT IT ENDS (qn.6i D3).
+	//
+	// Without this the deferral waits for the next unrelated trigger — a restart, an added storage,
+	// or a scheduled pass — so a disk whose versions were skipped stays skipped for as long as an
+	// hour. Re-triggering here turns "deferred" into "deferred until the backup finishes", which is
+	// what the spec promises and what makes deferring honest rather than lossy.
+	//
+	// KEYED OFF UnbindJob RATHER THAN OFF SUCCESS, and that is the whole reason this hook is here and
+	// not in the engine's success path. `Engine.release` is the single termination path every ending
+	// job takes — success, failure, cancel and shutdown alike — and it calls exactly this. So a device
+	// deferred behind a CANCELLED backup comes back by construction, rather than because somebody
+	// remembered to add a second call site (quince#771 review).
+	//
+	// Outside the lock: the callback triggers a runner, and holding `mu` across it would put the slot
+	// list behind a channel send.
+	if wasBound && notify != nil {
+		notify("job ended")
+	}
 }
+
+// SetOnJobEnd registers what to do when a job's binding is dropped — in practice, re-trigger a
+// reconciliation pass so anything deferred behind that job is picked up.
+//
+// WIRING TIME ONLY, and unsynchronised on purpose — the same constraint `SetRefresher` carries and
+// for the same reason: it is written once during `buildStorage`, before the HTTP server exists, so
+// no reader can be concurrent with it.
+//
+// Nil is the ordinary case for the admin CLIs and every test: with no runner there is nothing to
+// re-trigger, and a deferral is unreachable in a process that binds no jobs.
+func (m *Manager) SetOnJobEnd(f func(reason string)) { m.onJobEnd = f }
 
 // jobSlot is the storage THIS JOB writes to, and it enforces the invariant that makes serving with
 // a disk missing honest: A STORAGE WHOSE RESOLUTION DID NOT SUCCEED NEVER ACCEPTS A JOB (Operator

@@ -89,6 +89,12 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 		// when the first pass may begin — for `serve` that is once the router exists, so the scan and
 		// the bind proceed together rather than one queueing behind the other.
 		ls.reconcile = storage.NewRunner(storageMgr, log)
+		// A JOB ENDING RE-TRIGGERS A PASS, which is what makes a deferral temporary rather than lossy:
+		// a device skipped because a backup was running on it comes back when that backup ends, not
+		// when something unrelated next happens to ask. Wired to `UnbindJob`, which `Engine.release`
+		// calls on EVERY ending — success, failure, cancel, shutdown — so the cancel case is covered
+		// by construction rather than by a second call site somebody has to remember.
+		ls.reconcile.TriggerOnJobEnd(storageMgr)
 	}
 
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
