@@ -79,10 +79,16 @@ func (r *Runner) TriggerOnJobEnd(m *Manager) {
 
 // Reconciling reports whether a pass is queued OR running. It is what `GET /api/health` publishes,
 // and its meaning is written down in contracts §1: while true, a version list may be SHORT.
+// THE QUEUE IS PART OF THE ANSWER, and leaving it out was a false `false` in the unsafe direction
+// (quince#772 review). `Trigger` sets `pending` and then sends; `runOnce` clears `pending`
+// unconditionally at pass start. So a trigger landing between the loop's channel receive and
+// `runOnce` taking `mu` has its flag cleared by the pass ALREADY IN FLIGHT while its own item stays
+// queued — and when that pass ends, both flags are false with a pass still to run. Microseconds
+// wide, and precisely the direction this type exists to prevent.
 func (r *Runner) Reconciling() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.pending || r.running
+	return r.pending || r.running || len(r.trigger) > 0
 }
 
 func (r *Runner) loop(ctx context.Context) {

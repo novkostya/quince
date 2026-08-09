@@ -399,7 +399,7 @@ Beyond `make gates` / `make image`:
 | **G5** | 6 | a pending journal whose `JobID` is bound is skipped; the same journal with an unbound id is rolled forward |
 | **G6** | 7 | **SPLIT IN THREE BY PR 2, because one test could not do the job.** **G6a** interleaves a scan between `Backend.Commit` and `registerCommitted` deterministically — the D4 measurement, and a permanent tripwire on the seam. **G6b** runs a commit and a scan concurrently under `-race` — a regression net, *not* a proof: it passed 5/5 with the guard removed. **G6c** holds the lease exactly as `CommitJob` does and asserts the scan declines to enter — the only one of the three that is red without the lease |
 | **G7** | 8 | fake clock: N passes in M intervals; `0` produces none |
-| **G8** | 9 | the existing crash-mid-commit fixture, restarted, asserting `succeeded` — red if the ordering is inverted |
+| **G8** | 9 | **BUILT IN PR 3, and there was no "existing fixture" to reuse — the spec assumed one.** No test anywhere asserted the composition; `Engine.Reconcile`'s dependence on storage having rolled forward first was held up by a doc comment and a call order alone. The gate enters at `buildLiveStack` with an `archived` commit journal and a crash-orphaned job row, and asserts `succeeded` with the version named. **It must enter at the seam**: a unit test of `Engine.Reconcile` passes with the ordering inverted, because the inversion lives in the wiring. **Measured red** by moving `RollForwardAll` after `eng.Reconcile()` — the job lands `connection_lost` |
 | **G9** | 10 | `versions verify` against a fixture with an unadopted on-disk version still reports it |
 | **G10** | — | `make demo` + the click-list: add a storage, watch the card populate without a restart |
 
