@@ -190,6 +190,31 @@ func TestCheckHookUnreachable(t *testing.T) {
 	}
 }
 
+// THE REMEDY MUST NAME THE CAUSE THAT WAS MEASURED TO PRODUCE THIS (quince#799).
+//
+// It named the key, the forced command and the host, and omitted the HOST KEY — the one thing
+// quince#796 measured actually producing `unreachable`, on a rig where all three of those were
+// correct. `Detail` carries ssh's `Host key verification failed.` verbatim, so a reader who reads
+// the raw output is fine; `Reason` is the checklist that exists to spare them that, and it sent
+// them to re-check three things that were already right.
+//
+// ASSERTED PER CAUSE rather than as one substring of the sentence, so a reword that drops a cause
+// fails here instead of passing on a lucky match. That is the guard the issue asked for on top of
+// the clause: the enumeration now has ONE home, and this proves that home reaches the surface a
+// user actually reads.
+func TestUnreachableRemedyNamesEveryCause(t *testing.T) {
+	got := CheckHook(context.Background(), "tank/backups", "/nonexistent/ssh")
+	if got.Outcome != HookUnreachable {
+		t.Fatalf("outcome = %q, want %q — this test is about the reachability remedy", got.Outcome, HookUnreachable)
+	}
+	for _, cause := range []string{"key", "forced command", "known_hosts", "host is up"} {
+		if !strings.Contains(got.Reason, cause) {
+			t.Errorf("the unreachable remedy does not name %q, so an operator is sent to re-check "+
+				"everything except the cause. Reason was: %q", cause, got.Reason)
+		}
+	}
+}
+
 // THE FORCED COMMAND DISCARDS FLAGS, and this is quince#593's defect reproduced as a gate rather
 // than described in a comment. It is what justifies the whole extract-the-real-script design: a
 // stubbed helper would answer however the test chose and this could not be observed.

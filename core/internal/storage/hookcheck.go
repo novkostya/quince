@@ -25,10 +25,34 @@ const (
 	// proves what the FILESYSTEM thinks; only the helper can say what the HELPER was configured
 	// with, and a disagreement between them is silent until a backup fails at commit.
 	HookParentMismatch HookOutcome = "parent_mismatch"
-	// HookUnreachable — neither verb answered: no key, wrong forced command, host down, or no
-	// transport binary at all.
+	// HookUnreachable — neither verb answered, or there was no transport binary at all. WHAT
+	// PRODUCES IT IS ENUMERATED ONCE, in hookUnreachableCauses below; this comment deliberately
+	// does not restate the list.
+	//
+	// It restated it until quince#799, and the copy went stale: this line and the user-facing
+	// remedy both named the key, the forced command and the host, and both omitted the host key —
+	// which quince#796 then measured as the thing that actually produced this outcome on a rig
+	// where all three of the named causes were fine. Two descriptions of one set, drifting because
+	// nothing tied them together, is quince#782's shape.
 	HookUnreachable HookOutcome = "unreachable"
 )
+
+// hookUnreachableCauses is the ONE enumeration of what makes the helper unreachable, so the doc
+// comment above and the Reason the user reads cannot disagree again.
+//
+// THE HOST KEY WAS THE MISSING ONE, and it is the first thing a new install hits. Measured on a lab
+// rig (quince#796): with a correct key, a correct forced command, a reachable host and a correct
+// parent dataset, a `hook_cmd` carrying no host-key options answered `unreachable` with `Host key
+// verification failed.` A container's known_hosts is empty at first install — which is exactly when
+// an operator fills this field in — so the remedy was pointing at the three things that were
+// already right.
+//
+// THE MECHANISM IS DELIBERATELY NOT ASSERTED. The documented `hook_cmd` carries `BatchMode=yes`,
+// under which ssh cannot prompt and fails outright; an operator who omits it and has no tty fails
+// too, by a different route. Naming the CAUSE is what a reader needs, and which route they took is
+// the one thing here nobody has measured across both shapes.
+const hookUnreachableCauses = "the key, the forced command in authorized_keys, the host key in " +
+	"known_hosts, and that the host is up"
 
 // HookCheck is the verdict plus what the transport actually said.
 type HookCheck struct {
@@ -113,8 +137,7 @@ func CheckHook(ctx context.Context, parentDataset, hookCmd string) HookCheck {
 
 	default:
 		return HookCheck{Outcome: HookUnreachable,
-			Reason: "quince could not reach the helper — check the key, the forced command in " +
-				"authorized_keys, and that the host is up",
+			Reason: "quince could not reach the helper — check " + hookUnreachableCauses,
 			Detail: strings.TrimSpace(firstNonEmpty(capOut, listOut))}
 	}
 }
