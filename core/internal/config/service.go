@@ -477,7 +477,8 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	if err != nil {
 		return nil, nil, err
 	}
-	declared := wasDeclared.union(changed)
+	// …and nothing belonging to a storage this document no longer has. See forStorages.
+	declared := wasDeclared.union(changed).forStorages(c.Storage)
 
 	data, err := MarshalDeclared(c, declared)
 	if err != nil {
