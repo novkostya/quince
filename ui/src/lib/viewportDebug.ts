@@ -17,10 +17,68 @@
 // fix. It ships inert either way — the flag is absent from every link quince produces.
 const LOG_LINES = 9;
 
+// HOW YOU TURN IT ON INSIDE A HOME-SCREEN APP, WHICH HAS NO ADDRESS BAR.
+//
+// The URL flag is fine in Safari and useless in the installed PWA: there is nowhere to type, and the
+// manifest's `start_url` is `/`, so iOS launches the icon at `/` and drops any query string that was
+// present when it was added. Safari also reports every `env(safe-area-inset-*)` as 0, so the
+// questions that are actually left — what `innerHeight` and `scrollY` do in standalone, and what the
+// real insets are — CANNOT be answered from Safari at all. The instrument has to be reachable from
+// the installed app or it cannot measure the thing it was built for.
+//
+// So: FIVE TAPS IN THE TOP-LEFT CORNER, within three seconds. No UI, no route, no component touched,
+// and it lives and dies with this file. It is also remembered, so a reload or a navigation inside the
+// app does not lose it — tap five times again to turn it off.
+const CORNER = 64; // px square in the top-left
+const TAPS = 5;
+const WINDOW_MS = 3000;
+const REMEMBERED = "quince.vvdebug";
+
 export function initViewportDebug(): () => void {
-  if (typeof location === "undefined" || !new URLSearchParams(location.search).has("vvdebug")) {
-    return () => {};
+  const armCorner = (): void => {
+    let count = 0;
+    let first = 0;
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.clientX > CORNER || e.clientY > CORNER) {
+          count = 0;
+          return;
+        }
+        const now = e.timeStamp;
+        if (count === 0 || now - first > WINDOW_MS) {
+          count = 1;
+          first = now;
+          return;
+        }
+        if (++count < TAPS) return;
+        count = 0;
+        const on = localStorage.getItem(REMEMBERED) === "1";
+        localStorage.setItem(REMEMBERED, on ? "0" : "1");
+        location.reload();
+      },
+      true,
+    );
+  };
+  armCorner();
+
+  const flagged =
+    typeof location !== "undefined" && new URLSearchParams(location.search).has("vvdebug");
+  let remembered = false;
+  try {
+    remembered = localStorage.getItem(REMEMBERED) === "1";
+  } catch {
+    // Private mode or a blocked store — the URL flag still works.
   }
+  if (flagged) {
+    try {
+      localStorage.setItem(REMEMBERED, "1");
+    } catch {
+      // Not being able to remember it is not a reason to refuse to show it.
+    }
+  }
+  if (!flagged && !remembered) return () => {};
+
   const vv = window.visualViewport;
   if (!vv) return () => {};
 
