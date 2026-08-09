@@ -175,12 +175,42 @@ func pruneMapping(n *yaml.Node, d Declared, prefix string, keep map[string]bool)
 // not be in the document at all, so it needs a real canonical-position insert. Do not copy the
 // shape that used to be here.
 func pruneSequence(n *yaml.Node, d Declared, prefix string) {
+	// THE ONE CASE WHERE QUINCE MUST WRITE A VALUE NOBODY SET (spec D3), and it is the opposite of
+	// everything else this file does.
+	//
+	// `ResolveStorages` implies `default: true` on a LONE entry, so in a one-storage file the key is
+	// undeclared and correctly dropped — the next parse re-implies it. **Add a second storage and the
+	// implication stops applying.** Unless the incumbent's `default: true` is written at that moment,
+	// the next parse finds two storages and no default, and `validateStorages` refuses:
+	//
+	//	exactly one storage must be marked `default: true` … It is implied only when there is
+	//	exactly one storage
+	//
+	// That is a config the daemon will not start on — quince#683's class, reached from the other
+	// direction by the rung that exists to make the file tidy. It is a `keep` rather than an insert
+	// because the key is always present in the marshalled document (`Default` is a plain bool), so
+	// the ordering hazard the header of this function describes does not arise.
+	multi := len(n.Content) > 1
 	for _, item := range n.Content {
 		if item.Kind != yaml.MappingNode {
 			continue
 		}
-		pruneMapping(item, d, prefix+"["+nodeEntryKey(item)+"].", map[string]bool{"path": true})
+		keep := map[string]bool{"path": true}
+		if multi && nodeScalar(item, "default") == "true" {
+			keep["default"] = true
+		}
+		pruneMapping(item, d, prefix+"["+nodeEntryKey(item)+"].", keep)
 	}
+}
+
+// nodeScalar returns a mapping node's value for key, or "" when it is absent.
+func nodeScalar(item *yaml.Node, key string) string {
+	for i := 0; i+1 < len(item.Content); i += 2 {
+		if item.Content[i].Value == key {
+			return item.Content[i+1].Value
+		}
+	}
+	return ""
 }
 
 // nodeEntryKey is entryKey against a yaml node: the RESOLVED name, because by the time anything

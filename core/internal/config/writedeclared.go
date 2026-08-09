@@ -106,10 +106,53 @@ func diffSeq(oldVal any, next []any, prefix string, into Declared) {
 		key := entryKey(m)
 		prev, had := byName[key]
 		if !had {
-			prev = map[string]any{} // a NEW entry: everything it carries was set by this write
+			// A NEW ENTRY IS DIFFED AGAINST WHAT IT WOULD DEFAULT TO, not against nothing.
+			//
+			// Against an empty map every key of the entry reads as *set by this write*, so the add
+			// door wrote eleven keys for the two a caller supplied — 292 bytes for a first-run file,
+			// measured on quince#759. That is this rung's own defect surviving at the one door most
+			// users meet first.
+			//
+			// The baseline is `StorageEntry{Path: …}.Resolved()`: what quince would have filled in
+			// had the user written the path alone. A value matching it was not chosen; a value
+			// differing from it was. This is the test D5 REJECTS for the document at large — there
+			// it would delete a key the user explicitly wrote — and it is right here for the
+			// opposite reason: a new entry has no prior file it could have been written in, so
+			// "differs from what it would default to" is the only signal that exists.
+			prev = newEntryBaseline(m, len(next) == 1)
 		}
 		diffMaps(prev, m, prefix+"["+key+"].", into)
 	}
+}
+
+// newEntryBaseline renders what a storage entry declared as nothing but its path would resolve to.
+//
+// `lone` carries the list-level rule: `ResolveStorages` implies `default: true` on a single entry, so
+// in a one-entry list a `true` was implied rather than chosen. With a second entry present the
+// implication stops applying and a `true` becomes a real choice — which is why the same value is
+// undeclared in one case and declared in the other.
+func newEntryBaseline(entry map[string]any, lone bool) map[string]any {
+	path, _ := entry["path"].(string)
+	base := StorageEntry{Path: path}.Resolved()
+	base.Default = lone
+	m, err := toMapOf(base)
+	if err != nil {
+		return map[string]any{} // fall back to "everything was set": over-writes rather than loses
+	}
+	return m
+}
+
+// toMapOf renders any value through the marshaller into the generic tree the diff walks.
+func toMapOf(v any) (map[string]any, error) {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // sameScalar compares two decoded YAML scalars. They come back as typed values (bool, int, string),
