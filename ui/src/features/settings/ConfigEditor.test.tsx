@@ -319,4 +319,34 @@ describe("ConfigEditor when the config changes while the form is dirty", () => {
     rerenderWith(rerender, config([entry({ backend: "hardlink" })]));
     expect(screen.queryByText(/configuration changed elsewhere/i)).toBeNull();
   });
+
+  // THE NOTICE MUST NOT FIRE AFTER THE USER'S OWN SAVE, and nothing else in this file covers it.
+  //
+  // `dirty` compares `draft` against `synced` — NOT against the incoming config. So after any save:
+  // the mutation invalidates, the refetch delivers a new object, and without `onSuccess` adopting
+  // the response `synced` is still the PRE-SAVE document while `draft` carries the edit. `dirty` is
+  // true and the form announces "the configuration changed elsewhere" immediately after you saved
+  // it yourself, every single time.
+  //
+  // MEASURED: with the two adoption lines deleted, all 246 tests still passed. That is the exact
+  // failure the clean-form test above exists to prevent — a notice that fires on every refetch
+  // trains the reader to ignore it — sitting one line away with no gate in between.
+  it("does not warn after the user's own save", async () => {
+    const afterSave = config([entry({ backend: "auto" })]);
+    afterSave.backup.preferred_transport = "wifi";
+    saveResult.mockClear();
+    saveResult.mockResolvedValue({ config: afterSave, warnings: [], source: {}, file_text: "" });
+
+    const { rerender } = renderEditor(config([entry({ backend: "auto" })]));
+    fireEvent.change(screen.getByLabelText(/preferred transport/i), { target: { value: "wifi" } });
+    fireEvent.submit(screen.getByRole("button", { name: /^save$/i }).closest("form")!);
+    await waitFor(() => expect(saveResult).toHaveBeenCalled());
+
+    // The invalidation's refetch: a NEW object carrying what the save just wrote.
+    const refetched = config([entry({ backend: "auto" })]);
+    refetched.backup.preferred_transport = "wifi";
+    rerenderWith(rerender, refetched);
+
+    expect(screen.queryByText(/configuration changed elsewhere/i)).toBeNull();
+  });
 });
