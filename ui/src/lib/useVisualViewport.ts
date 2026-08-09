@@ -73,6 +73,14 @@ export function useVisualViewport(): void {
       const top = Math.min(Math.max(vv.offsetTop, 0), hidden);
       root.style.setProperty("--vv-top", `${top}px`);
       root.style.setProperty("--vv-height", `${vv.height}px`);
+
+      // THE HOME INDICATOR IS BEHIND THE KEYBOARD, SO RESERVING IT TWICE COSTS A STRIP OF SCREEN.
+      // `env(safe-area-inset-bottom)` still reports its ~34px while the keyboard is up, but the
+      // bottom of the visible area is now the keyboard, not the indicator — so padding the frame by
+      // it takes 34px out of the space above the keyboard for nothing. Measured on the Operator's
+      // recording (quince#762): a dead strip between the card's foot and the keyboard's accessory
+      // bar, with `Helper command` clipped by the card's edge while that strip sat empty.
+      root.style.setProperty("--vv-pad-bottom", hidden > 0 ? "1rem" : "max(1rem,var(--safe-bottom))");
     };
 
     apply();
@@ -85,6 +93,7 @@ export function useVisualViewport(): void {
       vv.removeEventListener("scroll", apply);
       root.style.removeProperty("--vv-top");
       root.style.removeProperty("--vv-height");
+      root.style.removeProperty("--vv-pad-bottom");
     };
   }, []);
 }

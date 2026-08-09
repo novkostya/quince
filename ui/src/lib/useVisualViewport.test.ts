@@ -91,3 +91,29 @@ describe("useVisualViewport publishes the visible area", () => {
     expect(published()).toEqual({ top: "", height: "" });
   });
 });
+
+// THE HOME INDICATOR IS BEHIND THE KEYBOARD, so reserving it while the keyboard is up costs a strip
+// of the space above it. Measured on the Operator's recording as a dead gap between the card's foot
+// and the keyboard's accessory bar, with the next field clipped by the card's edge (quince#762).
+describe("useVisualViewport reserves the bottom inset only when it is on screen", () => {
+  it("drops the inset while the keyboard is up", () => {
+    const update = install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+    expect(document.documentElement.style.getPropertyValue("--vv-pad-bottom")).toBe(
+      "max(1rem,var(--safe-bottom))",
+    );
+
+    update({ height: 430, offsetTop: 200 });
+    expect(document.documentElement.style.getPropertyValue("--vv-pad-bottom")).toBe("1rem");
+  });
+
+  it("puts it back when the keyboard goes", () => {
+    const update = install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+    update({ height: 430, offsetTop: 200 });
+    update({ height: 874, offsetTop: 0 });
+    expect(document.documentElement.style.getPropertyValue("--vv-pad-bottom")).toBe(
+      "max(1rem,var(--safe-bottom))",
+    );
+  });
+});

@@ -47,6 +47,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --vv-top: 0px;
   --vv-height: 100dvh;
+  --vv-pad-bottom: max(1rem, var(--safe-bottom));
 }
 
 html,

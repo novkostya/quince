@@ -69,7 +69,7 @@ function DialogSurface({ className, children }: { className?: string; children: 
           "top-[var(--vv-top)] h-[var(--vv-height)]",
           // `max(1rem, …)` is the shell's own idiom (`AppLayout`, `PasswordForm`, the onboarding
           // page): the inset when there is one, a plain margin when there is not, never both added.
-          "pt-[max(1rem,var(--safe-top))] pb-[max(1rem,var(--safe-bottom))]",
+          "pt-[max(1rem,var(--safe-top))] pb-[var(--vv-pad-bottom)]",
         )}
       >
         {/* `max-h-full` is the frame's CONTENT box — the visible height less the safe area — so the
