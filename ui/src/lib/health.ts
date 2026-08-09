@@ -27,9 +27,34 @@ export function useHealth() {
         return UNKNOWN_HEALTH;
       }
     },
-    staleTime: Infinity, // the mode cannot change without a restart
+    // `staleTime: Infinity` STOOD HERE, on the reason *"the mode cannot change without a restart"*.
+    // That was true of every field this payload carried until qn.6i added `reconciling`, which
+    // changes WHILE THE PROCESS RUNS — so a cached-forever query would raise the notice once at mount
+    // and never take it down, or never raise it at all.
+    //
+    // A SECOND QUERY AGAINST THE SAME ENDPOINT was the alternative and is worse: two cache entries for
+    // one document, and the next mutable field would have to pick a side.
+    //
+    // THE POLL RATE FOLLOWS THE ANSWER — 2 s while reconciling, so the notice clears promptly when the
+    // pass ends; 30 s otherwise, so a scheduled pass beginning under an idle browser is still noticed
+    // without polling hard for a state that is usually false. `undefined` (a server older than this
+    // UI) takes the slow rate, because such a server never reports the state at all.
+    staleTime: 1000,
+    refetchInterval: (q) => (q.state.data?.reconciling ? 2000 : 30000),
     retry: false,
   });
+}
+
+// useReconciling is the question a caller actually has: is quince re-reading its storages right now,
+// so a version list or a count may be SHORT (contracts §1)?
+//
+// FALSE WHILE LOADING AND FALSE ON A FAILED PROBE, matching useIsPublicDemo: the notice appears only
+// on a POSITIVE answer from the server. That direction is deliberate — a health endpoint that cannot
+// be reached must not make quince claim its own data is incomplete, which would layer a second wrong
+// statement on a first.
+export function useReconciling(): boolean {
+  const { data } = useHealth();
+  return data?.reconciling === true;
 }
 
 // useIsPublicDemo is the question every caller actually has. It is false while loading and false on
