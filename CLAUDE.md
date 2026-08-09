@@ -81,10 +81,29 @@ repo is not a message bus, and no human is an RPC layer.
 
    **"Discouraged", not "never", and the difference is where the cost lands.** quince#375's slice
    stacked for a real reason: 1a and 1b both edited `bin/wrapper-boundary-test` and would have
-   conflicted. Sequencing that costs **one review cycle** — land 1a, then branch 1b from `main` and
-   resolve nothing. That is the trade the ruling accepts, and it is cheap against losing an approved
-   PR. When you stack anyway, say so in the PR body so the merging seat knows before it merges the
-   base — the forge shows the base branch, and it is easy to miss.
+   conflicted. Sequencing that costs **one review cycle of PR latency** — land 1a, then branch 1b
+   from `main` and resolve nothing. That is the trade the ruling accepts, and it is cheap against
+   losing an approved PR. When you stack anyway, say so in the PR body so the merging seat knows
+   before it merges the base — the forge shows the base branch, and it is easy to miss.
+
+   **THE RULE BINDS THE PULL REQUEST, NOT YOUR WORKING COPY — so that cycle is LATENCY, not idle
+   time.** *Stacked* is a property of the PR's **base ref**: what `--delete-branch` closes is a pull
+   request whose base is another pull request's head. Building locally on top of an unmerged branch
+   is a different act and is safe — branch off the predecessor, write the next slice while its review
+   runs, and **rebase onto `main` before `gh pr create`**, so the PR opens with `base: main` and no
+   dependency exists on the forge for anything to close. *"Branch each PR from `main`"* above is a
+   statement about the branch you OPEN, not about where your fingers start.
+
+   **The timing caveat is the whole of the discipline.** A rebase onto `main` yields a clean diff only
+   **after the predecessor has landed**: until then its commits are not in `main`, so they are still
+   your ancestors and the PR would carry both slices — the mis-scoping rung 1 opens with. So build
+   immediately, `git fetch && git rebase origin/main` once the predecessor merges (its commits drop
+   out of the range as already-upstream), and open then. **What waits is `gh pr create`, not the
+   work.**
+
+   **If you cannot wait, the answer is still no.** Opening before the predecessor lands leaves `base:`
+   as either its branch — the stacked PR this rung forbids — or `main` with a diff carrying somebody
+   else's reviewed work. Neither is a pull request carrying ONE reviewable claim.
 2. **Fresh clone per unit of work.** `git clone https://github.com/novkostya/quince.git`
    into a scratch dir, branch **`<runner>/<short-title>`** — the runner name this session declared,
    then the topic. No worktrees, no long-lived checkout, no rsync from a workstation.
