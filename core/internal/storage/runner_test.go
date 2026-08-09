@@ -221,3 +221,86 @@ func TestATriggerDuringAPassQueuesAnotherPass(t *testing.T) {
 		t.Fatalf("Passes = %d, want 2 — a trigger after a pass must run another one", r.Passes())
 	}
 }
+
+// G7 — THE SCHEDULED PASS FIRES, AND `0` MEANS IT DOES NOT.
+//
+// Both halves in one test because the setting's whole contract is the pair: a schedule that never
+// fired and a schedule that could not be turned off are the same defect from opposite sides.
+//
+// The interval is deliberately tiny and the assertion waits on a PASS rather than on a clock, so this
+// is deterministic rather than timing-sensitive.
+func TestTheScheduledPassFiresAndZeroDisablesIt(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	r := NewRunner(m, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	r.SetInterval(15 * time.Millisecond)
+	r.StartSchedule(ctx)
+
+	first := r.WaitForPass()
+	select {
+	case <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no scheduled pass fired — the trigger the whole rung was widened for does nothing")
+	}
+
+	// OFF. Nothing else triggers anything, so any further pass can only have come from the schedule.
+	r.SetInterval(0)
+	settle := r.Passes()
+	time.Sleep(120 * time.Millisecond) // ~8 intervals at the rate above
+	if got := r.Passes(); got != settle {
+		t.Fatalf("passes went %d → %d after the interval was set to 0 — the schedule kept firing, so "+
+			"a user who turned it off did not turn it off", settle, got)
+	}
+}
+
+// A LIVE INTERVAL CHANGE APPLIES TO THE CURRENT WAIT, not after the old one elapses.
+//
+// This is what makes `reconcile.interval_minutes` LIVE in contracts §6's sense rather than in name
+// only: without the wake-up, turning six hours down to fifteen minutes would take up to six hours to
+// bite, and the per-key table would be claiming something false.
+//
+// The first interval is set long enough that the test would time out if the change were ignored.
+func TestShorteningTheIntervalTakesEffectWithoutWaitingOutTheOldOne(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	r := NewRunner(m, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	r.SetInterval(time.Hour)
+	r.StartSchedule(ctx)
+
+	done := r.WaitForPass()
+	r.SetInterval(15 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shortening the interval did not take effect on the wait already in progress — the " +
+			"setting is live in contracts §6 and this is what that word has to mean")
+	}
+}
+
+// TURNING THE SCHEDULE BACK ON NEEDS NO RESTART either, which is the half a `return` in the disabled
+// branch would silently remove.
+func TestReEnablingTheScheduleWorksWithoutARestart(t *testing.T) {
+	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
+	r := NewRunner(m, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	r.SetInterval(0) // start disabled
+	r.StartSchedule(ctx)
+
+	done := r.WaitForPass()
+	r.SetInterval(15 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the schedule could be turned off but not back on — a one-way live setting is worse " +
+			"than a restart-required one, because nothing says so")
+	}
+}

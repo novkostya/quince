@@ -20,7 +20,13 @@ type Config struct {
 	TLS        TLSConfig        `yaml:"tls" json:"tls"`
 	Sessions   SessionsConfig   `yaml:"sessions" json:"sessions"`
 	Automation AutomationConfig `yaml:"automation" json:"automation"`
-	UI         UIConfig         `yaml:"ui" json:"ui"`
+	// Reconcile is the qn.6i scheduled reconciliation pass. A TOP-LEVEL SECTION because there is
+	// nowhere else for it: `storage:` is a LIST, not a section, so a daemon-wide key placed there
+	// would have to become a property of every declared storage — a different setting with a
+	// different meaning. `automation:` was the other candidate and is declared as qn.12's debt in
+	// contracts §6, so putting a LIVE key in it would make that row false.
+	Reconcile ReconcileConfig `yaml:"reconcile" json:"reconcile"`
+	UI        UIConfig        `yaml:"ui" json:"ui"`
 }
 
 // BackupConfig is the `backup:` section.
@@ -319,6 +325,9 @@ func Default() Config {
 		Sessions: SessionsConfig{
 			TTLMinutes: 30,
 		},
+		Reconcile: ReconcileConfig{
+			IntervalMinutes: 360,
+		},
 		Automation: AutomationConfig{
 			StalenessDays:         3,
 			ReminderCooldownHours: 24,
@@ -336,4 +345,23 @@ func Default() Config {
 type Warning struct {
 	Path    string `json:"path"`
 	Message string `json:"message"`
+}
+
+// ReconcileConfig is the `reconcile:` section — the qn.6i scheduled reconciliation pass.
+type ReconcileConfig struct {
+	// IntervalMinutes is how often a reconciliation pass runs on its own. Default 360 (six hours).
+	//
+	// `0` DISABLES THE SCHEDULE AND NOTHING ELSE. Startup and storage-added still fire, because those
+	// are CORRECTNESS triggers — a registry that has never been scanned, and a disk whose contents
+	// nobody has looked at — where the schedule is hygiene: it catches a version deleted or restored
+	// under quince's feet. Turning off hygiene is a reasonable thing to want; turning off correctness
+	// is not, and one key should not do both.
+	//
+	// INTEGER MINUTES RATHER THAN A DURATION STRING, following the document rather than expressiveness:
+	// `sessions.ttl_minutes`, `automation.staleness_days` and `automation.reminder_cooldown_hours` are
+	// all bare numbers with the unit in the name. `6h` would be the first duration string in the file.
+	//
+	// IT IS LIVE (contracts §6): the runner reads it when it schedules the NEXT pass, so an edit takes
+	// effect from the following tick rather than at a restart.
+	IntervalMinutes int `yaml:"interval_minutes" json:"interval_minutes"`
 }

@@ -267,6 +267,10 @@ func serve(args []string) error {
 			// health answered `false` about a registry that had not been scanned — the false `false`
 			// this rung exists to remove, reintroduced by ordering.
 			ls.reconcile.Start(ctx)
+			// The scheduled trigger (qn.6i PR 5). Started even when the interval is 0 — the loop has to
+			// be running for the setting to be turnable back ON without a restart, which is what makes
+			// it live rather than half-live.
+			ls.reconcile.StartSchedule(ctx)
 			ls.reconcile.Trigger("startup")
 			reconcileReporter = ls.reconcile
 		}
