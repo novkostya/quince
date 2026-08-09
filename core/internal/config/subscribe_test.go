@@ -24,6 +24,11 @@ func testService(t *testing.T) *Service {
 	// A valid document to write over: `storage:` is the one key with no default, so a Replace of
 	// Default() would be refused by CheckStorages before any applier could run.
 	svc.cfg = validConfig()
+	// `cfg` AND `declared` ARE A PAIR, and poking one without the other builds a state `Load`
+	// cannot produce: a live document carrying values that neither a file nor any write declared.
+	// qn.6j's write path prunes to the declared set, so the entry would lose every key but `path`
+	// — caught by the round-trip guard, which is what it is for. Seed both.
+	svc.declared, _ = changedKeys(Default(), svc.cfg)
 	return svc
 }
 

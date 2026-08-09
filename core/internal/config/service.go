@@ -463,10 +463,61 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	if errs := CheckStorageBackendErrors(c.Storage); len(errs) > 0 {
 		return errs, nil, nil
 	}
-	data, err := Marshal(c)
+	// THE FILE NOW CARRIES ONLY WHAT WAS SET (qn.6j, quince#728; Operator ruling 2026-08-08, canon
+	// in `docs/quince.stack.md` D12). Read under `mu` here rather than at the swap below: the whole
+	// write is serialised by `writeMu`, so this is the same `old` the swap would have seen, and the
+	// marshaller needs it BEFORE the write rather than after.
+	s.mu.RLock()
+	old, wasDeclared := s.cfg, s.declared
+	s.mu.RUnlock()
+
+	// Clause 1 ∪ clause 2 of the write rule: what the file already said, plus what this write
+	// changes. See changedKeys for why the second half is not optional.
+	changed, err := changedKeys(old, c)
 	if err != nil {
 		return nil, nil, err
 	}
+	declared := wasDeclared.union(changed)
+
+	data, err := MarshalDeclared(c, declared)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// THE WRITE VERIFIES ITSELF, AND DEGRADES LOUDLY (spec rung-ruled decision 3, confirmed at
+	// review of quince#753). Re-parse the bytes about to be written and compare them to the
+	// document in hand; on a mismatch, write the FULL document instead and say so.
+	//
+	// IT IS A FALLBACK, SO IT IS ADMISSIBLE ONLY BECAUSE IT IS SURFACED — which is exactly the test
+	// `no silent caps or fallbacks` sets. What it buys is that a future defect in the pruning
+	// degrades into a fat file plus a visible warning, rather than into a config the daemon will not
+	// start on (quince#683's class, which this project has already paid for once).
+	//
+	// IT COULD NOT HAVE SHIPPED BEFORE quince#754. The comparison is against a RESOLVED re-parse, and
+	// until `replaceLocked` resolved its input the held document was not resolved on the `PUT` path —
+	// so every partial PUT would have mismatched and the fallback would have fired on the happy path
+	// of an ordinary client. A guard that cries during normal use is worse than no guard, because it
+	// teaches the reader to ignore it.
+	//
+	// One in-memory parse per save, on a path already doing `fsync` + `rename`.
+	var guardWarnings []Warning
+	if back, _, _, perr := Parse(data); perr != nil || !SameConfig(back, c) {
+		full, ferr := Marshal(c)
+		if ferr != nil {
+			return nil, nil, ferr
+		}
+		lost := lostPaths(c, back, perr)
+		s.log.Error("config: the tidy write did not round-trip — writing the full document instead",
+			"path", s.path, "parse_error", perr, "differing", lost)
+		data = full
+		guardWarnings = []Warning{{
+			Path: "",
+			Message: "your configuration was saved correctly, but quince could not write it in the " +
+				"short form and wrote every key instead — the file is larger than it needs to be and " +
+				"nothing else is wrong. Differing: " + lost,
+		}}
+	}
+
 	if err := AtomicWrite(s.path, data); err != nil {
 		return nil, nil, err
 	}
@@ -475,8 +526,12 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 		mtime = info.ModTime().UTC().Format(time.RFC3339)
 	}
 	s.mu.Lock()
-	old := s.cfg
 	s.cfg = c
+	// THE DECLARED SET MOVES WITH THE FILE, and this is the assignment the field comment promised
+	// when it said the write half was PR 4's. Without it the next save re-inflates the file this one
+	// tidied: `s.declared` would still describe the document as it was READ, and every key this
+	// write added would look undeclared again.
+	s.declared = declared
 	s.warnings = nil // a valid structured replace clears prior file warnings
 	s.source = Source{Path: s.path, Mtime: mtime}
 	s.mu.Unlock()
@@ -493,5 +548,8 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// while its cause persisted. `ForgetRestartWarning` already made exactly this split for exactly
 	// this reason — "a property of the response, not of the stored state" — and this follows it
 	// rather than inventing a second rule.
-	return nil, s.notify(old, c), nil
+	// The guard's warning rides out with the appliers' — both describe the gap between what was
+	// asked for and what the running system has, which is a property of THIS response rather than of
+	// the stored state. Same reason the applier warnings are never stored.
+	return nil, append(guardWarnings, s.notify(old, c)...), nil
 }
