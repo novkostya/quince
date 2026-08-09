@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/wire"
@@ -337,6 +338,72 @@ func TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes(t *testing
 			t.Errorf("Identity.%s = %v, want %v — Enrich REPLACES the identity, so a field missing "+
 				"from runWifiSync's literal is published empty", name, gv.Field(i).Interface(), want.Interface())
 		}
+	}
+}
+
+// THE OP MUST PUBLISH BEFORE IT ANNOUNCES, and the order is a contract rather than an implementation
+// detail (quince#529). `succeeded` is what a client polls for, and it re-reads the device the moment
+// it sees one — so announcing first hands that client the stale badge this whole path exists to
+// retract, which is the symptom that took three hardware attempts to diagnose (quince#325/#363/#366).
+//
+// It is also what made TestWifiSyncOpPublishesTheVerifiedStateEvenWhenTheDeviceVanishes flaky on
+// branches with no Go changes, up to reddening `main` at 1cfd50d: `waitOp` returns the instant the op
+// reads `succeeded`, so that test read the registry inside this window.
+//
+// DETERMINISTIC WHERE THAT TEST IS NOT. It does not race the two events and hope: it HOLDS THE
+// PUBLISH OPEN and asks what the op has already said. Under the old ordering the answer is
+// `succeeded` every time, not one run in thirty.
+func TestWifiSyncPublishesBeforeItAnnouncesSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, scenario, action string
+		dev                    wire.Device
+	}{
+		// runWifiSync's own publish: the value SetWifiSync read back and verified.
+		{"a verified disable", "wifi_on", "disable", pairedUSBDevice(fakeUDID)},
+		// wifiSyncDisableUnreadable's `unknown` — the publish that RETRACTS a stale `on`, so
+		// announcing before it is the worst version of this bug.
+		{"a disable whose read-back is severed", "wifi_set_then_unreadable", "disable", pairedWiFiDevice(fakeUDID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			devs := newFakeDevices()
+			d := tc.dev
+			d.WifiSync = "on"
+			devs.add(d)
+			m := newWifiManager(t, devs, tc.scenario)
+
+			// `once`, because a USB op also calls reEnrich afterwards and only the FIRST publish is
+			// the one racing the announcement. Set before the op starts — see fakeDevices.onEnrich.
+			var once sync.Once
+			entered, release := make(chan struct{}), make(chan struct{})
+			devs.onEnrich = func(string) {
+				once.Do(func() {
+					close(entered)
+					<-release
+				})
+			}
+
+			opID, status, reason := m.WifiSync(context.Background(), fakeUDID, tc.action)
+			if status != http.StatusAccepted {
+				t.Fatalf("status = %d (%s), want 202", status, reason)
+			}
+
+			<-entered // the publish is in flight and held open
+			if op, ok := m.Op(opID); ok && op.State == "succeeded" {
+				t.Fatal("the op reported SUCCEEDED while its publish was still in flight — a client " +
+					"that polls for success and re-reads the device gets the stale badge this path " +
+					"exists to retract (quince#529)")
+			}
+			close(release)
+
+			if op := waitOp(t, m, opID); op.State != "succeeded" {
+				t.Fatalf("op = %+v, want succeeded", op)
+			}
+			// And the publish is not merely first, it is DONE: the whole point is that a client
+			// which sees `succeeded` can read the new value.
+			if _, ok := devs.lastEnrich(fakeUDID); !ok {
+				t.Fatal("nothing was published even after the op succeeded")
+			}
+		})
 	}
 }
 

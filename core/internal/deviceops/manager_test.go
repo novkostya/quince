@@ -16,6 +16,13 @@ type fakeDevices struct {
 	mu       sync.Mutex
 	devs     map[string]wire.Device
 	enriched map[string]device.Identity
+
+	// onEnrich, when set, runs INSIDE Enrich before the value is recorded — the seam that lets a
+	// test hold a publish OPEN and ask the op what it has already told the world (quince#529).
+	// SET IT BEFORE THE OP STARTS: the goroutine that calls it is spawned by the op, and that spawn
+	// is the happens-before edge which keeps this plain field read race-free. Assigning it while an
+	// op is in flight would be a data race, and `-race` would say so.
+	onEnrich func(udid string)
 }
 
 func newFakeDevices() *fakeDevices {
@@ -43,6 +50,10 @@ func (f *fakeDevices) Devices() []wire.Device {
 	return out
 }
 func (f *fakeDevices) Enrich(udid string, id device.Identity) {
+	// Outside the lock, so a hook may call back into the manager without deadlocking on it.
+	if f.onEnrich != nil {
+		f.onEnrich(udid)
+	}
 	f.mu.Lock()
 	f.enriched[udid] = id
 	f.mu.Unlock()
