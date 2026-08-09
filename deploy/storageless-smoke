@@ -122,7 +122,32 @@ code=$(status "http://127.0.0.1:$PORT/api/devices" /dev/null "$JAR")
 [ "$code" = "200" ] || fail "/api/devices after the add = $code, want 200 — the mode did not clear"
 echo "  ok  the setup mode ends in the SAME PROCESS, with no restart"
 
-grep -q 'default: true' "$WORK/data/config.yml" || fail "the lone storage was not written as default"
-echo "  ok  the lone storage is default by implication, written to config.yml"
+# THE IMPLICATION IS A FACT ABOUT THE RESOLVED CONFIG, NOT ABOUT THE FILE (qn.6j, quince#728).
+#
+# This grepped `config.yml` for `default: true`, and its ok line said "written to config.yml". The
+# Operator ruled on 2026-08-08 that the file carries ONLY WHAT WAS SET — a lone storage's default is
+# IMPLIED, so nobody set it and the file must not say it. `ResolveStorages` re-implies it at every
+# parse, which is where the guarantee actually lives.
+#
+# Asserting the file was always the weaker check: it proved a value reached disk, where what anything
+# depends on is that a backup naming no storage resolves to one. That is asserted directly now, from
+# the add response the caller already holds.
+default_seen=$(jq -r '.config.storage[0].default' "$WORK/add.json")
+[ "$default_seen" = "true" ] || fail "the lone storage is not default in the API's view (got '$default_seen') — a backup naming no storage would resolve to nothing"
+echo "  ok  the lone storage is default by implication, in the resolved config"
+
+# AND THE TIDY HALF, which nothing else checks end to end. This is the only place the FIRST-RUN FILE
+# is examined on a real container, and that file is the one most users will ever read.
+if grep -q 'default: true' "$WORK/data/config.yml"; then
+	fail "config.yml carries an implied default nobody set — qn.6j: the file contains only what was set
+$(cat "$WORK/data/config.yml")"
+fi
+for ghost in 'zfs:' 'retention:' 'preferred_transport'; do
+	if grep -q "$ghost" "$WORK/data/config.yml"; then
+		fail "config.yml carries '$ghost', which the caller never sent — the first-run file is inflated
+$(cat "$WORK/data/config.yml")"
+	fi
+done
+echo "  ok  the first-run config.yml carries only what the caller sent"
 
 echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart"
