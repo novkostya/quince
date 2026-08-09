@@ -26,13 +26,20 @@ import { useEffect } from "react";
 //
 // WHAT IT IS MEASURED AGAINST, AND WHY IT IS NOT `window.innerHeight`. The bound wants "how much of
 // the visible area is hidden right now", and the first version of this file computed it as
-// `innerHeight - height`. THAT IS ZERO ON THE DEVICE THIS WAS WRITTEN FOR. iOS shrinks
-// `window.innerHeight` along with the visual viewport when the keyboard opens, so the difference
-// collapses, every legitimate offset was clamped away, and the dialog stayed pinned to the top of
-// the layout viewport while Safari scrolled the page down under the keyboard. Operator-measured on
-// an iPhone (quince#762): right on first focus, because nothing had scrolled yet and the clamp bound
-// nothing; visibly high on re-focus; most of the way off the top of the screen once the tall zfs
-// form pushed the focused field far down. One wrong reference, three symptoms of increasing size.
+// `innerHeight - height`. Replacing that fixed a real, Operator-visible fault in the home-screen
+// PWA (quince#762): the dialog was right on first focus, visibly high on re-focus, and most of the
+// way off the top of the screen once the tall zfs form pushed the focused field far down.
+//
+// THE REASON GIVEN FOR IT WAS WRONG, AND THE INSTRUMENT SAID SO. This comment used to assert that
+// iOS shrinks `window.innerHeight` along with the visual viewport, collapsing the difference to zero.
+// Measured in Safari with `?vvdebug`: `inner=714 client=714` while `vv.height=377`. It does not
+// shrink there, so that difference is ~337 and would have clamped nothing.
+//
+// The two are not in conflict — they are different contexts. The fault was seen in the STANDALONE
+// PWA and the measurement was taken in SAFARI, which have different layout viewports, and the
+// standalone case is still unmeasured. What is known: the change fixed something real, and the
+// stated cause is false in the one context anyone has instrumented. Recorded rather than quietly
+// rewritten, because a fix whose explanation is wrong is how the next person builds on sand.
 //
 // So the reference is the WIDEST visible height this dialog has seen, which is observed rather than
 // asked for: `apply()` runs once at mount, before any keyboard, so the first reading IS the
