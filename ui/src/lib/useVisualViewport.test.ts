@@ -2,16 +2,23 @@ import { describe, it, expect, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useVisualViewport } from "./useVisualViewport";
 
-// THE CASE THE BROWSER TESTS CANNOT REACH, AND IT SHIPPED BROKEN BECAUSE OF THAT.
+// THE CASE THE BROWSER TESTS CANNOT REACH.
 //
 // The e2e suite drives a real visible-area shrink, which is a faithful stand-in for the keyboard's
 // effect on `height` — and no stand-in at all for its effect on `offsetTop`, which only appears when
-// the browser SCROLLS the page under the keyboard. Headless never does, so the offset path was
-// exercised at exactly one value, 0, and a clamp that discarded every non-zero offset passed
-// everything. The Operator found it on the third tap (quince#762).
+// the browser SCROLLS the page under the keyboard. Headless never does, so the offset path is
+// exercised there at exactly one value, 0. These tests are the only place the arithmetic between a
+// non-zero offset and a shrunken height is checked at all.
 //
-// A fake `visualViewport` is the only way to state those numbers. It is not a simulation of iOS —
-// it is the four readings iOS produces, written down, so the arithmetic between them is checked.
+// A fake `visualViewport` is the only way to state those numbers. It is not a simulation of iOS — it
+// is the readings iOS produces, written down.
+//
+// THIS HEADER USED TO CLAIM THESE TESTS CAUGHT A SHIPPED BUG. They did not, and the retraction
+// belongs here rather than only in the source file (quince#791 review). The claim was that a clamp
+// against `window.innerHeight` "discarded every non-zero offset" on the device — but `innerHeight`
+// does not shrink there, so that bound was ~444 and an offset of 200 passed it untouched. The old
+// formula would have behaved identically on hardware. The 3-of-5 failure once cited as proof was an
+// artefact of the mock below forcing `innerHeight` to a value iOS never produces.
 type FakeViewport = { height: number; offsetTop: number };
 
 function install(v: FakeViewport): (next: Partial<FakeViewport>) => void {
@@ -39,15 +46,25 @@ afterEach(() => {
 });
 
 describe("useVisualViewport publishes the visible area", () => {
-  it("passes the offset through when the keyboard has scrolled the page — the shipped bug", () => {
-    // iPhone-class: 874 tall with no keyboard, 430 with one, and Safari has scrolled 200px so the
-    // focused field clears it. `window.innerHeight` is left at the SHRUNKEN height on purpose —
-    // that is what iOS reports, and clamping against it collapsed the bound to 0 and pinned the
-    // dialog to the top of the layout viewport.
+  it("passes the offset through while the keyboard hides part of the viewport", () => {
+    // iPhone-class: 874 tall with no keyboard, 430 with one, and the browser has scrolled 200px so
+    // the focused field clears it.
     const update = install({ height: 874, offsetTop: 0 });
     renderHook(() => useVisualViewport());
     expect(published()).toEqual({ top: "0px", height: "874px" });
 
+    // `window.innerHeight` IS SET TO A VALUE iOS NEVER PRODUCES, DELIBERATELY, AND THAT IS THE
+    // ASSERTION. Measured with `?vvdebug` on the device: `inner` stays 714 in Safari and 812 in the
+    // standalone PWA while `vv.height` is 377 and 471 — it does NOT track the keyboard. Forcing it to
+    // the shrunken height here is therefore a lie the hook must not be able to hear: it reads
+    // `widest`, observed from `visualViewport` itself, and nothing else. Reintroduce an
+    // `innerHeight`-based bound and this value collapses it to 0, the offset is clamped away, and
+    // this test fails.
+    //
+    // It said the opposite until quince#791 review — "that is what iOS reports" — in the same diff
+    // whose source file spends thirty lines retracting exactly that belief. Two files in one change
+    // disagreeing about a measured fact, with the false one in the file a reader consults to learn
+    // what iOS does.
     window.innerHeight = 430;
     update({ height: 430, offsetTop: 200 });
     expect(published()).toEqual({ top: "200px", height: "430px" });
