@@ -269,3 +269,54 @@ describe("ConfigEditor follows the server when the config changes underneath it"
     expect(sent.storage?.[0].backend).toBe("hardlink");
   });
 });
+
+// A DIRTY FORM IS NOT OVERWRITTEN, AND THE USER IS TOLD (quince#764 PR 2).
+//
+// PR 1 re-synced only a CLEAN form, which is the right conservative half: React Query refetches on
+// window focus, so an unconditional re-sync would wipe an edit in progress. It left a window open —
+// a dirty form still saved its stale sections silently. This closes it by SAYING SO rather than by
+// choosing for the user.
+describe("ConfigEditor when the config changes while the form is dirty", () => {
+  function rerenderWith(rerender: (ui: React.ReactElement) => void, c: Config) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ConfigEditor config={c} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("keeps the edit and warns instead of silently overwriting either side", () => {
+    const { rerender } = renderEditor(config([entry({ backend: "auto" })]));
+
+    // The user edits one field…
+    fireEvent.change(screen.getByLabelText(/preferred transport/i), { target: { value: "wifi" } });
+    // …and the server document moves underneath them.
+    rerenderWith(rerender, config([entry({ backend: "hardlink" })]));
+
+    // The edit survives — this is what an unconditional re-sync would have destroyed.
+    expect((screen.getByLabelText(/preferred transport/i) as HTMLSelectElement).value).toBe("wifi");
+    // And the divergence is visible rather than silent.
+    expect(screen.getByText(/configuration changed elsewhere/i)).toBeTruthy();
+  });
+
+  it("offers taking the server version, and says that it discards the edit", () => {
+    const { rerender } = renderEditor(config([entry({ backend: "auto" })]));
+    fireEvent.change(screen.getByLabelText(/preferred transport/i), { target: { value: "wifi" } });
+    rerenderWith(rerender, config([entry({ backend: "hardlink" })]));
+
+    fireEvent.click(screen.getByRole("button", { name: /discard my edits/i }));
+
+    // The form is now the server's document, and the notice is gone with its cause.
+    expect((screen.getByLabelText(/preferred transport/i) as HTMLSelectElement).value).toBe("usb");
+    expect(screen.queryByText(/configuration changed elsewhere/i)).toBeNull();
+  });
+
+  // A CLEAN form must NOT warn — the notice exists for the case where something has to be chosen,
+  // and firing it on every background refetch would train the reader to ignore it.
+  it("stays silent when the form is clean", () => {
+    const { rerender } = renderEditor(config([entry({ backend: "auto" })]));
+    rerenderWith(rerender, config([entry({ backend: "hardlink" })]));
+    expect(screen.queryByText(/configuration changed elsewhere/i)).toBeNull();
+  });
+});

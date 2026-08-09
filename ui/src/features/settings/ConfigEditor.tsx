@@ -95,12 +95,38 @@ export function ConfigEditor({ config }: { config: Config }) {
   // `config !== synced` is a REFERENCE test, deliberately: React Query's structural sharing preserves
   // identity across a refetch whose content is unchanged, so this fires when the document actually
   // moved rather than on every poll.
+  // THE STRINGIFY COMPARISON IS KEY-ORDER SENSITIVE, and a false `dirty` silently restores
+  // quince#764 (architect note on quince#765). It is safe because BOTH SIDES COME FROM THE SAME
+  // SERVER DOCUMENT and are only ever updated by SPREAD, which preserves key insertion order — so a
+  // clean draft stringifies identically to `synced`. A future handler that rebuilds a nested section
+  // from an object literal in a different key order breaks that: the form reads dirty when nobody
+  // touched it, the re-sync stops, and the bug is back for that section **with no test failing**,
+  // because the tests reach this through spreads. Written down because the assumption is invisible
+  // and its failure is silent.
   const [synced, setSynced] = useState<Config>(config);
+  const [staleElsewhere, setStaleElsewhere] = useState(false);
   if (config !== synced) {
     const dirty = JSON.stringify(draft) !== JSON.stringify(synced);
     setSynced(config);
-    if (!dirty) setDraft(config);
+    if (dirty) {
+      // THE FORM IS NOT OVERWRITTEN AND THE USER IS TOLD. Keeping the draft protects the edit in
+      // progress; saying so is what stops the save silently shipping a stale section — the half PR 1
+      // deliberately left open.
+      setStaleElsewhere(true);
+    } else {
+      setDraft(config);
+      setStaleElsewhere(false);
+    }
   }
+
+  // Taking the server's document DISCARDS the edit in progress, so it is an explicit action rather
+  // than something that happens to you — which is the whole distinction this pair of changes draws.
+  const takeServerVersion = () => {
+    setDraft(config);
+    setSynced(config);
+    setStaleElsewhere(false);
+    setErrors([]);
+  };
 
   const mutation = useMutation({
     mutationFn: (c: Config) => updateConfig(c),
@@ -108,6 +134,13 @@ export function ConfigEditor({ config }: { config: Config }) {
       setErrors([]);
       setSaved(true);
       setTheme(resp.config.ui.theme as Theme);
+      // THE SAVE ENDS THE DIVERGENCE, whichever way it went. The response IS the new server document
+      // — `PUT` returns the same body `GET` does — so adopting it here leaves the form, `synced` and
+      // the server agreeing, and clears a notice whose cause the save has just resolved. Without
+      // this, a form that was stale-then-saved would keep warning about a document it has replaced.
+      setDraft(resp.config);
+      setSynced(resp.config);
+      setStaleElsewhere(false);
       void qc.invalidateQueries({ queryKey: configKey });
     },
     onError: (err: unknown) => {
@@ -248,6 +281,32 @@ export function ConfigEditor({ config }: { config: Config }) {
           </Select>
         )}
       </Field>
+
+      {/* THE CONFIGURATION MOVED WHILE YOU WERE EDITING (quince#764). Above the Save row on purpose:
+          it is a fact about what Save will do, and a reader who meets it after pressing the button
+          has already shipped the stale section.
+
+          It says what will happen rather than only what happened, because `PUT /api/config` is a
+          full-document replace — saving now overwrites the change somebody else made. The action is
+          the other direction and is labelled with its cost: taking the new version discards this
+          edit. Neither side is dropped without being chosen, which is the rule this pair of changes
+          exists to establish. */}
+      {staleElsewhere ? (
+        <div
+          role="status"
+          className="rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
+        >
+          <div className="font-medium">The configuration changed elsewhere</div>
+          <p className="mt-1 text-xs">
+            Something else — a hand-edit, the CLI, another tab — changed <code>config.yml</code> since
+            this form loaded. Saving now replaces it with what you see here. Your unsaved edits are
+            kept until you choose.
+          </p>
+          <Button type="button" className="mt-2" onClick={takeServerVersion}>
+            Discard my edits and load the new version
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={mutation.isPending}>
