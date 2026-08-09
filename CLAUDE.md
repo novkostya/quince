@@ -974,10 +974,22 @@ layer, the journal pre-push hook, the git template and `quince.privacy-check` al
 that script. **quince#375 is open with three items of scope**: the role, `preflight`'s supervisor
 arm asserting the layer as it does for the others, and this correction.
 
-**Nothing is leaking while it is unbuilt, and the reason is the fail-closed half.** A box with no
-`quince.privacy-check` **refuses** journal pushes rather than making them unswept, so the exposure is
-a seat that cannot publish rather than one that publishes unswept. That is the right direction to
-fail and it is why this is owed work rather than an incident.
+**NOTHING HAS LEAKED, AND THE REASON IS NOT A CONTROL.** The refusal that would stop an unswept
+journal push is `bin/pre-push-journal`'s, and **a hook can only refuse if it is installed** — it
+arrives through `provision` §4c's git template, and §4c never runs for a role `provision:27` rejects.
+Measured on the supervisor box, 2026-08-09: **no git template, no `pre-push` hook,
+`quince.privacy-check` unset, and no `quince-devlog` clone to push from.**
+
+**So the guard is ABSENT rather than fail-closed**, and what stands in for it is that the seat has
+not published a journal entry. That is the same **restraint** this file names two sections up —
+*"unbounded, unattributed and unrecorded"* — and it is why the role is owed rather than optional.
+
+**This paragraph said the opposite in the PR that added it** (quince#767): *"a box with no
+`quince.privacy-check` refuses journal pushes … that is the right direction to fail."* True of a box
+that has the hook and lacks the list; false of one that has neither. Corrected by the analyst seat,
+which was running on the box and could measure what the authoring seat could only infer — the same
+defect this section already records twice: **a claim about reachable behaviour, verified at the
+mechanism and not at the destination.**
 
 **The overturned reasoning is kept because somebody will re-propose it.** It ran: requiring the layer
 would make `privacy-check` **runnable** on that box without making it **run** — nothing invokes the
@@ -995,8 +1007,13 @@ seat"**, and framed that way the earlier answer does not survive.
 
 **What is accepted rather than avoided.** `pr.6`'s concentration concern was real and is now paid
 deliberately: the box holding root ssh into the other two also holds a complete copy of the private
-record — ~610 KB across 11 files, including the lab topology and four external-review transcripts.
-That is the price of a seat that can publish the narrative record.
+record — **677 KB across 11 files, measured on the architect box 2026-08-09**, including the lab
+topology and four external-review transcripts. That is the price of a seat that can publish the
+narrative record.
+
+**Both figures in this file were `~610 KB`, and one said 8 files while the other said 11 — 89 lines
+apart, neither citing a measurement** (quince#767 review, `quince-analyst`). They are now one number
+with its provenance, because two parts describing the same whole is what quince#409 already cost.
 
 **And the control gets simpler, which is worth something on `decisions/0007`'s own terms.**
 `preflight`'s supervisor arm was going to become an allowlist — *these credentials may be present,
@@ -1084,7 +1101,8 @@ the canary proved the matcher, and those lines are the only thing that distingui
 *compiled the lists and matched nothing*.
 
 **What that means, stated rather than implied:** each box carries the complete private
-record — ~610 KB across 8 files, including the lab topology and the external review
+record — **677 KB across 11 files, measured on the architect box 2026-08-09** (`git ls-files`,
+`find -type f`), including the lab topology and the external review
 transcripts — not merely the pattern list. Compromise of a box is compromise of all of it,
 and `pr.6`'s credential-concentration boundary is owed a line saying so. The implementer
 identity holds **write** on that repository by ruling, because the layer is a living document
