@@ -27,8 +27,22 @@ export function ReconcilingNotice() {
     <div
       // `status`, not `alert`: a screen reader should hear this in turn rather than have its user
       // interrupted. Nothing is wrong — a list is merely still filling in.
+      // THE PROJECT'S TOKENS, NOT shadcn's DEFAULTS. This shipped as
+      // `rounded-md border-border bg-muted text-muted-foreground` and rendered as a pale slab against
+      // the dark cards — reported from a real screen.
+      //
+      // `border-border` and `text-muted-foreground` are not in `index.css`, so Tailwind emitted
+      // nothing for them: no border colour, no text colour. **`bg-muted` is the dangerous one** — it
+      // IS defined, as `--color-muted: var(--fg-muted)`, a FOREGROUND colour. Used as a background it
+      // fills the box with the muted TEXT colour, which is why the result was light grey rather than
+      // simply unstyled. A name that exists and means something else fails LOUDLY; the other two
+      // failed silently.
+      //
+      // The house surface is `rounded-card border border-line bg-card` — `card.tsx`, `dialog.tsx`,
+      // `JobHistory` and `VersionList` all use it. Matching it is what makes this read as part of the
+      // page rather than as something pasted on top of it.
       role="status"
-      className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+      className="mb-4 rounded-card border border-line bg-card px-3 py-2 text-sm text-muted"
     >
       Checking storages for backups — <strong>some backups may not be listed yet.</strong> This
       clears on its own.

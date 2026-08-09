@@ -288,7 +288,7 @@ export function ConfigEditor({ config }: { config: Config }) {
                 })
               }
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted">
               How often quince re-checks its storages for backups added, removed or restored outside
               quince. <strong>0 turns the schedule off</strong> — starting up, adding a storage, and a
               backup finishing still trigger a check.
