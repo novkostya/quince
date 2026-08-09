@@ -212,3 +212,60 @@ describe("ConfigEditor promises no restart", () => {
     expect(screen.queryByText(/applied/i)).toBeNull();
   });
 });
+
+// THE DRAFT FOLLOWS THE SERVER (quince#764), and the absence of this test is why the defect shipped.
+//
+// `useState(config)` captures its argument on FIRST MOUNT and ignores every later value. React Query
+// serves a cached document instantly and refetches behind it, so the editor could seed from a stale
+// document while the rest of the page re-rendered with the fresh one — and `PUT /api/config` is a
+// full-document replace, so saving one field shipped the whole stale draft and reverted whatever had
+// changed server-side.
+//
+// Observed on the staging stand: two storages hand-edited to `backend: hardlink`, quince restarted,
+// one unrelated Settings save, and both were back to `auto` on disk. The preview panel was showing
+// the CORRECT file at the same moment — two documents on one screen, disagreeing.
+//
+// NO TEST IN THIS FILE EVER RE-RENDERED WITH A NEW PROP, which is the whole gap: every case mounts
+// once and asserts against that mount.
+describe("ConfigEditor follows the server when the config changes underneath it", () => {
+  it("re-syncs a clean form to a new config prop", () => {
+    const { rerender } = renderEditor(config([entry()]));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    expect((screen.getByLabelText(/preferred transport/i) as HTMLSelectElement).value).toBe("usb");
+
+    const next = config([entry()]);
+    next.backup.preferred_transport = "wifi";
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ConfigEditor config={next} />
+      </QueryClientProvider>,
+    );
+
+    expect((screen.getByLabelText(/preferred transport/i) as HTMLSelectElement).value).toBe("wifi");
+  });
+
+  // THE SAVE MUST SHIP WHAT THE SERVER LAST SERVED, not what it served when the page opened. This is
+  // the assertion closest to the reported defect: the storage list was never touched in the UI and
+  // came back changed on disk.
+  it("saves the storages from the CURRENT config, not the one it mounted with", async () => {
+    saveResult.mockClear();
+    saveResult.mockResolvedValue({ config: config([entry()]), warnings: [], source: {}, file_text: "" });
+
+    const { rerender } = renderEditor(config([entry({ backend: "auto" })]));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    // The server now reports `hardlink` — a hand-edit quince has adopted.
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ConfigEditor config={config([entry({ backend: "hardlink" })])} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.submit(screen.getByRole("button", { name: /save/i }).closest("form")!);
+
+    await waitFor(() => expect(saveResult).toHaveBeenCalled());
+    const sent = saveResult.mock.calls[0][0] as Config;
+    expect(sent.storage?.[0].backend).toBe("hardlink");
+  });
+});

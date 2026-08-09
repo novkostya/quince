@@ -73,6 +73,35 @@ export function ConfigEditor({ config }: { config: Config }) {
   const [errors, setErrors] = useState<ConfigFieldError[]>([]);
   const [saved, setSaved] = useState(false);
 
+  // THE DRAFT FOLLOWS THE SERVER (quince#764). `useState(config)` captures its argument on FIRST
+  // MOUNT and ignores every later value, so without this the editor can hold a document the server
+  // stopped serving minutes ago — and `PUT /api/config` is a FULL-DOCUMENT REPLACE, so saving one
+  // field ships the whole stale draft and reverts everything that changed underneath it.
+  //
+  // Observed on the staging stand: two storages hand-edited to `backend: hardlink`, quince restarted,
+  // one unrelated save, and both were back to `auto` on disk — while the preview panel showed the
+  // correct file. Two documents on one screen, disagreeing.
+  //
+  // ADJUSTED DURING RENDER, NOT IN AN EFFECT. This is React's own pattern for state derived from
+  // props; an effect renders once with the stale value first, and on this form that frame is a save
+  // the user can click.
+  //
+  // ONLY WHEN THE FORM IS CLEAN, and that half is load-bearing. React Query refetches on window
+  // focus, so an unconditional re-sync would wipe whatever was being typed the moment you switched
+  // tabs — trading this bug for a second silent loss in the opposite direction. A dirty form keeps
+  // its draft; TELLING the user it no longer matches the server is quince#764's PR 2, and until that
+  // lands a dirty form can still save a stale section.
+  //
+  // `config !== synced` is a REFERENCE test, deliberately: React Query's structural sharing preserves
+  // identity across a refetch whose content is unchanged, so this fires when the document actually
+  // moved rather than on every poll.
+  const [synced, setSynced] = useState<Config>(config);
+  if (config !== synced) {
+    const dirty = JSON.stringify(draft) !== JSON.stringify(synced);
+    setSynced(config);
+    if (!dirty) setDraft(config);
+  }
+
   const mutation = useMutation({
     mutationFn: (c: Config) => updateConfig(c),
     onSuccess: (resp) => {
