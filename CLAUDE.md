@@ -955,32 +955,53 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
 ## The private layer
 
 `local/` is gitignored: lab topology, the privacy pattern list, and personal transcripts.
-It lives in the **private `quince-local` repository**, and **the two WORKING boxes hold a full
-clone of it** — `deploy/runner/provision` places it and `preflight` refuses to start a box
-that cannot reach it (quince#44, ruled 2026-07-27). This paragraph used to say the layer
+It lives in the **private `quince-local` repository**, and **ALL THREE WORKING BOXES ARE REQUIRED TO
+CARRY A FULL CLONE OF IT — two of them do, and the third is ruled but UNBUILT** (see the next block
+before planning against this sentence). `deploy/runner/provision` places it and `preflight` refuses
+to start a box that cannot reach it (quince#44, ruled 2026-07-27). This paragraph used to say the layer
 existed *"only on the Operator's machines"*; that stopped being true the moment work moved
 onto the boxes, and a document describing a narrower reality than the one that exists is the
 defect class this project keeps filing.
 
-**There are THREE seats and the third deliberately does NOT hold it** — Operator ruling
-2026-08-01, relayed at [quince#375](https://github.com/novkostya/quince/issues/375#issuecomment-5147380898).
-This sentence said *"both session hosts"* while the supervisor box existed, which was accurate
-only because that seat could not publish. quince#375 gave it `contents: write`, and the question
-of whether it must therefore carry the layer was ruled **no**.
+**RULED 2026-08-02 (Operator, [quince#375](https://github.com/novkostya/quince/issues/375)): the
+supervisor box gets the FULL private layer. This OVERTURNS the ruling of 2026-08-01**, which held
+that there were three seats and the third deliberately did not hold it. **Every working box carries
+the layer — there is no exception to remember.**
 
-**The reasoning matters more than the outcome, because the obvious answer was the other one.**
-Requiring the layer would make `privacy-check` **runnable** on that box without making it **run**:
-nothing invokes the gate on a push except `bin/pre-push-journal`. And the hook needs the pattern
-list, so on a box that lacks one it **refuses the push** — fail-closed, which is the direction this
-project wants. So the hook alone closes the exposure, and requiring the layer would have bought a
-satisfied checklist item plus a third complete copy of the private record on the box that already
-holds root ssh into the other two — `pr.6`'s concentration concern, paid for nothing.
+**THE MECHANISM IS NOT BUILT, AND CANON MUST NOT READ AS THOUGH IT WERE.** `provision` still has no
+`--role supervisor` (see `provision:27` below), so that box cannot be provisioned at all — the
+layer, the journal pre-push hook, the git template and `quince.privacy-check` all arrive through
+that script. **quince#375 is open with three items of scope**: the role, `preflight`'s supervisor
+arm asserting the layer as it does for the others, and this correction.
 
-**What that ruling makes load-bearing is the journal pre-push hook — and ON THE SUPERVISOR BOX THERE
-IS NO WAY TO INSTALL IT.** `refs/heads/journal` has no pull request and therefore no reviewer, and
-the paragraph above says the privacy gate is the only guard on it. The analyst's pull-request path
-was never the exposure — a PR has a reviewer, and the reviewer sweeps. **The journal path is the
-exposure, and its guard is currently undeliverable on the seat that now publishes.**
+**Nothing is leaking while it is unbuilt, and the reason is the fail-closed half.** A box with no
+`quince.privacy-check` **refuses** journal pushes rather than making them unswept, so the exposure is
+a seat that cannot publish rather than one that publishes unswept. That is the right direction to
+fail and it is why this is owed work rather than an incident.
+
+**The overturned reasoning is kept because somebody will re-propose it.** It ran: requiring the layer
+would make `privacy-check` **runnable** on that box without making it **run** — nothing invokes the
+gate on a push except `bin/pre-push-journal`, the hook needs the pattern list, and a box lacking one
+refuses the push. So the hook alone closes the exposure, and the layer would buy a satisfied
+checklist item plus a third complete copy of the private record on the box that already holds root
+ssh into the other two — `pr.6`'s concentration concern, paid for nothing.
+
+**It failed on one word.** *"The hook alone closes the exposure"* is true of **leakage** and false of
+**function**: `privacy-check` exits **2, DID NOT RUN** without the list, so the hook refuses every
+push, **forever**. It does not close the exposure so much as close the branch. A seat holding
+`contents: write` on five repositories, whose two artefact types include the journal, could never
+write one. **So the choice was never "layer vs. hook" — it was "layer vs. no journal from that
+seat"**, and framed that way the earlier answer does not survive.
+
+**What is accepted rather than avoided.** `pr.6`'s concentration concern was real and is now paid
+deliberately: the box holding root ssh into the other two also holds a complete copy of the private
+record — ~610 KB across 11 files, including the lab topology and four external-review transcripts.
+That is the price of a seat that can publish the narrative record.
+
+**And the control gets simpler, which is worth something on `decisions/0007`'s own terms.**
+`preflight`'s supervisor arm was going to become an allowlist — *these credentials may be present,
+those may not* — a list that can drift. All three boxes now hold the same layer, so **"every working
+box carries the private layer" is a sentence anyone can check.**
 
 ```
 deploy/runner/provision:27
@@ -992,21 +1013,12 @@ provisioned by this script and cannot be: the hook, the git template and `quince
 arrive through `provision`, and it refuses that role with exit 2. quince#383 is the PR that makes
 that refusal *honest* rather than silent; it does not add the role.
 
-**This paragraph asserted the opposite and it was WRONG — caught by the Operator, not by me.** It
-read *"§4c … is NOT role-gated — it installs a git template on every box whatever seat it is, so a
-provisioned supervisor box gets the guard exactly as the other two do."* Both halves of the evidence
-were real and neither was sufficient: §4c genuinely sits outside any `case $ROLE`, and its own
-comment genuinely says *"UNCONDITIONAL ACROSS ROLES, including supervisor."* Unconditional **within
-a script that never runs for that role** is not unconditional. I read the section and never checked
-whether the script would accept the argument, which is the same defect one level up: a claim about
-reachable behaviour, verified only at the destination.
-
-**What is therefore true, stated so no one plans against the wrong version:** the fail-closed half
-works — a box with no `quince.privacy-check` **refuses** journal pushes rather than making them
-unswept — so nothing is currently leaking. But the ruling's chosen control is **unbuilt on the box it
-was chosen to protect**, and *"re-run `provision`"* is an instruction nobody can follow there. Either
-`provision` learns `--role supervisor`, or the ruling needs a different delivery mechanism. Tracked
-on quince#375.
+**"UNCONDITIONAL ACROSS ROLES" IN A SCRIPT THAT NEVER RUNS FOR THAT ROLE IS NOT UNCONDITIONAL**, and
+this file asserted otherwise until the Operator caught it. §4c genuinely sits outside any
+`case $ROLE` and its own comment genuinely says *"UNCONDITIONAL ACROSS ROLES, including supervisor"* —
+both halves true, neither sufficient. **Read the dispatch before believing a section is reachable**;
+a claim about reachable behaviour verified only at the destination is this file's most-repeated
+defect, and `provision:27` is where it is decided.
 
 **The gap is FRESHNESS, not a missing mechanism, and this paragraph said otherwise until it was
 checked.** It read *"quince#308 is the control, not provisioning hygiene … until `provision` places
