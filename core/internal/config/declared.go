@@ -111,13 +111,18 @@ func MarshalDeclared(c Config, d Declared) ([]byte, error) {
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 {
 		return full, nil // an empty or non-mapping document has nothing to prune
 	}
-	pruneMapping(doc.Content[0], d, "")
+	pruneMapping(doc.Content[0], d, "", nil)
 	return yaml.Marshal(&doc)
 }
 
 // pruneMapping removes every key the user did not write, bottom-up so a section whose last child
 // goes does not survive as `backup: {}`.
-func pruneMapping(n *yaml.Node, d Declared, prefix string) {
+//
+// `keep` names leaf keys this mapping must retain whatever the declared set says — the "could not be
+// re-parsed without it" clause of the write rule. It is a KEEP rather than a re-insert, and that is
+// the whole reason ordering is safe here: a key that is never removed cannot come back in the wrong
+// place. See pruneSequence.
+func pruneMapping(n *yaml.Node, d Declared, prefix string, keep map[string]bool) {
 	if n.Kind != yaml.MappingNode {
 		return
 	}
@@ -127,17 +132,23 @@ func pruneMapping(n *yaml.Node, d Declared, prefix string) {
 		path := prefix + key.Value
 		switch val.Kind {
 		case yaml.MappingNode:
-			pruneMapping(val, d, path+".")
+			pruneMapping(val, d, path+".", nil)
 			if len(val.Content) == 0 {
 				continue // every child pruned: the section itself goes
 			}
 		case yaml.SequenceNode:
 			pruneSequence(val, d, path)
+			// THE LENGTH TEST IS LOAD-BEARING AND IS NOT A BELT-AND-BRACES DUPLICATE OF `Has`.
+			// `storage:` survives an empty declared set because the SEQUENCE is non-empty, not
+			// because anything declared it — which is what makes a fresh install write
+			// `storage:\n  - path: …` rather than an empty document (spec story 10). Drop it and
+			// keep only `!d.Has(path)`, which reads like a simplification, and the first save on a
+			// new install deletes the storage list.
 			if len(val.Content) == 0 && !d.Has(path) {
 				continue
 			}
 		default:
-			if !d.Has(path) {
+			if !d.Has(path) && !keep[key.Value] {
 				continue
 			}
 		}
@@ -151,24 +162,24 @@ func pruneMapping(n *yaml.Node, d Declared, prefix string) {
 // AN ENTRY ALWAYS KEEPS ITS `path`, whatever the declared set says. An entry without one is not a
 // storage — it is a mapping the next parse would refuse — so this is the "could not be re-parsed
 // without it" clause of the write rule rather than an exception to it.
+//
+// KEEPING IT IS NOT THE SAME AS PUTTING IT BACK, AND PR 5 IS WHERE THE DIFFERENCE BITES. This
+// removed `path` and re-inserted it at the FRONT until the review of quince#758, which is wrong
+// order — canonical for a `StorageEntry` is `name, path, default, backend, zfs, retention`
+// (`schema.go`), so an entry that kept `name` and lost `path` marshalled as `path, name, …`. That
+// broke the exact property the node-prune design was chosen to preserve, inside the function that
+// implements it, and it was unreachable only because `Validate` refuses a nameless entry.
+//
+// A key that is never removed cannot come back in the wrong place, so the fix is to not remove it.
+// **D3's `default: true` materialisation (PR 5) cannot use this trick**: it inserts a key that may
+// not be in the document at all, so it needs a real canonical-position insert. Do not copy the
+// shape that used to be here.
 func pruneSequence(n *yaml.Node, d Declared, prefix string) {
 	for _, item := range n.Content {
 		if item.Kind != yaml.MappingNode {
 			continue
 		}
-		required := ""
-		for i := 0; i+1 < len(item.Content); i += 2 {
-			if item.Content[i].Value == "path" {
-				required = item.Content[i+1].Value
-			}
-		}
-		pruneMapping(item, d, prefix+"["+nodeEntryKey(item)+"].")
-		if required != "" && !hasKey(item, "path") {
-			item.Content = append([]*yaml.Node{
-				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"},
-				{Kind: yaml.ScalarNode, Tag: "!!str", Value: required},
-			}, item.Content...)
-		}
+		pruneMapping(item, d, prefix+"["+nodeEntryKey(item)+"].", map[string]bool{"path": true})
 	}
 }
 
@@ -186,13 +197,4 @@ func nodeEntryKey(item *yaml.Node) string {
 		}
 	}
 	return ""
-}
-
-func hasKey(n *yaml.Node, key string) bool {
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
-			return true
-		}
-	}
-	return false
 }

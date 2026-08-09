@@ -240,8 +240,18 @@ type Service struct {
 	path string
 	log  *slog.Logger
 	cfg  Config
-	// declared is the file's own record of what the user set, refreshed on every load and every
-	// write. Read under mu like cfg; nothing outside this package needs it yet.
+	// declared is the file's own record of what the user set (qn.6j).
+	//
+	// SET ONCE, AT CONSTRUCTION, AND NOTHING MAINTAINS IT YET. `NewService` takes it from `Load`
+	// and no assignment to it exists anywhere in this package. Stated exactly because the next
+	// author is the one who has to change that:
+	//
+	//   - THE WRITE HALF IS PR 4. `replaceLocked` must update this when it writes, or the second
+	//     save re-inflates the file the first one tidied.
+	//   - THERE IS NO RELOAD PATH AT ALL. `Load` runs at construction and nothing re-reads the
+	//     file, so a hand-edit is invisible to a running quince — quince#727, post-`v0.1`.
+	//
+	// Read under `mu`, like `cfg`. Nothing outside this package needs it.
 	declared Declared
 	warnings []Warning
 	source   Source
