@@ -49,7 +49,7 @@ func TestBuildStorageDefersTheScanForServeAndRunsItForTheCLIs(t *testing.T) {
 
 			st := testStore(t)
 			cfgSvc := config.NewService(path, quietLog())
-			if _, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st,
+			if _, _, err := buildStorage(context.Background(), config.Bootstrap{}, cfgSvc, st,
 				bus.New(), quietLog(), tc.mode); err != nil {
 				t.Fatalf("buildStorage: %v", err)
 			}
