@@ -161,3 +161,41 @@ func keysOf(d Declared) []string {
 	}
 	return out
 }
+
+// CANONICAL ORDER SURVIVES A KEPT-BUT-UNDECLARED KEY, which is the property the whole node-prune
+// design was chosen for and the one the first version of pruneSequence broke.
+//
+// `path` is kept whatever the declared set says. When the entry ALSO keeps a key that sorts before
+// it — `name` — the output must read `name, path`, the struct's own field order. The original
+// implementation removed `path` and re-inserted it at the front, producing `path, name`: wrong order,
+// in the function whose job is to preserve it, unreachable in production only because Validate
+// refuses a nameless entry. Found at review of quince#758.
+func TestAKeptKeyDoesNotJumpToTheFrontOfItsEntry(t *testing.T) {
+	cfg, _ := parseDeclared(t, "storage:\n  - name: nas\n    path: /backups\n    backend: hardlink\n")
+
+	// `name` declared, `path` NOT — so path survives only as a kept key, which is the ordering case.
+	out, err := MarshalDeclared(cfg, Declared{"storage": true, "storage[nas].name": true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	name, path := indexOfKey(string(out), "name:"), indexOfKey(string(out), "path:")
+	if name < 0 || path < 0 {
+		t.Fatalf("expected both keys in the output, got: %q", out)
+	}
+	if name > path {
+		t.Errorf("`path` sorted before `name`; canonical order is name, path, default, backend, "+
+			"zfs, retention.\ngot: %q", out)
+	}
+	if _, _, _, err := Parse(out); err != nil {
+		t.Errorf("re-parse: %v\nwritten: %q", err, out)
+	}
+}
+
+func indexOfKey(doc, key string) int {
+	for i := 0; i+len(key) <= len(doc); i++ {
+		if doc[i:i+len(key)] == key {
+			return i
+		}
+	}
+	return -1
+}
