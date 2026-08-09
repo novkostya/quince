@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useVisualViewport } from "./useVisualViewport";
 
@@ -54,6 +54,7 @@ describe("useVisualViewport publishes the visible area", () => {
   });
 
   it("discards a stale offset once the keyboard is gone — iOS 26, forums/thread/800154", () => {
+    vi.useFakeTimers();
     const update = install({ height: 874, offsetTop: 0 });
     renderHook(() => useVisualViewport());
 
@@ -61,9 +62,12 @@ describe("useVisualViewport publishes the visible area", () => {
     expect(published().top).toBe("200px");
 
     // The keyboard closes: full height back, offset left behind. Nothing is hidden, so no offset can
-    // be legitimate and the dialog belongs at the top of the visible area.
+    // be legitimate and the dialog belongs at the top of the visible area. The timer advance is the
+    // settle below — a growth is believed only once it lasts, and a real dismissal does.
     update({ height: 874, offsetTop: 200 });
+    vi.advanceTimersByTime(250);
     expect(published()).toEqual({ top: "0px", height: "874px" });
+    vi.useRealTimers();
   });
 
   it("never publishes an offset larger than the hidden strip", () => {
@@ -88,5 +92,61 @@ describe("useVisualViewport publishes the visible area", () => {
     Reflect.deleteProperty(window, "visualViewport");
     renderHook(() => useVisualViewport());
     expect(published()).toEqual({ top: "", height: "" });
+  });
+});
+
+// MOVING FOCUS BETWEEN TWO FIELDS WITH THE KEYBOARD UP MAKES iOS BRIEFLY REPORT NO KEYBOARD.
+// Taken at face value the dialog stretches to the whole screen and slides under the status bar for a
+// frame, then snaps back — Operator-reported as jumping when switching fields, and caught in the
+// screen recording on quince#762 as a taller card with a scrollbar down its side.
+describe("useVisualViewport ignores a growth that does not last", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds the keyboard-open geometry through a one-frame full-height report", () => {
+    vi.useFakeTimers();
+    const update = install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+
+    update({ height: 430, offsetTop: 200 }); // keyboard opens — a shrink, applied at once
+    expect(published()).toEqual({ top: "200px", height: "430px" });
+
+    update({ height: 874, offsetTop: 0 }); // the transient, mid focus-switch
+    expect(published()).toEqual({ top: "200px", height: "430px" }); // unmoved, which is the fix
+
+    vi.advanceTimersByTime(100);
+    update({ height: 430, offsetTop: 200 }); // iOS tells the truth again
+    vi.advanceTimersByTime(1000); // and the deferred write must not fire late
+    expect(published()).toEqual({ top: "200px", height: "430px" });
+  });
+
+  it("still follows the keyboard closing, once it stays closed", () => {
+    vi.useFakeTimers();
+    const update = install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+    update({ height: 430, offsetTop: 200 });
+
+    update({ height: 874, offsetTop: 0 });
+    vi.advanceTimersByTime(250);
+    expect(published()).toEqual({ top: "0px", height: "874px" });
+  });
+
+  it("applies a shrink immediately — a late dialog is a dialog under the keyboard", () => {
+    vi.useFakeTimers();
+    const update = install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+
+    update({ height: 430, offsetTop: 200 });
+    expect(published()).toEqual({ top: "200px", height: "430px" }); // no timer advanced
+  });
+
+  it("publishes the first reading without waiting", () => {
+    vi.useFakeTimers();
+    install({ height: 874, offsetTop: 0 });
+    renderHook(() => useVisualViewport());
+    // Deferring this one would open every dialog against the stylesheet fallbacks and correct it a
+    // quarter-second later, which is the bug this guard could easily have introduced.
+    expect(published()).toEqual({ top: "0px", height: "874px" });
   });
 });

@@ -22,9 +22,15 @@ import { useEffect, type RefObject } from "react";
 // frames of it, and the card moved anyway.
 //
 // So a field with `MARGIN` of clearance at both ends is left exactly where it is. Only a field that
-// is off the region, or crowding an edge, is moved — and then it is CENTRED rather than nudged,
-// because a nudge lands it back on the boundary the moment the keyboard resizes the container. Two
-// different questions, deliberately: *should this move* has a tolerance, *where should it go* does not.
+// is off the region, or crowding an edge, is moved.
+//
+// AND THEN IT IS MOVED AS LITTLE AS POSSIBLE — to `MARGIN` of clearance and no further. The first
+// version centred, on the reasoning that a nudge would land the field back on the boundary as soon
+// as the keyboard resized the container. That reasoning was wrong once the tolerance above existed:
+// a field parked at exactly `MARGIN` SATISFIES the test, so it is not touched again, and centring
+// was simply the largest movement available where the smallest would do. Operator-reported after the
+// tolerance landed — "in default position it seems ok but if you scroll a bit it's still jumping" —
+// because scrolling puts a field near an edge, which is precisely when the correction fires.
 //
 // SYNCHRONOUSLY ON `focusin`, NOT ON THE NEXT FRAME. The browser runs its own scroll-into-view after
 // the focus events and paints the result; correcting a frame later means the wrong position is drawn
@@ -52,18 +58,20 @@ export function useScrollFocusIntoView(ref: RefObject<HTMLElement | null>): void
       const box = container.getBoundingClientRect();
       const field = el.getBoundingClientRect();
 
-      // Already comfortable: leave it alone. A field taller than the region can never satisfy this,
-      // which is correct — it always needs aligning.
+      // Already comfortable: leave it alone. A field too tall to hold a gutter at both ends can
+      // never satisfy this, which is correct — it always needs aligning.
       const above = field.top - box.top;
       const below = box.top + box.height - (field.top + field.height);
       if (above >= MARGIN && below >= MARGIN) return;
 
-      // A field taller than the region can only be aligned, not centred — show its top, which is
-      // where the label and the caret are.
+      // A field that cannot fit between the two gutters can only be aligned, not fitted — show its
+      // top, which is where the label and the caret are. Otherwise move by the shortfall alone.
       const delta =
-        field.height >= box.height
-          ? above
-          : field.top + field.height / 2 - (box.top + box.height / 2);
+        field.height + 2 * MARGIN >= box.height
+          ? above - MARGIN
+          : above < MARGIN
+            ? above - MARGIN // too high: scroll back up, so the delta is negative
+            : MARGIN - below; // too low: scroll down by what is missing
       // The browser clamps this to the scrollable range, so no bounds arithmetic is needed here.
       container.scrollTop += delta;
     };

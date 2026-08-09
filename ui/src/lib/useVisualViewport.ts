@@ -55,12 +55,42 @@ export function useVisualViewport(): void {
 
     const root = document.documentElement;
     let widest = 0;
-    const apply = (): void => {
+    let applied = -1;
+    let settling: ReturnType<typeof setTimeout> | undefined;
+
+    const write = (): void => {
       widest = Math.max(widest, vv.height);
       const hidden = Math.max(0, widest - vv.height);
       const top = Math.min(Math.max(vv.offsetTop, 0), hidden);
       root.style.setProperty("--vv-top", `${top}px`);
       root.style.setProperty("--vv-height", `${vv.height}px`);
+      applied = vv.height;
+    };
+
+    // GROWING IS DEFERRED, SHRINKING IS NOT, AND THE ASYMMETRY IS THE WHOLE POINT.
+    //
+    // Moving focus from one field to another with the keyboard already up makes iOS report, for a
+    // frame or two, a visible area that is back to FULL HEIGHT with no offset — as though the
+    // keyboard had closed — before it reports the real one again. Taken at face value that
+    // momentarily stretches the dialog to the whole screen and slides it up under the status bar,
+    // then snaps it back. Operator-reported as jumping when switching fields, and visible in the
+    // screen recording on quince#762 as a one-frame taller card with a scrollbar down its side.
+    //
+    // A shrink is always real and always urgent: it is the keyboard arriving, and a late response
+    // means the dialog sits under it. A growth is either the keyboard leaving — in which case
+    // `SETTLE_MS` of delay is invisible, since the keyboard is still animating out over roughly that
+    // long — or this transient, in which case waiting is exactly right. So the delay costs nothing in
+    // the honest case and removes the dishonest one.
+    const SETTLE_MS = 250;
+    const apply = (): void => {
+      clearTimeout(settling);
+      // `applied < 0` is the first reading, which must land immediately or the dialog opens against
+      // the stylesheet fallbacks and corrects itself a quarter-second later.
+      if (applied >= 0 && vv.height > applied) {
+        settling = setTimeout(write, SETTLE_MS);
+        return;
+      }
+      write();
     };
 
     apply();
@@ -69,6 +99,7 @@ export function useVisualViewport(): void {
     vv.addEventListener("resize", apply);
     vv.addEventListener("scroll", apply);
     return () => {
+      clearTimeout(settling);
       vv.removeEventListener("resize", apply);
       vv.removeEventListener("scroll", apply);
       root.style.removeProperty("--vv-top");
