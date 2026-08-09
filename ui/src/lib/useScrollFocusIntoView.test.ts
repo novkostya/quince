@@ -26,46 +26,67 @@ function stand(fieldTop: number, fieldHeight = 40) {
   return { container, field };
 }
 
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-
 afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("useScrollFocusIntoView centres the focused field in the scroll region", () => {
+describe("useScrollFocusIntoView moves a field only when it needs moving", () => {
+  it("leaves a field that already has clearance exactly where it is", async () => {
+    // 200..240 inside 100..400: 100px above, 160px below. This is the case that made the card jump a
+    // full step every time focus moved between two fields that were both already on screen.
+    const { container, field } = stand(200);
+    renderHook(() => useScrollFocusIntoView({ current: container }));
+
+    field.focus();
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("moves a field the browser left flush against the edge", async () => {
+    // 370..400 — visible, and touching the bottom boundary, which is exactly where `nearest` leaves
+    // it. Zero clearance below, so it is corrected: centre 385 against the region's 250.
+    const { container, field } = stand(370, 30);
+    renderHook(() => useScrollFocusIntoView({ current: container }));
+
+    field.focus();
+    expect(container.scrollTop).toBe(135);
+  });
+
   it("scrolls a field below the fold to the middle rather than to the edge", async () => {
-    // Field at 380..420, below the region's bottom edge at 400. Its centre is 400, the region's is
-    // 250, so 150px of scroll centres it. The browser's own `nearest` would move 20px — just enough
-    // to touch the boundary, which is the behaviour the Operator photographed.
     const { container, field } = stand(380);
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    await nextFrame();
     expect(container.scrollTop).toBe(150);
   });
 
   it("scrolls a field above the fold back down by the same rule", async () => {
-    // Field at 40..80, above the region. Centre 60 against 250 — a negative delta.
     const { container, field } = stand(40);
     container.scrollTop = 500;
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    await nextFrame();
     expect(container.scrollTop).toBe(310);
   });
 
   it("aligns the top of a field taller than the region, since it cannot be centred", async () => {
     // 320 tall in a 300 region: centring would hide the label and the caret, which are at the top.
+    // It can never satisfy the clearance test either, which is correct — it always needs aligning.
     const { container, field } = stand(380, 320);
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    await nextFrame();
     expect(container.scrollTop).toBe(280);
+  });
+
+  it("corrects inside the focus event, before anything is painted", async () => {
+    // The first version deferred to the next animation frame, so the browser drew its own
+    // scroll-into-view first and the card visibly snapped afterwards. Asserting synchronously is how
+    // that is pinned: this test fails if the correction goes back behind a rAF.
+    const { container, field } = stand(380);
+    renderHook(() => useScrollFocusIntoView({ current: container }));
+
+    field.focus();
+    expect(container.scrollTop).toBe(150); // no await — the work is done by the time focus() returns
   });
 
   it("leaves the region alone when the focus is outside it", async () => {
@@ -75,13 +96,11 @@ describe("useScrollFocusIntoView centres the focused field in the scroll region"
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     outside.focus();
-    await nextFrame();
     expect(container.scrollTop).toBe(0);
   });
 
   it("does nothing at all when there is no container", async () => {
     renderHook(() => useScrollFocusIntoView({ current: null }));
-    await nextFrame();
     // Reaching here without throwing IS the assertion: a dialog that is closed has no card, and the
     // hook must not care.
     expect(true).toBe(true);
