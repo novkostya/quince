@@ -322,7 +322,16 @@ export function AddStorageForm({
               id="zfs-hook"
               className="mt-1"
               value={hookCmd}
-              placeholder="ssh -i /data/keys/zfs -o BatchMode=yes user@host"
+              /* THE HOST-KEY OPTIONS ARE PART OF THE EXAMPLE, not decoration. `BatchMode=yes`
+                 disables the accept-this-key prompt, so an ssh with no `known_hosts` entry
+                 REFUSES — and a container's `known_hosts` is empty at exactly the moment someone
+                 is filling this field in. Measured on a lab rig: without them `Test helper`
+                 answers `unreachable` / "Host key verification failed." with a correct key, a
+                 correct forced command and a correct dataset, and `unreachable`'s remedy text
+                 names all three. `accept-new` rather than `yes` here because a placeholder cannot
+                 seed a known_hosts file; deploy/storage.md recommends seeding and explains the
+                 difference. */
+              placeholder="ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=accept-new user@host"
               onChange={(e) => {
                 setHookCmd(e.target.value);
                 setHookCheck(null);
