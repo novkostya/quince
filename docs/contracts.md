@@ -1167,7 +1167,7 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap A.
   "reason":  "/mnt/nas-backups is usable and holds no quince storage yet",
 
   "backend":        "reflink",            // "" on every refusal
-  "backend_reason": "FICLONE independence probe passed on /mnt/nas-backups",
+  "backend_reason": "FICLONE clone-sharing probe passed on /mnt/nas-backups: the clone's extents are reported shared (FIEMAP_EXTENT_SHARED) and the clone is independent of its source",
 
   "marker":   null,                       // {storage_id, backend, created_at} when one was readable
   "non_empty": false,                     // data at the path that is not quince's own
@@ -1741,11 +1741,14 @@ case BackendReflink, BackendHardlink, BackendCopy:
 	// returned WITHOUT probing — "storage.backend: <x> (explicit)"
 }
 // auto: probe the real filesystem
-name, reason := probeNamespace(opts.Backups)
+name, reason, degraded := probeNamespaceDetail(opts.Backups)
 ```
 
-`probeNamespace` — FICLONE independence, then `link()`+inode identity — runs on the **`auto` branch
-only**. An explicit namespace backend is taken at face value. **So `auto` is not a convenience
+`probeNamespaceDetail` — FICLONE **clone sharing** (`FIEMAP_EXTENT_SHARED`) plus the independence
+check that rules out a hardlink, then `link()`+inode identity — runs on the **`auto` branch
+only**. `degraded` is what makes the choice a WARN rather than an INFO: it is set for `copy`, and
+for a `reflink` chosen on a filesystem that cannot report sharing, whose `backend_reason` then says
+the space saving is unverified (quince#747). An explicit namespace backend is taken at face value. **So `auto` is not a convenience
 default; it is the only thing in the product that checks a backend declaration against the medium**,
 at a time when nothing creates a storage for you — that flow is quince#443, a later rung.
 

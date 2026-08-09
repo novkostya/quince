@@ -302,13 +302,17 @@ List() / Delete(ref) / Prune(policy) / Verify(ref)
 | Backend | Version = | Commit | Notes |
 | --- | --- | --- | --- |
 | `zfs` | `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>` | verify → **exchange** working/<udid> ⇄ latest/ (in-container `renameat2`, no privilege, no window) → rm working/ → `snapshot` via hook/exec. Seed is host-side reflink via the hook `seed` verb, or in-container reflink→copy. **RULED to become verify → `snapshot`, with no seed and no exchange — see the block at the end of this section; the Version column is unchanged by it** | hook = forced-command SSH key: `snapshot`/`destroy`/`list` on `@quince-*` + `create` of children + `seed` (clone latest/→working/<udid>); **dataset destroy never in the key** (quince prints the host command); `.zfs` visibility + new-child-dataset propagation probed — recommended PVE mount is `lxc.mount.entry … rbind,rslave` (live propagation, no restart), else printed `pct set -mpN` instructions; nested-OCI bind uses `propagation: rslave`; single-dataset fallback mode documented |
-| `reflink` | `latest/` (newest) + `versions/<ts>/` dirs | verify → **exchange** working/<udid> ⇄ latest/ → archive the displaced content to `versions/<prev>` | smart default where FICLONE probe passes (Btrfs/XFS/bcachefs, ZFS 2.2+ without a hook); clones are independent files — **no hardlink-safety matrix needed**; cloning in-process via FICLONE ioctl (no `cp --reflink` dependency) |
+| `reflink` | `latest/` (newest) + `versions/<ts>/` dirs | verify → **exchange** working/<udid> ⇄ latest/ → archive the displaced content to `versions/<prev>` | smart default where the FICLONE probe shows the clone SHARING its extents (Btrfs/XFS measured on the lab rig; bcachefs, ZFS 2.2+ without a hook untested); clones are independent files — **no hardlink-safety matrix needed**; cloning in-process via FICLONE ioctl (no `cp --reflink` dependency) |
 | `hardlink` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | for no-reflink filesystems (ext4); the **seed is disabled-to-copy** until the destructive hardlink-safety matrix passes (gate 12c) — a hardlink seed would alias the committed `latest/`; in-place-mutating file classes copied, not linked |
 | `copy` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | full-copy seed; transient 2× space; retention defaults to latest-only |
 
 Auto-selection: explicit zfs config → `zfs`; else probe `/backups` at runtime:
-FICLONE-independence test → `reflink`, `link()`+inode test → `hardlink`, else `copy`
-(stack D5). One shared `clonetree` package implements the three clone strategies; qn.5b uses it for
+FICLONE **clone-sharing** test (`FIEMAP_EXTENT_SHARED`, plus the independence check that rules
+out a hardlink) → `reflink`, `link()`+inode test → `hardlink`, else `copy` (stack D5). A FICLONE
+that succeeds without sharing falls THROUGH to hardlink — D5's one selection edge, because the
+reflink backend is chosen for space and an unshared clone delivers none of it (quince#747). Where
+the filesystem cannot report sharing at all, `reflink` still wins on D5's risk asymmetry and the
+backend reason says the saving is UNVERIFIED. One shared `clonetree` package implements the three clone strategies; qn.5b uses it for
 the **seed** (clone `latest/` → `working/<udid>` at job start, hardlink downgraded to copy — gate
 12c), and the atomic `latest/` swap is a plain `renameat2(RENAME_EXCHANGE)`, not a clone.
 

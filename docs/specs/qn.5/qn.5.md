@@ -145,8 +145,8 @@ Decisions this rung settles (rung-local unless a `PROPOSED (gap)` block says oth
   namespace promotion, and the zfs `latest/` mirror.
 - **Auto-selection probe** (`storage.backend: auto`): explicit zfs intent
   (`storage.zfs.parent_dataset` or a `hook_cmd` set) → `zfs`; else probe the **real `/backups`
-  filesystem** at runtime — FICLONE a test file and verify block independence → `reflink`;
-  `link()` + inode-identity test → `hardlink`; else `copy`. Deterministic, **logged**, and the
+  filesystem** at runtime — FICLONE a test file and verify block SHARING, plus independence
+  (quince#747) → `reflink`; `link()` + inode-identity test → `hardlink`; else `copy`. Deterministic, **logged**, and the
   chosen backend + why is a plain-language string for onboarding (design §9). Selecting `copy`
   (a degraded mode) is **surfaced**, never silent (hard rule).
 - **Journaled commit + on-disk markers.** Each committed version carries a
