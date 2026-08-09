@@ -30,7 +30,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("useScrollFocusIntoView moves a field only when it needs moving", () => {
+describe("useScrollFocusIntoView moves a field only when it needs moving, and only as far as it must", () => {
   it("leaves a field that already has clearance exactly where it is", async () => {
     // 200..240 inside 100..400: 100px above, 160px below. This is the case that made the card jump a
     // full step every time focus moved between two fields that were both already on screen.
@@ -41,41 +41,44 @@ describe("useScrollFocusIntoView moves a field only when it needs moving", () =>
     expect(container.scrollTop).toBe(0);
   });
 
-  it("moves a field the browser left flush against the edge", async () => {
+  it("moves a field the browser left flush against the edge, by the shortfall alone", async () => {
     // 370..400 — visible, and touching the bottom boundary, which is exactly where `nearest` leaves
-    // it. Zero clearance below, so it is corrected: centre 385 against the region's 250.
+    // it. Zero clearance below, so it moves by the 24 it is missing and not one pixel more. Centring
+    // would have moved it 135, which is the difference the Operator felt as a jump.
     const { container, field } = stand(370, 30);
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    expect(container.scrollTop).toBe(135);
+    expect(container.scrollTop).toBe(24);
   });
 
-  it("scrolls a field below the fold to the middle rather than to the edge", async () => {
+  it("scrolls a field below the fold just far enough to clear the edge", async () => {
+    // 380..420 against a region ending at 400: 20 past it, plus the 24 gutter.
     const { container, field } = stand(380);
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    expect(container.scrollTop).toBe(150);
+    expect(container.scrollTop).toBe(44);
   });
 
   it("scrolls a field above the fold back down by the same rule", async () => {
+    // 40..80 against a region starting at 100: 60 short, plus the gutter, in the other direction.
     const { container, field } = stand(40);
     container.scrollTop = 500;
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    expect(container.scrollTop).toBe(310);
+    expect(container.scrollTop).toBe(416);
   });
 
-  it("aligns the top of a field taller than the region, since it cannot be centred", async () => {
-    // 320 tall in a 300 region: centring would hide the label and the caret, which are at the top.
-    // It can never satisfy the clearance test either, which is correct — it always needs aligning.
+  it("aligns the top of a field too tall to hold a gutter at both ends", async () => {
+    // 320 tall in a 300 region: there is no position that satisfies both gutters, so show its top,
+    // which is where the label and the caret are.
     const { container, field } = stand(380, 320);
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    expect(container.scrollTop).toBe(280);
+    expect(container.scrollTop).toBe(256);
   });
 
   it("corrects inside the focus event, before anything is painted", async () => {
@@ -86,7 +89,7 @@ describe("useScrollFocusIntoView moves a field only when it needs moving", () =>
     renderHook(() => useScrollFocusIntoView({ current: container }));
 
     field.focus();
-    expect(container.scrollTop).toBe(150); // no await — the work is done by the time focus() returns
+    expect(container.scrollTop).toBe(44); // no await — the work is done by the time focus() returns
   });
 
   it("leaves the region alone when the focus is outside it", async () => {
