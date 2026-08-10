@@ -1,0 +1,15 @@
+{
+  "name": "noisy-joblog",
+  "transport": "usb",
+  "terminal_state": "succeeded",
+  "exit_code": 0,
+  "encrypted": true,
+  "kind": "full",
+  "tree": "complete",
+  "line_delay_ms": 1,
+  "stall_after_line": 0,
+  "stall_ms": 0,
+  "stall_churns_tree": false,
+  "hang_after_last": false,
+  "note": "The job-log noise corpus (quince#809, quince#810), assembled from the shapes measured in a real 94,034-file iPad backup's stored log rather than captured as one run. Carries all three in one transcript so a fix for any of them shows what it does to the others: EMPTY tokens between narration lines (60% of that log), a phase header repeated consecutively (Receiving files 735x and Moving 128 files 734x there), and progress frames whose current figure is in plain Bytes (which the redraw filter's [KMGT]?B pattern does not match, so they were logged verbatim). The MB frame is the control: it is dropped today and must stay dropped. idevicebackup2 stdout carries no UDID/device-name/path, so nothing PII was present to scrub."
+}

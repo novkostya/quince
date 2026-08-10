@@ -1581,3 +1581,80 @@ func TestRetryInheritsTheStorageAndRefusesWhenItIsGone(t *testing.T) {
 // and no storage, and by the branch's own guard (`storageID == ""`), which cannot run when a
 // storage was named.
 func strPtr(s string) *string { return &s }
+
+// THE JOB LOG IS NARRATION, AND A REAL BACKUP'S WAS 0.3% NARRATION (quince#810).
+//
+// Measured on the stored log of a 94,034-file iPad backup: 3,758 lines, of which 2,251 were EMPTY
+// (60%), 735 were "Receiving files" and 734 were "Moving 128 files" (39% between them), and about
+// twelve carried information. The 256 KiB ring is a fixed budget against an input that scales with
+// the device, so the tail a reviewer opens the log for is evicted by the noise.
+//
+// Both causes are asserted here against `noisy-joblog`, the fixture that carries all three shapes —
+// including quince#809's plain-`Bytes` frames, which this test pins as STILL LEAKING so that the
+// PR fixing that regex has to come back and change this file. Three issues edit this one function
+// and the combination is what nobody reviews; a fixture they share is what makes that visible.
+func TestJobLogDropsEmptyTokensAndCollapsesRepeatedNarration(t *testing.T) {
+	m := loadMeta(t, "noisy-joblog")
+	h := newHarness(t, m.params(t), m.Transport)
+	job := h.start(t, m.Transport, "")
+	if final := waitTerminal(t, h.eng, job.ID, 10*time.Second); final.State != StateSucceeded {
+		t.Fatalf("state=%s error=%v, want succeeded", final.State, final.Error)
+	}
+	logtxt, ok := h.eng.JobLog(job.ID)
+	if !ok {
+		t.Fatal("no job log")
+	}
+	lines := strings.Split(strings.TrimRight(logtxt, "\n"), "\n")
+
+	// CAUSE 1 — not one empty line survives. The transcript has five blank lines.
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			t.Errorf("line %d is empty — scanFrames' empty tokens are reaching the log (quince#810)", i+1)
+		}
+	}
+
+	// CAUSE 2 — a run of identical lines collapses to the first plus a total, and the total is in
+	// the STORED log rather than only the live pane.
+	// THE INVARIANT, asserted instead of a line count. A count would depend on quince#809: its
+	// leaked `Bytes` frames sit BETWEEN otherwise-identical narration lines and break the runs, so
+	// fixing that regex merges three runs into one and any exact number goes stale within a PR.
+	// What holds either way is that no two ADJACENT log lines are identical.
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == lines[i-1] {
+			t.Errorf("lines %d and %d are identical (%q) — a consecutive run reached the log "+
+				"uncollapsed (quince#810)", i, i+1, lines[i])
+		}
+	}
+	if !strings.Contains(logtxt, "Moving 128 files ... x3") {
+		t.Errorf("no run total for `Moving 128 files` — suppressing a repeated line is compression, "+
+			"suppressing that it repeated is a claim it did not (quince#810 ruling)\n---\n%s", logtxt)
+	}
+
+	// NEVER A GLOBAL DEDUP. `Receiving files` returns after other narration and that is a NEW fact.
+	first, last := strings.Index(logtxt, "Receiving files"), strings.LastIndex(logtxt, "Receiving files")
+	if first == last {
+		t.Error("`Receiving files` appears once — a run that resumes after other narration must " +
+			"appear again; collapsing across the whole log loses the ordering that makes it narration")
+	}
+
+	// THE CONTROL, and without it every assertion above is satisfied by a filter that drops
+	// everything: the informative lines must survive untouched.
+	for _, want := range []string{"Backup will be encrypted.", "Requesting backup from device...",
+		"Sending 'Manifest.plist'", "Received 94035 files from device.", "Backup Successful."} {
+		if !strings.Contains(logtxt, want) {
+			t.Errorf("the log lost %q — the filter is eating narration", want)
+		}
+	}
+
+	// quince#809, PINNED AS UNFIXED. `[KMGT]?B` does not match `Bytes`, so these frames set neither
+	// overallPercent nor hasBytes and are logged verbatim. The MB frame beside them IS dropped,
+	// which is the discriminator: this is a units bug, not a filter that fails on progress frames.
+	if !strings.Contains(logtxt, "0% (16 Bytes/1.4 MB)") {
+		t.Error("a plain-Bytes progress frame no longer leaks — quince#809 is fixed, and this " +
+			"assertion is now the wrong way round: flip it to require that it is DROPPED")
+	}
+	if strings.Contains(logtxt, "(23.2 MB/938.6 MB)") {
+		t.Error("an MB progress frame reached the log — the redraw filter is broken for the units " +
+			"it does match, which is a regression rather than quince#809")
+	}
+}

@@ -1,0 +1,22 @@
+Backup will be encrypted.
+Full backup mode.
+Requesting backup from device...
+
+Receiving files
+
+Receiving files
+[=                                                 ]   0% (16 Bytes/1.4 MB)
+Receiving files
+
+Receiving files
+[=                                                 ]   0% (784 Bytes/122.0 MB)
+Receiving files
+Moving 128 files
+Moving 128 files
+
+Moving 128 files
+Receiving files
+[==                                                ]   2% (23.2 MB/938.6 MB)
+Sending 'Manifest.plist'
+Received 94035 files from device.
+Backup Successful.
