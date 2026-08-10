@@ -267,11 +267,18 @@ owns the privileged FICLONE — it just clones **into `working/`** now instead o
 > written through — the list was never the mechanism, and proving it complete was never the blocker.
 > `seedStrategy` and `MutatesInPlace` are both deleted.
 >
-> **What survives from the amendment:** the hazard's shape. One upstream call
-> (`mb2_copy_file_by_path`, reached from `DLMessageCopyItem`) writes without unlinking and takes its
-> destination from the DEVICE at runtime, so no class list here could ever have covered it. It was
-> not observed firing on either device. Re-run the gate whenever `LIBIMOBILEDEVICE_REF` moves — the
-> property belongs to the writer, not to quince.
+> **What survives from the amendment is the hazard's shape, and it is closed upstream rather than
+> measured away.** One call — `mb2_copy_file_by_path`, reached from `DLMessageCopyItem` — wrote
+> without unlinking and takes its destination from the DEVICE at runtime, so no class list here
+> could ever have covered it **and no amount of device testing could enumerate it**: the message
+> loop is guarded only by `cmd != CMD_LEAVE`, so the handler is reachable during a backup. It was
+> never observed firing, which is not the same as never.
+> `deploy/patches/libimobiledevice/0004` adds the missing `remove_file(dst)`, so all four write
+> paths unlink and the tier rests on a patch rather than on an absence.
+>
+> **Re-run the gate whenever `LIBIMOBILEDEVICE_REF` moves.** The property belongs to the writer, not
+> to quince, and 0004 is the load-bearing dependency: drop it, or let upstream rewrite that
+> function, and the tier is unsafe again.
 
 - The hook's **`mirror` verb is removed**; a **`seed` verb** is added (host-side
   `cp -a --reflink=always latest working/<udid>` + `chown -R "$CTUID" working` so the container can

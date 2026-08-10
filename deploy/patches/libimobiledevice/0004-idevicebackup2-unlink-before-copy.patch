@@ -1,0 +1,27 @@
+diff --git a/tools/idevicebackup2.c b/tools/idevicebackup2.c
+index de33798..be5dd68 100644
+--- a/tools/idevicebackup2.c
++++ b/tools/idevicebackup2.c
+@@ -1289,6 +1289,22 @@ static void mb2_copy_file_by_path(const char *src, const char *dst)
+ 		return;
+ 	}
+ 
++	/* quince #518 patch: UNLINK THE DESTINATION FIRST.
++	 *
++	 * Every other path in this file that writes into the backup directory removes the target
++	 * before creating it: the DLMessageDownloadFiles receive (remove_file then fopen "wb"), the
++	 * Info.plist rewrite, and DLMessageMoveItems (remove_file then rename). This one does not,
++	 * so fopen("wb") truncates the existing inode in place.
++	 *
++	 * quince hardlinks the previous committed backup into the per-job working tree, so an
++	 * in-place truncate here reaches THROUGH the alias and corrupts a committed version — the
++	 * one thing quince's storage design promises never happens. This copy's destination is
++	 * named by the DEVICE at runtime and the handler is not command-gated, so it is reachable
++	 * during a backup and cannot be excluded by any list on quince's side.
++	 *
++	 * A no-op when the destination is not aliased: the file is truncated either way. */
++	remove_file(dst);
++
+ 	/* open destination file */
+ 	if ((to = fopen(dst, "wb")) == NULL) {
+ 		printf("Cannot open destination file '%s'.\n", dst);
