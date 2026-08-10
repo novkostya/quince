@@ -307,7 +307,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    forge-watch-exits-test forge-watch-stop-test forge-watch-fixtures-doc-test \
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
-                   home-resolution-test wrapper-boundary-test gate-scope-test gh-coder-body-test \
+                   home-resolution-test wrapper-boundary-test gate-scope-test wrapper-body-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
@@ -369,7 +369,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
                    bin/forge-watch-seats-test \
                    bin/scratch-reap bin/scratch-reap-test \
-                   bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test bin/gh-coder-body-test \
+                   bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test bin/wrapper-body-test \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/gh-analyst \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
@@ -583,9 +583,9 @@ gate-scope-test: ## The gate map is total and the skipping is never silent (quin
 wrapper-boundary-test: ## A boundary refusal must outrank an environment one in the gh wrappers (quince#157)
 	@bin/wrapper-boundary-test
 
-.PHONY: gh-coder-body-test
-gh-coder-body-test: ## gh-coder must REFUSE inline --body — backticks in it EXECUTE (quince#518)
-	@bin/gh-coder-body-test
+.PHONY: wrapper-body-test
+wrapper-body-test: ## every gh wrapper must REFUSE inline --body — backticks in it EXECUTE (quince#518)
+	@bin/wrapper-body-test
 
 # quince#256 item 3's other half, and the same argument as sh-lint-coverage-test below: a totality
 # check with no tests would report `clean` about a comparison it had failed to make. The cases that

@@ -18,6 +18,64 @@
 # `VAR=value`, so `GH_TOKEN=$(…) gh …` is unallowlistable by construction. Allowlist the script.
 set -eu
 
+# INLINE `--body` IS REFUSED, and the reason is a measured leak rather than a style preference
+# (quince#518, quince#527).
+#
+# A body written as `--body "…"` is a shell string, so backticks inside it are COMMAND
+# SUBSTITUTION — evaluated by the shell before this wrapper sees an argument, which is why the
+# guard cannot live anywhere but the entry point. On 2026-08-02 that published a PVE host's
+# block-device map to a public issue through `gh-coder`, and twice more the same session it
+# silently ATE filenames out of sentences.
+#
+# THE SAME BUG IS IN THIS REPOSITORY'S HISTORY THROUGH THE ARCHITECT'S WRAPPER, an hour earlier: a
+# review comment's backticked spans were evaluated, the shell tried to execute two committed paths,
+# and the posted comment TRUNCATED mid-sentence and lost both of its numbered points. It was
+# harmless for one reason only — neither path is an executable. `iostat` is. **The severity is
+# decided by whether the prose happens to name something on $PATH**, which is a property of English
+# rather than of care.
+#
+# AND IT IS THE ONE PATH THE PRIVACY GATE CANNOT COVER: `make privacy-check TEXT=<file>` needs a
+# file, and `--body` has none.
+#
+# AHEAD OF THIS WRAPPER'S BOUNDARY REFUSAL, deliberately, and it does not weaken it. That ordering
+# rule exists because a message inviting the WRONG REPAIR is how a reviewer key ends up on the
+# authoring host — "install openssl" is an instruction to change the environment. This one is an
+# instruction to change the INVOCATION, and the boundary refusal is still waiting on the next
+# attempt. `bin/wrapper-boundary-test` passes no inline body, so every case it constructs is
+# unchanged.
+#
+# `--body-file` and `--body-file -` both pass. Neither can substitute, and both give the sweep
+# something to point at.
+for _a in "$@"; do
+	case "$_a" in
+	--body | -b)
+		cat >&2 <<'EOM'
+gh-review: REFUSING --body. Write the text to a file and pass --body-file.
+
+  Inline --body is a shell string, so backticks in it are COMMAND SUBSTITUTION. On 2026-08-02
+  that published a PVE host's device map to a public issue, and it truncated a review comment
+  mid-sentence through this wrapper's sibling (quince#518, quince#527).
+
+  It is also the one path `make privacy-check TEXT=<file>` cannot cover, because there is no
+  file to sweep. Use:
+
+      cat > "$HOME/scratch/<seat>/bodies/<name>.md" <<'EOF'
+      …
+      EOF
+      make privacy-check TEXT="$HOME/scratch/<seat>/bodies/<name>.md"
+      gh-review <verb> --body-file "$HOME/scratch/<seat>/bodies/<name>.md"
+
+  A quoted heredoc delimiter ('EOF', not EOF) is what stops substitution inside the file too.
+EOM
+		exit 2
+		;;
+	--body=* | -b=* | -b?*)
+		echo "gh-review: REFUSING an inline body (--body=… / -b…) — same reason as --body; use --body-file (quince#518)." >&2
+		exit 2
+		;;
+	esac
+done
+
 # HOME IS NOT GUARANTEED, AND `set -u` MAKES A BARE $HOME FATAL. This is the wrapper that found it:
 # `preflight`'s reviewer-mint assertion invokes this script, `preflight` runs from OpenRC, and
 # OpenRC gives a service no HOME — so `${VAR:-$HOME/...}` died on the UNGUARDED $HOME inside the
