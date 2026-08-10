@@ -1,8 +1,8 @@
 diff --git a/tools/idevicebackup2.c b/tools/idevicebackup2.c
-index de33798..be5dd68 100644
+index de33798..f7f024a 100644
 --- a/tools/idevicebackup2.c
 +++ b/tools/idevicebackup2.c
-@@ -1289,6 +1289,22 @@ static void mb2_copy_file_by_path(const char *src, const char *dst)
+@@ -1289,6 +1289,30 @@ static void mb2_copy_file_by_path(const char *src, const char *dst)
  		return;
  	}
  
@@ -10,16 +10,24 @@ index de33798..be5dd68 100644
 +	 *
 +	 * Every other path in this file that writes into the backup directory removes the target
 +	 * before creating it: the DLMessageDownloadFiles receive (remove_file then fopen "wb"), the
-+	 * Info.plist rewrite, and DLMessageMoveItems (remove_file then rename). This one does not,
-+	 * so fopen("wb") truncates the existing inode in place.
++	 * Info.plist rewrite, and DLMessageMoveItems (remove_file then rename). This one did not,
++	 * so fopen("wb") truncated the existing inode in place.
 +	 *
 +	 * quince hardlinks the previous committed backup into the per-job working tree, so an
 +	 * in-place truncate here reaches THROUGH the alias and corrupts a committed version — the
 +	 * one thing quince's storage design promises never happens. This copy's destination is
-+	 * named by the DEVICE at runtime and the handler is not command-gated, so it is reachable
-+	 * during a backup and cannot be excluded by any list on quince's side.
++	 * named by the DEVICE at runtime and the handler is not command-gated (the message loop is
++	 * guarded only by cmd != CMD_LEAVE), so it is reachable during a backup and cannot be
++	 * excluded by any list on quince's side.
 +	 *
-+	 * A no-op when the destination is not aliased: the file is truncated either way. */
++	 * A no-op when the destination is not aliased: the file is truncated either way.
++	 *
++	 * IT DOES CHANGE ONE FAILURE MODE, and the trade is deliberate: if the fopen below now
++	 * fails (ENOSPC, permissions) the destination is already gone, where before it survived
++	 * untouched. Losing a file inside working/<udid> costs one re-fetch on the retry — quince
++	 * keeps a failed job's dirty working tree and resumes into it — while truncating through
++	 * the alias costs a committed version. Placed after the source-open failure return, so a
++	 * copy that cannot read its source still does not destroy the destination. */
 +	remove_file(dst);
 +
  	/* open destination file */
