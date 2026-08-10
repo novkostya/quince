@@ -18,6 +18,31 @@ function submit(password = "hunter2") {
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 }
 
+// THE CREDENTIAL ANCHOR — quince#819. quince asks for two different passwords on one origin, and
+// neither declared a username, so iCloud Keychain filed them together. The value is a constant
+// because quince is single-admin: what it differentiates is this surface from the per-device backup
+// password, not one admin from another.
+describe("the password form's username anchor", () => {
+  it("declares a readOnly quince-admin username the manager can key on", () => {
+    renderForm(() => Promise.resolve());
+
+    const anchor = screen.getByLabelText("Username");
+    expect(anchor).toHaveValue("quince-admin");
+    expect(anchor).toHaveAttribute("autocomplete", "username");
+    // `readOnly`, never `disabled` — a disabled control is excluded from submission and skipped by
+    // autofill, which would defeat the field's whole purpose.
+    expect(anchor).toHaveAttribute("readonly");
+    expect(anchor).not.toBeDisabled();
+  });
+
+  // The anchor must not become the thing the user lands on: `autoFocus` stays on the password, so
+  // typing still works the moment the page appears.
+  it("leaves the password field the one that takes focus", () => {
+    renderForm(() => Promise.resolve());
+    expect(screen.getByLabelText("Password")).toHaveFocus();
+  });
+});
+
 describe("the password form's error", () => {
   // The whole point of quince#497's 426: no password will ever work over this connection, so the
   // form has to offer somewhere else to go. Every OTHER failure here has an action the user can

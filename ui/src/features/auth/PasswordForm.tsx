@@ -77,6 +77,33 @@ export function PasswordForm({
         <h1 className="mt-4 text-base font-semibold">{title}</h1>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
         {notice}
+        {/* THE ANCHOR, NOT A CHOICE THE USER HAS — quince#819. A password manager keys a credential
+            on (origin, username). quince asks for two DIFFERENT passwords on one origin — this one
+            and the per-device backup password in `EncryptionDialog` — and until this field existed
+            neither declared a username, so both collapsed to origin-only entries that iCloud
+            Keychain filed together. `quince-admin` is a constant because quince is single-admin;
+            the differentiation it buys is against the OTHER surface, not between accounts here.
+
+            `readOnly` AND VISIBLE, rather than suppressed. Chromium's own form guidance accepts a
+            hidden input for this ("include a hidden input field containing this information even if
+            it is not directly necessary for your form"), but the browser this was reported against
+            is Safari and no authoritative source was found either way for WebKit — and a
+            `display:none` field is the variant most likely to be ignored. Visible is the option that
+            cannot be skipped for being invisible, so it is the safe default until G1 says otherwise.
+
+            NOT `disabled`: a disabled control is excluded from form submission and is skipped by
+            autofill, which would defeat the whole point. */}
+        <div className="mt-4 flex flex-col gap-1">
+          <Label htmlFor="username">Username</Label>
+          <Input
+            id="username"
+            name="username"
+            type="text"
+            autoComplete="username"
+            readOnly
+            value="quince-admin"
+          />
+        </div>
         <div className="mt-4 flex flex-col gap-1">
           <Label htmlFor="password">Password</Label>
           <Input

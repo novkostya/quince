@@ -177,6 +177,8 @@ export function DeviceDetailsPage() {
 
           <EncryptionDialog
             udid={device.udid}
+            // Raw, not `device.name || device.udid` — the dialog owns that fallback (quince#819).
+            deviceName={device.name}
             encryption={device.backup_encryption}
             open={encOpen}
             onOpenChange={setEncOpen}

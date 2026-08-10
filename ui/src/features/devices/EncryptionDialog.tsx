@@ -14,6 +14,7 @@ export type EncryptionMode = "enable" | "change" | "disable";
 // never logged; their onward handling (pty, never argv) is the core's job (story 5).
 export function EncryptionDialog({
   udid,
+  deviceName,
   encryption,
   open,
   onOpenChange,
@@ -21,6 +22,9 @@ export function EncryptionDialog({
   post,
 }: {
   udid: string;
+  // The device's own name, for the credential anchor below. RAW, not pre-resolved: the dialog owns
+  // the `name || udid` fallback so a second call site cannot mint a different rule for it (quince#819).
+  deviceName?: string;
   encryption: "on" | "off" | "unknown";
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -28,6 +32,10 @@ export function EncryptionDialog({
   post?: StartFn;
 }) {
   const canManage = encryption !== "off"; // change/disable need existing encryption
+  // `name || udid` is this codebase's existing idiom for naming a device — DeviceCard,
+  // DeviceDetailsPage and StorageDetailsPage all carry it verbatim — so an unnamed device reads the
+  // same here as everywhere else rather than getting a second rule (quince#819).
+  const credentialName = deviceName || udid;
   const [mode, setMode] = React.useState<EncryptionMode>(
     initialMode ?? (encryption === "off" ? "enable" : "change"),
   );
@@ -156,6 +164,26 @@ export function EncryptionDialog({
 
           {!done ? (
             <div className="mt-4 flex flex-col gap-3">
+              {/* WHICH CREDENTIAL THIS IS — quince#819. Without it this dialog and the admin login
+                  form are two origin-only entries claiming to be the same password, so iCloud
+                  Keychain files them together and offers the wrong one. The device's name is what
+                  makes the saved entry readable in the Passwords app AND what the user recognises;
+                  the UDID is the fallback rather than the value, because a UDID in a screenshot of
+                  a settings screen is how identifiers escape. Rendered in every mode, since the
+                  anchor is a property of the credential rather than of the action.
+
+                  See `PasswordForm` for why this is `readOnly` and visible rather than suppressed. */}
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="enc-device">Device</Label>
+                <Input
+                  id="enc-device"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  readOnly
+                  value={credentialName}
+                />
+              </div>
               {(mode === "change" || mode === "disable") && (
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="enc-current">Current password</Label>
