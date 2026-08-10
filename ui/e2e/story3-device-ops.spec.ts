@@ -29,6 +29,16 @@ test("encryption op narrates the assisted flow to success", async ({ page }) => 
   await expect(page).toHaveURL(/\/devices\//);
 
   await page.getByRole("button", { name: /manage encryption/i }).click();
+
+  // THE OTHER HALF OF quince#819's ANCHOR, and the half that carries a per-device value: this
+  // dialog's credential is anchored on the device the page is for, so the keychain can tell it from
+  // the admin login password asserted in story 1 and from every other device's. `family-iphone` is
+  // the demo device this test opened, so the value proves the prop is wired from the page and not
+  // merely present.
+  const anchor = page.getByLabel("Device", { exact: true });
+  await expect(anchor).toHaveValue("family-iphone");
+  await expect(anchor).toHaveAttribute("autocomplete", "username");
+
   await page.getByLabel("Current password", { exact: true }).fill("demo-current");
   await page.getByLabel("New password", { exact: true }).fill("demo-next");
   await page.getByLabel("Confirm new password", { exact: true }).fill("demo-next");

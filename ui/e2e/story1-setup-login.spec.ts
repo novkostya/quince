@@ -6,6 +6,14 @@ test("set password, land in the shell, devices appear, reload keeps session", as
   await page.goto("/");
   await expect(page).toHaveURL(/\/setup/);
 
+  // THE CREDENTIAL ANCHOR, IN A REAL BROWSER — quince#819. quince asks for two different passwords
+  // on one origin; without a username on each, a password manager files them as one entry. Asserted
+  // here as well as in jsdom because the attribute is only worth anything to an actual browser's
+  // autofill machinery, and because this is the surface a user meets first.
+  const anchor = page.getByLabel("Username", { exact: true });
+  await expect(anchor).toHaveValue("quince-admin");
+  await expect(anchor).toHaveAttribute("autocomplete", "username");
+
   await page.getByLabel("Password").fill("demo");
   await page.getByRole("button", { name: /set password/i }).click();
 

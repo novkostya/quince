@@ -44,6 +44,47 @@ describe("EncryptionDialog", () => {
     });
   });
 
+  // THE CREDENTIAL ANCHOR — quince#819. A password manager keys on (origin, username), so without
+  // this the dialog and the admin login form are two origin-only entries on one origin claiming to
+  // be the same password. The token has to be `username` for a manager to read it as the anchor, and
+  // it has to be `readOnly` rather than `disabled` — a disabled control is skipped by autofill.
+  it("anchors the credential on the device's name", () => {
+    render(
+      <EncryptionDialog
+        udid="DEV-1"
+        deviceName="family-iphone"
+        encryption="on"
+        open
+        onOpenChange={noop}
+      />,
+    );
+
+    const anchor = screen.getByLabelText("Device");
+    expect(anchor).toHaveValue("family-iphone");
+    expect(anchor).toHaveAttribute("autocomplete", "username");
+    expect(anchor).toHaveAttribute("readonly");
+    expect(anchor).not.toBeDisabled();
+  });
+
+  // THE FALLBACK LIVES HERE, NOT AT THE CALL SITE, so a second call site cannot mint a different
+  // rule for an unnamed device. `name || udid` is what DeviceCard, DeviceDetailsPage and
+  // StorageDetailsPage already do.
+  it("falls back to the udid when the device has no name", () => {
+    render(<EncryptionDialog udid="DEV-1" encryption="on" open onOpenChange={noop} />);
+    expect(screen.getByLabelText("Device")).toHaveValue("DEV-1");
+  });
+
+  // The anchor is a property of the CREDENTIAL, not of the action, so it is present whichever mode
+  // the dialog is in — including "disable", where the manager should still offer the right entry.
+  it.each([
+    ["enable", "off" as const, /^enable backup encryption$/i],
+    ["disable", "on" as const, /^disable$/i],
+  ])("is present in %s mode too", (_mode, encryption, switcher) => {
+    render(<EncryptionDialog udid="DEV-1" deviceName="family-iphone" encryption={encryption} open onOpenChange={noop} />);
+    if (encryption === "on") fireEvent.click(screen.getByRole("button", { name: switcher }));
+    expect(screen.getByLabelText("Device")).toHaveValue("family-iphone");
+  });
+
   // THE REASON THE DIALOG IS A FORM AT ALL — quince#819. A save prompt is driven by submission, so
   // the password fields and the submit button have to sit in one form and Enter has to reach it.
   // Asserted through the FORM rather than through the button's onClick, because the button no longer
