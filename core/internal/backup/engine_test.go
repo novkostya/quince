@@ -1625,7 +1625,7 @@ func TestJobLogDropsEmptyTokensAndCollapsesRepeatedNarration(t *testing.T) {
 				"uncollapsed (quince#810)", i, i+1, lines[i])
 		}
 	}
-	if !strings.Contains(logtxt, "Moving 128 files ... x3") {
+	if !strings.Contains(logtxt, "Moving 128 files ... x3 total") {
 		t.Errorf("no run total for `Moving 128 files` — suppressing a repeated line is compression, "+
 			"suppressing that it repeated is a claim it did not (quince#810 ruling)\n---\n%s", logtxt)
 	}
@@ -1646,15 +1646,14 @@ func TestJobLogDropsEmptyTokensAndCollapsesRepeatedNarration(t *testing.T) {
 		}
 	}
 
-	// quince#809, PINNED AS UNFIXED. `[KMGT]?B` does not match `Bytes`, so these frames set neither
-	// overallPercent nor hasBytes and are logged verbatim. The MB frame beside them IS dropped,
-	// which is the discriminator: this is a units bug, not a filter that fails on progress frames.
-	if !strings.Contains(logtxt, "0% (16 Bytes/1.4 MB)") {
-		t.Error("a plain-Bytes progress frame no longer leaks — quince#809 is fixed, and this " +
-			"assertion is now the wrong way round: flip it to require that it is DROPPED")
-	}
-	if strings.Contains(logtxt, "(23.2 MB/938.6 MB)") {
-		t.Error("an MB progress frame reached the log — the redraw filter is broken for the units " +
-			"it does match, which is a regression rather than quince#809")
+	// quince#809, NOW FIXED — this is the assertion the previous revision asked the next author to
+	// flip, flipped. A plain-`Bytes` frame is a redraw frame and must be dropped like any other;
+	// the MB frame beside it is the control, and the pair is what distinguishes a units bug from a
+	// filter that fails on progress frames generally.
+	for _, frame := range []string{"(16 Bytes/1.4 MB)", "(784 Bytes/122.0 MB)", "(23.2 MB/938.6 MB)"} {
+		if strings.Contains(logtxt, frame) {
+			t.Errorf("a progress frame reached the log: %s — the redraw filter does not recognise "+
+				"it (quince#809 for the Bytes units, a regression for the MB one)\n---\n%s", frame, logtxt)
+		}
 	}
 }

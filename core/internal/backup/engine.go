@@ -948,7 +948,11 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 	// progress fields still update below, and job.updated carries them (throttled). Everything with
 	// real narration — phase headers ("Receiving files"), the passcode wait, the tool's error line,
 	// "Backup Successful" — is logged verbatim.
-	redraw := (p.overallPercent != nil || p.hasBytes) &&
+	// `sizeFrame`, NOT `hasBytes`, and the difference is quince#809: the filter's question is "is
+	// this a redraw frame", which is true of a `(16 Bytes/1.4 MB)` frame even though those figures
+	// are not worth publishing. The publisher below still reads `hasBytes` and still sees exactly
+	// what it saw before this change.
+	redraw := (p.overallPercent != nil || p.sizeFrame) &&
 		!p.waitingPasscode && !p.phaseReceiving && !p.success && p.failReason == ""
 	// AN EMPTY TOKEN IS NOT NARRATION (quince#810). scanFrames splits on '\r' as well as '\n' so a
 	// progress redraw is one token per frame; where the tool puts those adjacent the split yields
@@ -1027,7 +1031,7 @@ func (e *Engine) logLine(lj *liveJob, line string) {
 	lj.mu.Unlock()
 
 	if n > 1 {
-		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n))
+		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n)+" total")
 	}
 	e.emitLog(lj, line)
 }
@@ -1042,7 +1046,7 @@ func (e *Engine) flushLogRun(lj *liveJob) {
 	lj.logRunLine, lj.logRunCount = "", 0
 	lj.mu.Unlock()
 	if n > 1 {
-		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n))
+		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n)+" total")
 	}
 }
 

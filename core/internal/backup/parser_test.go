@@ -79,3 +79,74 @@ func (r *twoChunkReader) Read(p []byte) (int, error) {
 	r.i++
 	return n, nil
 }
+
+// `Bytes` IS A UNIT THE TOOL WRITES, and the redraw filter did not recognise it (quince#809).
+//
+// THE TABLE IS PER UNIT because that is what was missing: every fixture in this suite used `MB`, so
+// a whole class of frame reached neither consumer in a test and the pattern was free to be wrong for
+// as long as it was.
+//
+// TWO COLUMNS, BECAUSE ONE PREDICATE WAS ANSWERING TWO QUESTIONS. `sizeFrame` is the log filter's —
+// *is this a redraw* — and must now be true for every unit. `hasBytes` is the progress publisher's —
+// *are these figures worth publishing* — and is deliberately UNCHANGED, so a per-file `Bytes` counter
+// three orders of magnitude below the job total does not start driving `bytes_done` while quince#808
+// is open about those numbers at all. The `want` columns differing on the `Bytes` rows IS the fix.
+func TestParseLineRecognisesEveryProgressUnit(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		line          string
+		wantSizeFrame bool
+		wantHasBytes  bool
+		wantDone      int64
+	}{
+		{"plain Bytes — the missed class", "[=  ]   0% (16 Bytes/1.4 MB)", true, false, 0},
+		{"plain Bytes, larger", "[=  ]   0% (784 Bytes/122.0 MB)", true, false, 0},
+		{"B", "[=  ]   0% (16 B/1.4 MB)", true, true, 16},
+		{"KB", "[=  ]   1% (12.0 KB/1.4 MB)", true, true, 12 * 1024},
+		{"MB — the control, unchanged", "[== ]   2% (23.2 MB/938.6 MB)", true, true, 23*1024*1024 + 209715},
+		{"GB", "[== ]  50% (1.5 GB/3.0 GB)", true, true, 1610612736},
+		{"no size pair at all", "Receiving files", false, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := parseLine(tc.line)
+			if p.sizeFrame != tc.wantSizeFrame {
+				t.Errorf("sizeFrame = %v, want %v — this decides whether the LOG drops the frame; "+
+					"a false here is quince#809, hundreds of these lines at frame rate", p.sizeFrame, tc.wantSizeFrame)
+			}
+			if p.hasBytes != tc.wantHasBytes {
+				t.Errorf("hasBytes = %v, want %v — this decides whether the frame's figures are "+
+					"PUBLISHED as bytes_done/bytes_total, and quince#809 must not change it",
+					p.hasBytes, tc.wantHasBytes)
+			}
+			if tc.wantHasBytes && p.bytesDone != tc.wantDone {
+				t.Errorf("bytesDone = %d, want %d", p.bytesDone, tc.wantDone)
+			}
+			if !tc.wantHasBytes && p.bytesDone != 0 {
+				t.Errorf("bytesDone = %d on a frame that must publish nothing — a per-file Bytes "+
+					"counter reaching bytes_done is what this scoping exists to prevent", p.bytesDone)
+			}
+		})
+	}
+}
+
+// THE UNIT MUST BE CAPTURED WHOLE, because the publishing guard is a string comparison on it:
+// `strings.EqualFold(m[2], "Bytes")` is what keeps a per-file Bytes counter out of `bytes_done`,
+// and a capture of just `B` would silently let it through — the frame would stop flooding the log
+// AND start publishing, which is exactly the combination quince#809's review warned about.
+//
+// THIS TEST DOES NOT PIN THE ALTERNATION ORDER, and an earlier revision of it claimed to. The claim
+// was that `[KMGT]?B|Bytes` would match the bare `B`, leave `ytes`, fail the required `/`, and so
+// reproduce quince#809 inside its own fix. MEASURED: it does not. Go's regexp keeps whichever
+// branch lets the WHOLE pattern match, so the branch that cannot reach the `/` is discarded, and
+// this assertion passes with either order. Kept — what it actually asserts is load-bearing —
+// renamed and re-commented so it stops claiming something about the engine that is not true.
+func TestBytesUnitIsCapturedWhole(t *testing.T) {
+	m := reBytes.FindStringSubmatch("[=  ]   0% (16 Bytes/1.4 MB)")
+	if m == nil {
+		t.Fatal("a plain-Bytes frame does not match reBytes at all (quince#809)")
+	}
+	if m[2] != "Bytes" {
+		t.Fatalf("unit captured as %q, want \"Bytes\" — the publishing guard compares this string, "+
+			"so a partial capture would let a per-file counter reach bytes_done", m[2])
+	}
+}

@@ -52,7 +52,22 @@ type parsed struct {
 	overallPercent  *float64 // from "NN% Finished" (the only trustworthy OVERALL percent)
 	bytesDone       int64    // best-effort current-transfer bytes from "(X/Y)"
 	bytesTotal      int64
-	hasBytes        bool
+
+	// TWO FLAGS, BECAUSE ONE PREDICATE WAS ANSWERING TWO QUESTIONS (quince#809 review).
+	//
+	// `hasBytes` was named for what it MATCHED — a line carrying a size pair — and was consumed by
+	// callers who wanted what it MEANT: the log filter asking *is this a redraw frame*, and the
+	// progress publisher asking *are these figures worth publishing*. Those coincided only while
+	// the pattern was narrow. Widening it to catch the tool's spelled-out `Bytes` would have
+	// silently started publishing per-file figures three orders of magnitude below the job total —
+	// landing in quince#808's territory with no test able to see it.
+	//
+	//	sizeFrame — a progress redraw, whatever the unit. The LOG FILTER's question.
+	//	hasBytes  — figures the publisher may use. UNCHANGED by quince#809: plain `Bytes` frames
+	//	            still publish nothing, exactly as before. Whether they SHOULD is quince#808's
+	//	            question and is deliberately not answered here.
+	sizeFrame bool
+	hasBytes  bool
 }
 
 var (
@@ -60,7 +75,23 @@ var (
 	// overall percent (every finished file shows 100%), so only "Finished" drives job.percent.
 	reFinished = regexp.MustCompile(`(\d+)%\s+Finished`)
 	// "[..]  2% (23.2 MB/938.6 MB)" — a size pair; best-effort current-transfer bytes.
-	reBytes = regexp.MustCompile(`\(([\d.]+)\s*([KMGT]?B)/([\d.]+)\s*([KMGT]?B)\)`)
+	//
+	// `Bytes` IS A UNIT THE TOOL WRITES, and `[KMGT]?B` does not match it (quince#809). The
+	// alternation is anchored at `\(`, so `([KMGT]?B)` can only consume the `B` of `Bytes` and the
+	// required `/` then fails — every sub-KB frame missed the pattern entirely and was logged
+	// verbatim. Every file's transfer starts under 1 KB and small files never leave that range, so
+	// the log filled with near-identical `0% (16 Bytes/…)`, `(32 Bytes/…)` at frame rate.
+	//
+	// THE ALTERNATION ORDER DOES NOT MATTER, and this comment claimed the opposite until it was
+	// run. `[KMGT]?B|Bytes` is the obvious trap — leftmost-first matches the bare `B` of `Bytes`,
+	// leaves `ytes`, and fails the required `/`, reproducing the bug inside its own fix. It does
+	// not happen: Go's regexp keeps whichever branch lets the WHOLE pattern match, so a branch that
+	// cannot reach the `/` is discarded. MEASURED — the suite below passes with both orders.
+	// `Bytes` is written first anyway: it reads in the order the reader cares about and costs
+	// nothing. What DOES matter is that the unit is captured whole, which is asserted below,
+	// because `strings.EqualFold(m[2], "Bytes")` is what keeps these frames out of the published
+	// figures — a partial `B` capture would silently let them through.
+	reBytes = regexp.MustCompile(`\(([\d.]+)\s*(Bytes|[KMGT]?B)/([\d.]+)\s*(Bytes|[KMGT]?B)\)`)
 	// "ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)" —
 	// the DEVICE's own explanation of a refusal. Captured verbatim so a failed job can say what
 	// went wrong instead of "exit status 151" (qn.4c lab finding: 151 == MBErrorDomain 105, and
@@ -87,9 +118,20 @@ func parseLine(line string) parsed {
 		}
 	}
 	if m := reBytes.FindStringSubmatch(l); m != nil {
-		p.bytesDone = parseSize(m[1], m[2])
-		p.bytesTotal = parseSize(m[3], m[4])
-		p.hasBytes = true
+		// Every size pair is a redraw frame — that is the log filter's question, and it is the one
+		// quince#809 is about.
+		p.sizeFrame = true
+		// PUBLISHING IS DELIBERATELY UNCHANGED. A frame whose CURRENT figure is in plain `Bytes` is
+		// a per-file counter at the start of a file, three orders of magnitude below the job total;
+		// letting it set the published figures would make `bytes_done` jitter between scales for no
+		// gain, inside quince#808's open question about those numbers being per-message at all.
+		// So these frames stop flooding the log and go on publishing nothing, which is exactly
+		// what they did before — this fix is a strict no-op on r.BytesDone / r.BytesTotal.
+		if !strings.EqualFold(m[2], "Bytes") {
+			p.bytesDone = parseSize(m[1], m[2])
+			p.bytesTotal = parseSize(m[3], m[4])
+			p.hasBytes = true
+		}
 	}
 	if m := reErrorCode.FindStringSubmatch(l); m != nil {
 		p.failReason = strings.TrimSpace(m[1])
@@ -104,7 +146,12 @@ func parseSize(num, unit string) int64 {
 		return 0
 	}
 	switch strings.ToUpper(unit) {
-	case "B":
+	// `BYTES` IS UNREACHED TODAY AND IS HERE ON PURPOSE (quince#809). parseLine does not call this
+	// for a `Bytes` frame — those set `sizeFrame` and stop, so nothing publishes their figures. The
+	// arm exists because the alternative to an unreached case is a silent 0: whoever later decides
+	// that `Bytes` frames SHOULD publish (quince#808's question) removes one `if` in parseLine, and
+	// without this they would get zeroes with nothing to say why.
+	case "B", "BYTES":
 		return int64(f)
 	case "KB":
 		return int64(f * 1024)
