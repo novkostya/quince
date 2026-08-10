@@ -61,21 +61,22 @@ func (b *namespaceBackend) SeedWork(udid, _ string) error {
 	return finishSeed(b.backups, udid, b.seedClosure(udid))
 }
 
-// seedClosure is the namespace-specific clone (the backend's SAFE strategy: hardlink→copy,
-// amendment A), shared by WorkDir and SeedWork.
+// seedClosure is the namespace-specific clone, shared by WorkDir and SeedWork.
+//
+// THE SEED NOW USES THE BACKEND'S OWN STRATEGY. It used to run `seedStrategy`, which downgraded
+// hardlink→copy per qn.5b amendment A and logged a WARN saying so — and since the seed is the only
+// place a namespace backend duplicates anything, that downgrade was the whole of what made the
+// `hardlink` tier behave identically to `copy` (quince#518). Gate 12c ran on hardware and the
+// premise did not hold, so the downgrade and its warning are gone rather than made conditional:
+// there is no degraded mode left to surface here.
 func (b *namespaceBackend) seedClosure(udid string) func() error {
 	tree := workingTree(b.backups, udid)
 	latest := latestDir(b.backups, udid)
 	return func() error {
-		safe := seedStrategy(b.strategy)
-		if safe != b.strategy {
-			b.log.Warn("storage: hardlink seed disabled-to-copy (gate 12c) — seeding working via copy",
-				"backend", b.name, "udid", udid)
-		}
-		if err := clonetree.Clone(tree, latest, safe); err != nil {
+		if err := clonetree.Clone(tree, latest, b.strategy); err != nil {
 			return fmt.Errorf("storage: seed working from latest: %w", err)
 		}
-		b.log.Info("storage: seeded working from latest", "backend", b.name, "udid", udid, "strategy", safe)
+		b.log.Info("storage: seeded working from latest", "backend", b.name, "udid", udid, "strategy", b.strategy)
 		return nil
 	}
 }

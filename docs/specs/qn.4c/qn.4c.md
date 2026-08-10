@@ -97,7 +97,7 @@ usual "unlanded branch" case does not apply).
 - **Live re-supervision on a `manage_muxer` edit** — still process-start-only (qn.2b's stated D12
   exception carries over verbatim; qn.7 owns it).
 - **Gate 12c** (destructive hardlink matrix) — deferred past the freeze ((by)); the hardlink tier
-  stays disabled-to-copy and surfaced ((bn)).
+  stays disabled-to-copy and surfaced ((bn)). **RETIRED 2026-08-10 — gate 12c passed, quince#518.**
 - **`ui/` behavior** — no component changes. The encryption banner/dialog already branch on
   `backup_encryption === "off"`, and the card already narrates `verifying`/`committing` and renders
   `last_backup` (**verified by running** — see finding (iv) below); both defects are *server-side

@@ -166,10 +166,12 @@ func TestLabGate12(t *testing.T) {
 	for _, r := range AnchoredFilterRules(lastPathSegment(parent)) {
 		t.Logf("    --filter %q", r)
 	}
-	t.Log("MANUAL (c) destructive hardlink-safety matrix (gate 12c, deferred past the freeze): force " +
-		"the hardlink backend and run full->incremental, big-file, -wal/-shm, delete, rename, " +
-		"interrupted+next, iOS upgrade, encryption change; assert the prior version's blobs keep " +
-		"byte+metadata identity. Until it passes, hardlink stays disabled-to-copy — INCLUDING the seed.")
+	t.Log("MANUAL (c) destructive hardlink-safety matrix (gate 12c): PASSED on hardware 2026-08-10 " +
+		"(quince#518) for full->incremental on two devices, with clonetree's class list disabled — " +
+		"the committed tree came back byte-identical and the seed downgrade is retired. STILL " +
+		"UNCOVERED and worth running: big-file, delete, rename, INTERRUPTED+NEXT, iOS upgrade, " +
+		"encryption change. Re-run the whole matrix whenever LIBIMOBILEDEVICE_REF moves — the " +
+		"safety property belongs to the writer, not to quince.")
 }
 
 func lastPathSegment(p string) string {

@@ -430,7 +430,7 @@ Every hard rule / canon boundary this rung touches *or comes near*, one complian
   cleared; no companion file). **`WriteMarker` replaces (remove-then-write), never truncates** —
   found during the build: on the hardlink backend a seeded `work/` shares inodes with committed
   `latest/`, so an in-place truncate of the marker would rewrite a committed version's identity.
-  (The clonetree hardlink strategy already copies `MutatesInPlace` classes — dbs/`-wal`/`-shm`/
+  (The clonetree hardlink strategy copied `MutatesInPlace` classes — dbs/`-wal`/`-shm`/
   top-level plists — for the same reason; the marker is quince's own such file.)
 - **zfs `exec` vs `hook`** both go through the qn.3 subprocess hygiene (argv arrays, `setpgid`,
   ctx-kill); dataset/snapshot names are pattern-validated before argv; **dataset destroy is never

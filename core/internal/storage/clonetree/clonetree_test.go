@@ -7,7 +7,7 @@ import (
 )
 
 // buildSrcTree lays down a small backup-shaped tree: a content blob in a two-hex shard dir, a
-// Manifest.db (a MutatesInPlace class), and a nested dir. Returns the root.
+// Manifest.db (the class the retired MutatesInPlace list singled out), and a nested dir.
 func buildSrcTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -60,23 +60,59 @@ func TestCloneCopyIsFaithfulAndIndependent(t *testing.T) {
 	}
 }
 
-func TestCloneHardlinkSharesInodesExceptMutatingClasses(t *testing.T) {
+// THE HARDLINK STRATEGY SHARES EVERY REGULAR FILE — including the metadata classes an earlier
+// version copied, which is the change quince#518 measured its way to.
+//
+// This test asserted the opposite until gate 12c ran: `Manifest.db` and `Info.plist` had to be
+// COPIED, on the reasoning that the writer might rewrite them in place through the alias. Measured
+// on two real devices with that list disabled, it does not — it unlinks and recreates, and the
+// committed tree came back byte-identical both times. The named files are kept as the cases,
+// because they are the ones the old list singled out and so the ones a reader will wonder about.
+func TestCloneHardlinkSharesEveryRegularFile(t *testing.T) {
 	src := buildSrcTree(t)
 	dst := filepath.Join(t.TempDir(), "out")
 	if err := Clone(dst, src, Hardlink); err != nil {
 		t.Fatalf("clone hardlink: %v", err)
 	}
-	// A content blob is hard-linked (shared inode) — cheap versioning.
-	if !sameFile(t, filepath.Join(src, "ab", "ab00cafe"), filepath.Join(dst, "ab", "ab00cafe")) {
-		t.Fatal("content blob was not hard-linked")
+	for _, rel := range []string{
+		filepath.Join("ab", "ab00cafe"), // a content blob — always was linked
+		"Manifest.db",                   // was copied by MutatesInPlace; 266 MB on a real device
+		"Info.plist",                    // was copied
+	} {
+		if !sameFile(t, filepath.Join(src, rel), filepath.Join(dst, rel)) {
+			t.Errorf("%s was not hard-linked — the seed is paying copy cost for it", rel)
+		}
 	}
-	// Manifest.db is a MutatesInPlace class → copied, NOT shared (else a rewrite would corrupt
-	// the committed version sharing the inode).
-	if sameFile(t, filepath.Join(src, "Manifest.db"), filepath.Join(dst, "Manifest.db")) {
-		t.Fatal("Manifest.db was hard-linked — an in-place-mutating class must be copied")
+}
+
+// A seed must cost no file data at all. Asserted as a whole-tree property rather than per file,
+// because the defect this replaces was one class escaping the link path and nothing noticing: on a
+// real 35 GB backup the single escaping file (`Manifest.db`) cost 266 MB per seed.
+func TestCloneHardlinkCopiesNothing(t *testing.T) {
+	src := buildSrcTree(t)
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := Clone(dst, src, Hardlink); err != nil {
+		t.Fatalf("clone hardlink: %v", err)
 	}
-	if sameFile(t, filepath.Join(src, "Info.plist"), filepath.Join(dst, "Info.plist")) {
-		t.Fatal("Info.plist was hard-linked — a rewritten-metadata class must be copied")
+	var unshared []string
+	err := filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
+		if err != nil || !fi.Mode().IsRegular() {
+			return err //nolint:nilerr // propagate walk errors, skip non-regular entries
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		if !sameFile(t, p, filepath.Join(dst, rel)) {
+			unshared = append(unshared, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(unshared) > 0 {
+		t.Errorf("a hardlink seed copied %d file(s) instead of linking: %v", len(unshared), unshared)
 	}
 }
 
@@ -146,26 +182,6 @@ func TestStrategyString(t *testing.T) {
 	for s, want := range map[Strategy]string{Reflink: "reflink", Hardlink: "hardlink", Copy: "copy", Strategy(99): "unknown"} {
 		if got := s.String(); got != want {
 			t.Errorf("Strategy(%d).String() = %q, want %q", s, got, want)
-		}
-	}
-}
-
-func TestMutatesInPlace(t *testing.T) {
-	inPlace := []string{
-		"Manifest.db", "Manifest.db-wal", "Manifest.db-shm", "Status.plist", "Info.plist",
-		"Manifest.plist", "foo.sqlite", "foo.sqlite-wal", "x/y/bar.db",
-	}
-	linkable := []string{
-		"ab/ab00cafe", "cd/deadbeef", "ff/0011223344", "Snapshot/somefile",
-	}
-	for _, p := range inPlace {
-		if !MutatesInPlace(p) {
-			t.Errorf("MutatesInPlace(%q) = false, want true", p)
-		}
-	}
-	for _, p := range linkable {
-		if MutatesInPlace(p) {
-			t.Errorf("MutatesInPlace(%q) = true, want false", p)
 		}
 	}
 }
