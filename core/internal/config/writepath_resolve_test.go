@@ -73,7 +73,7 @@ func TestAPutLeavesNoEmptyNameInTheLiveSnapshot(t *testing.T) {
 
 	errs, _, err := svc.Replace(wireDoc(StorageEntry{
 		Path: "/backups", Backend: "hardlink", Default: true,
-		ZFS: ZFSConfig{Mode: "exec", Seed: "auto"},
+		ZFS: ZFSConfig{Mode: "hook", Seed: "auto"},
 	}))
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("replace: err=%v errs=%+v", err, errs)

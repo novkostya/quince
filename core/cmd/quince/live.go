@@ -475,7 +475,7 @@ func resolveSlot(ctx context.Context, e config.StorageEntry,
 			ez := e.ZFS
 			stBackend, backendName, _ = storage.Select(ctx, storage.Options{
 				Backend: e.Backend, Backups: e.Path, AppVersion: version.String(),
-				ZFSParent: ez.ParentDataset, ZFSMode: ez.Mode,
+				ZFSParent:  ez.ParentDataset,
 				ZFSHookCmd: ez.HookCmd, ZFSSeed: ez.Seed,
 			}, log)
 			probed = true

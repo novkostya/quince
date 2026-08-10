@@ -29,10 +29,10 @@ func seedStorages(t *testing.T, srv *httptest.Server, c *http.Client, storageJSO
 }
 
 const twoStorages = `[{"name":"pool","path":"/backups","default":true,"backend":"auto",` +
-	`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+	`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},` +
 	`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}},` +
 	`{"name":"shuttle","path":"/mnt/shuttle","default":false,"backend":"auto",` +
-	`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+	`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},` +
 	`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}]`
 
 func deleteStorage(t *testing.T, srv *httptest.Server, c *http.Client, name string) (int, []byte) {
@@ -166,7 +166,7 @@ func TestForgetStorageRefusesTheOnlyStorage(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 	seedStorages(t, srv, c, `[{"name":"pool","path":"/backups","default":true,"backend":"auto",`+
-		`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},`+
+		`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},`+
 		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}]`)
 
 	code, body := deleteStorage(t, srv, c, "pool")

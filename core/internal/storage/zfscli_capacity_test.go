@@ -17,7 +17,7 @@ import (
 
 func fakeCapacityCLI(out string, err error) (*zfsCLI, *[][]string) {
 	calls := &[][]string{}
-	c := newZFSCLI("rpool/quince-labtest", "hook", "ssh -i /k host", "")
+	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		*calls = append(*calls, argv)
 		return out, err
@@ -55,20 +55,36 @@ func TestZFSCapacityReadsUsedPlusAvailable(t *testing.T) {
 	}
 }
 
-// EXEC MODE KEEPS THE DIRECT CALL, because no forced command is in the way — and `-p` is
-// load-bearing there: without it zfs prints human units ("399G") and this would be parsing prose.
-func TestZFSCapacityExecModeCallsZFSDirectly(t *testing.T) {
+// THE HOOK IS THE ONLY TRANSPORT — every verb, no exceptions (quince#697, quince#793).
+//
+// This replaces a test that asserted the opposite for one verb: `Capacity` used to branch on the
+// mode and build `zfs list -H -p -o used,available <parent>` directly. It is written across ALL
+// SIX verbs rather than against `capacity` alone, because the removed branch lived in the method
+// rather than in `argv()` — so a future direct call would most likely reappear the same way, in
+// one method, and a test pinning one verb would not see it.
+func TestEveryZFSOpGoesThroughTheHook(t *testing.T) {
 	calls := &[][]string{}
-	c := newZFSCLI("rpool/quince-labtest", "exec", "", "")
+	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		*calls = append(*calls, argv)
-		return "3972103372\t428871450624\n", nil
+		return "", nil
 	}
-	if _, _, err := c.Capacity(context.Background()); err != nil {
-		t.Fatalf("capacity: %v", err)
+	ctx := context.Background()
+	udid, snap := "00008030-000000000000001E", "quince-2026-08-10T12-00-01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	_ = c.CreateDataset(ctx, udid)
+	_ = c.Snapshot(ctx, udid, snap)
+	_, _ = c.ListSnapshots(ctx, udid)
+	_ = c.DestroySnapshot(ctx, udid, snap)
+	_ = c.Rollback(ctx, udid, snap)
+	_, _, _ = c.Capacity(ctx)
+
+	if len(*calls) != 6 {
+		t.Fatalf("expected one call per verb, got %d: %v", len(*calls), *calls)
 	}
-	if argv := strings.Join((*calls)[0], " "); argv != "zfs list -H -p -o used,available rpool/quince-labtest" {
-		t.Errorf("exec argv = %q, want the direct flagged list", argv)
+	for _, argv := range *calls {
+		if len(argv) < 4 || strings.Join(argv[:4], " ") != "ssh -i /k host" {
+			t.Errorf("argv %q does not start with the configured hook — a verb is reaching a binary directly", argv)
+		}
 	}
 }
 
@@ -87,7 +103,7 @@ func TestZFSCapacityExecModeCallsZFSDirectly(t *testing.T) {
 // one of them failing.
 func forcedCommandHook(t *testing.T, arms map[string]string) *zfsCLI {
 	t.Helper()
-	c := newZFSCLI("rpool/quince-labtest", "hook", "ssh -i /k host", "")
+	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		// argv is `ssh -i /k host <verb> [args…]`; the helper sees what follows the ssh target and
 		// dispatches on the FIRST TOKEN ONLY.

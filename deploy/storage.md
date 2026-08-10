@@ -53,17 +53,25 @@ dataset — so a quota on the child is invisible to that question. Measured on a
 backup that cannot fit, and the failure arrives as **ENOSPC part-way through** rather than as a clean
 up-front refusal — which on Wi-Fi costs hours.
 
-## ZFS: `exec` vs `hook`
+## ZFS: the hook is the only transport
 
-- `storage.zfs.mode: exec` — quince runs `zfs …` directly. Requires the container to hold ZFS
-  delegation (`zfs allow`) or run privileged. Simplest where the daemon can reach `zfs`.
-- `storage.zfs.mode: hook` — quince runs `storage.zfs.hook_cmd` (an argv, never a shell string),
-  typically an SSH forced-command to a constrained helper on the ZFS host. This keeps the
-  HTTP-facing container free of ZFS privileges (the hardened posture). The transport binary the
-  `hook_cmd` names (usually `ssh`) must exist **where quince runs**: the runtime image ships
-  `openssh-client` for exactly this (qn.4a gate-15 finding #2) — without it every hook call dies
-  with `exec: "ssh": executable file not found` and no backup can seed. An `exec`-mode hook that
-  shells out to some other transport must ensure that binary is present too.
+`storage.zfs.mode: hook` is the only value and the default — quince runs `storage.zfs.hook_cmd`
+(an argv, never a shell string), typically an SSH forced-command to a constrained helper on the ZFS
+host. This keeps the HTTP-facing container free of ZFS privileges.
+
+The transport binary the `hook_cmd` names (usually `ssh`) must exist **where quince runs**: the
+runtime image ships `openssh-client` for exactly this (qn.4a gate-15 finding #2) — without it every
+hook call dies with `exec: "ssh": executable file not found` and no backup can seed.
+
+**`mode: exec` is REMOVED** — Operator ruling 2026-08-10 (quince#697). It ran `zfs …` in the
+container against delegated privileges, and **the shipped image has no `zfs` binary**, so the mode
+you got by default could not work in what we ship. Shipping the userland was rejected rather than
+merely declined: the `zfs` CLI talks to the host kernel module over a versioned ioctl interface, so
+the image would have to track a host version that is not ours to control.
+
+**If your `config.yml` still says `mode: exec`, quince refuses it and names the key** —
+`storage[N].zfs.mode: invalid value "exec"; must be one of [hook]`. Set up the helper below and
+change the line to `hook`, or just delete the line: an absent key already means `hook`.
 
 ### The constrained `quince-zfs-helper` (forced-command reference)
 

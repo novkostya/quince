@@ -236,7 +236,9 @@ func TestASecondStorageMaterialisesTheIncumbentsDefault(t *testing.T) {
 // Measured before the fix: forget `b2` (which declared `zfs.mode: hook`, `zfs.seed: copy`), re-add
 // `b2` at the same path declaring neither, and the file came back carrying
 // `zfs: {mode: exec, seed: auto}` — defaults nobody set on the new entry, written from the old
-// entry's surviving paths. Tidiness rather than correctness: every value is the current one.
+// entry's surviving paths. (`exec` was the default when that was measured; it is `hook` since
+// quince#697. The defect is the writing, not the value.) Tidiness rather than correctness: every
+// value is the current one.
 func TestForgettingAStorageDropsItsDeclaredPaths(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")

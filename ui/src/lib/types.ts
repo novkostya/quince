@@ -359,7 +359,10 @@ export interface StorageAddition {
   path: string;
   // CONCRETE, never `auto` — the add flow records the backend quince probed and showed.
   backend: "zfs" | "reflink" | "hardlink" | "copy";
-  zfs?: { parent_dataset: string; mode: "hook" | "exec"; hook_cmd: string; seed: string };
+  // `mode` has ONE value: `exec` was removed on quince#793 (Operator ruling, quince#697) because
+  // the shipped image has no `zfs` binary. The key is kept so the server can REFUSE an old `exec`
+  // by path rather than ignore it as an unknown key.
+  zfs?: { parent_dataset: string; mode: "hook"; hook_cmd: string; seed: string };
 }
 
 // StorageHookCheck is POST /api/storages/probe/hook (contracts §2, qn.6e) — does the operator's

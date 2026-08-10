@@ -17,8 +17,7 @@ type Options struct {
 	Backups    string // this storage's root (qn.6c; was QUINCE_BACKUPS)
 	AppVersion string
 	ZFSParent  string // storage.zfs.parent_dataset
-	ZFSMode    string // exec | hook
-	ZFSHookCmd string
+	ZFSHookCmd string // storage.zfs.hook_cmd — the only zfs transport (quince#697)
 	ZFSSeed    string // auto | reflink | copy (in-container seed strategy; hardlink never used — amendment A)
 }
 
@@ -29,12 +28,12 @@ type Options struct {
 // onboarding and logged (never silent — a copy fallback is a surfaced degraded mode).
 func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, string, string) {
 	if WantZFS(opts.Backend, opts.ZFSParent, opts.ZFSHookCmd) {
-		cli := newZFSCLI(opts.ZFSParent, opts.ZFSMode, opts.ZFSHookCmd, "")
+		cli := newZFSCLI(opts.ZFSParent, opts.ZFSHookCmd)
 		reason := "storage.zfs configured (parent dataset / hook set)"
 		if opts.Backend == BackendZFS {
 			reason = "storage.backend: zfs"
 		}
-		log.Info("storage backend selected", "backend", BackendZFS, "reason", reason, "mode", opts.ZFSMode)
+		log.Info("storage backend selected", "backend", BackendZFS, "reason", reason)
 		return newZFSBackend(baseCtx, cli, opts.Backups, orAuto(opts.ZFSSeed), opts.AppVersion, log), BackendZFS, reason
 	}
 

@@ -219,19 +219,19 @@ func splitFull(full string) (ds, snap string) {
 	return full, ""
 }
 
-// newZFSManager builds a zfs-backend Manager backed by the fakeZFS (exec mode, copy seed).
+// newZFSManager builds a zfs-backend Manager backed by the fakeZFS (copy seed).
 func newZFSManager(t *testing.T, policy RetentionPolicy) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
-	return newZFSManagerCfg(t, policy, "exec", "copy")
+	return newZFSManagerCfg(t, policy, "copy")
 }
 
-// newZFSManagerCfg builds a zfs-backend Manager with a chosen zfs mode + in-container seed strategy.
-func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, mode, seed string) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
+// newZFSManagerCfg builds a zfs-backend Manager with a chosen in-container seed strategy.
+func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, seed string) (*Manager, *zfsBackend, *fakeZFS, string, *store.Store) {
 	t.Helper()
 	backups := t.TempDir()
 	st := openStore(t)
 	parent := "tank/backups/iphone-backup"
 	f := &fakeZFS{backups: backups, parent: parent}
-	cli := newZFSCLI(parent, mode, "hook-placeholder", "zfs")
+	cli := newZFSCLI(parent, "hook-placeholder")
 	cli.run = f.run
 	be := newZFSBackend(context.Background(), cli, backups, seed, "test", testLogger())
 	seedStorageMarker(t, backups, "", BackendZFS)

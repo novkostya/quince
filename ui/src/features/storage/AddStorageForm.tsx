@@ -174,7 +174,8 @@ export function AddStorageForm({
       const saved = await addStorage({
         path: probe.clean_path,
         backend: backend as "zfs" | "reflink" | "hardlink" | "copy",
-        // `mode: hook` because `exec` cannot work in the shipped image (quince#697), and `seed:
+        // `mode: hook` because it is the only mode — `exec` was removed for not working in the
+        // shipped image (quince#697, quince#793) — and `seed:
         // auto` because in hook mode the host-side `seed` verb does the reflink and the key is
         // moot — the schema's own comment says so. Neither is asked for; both would be a field
         // whose only honest answer is the one quince already knows.

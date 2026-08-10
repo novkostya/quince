@@ -139,7 +139,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 	// A client that reconstructs the list rather than splicing a fetched one omits the keys it
 	// never rendered. Those do NOT all fail the same way, and only one of them fails silently:
 	//
-	//   zfs.mode  — omitted decodes to "", which Validate REJECTS (oneOf exec|hook). Loud. A 422.
+	//   zfs.mode  — omitted decodes to "", which Validate REJECTS (oneOf hook). Loud. A 422.
 	//   retention — a POINTER, so omitted decodes to nil, which Validate skips entirely. Silent.
 	//
 	// So the hazard the narrow endpoint exists to prevent is real and it is `retention:`. The

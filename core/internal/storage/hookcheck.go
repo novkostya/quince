@@ -107,7 +107,7 @@ func CheckHook(ctx context.Context, parentDataset, hookCmd string) HookCheck {
 	ctx, cancel := context.WithTimeout(ctx, hookCheckTimeout)
 	defer cancel()
 
-	cli := newZFSCLI(parentDataset, "hook", hookCmd, "")
+	cli := newZFSCLI(parentDataset, hookCmd)
 
 	capOut, capErr := cli.run(ctx, cli.argv("capacity"))
 	listOut, listErr := cli.run(ctx, cli.argv("list", parentDataset))

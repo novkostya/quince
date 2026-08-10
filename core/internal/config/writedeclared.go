@@ -210,7 +210,8 @@ func lostPaths(want, got Config, perr error) string {
 //	                                  name, which is exactly the unplug-and-replug flow
 //	                                → the file gets `zfs: {mode: exec, seed: auto}` — DEFAULTS the
 //	                                  user never set on the new entry, written from the old one's
-//	                                  surviving paths
+//	                                  surviving paths (`exec` was the default then; `hook` since
+//	                                  quince#697 — the defect is the writing, not the value)
 //
 // That is this rung's own defect in the flow most likely to meet it twice. It is tidiness rather
 // than correctness — every value written is the current one and the document parses — which is why

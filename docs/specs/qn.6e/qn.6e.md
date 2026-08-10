@@ -125,6 +125,11 @@ directly (`zfscli.go:34-38`, `:47-53`). **So the schema's default zfs mode canno
 shipped image.** That is not a defect this rung introduces and not one it fixes; it is the reason
 the form's zfs branch defaults to `hook` and says why.
 
+> **SINCE FIXED — the default is `hook` and `exec` is GONE** (Operator ruling 2026-08-10,
+> quince#697, executed on quince#793). `hook` is the only legal value, and a config still carrying
+> `exec` is refused by path. The measurement above stands — the image has no `zfs` binary — but do
+> not read this fact as describing the current default.
+
 **4. zfs is NEVER probed today — it is pure intent.** `probe.go:31-32`:
 
 ```go
@@ -284,7 +289,8 @@ Only one of `ZFSConfig`'s four keys is a real user choice.
 - **`seed` does not go in the form.** `auto|reflink|copy`, and its own schema comment says *"In hook
   mode the host-side `seed` verb does the reflink and this is moot"* (`schema.go:178-181`).
   Config-file-only advanced key.
-- **`mode` defaults to `hook` in the form, against `Resolved()`'s `exec`** (facts 3, 8). The form
+- **`mode` defaults to `hook` in the form, against `Resolved()`'s `exec`** (facts 3, 8 — the
+  disagreement ended when quince#793 made `hook` the loader's default too). The form
   says why in one sentence, and does not present `exec` as a peer: *quince can't run `zfs` from
   inside the container. That's normal — it will call a helper on the host instead.*
 - **`parent_dataset` is ASKED, and validated by firing the helper.** The issue wanted it derived.
@@ -746,6 +752,9 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
    This line said *"worth its own issue; filed with PR 2"* while no issue existed and PR 2 had
    merged — quince#320's defect in miniature, since a deferral aimed at nothing is one nobody can
    pick up. The issue carries the two measurements and three candidate shapes, and rules none.
+   **CLOSED 2026-08-10 — none of the three.** The Operator removed `exec` (quince#793); `hook` is
+   the only value and the default. The config break this item declined to take was taken
+   deliberately, as a refusal that names the key rather than a silent re-default.
 
 ---
 

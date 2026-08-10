@@ -97,7 +97,7 @@ func TestValidateCatchesBadEnums(t *testing.T) {
 	// The backend enum moved onto the ENTRY with the flattening, so this reaches it through the
 	// list rather than through a global.
 	c.Storage = &[]StorageEntry{{Name: "local", Path: "/backups", Default: true, Backend: "banana",
-		ZFS: ZFSConfig{Mode: "exec", Seed: "auto"}}}
+		ZFS: ZFSConfig{Mode: "hook", Seed: "auto"}}}
 	c.UI.Theme = "neon"
 	c.Sessions.TTLMinutes = 0
 	errs := Validate(c)
@@ -436,6 +436,53 @@ func TestPreferredTransportRefusesAuto(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("`auto` was accepted as a preference; errors = %+v", errs)
+	}
+}
+
+// `storage.zfs.mode: exec` IS REFUSED, BY PATH — Operator ruling 2026-08-10 (quince#697,
+// quince#793). It ran `zfs` in the container, and the shipped image has no `zfs` binary.
+//
+// THE REFUSAL IS THE POINT, and it is why the key survived losing its second value. Deleting the
+// field would make `exec` an unknown key, which warns *"(ignored)"* — so an operator carrying the
+// mode that cannot work would be told it was being ignored rather than that it is gone. Kept as a
+// one-value enum, the error names the exact path and the one legal value. See ZFSConfig.Mode.
+func TestZFSModeExecIsRefusedRatherThanIgnored(t *testing.T) {
+	cfg, _, warns, err := Parse([]byte("storage:\n  - path: /backups\n    backend: zfs\n    zfs:\n      mode: exec\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, w := range warns {
+		if strings.Contains(w.Path, "zfs.mode") {
+			t.Errorf("`mode: exec` produced an unknown-key warning (%q) — it must be a validation "+
+				"ERROR, not something reported as ignored", w.Message)
+		}
+	}
+	var msg string
+	for _, e := range Validate(cfg) {
+		if e.Path == "storage[0].zfs.mode" {
+			msg = e.Message
+		}
+	}
+	if msg == "" {
+		t.Fatalf("`mode: exec` was accepted; errors = %+v", Validate(cfg))
+	}
+	if !strings.Contains(msg, "hook") {
+		t.Errorf("the refusal must name the one legal value so the operator knows what to write; got %q", msg)
+	}
+}
+
+// A config that never mentions `mode` gets `hook`, which is the mode that works in the shipped
+// image. It got `exec` — the one that cannot — until quince#697.
+func TestZFSModeDefaultsToHook(t *testing.T) {
+	cfg, _, _, err := Parse([]byte("storage:\n  - path: /backups\n    backend: zfs\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := (*cfg.Storage)[0].ZFS.Mode; got != "hook" {
+		t.Errorf("default zfs mode = %q, want hook", got)
+	}
+	if errs := Validate(cfg); len(errs) > 0 {
+		t.Errorf("a storage declaring no zfs mode must validate; errs = %+v", errs)
 	}
 }
 

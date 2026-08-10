@@ -146,6 +146,9 @@ storage[0].zfs.seed  invalid value ""; must be one of [auto reflink copy]
 storage              exactly one storage must be marked `default: true` …
 ```
 
+> Transcribed as measured. The first line now reads `must be one of [hook]` — `exec` was removed on
+> quince#793 (Operator ruling, quince#697). The refusal itself is unchanged.
+
 An empty `backend` is refused the same way. **`validateStorages` asserts the opposite in its own
 comment** (`validate.go:133`): *"A LONE STORAGE IS ALREADY MARKED DEFAULT by ResolveStorages, so
 `defaults == 0` here can only mean several storages and none chosen."* True on the load path, false
@@ -365,7 +368,7 @@ stronger one:
    says the two tags are separable, so this is a discipline hazard; story 6 makes it a gate.
 2. **On the `yaml:` side it cannot deliver the ruling and would obscure that it hadn't.**
    `omitempty` drops **zero** values; the inflating fields are **non-zero after `Resolved()`**
-   (`backend: auto`, `zfs.mode: exec`, `zfs.seed: auto`, `name` = the path). It would remove
+   (`backend: auto`, `zfs.mode: hook`, `zfs.seed: auto`, `name` = the path). It would remove
    `tls.cert_file: ""` — visibly progress — and leave the `zfs:` block the issue leads with. Worse,
    it would break two fields on purpose-built semantics: `backup.require_encryption: false` is a
    **deliberate setting** that `omitempty` erases, and `storage[].retention.*` is a pointer
@@ -428,7 +431,7 @@ finding 1 is re-filed with this spec's argument attached.
     storage → the written file is that storage and nothing else. This is the fresh-install path and
     it is the file most users will ever read.
 11. **A `PUT` that omits an optional storage key succeeds and writes a resolved value** (D2a). The
-    body that returns three `422`s in fact 9 returns `200`, the file gets `zfs.mode: exec` only if
+    body that returns three `422`s in fact 9 returns `200`, the file gets `zfs.mode: hook` only if
     it was declared or changed, and the live snapshot's `name` is the path — never `""`.
 
 ---

@@ -616,7 +616,7 @@ must show the **file**, not a re-rendering of the parsed document.
 
 **`config` and `file_text` are two DIFFERENT documents, not two renderings of one**, and `qn.6j` is
 what made them different. `config` is the **resolved** configuration — every key, defaults filled,
-`backend: auto`, `zfs.mode: exec`. `file_text` is **only what was set**. They answer different
+`backend: auto`, `zfs.mode: hook`. `file_text` is **only what was set**. They answer different
 questions: *what is quince's configuration* versus *what does my file contain*.
 
 **The alternative was the UI serializing YAML client-side, and it is rejected**: the server is the
@@ -1506,7 +1506,11 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
                             # create the same <parent>/<udid> per device and each believe they
                             # owned it. That refusal survived the flattening because it was
                             # never about inheritance (quince#473).
-      mode: exec            # exec (delegated) | hook
+      mode: hook            # hook — the ONLY value, and the default. `exec` ran `zfs` in the
+                            # container and was REMOVED (Operator ruling 2026-08-10, quince#697):
+                            # the shipped image has no `zfs` binary. A file still carrying
+                            # `mode: exec` is REFUSED by path rather than ignored — the key
+                            # outlived its second value so that the refusal exists at all.
       hook_cmd: ""          # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
                             # (forced-command: snapshot/destroy/list @quince-*, create children,
                             #  seed working/<udid> from latest/, capacity; dataset destroy

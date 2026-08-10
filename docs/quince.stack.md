@@ -310,7 +310,7 @@ differently (Operator ruling: no hardlink games under ZFS):
      **`FIEMAP_EXTENT_SHARED` on the test clone** (`FS_IOC_FIEMAP`, quince#747 — exact,
      per-file, unaffected by concurrent writers, and the one the NAMESPACE probe uses; btrfs
      and XFS both answer it, ZFS answers `EOPNOTSUPP`, measured) → hook `list` avail-delta →
-     delegated `zfs list -o avail` (exec mode) → syscall-only `statfs(2)`
+     syscall-only `statfs(2)`
      `f_bavail` delta around an incompressible test clone (works in any container;
      sync-and-settle for txg accounting lag) → none usable ⇒ report UNVERIFIED,
      never claim zero-space. This mirror exists for file-level offsite sync (D5a)
@@ -322,7 +322,7 @@ differently (Operator ruling: no hardlink games under ZFS):
    snapshot captures `latest/` = the version), browsed read-only via `.zfs/snapshot/<snap>/latest`.
    Seed clones `latest/` → `working/<udid>`; Discard keeps the dirty `working/` for a retry;
    retention = destroying our own snapshots. **Only quince-created snapshots count** — host auto-snapshot tooling is
-   never relied on, created, or classified. Host-side ops go through delegated exec or a
+   never relied on, created, or classified. Host-side ops go through a
    constrained hook (forced-command SSH key allowing only: `snapshot`/`destroy`/`list`
    scoped to `@quince-*` snapshots, plus `create` of child datasets under the one
    configured parent; **dataset destroy is never in the key** — quince prints the exact
@@ -602,7 +602,7 @@ this document.
 **IMPLEMENTATION NOTE, because the obvious approach cannot deliver this and the second-obvious one
 breaks a live behaviour.** `omitempty` drops **zero** values, not **default** ones — and
 `ResolveStorages` fills non-zero defaults at parse (`core/internal/config/schema.go`: `backend:
-auto`, `zfs.mode: exec`, `zfs.seed: auto`), with `Marshal` serialising the **resolved** document. So
+auto`, `zfs.mode: hook`, `zfs.seed: auto`), with `Marshal` serialising the **resolved** document. So
 `omitempty` tidies empty strings and leaves exactly the keys this ruling is about. *Only what was
 set* is a fact about the **input document** that resolution has already destroyed, so it needs
 declared-vs-resolved tracking, and that tracking has to survive the write path or every UI save

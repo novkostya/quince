@@ -114,8 +114,11 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 		if !oneOf(s.Backend, "auto", "zfs", "reflink", "hardlink", "copy") {
 			add(at+".backend", enumMsg(s.Backend, "auto", "zfs", "reflink", "hardlink", "copy"))
 		}
-		if !oneOf(s.ZFS.Mode, "exec", "hook") {
-			add(at+".zfs.mode", enumMsg(s.ZFS.Mode, "exec", "hook"))
+		// ONE legal value since `exec` was removed (quince#697) — see ZFSConfig.Mode for why the key
+		// outlived its second value. A config carrying `mode: exec` is REFUSED here, by path, rather
+		// than ignored.
+		if !oneOf(s.ZFS.Mode, "hook") {
+			add(at+".zfs.mode", enumMsg(s.ZFS.Mode, "hook"))
 		}
 		if !oneOf(s.ZFS.Seed, "auto", "reflink", "copy") {
 			add(at+".zfs.seed", enumMsg(s.ZFS.Seed, "auto", "reflink", "copy"))

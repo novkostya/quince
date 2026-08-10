@@ -329,7 +329,7 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 		// so the body carries a valid one rather than asserting the storage rule by accident.
 		// `storage` IS the list (quince#473) — no wrapper object, no globals.
 		`"storage":[{"name":"local","path":"/backups","default":true,"backend":"auto",` +
-		`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+		`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},` +
 		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}],` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
