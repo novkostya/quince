@@ -30,6 +30,8 @@ becomes another one:
 | `wifi-torn-session.txt` | a Wi-Fi session dropping mid-transfer (`-4` / connection lost) |
 | `silent-stall.txt` | multi-minute silence that is NOT a failure (liveness sampler input) |
 | `encryption-changed.txt` | a run right after backup-password enable/change |
+| `disk-full-105.txt` | the device refusing for space (`ErrorCode 105` / `MBErrorDomain/105`) |
+| `noisy-joblog.txt` | the three job-log noise shapes in one run — empty tokens, a repeated phase header, and progress frames whose figure is in plain `Bytes` (quince#809, quince#810) |
 
 ## Format
 

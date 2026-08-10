@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -150,6 +152,16 @@ type liveJob struct {
 	cancel     context.CancelFunc
 	killReason string // "cancel" | "timeout" | "shutdown"
 	lastEmit   time.Time
+
+	// logRun collapses a run of identical narration lines (quince#810). idevicebackup2 prints its
+	// phase headers once per PROTOCOL MESSAGE, not once per phase — a 94,034-file backup logged
+	// "Receiving files" 735 times and "Moving 128 files" 734 — so the run length scales with the
+	// device and the 256 KiB ring evicts the tail somebody actually needs.
+	//
+	// GUARDED BY mu BECAUSE TWO SCANNERS WRITE IT: startTool runs one goroutine over stdout and one
+	// over stderr, both calling handleLine.
+	logRunLine  string
+	logRunCount int
 }
 
 // New constructs the engine (does not start reconciliation — call Reconcile before serving).
@@ -736,6 +748,11 @@ func (e *Engine) runToolLoop(lj *liveJob, rt *runningTool) superviseResult {
 	// documented ordering. The process closing stdout/stderr (normal exit, or a group SIGKILL from
 	// cancel/timeout/shutdown) is what ends the scanners.
 	rt.readers.Wait()
+	// Both scanners are done, so nothing can append behind this: close any open run of identical
+	// narration lines so its count reaches the STORED log and not only the live pane (quince#810).
+	// A job whose last narration is a repeated phase header — the ordinary shape of a long receive —
+	// would otherwise end with the run's total never written anywhere.
+	e.flushLogRun(lj)
 	close(sampleDone)
 	waitErr := rt.cmd.Wait()
 
@@ -933,9 +950,12 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 	// "Backup Successful" — is logged verbatim.
 	redraw := (p.overallPercent != nil || p.hasBytes) &&
 		!p.waitingPasscode && !p.phaseReceiving && !p.success && p.failReason == ""
-	if !redraw {
-		e.logs.append(lj.row.ID, line+"\n")
-		e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: line + "\n"})
+	// AN EMPTY TOKEN IS NOT NARRATION (quince#810). scanFrames splits on '\r' as well as '\n' so a
+	// progress redraw is one token per frame; where the tool puts those adjacent the split yields
+	// EMPTY tokens, and appending them made 2,251 of one real backup's 3,758 log lines — 60% — blank.
+	// Nothing intends them: the parser has already taken whatever the frame carried.
+	if !redraw && strings.TrimSpace(line) != "" {
+		e.logLine(lj, line)
 	}
 
 	ss.mu.Lock()
@@ -972,6 +992,66 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 			r.BytesDone, r.BytesTotal = p.bytesDone, p.bytesTotal
 		}
 	})
+}
+
+// logLine appends one narration line, collapsing a RUN of identical lines into the first occurrence
+// plus a count when the run ends (quince#810 cause 2, architect-ruled option (a) 2026-08-10).
+//
+// CONSECUTIVE-IDENTICAL ONLY, NEVER GLOBAL DEDUP, and that is the ruling's first constraint. A
+// phase header appearing again after other narration is a NEW fact and must appear again; a
+// "seen it" set would collapse the log into its distinct strings and lose the ordering that makes
+// it a narration.
+//
+// THE COUNT IS THE POINT, not the suppression. Logging the header only when the phase CHANGES was
+// the rejected option: a 1-batch backup and a 735-batch backup would produce identical logs, and
+// the number is recoverable from nowhere else — "Received 94035 files" is a FILE count, not a batch
+// count. Suppressing a repeated line is compression; suppressing the fact that it repeated is a
+// claim that it did not.
+//
+// THE FIRST OCCURRENCE IS EMITTED IMMEDIATELY so the live pane never goes silent through a long
+// receive — the ruling's other constraint. A pane that stops for twenty minutes reads as a hang,
+// and the progress bar carrying motion is not the same as the log saying what is happening. The
+// cost is that the line appears twice for a run: once when it starts, once with its total. That is
+// deliberate, and it is why the summary repeats the text rather than being a bare "... x735" — two
+// scanner goroutines feed this, so a summary that relied on being adjacent to its own line could
+// be separated by the other stream's output.
+func (e *Engine) logLine(lj *liveJob, line string) {
+	lj.mu.Lock()
+	if line == lj.logRunLine {
+		lj.logRunCount++
+		lj.mu.Unlock()
+		return
+	}
+	prev, n := lj.logRunLine, lj.logRunCount
+	lj.logRunLine, lj.logRunCount = line, 1
+	lj.mu.Unlock()
+
+	if n > 1 {
+		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n))
+	}
+	e.emitLog(lj, line)
+}
+
+// flushLogRun closes an open run so its count reaches the STORED log, not only the live pane —
+// the ruling's second constraint. Without it a job whose last narration is a repeated header ends
+// with the run's total never written, and GET /api/jobs/{id}/log is what a reviewer reads after
+// the fact. Called once the scanners are done, so nothing can be appended behind it.
+func (e *Engine) flushLogRun(lj *liveJob) {
+	lj.mu.Lock()
+	prev, n := lj.logRunLine, lj.logRunCount
+	lj.logRunLine, lj.logRunCount = "", 0
+	lj.mu.Unlock()
+	if n > 1 {
+		e.emitLog(lj, prev+" ... x"+strconv.Itoa(n))
+	}
+}
+
+// emitLog is the ONE place a log line reaches both consumers — the per-job ring that serves
+// GET /api/jobs/{id}/log, and the WS stream the live pane renders. They must not diverge: a count
+// that reached the pane and not the ring would make the stored log a different document.
+func (e *Engine) emitLog(lj *liveJob, line string) {
+	e.logs.append(lj.row.ID, line+"\n")
+	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: line + "\n"})
 }
 
 func (e *Engine) warnDiskLow(lj *liveJob, low *diskLowInfo) {
