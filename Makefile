@@ -677,8 +677,25 @@ pre-push-shim-test: ## the journal pre-push shim in every push state (quince#308
 provision-guard-test: ## provision's identity guard in every credential state (quince#234; synthetic, dry-run)
 	@deploy/runner/provision-guard-test
 
+# THE `lab` TAG IS COMPILED HERE AND DELIBERATELY NOT RUN (quince#789).
+#
+# `-tags lab` guards the hardware harnesses — gate 12's zfs run, the filesystem matrix. They are
+# excluded from every gate by design, and the cost of that was invisible until somebody tried to add
+# one: a file behind an excluded tag is not *skipped with a warning*, it is INVISIBLE, and `gates`
+# reports success having never opened it. `labgate_test.go` stopped compiling when `NewManager` lost
+# its RetentionPolicy parameter (quince#473) and nothing said so for the whole interval, so a
+# deferred gate and a gate nobody can run looked identical from `main`.
+#
+# That is quince#200's finding one level up — there it was a hand-maintained list, here it is the
+# build system — and the remedy is the same shape: make forgetting it a failure rather than a
+# silence.
+#
+# COMPILE, DO NOT RUN. `go vet` type-checks the files; `go test -tags lab` would try to execute
+# harnesses that need a real pool, a real device or a real filesystem tier. They skip without their
+# env, so running them would mostly be a slow no-op — but "mostly" is the wrong guarantee for CI,
+# and the defect this catches is a compile error, which vet catches at full strength.
 .PHONY: gates-go
-gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
+gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
 	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || printf 'gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n' '$(GO_TEST_ARGS)'
 	$(RUN) -w /src/core \
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
@@ -686,6 +703,7 @@ gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race (GO_TEST_ARGS
 	    unformatted=$$(gofmt -l .); \
 	    if [ -n "$$unformatted" ]; then echo "gofmt needs to run on:"; echo "$$unformatted"; exit 1; fi; \
 	    go vet ./...; \
+	    go vet -tags lab ./...; \
 	    golangci-lint run; \
 	    go test -race -cover $(GO_TEST_ARGS)'
 
