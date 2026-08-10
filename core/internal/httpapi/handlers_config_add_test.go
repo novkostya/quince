@@ -21,7 +21,7 @@ import (
 // oneStorage is seedStorages' single-entry counterpart to twoStorages, carrying the same fully
 // specified shape a client sends.
 const oneStorage = `[{"name":"one","path":"/backups-a","default":true,"backend":"reflink",` +
-	`"zfs":{"parent_dataset":"","mode":"exec","hook_cmd":"","seed":"auto"},` +
+	`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},` +
 	`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}]`
 
 func addStorage(t *testing.T, srv *httptest.Server, c *http.Client, body string) (int, []byte) {

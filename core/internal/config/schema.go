@@ -154,7 +154,7 @@ func (e StorageEntry) Resolved() StorageEntry {
 		e.Backend = "auto"
 	}
 	if e.ZFS.Mode == "" {
-		e.ZFS.Mode = "exec"
+		e.ZFS.Mode = "hook"
 	}
 	if e.ZFS.Seed == "" {
 		e.ZFS.Seed = "auto"
@@ -187,8 +187,19 @@ func ResolveStorages(in *[]StorageEntry) *[]StorageEntry {
 // ZFSConfig is `storage.zfs:`.
 type ZFSConfig struct {
 	ParentDataset string `yaml:"parent_dataset" json:"parent_dataset"`
-	Mode          string `yaml:"mode" json:"mode"` // exec | hook
-	HookCmd       string `yaml:"hook_cmd" json:"hook_cmd"`
+	// Mode has ONE legal value, `hook`, since the Operator removed `exec` (quince#697, quince#793).
+	//
+	// THE KEY IS KEPT ON PURPOSE, and the reason is the refusal rather than the key. Deleting the
+	// field would make `mode: exec` an UNKNOWN key, and `unknownKeys` says *"unknown config key
+	// … (ignored)"* — so the change that removes an unrunnable mode would also downgrade its
+	// diagnosis from a refusal to something explicitly ignored, which is the silent-fallback case
+	// CLAUDE.md forbids. As a one-value enum, `Validate` answers `invalid value "exec"; must be
+	// one of [hook]` against the exact path, which is what an operator needs.
+	//
+	// Removing the key stays available and gets easier, not harder: it wants a retired-key warning
+	// that names its successor, which is quince#401 and its own reviewable claim.
+	Mode    string `yaml:"mode" json:"mode"` // hook (the only value)
+	HookCmd string `yaml:"hook_cmd" json:"hook_cmd"`
 	// Seed is the in-container strategy for cloning latest/ → working/<udid> at job start (qn.5b;
 	// renamed from `mirror` when the reflink moved from commit-time to seed-time). auto | reflink |
 	// copy — the hardlink tier is never used for the seed (amendment A: it would alias the

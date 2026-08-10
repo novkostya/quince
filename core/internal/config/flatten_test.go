@@ -44,7 +44,7 @@ func TestASingleStorageIsJustAPath(t *testing.T) {
 	if e.Backend != "auto" {
 		t.Errorf("backend = %q, want auto", e.Backend)
 	}
-	if e.ZFS.Mode != "exec" || e.ZFS.Seed != "auto" {
+	if e.ZFS.Mode != "hook" || e.ZFS.Seed != "auto" {
 		t.Errorf("zfs defaults not applied: %+v", e.ZFS)
 	}
 	if e.Retention == nil || *e.Retention != DefaultRetention() {

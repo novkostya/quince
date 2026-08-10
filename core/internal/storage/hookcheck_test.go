@@ -233,7 +233,7 @@ esac`
 	hook := hookHarness(t, parent, zfs, extractHelper(t))
 
 	// Ask `list` with flags a caller might hope get forwarded.
-	cli := newZFSCLI(parent, "hook", hook, "")
+	cli := newZFSCLI(parent, hook)
 	if _, err := cli.run(context.Background(), cli.argv("list", "-H", "-p", "-o", "used,available", parent)); err != nil {
 		t.Fatalf("the helper refused a guarded list: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestTheRealHelperBoundsRollback(t *testing.T) {
 		t.Helper()
 		rec := filepath.Join(t.TempDir(), "argv")
 		hook := hookHarness(t, parent, `echo "$*" >> `+rec+"\nexit 0", extractHelper(t))
-		cli := newZFSCLI(parent, "hook", hook, "")
+		cli := newZFSCLI(parent, hook)
 		_, err := cli.run(context.Background(), cli.argv(args[0], args[1:]...))
 		b, readErr := os.ReadFile(rec)
 		if readErr != nil {

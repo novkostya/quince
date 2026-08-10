@@ -18,38 +18,36 @@ var datasetPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:/-]{0,255}$`)
 // quince-<date>-<ulid> names (qn.5b), but adopted/foreign scans see arbitrary ones — validate anyway.
 var snapShortPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$`)
 
-// zfsCLI runs host ZFS operations. mode "exec" runs `zfs …` directly (delegated privileges);
-// mode "hook" runs the operator's forced-command (e.g. an SSH key to a constrained helper).
-// Either way argv is an array, never a shell string; dataset/snap names are validated before
-// they reach it; DATASET DESTROY IS NEVER ISSUED (design §5 — quince prints the human command).
-// run is overridable so tests inject a fake that records argv and simulates the fs effect.
+// zfsCLI runs host ZFS operations through the operator's forced command (`storage.zfs.hook_cmd` —
+// e.g. an SSH key to a constrained helper). argv is an array, never a shell string; dataset/snap
+// names are validated before they reach it; DATASET DESTROY IS NEVER ISSUED (design §5 — quince
+// prints the human command). run is overridable so tests inject a fake that records argv and
+// simulates the fs effect.
+//
+// THERE IS ONE TRANSPORT. quince used to also offer `mode: exec`, running `zfs …` in the container
+// against delegated privileges — removed by Operator ruling 2026-08-10 (quince#697, quince#793).
+// Do not reintroduce a direct-exec path: the `zfs` CLI talks to the host kernel module over a
+// versioned ioctl interface, so shipping the userland would tie the image to a host version that is
+// not ours to control. That is the reason containerised tools reach for a helper in the first place.
 type zfsCLI struct {
 	parent   string // storage.zfs.parent_dataset, e.g. pool/path/iphone-backup
-	mode     string // exec | hook
-	bin      string // "zfs" for exec
 	hookArgv []string
 	run      func(ctx context.Context, argv []string) (string, error)
 }
 
-func newZFSCLI(parent, mode, hookCmd, bin string) *zfsCLI {
-	c := &zfsCLI{parent: parent, mode: mode, bin: bin, run: execRun}
-	if bin == "" {
-		c.bin = "zfs"
+func newZFSCLI(parent, hookCmd string) *zfsCLI {
+	return &zfsCLI{
+		parent:   parent,
+		hookArgv: strings.Fields(hookCmd), // operator-configured; argv, never a shell string
+		run:      execRun,
 	}
-	if mode == "hook" {
-		c.hookArgv = strings.Fields(hookCmd) // operator-configured; argv, never a shell string
-	}
-	return c
 }
 
 func (c *zfsCLI) dataset(udid string) string { return c.parent + "/" + udid }
 
-// argv builds the full argv for a zfs operation per mode.
+// argv prefixes the operator's forced command to the verb and its arguments.
 func (c *zfsCLI) argv(op string, args ...string) []string {
-	if c.mode == "hook" {
-		return append(append(append([]string{}, c.hookArgv...), op), args...)
-	}
-	return append([]string{c.bin, op}, args...)
+	return append(append(append([]string{}, c.hookArgv...), op), args...)
 }
 
 // CreateDataset ensures the child dataset exists (idempotent — an "already exists" is success).
@@ -138,12 +136,13 @@ func (c *zfsCLI) DestroySnapshot(ctx context.Context, udid, snap string) error {
 // or bookmarks exist`. Any snapshotter running on the host produces it — which is why excluding
 // quince's datasets from one is required setup (deploy/storage.md), and why the caller must name
 // THAT remedy rather than a busy-mount one (qn.6h D4 answer C, gate G5c).
-// Rollback validates STRICTLY where its siblings validate safely, and the difference is EXEC MODE.
-// snapShortPattern is deliberately permissive — its comment says why: "adopted/foreign scans see
-// arbitrary ones". That is right for reading and for the verbs a constrained helper re-checks. In
-// hook mode the helper's `case "$target" in "$PARENT"/*@quince-*)` is the backstop; in EXEC mode
-// there is no helper at all — argv goes straight to `zfs` — so this is the only place a foreign
-// snapshot can be refused, and rolling a device dataset back to somebody else's snapshot is not
+// Rollback validates STRICTLY where its siblings validate safely, and it keeps doing so now that
+// the helper is the only transport. snapShortPattern is deliberately permissive — its comment says
+// why: "adopted/foreign scans see arbitrary ones". That is right for reading and for the verbs a
+// constrained helper re-checks. This check is the NEAR SIDE of two independent ones: the helper's
+// `case "$target" in "$PARENT"/*@quince-*)` is the far side, and it lives in a file quince does not
+// install and cannot read. Do not delete this as redundant with it — a helper predating quince#600
+// is a real deployment, and rolling a device dataset back to somebody else's snapshot is not
 // quince's to do. Hence: the quince prefix, and validUDID so a crafted name cannot leave $PARENT.
 func (c *zfsCLI) Rollback(ctx context.Context, udid, snap string) error {
 	if !validUDID(udid) {
@@ -204,13 +203,7 @@ func (c *zfsCLI) Capacity(ctx context.Context) (free, total uint64, err error) {
 	// checkable by reading five case arms. The verb takes NO caller argument at all — the helper
 	// uses its own configured $PARENT — which is tighter than the arms that accept a
 	// pattern-guarded target. Operators upgrading MUST add the arm; see deploy/storage.md.
-	//
-	// exec mode keeps the direct call: no forced command is in the way.
-	argv := c.argv("capacity")
-	if c.mode != "hook" {
-		argv = []string{c.bin, "list", "-H", "-p", "-o", "used,available", c.parent}
-	}
-	out, err := c.run(ctx, argv)
+	out, err := c.run(ctx, c.argv("capacity"))
 	if err != nil {
 		return 0, 0, fmt.Errorf("zfs capacity %s: %w: %s", c.parent, err, strings.TrimSpace(out))
 	}
