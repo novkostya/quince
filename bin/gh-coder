@@ -19,7 +19,8 @@
 set -eu
 
 # INLINE `--body` IS REFUSED, and the reason is a measured leak rather than a style preference
-# (quince#518, 2026-08-02).
+# (quince#518, 2026-08-02; quince#526 ordered this guard, and quince#527 put it on every other
+# wrapper — read #526 for the shape, #518 for what it cost).
 #
 # A body written as `--body "…"` is a shell string, so backticks inside it are COMMAND
 # SUBSTITUTION. On this box that is not theoretical: `iostat` in backticked prose EXECUTED, and its

@@ -19,7 +19,12 @@
 set -eu
 
 # INLINE `--body` IS REFUSED, and the reason is a measured leak rather than a style preference
-# (quince#518, quince#527).
+# (quince#518).
+#
+# THREE REFERENCES, AND THEY ANSWER DIFFERENT QUESTIONS. quince#518 is the leak this guard exists
+# because of; quince#526 established it on `bin/gh-coder` and is the one to read for what it looks
+# like; quince#527 is why it is on this wrapper too rather than on that one alone. A reader who
+# follows #518 alone lands on a storage discussion and has to work out why (quince#803 review).
 #
 # A body written as `--body "…"` is a shell string, so backticks inside it are COMMAND
 # SUBSTITUTION — evaluated by the shell before this wrapper sees an argument, which is why the
