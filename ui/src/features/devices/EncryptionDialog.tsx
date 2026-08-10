@@ -78,7 +78,8 @@ export function EncryptionDialog({
     clearFields();
   }
 
-  function submit() {
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
     setFormError(null);
     if (mode === "enable") {
       if (!newPw) return setFormError("Enter a password.");
@@ -114,101 +115,127 @@ export function EncryptionDialog({
           backups. quince sets it and never stores it.
         </DialogDescription>
 
-        {canManage ? (
-          <div className="mt-4 flex gap-2">
-            <Button
-              size="sm"
-              variant={mode === "change" ? "accent" : "outline"}
-              onClick={() => switchMode("change")}
-            >
-              Change password
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === "disable" ? "destructive" : "outline"}
-              onClick={() => switchMode("disable")}
-            >
-              Disable
-            </Button>
-          </div>
-        ) : null}
+        {/* A REAL FORM, BECAUSE A SAVE PROMPT IS DRIVEN BY SUBMISSION — quince#819. These password
+            inputs sat in a plain `div` with an onClick button, so a password manager had only its
+            weaker heuristic to go on and offered to save late and out of context. `PasswordForm` was
+            already a form; this was the surface that was not.
 
-        {!done ? (
-          <div className="mt-4 flex flex-col gap-3">
-            {(mode === "change" || mode === "disable") && (
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="enc-current">Current password</Label>
-                <Input
-                  id="enc-current"
-                  type="password"
-                  autoComplete="current-password"
-                  value={currentPw}
-                  onChange={(e) => setCurrentPw(e.target.value)}
-                />
-              </div>
-            )}
-            {(mode === "enable" || mode === "change") && (
-              <>
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="enc-new">New password</Label>
-                  <Input
-                    id="enc-new"
-                    type="password"
-                    autoComplete="new-password"
-                    value={newPw}
-                    onChange={(e) => setNewPw(e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="enc-confirm">Confirm new password</Label>
-                  <Input
-                    id="enc-confirm"
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirmPw}
-                    onChange={(e) => setConfirmPw(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
-            {mode === "disable" ? (
-              <p className="text-sm text-warn">
-                Disabling encryption is discouraged: Health, Keychain, saved passwords, and call
-                history are omitted from unencrypted backups.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+            EVERY `Button` INSIDE THIS FORM NEEDS AN EXPLICIT `type`, and there are five of them.
+            `ui/components/ui/button.tsx` sets none, so a bare `<button>` in a form is `type="submit"`
+            by the HTML default — which means wrapping this dialog silently converted the two mode
+            switchers below AND `Cancel` and `Done` in the footer into submits. quince#819 named the
+            two switchers; `Cancel` is the one that would have been felt, since dismissing the dialog
+            would have posted the form instead.
 
-        {!done ? (
-          <p className="mt-3 text-xs text-muted">
-            Keep the device unlocked — it will ask you to confirm this change with its passcode.
-          </p>
-        ) : null}
-
-        <div className="mt-4 min-h-6">
-          {formError ? <p className="text-sm text-danger">{formError}</p> : null}
-          <OpNarration op={op} starting={starting} startError={startError} />
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          {done ? (
-            <Button onClick={() => change(false)}>Done</Button>
-          ) : (
-            <>
-              <Button variant="outline" onClick={() => change(false)}>
-                Cancel
+            FIXED HERE AT THE CALL SITES RATHER THAN AT THE SHARED `Button`, deliberately: defaulting
+            `Button` to `type="button"` changes behaviour at every call site in the product, which is
+            its own claim with its own blast radius and is unbundled to its own issue (architect
+            ruling on quince#819). It is the better fix and is not being rejected — only reviewed
+            separately. Until it lands, the next form to wrap a `Button` rediscovers this. */}
+        <form onSubmit={submit}>
+          {canManage ? (
+            <div className="mt-4 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === "change" ? "accent" : "outline"}
+                onClick={() => switchMode("change")}
+              >
+                Change password
               </Button>
               <Button
-                variant={mode === "disable" ? "destructive" : "accent"}
-                onClick={submit}
-                disabled={inFlight}
+                type="button"
+                size="sm"
+                variant={mode === "disable" ? "destructive" : "outline"}
+                onClick={() => switchMode("disable")}
               >
-                {inFlight ? "Working…" : title}
+                Disable
               </Button>
-            </>
-          )}
-        </div>
+            </div>
+          ) : null}
+
+          {!done ? (
+            <div className="mt-4 flex flex-col gap-3">
+              {(mode === "change" || mode === "disable") && (
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="enc-current">Current password</Label>
+                  <Input
+                    id="enc-current"
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPw}
+                    onChange={(e) => setCurrentPw(e.target.value)}
+                  />
+                </div>
+              )}
+              {(mode === "enable" || mode === "change") && (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="enc-new">New password</Label>
+                    <Input
+                      id="enc-new"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPw}
+                      onChange={(e) => setNewPw(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="enc-confirm">Confirm new password</Label>
+                    <Input
+                      id="enc-confirm"
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirmPw}
+                      onChange={(e) => setConfirmPw(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+              {mode === "disable" ? (
+                <p className="text-sm text-warn">
+                  Disabling encryption is discouraged: Health, Keychain, saved passwords, and call
+                  history are omitted from unencrypted backups.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!done ? (
+            <p className="mt-3 text-xs text-muted">
+              Keep the device unlocked — it will ask you to confirm this change with its passcode.
+            </p>
+          ) : null}
+
+          <div className="mt-4 min-h-6">
+            {formError ? <p className="text-sm text-danger">{formError}</p> : null}
+            <OpNarration op={op} starting={starting} startError={startError} />
+          </div>
+
+          <div className="mt-6 flex justify-end gap-2">
+            {done ? (
+              <Button type="button" onClick={() => change(false)}>
+                Done
+              </Button>
+            ) : (
+              <>
+                <Button type="button" variant="outline" onClick={() => change(false)}>
+                  Cancel
+                </Button>
+                {/* The ONE submit in this form. Its `onClick` is gone: the click reaches `submit`
+                    through the form's own submission, which is what makes Enter-in-a-password-field
+                    work and what a password manager watches for. */}
+                <Button
+                  type="submit"
+                  variant={mode === "disable" ? "destructive" : "accent"}
+                  disabled={inFlight}
+                >
+                  {inFlight ? "Working…" : title}
+                </Button>
+              </>
+            )}
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   );
