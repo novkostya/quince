@@ -851,6 +851,18 @@ Job: {
 // (or via ?group=intent later). A full Intent entity (server-side object owning
 // attempts, wired to automation pushes) is a parked future evolution — retry_of +
 // intent_id carry the model until it's needed.
+//
+// A GROUP HAS ONE INSTANT, AND IT IS THE ONE ITS LABEL DESCRIBES (quince#813, architect ruling
+// 2026-08-10). The summary is past-tense for every terminal state, so a terminal group is dated
+// from `latest.finished_at` and a running one from `attempts[0].started_at` — the FIRST attempt's,
+// because one retried night is one operation and it began when the first attempt did. A running
+// row must word its instant as a start ("started 19 minutes ago"); an unworded start under a
+// past-tense label is the defect this rule exists for, and the error it produces equals the
+// backup's duration — half an hour on a 36 GB Wi-Fi backup.
+//
+// THE NEWEST-FIRST SORT KEYS ON THAT SAME INSTANT, not on a field chosen separately. Two
+// overlapping intents — a long backup started first and finished second — otherwise render in an
+// order their own visible timestamps contradict.
 
 Version: {
   "id": "...", "udid": "...", "backend": "zfs" | "reflink" | "hardlink" | "copy",
