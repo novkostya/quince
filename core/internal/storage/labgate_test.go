@@ -93,8 +93,14 @@ func TestLabGate12(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	m := NewManager([]Slot{{Name: "lab", Root: backups, Backend: backend, BackendName: name, Reachable: true}},
-		st, st, bus.New(), RetentionPolicy{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12}, id.New, log)
+	// RETENTION IS THE SLOT'S, NOT THE MANAGER'S (qn.6c, quince#473): it moved onto the slot when
+	// `storage:` flattened into a list, because a list has nowhere to put a global. This call kept
+	// the old shape and stopped compiling — invisibly, because the `lab` tag is excluded from every
+	// gate, so `gates` reported success having never built this file (quince#789).
+	m := NewManager([]Slot{{
+		Name: "lab", Root: backups, Backend: backend, BackendName: name, Reachable: true,
+		Retention: RetentionPolicy{KeepRecent: 10, KeepDaily: 30, KeepWeekly: 12},
+	}}, st, st, bus.New(), id.New, log)
 
 	// (a) Provision + commit an encrypted tree in working/. If QUINCE_LAB_TREE points at a
 	// pre-produced idevicebackup2 tree, seed working/ from it (reflink → copy fallback) — this

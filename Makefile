@@ -677,8 +677,17 @@ pre-push-shim-test: ## the journal pre-push shim in every push state (quince#308
 provision-guard-test: ## provision's identity guard in every credential state (quince#234; synthetic, dry-run)
 	@deploy/runner/provision-guard-test
 
+# `go vet -tags lab` COMPILES THE lab-TAGGED HARNESS AND NEVER RUNS IT, and that is the whole point
+# (quince#789). The `lab` tag is excluded from every gate by design — those tests need real hardware
+# and real env — so the files behind it are not skipped-with-a-warning, they are INVISIBLE, and
+# `gates` reports success having never built them. `NewManager` changed shape, `labgate_test.go` kept
+# the old call, and it did not compile on `main` for however long that took: gate 12's harness was
+# not a deferred gate, it was a gate nobody could run.
+#
+# Vet compiles a package to analyse it, so this catches exactly the class the tag hides — a signature
+# drifting away from a call nothing builds — while running none of it. One command, no hardware.
 .PHONY: gates-go
-gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
+gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
 	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || printf 'gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n' '$(GO_TEST_ARGS)'
 	$(RUN) -w /src/core \
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
@@ -686,6 +695,7 @@ gates-go: tc-go ## Go: gofmt + vet + golangci-lint + go test -race (GO_TEST_ARGS
 	    unformatted=$$(gofmt -l .); \
 	    if [ -n "$$unformatted" ]; then echo "gofmt needs to run on:"; echo "$$unformatted"; exit 1; fi; \
 	    go vet ./...; \
+	    go vet -tags lab ./...; \
 	    golangci-lint run; \
 	    go test -race -cover $(GO_TEST_ARGS)'
 
