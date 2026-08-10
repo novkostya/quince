@@ -325,10 +325,13 @@ Measured with that list fully disabled, on two devices — a 94,034-file iPad an
 iPhone with a 4.1 GB incremental — the committed tree came back **byte-identical** both times, and
 the metadata files ended at link count 1: `idevicebackup2` unlinks before it creates. The list was
 never the mechanism, so completing it was never the blocker. **What it cost:** a seed of 272 MiB
-instead of ~35 GB, per incremental, on that 35 GB backup. **What remains open:** one upstream call
-(`mb2_copy_file_by_path`, from `DLMessageCopyItem`) writes without unlinking, its destination is
-chosen by the device, and no class list here could have covered it — unobserved on both devices with
-a detector validated by its siblings, which is not the same as never.
+instead of ~35 GB, per incremental, on that 35 GB backup. **The one path measurement could not
+close is closed by construction:** `mb2_copy_file_by_path` (reached from `DLMessageCopyItem`) wrote
+without unlinking, and its destination is named by the device at runtime, so no class list could
+have covered it and no amount of device testing could enumerate it — the handler is not
+command-gated, so it is reachable during a backup. `deploy/patches/libimobiledevice/0004` adds the
+missing `remove_file(dst)`, making all four write paths unlink. **The hardlink tier therefore depends
+on that patch**, not on an observed absence.
 
 **Commit is journaled, and startup reconciliation is a first-class subsystem** (adopted
 from external review). Commit phases persist to the job journal AND to on-disk markers —

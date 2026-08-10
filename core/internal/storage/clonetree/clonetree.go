@@ -47,14 +47,18 @@ const (
 	// size unmoved, which is unlink-then-create in the act.
 	//
 	// WHAT THIS ASSUMES, so a future reader knows what would break it: that every path in
-	// `idevicebackup2` which writes into the backup tree unlinks first. Three of its four do so
-	// explicitly (`remove_file` before create / before rename). The fourth —
-	// `mb2_copy_file_by_path`, reached from `DLMessageCopyItem` — does NOT, and its destination is
-	// named by the DEVICE at runtime, so no list here could have covered it either. It was not
-	// observed firing on either device, with a detector validated by its siblings printing at the
-	// same verbosity. **Absence over two devices is not never**: if a backup ever corrupts a
-	// committed version, that call is the first place to look, and the fix is upstream rather than
-	// here.
+	// `idevicebackup2` which writes into the backup tree unlinks first. Three of its four did so
+	// already. The fourth — `mb2_copy_file_by_path`, reached from `DLMessageCopyItem` — did not,
+	// and its destination is named by the DEVICE at runtime, so no list here could have covered it.
+	// It was never observed firing, but the handler is NOT command-gated (the message loop is
+	// guarded only by `cmd != CMD_LEAVE`), so it is reachable during a backup and absence over two
+	// devices is not never. **It is now closed by construction rather than by observation**:
+	// `deploy/patches/libimobiledevice/0004` adds the missing `remove_file(dst)`, so all four paths
+	// unlink and this strategy no longer rests on anything unmeasurable.
+	//
+	// That patch is the load-bearing dependency. If it is ever dropped, or upstream rewrites that
+	// function, this strategy is unsafe again — and the failure is a silently corrupted committed
+	// version, found whenever someone next needs a restore.
 	Hardlink
 	// Copy is a full independent byte copy (preserves mode + mtime).
 	Copy

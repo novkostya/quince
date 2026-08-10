@@ -63,7 +63,7 @@ ENV OPENSSL_STATIC=1
 RUN cargo build --release && install -m0755 target/release/netmuxd /netmuxd
 
 # --- libimobiledevice: pinned tag, built from source with quince's in-tree patches (qn.6b) ---
-# Built from SOURCE (not the Alpine `-progs` package) so three in-tree patches ship in the image:
+# Built from SOURCE (not the Alpine `-progs` package) so four in-tree patches ship in the image:
 #   0001  raises the default receive timeout 30s -> 15min (upstream #1413) — a slow passcode,
 #         large-device transfer, or transient Wi-Fi flap no longer trips a premature receive error.
 #   0002  adds `idevicebackup2 --gate <path>` — pause after the Backup request, before the message
@@ -74,6 +74,12 @@ RUN cargo build --release && install -m0755 target/release/netmuxd /netmuxd
 #         com.apple.mobile.wireless_lockdown/EnableWifiConnections (qn.7). Go cannot call the
 #         library directly either: the core is built CGO_ENABLED=0 on purpose, for the static
 #         musl binary that has to run on a low-end NAS.
+#   0004  makes `mb2_copy_file_by_path` UNLINK its destination before creating it. Every other path
+#         in that file already does; this one truncated the existing inode in place, which reaches
+#         THROUGH the hardlink a seed shares with the committed backup and corrupts a version
+#         (quince#518). The destination is named by the DEVICE at runtime and the handler is not
+#         command-gated, so it is reachable during a backup and no list on quince's side could
+#         exclude it. A no-op when the destination is not aliased.
 # Only THIS repo is built: Alpine 3.24 ships every -dev dependency at a satisfying version, incl.
 # libtatsu (verified live, qn.6b spike). NOTE (amendment A): 0001 raises the default for EVERY
 # libimobiledevice binary, so quince bounds its non-backup tool ops with a Go-side deadline
