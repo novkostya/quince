@@ -287,7 +287,9 @@ differently (Operator ruling: no hardlink games under ZFS):
      even a buggy verb cannot damage canonical versions); (ii) no hook →
      in-container reflink attempt (covers privileged/bare-metal topologies; fails
      fast with `EPERM` in unprivileged ones, self-selecting down the ladder);
-     (iii) hardlink-under-safety-matrix (gate 12c); (iv) copy — always correct,
+     (iii) hardlink — **gate 12c PASSED on hardware 2026-08-10 (quince#518)**, so this
+     rung is live rather than matrix-pending, and it shares every regular file;
+     (iv) copy — always correct,
      cost SURFACED (backend-selection string, commit log, health;
      ~full-backup-size write amplification per commit stated plainly), never
      silent. EXDEV-from-snapshot holds at every layer (kernel: separate

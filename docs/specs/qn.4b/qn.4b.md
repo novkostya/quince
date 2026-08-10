@@ -245,7 +245,7 @@ host's real **rpool** (zfs hook mode) + a real iPhone with **Wi-Fi sync enabled*
     encryption-settings change** (truncate/chmod/xattr traps included; **iOS-upgrade leg
     OPPORTUNISTIC** — runs at the next real update, a named trigger not a blocker, (bg)/(bn)). Any
     in-place-mutating file class is **proven copied, not linked**. Until this passes, the `hardlink`
-    tier stays **disabled-to-copy (surfaced)** — the interim safety from (bn).
+    tier stays **disabled-to-copy (surfaced)** — the interim safety from (bn). **RETIRED 2026-08-10 — gate 12c passed, quince#518.**
     - **Every bug found on the lab box becomes a scrubbed replay fixture (transcript or fake-`zfs`)
       before it is fixed** (hard rule).
 

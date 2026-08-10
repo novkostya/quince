@@ -303,7 +303,7 @@ List() / Delete(ref) / Prune(policy) / Verify(ref)
 | --- | --- | --- | --- |
 | `zfs` | `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>` | verify → **exchange** working/<udid> ⇄ latest/ (in-container `renameat2`, no privilege, no window) → rm working/ → `snapshot` via hook/exec. Seed is host-side reflink via the hook `seed` verb, or in-container reflink→copy. **RULED to become verify → `snapshot`, with no seed and no exchange — see the block at the end of this section; the Version column is unchanged by it** | hook = forced-command SSH key: `snapshot`/`destroy`/`list` on `@quince-*` + `create` of children + `seed` (clone latest/→working/<udid>); **dataset destroy never in the key** (quince prints the host command); `.zfs` visibility + new-child-dataset propagation probed — recommended PVE mount is `lxc.mount.entry … rbind,rslave` (live propagation, no restart), else printed `pct set -mpN` instructions; nested-OCI bind uses `propagation: rslave`; single-dataset fallback mode documented |
 | `reflink` | `latest/` (newest) + `versions/<ts>/` dirs | verify → **exchange** working/<udid> ⇄ latest/ → archive the displaced content to `versions/<prev>` | smart default where the FICLONE probe shows the clone SHARING its extents (Btrfs/XFS measured on the lab rig; bcachefs, ZFS 2.2+ without a hook untested); clones are independent files — **no hardlink-safety matrix needed**; cloning in-process via FICLONE ioctl (no `cp --reflink` dependency) |
-| `hardlink` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | for no-reflink filesystems (ext4); the **seed is disabled-to-copy** until the destructive hardlink-safety matrix passes (gate 12c) — a hardlink seed would alias the committed `latest/`; in-place-mutating file classes copied, not linked |
+| `hardlink` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | for no-reflink filesystems (ext4); the seed hardlinks **every** regular file — gate 12c passed on hardware (quince#518), and the class list it used to exempt is retired. Safety rests on `idevicebackup2` unlinking before it creates, so the alias breaks rather than being written through; the one path that does not (`DLMessageCopyItem`) is upstream and was not observed firing on two devices |
 | `copy` | `latest/` (newest) + `versions/<ts>/` dirs | same exchange+archive | full-copy seed; transient 2× space; retention defaults to latest-only |
 
 Auto-selection: explicit zfs config → `zfs`; else probe `/backups` at runtime:
@@ -313,8 +313,22 @@ that succeeds without sharing falls THROUGH to hardlink — D5's one selection e
 reflink backend is chosen for space and an unshared clone delivers none of it (quince#747). Where
 the filesystem cannot report sharing at all, `reflink` still wins on D5's risk asymmetry and the
 backend reason says the saving is UNVERIFIED. One shared `clonetree` package implements the three clone strategies; qn.5b uses it for
-the **seed** (clone `latest/` → `working/<udid>` at job start, hardlink downgraded to copy — gate
-12c), and the atomic `latest/` swap is a plain `renameat2(RENAME_EXCHANGE)`, not a clone.
+the **seed** (clone `latest/` → `working/<udid>` at job start, in the backend's own strategy — the
+hardlink downgrade is retired, quince#518), and the atomic `latest/` swap is a plain
+`renameat2(RENAME_EXCHANGE)`, not a clone.
+
+**Gate 12c ran on hardware, 2026-08-10, and its premise did not hold** — which is why the hardlink
+tier is now a real tier rather than an alias for `copy`. Amendment A disabled the hardlink seed on
+the reasoning that an in-place write would corrupt the committed version through the shared inode,
+and that a list of file classes (`clonetree.MutatesInPlace`) had to be proved complete first.
+Measured with that list fully disabled, on two devices — a 94,034-file iPad and a 135,183-file
+iPhone with a 4.1 GB incremental — the committed tree came back **byte-identical** both times, and
+the metadata files ended at link count 1: `idevicebackup2` unlinks before it creates. The list was
+never the mechanism, so completing it was never the blocker. **What it cost:** a seed of 272 MiB
+instead of ~35 GB, per incremental, on that 35 GB backup. **What remains open:** one upstream call
+(`mb2_copy_file_by_path`, from `DLMessageCopyItem`) writes without unlinking, its destination is
+chosen by the device, and no class list here could have covered it — unobserved on both devices with
+a detector validated by its siblings, which is not the same as never.
 
 **Commit is journaled, and startup reconciliation is a first-class subsystem** (adopted
 from external review). Commit phases persist to the job journal AND to on-disk markers —

@@ -107,7 +107,8 @@ consequence has **two observers that fail independently** (roadmap gate, Operato
   stay `<backups>/<udid>/…` (storage-scopeable to `<storage>/<udid>/…` later) and `last_backup`
   derivation stays per-version (tolerant of going per-(device,storage)). Costs nothing now.
 - **Gate 12c** (the destructive hardlink-safety matrix) — deferred past the freeze; the hardlink
-  tier stays disabled-to-copy, surfaced (unchanged posture). qn.5b must not *rely* on hardlink
+  tier stays disabled-to-copy, surfaced (unchanged posture — RETIRED 2026-08-10, quince#518).
+  qn.5b must not *rely* on hardlink
   correctness it doesn't prove.
 - **Wi-Fi drop classification #8, progress/liveness shaping #10-percent** — qn.7.
 - **UI** — the failed-attempt "needs attention · Retry" line (#6), two-`latest`-badges (#7),
@@ -249,17 +250,28 @@ owns the privileged FICLONE — it just clones **into `working/`** now instead o
 |---|---|---|---|
 | **zfs, hook** | host-side, via a hook **`seed`** verb (replaces `mirror`) — FICLONE `EPERM`s in the unprivileged userns (gate-12 (bi)); the host reflinks + chowns to the container uid | **in-container** Go `renameat2` (recommended; §gate decision 2) | host-side hook `snapshot` (unchanged) |
 | **zfs, exec / hookless** | in-container `clonetree` ladder **reflink → copy** (the hardlink tier is gated to copy for the seed until 12c — amendment A; surfaced) | in-container | exec/host |
-| **reflink / hardlink / copy** | in-container `clonetree.Clone(working/<udid>, latest, seedStrategy)` where `seedStrategy` maps **hardlink → copy** (amendment A) — reflink and copy pass through | in-container | n/a |
+| **reflink / hardlink / copy** | in-container `clonetree.Clone(working/<udid>, latest, <the backend's own strategy>)` — amendment A's hardlink→copy downgrade is **retired**, quince#518 | in-container | n/a |
 
-> **Amendment A ((co)) — the seed clone is NEVER hardlink until 12c.** Seeding the **hardlink**
-> backend would make `working/<udid>` share inodes with the committed `latest/`, so an in-place
-> write by `idevicebackup2` (any file class not yet on `clonetree.MutatesInPlace`) corrupts the
-> committed version through the alias — the exact hazard the deferred 12c matrix governs. So the
-> seed uses the **backend's safe strategy**: reflink (independent CoW) and copy are safe; **hardlink
-> downgrades to copy (surfaced)**. A `seedStrategy(clonetree.Strategy)` helper enforces this
-> (`Hardlink → Copy`, others pass through); the prose says "the backend's safe strategy," never
-> "reflink." The hardlink backend is thereby *disabled-to-copy for the seed too* (space-shared
-> versions return when 12c proves the `MutatesInPlace` list complete).
+> **Amendment A ((co)) — RETIRED 2026-08-10 by gate 12c, quince#518.** It read: *the seed clone is
+> NEVER hardlink until 12c*, because seeding the hardlink backend makes `working/<udid>` share
+> inodes with the committed `latest/`, so an in-place write by `idevicebackup2` — any file class not
+> yet on `clonetree.MutatesInPlace` — would corrupt the committed version through the alias. A
+> `seedStrategy` helper enforced `Hardlink → Copy`, which made the hardlink backend
+> *disabled-to-copy for the seed too*, and since the seed is the only place a namespace backend
+> duplicates anything, that made the tier behaviourally identical to `copy`.
+>
+> **The hazard was real and the guard was aimed at the wrong thing.** 12c ran on hardware with the
+> class list fully disabled: on a 94,034-file iPad and a 135,183-file iPhone (4.1 GB incremental,
+> every file aliased including a 266 MB `Manifest.db`) the committed tree came back byte-identical
+> both times. `idevicebackup2` unlinks before it creates, so the alias breaks instead of being
+> written through — the list was never the mechanism, and proving it complete was never the blocker.
+> `seedStrategy` and `MutatesInPlace` are both deleted.
+>
+> **What survives from the amendment:** the hazard's shape. One upstream call
+> (`mb2_copy_file_by_path`, reached from `DLMessageCopyItem`) writes without unlinking and takes its
+> destination from the DEVICE at runtime, so no class list here could ever have covered it. It was
+> not observed firing on either device. Re-run the gate whenever `LIBIMOBILEDEVICE_REF` moves — the
+> property belongs to the writer, not to quince.
 
 - The hook's **`mirror` verb is removed**; a **`seed` verb** is added (host-side
   `cp -a --reflink=always latest working/<udid>` + `chown -R "$CTUID" working` so the container can
@@ -404,7 +416,7 @@ already exists). This is the one contract-touching addition; **not built until a
    with distinct sentinel files swap inode + content in one call; the operation on a missing path
    errors (never partially applies).
 2. **Per-job `working/` seed + resume** — `WorkDir` seeds `working/<udid>` from `latest/` (via the
-   backend's SAFE strategy — `seedStrategy`, hardlink→copy per amendment A), writes the seed
+   backend's own strategy — amendment A's `seedStrategy` downgrade is RETIRED, quince#518), writes the seed
    sentinel, and **resumes** a non-empty `working/<udid>` without
    re-seeding. Test: first call on empty `latest/` → empty tree + `full`; call with a populated
    `latest/` → cloned tree + `incremental`; a second call with a dirty tree present → same tree,
@@ -541,7 +553,7 @@ result under the new lifecycle).
 Architectural forks resolved by the (co) ruling (recorded in the decisions log); rung-local calls
 settled here as they land:
 
-- **(co-A) Seed strategy is safe, never hardlink.** `seedStrategy(clonetree.Strategy)` maps
+- **(co-A) Seed strategy is safe, never hardlink — RETIRED 2026-08-10, quince#518.** It read: `seedStrategy(clonetree.Strategy)` maps
   `Hardlink → Copy` (surfaced), `Reflink`/`Copy` pass through; used by every seed path (namespace
   `WorkDir`, zfs exec/hookless in-container seed). The zfs-hook `seed` verb reflinks host-side
   (safe). *rung-ruled detail:* the zfs in-container seed ladder is **reflink → copy** (no hardlink
@@ -582,6 +594,6 @@ issues; gofmt clean.
   (probe-snapshot loop during a running backup + at commit), **G-rclone** (continuous sync never
   deletes/tears the remote), **G-exchange-live** (the in-container `exch` probe on the deployed
   dataset — the go/no-go for the in-container exchange), plus a syncoid mid-write pass. Preserved in
-  §Gates + the `//go:build lab` harness. Gate 12c stays deferred (hardlink disabled-to-copy, now
+  §Gates + the `//go:build lab` harness. Gate 12c RAN 2026-08-10 and PASSED for full→incremental on two devices (quince#518); it was deferred here (hardlink disabled-to-copy, then
   including the seed).
 - **Not committed** — awaiting the Operator's go (commit-when-asked; no push/tag).

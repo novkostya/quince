@@ -148,20 +148,6 @@ func strategyFor(name string) clonetree.Strategy {
 	}
 }
 
-// seedStrategy returns the strategy SAFE for seeding working/<udid> from latest/ (qn.5b
-// amendment A, decisions (co)). Reflink (independent CoW) and copy are safe; a HARDLINK seed
-// would alias working/<udid> to the committed latest/, so an in-place idevicebackup2 write to any
-// file class not yet on clonetree.MutatesInPlace would corrupt the committed version through the
-// alias — the very completeness the deferred gate 12c proves. Until then the hardlink tier stays
-// disabled-to-copy for the seed too, so it downgrades to copy (a surfaced degraded mode; the
-// caller logs it). reflink/copy pass through unchanged.
-func seedStrategy(s clonetree.Strategy) clonetree.Strategy {
-	if s == clonetree.Hardlink {
-		return clonetree.Copy
-	}
-	return s
-}
-
 func orAuto(s string) string {
 	if s == "" {
 		return "auto"

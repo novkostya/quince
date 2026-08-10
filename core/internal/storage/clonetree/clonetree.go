@@ -1,13 +1,16 @@
 // Package clonetree is quince's one tree-clone implementation, shared by every consumer that
 // needs to materialize a copy of a backup tree: namespace Seed (populate work/ from latest/),
 // namespace version promotion, and the zfs latest/ mirror (design §5, stack D5). It offers
-// three strategies — reflink (FICLONE, independent CoW files), hardlink (shared inodes, guarded
-// by the destructive safety matrix), and copy — chosen by the storage probe up front, never
+// three strategies — reflink (FICLONE, independent CoW files), hardlink (shared inodes), and
+// copy — chosen by the storage probe up front, never
 // per file: the strategy is decided once (deterministic, logged) and applied uniformly.
 //
-// The hardlink strategy NEVER shares an inode for a file class the backup writer may mutate in
-// place (MutatesInPlace) — sharing would corrupt the immutable previous version. Reflink and
-// copy produce independent files, so the hazard (and its matrix) does not apply to them.
+// The hardlink strategy shares an inode for EVERY regular file. Its safety rests on a property of
+// the WRITER rather than on anything this package does: `idevicebackup2` unlinks a file before
+// creating its replacement, on every path that writes into a backup tree, so a rewrite breaks the
+// alias instead of reaching through it into the committed version. Gate 12c measured that on
+// hardware (quince#518) — see the Hardlink doc for what it assumes and when to re-check it.
+// Reflink and copy produce independent files, so the question does not arise for them.
 package clonetree
 
 import (
@@ -17,7 +20,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Strategy selects how regular files are materialized.
@@ -27,7 +29,32 @@ const (
 	// Reflink clones via the FICLONE ioctl: independent copy-on-write files, near-instant,
 	// zero extra space until divergence. Requires a reflink-capable filesystem (probed).
 	Reflink Strategy = iota
-	// Hardlink shares inodes except for MutatesInPlace classes, which are copied. Same-fs only.
+	// Hardlink shares one inode per regular file with the source tree. Same-fs only, and near-free:
+	// a 135,183-file / 35 GB backup seeded in 272 MiB of writes where a copy seed cost ~35 GB
+	// (measured, quince#518).
+	//
+	// IT SHARES EVERYTHING, INCLUDING Manifest.db, AND THAT IS A MEASURED CHOICE RATHER THAN AN
+	// OVERSIGHT. An earlier version copied a list of "classes the writer may mutate in place"
+	// (`MutatesInPlace`: dbs, -wal/-shm sidecars, the top-level plists). Gate 12c showed the list
+	// was not what protected the committed version, on two devices with it fully disabled:
+	//
+	//   - 94,034-file iPad, 35-file incremental  → committed tree unchanged, 29 blobs relinked
+	//   - 135,183-file iPhone, 121-file / 4.1 GB incremental, EVERY file aliased including a
+	//     266 MB Manifest.db → committed tree unchanged across all 135,183 files
+	//
+	// The four metadata files came back at link count 1 both times: the tool unlinked and recreated
+	// them. The transition was caught live — `latest/Manifest.db` going links=2 → links=1 with its
+	// size unmoved, which is unlink-then-create in the act.
+	//
+	// WHAT THIS ASSUMES, so a future reader knows what would break it: that every path in
+	// `idevicebackup2` which writes into the backup tree unlinks first. Three of its four do so
+	// explicitly (`remove_file` before create / before rename). The fourth —
+	// `mb2_copy_file_by_path`, reached from `DLMessageCopyItem` — does NOT, and its destination is
+	// named by the DEVICE at runtime, so no list here could have covered it either. It was not
+	// observed firing on either device, with a detector validated by its siblings printing at the
+	// same verbosity. **Absence over two devices is not never**: if a backup ever corrupts a
+	// committed version, that call is the first place to look, and the fix is upstream rather than
+	// here.
 	Hardlink
 	// Copy is a full independent byte copy (preserves mode + mtime).
 	Copy
@@ -101,9 +128,11 @@ func cloneFile(dst, src, rel string, strategy Strategy) error {
 	case Reflink:
 		return reflinkFile(dst, src)
 	case Hardlink:
-		if MutatesInPlace(rel) {
-			return copyFile(dst, src) // never share an inode with a committed version
-		}
+		// EVERY regular file is linked, including the metadata classes this code used to copy.
+		// Gate 12c measured why that list was not what kept the committed version safe
+		// (quince#518): `idevicebackup2` UNLINKS before it creates, on every path that writes into
+		// the backup tree, so a rewrite breaks the alias instead of reaching through it. See the
+		// Hardlink strategy doc for what that assumes and what it costs.
 		if err := os.Link(src, dst); err != nil {
 			return fmt.Errorf("clonetree: hardlink %s: %w", rel, err)
 		}
@@ -142,29 +171,21 @@ func copyFile(dst, src string) error {
 	return os.Chtimes(dst, mt, mt)
 }
 
-// MutatesInPlace reports whether a backup-relative path is a file class the MobileBackup2
-// writer may rewrite/mutate in place — which must therefore be copied (never hard-linked) so a
-// committed version's inode is never touched. SQLite databases + their -wal/-shm sidecars and
-// the top-level metadata plists are the known classes; the gate-12 destructive matrix validates
-// and, on any new finding, extends this list (with a replay fixture — hard rule). Reflink/copy
-// trees are exempt (independent files), so this is consulted only for the hardlink strategy.
-func MutatesInPlace(rel string) bool {
-	base := filepath.Base(rel)
-	for _, suf := range []string{
-		".db", ".db-wal", ".db-shm", ".db-journal",
-		".sqlite", ".sqlite-wal", ".sqlite-shm",
-		"-wal", "-shm",
-	} {
-		if strings.HasSuffix(base, suf) {
-			return true
-		}
-	}
-	switch base {
-	case "Status.plist", "Info.plist", "Manifest.plist":
-		return true
-	}
-	return false
-}
+// MutatesInPlace IS GONE (quince#518). It listed the file classes the hardlink strategy copied
+// instead of linking — `.db`, `-wal`/`-shm` sidecars, and the top-level plists — on the reasoning
+// that the MobileBackup2 writer might rewrite them in place and so corrupt the committed version
+// through the alias.
+//
+// GATE 12C MEASURED THAT THE LIST PROTECTED NOTHING. Seeded with the list disabled, on two devices,
+// `idevicebackup2` unlinked and recreated every one of those files and the committed tree came back
+// byte-identical. What kept it safe was the writer's unlink-first idiom, which covers the content
+// blobs the list never named either. The list's own `Manifest.db` entry cost 266 MB of copying per
+// seed for no measurable safety.
+//
+// This tombstone is a GUARD rather than archaeology (quince#595): the list looks obviously prudent,
+// and the next reader to worry about in-place writes should know it was tried, measured, and
+// removed — and that the residual risk it could never have covered is `DLMessageCopyItem`, which is
+// upstream. Delete this comment once that call is patched or the concern is ruled dead.
 
 // ReflinkResult is what ReflinkProbeDetail found. The three values exist because the two
 // questions the probe asks have different answers on different filesystems, and quince#747 is
