@@ -196,6 +196,14 @@ func (d Deps) handlePasskeyList() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not list passkeys")
 			return
 		}
+		// READ ALONGSIDE THE LIST, not derived from it: an install can hold credentials AND a
+		// password, or either alone, and the surface renders differently in all four combinations.
+		hasPassword, err := d.Auth.HasPassword()
+		if err != nil {
+			d.Log.Error("passkey list: password check failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not list passkeys")
+			return
+		}
 		out := make([]wire.Passkey, 0, len(rows))
 		for _, p := range rows {
 			out = append(out, passkeyToWire(p))
@@ -207,9 +215,10 @@ func (d Deps) handlePasskeyList() http.HandlerFunc {
 		// (deploy/tls.md). Sending it makes the UI's warning agree with the server's behaviour
 		// rather than with a guess.
 		writeJSON(w, d.Log, http.StatusOK, wire.PasskeyList{
-			Passkeys:  out,
-			RPID:      auth.RPIDFromRequest(r),
-			Supported: auth.RPIDSupported(auth.RPIDFromRequest(r)),
+			Passkeys:    out,
+			RPID:        auth.RPIDFromRequest(r),
+			Supported:   auth.RPIDSupported(auth.RPIDFromRequest(r)),
+			HasPassword: hasPassword,
 		})
 	}
 }

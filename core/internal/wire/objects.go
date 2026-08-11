@@ -443,4 +443,23 @@ type PasskeyList struct {
 	// Supported is false where this address cannot be a relying party at all — a bare IP, or a
 	// name with no dot. The surface refuses to offer a button that cannot work (spec story 4).
 	Supported bool `json:"supported"`
+	// HasPassword reports whether an admin PASSWORD exists — qn.6m, quince#855.
+	//
+	// ON THIS ENDPOINT RATHER THAN ON `GET /api/auth/status`, WHICH IS THE OBVIOUS HOME AND THE
+	// WRONG ONE. `auth/status` is PRE-AUTH, so putting it there would tell an anonymous visitor
+	// whether this quince has a password — close to free today, since the login screen renders a
+	// password field either way, but a disclosure decision rather than a field, and one nobody
+	// ruled. This endpoint already requires a session, so it discloses to somebody who is already
+	// the admin.
+	//
+	// IT ALSO FITS WHAT THIS PAYLOAD HAS BECOME. `rp_id` and `supported` are not facts about the
+	// listed credentials either; they are what the auth SURFACE needs in order to render honestly,
+	// and so is this. The endpoint name now under-describes its body, which is the cost and is
+	// cheaper than a fourth auth endpoint.
+	//
+	// WITHOUT IT THE SCREEN LIES QUIETLY: `/settings/auth` said "Change your password / Current
+	// password" on a passwordless install, where the field had to be left blank and nothing said
+	// so. PUT /api/auth/password already handled that case correctly, so the defect was entirely
+	// in what the surface CLAIMED.
+	HasPassword bool `json:"has_password"`
 }

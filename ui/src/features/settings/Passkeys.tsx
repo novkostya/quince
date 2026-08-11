@@ -23,7 +23,14 @@ type Passkey = {
   last_used_at: string | null;
 };
 
-type PasskeyList = { passkeys: Passkey[]; rp_id: string; supported: boolean };
+export type PasskeyList = {
+  passkeys: Passkey[];
+  rp_id: string;
+  supported: boolean;
+  // quince#855 — whether an admin PASSWORD exists. On this payload rather than on the pre-auth
+  // `auth/status`, so it is disclosed only to a session that is already the admin.
+  has_password: boolean;
+};
 
 // EXPORTED since qn.6m slice 6b: `PasswordControls` sits on the same page and going passwordless
 // changes what this list should say about itself, so it must be able to invalidate it. Shared from
@@ -32,11 +39,18 @@ type PasskeyList = { passkeys: Passkey[]; rp_id: string; supported: boolean };
 export const passkeysKey = ["auth", "passkeys"] as const;
 const key = passkeysKey;
 
+// ONE QUERY, TWO CONSUMERS. `PasswordControls` needs `has_password` from this same payload, and a
+// second `useQuery` on the same key would be a second definition of the fetch to keep in step. React
+// Query dedupes by key, so both components share one request and one cache entry.
+export function usePasskeyList() {
+  return useQuery({ queryKey: key, queryFn: () => api.get<PasskeyList>("/api/auth/passkeys") });
+}
+
 
 
 export function Passkeys() {
   const qc = useQueryClient();
-  const list = useQuery({ queryKey: key, queryFn: () => api.get<PasskeyList>("/api/auth/passkeys") });
+  const list = usePasskeyList();
   const [adding, setAdding] = React.useState(false);
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });

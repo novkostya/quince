@@ -245,13 +245,14 @@ POST /api/auth/passkeys/login/finish?ceremony=<key>  → 200 {state, csrf_token}
 Passkeys — management (qn.6k):
 
 ```
-GET    /api/auth/passkeys        → 200 {passkeys: [...], rp_id, supported}
+GET    /api/auth/passkeys        → 200 {passkeys: [...], rp_id, supported, has_password}
        // SESSION REQUIRED. Each row: {id, name, rp_id, created_at, last_used_at|null}. NO public
        // key and NO credential material — the list exists so a human can recognise a device and
        // remove it, and sending more would widen what a compromised session can enumerate.
        // `rp_id` is what THIS request resolved to and `supported` is whether it can be a relying
        // party at all, so the surface can mark rows bound to another address, and refuse to offer
        // a button on a tier that cannot work, WITHOUT re-deriving the domain in the browser.
+       // `has_password` is whether an admin password exists at all (quince#855) — see below.
 DELETE /api/auth/passkeys/{id}   → 204
        // SESSION REQUIRED. 204 WHETHER OR NOT A ROW WENT: removing a credential that is already
        // gone is the state the caller wanted, and a 404 would make a retry, or a second tab, look
@@ -263,6 +264,26 @@ PATCH  /api/auth/passkeys/{id} {name} → 200 {passkey}
        // about creation, and a setter that could reach them would be a way to make the record
        // disagree with the credential it describes.
 ```
+
+**`has_password` IS ON THIS ENDPOINT AND NOT ON `GET /api/auth/status`, WHICH IS THE OBVIOUS HOME AND
+THE WRONG ONE** (quince#855). `auth/status` is **pre-auth**, so the field there would tell an
+anonymous visitor whether this quince has a password. That is close to free today — the login screen
+renders a password field either way — but it is a **disclosure decision rather than a field**, and
+nobody has ruled it. This endpoint already requires a session, so it discloses only to somebody who
+is already the admin, and no ruling is owed.
+
+**It also fits what this payload has become.** `rp_id` and `supported` are not facts about the listed
+credentials either; they are what the auth **surface** needs in order to render honestly, and so is
+this. The cost is that the endpoint's name now under-describes its body — cheaper than a fourth auth
+endpoint, and stated rather than left for a reader to notice.
+
+**What it fixes.** `/settings/auth` said *"Change your password / Current password"* on a passwordless
+install, where the field had to be left blank and nothing said so. `PUT /api/auth/password` already
+handled that case correctly, so the defect was entirely in what the surface **claimed** — the
+state-honesty rule applied to a form's own labels.
+
+**If a PRE-AUTH consumer ever needs this**, that is a different question with a real disclosure
+trade-off, and it should be ruled then rather than assumed now.
 
 **THE ASSERTION PAIR IS IN THREE EXACT-PATH LISTS, NOT TWO** — the pre-auth exemption, the
 storageless-reachable set (a storageless install is exactly where onboarding offers a passkey), and
