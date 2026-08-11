@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"database/sql"
+	"errors"
+	"time"
+)
 
 // Passkey storage. qn.6k slice 2 deliberately carries only what the RECOVERY path needs — count
 // and clear. Registration, listing and per-credential removal arrive with the endpoints in slice 3,
@@ -18,6 +22,10 @@ type Passkey struct {
 	Transports   string // JSON array as reported at registration
 	Name         string
 	CreatedAt    time.Time
+	// LastUsedAt is the zero time until the credential's first successful assertion. Zero means
+	// NEVER USED rather than "used at the epoch", and the Settings surface has to render that
+	// difference — a credential nobody has signed in with is exactly the one worth removing.
+	LastUsedAt time.Time
 }
 
 // InsertPasskey records a credential.
@@ -59,4 +67,90 @@ func (s *Store) DeleteAllPasskeys() (int, error) {
 	}
 	n, err := res.RowsAffected()
 	return int(n), err
+}
+
+// scanPasskey reads one row. The nullable columns are the ones with a genuine "not yet" state —
+// `last_used_at` until the first assertion, and the two informational authenticator fields — so
+// each is read through a Null* and left at its zero value rather than being defaulted to something
+// that reads like data.
+func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
+	var (
+		p          Passkey
+		aaguid     []byte
+		transports sql.NullString
+		created    string
+		lastUsed   sql.NullString
+	)
+	if err := sc.Scan(&p.CredentialID, &p.PublicKey, &p.RPID, &p.SignCount, &aaguid,
+		&transports, &p.Name, &created, &lastUsed); err != nil {
+		return Passkey{}, err
+	}
+	p.AAGUID = aaguid
+	p.Transports = transports.String
+	var err error
+	if p.CreatedAt, err = parseTime(created); err != nil {
+		return Passkey{}, err
+	}
+	if lastUsed.Valid {
+		if p.LastUsedAt, err = parseTime(lastUsed.String); err != nil {
+			return Passkey{}, err
+		}
+	}
+	return p, nil
+}
+
+const passkeyCols = `credential_id, public_key, rp_id, sign_count, aaguid, transports, name,
+	created_at, last_used_at`
+
+// GetPasskey returns one credential by its id, and whether it exists.
+//
+// An assertion arrives carrying a credential id and nothing else to look up by, which is why this
+// is the only lookup the assertion path needs — and why `credential_id` is the primary key.
+func (s *Store) GetPasskey(credentialID string) (Passkey, bool, error) {
+	row := s.db.QueryRow(`SELECT `+passkeyCols+` FROM passkeys WHERE credential_id = ?`, credentialID)
+	p, err := scanPasskey(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Passkey{}, false, nil
+	}
+	if err != nil {
+		return Passkey{}, false, err
+	}
+	return p, true, nil
+}
+
+// ListPasskeys returns every credential, oldest first.
+//
+// Oldest first because the list is a HISTORY the admin reads to decide what to remove — the phone
+// they registered a year ago and no longer own is the interesting row, and it belongs at the top
+// rather than buried under whatever was added most recently.
+func (s *Store) ListPasskeys() ([]Passkey, error) {
+	rows, err := s.db.Query(`SELECT ` + passkeyCols + ` FROM passkeys ORDER BY created_at, credential_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Passkey
+	for rows.Next() {
+		p, err := scanPasskey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// TouchPasskey records a successful assertion: the authenticator's new signature counter and when
+// it was used.
+//
+// THE SIGN COUNT IS STORED, NOT COMPARED HERE. Clone detection is the WebAuthn library's job and it
+// happens before this is called; this records the accepted value. Splitting it that way keeps the
+// store free of protocol judgement — a store method that silently declined to write a lower counter
+// would be a security decision hidden in a setter.
+func (s *Store) TouchPasskey(credentialID string, signCount uint32, usedAt time.Time) error {
+	_, err := s.db.Exec(
+		`UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE credential_id = ?`,
+		signCount, fmtTime(usedAt), credentialID)
+	return err
 }
