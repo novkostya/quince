@@ -3,7 +3,6 @@ import { AppLayout } from "./AppLayout";
 import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
-import { OnboardingPasskeyPage } from "@/pages/OnboardingPasskeyPage";
 import { OnboardingStoragePage } from "@/pages/OnboardingStoragePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -61,21 +60,15 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
   },
-  // THE PASSKEY OFFER (qn.6k story 9). Behind `RequireAuth` and outside the shell, like the storage
-  // step above — registration needs a session by definition, and the offer arrives immediately
-  // after setup, where the shell has nothing to show yet.
+  // `/onboarding/passkey` IS GONE — qn.6m slice 4. It was `qn.6k` story 9's separate step; the
+  // passkey offer now lives ON the setup screen, which is quince#841 item 2 and the ruled fix for
+  // quince#840 (the offer never rendered — the screen stops existing rather than being debugged).
   //
-  // NOT under `RequireStorage`, and not a gate of its own. It is a step the user passes THROUGH:
-  // both buttons navigate to `/`, and the page renders nothing at all where passkeys cannot work,
-  // so it can never become somewhere a first run gets stuck.
-  {
-    path: "/onboarding/passkey",
-    element: (
-      <RequireAuth>
-        <OnboardingPasskeyPage />
-      </RequireAuth>
-    ),
-  },
+  // NO REDIRECT LEFT BEHIND, and that is deliberate rather than an omission. The path was only ever
+  // reachable by `SetupPasswordPage` navigating to it in the seconds after first-run setup — never
+  // linked and never worth bookmarking, and meaningless on an install that now has a password. The
+  // catch-all at the foot of this list sends it to `/`, which is the right destination for the only
+  // person who could still have it open.
   {
     element: (
       <RequireAuth>
