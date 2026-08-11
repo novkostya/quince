@@ -13,12 +13,17 @@ export function PasswordForm({
   subtitle,
   cta,
   notice,
+  passkeys = false,
   onSubmit,
 }: {
   title: string;
   subtitle: string;
   cta: string;
   notice?: ReactNode;
+  // passkeys arms conditional mediation on this form (qn.6k). FALSE ON THE SETUP PAGE, and
+  // deliberately: there is nothing to sign in to before a password exists, and the browser would be
+  // asked to offer a credential for an account that has not been created.
+  passkeys?: boolean;
   onSubmit: (password: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState("");
@@ -114,7 +119,7 @@ export function PasswordForm({
             id="username"
             name="username"
             type="text"
-            autoComplete="username"
+            autoComplete={passkeys ? "username webauthn" : "username"}
             readOnly
             tabIndex={-1}
             value="quince-admin"
@@ -126,7 +131,7 @@ export function PasswordForm({
             id="password"
             type="password"
             autoFocus
-            autoComplete="current-password"
+            autoComplete={passkeys ? "current-password webauthn" : "current-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
