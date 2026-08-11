@@ -94,3 +94,53 @@ func TestPasswordMutationIsInNoneOfTheExactPathLists(t *testing.T) {
 		}
 	}
 }
+
+// THE FIRST-RUN PAIR IS IN ALL THREE, AND THE AUTHENTICATED PAIR STILL IN NONE — qn.6m D5.
+//
+// These two look almost identical to the registration pair and belong on the opposite side of every
+// list, which is exactly the confusion an exact-path assertion exists to prevent. Each omission
+// fails differently and none fails obviously:
+//
+//   - out of `authExempt`   → 401 on the endpoint whose whole job is to work with no session;
+//   - out of `setupAllowed` → 503 storage_required on a storageless install, which IS the
+//     onboarding state where the passwordless option is offered;
+//   - out of `csrfExempt`   → a double-submit refusal, because no CSRF cookie exists before a
+//     session does.
+//
+// What makes them safe to exempt is NOT the list — it is the one-shot `Configured()` guard in the
+// handler, which closes them the instant the install is claimed. The list only decides whether the
+// guard is ever reached.
+func TestFirstRunPasskeyPairIsInAllThreeExactPathLists(t *testing.T) {
+	firstRun := []string{
+		"/api/auth/setup/passkey/begin",
+		"/api/auth/setup/passkey/finish",
+	}
+	authenticated := []string{
+		"/api/auth/passkeys/register/begin",
+		"/api/auth/passkeys/register/finish",
+	}
+
+	for _, p := range firstRun {
+		r := httptest.NewRequest("POST", p, nil)
+		if !authExempt(r) {
+			t.Errorf("%s is not in authExempt — first run has no session to present", p)
+		}
+		if !setupAllowed(r) {
+			t.Errorf("%s is not in setupAllowed — it would 503 on a storageless install, which is "+
+				"the onboarding state this endpoint exists for", p)
+		}
+		if !csrfExempt(r) {
+			t.Errorf("%s is not in csrfExempt — no CSRF cookie exists before a session does", p)
+		}
+	}
+
+	// UNCHANGED AND RE-ASSERTED HERE. Adding a pre-auth registration path is precisely the edit that
+	// could tempt somebody to "tidy" the authenticated pair in beside it.
+	for _, p := range authenticated {
+		r := httptest.NewRequest("POST", p, nil)
+		if authExempt(r) || setupAllowed(r) || csrfExempt(r) {
+			t.Errorf("%s drifted into an exact-path list — authenticated registration must stay out "+
+				"of all three", p)
+		}
+	}
+}

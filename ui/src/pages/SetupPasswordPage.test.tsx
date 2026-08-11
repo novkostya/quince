@@ -153,3 +153,64 @@ describe("when the passkey does not happen", () => {
     expect(screen.queryByRole("button", { name: /set password and continue/i })).not.toBeInTheDocument();
   });
 });
+
+// FIRST-RUN PASSWORDLESS — qn.6m slice 7, quince#841 item 3, ruling B.
+describe("going passwordless at first run", () => {
+  it("offers the option, and says what it costs before it is taken", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: /use a passkey instead/i })).toBeInTheDocument();
+    // The sentence a user cannot work out for themselves: a box they cannot get a shell on is
+    // unrecoverable. D7 requires it on the screen that offers the choice.
+    expect(screen.getByText(/console or SSH access/i)).toBeInTheDocument();
+    expect(screen.getByText(/quince auth reset/)).toBeInTheDocument();
+  });
+
+  it("is absent where the browser cannot hold a passkey", () => {
+    // @ts-expect-error — removing the stand-in.
+    delete window.PublicKeyCredential;
+    renderPage();
+    expect(screen.queryByRole("button", { name: /use a passkey instead/i })).not.toBeInTheDocument();
+  });
+
+  // THE PRE-AUTH PAIR, NOT THE AUTHENTICATED ONE. Registration is session-required and first run has
+  // no session; getting this wrong is a 401 on the one path the slice exists to open.
+  it("registers against the FIRST-RUN endpoints and never sets a password", async () => {
+    const reg = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /use a passkey instead/i }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }));
+    expect(reg).toHaveBeenCalledWith("This device", { firstRun: true });
+    // NO PASSWORD IS SET, EVER — the rejected alternative was to generate one, register, then
+    // delete it, which strands the user behind a password they never saw if registration fails.
+    expect(auth.setup).not.toHaveBeenCalled();
+  });
+
+  // NOTHING HAS CHANGED after a dismissal — no password, no credential, no session — so the user is
+  // exactly where they started and the form is still the way forward.
+  it("reports a dismissal and leaves the password form usable", async () => {
+    vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(false);
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /use a passkey instead/i }));
+
+    expect(await screen.findByText(/no passkey was added/i)).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  // The server's own sentence — `already_configured` and `passkeys_unsupported_here` both name
+  // something this client cannot know.
+  it("surfaces the server's refusal", async () => {
+    vi.spyOn(webauthn, "registerPasskey").mockRejectedValue(
+      new APIError(409, "already_configured", "this quince is already set up"),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /use a passkey instead/i }));
+
+    expect(await screen.findByText(/already set up/i)).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});

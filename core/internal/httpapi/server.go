@@ -134,6 +134,11 @@ func NewRouter(deps Deps) http.Handler {
 	// Registration needs a session, so these sit inside authGuard with everything else and touch
 	// neither exact-path allowlist. Registered only when the ceremony store is wired (qn.6k).
 	if deps.Passkeys != nil && deps.Store != nil {
+		// FIRST-RUN passkey registration — PRE-AUTH and one-shot (qn.6m D5). Registered beside the
+		// authenticated pair because both need the ceremony store, but it joins all three exact-path
+		// lists where that pair joins none.
+		apiMux.HandleFunc("POST /api/auth/setup/passkey/begin", deps.handleSetupPasskeyBegin())
+		apiMux.HandleFunc("POST /api/auth/setup/passkey/finish", deps.handleSetupPasskeyFinish())
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/begin", deps.handlePasskeyRegisterBegin())
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/begin", deps.handlePasskeyLoginBegin())

@@ -40,8 +40,15 @@ type BeginRegistration = {
  * MUST BE CALLED FROM A USER GESTURE. `navigator.credentials.create()` requires one, which is why
  * both callers invoke this from a button's own handler rather than from an effect.
  */
-export async function registerPasskey(name: string): Promise<boolean> {
-  const begin = await api.post<BeginRegistration>("/api/auth/passkeys/register/begin", {});
+// `firstRun` picks the PRE-AUTH pair (qn.6m D5). Two endpoint pairs, one ceremony — the wire shape
+// and the browser call are identical, and only the guard on the far side differs, so a second copy
+// of this function would be two places to fix the next `bytesToB64url` bug in.
+export async function registerPasskey(
+  name: string,
+  opts: { firstRun?: boolean } = {},
+): Promise<boolean> {
+  const base = opts.firstRun ? "/api/auth/setup/passkey" : "/api/auth/passkeys/register";
+  const begin = await api.post<BeginRegistration>(`${base}/begin`, {});
   const pk = begin.options.publicKey;
 
   let cred: PublicKeyCredential | null;
@@ -68,7 +75,7 @@ export async function registerPasskey(name: string): Promise<boolean> {
 
   const resp = cred.response as AuthenticatorAttestationResponse;
   await api.post(
-    `/api/auth/passkeys/register/finish?ceremony=${encodeURIComponent(begin.ceremony)}` +
+    `${base}/finish?ceremony=${encodeURIComponent(begin.ceremony)}` +
       `&name=${encodeURIComponent(name)}`,
     {
       id: cred.id,

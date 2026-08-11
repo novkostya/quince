@@ -269,3 +269,82 @@ func (d Deps) handlePasskeyRename() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, passkeyToWire(pk))
 	}
 }
+
+// POST /api/auth/setup/passkey/begin → 200 {ceremony, options}
+//
+// PRE-AUTH AND ONE-SHOT — qn.6m D5. This is `POST /api/auth/setup`'s sibling: reachable with no
+// session because creating one is what it does, and refused with 409 the moment this install is
+// configured by anything (a password OR any passkey, D3).
+func (d Deps) handleSetupPasskeyBegin() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// The SAME insecure-origin refusal `POST /api/auth/setup` carries, and for a stronger
+		// reason: WebAuthn does not run outside a secure context at all, so a browser here would
+		// fail after the round trip rather than before it.
+		if d.refuseInsecureOrigin(w, r) {
+			return
+		}
+		options, ceremony, err := d.Auth.BeginSetupPasskey(d.Passkeys, auth.RPIDFromRequest(r), d.Proxies.ClientIP(r))
+		if err != nil {
+			switch {
+			case errors.Is(err, auth.ErrRateLimited):
+				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+			case errors.Is(err, auth.ErrAlreadyConfigured):
+				writeError(w, d.Log, http.StatusConflict, "already_configured", "this quince is already set up")
+			case d.writePasskeyError(w, err):
+				// already written — covers passkeys_unsupported_here
+			default:
+				d.Log.Error("first-run passkey begin failed", "error", err)
+				writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not start passkey setup")
+			}
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.PasskeyRegisterBegin{Ceremony: ceremony, Options: options})
+	}
+}
+
+// POST /api/auth/setup/passkey/finish?ceremony=<key>&name=<label> → 200 {state, csrf_token} + cookies
+//
+// ISSUES A SESSION, exactly as `POST /api/auth/setup` does — the caller has just proved possession of
+// a credential this install now holds. The response shape is `AuthStatus` and NOT the 201 {passkey}
+// that authenticated registration returns, because this call's outcome is "you are signed in", not
+// "here is a row you can now manage".
+func (d Deps) handleSetupPasskeyFinish() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.refuseInsecureOrigin(w, r) {
+			return
+		}
+		ceremony := strings.TrimSpace(r.URL.Query().Get("ceremony"))
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if ceremony == "" {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "ceremony is required")
+			return
+		}
+		if name == "" {
+			writeError(w, d.Log, http.StatusUnprocessableEntity, "name_required",
+				"give this passkey a name you will recognise later")
+			return
+		}
+		_, sess, csrf, err := d.Auth.FinishSetupPasskey(d.Passkeys, ceremony, name,
+			auth.RPIDFromRequest(r), r, time.Now().UTC(), sessionCookieValue(r))
+		if err != nil {
+			switch {
+			case errors.Is(err, auth.ErrAlreadyConfigured):
+				// THE RACE'S LOSER GETS THIS. Two ceremonies can begin on a virgin install; the
+				// credential write decides, and the second finisher is told the box is taken rather
+				// than silently adding a second admin credential to it.
+				writeError(w, d.Log, http.StatusConflict, "already_configured", "this quince is already set up")
+			case d.writePasskeyError(w, err):
+				// already written
+			default:
+				d.Log.Error("first-run passkey finish failed verification", "error", err)
+				writeError(w, d.Log, http.StatusBadRequest, "passkey_rejected",
+					"this passkey could not be verified — start again")
+			}
+			return
+		}
+		secure := d.Auth.Secure(r)
+		http.SetCookie(w, auth.SessionCookie(sess, secure))
+		http.SetCookie(w, auth.CSRFCookie(csrf, secure))
+		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
+	}
+}

@@ -46,8 +46,44 @@ export function SetupPasswordPage() {
   // it. Re-submitting would 409, and the only thing left to do is get on with it.
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
+  const [passwordlessBusy, setPasswordlessBusy] = useState(false);
+  const [passwordlessErr, setPasswordlessErr] = useState<string | null>(null);
+
   const offer = browserCanPasskey();
   const done = () => nav("/", { replace: true });
+
+  // GO PASSWORDLESS AT FIRST RUN — quince#841 item 3, using D5's pre-auth pair.
+  //
+  // ON THE BUTTON'S OWN CLICK, not behind an effect or a navigation: `navigator.credentials.create()`
+  // needs live user activation, and this is the gesture that authorises it.
+  //
+  // NO PASSWORD IS SET, EVER — that is the whole point. `setup/passkey/finish` issues the session
+  // itself, so there is no moment where a password exists and is then removed. The rejected
+  // alternative was exactly that (generate one, register, delete it), and it strands the user behind
+  // a password they never saw if registration fails halfway.
+  async function goPasswordless() {
+    setPasswordlessBusy(true);
+    setPasswordlessErr(null);
+    try {
+      const added = await registerPasskey(FIRST_PASSKEY_NAME, { firstRun: true });
+      if (!added) {
+        // Dismissed, not failed. NOTHING HAS CHANGED — no password, no credential, no session — so
+        // the user is exactly where they started and the form below is still the way forward.
+        setPasswordlessErr("No passkey was added — the request was cancelled or timed out.");
+        return;
+      }
+      // The session arrives with the credential, so the status the guards read must be seeded
+      // before navigating — the same race `onSubmit` documents below.
+      qc.setQueryData(authStatusKey, { state: "authenticated", csrf_token: "" });
+      done();
+    } catch (err) {
+      setPasswordlessErr(
+        err instanceof APIError ? err.message : "Could not set up a passkey on this device.",
+      );
+    } finally {
+      setPasswordlessBusy(false);
+    }
+  }
 
   // THE PANEL SHOWN WHEN THE PASSWORD IS SET AND THE PASSKEY IS NOT. Every one of these is a state
   // where the install is FINE — the user has an admin password and a session — so none of them is an
@@ -117,6 +153,43 @@ export function SetupPasswordPage() {
               </span>
             </span>
           </label>
+        ) : null
+      }
+      footer={
+        // THE PASSWORDLESS OPTION — quince#841 item 3, ruling B. D5's pre-auth pair is what makes it
+        // reachable AT FIRST RUN at all: ordinary registration is session-required and first run has
+        // no session, so this button uses `/api/auth/setup/passkey/*`, which is one-shot and closes
+        // the moment the install is claimed.
+        //
+        // BELOW THE PRIMARY ACTION AND QUIETER, deliberately. A password is the right default for
+        // most installs — it needs no second device and no recovery story — so this is an option
+        // somebody goes looking for rather than one they fall into.
+        offer ? (
+          <div className="mt-6 border-t border-line pt-4">
+            <p className="text-sm text-muted">
+              Or skip the password entirely and use a passkey as your only way in.
+            </p>
+            {/* THE COST, ON THE SCREEN THAT OFFERS IT — D7, the same rule the settings surface
+                follows. Shorter here on purpose: this is first run, there is no install to lose yet,
+                and the choice is reversible from Settings the moment they are in. The sentence that
+                cannot be dropped is the SHELL one, because it is the fact that makes this unsuitable
+                for a box they cannot physically reach — and the one they cannot work out alone. */}
+            <p className="mt-2 text-sm text-muted">
+              If you lose the device holding it, the only way back is{" "}
+              <code className="font-mono text-fg">quince auth reset</code> on the machine running
+              quince — so you need console or SSH access to it.
+            </p>
+            {passwordlessErr ? <p className="mt-2 text-sm text-danger">{passwordlessErr}</p> : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3"
+              disabled={passwordlessBusy}
+              onClick={goPasswordless}
+            >
+              {passwordlessBusy ? "…" : "Use a passkey instead"}
+            </Button>
+          </div>
         ) : null
       }
       onSubmit={async (pw) => {
