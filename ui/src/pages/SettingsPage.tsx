@@ -1,7 +1,8 @@
 import { useConfig } from "@/lib/config";
 import { ConfigView } from "@/features/settings/ConfigView";
 import { ConfigEditor } from "@/features/settings/ConfigEditor";
-import { Passkeys } from "@/features/settings/Passkeys";
+import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 
 export function SettingsPage() {
   const { data, isLoading, isError } = useConfig();
@@ -22,6 +23,35 @@ export function SettingsPage() {
         here apply immediately. You can edit the file by hand instead — quince picks those up when it
         restarts.
       </p>
+
+      {/* THE PASSKEYS CARD HAS MOVED TO `/settings/auth` — quince#841 ruling A, qn.6m slice 6. What
+          stands here is a LINK, and the move settles an argument this spot had already half-lost.
+
+          quince#834 put the card in the Edit column, above the file, on the reading that "passkeys
+          are a thing you CHANGE, so they belong beside the other things you change". Ruling A draws
+          the line one step further out: **auth is not configuration**, and Settings is a config
+          editor plus a config dump plus storages — a fourth section makes it a drawer.
+
+          OUTSIDE THE `data` GUARD, WHICH IS THE POINT AND NOT A DETAIL. quince#834 stated and
+          accepted a cost: the card sat inside that guard, so a box whose config failed to LOAD showed
+          no passkey surface at all. Moving the card to its own page only pays that back if the way to
+          REACH it is not behind the same condition — a link inside the guard would leave somebody
+          with a broken config unable to get at the credentials they sign in with, which is the same
+          defect one level up. Asserted, not just intended: SettingsAuthPage.test.tsx renders this
+          page with the config query REJECTING and requires the link to still be there.
+
+          Above the columns rather than below: on a phone they stack, and the config dump is long
+          enough to bury anything after it. */}
+      <Link
+        to="/settings/auth"
+        className="mt-6 flex max-w-xl items-center justify-between rounded-card border border-line bg-card px-4 py-3 text-sm transition-colors hover:bg-elevated"
+      >
+        <span>
+          <span className="font-medium">Sign-in</span>
+          <span className="mt-0.5 block text-muted">Password and passkeys</span>
+        </span>
+        <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-muted" />
+      </Link>
 
       {isLoading ? <div className="mt-6 text-sm text-muted">Loading…</div> : null}
       {isError ? <div className="mt-6 text-sm text-danger">Could not load configuration.</div> : null}
@@ -48,17 +78,6 @@ export function SettingsPage() {
             <div className="mt-3">
               <ConfigEditor config={data.config} />
             </div>
-            {/* IN THE SETTINGS COLUMN, ABOVE THE FILE — Operator-directed, and it is the right
-                reading of the page. Passkeys are a thing you CHANGE, so they belong beside the other
-                things you change rather than after the read-only dump of the file. On a phone the
-                columns stack, so this also puts them ahead of a config listing that is long enough
-                to bury anything below it — which is how they were first seen, and why it was raised.
-
-                THE COST, STATED: this is inside the `data` guard, so a box whose config fails to
-                load now shows no passkey surface either. That was the one argument for keeping it
-                outside, and it is the weaker one — a Settings page that cannot read its own config
-                is broken in a way the password login already handles. */}
-            <Passkeys />
           </div>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-muted">Current configuration</h2>

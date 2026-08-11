@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // `waitFor` from testing-library, NOT `vi.waitFor` — the former wraps its polling in `act`, so the
 // query resolving mid-wait does not produce an "update was not wrapped in act(...)" warning.
 import { render, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SettingsPage } from "./SettingsPage";
 import { api } from "@/lib/api";
@@ -20,7 +21,11 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <SettingsPage />
+      {/* A ROUTER IS REQUIRED SINCE qn.6m SLICE 6 — this page carries a `<Link>` to
+          `/settings/auth`, and `<Link>` outside a Router throws on a null context. */}
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
