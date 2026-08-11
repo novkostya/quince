@@ -296,6 +296,9 @@ func serve(args []string) error {
 		//
 		// Nil in demo mode, where `--demo` fabricates its storages and the mode never applies.
 		StorageRequired: storageRequired(demoMode, cfgSvc),
+		// Passkeys (qn.6k). The ceremony store is per-process and in memory; the credentials
+		// themselves live in the app DB, which is why both are wired and neither is optional here.
+		Store: st, Passkeys: auth.NewPasskeyCeremonies(),
 	})
 
 	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
