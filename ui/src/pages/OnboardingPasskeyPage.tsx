@@ -2,7 +2,8 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
-import { api, APIError } from "@/lib/api";
+import { api } from "@/lib/api";
+import { AddPasskeyDialog } from "@/features/settings/AddPasskeyDialog";
 
 // The onboarding passkey offer — qn.6k slice 6, story 9. Ruled on quince#657: "offered in
 // onboarding; added later in Settings."
@@ -12,27 +13,14 @@ import { api, APIError } from "@/lib/api";
 // out of their own backups. A step that pressed for one here would be selling the wrong story on the
 // screen where the user forms their idea of what quince expects.
 
-function b64urlToBytes(s: string): Uint8Array {
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
-function bytesToB64url(b: ArrayBuffer): string {
-  let bin = "";
-  for (const byte of new Uint8Array(b)) bin += String.fromCharCode(byte);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
 type Support = { rp_id: string; supported: boolean };
 
 export function OnboardingPasskeyPage() {
   const nav = useNavigate();
   const [support, setSupport] = React.useState<Support | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
+  const [adding, setAdding] = React.useState(false);
 
   const done = React.useCallback(() => nav("/", { replace: true }), [nav]);
 
@@ -53,50 +41,6 @@ export function OnboardingPasskeyPage() {
     };
   }, []);
 
-  async function add() {
-    setError(null);
-    setBusy(true);
-    try {
-      const name = window.prompt("Name this passkey — the device you are setting it up on:");
-      if (!name?.trim()) return;
-
-      const begin = await api.post<{
-        ceremony: string;
-        options: { publicKey: PublicKeyCredentialCreationOptions };
-      }>("/api/auth/passkeys/register/begin", {});
-      const pk = begin.options.publicKey;
-      const cred = (await navigator.credentials.create({
-        publicKey: {
-          ...pk,
-          challenge: b64urlToBytes(pk.challenge as unknown as string),
-          user: { ...pk.user, id: b64urlToBytes(pk.user.id as unknown as string) },
-        },
-      })) as PublicKeyCredential | null;
-      if (!cred) return;
-
-      const resp = cred.response as AuthenticatorAttestationResponse;
-      await api.post(
-        `/api/auth/passkeys/register/finish?ceremony=${encodeURIComponent(begin.ceremony)}` +
-          `&name=${encodeURIComponent(name.trim())}`,
-        {
-          id: cred.id,
-          rawId: bytesToB64url(cred.rawId),
-          type: cred.type,
-          response: {
-            clientDataJSON: bytesToB64url(resp.clientDataJSON),
-            attestationObject: bytesToB64url(resp.attestationObject),
-          },
-        },
-      );
-      done();
-    } catch (err) {
-      if (err instanceof Error && err.name === "NotAllowedError") setError(null); // dismissed
-      else if (err instanceof APIError) setError(err.message);
-      else setError(err instanceof Error ? err.message : "Could not add a passkey.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   // NOT OFFERED WHERE IT CANNOT WORK — story 4, and here it means skipping the step entirely rather
   // than showing a refusal. On a tier that cannot hold a passkey there is nothing for the user to
@@ -126,11 +70,11 @@ export function OnboardingPasskeyPage() {
           different name, you sign in with your password instead.
         </p>
 
-        {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+
 
         <div className="mt-5 flex flex-col gap-2">
-          <Button type="button" onClick={add} disabled={busy}>
-            {busy ? "Working…" : "Add a passkey"}
+          <Button type="button" onClick={() => setAdding(true)}>
+            Add a passkey
           </Button>
           {/* SKIP IS A FIRST-CLASS BUTTON, not a link in the corner. It is the normal answer, and
               the user can add one later from Settings whenever they like. */}
@@ -138,6 +82,11 @@ export function OnboardingPasskeyPage() {
             Not now
           </Button>
         </div>
+
+        {/* THE SAME DIALOG THE SETTINGS SURFACE USES. One naming step, one ceremony, one set of
+            error messages — a second copy is how the two would drift, and this ceremony has already
+            cost one bug that only one copy would have carried. */}
+        <AddPasskeyDialog open={adding} onOpenChange={setAdding} onAdded={done} />
       </div>
     </div>
   );

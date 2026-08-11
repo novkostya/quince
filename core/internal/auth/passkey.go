@@ -182,6 +182,31 @@ func relyingParty(rpID string) (*webauthn.WebAuthn, error) {
 		RPDisplayName: rpDisplayName,
 		RPID:          rpID,
 		RPOrigins:     []string{"https://" + rpID},
+		// DISCOVERABLE CREDENTIALS ARE REQUIRED, AND WITHOUT THIS THE WHOLE FEATURE IS INERT.
+		//
+		// The library's zero value requests no resident key, so the authenticator is free to create
+		// a NON-discoverable credential — one that can only be used when the server already names
+		// it in `allowCredentials`. quince never can: it has one admin, no account picker, and
+		// `BeginDiscoverableLogin` deliberately sends an empty allow-list. So registration would
+		// succeed, the credential would exist on the device, and login could never find it.
+		//
+		// MEASURED, not theorised: a passkey added on macOS was accepted and stored, and the login
+		// form never offered it. That is exactly this — and it is a requirement the spec states in
+		// as many words ("requires discoverable credentials, which this design wants anyway") that
+		// the first implementation simply did not carry.
+		//
+		// `RequireResidentKey` is the legacy WebAuthn-1 spelling of the same thing and is set
+		// alongside, because older authenticators read that and ignore `ResidentKey`.
+		//
+		// UserVerification PREFERRED rather than required: verification is what makes it Face ID
+		// rather than a bare tap, and every platform authenticator this is built for does it — but
+		// requiring it would refuse a security key that cannot, for a login that still has a
+		// password beside it.
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			ResidentKey:        protocol.ResidentKeyRequirementRequired,
+			RequireResidentKey: protocol.ResidentKeyRequired(),
+			UserVerification:   protocol.VerificationPreferred,
+		},
 	})
 }
 

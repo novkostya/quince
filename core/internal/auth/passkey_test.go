@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
@@ -223,5 +224,41 @@ func TestFinishWithNoCeremonyIsNamed(t *testing.T) {
 	_, err := FinishPasskeyRegistration(st, cer, "not-a-key", "phone", rpHome, nil, time.Now().UTC())
 	if !errors.Is(err, ErrNoChallenge) {
 		t.Fatalf("got %v, want ErrNoChallenge", err)
+	}
+}
+
+// THE BUG THAT MADE THE WHOLE FEATURE INERT, PINNED — and it is a requirement the spec states.
+//
+// Without a resident-key requirement the authenticator may create a NON-discoverable credential.
+// quince can never use one: it has one admin, no account picker, and `BeginDiscoverableLogin` sends
+// an empty allow-list. So registration succeeds, the credential exists on the device, and the login
+// form can never offer it. Measured on macOS before the fix: a passkey was added and never appeared.
+func TestRegistrationRequiresADiscoverableCredential(t *testing.T) {
+	st := newResetStore(t)
+	cer := NewPasskeyCeremonies()
+
+	options, _, err := BeginPasskeyRegistration(st, cer, rpHome)
+	if err != nil {
+		t.Fatalf("BeginPasskeyRegistration: %v", err)
+	}
+	creation, ok := options.(*protocol.CredentialCreation)
+	if !ok {
+		t.Fatalf("options are %T, want *protocol.CredentialCreation", options)
+	}
+
+	sel := creation.Response.AuthenticatorSelection
+	if sel.ResidentKey != protocol.ResidentKeyRequirementRequired {
+		t.Errorf("residentKey = %q, want %q — a non-discoverable credential can never be offered",
+			sel.ResidentKey, protocol.ResidentKeyRequirementRequired)
+	}
+	// The WebAuthn-1 spelling, for authenticators that read it and ignore `residentKey`.
+	if sel.RequireResidentKey == nil || !*sel.RequireResidentKey {
+		t.Errorf("requireResidentKey = %v, want true", sel.RequireResidentKey)
+	}
+	// Preferred rather than required: verification is what makes it Face ID rather than a bare tap,
+	// but requiring it would refuse a security key that cannot, for a login that still has a
+	// password beside it.
+	if sel.UserVerification != protocol.VerificationPreferred {
+		t.Errorf("userVerification = %q, want %q", sel.UserVerification, protocol.VerificationPreferred)
 	}
 }
