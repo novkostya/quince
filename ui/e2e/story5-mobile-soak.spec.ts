@@ -76,20 +76,30 @@ test("a dead version renders explicitly dead with a Remove action", async ({ pag
   await expect(page.getByRole("button", { name: /^remove$/i })).toBeVisible();
 });
 
-// qn.6e — ADD STORAGE ON A PHONE. Operator-reported from a live device: the dialog zoomed on focus,
-// and once the zfs branch opened it grew taller than the screen with no way to scroll, so the
-// buttons at its foot could not be reached at all.
+// qn.6e — ADD STORAGE ON A PHONE. Operator-reported from a live device: the surface zoomed on
+// focus, and once the zfs branch opened it grew taller than the screen with no way to scroll, so
+// the buttons at its foot could not be reached at all.
 //
 // Both were regressions against fixes this codebase already had. The zoom is quince#616 —
 // `fieldBase` carries `text-base sm:text-sm` and the add form used raw `<input>`/`<select>` with
 // `text-sm`, bypassing it. The height had no fix because no dialog had ever been tall enough to
-// need one; `DialogContent` now bounds and scrolls, which repairs every dialog rather than this one.
-test("the add-storage dialog is usable on a phone, zfs branch included", async ({ page }) => {
+// need one; `DialogContent` bounds and scrolls, which repaired every dialog rather than this one.
+//
+// IT IS A PAGE NOW (quince#846), and exactly half of this test moves with it. THE ZOOM HALF IS A
+// PROPERTY OF THE FIELDS and is untouched — it is the half that regressed, and it would regress the
+// same way on a page. The height half was a property of the CONTAINER: a page cannot overflow a
+// height it does not set, so what survives of *"Save existed and could not be got to"* is that the
+// foot is still reachable, measured against the shell's scroll region instead of a card's own box.
+// `DialogContent`'s bound has not stopped mattering and is gated two tests below, on the encryption
+// dialog — which is now this suite's tall-dialog subject.
+test("the add-storage page is usable on a phone, zfs branch included", async ({ page }) => {
   await authenticate(page);
 
   await page.getByTestId("add-storage").click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/storage\/new$/);
+  // NOT A MODAL, asserted rather than assumed: an outside tap dismissing this surface is the whole
+  // reason it moved, and quince#818 is about to make that write a keypair to disk.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // 16px MINIMUM ON EVERY FOCUSABLE FIELD. Below it, iOS Safari zooms the page to `16 / fontSize`
   // on focus — measured on the COMPUTED style, because the class that produces it is the thing that
@@ -113,17 +123,17 @@ test("the add-storage dialog is usable on a phone, zfs branch included", async (
   const parentSize = await parent.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
   expect(parentSize).toBeGreaterThanOrEqual(16);
 
-  // THE DIALOG FITS THE VIEWPORT, and its content scrolls inside it rather than running off the
-  // edges. Asserted on the box against the window, because "fits" is what the user experiences and
-  // a max-height class could be present and overridden.
-  const box = await dialog.boundingBox();
-  const viewportH = page.viewportSize()?.height ?? 0;
-  expect(box).not.toBeNull();
-  expect(box!.y).toBeGreaterThanOrEqual(0);
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewportH);
+  // NO SIDEWAYS SCROLL, which is this suite's standing phone constraint and is the page's version
+  // of "it fits". A dialog could overflow its own card; a page overflows the document, and that is
+  // what a phone user meets as the layout sliding under their thumb.
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
 
   // AND THE FOOT IS REACHABLE. This is the failure as the Operator met it: Save existed, and could
-  // not be got to. Scrolling within the dialog must bring it into view and it must be clickable.
+  // not be got to. On a page the scroll region is `<main>` (the shell owns scrolling), so this
+  // asserts the same user-visible fact through the container that now owns it.
   const save = page.getByTestId("add-storage-save");
   await save.scrollIntoViewIfNeeded();
   await expect(save).toBeVisible();
@@ -175,6 +185,22 @@ async function visibleHeightPublished(page: Page, px: number): Promise<void> {
 // the plain 1rem gutter.
 const GUTTER = 16;
 
+// THE SUBJECT OF BOTH quince#762 GATES USED TO BE THE ADD-STORAGE DIALOG, AND IT NO LONGER EXISTS
+// (quince#846 made that surface a page). The fix it gates is a property of `DialogContent` and of
+// every portalled surface — not of the add flow — so the gates move to another dialog rather than
+// leaving with their old subject.
+//
+// THE ENCRYPTION DIALOG IS THE SUCCESSOR because it is the tallest one left: four fields and a
+// submit, which is what the notch case and the below-the-fold case both need. `family-iphone` is
+// paired with encryption on in `--demo`, so "Manage encryption" opens in change mode — the same
+// path story 3 drives.
+async function openTallDialog(page: Page): Promise<void> {
+  await page.getByRole("link", { name: "family-iphone" }).click();
+  await expect(page).toHaveURL(/\/devices\//);
+  await page.getByRole("button", { name: /manage encryption/i }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
 async function expectCentredInVisibleArea(
   page: Page,
   visibleH: number,
@@ -201,10 +227,11 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
   page,
 }) => {
   await authenticate(page);
+  // Navigate FIRST, then fake the insets: the properties are set on `documentElement` of this
+  // document and client-side routing keeps it, but doing it in this order keeps that from being a
+  // thing a reader has to know.
+  await openTallDialog(page);
   await fakeSafeArea(page, ISLAND_TOP, HOME_INDICATOR);
-
-  await page.getByTestId("add-storage").click();
-  await expect(page.getByRole("dialog")).toBeVisible();
   await visibleHeightPublished(page, 844);
   await expectCentredInVisibleArea(page, 844, HOME_INDICATOR);
 
@@ -219,9 +246,9 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
 
   // AND THE FOOT IS STILL REACHABLE once the card is bounded by a much smaller visible area — the
   // case where centring and scrolling have to hold at the same time.
-  const save = page.getByTestId("add-storage-save");
-  await save.scrollIntoViewIfNeeded();
-  await expect(save).toBeVisible();
+  const submit = page.getByRole("button", { name: /change backup password/i });
+  await submit.scrollIntoViewIfNeeded();
+  await expect(submit).toBeVisible();
 });
 
 // quince#762 — FOCUSING A FIELD BELOW THE FOLD MUST NOT LEAVE IT ON THE EDGE OF THE SCROLL REGION.
@@ -237,21 +264,21 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
 // scroll container — which the unit test cannot. **The proof of the behaviour is
 // `ui/src/lib/useScrollFocusIntoView.test.ts`**, which states the geometry and fails 3 of 5 when the
 // correction is neutered. Do not read this one as coverage of the fix.
+//
+// THE SUBJECT MOVED WITH quince#846: the fields the Operator named were the zfs branch's, and that
+// branch is on a page now, where this correction does not apply and is not wanted — the shell owns
+// the scroll region and there is no card edge to be cut off by. The behaviour is a DIALOG's, so it
+// is gated on the tallest surviving dialog rather than followed to a container that has no fold.
 test("focusing a field below the fold brings it clear of the dialog's edges", async ({ page }) => {
   await authenticate(page);
 
-  await page.getByTestId("add-storage").click();
+  await openTallDialog(page);
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
 
-  await page.getByLabel("Path").fill("/tmp");
-  await page.getByTestId("probe-check").click();
-  await page.getByTestId("backend-select").selectOption("zfs");
-  await expect(page.getByTestId("zfs-fields")).toBeVisible();
-
-  // The two the Operator named, in the order they are met.
-  for (const label of ["Parent dataset", "Helper command"]) {
-    const field = page.getByLabel(label);
+  // The two lowest fields in the tall dialog — the ones a fold can cut, which is what the Operator
+  // reported about the two lowest fields of the one this replaces.
+  for (const label of ["New password", "Confirm new password"]) {
+    const field = page.getByLabel(label, { exact: true });
     await field.focus();
 
     // Settle: the correction runs on the next animation frame after `focusin`.

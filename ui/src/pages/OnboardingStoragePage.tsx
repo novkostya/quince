@@ -41,6 +41,12 @@ export function OnboardingStoragePage() {
           // THE ONLY WAY OUT OF THIS SCREEN IS TO SUCCEED, so there is no cancel. Adding a storage
           // is what lifts the daemon's setup mode; a dismissal would return the user to a Home that
           // cannot render and an API that refuses.
+          //
+          // THE NAME IS DELIBERATELY IGNORED, unlike `AddStoragePage`, which navigates to it
+          // (quince#846). This step's destination is Home and is not cosmetic: quince#683 was a
+          // bounce straight back to this page, caused by ordering, and story 11's last test gates
+          // the landing. First run ends on the page the product opens with, not on a details page
+          // for the only storage there is.
           onSaved={() => navigate("/", { replace: true })}
           footer={({ save, canSave, saving, adopting }) => (
             <div className="mt-6">
