@@ -344,10 +344,17 @@ Sequenced from `main`, **not stacked**.
 | **3** | **the auth screens become plain pages** (D1, D2) — the `AuthPage` shell; login keeps its card | no | quince#844, **merged** |
 | **4** | **the combined first-run screen**: password + optional passkey, one page. **Deleted `OnboardingPasskeyPage`; closed quince#840** | no | quince#845, **merged** |
 | **5a** | **`configured` = a password OR a passkey** — D3 alone | **YES** | quince#847, **merged** |
-| **5b** | **the password becomes mutable** — change + remove, the demo stand-in | **YES** | quince#851 |
+| **5b** | **the password becomes mutable** — change + remove, the demo stand-in | **YES** | quince#851, **merged** |
 | **6a** | **`/settings/auth` exists** (ruling A) — the page, and the passkeys card moves onto it | no | quince#853, **merged** |
-| **6b** | **the password controls on that page** — consumes 5b | no | not open |
-| **7** | **first-run passwordless** — D5's pre-auth pair, `contracts.md`, and the offer on slice 4's screen | **YES** | not open |
+| **6b** | **the password controls on that page** — consumes 5b | no | quince#856, **merged** |
+| **7** | **first-run passwordless** — D5's pre-auth pair, `contracts.md`, and the offer on slice 4's screen | **YES** | quince#858, **merged** |
+
+**ALL NINE ARE MERGED. THE RUNG IS CODE-COMPLETE AND IT IS NOT DONE**, and the gap between those two
+sentences is the whole of what remains: **G12 and G13 have never been run.** No automated gate on this
+rung touches a real authenticator — vitest mocks the ceremony, and e2e cannot reach a secure context,
+which story 1 now asserts outright rather than leaving as an assumption. So every green check here is
+consistent with the feature being **inert**, which is exactly how `qn.6k` shipped in nine green pull
+requests. See *Owed gates* below: both have a named owner and neither is reachable from an agent seat.
 
 **SEVEN SLICES BECAME NINE, AND THIS TABLE STILL SAID SEVEN AFTER SIX OF THEM HAD MERGED.** Corrected
 here rather than quietly, because `CLAUDE.md` names a status table as the second thing that describes
