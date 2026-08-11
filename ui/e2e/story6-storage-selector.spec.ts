@@ -8,7 +8,7 @@ async function authenticate(page: Page): Promise<void> {
     await page.getByRole("button", { name: /set password/i }).click();
   } else if (page.url().includes("/login")) {
     await page.getByLabel("Password").fill("demo");
-    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
   }
   // Home is `/` since qn.6d (quince#443); `/devices` redirects to it. Asserting the HEADING
   // rather than the URL keeps this stable across the next rename — this label has already

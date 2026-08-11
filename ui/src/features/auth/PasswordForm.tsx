@@ -28,7 +28,7 @@ export function PasswordForm({
   passkeys?: boolean;
   // onPasskey is called after a successful passkey sign-in, so the page can route exactly as it
   // does after a password one. Absent on setup, where there is nothing to sign in to yet.
-  onPasskey?: () => void;
+  onPasskey?: () => void | Promise<void>;
   onSubmit: (password: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState("");
@@ -58,7 +58,7 @@ export function PasswordForm({
     setError(null);
     try {
       await signInWithPasskey({ conditional: false });
-      onPasskey?.();
+      await onPasskey?.();
     } catch (err) {
       if (err instanceof APIError) {
         setError({ message: err.message, code: err.code });

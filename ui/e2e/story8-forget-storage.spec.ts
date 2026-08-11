@@ -10,7 +10,7 @@ async function authenticate(page: Page): Promise<void> {
     await page.getByRole("button", { name: /set password/i }).click();
   } else if (page.url().includes("/login")) {
     await page.getByLabel("Password").fill("demo");
-    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
   }
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 }

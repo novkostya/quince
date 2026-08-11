@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { AddPasskeyDialog } from "./AddPasskeyDialog";
+import { forgetPasskey } from "@/lib/passkeyHint";
 import { RelativeTime } from "@/components/RelativeTime";
 
 // The passkey management surface — qn.6k slice 5b, stories 2, 3, 4 and 8.
@@ -37,7 +38,13 @@ export function Passkeys() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del<void>(`/api/auth/passkeys/${encodeURIComponent(id)}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      // REMOVING THE LAST ONE STOPS THE UNPROMPTED SHEET. Otherwise the next visit fires a sheet
+      // with nothing to offer — the exact wrong-guess the hint exists to prevent, caused by us.
+      //
+      // Only when it was the last: with others left, a passkey can still work in this browser, and
+      // the removed one may not even have been this device's.
+      if (rows.length <= 1 && rows.some((p) => p.id === id)) forgetPasskey();
       invalidate();
     },
   });
