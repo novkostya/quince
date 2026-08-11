@@ -34,11 +34,16 @@ fi
 
 IMAGE="${IMAGE:-quince:local}"
 NAME="storageless-smoke-$$"
+# THE SECOND ARM'S CONTAINER (quince#817). A storageless start has TWO causes — no config at all,
+# and a config that no longer parses — and they present as one symptom. They need two containers,
+# because the cause is a file that has to exist before the daemon starts.
+NAME2="$NAME-invalid"
 WORK=$(mktemp -d)
 PORT="${PORT:-0}"
 
 cleanup() {
 	"$RUNTIME" rm -f "$NAME" >/dev/null 2>&1 || true
+	"$RUNTIME" rm -f "$NAME2" >/dev/null 2>&1 || true
 	rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
@@ -48,13 +53,18 @@ if [ "$PORT" = "0" ]; then
 	# fail as though the product were broken — the most expensive possible disguise.
 	PORT=$(awk 'BEGIN{srand();print 20000+int(rand()*20000)}')
 fi
+PORT2=$((PORT + 1))
 
-mkdir -p "$WORK/data" "$WORK/cache"
+mkdir -p "$WORK/data" "$WORK/cache" "$WORK/invalid-data" "$WORK/invalid-cache"
 
+# LOGFROM is which container's log a failure dumps. It exists because there are two arms now: a
+# failure in the second one that printed the FIRST container's log would send a reader to a healthy
+# daemon and read as "the log says nothing is wrong".
+LOGFROM="$NAME"
 fail() {
 	echo "storageless-smoke: FAILED — $1" >&2
-	echo "--- container log ---" >&2
-	"$RUNTIME" logs "$NAME" 2>&1 | tail -30 >&2
+	echo "--- container log ($LOGFROM) ---" >&2
+	"$RUNTIME" logs "$LOGFROM" 2>&1 | tail -30 >&2
 	exit 1
 }
 
@@ -108,6 +118,16 @@ code=$(curl -s -b "$JAR" -o "$WORK/probe.json" -w '%{http_code}' -X POST \
 [ "$code" = "200" ] || fail "the storage probe = $code, want 200 — the form cannot work without it"
 echo "  ok  the probe answers, so the first-run form can be filled in"
 
+# NO WARNINGS ON THIS ARM, and it is half of a PAIR — the other half is the invalid-config arm at
+# the foot of this file (quince#817). Neither assertion means much alone: "warnings is empty" is
+# only interesting beside a start where it is not, which is what makes the two causes of a
+# storageless start distinguishable to anything that reads them.
+curl -s -b "$JAR" -o "$WORK/cfg-empty.json" "http://127.0.0.1:$PORT/api/config" \
+	|| fail "GET /api/config failed on a fresh install"
+warns=$(jq -r '.warnings | length' "$WORK/cfg-empty.json")
+[ "$warns" = "0" ] || fail "a fresh install reports $warns config warning(s), want 0 — $(jq -c .warnings "$WORK/cfg-empty.json")"
+echo "  ok  a fresh install carries NO config warnings (the other half of the pair below)"
+
 # THE WRITE THAT ENDS THE MODE, and the case six unit tests never covered: the FIRST storage, into a
 # config that has none.
 code=$(curl -s -b "$JAR" -o "$WORK/add.json" -w '%{http_code}' -X POST \
@@ -150,4 +170,86 @@ $(cat "$WORK/data/config.yml")"
 done
 echo "  ok  the first-run config.yml carries only what the caller sent"
 
-echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart"
+
+# ── THE SECOND CAUSE OF A STORAGELESS START: A CONFIG THAT NO LONGER PARSES (quince#817) ──────────
+#
+# quince#793 retired `storage.zfs.mode: exec` and made a config carrying it invalid. The REFUSAL was
+# measured at `config validate`; what nobody had watched was a running daemon meeting that file. The
+# reasoning was read off `NewService` → `Default()` (which leaves `Storage` nil) → `CheckStorages`,
+# and every step of it was read rather than executed.
+#
+# IT IS GATED HERE RATHER THAN IN ITS OWN TARGET because `storageless-smoke` is a separate CI step
+# and no agent seat can push a workflow (quince#113) — an arm costs nothing to wire, a new target
+# costs a `.github/workflows/**` write that would have to be relayed to the Operator.
+#
+# quince#818 IS WHY THIS IS WORTH A GATE RATHER THAN A ONE-OFF MEASUREMENT. That rung retires a
+# SECOND key — `hook_cmd`, replaced by structured `ssh_*` — with the same refusal shape, so every
+# existing zfs install restarts into exactly this path on upgrade. Whatever this arm proves for one
+# retired key it proves for both; if it ever stops being true, an upgrade finds out on somebody's
+# install instead of here.
+echo "storageless-smoke: second arm — a config that carries the retired \`zfs.mode: exec\`"
+
+cat > "$WORK/invalid-data/config.yml" <<'YML'
+storage:
+  - path: /cache
+    backend: zfs
+    zfs:
+      parent_dataset: pool/backups
+      mode: exec
+      hook_cmd: /usr/local/bin/quince-zfs-helper
+YML
+
+LOGFROM="$NAME2"
+"$RUNTIME" run -d --name "$NAME2" -p "$PORT2":8968 \
+	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
+	-v "$WORK/invalid-data":/data -v "$WORK/invalid-cache":/cache \
+	"$IMAGE" serve >/dev/null || fail "could not start the container with an invalid config"
+
+i=0
+while [ "$i" -lt 60 ]; do
+	if [ "$(status "http://127.0.0.1:$PORT2/api/health" /dev/null)" = "200" ]; then break; fi
+	i=$((i + 1))
+	sleep 1
+done
+# IT MUST NOT EXIT. An invalid config is the operator's to fix through the UI, and a daemon that
+# dies on one takes away the only surface that could tell them what is wrong.
+[ "$i" -lt 60 ] || fail "the daemon never answered /api/health against an invalid config — it exited rather than serving"
+echo "  ok  it SERVES against an invalid config, rather than exiting"
+
+code=$(status "http://127.0.0.1:$PORT2/api/devices" /dev/null)
+[ "$code" = "401" ] || fail "unauthenticated /api/devices = $code, want 401 (an invalid config must not make the setup state public)"
+echo "  ok  an unauthenticated caller still gets 401"
+
+JAR2="$WORK/jar2"
+t2=$(curl -s -b "$JAR2" -c "$JAR2" "http://127.0.0.1:$PORT2/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
+curl -s -b "$JAR2" -c "$JAR2" -o /dev/null -X POST -H 'Content-Type: application/json' \
+	-H "X-CSRF-Token: $t2" -d '{"password":"smoketest1"}' \
+	"http://127.0.0.1:$PORT2/api/auth/setup" || fail "could not set the admin password on the invalid-config daemon"
+
+code=$(status "http://127.0.0.1:$PORT2/api/devices" "$WORK/dev2.json" "$JAR2")
+[ "$code" = "503" ] || fail "authenticated /api/devices = $code, want 503 — an unusable config must reach the same setup state"
+grep -q storage_required "$WORK/dev2.json" || fail "the 503 did not carry storage_required"
+echo "  ok  it lands in the setup state, with storage_required"
+
+# THE ASSERTION THIS ARM EXISTS FOR. `Default()` leaves `Storage` nil, so *nil storage* is
+# indistinguishable from *never declared one* unless the warnings carry the real cause through —
+# quince#508 built that distinction, and this is what proves the wiring delivers it. Without this,
+# an operator is told "no storage declared" when the truth is "one line of your config is no longer
+# legal", which is a two-cause-one-symptom collapse this project has paid for before (quince#799).
+curl -s -b "$JAR2" -o "$WORK/cfg-invalid.json" "http://127.0.0.1:$PORT2/api/config" \
+	|| fail "GET /api/config failed on the invalid-config daemon"
+got=$(jq -r '[.warnings[] | select(.path == "storage[0].zfs.mode")] | length' "$WORK/cfg-invalid.json")
+[ "$got" = "1" ] || fail "no warning names storage[0].zfs.mode — the cause reaches the log and nothing else
+$(jq -c .warnings "$WORK/cfg-invalid.json")"
+jq -r '.warnings[] | select(.path == "storage[0].zfs.mode") | .message' "$WORK/cfg-invalid.json" \
+	| grep -q 'must be one of \[hook\]' \
+	|| fail "the warning does not carry the daemon's own remedy — a path with no message is a code, not an answer"
+echo "  ok  the CAUSE is surfaced over the API, naming storage[0].zfs.mode and its remedy"
+
+# AND THE FILE ITSELF COMES BACK, which is what any surface showing the operator their mistake has
+# to render (contracts §6: `file_text` is the file as it is on disk, read at request time).
+grep -q 'mode: exec' "$WORK/cfg-invalid.json" || fail "file_text does not carry the operator's own config"
+echo "  ok  file_text carries the offending file, so a surface has something to show"
+
+echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart, and an
+  invalid config reaches the same setup state with its cause carried through rather than lost"
