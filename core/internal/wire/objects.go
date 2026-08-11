@@ -429,3 +429,18 @@ type Passkey struct {
 	// timestamp, because a credential nobody has signed in with is exactly the one worth removing.
 	LastUsedAt *string `json:"last_used_at"`
 }
+
+// PasskeyList is GET /api/auth/passkeys' response (qn.6k).
+//
+// It carries the CURRENT relying party alongside the rows, so the Settings surface can mark the
+// credentials that will not work at this address without deriving the domain itself. A browser can
+// read `location.hostname`, but it cannot know what quince considered the rpId — behind a proxy the
+// two agree only if the proxy preserves `Host`, which is precisely what can be misconfigured
+// (deploy/tls.md). Sending it makes the UI's warning agree with the server's behaviour.
+type PasskeyList struct {
+	Passkeys []Passkey `json:"passkeys"`
+	RPID     string    `json:"rp_id"`
+	// Supported is false where this address cannot be a relying party at all — a bare IP, or a
+	// name with no dot. The surface refuses to offer a button that cannot work (spec story 4).
+	Supported bool `json:"supported"`
+}

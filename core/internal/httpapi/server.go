@@ -123,6 +123,9 @@ func NewRouter(deps Deps) http.Handler {
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/begin", deps.handlePasskeyLoginBegin())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/finish", deps.handlePasskeyLoginFinish())
+		apiMux.HandleFunc("GET /api/auth/passkeys", deps.handlePasskeyList())
+		apiMux.HandleFunc("DELETE /api/auth/passkeys/{id}", deps.handlePasskeyDelete())
+		apiMux.HandleFunc("PATCH /api/auth/passkeys/{id}", deps.handlePasskeyRename())
 	}
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())

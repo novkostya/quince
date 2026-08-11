@@ -119,6 +119,28 @@ POST /api/auth/passkeys/login/finish?ceremony=<key>  → 200 {state, csrf_token}
      // 429 rate limited · 409 passkey_rp_mismatch · 400 no_ceremony
 ```
 
+Passkeys — management (qn.6k):
+
+```
+GET    /api/auth/passkeys        → 200 {passkeys: [...], rp_id, supported}
+       // SESSION REQUIRED. Each row: {id, name, rp_id, created_at, last_used_at|null}. NO public
+       // key and NO credential material — the list exists so a human can recognise a device and
+       // remove it, and sending more would widen what a compromised session can enumerate.
+       // `rp_id` is what THIS request resolved to and `supported` is whether it can be a relying
+       // party at all, so the surface can mark rows bound to another address, and refuse to offer
+       // a button on a tier that cannot work, WITHOUT re-deriving the domain in the browser.
+DELETE /api/auth/passkeys/{id}   → 204
+       // SESSION REQUIRED. 204 WHETHER OR NOT A ROW WENT: removing a credential that is already
+       // gone is the state the caller wanted, and a 404 would make a retry, or a second tab, look
+       // like a failure the user must act on.
+PATCH  /api/auth/passkeys/{id} {name} → 200 {passkey}
+       // SESSION REQUIRED. 404 when there is no such credential — UNLIKE delete, because the
+       // caller asked for a specific end state that did not happen. 422 name_required.
+       // THE NAME IS THE ONLY MUTABLE FIELD: everything else is the authenticator's or a fact
+       // about creation, and a setter that could reach them would be a way to make the record
+       // disagree with the credential it describes.
+```
+
 **THE ASSERTION PAIR IS IN THREE EXACT-PATH LISTS, NOT TWO** — the pre-auth exemption, the
 storageless-reachable set (a storageless install is exactly where onboarding offers a passkey), and
 **the CSRF exemption**, because no CSRF cookie exists before login. The third was not anticipated

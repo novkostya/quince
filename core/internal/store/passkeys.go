@@ -154,3 +154,38 @@ func (s *Store) TouchPasskey(credentialID string, signCount uint32, usedAt time.
 		signCount, fmtTime(usedAt), credentialID)
 	return err
 }
+
+// DeletePasskey removes one credential, returning whether a row went.
+//
+// Absent is NOT an error: two tabs removing the same credential, or a retry after a dropped
+// response, both arrive here second and both should read as "it is gone" rather than as a failure
+// the user has to interpret.
+func (s *Store) DeletePasskey(credentialID string) (deleted bool, err error) {
+	res, err := s.db.Exec(`DELETE FROM passkeys WHERE credential_id = ?`, credentialID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// RenamePasskey changes the user-chosen label, returning whether a row went.
+//
+// The NAME is the only mutable field, deliberately. Everything else on the row is either the
+// authenticator's (the key, the counter, the AAGUID) or a fact about when it was created — none of
+// it is quince's to edit, and a setter that could reach them would be a way to make the record
+// disagree with the credential it describes.
+func (s *Store) RenamePasskey(credentialID, name string) (renamed bool, err error) {
+	res, err := s.db.Exec(`UPDATE passkeys SET name = ? WHERE credential_id = ?`, name, credentialID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
