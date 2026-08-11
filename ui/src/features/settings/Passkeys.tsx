@@ -37,7 +37,9 @@ export function Passkeys() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del<void>(`/api/auth/passkeys/${encodeURIComponent(id)}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+    },
   });
 
 
@@ -55,7 +57,7 @@ export function Passkeys() {
   const supported = data?.supported === true;
 
   return (
-    <div className="mt-8 max-w-xl">
+    <div className="mt-8">
       <h2 className="text-sm font-semibold text-muted">Passkeys</h2>
       <p className="mt-3 text-sm text-muted">
         Sign in with Face ID or Touch ID instead of typing your password. Your password keeps working

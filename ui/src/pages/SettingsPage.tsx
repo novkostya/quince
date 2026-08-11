@@ -48,6 +48,17 @@ export function SettingsPage() {
             <div className="mt-3">
               <ConfigEditor config={data.config} />
             </div>
+            {/* IN THE SETTINGS COLUMN, ABOVE THE FILE — Operator-directed, and it is the right
+                reading of the page. Passkeys are a thing you CHANGE, so they belong beside the other
+                things you change rather than after the read-only dump of the file. On a phone the
+                columns stack, so this also puts them ahead of a config listing that is long enough
+                to bury anything below it — which is how they were first seen, and why it was raised.
+
+                THE COST, STATED: this is inside the `data` guard, so a box whose config fails to
+                load now shows no passkey surface either. That was the one argument for keeping it
+                outside, and it is the weaker one — a Settings page that cannot read its own config
+                is broken in a way the password login already handles. */}
+            <Passkeys />
           </div>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-muted">Current configuration</h2>
@@ -57,13 +68,6 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
-
-      {/* OUTSIDE THE CONFIG BLOCK, deliberately. Passkeys are not configuration — they are not in
-          `config.yml`, they add no key, and they survive a config reload untouched (qn.6k). Putting
-          them inside would imply an editing path that does not exist, which is the same class of
-          claim the intro paragraph above exists to correct. It also means they render on a box
-          whose config failed to load, which is exactly when signing in matters. */}
-      <Passkeys />
     </section>
   );
 }
