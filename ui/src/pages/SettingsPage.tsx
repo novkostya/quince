@@ -1,6 +1,7 @@
 import { useConfig } from "@/lib/config";
 import { ConfigView } from "@/features/settings/ConfigView";
 import { ConfigEditor } from "@/features/settings/ConfigEditor";
+import { Passkeys } from "@/features/settings/Passkeys";
 
 export function SettingsPage() {
   const { data, isLoading, isError } = useConfig();
@@ -56,6 +57,13 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+
+      {/* OUTSIDE THE CONFIG BLOCK, deliberately. Passkeys are not configuration — they are not in
+          `config.yml`, they add no key, and they survive a config reload untouched (qn.6k). Putting
+          them inside would imply an editing path that does not exist, which is the same class of
+          claim the intro paragraph above exists to correct. It also means they render on a box
+          whose config failed to load, which is exactly when signing in matters. */}
+      <Passkeys />
     </section>
   );
 }
