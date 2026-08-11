@@ -36,9 +36,20 @@ recorded for the journal's letter ids.
 **WHETHER THIS IS A RUNG AT ALL IS THE OPERATOR'S, AND quince#841 SAYS SO IN AS MANY WORDS.** The
 alternative is a `§8` amendment to `qn.6k`'s spec. This document assumes the rung, following
 `qn.6k`'s own precedent — allocate, state the assumption in a section of its own, and name the cheap
-reversal. **A directory rename before this PR merges costs nothing; reversing it after code exists
-costs a great deal.** If the Operator wants an amendment instead, or wants `qn.6l`, say so on this PR
-and the rename is the whole of the change.
+reversal. If the Operator wants an amendment instead, or wants `qn.6l`, the rename is the whole of
+the change.
+
+**THE QUESTION IS STILL UNANSWERED, AND THE ESCAPE HATCH THIS PARAGRAPH OFFERED HAS CLOSED.** It read
+*"a directory rename before this PR merges costs nothing"* — and this spec merged as quince#842,
+after which six more PRs cited `qn.6m` in their titles, bodies and commit messages, and
+`docs/contracts.md` gained two blocks naming `qn.6m D3` and `D4`. A rename is now a change across
+merged canon and a set of unrewritable commit messages rather than a `git mv`.
+
+**That is not an argument for leaving it undecided — it is the cost of the decision, stated where it
+was previously understated.** Nothing here is irreversible; the letter is a label, the code does not
+read it, and correcting it later costs a documentation sweep rather than any behaviour. Recorded
+because a sentence promising a cheap reversal, left standing past the moment it was cheap, is the
+defect this project files most often.
 
 ---
 
@@ -326,21 +337,41 @@ called done**; neither blocks a PR.
 
 Sequenced from `main`, **not stacked**.
 
-| | | contracts? |
-| --- | --- | --- |
-| **1** | **this spec** | no |
-| **2** | **sign out in the shell** (D8) — wiring an endpoint that already exists and has no caller | no |
-| **3** | **the auth screens become plain pages** (D1, D2) — the `AuthPage` shell; login keeps its card | no |
-| **4** | **the combined first-run screen**: password + optional passkey, one page. **Deletes `OnboardingPasskeyPage` and closes quince#840** | no |
-| **5** | **the password becomes mutable** — change + remove, **D3's redefinition**, the demo stand-in, `contracts.md` | **YES** |
-| **6** | **`/settings/auth`** (ruling A) — the settings-side page, consuming slice 5 | no |
-| **7** | **first-run passwordless** — D5's pre-auth pair, `contracts.md`, and the offer on slice 4's screen | **YES** |
+| | | contracts? | |
+| --- | --- | --- | --- |
+| **1** | **this spec** | no | quince#842, **merged** |
+| **2** | **sign out in the shell** (D8) — wiring an endpoint that already existed and had no caller | no | quince#843, **merged** |
+| **3** | **the auth screens become plain pages** (D1, D2) — the `AuthPage` shell; login keeps its card | no | quince#844, **merged** |
+| **4** | **the combined first-run screen**: password + optional passkey, one page. **Deleted `OnboardingPasskeyPage`; closed quince#840** | no | quince#845, **merged** |
+| **5a** | **`configured` = a password OR a passkey** — D3 alone | **YES** | quince#847, **merged** |
+| **5b** | **the password becomes mutable** — change + remove, the demo stand-in | **YES** | quince#851 |
+| **6a** | **`/settings/auth` exists** (ruling A) — the page, and the passkeys card moves onto it | no | quince#853, **merged** |
+| **6b** | **the password controls on that page** — consumes 5b | no | not open |
+| **7** | **first-run passwordless** — D5's pre-auth pair, `contracts.md`, and the offer on slice 4's screen | **YES** | not open |
 
-**Slices 2, 3, 4 and 6's shell do not wait behind a code-owner approval**, which is what quince#841
+**SEVEN SLICES BECAME NINE, AND THIS TABLE STILL SAID SEVEN AFTER SIX OF THEM HAD MERGED.** Corrected
+here rather than quietly, because `CLAUDE.md` names a status table as the second thing that describes
+the whole and is therefore stale by default after every flip — the defect quince#408 and quince#409
+were filed for, arriving in the document that cites them. Both splits were deliberate, both were made
+at build time, and both contradict what this section originally argued, so the arguments are corrected
+rather than deleted.
+
+**5 SPLIT, AND THE PARAGRAPH ARGUING IT SHOULD NOT WAS RIGHT ABOUT A DIFFERENT CUT.** It said *"change
+and remove are one claim, and D3's redefinition belongs to neither of them alone — splitting it would
+leave the security change homeless."* That is true of splitting **change from remove**, which was not
+done. The cut actually made was **D3 away from both**, which gives the security change its own home
+instead of taking one away: 5a lands the guard, alone and reviewable, **before anything can create the
+state it defends against**. Same ordering ruling `qn.6k` used to put `quince auth reset` ahead of the
+first credential.
+
+**6 SPLIT FOR A REASON THAT DID NOT EXIST WHEN THIS WAS WRITTEN.** The settings page consumes 5b's
+endpoints, and 5b sits behind a code-owner review that 6 does not need. Building both together meant
+either stacking on 5b's branch — which `CLAUDE.md` §1 rules against — or landing UI whose buttons 404
+if the merge order slips. So 6a ships the page and the card move, calling **no endpoint that does not
+already exist**, and 6b adds the controls once 5b lands.
+
+**Slices 2, 3, 4, 6a and 6b do not wait behind a code-owner approval**, which is what quince#841
 asked for.
-
-**5 is ONE PR and not two.** Change and remove are one claim — *the password is mutable* — and D3's
-redefinition belongs to neither of them alone. Splitting it would leave the security change homeless.
 
 **7 is separate from 4 on purpose.** Slice 4 delivers a genuinely combined screen using only surfaces
 that exist; the *passwordless* option on it needs D5's endpoints, so it arrives with them rather than
