@@ -63,6 +63,8 @@ func run(args []string) error {
 		return versionsCmd(args[1:])
 	case "device":
 		return deviceCmd(args[1:])
+	case "auth":
+		return authCmd(args[1:])
 	case "config":
 		return configCmd(args[1:])
 	case "version":
@@ -83,6 +85,7 @@ func usage() {
 		"  quince backup <udid> [--transport usb|wifi|auto]   drive one backup to completion\n"+
 		"  quince versions verify <id> | --udid <udid>        re-run structural verification\n"+
 		"  quince device reset-working <udid>                 discard the dirty working/\n"+
+		"  quince auth reset --yes                            clear the admin password + every passkey\n"+
 		"  quince config validate [path]                      validate config.yml\n"+
 		"  quince version                                     print version\n", version.String())
 }

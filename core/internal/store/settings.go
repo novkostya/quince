@@ -25,6 +25,21 @@ func (s *Store) SetSetting(key, value string) error {
 	return err
 }
 
+// DeleteSetting removes key, returning whether a row went. Absent is not an error: the caller that
+// wants "was there one?" gets the bool, and `quince auth reset` on a box that was never set up is a
+// legitimate no-op rather than a failure.
+func (s *Store) DeleteSetting(key string) (deleted bool, err error) {
+	res, err := s.db.Exec(`DELETE FROM settings WHERE key = ?`, key)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // SetSettingIfAbsent inserts key only if it does not already exist, returning whether the
 // insert happened. It is the atomic primitive behind the first-run set-password guard
 // (auth.SetPassword → 409 if a password already exists).
