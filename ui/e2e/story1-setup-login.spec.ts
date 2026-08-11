@@ -14,6 +14,17 @@ test("set password, land in the shell, devices appear, reload keeps session", as
   await expect(anchor).toHaveValue("quince-admin");
   await expect(anchor).toHaveAttribute("autocomplete", "username");
 
+  // THE ANCHOR MUST NOT TAKE THE FOCUS THE PASSWORD WANTS — quince#824. Asserted in a real browser
+  // because that is where `autoFocus` actually runs; jsdom pins the attributes, this pins the
+  // outcome. Measured on both engines before the fix: `focused=input#password` in Chromium and
+  // WebKit, with the read-only anchor sitting at `tabindex=0` ahead of it.
+  //
+  // ON iOS THIS ASSERTION IS STILL TRUE AND THE KEYBOARD STILL WILL NOT OPEN, which is not a
+  // regression to hunt: iOS declines to raise the keyboard for a focus that did not come from a
+  // user gesture. Do not add timers or extra `.focus()` calls trying to beat it.
+  await expect(page.locator("#password")).toBeFocused();
+  await expect(anchor).toHaveAttribute("tabindex", "-1");
+
   await page.getByLabel("Password").fill("demo");
   await page.getByRole("button", { name: /set password/i }).click();
 

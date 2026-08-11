@@ -172,7 +172,10 @@ export function EncryptionDialog({
                   a settings screen is how identifiers escape. Rendered in every mode, since the
                   anchor is a property of the credential rather than of the action.
 
-                  See `PasswordForm` for why this is `readOnly` and visible rather than suppressed. */}
+                  See `PasswordForm` for why this is `readOnly` and visible rather than suppressed,
+                  and for why `tabIndex={-1}` costs nothing with autofill (quince#824). Here it also
+                  keeps the first Tab inside the dialog landing on a password field rather than on
+                  a label the user cannot edit. */}
               <div className="flex flex-col gap-1">
                 <Label htmlFor="enc-device">Device</Label>
                 <Input
@@ -181,6 +184,7 @@ export function EncryptionDialog({
                   type="text"
                   autoComplete="username"
                   readOnly
+                  tabIndex={-1}
                   value={credentialName}
                 />
               </div>
