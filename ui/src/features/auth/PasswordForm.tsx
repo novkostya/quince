@@ -17,6 +17,7 @@ export function PasswordForm({
   cta,
   notice,
   extra,
+  footer,
   variant = "card",
   passkeys = false,
   onPasskey,
@@ -28,6 +29,10 @@ export function PasswordForm({
   notice?: ReactNode;
   // Rendered between the password field and the submit button — the setup surface's passkey offer.
   extra?: ReactNode;
+  // Rendered AFTER the submit button and the passkey sign-in button — a secondary path away from
+  // this form entirely (first-run passwordless, qn.6m D5), rather than another input to it. Below
+  // the primary action because that is what "secondary" means on a screen with one obvious job.
+  footer?: ReactNode;
   // `card` DEFAULT, `page` on setup — ruling A on quince#841, spec D1. Login is not an onboarding
   // step and keeps the card, so the default is the shape that must not change rather than the one
   // being introduced: a surface that forgets to pass this stays exactly as it was.
@@ -214,6 +219,7 @@ export function PasswordForm({
             Sign in with a passkey
           </Button>
         ) : null}
+        {footer}
       </>
     </AuthPage>
   );

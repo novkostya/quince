@@ -187,6 +187,45 @@ failing the way "no credential here" fails — `docs/specs/qn.6k/qn.6k.md` D2.
 **NEITHER REGISTRATION ENDPOINT IS PRE-AUTH, so neither joins any exact-path list.** Registration is
 something an authenticated admin does.
 
+First-run passkey registration — **a DIFFERENT pair, pre-auth and one-shot** (qn.6m D5):
+
+```
+POST /api/auth/setup/passkey/begin  → 200 {ceremony, options}
+     // PRE-AUTH, and `POST /api/auth/setup`'s sibling: first run has no session because
+     // creating one is what this does. 409 already_configured the moment Configured() is
+     // true — a password OR any passkey — so it closes as soon as the install is claimed.
+     // 429 rate_limited, THE SAME BUCKET as login and setup · 426 insecure_origin
+     // 409 passkeys_unsupported_here, as the authenticated begin is.
+POST /api/auth/setup/passkey/finish?ceremony=<key>&name=<label>
+                                    → 200 {state, csrf_token} + session cookie
+     // PRE-AUTH. ISSUES A SESSION, exactly as POST /api/auth/setup does — the caller has
+     // just proved possession of a credential this install now holds.
+     // THE RESPONSE IS AuthStatus, NOT the 201 {passkey} the authenticated finish returns:
+     // this call's outcome is "you are signed in", not "here is a row you can manage".
+     // 409 already_configured — RE-CHECKED HERE, not only at begin: two ceremonies can begin
+     // on a virgin install, the credential write decides, and the loser must be refused
+     // rather than silently adding a second admin credential to somebody else's box.
+     // 400 no_ceremony · 400 passkey_rejected · 422 name_required · 409 passkey_rp_mismatch
+```
+
+**THIS PAIR IS IN ALL THREE EXACT-PATH LISTS, AND THE AUTHENTICATED PAIR IS STILL IN NONE.** They
+look almost identical and belong on opposite sides of every list, which is why
+`passkey_allowlist_test.go` asserts both directions by exact path.
+
+**WHY A SECOND PAIR RATHER THAN EXEMPTING THE FIRST.** `authExempt` is exact-path **and
+unconditional**, and that is its whole value; making membership depend on `needs_setup` would put the
+first state test into the one structure that has none. The alternative considered and rejected was
+generating a throwaway password, registering, then deleting it — which needs no new endpoint and
+locks the user out of their own install if registration fails in the window, by a password they never
+saw.
+
+**AND WHY IT ADDS NO EXPOSURE.** First run is **already** first-come-first-served for the password:
+anyone who can reach an unconfigured quince can call `POST /api/auth/setup` and own it. This makes it
+first-come-first-served for a credential on the same terms and behind the same one-shot guard.
+**What is NOT atomic** is the check-then-write across a ceremony pair, so two registrations begun
+simultaneously on a virgin install can both finish; both belong to whoever was at the machine during
+first run, and `quince auth reset` removes every credential.
+
 Passkeys — assertion (qn.6k):
 
 ```

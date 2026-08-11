@@ -80,7 +80,11 @@ func authExempt(r *http.Request) bool {
 		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
 		// Registration is deliberately NOT here: it needs a session, which is what makes it the
 		// half that touches none of these lists.
-		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish":
+		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish",
+		// FIRST-RUN PASSKEY REGISTRATION IS PRE-AUTH BY THE SAME LOGIC AS `POST /api/auth/setup`
+		// (qn.6m D5): first run has no session, and creating one is what it does. One-shot — 409 once
+		// `Configured()` is true — so it closes the instant the install is claimed.
+		"POST /api/auth/setup/passkey/begin", "POST /api/auth/setup/passkey/finish":
 		return true
 	}
 	return false
@@ -128,7 +132,9 @@ func csrfExempt(r *http.Request) bool {
 		// no CSRF cookie before login, and the assertion pair is how a passkey user gets one, so
 		// omitting it here would make passkey sign-in fail on the double-submit check with a
 		// message about CSRF rather than about anything the user did.
-		"/api/auth/passkeys/login/begin", "/api/auth/passkeys/login/finish":
+		"/api/auth/passkeys/login/begin", "/api/auth/passkeys/login/finish",
+		// First-run passkey registration (qn.6m D5): no CSRF cookie exists before a session does.
+		"/api/auth/setup/passkey/begin", "/api/auth/setup/passkey/finish":
 		return true
 	}
 	return false
@@ -179,7 +185,11 @@ func setupAllowed(r *http.Request) bool {
 		"POST /api/storages/probe", "POST /api/storages/probe/hook",
 		// A STORAGELESS INSTALL IS EXACTLY WHERE ONBOARDING OFFERS A PASSKEY, so signing in with
 		// one has to work here or the offer leads somewhere unusable (qn.6k).
-		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish":
+		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish",
+		// First-run passkey registration (qn.6m D5). A storageless install IS the onboarding state,
+		// which is exactly where the passwordless option is offered — omitting these would 503 the
+		// one path this rung exists to open.
+		"POST /api/auth/setup/passkey/begin", "POST /api/auth/setup/passkey/finish":
 		return true
 	}
 	return false
