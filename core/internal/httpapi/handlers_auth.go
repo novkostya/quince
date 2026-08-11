@@ -141,3 +141,70 @@ func (d Deps) handleAuthLogout() http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+// changePasswordBody is PUT /api/auth/password (qn.6m D4).
+//
+// `current_password` IS OMITTED, NOT EMPTY, on a passwordless install — but the two arrive
+// identically as JSON and the server decides which case applies from its own state, so there is no
+// client-supplied flag to get wrong here. Both fields travel in the BODY, never the query: they are
+// credentials, and the secrets rule keeps them out of argv, env and any URL that could be logged.
+type changePasswordBody struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// PUT /api/auth/password — change the admin password. SESSION REQUIRED (authGuard).
+func (d Deps) handleChangePassword() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body changePasswordBody
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
+			return
+		}
+		err := d.PasswordAdmin.ChangePassword(body.CurrentPassword, body.NewPassword, d.Proxies.ClientIP(r))
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, ErrPasswordAdminUnavailable):
+			// 503 AND THE REASON, not a hidden control — the demo carve-out (qn.6m D6).
+			writeError(w, d.Log, http.StatusServiceUnavailable, "unavailable", err.Error())
+		case errors.Is(err, auth.ErrRateLimited):
+			writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+		case errors.Is(err, auth.ErrBadPassword):
+			// 401 — the CURRENT password was wrong. Deliberately the same code the login form uses
+			// for the same mistake, so a client need not learn a second spelling of it.
+			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
+		case errors.Is(err, auth.ErrWeakPassword):
+			writeError(w, d.Log, http.StatusUnprocessableEntity, "weak_password", "password does not meet requirements")
+		default:
+			d.Log.Error("change password failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not change password")
+		}
+	}
+}
+
+// DELETE /api/auth/password — go passwordless. SESSION REQUIRED (authGuard).
+//
+// The rpId comes from the REQUEST rather than from the client, exactly as every other passkey
+// surface derives it: what matters is the address this call actually arrived on, and a client-named
+// domain would let a caller talk itself past the lockout guard.
+func (d Deps) handleRemovePassword() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := d.PasswordAdmin.RemovePassword(auth.RPIDFromRequest(r), d.Proxies.ClientIP(r))
+		var lastCred auth.ErrLastCredential
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, ErrPasswordAdminUnavailable):
+			writeError(w, d.Log, http.StatusServiceUnavailable, "unavailable", err.Error())
+		case errors.As(err, &lastCred):
+			// 409 AND THE ERROR'S OWN SENTENCE. It names the address this request arrived on and the
+			// addresses the credentials it found belong to, which is the difference between a
+			// mystery and an instruction — the same reasoning as passkey_rp_mismatch.
+			writeError(w, d.Log, http.StatusConflict, "last_credential", lastCred.Error())
+		default:
+			d.Log.Error("remove password failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove password")
+		}
+	}
+}

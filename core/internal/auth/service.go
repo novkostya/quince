@@ -8,8 +8,10 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/id"
@@ -239,6 +241,119 @@ func (s *Service) SetPassword(password, clientIP string) error {
 		return ErrAlreadyConfigured
 	}
 	return nil
+}
+
+// ChangePassword sets a NEW admin password on an install that is already configured — qn.6m D4.
+//
+// SESSION REQUIRED (the handler enforces it) AND the CURRENT password besides, and the second is
+// not belt-and-braces. A session is proof of a PAST authentication, not of present possession, and
+// the one irreversible thing an attacker holding a stolen cookie can do is change the password and
+// keep the owner out. It costs the legitimate user one field they already know.
+//
+// `current` MAY BE EMPTY, AND EXACTLY WHEN NO PASSWORD EXISTS. On a passwordless install "change"
+// IS "set", and the state deciding which spelling applies is server-side anyway — so a separate
+// add-a-password endpoint would be a fourth spelling of one idea. Where a password DOES exist, an
+// empty `current` is simply a wrong one and takes the same 401.
+//
+// RATE-LIMITED ON THE SAME BUCKET as login and setup: it verifies a password, so it is a credential
+// endpoint, and somebody holding a session must not get a fresh budget to guess the current password
+// in. NOT reset on success — Login resets because a correct password is evidence the client is the
+// owner, where here the session already said that, so a reset would only hand budget back.
+func (s *Service) ChangePassword(current, next, clientIP string) error {
+	if !s.limiter.allow(clientIP, s.now()) {
+		return ErrRateLimited
+	}
+	if len(next) < s.minPasswordLen {
+		return ErrWeakPassword
+	}
+	hash, hasPassword, err := s.store.GetSetting(settingPasswordHash)
+	if err != nil {
+		return err
+	}
+	if hasPassword {
+		ok, err := verifyPassword(current, hash)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			s.audit("password_change_failed", clientIP)
+			return ErrBadPassword
+		}
+	}
+	newHash, err := s.hash(next, s.params)
+	if err != nil {
+		return err
+	}
+	// A plain Set, NOT SetSettingIfAbsent — this is the one path allowed to OVERWRITE the hash,
+	// which is why it is a distinct method rather than a flag on SetPassword. SetPassword's one-shot
+	// guard stays exactly as strict, because that is the PRE-AUTH one.
+	if err := s.store.SetSetting(settingPasswordHash, newHash); err != nil {
+		return err
+	}
+	s.audit("password_changed", clientIP)
+	return nil
+}
+
+// ErrLastCredential — removing the password would leave no way to sign in at THIS address.
+//
+// It carries what was actually found, so the refusal can name the addresses the credentials it DID
+// find belong to rather than answering "no passkeys" at a box that visibly has some. Same reasoning
+// as ErrRPIDMismatch: the bare version of this message reads as "quince is broken".
+type ErrLastCredential struct {
+	Presented string   // the rpId this request arrived on
+	Elsewhere []string // rpIds of credentials that exist but are bound elsewhere
+}
+
+func (e ErrLastCredential) Error() string {
+	if len(e.Elsewhere) == 0 {
+		return fmt.Sprintf("removing the password would leave no way to sign in: this quince holds "+
+			"no passkey for %q. Add a passkey first.", e.Presented)
+	}
+	return fmt.Sprintf("removing the password would leave no way to sign in at %q: the passkeys "+
+		"this quince holds are registered for %s, and a passkey only works at the address it was "+
+		"created on. Add a passkey for %q first.",
+		e.Presented, strings.Join(e.Elsewhere, ", "), e.Presented)
+}
+
+// RemovePassword makes this install PASSWORDLESS — qn.6m D4, permitted by ruling B on quince#841,
+// which superseded qn.6k's "a passkey is an addition, never a replacement".
+//
+// IT REFUSES UNLESS A PASSKEY EXISTS FOR **THIS** rpId, and that filter is the exact opposite of
+// Configured()'s. The two ask different questions, and saying so here is worth the lines because the
+// pair now sits in one file:
+//
+//	Configured()      has this install been CLAIMED?    → do NOT filter. Guards first-run setup.
+//	RemovePassword()  can the user still SIGN IN here?  → DO filter. Guards the lockout.
+//
+// A credential bound to another domain cannot sign in at this address, so counting it here would let
+// somebody remove their password and lock themselves out of their own backups — with the phone still
+// cheerfully listing a passkey that cannot help. That is qn.6k D2's hazard reached from the other
+// side, and `quince auth reset` (console access) would be the only way back.
+//
+// NOT RATE-LIMITED, deliberately: it verifies no credential, so there is nothing to guess. The
+// session guard is the whole of its protection, as for every other authenticated mutation.
+func (s *Service) RemovePassword(rpID, clientIP string) error {
+	rows, err := s.store.ListPasskeys()
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(rows))
+	elsewhere := make([]string, 0, len(rows))
+	for _, p := range rows {
+		if p.RPID == rpID {
+			// A usable credential exists — nothing else to check.
+			if _, err := s.store.DeleteSetting(settingPasswordHash); err != nil {
+				return err
+			}
+			s.audit("password_removed", clientIP)
+			return nil
+		}
+		if !seen[p.RPID] {
+			seen[p.RPID] = true
+			elsewhere = append(elsewhere, p.RPID)
+		}
+	}
+	return ErrLastCredential{Presented: rpID, Elsewhere: elsewhere}
 }
 
 // Login verifies the password (rate-limited first) and, on success, rotates to a fresh
