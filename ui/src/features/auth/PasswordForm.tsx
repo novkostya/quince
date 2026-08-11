@@ -7,13 +7,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
 import { signInWithPasskey } from "@/lib/webauthn";
+import { AuthPage, type AuthVariant } from "./AuthPage";
 
-// Shared full-page password form for first-run setup and login.
+// Shared password form for first-run setup and login. The BOX it sits in is `AuthPage`'s (qn.6m
+// slice 3); everything below is the fields, the errors and the two buttons.
 export function PasswordForm({
   title,
   subtitle,
   cta,
   notice,
+  variant = "card",
   passkeys = false,
   onPasskey,
   onSubmit,
@@ -22,6 +25,10 @@ export function PasswordForm({
   subtitle: string;
   cta: string;
   notice?: ReactNode;
+  // `card` DEFAULT, `page` on setup — ruling A on quince#841, spec D1. Login is not an onboarding
+  // step and keeps the card, so the default is the shape that must not change rather than the one
+  // being introduced: a surface that forgets to pass this stays exactly as it was.
+  variant?: AuthVariant;
   // passkeys arms conditional mediation on this form (qn.6k). FALSE ON THE SETUP PAGE, and
   // deliberately: there is nothing to sign in to before a password exists, and the browser would be
   // asked to offer a credential for an account that has not been created.
@@ -92,37 +99,11 @@ export function PasswordForm({
   }
 
   return (
-    // min-h-dvh (not 100vh) so it matches the visible area on a phone — no stray scroll. On a phone
-    // the form sits toward the top so the keyboard / Face ID sheet has room below it (dead-centering
-    // looks unbalanced once the sheet slides up); on desktop it centers. Safe-area padding keeps it
-    // clear of the status bar / side notch (qn.6a soak fixes).
-    //
-    // `dvh` IS RIGHT HERE, AND THE UNIT IS NOT THE THING TO CHANGE (quince#659). An issue was filed
-    // saying the opposite — that `dvh` with the toolbars hidden is "larger than the visible area" —
-    // and that is the definition of `lvh`. Per CSS Values 4 the dynamic viewport equals the SMALL
-    // viewport when the toolbars are expanded and the LARGE one when they retract, so it tracks what
-    // is visible in BOTH states:
-    //
-    //     svh   toolbars retracted: SHORTER than visible  |  expanded: equals visible
-    //     lvh   toolbars retracted: equals visible        |  expanded: TALLER than visible
-    //     dvh   toolbars retracted: equals visible        |  expanded: equals visible
-    //
-    // `min-h-svh` here would make the box shorter than the viewport whenever the toolbars retract —
-    // importing a background band onto the login screen to fix a problem that does not exist.
-    //
-    // WHAT `dvh` CAN DO is lag transiently during the toolbar animation, and whether that lag is a
-    // defect depends on the SCROLL STRUCTURE around it rather than on the unit. `/setup`, `/login`
-    // and `/onboarding/https` are siblings of the `AppLayout` route rather than children
-    // (`router.tsx`), so the DOCUMENT scrolls here and the worst a lag costs is a brief scroll that
-    // resolves itself. In the authed shell — `overflow-hidden`, no document scroll — the same lag
-    // puts content where no scroller reaches it. That is quince#649, and it is a property of that
-    // structure rather than of this unit.
-    <div className="flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-card border border-line bg-card p-6">
-        <div className="text-lg font-semibold tracking-tight">quince</div>
-        <h1 className="mt-4 text-base font-semibold">{title}</h1>
-        <p className="mt-1 text-sm text-muted">{subtitle}</p>
-        {notice}
+    // THE SHELL LIVES IN `AuthPage` NOW (qn.6m slice 3) — the `dvh` reasoning, the safe-area padding
+    // and the two box shapes moved there intact, because they are true of every auth surface and
+    // this component is no longer the only one.
+    <AuthPage variant={variant} title={title} subtitle={subtitle} notice={notice} onSubmit={submit}>
+      <>
         {/* THE ANCHOR, NOT A CHOICE THE USER HAS — quince#819. A password manager keys a credential
             on (origin, username). quince asks for two DIFFERENT passwords on one origin — this one
             and the per-device backup password in `EncryptionDialog` — and until this field existed
@@ -223,7 +204,7 @@ export function PasswordForm({
             Sign in with a passkey
           </Button>
         ) : null}
-      </form>
-    </div>
+      </>
+    </AuthPage>
   );
 }
