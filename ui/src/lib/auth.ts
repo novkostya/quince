@@ -24,3 +24,20 @@ export function setup(password: string): Promise<AuthStatus> {
 export function logout(): Promise<void> {
   return api.post<void>("/api/auth/logout");
 }
+
+// The password is MUTABLE since qn.6m slice 5b (contracts §1, quince#851).
+//
+// `current` IS OMITTED EXACTLY WHEN NO PASSWORD EXISTS — on a passwordless install "change" IS
+// "set", and the server decides which case applies from its own state. Sent as an empty string
+// rather than an absent key: the handler treats both identically, and one shape is fewer than two.
+export function changePassword(current: string, next: string): Promise<void> {
+  return api.put<void>("/api/auth/password", { current_password: current, new_password: next });
+}
+
+// removePassword makes this install passwordless. The server REFUSES with 409 `last_credential`
+// unless a passkey exists for THIS address — deliberately not re-checked here, because a second
+// implementation of an rpId rule is a thing that drifts, and the server's refusal already names the
+// addresses the credentials it found belong to.
+export function removePassword(): Promise<void> {
+  return api.del<void>("/api/auth/password");
+}
