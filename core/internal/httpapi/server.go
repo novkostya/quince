@@ -116,6 +116,12 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
+	// Registration needs a session, so these sit inside authGuard with everything else and touch
+	// neither exact-path allowlist. Registered only when the ceremony store is wired (qn.6k).
+	if deps.Passkeys != nil && deps.Store != nil {
+		apiMux.HandleFunc("POST /api/auth/passkeys/register/begin", deps.handlePasskeyRegisterBegin())
+		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
+	}
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
 	apiMux.HandleFunc("POST /api/config/storage", deps.handleConfigStorageAdd())

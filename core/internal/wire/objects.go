@@ -402,3 +402,30 @@ type StorageHookCheck struct {
 type StorageHookCheckResponse struct {
 	Check StorageHookCheck `json:"check"`
 }
+
+// PasskeyRegisterBegin is POST /api/auth/passkeys/register/begin's response (qn.6k).
+//
+// `options` is the WebAuthn `PublicKeyCredentialCreationOptions` structure VERBATIM as the library
+// produced it, passed to `navigator.credentials.create()` unmodified. It is deliberately `any`
+// rather than a mirrored Go type: the shape is the W3C spec's, it changes when the library's
+// conformance does, and a hand-maintained copy here would be a second definition that can drift
+// from the one actually signed over.
+type PasskeyRegisterBegin struct {
+	Ceremony string `json:"ceremony"`
+	Options  any    `json:"options"`
+}
+
+// Passkey is one registered credential as the API renders it (qn.6k).
+//
+// NO PUBLIC KEY AND NO CREDENTIAL ID. Neither is a secret, and neither is any use to the UI — the
+// list exists so a human can recognise a device and remove it. Sending them would widen what a
+// compromised session can enumerate for nothing.
+type Passkey struct {
+	ID        string `json:"id"`   // opaque handle for remove/rename; the credential id
+	Name      string `json:"name"` // what the user called it
+	RPID      string `json:"rp_id"`
+	CreatedAt string `json:"created_at"`
+	// LastUsedAt is null until the first successful assertion — "never used" rather than a zero
+	// timestamp, because a credential nobody has signed in with is exactly the one worth removing.
+	LastUsedAt *string `json:"last_used_at"`
+}

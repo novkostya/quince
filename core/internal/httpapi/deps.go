@@ -8,6 +8,7 @@ import (
 	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -53,6 +54,15 @@ type Deps struct {
 	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
 	// "trust nobody", which is the shipping default and today's behaviour.
 	Proxies *auth.TrustedProxies
+	// Store is the app DB, for surfaces that read rows rather than a domain model. Passkey
+	// registration is the first: a credential list is rows, and a service in front of four SQL
+	// statements would be a facade rather than a boundary (qn.6k).
+	Store *store.Store
+	// Passkeys holds in-flight WebAuthn ceremonies — in memory, two-minute TTL, single use. NIL
+	// WHEREVER PASSKEYS CANNOT BE BEGUN (the admin CLIs, test routers that do not exercise them),
+	// and the routes are not registered when it is, so a nil here is unreachable rather than a
+	// panic waiting.
+	Passkeys *auth.PasskeyCeremonies
 }
 
 // WorkingReset drives POST /api/devices/{udid}/reset-working (qn.5b, contracts §1): discard a

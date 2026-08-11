@@ -76,6 +76,35 @@ POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session 
 POST /api/auth/logout            → 204, clears the cookie.
 ```
 
+Passkeys — registration (qn.6k; Operator ruling on quince#657, 2026-08-11):
+
+```
+POST /api/auth/passkeys/register/begin  → 200 {ceremony, options}
+     // SESSION REQUIRED. `options` is the W3C PublicKeyCredentialCreationOptions verbatim, for
+     // navigator.credentials.create(). `ceremony` is an opaque SINGLE-USE key with a 2-minute
+     // TTL, held in memory and lost on restart — the remedy is to press the button again.
+     // 409 passkeys_unsupported_here when this address cannot be a relying party: an rpId must
+     // be a DOMAIN, so a bare IP is refused HERE rather than minting a credential that could
+     // never be used.
+POST /api/auth/passkeys/register/finish?ceremony=<key>&name=<label>  → 201 {passkey}
+     // SESSION REQUIRED. THE BODY BELONGS TO THE AUTHENTICATOR — it is the credential response,
+     // whose exact bytes are what the signature covers — so these two parameters are in the
+     // query rather than alongside it.
+     // 400 no_ceremony (expired or already used) · 400 passkey_rejected (failed verification)
+     // 409 passkey_rp_mismatch (the ceremony began on a different domain) · 422 name_required
+```
+
+**The rpId is DERIVED from the request host, never configured.** A pinned value that disagreed with
+the origin would fail every ceremony with nothing for the user to see, and deriving is the only thing
+that stays correct across the four `qn.6f` access tiers without editing YAML. It is **stored on the
+credential**, so a passkey presented on another tier can name the domain it belongs to instead of
+failing the way "no credential here" fails — `docs/specs/qn.6k/qn.6k.md` D2.
+
+**NEITHER ENDPOINT IS PRE-AUTH, so neither joins the two exact-path lists below.** Registration is
+something an authenticated admin does. **The assertion pair is pre-auth by necessity and must be
+added to BOTH lists when it lands** — the pre-auth exemption *and* the storageless-reachable one,
+because a storageless install is exactly the state where onboarding offers a passkey.
+
 Onboarding (qn.6f):
 
 ```

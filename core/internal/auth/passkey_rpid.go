@@ -81,3 +81,27 @@ func ResolveCredential(st *store.Store, credentialID, rpID string) (store.Passke
 	}
 	return pk, nil
 }
+
+// isUsableRPID reports whether this address can be a relying party at all.
+//
+// An rpId must be a DOMAIN. A bare IP cannot be one — a protocol constraint, not a certificate one,
+// so no amount of TLS work rescues the self-signed-at-an-IP tier, and refusing at registration beats
+// minting a credential that could never be used (spec story 4). `localhost` is permitted because
+// browsers treat it as a secure context, and it is how quince is reached in development.
+//
+// Deliberately NOT a fuller validity check: whether a real name is acceptable is the BROWSER's
+// judgement — it requires the rpId to be a registrable domain suffix of the origin — and duplicating
+// that here would be a second, weaker copy of a rule the client already enforces loudly at
+// registration.
+func isUsableRPID(rpID string) bool {
+	if rpID == "" {
+		return false
+	}
+	if rpID == "localhost" {
+		return true
+	}
+	if net.ParseIP(rpID) != nil {
+		return false
+	}
+	return strings.Contains(rpID, ".")
+}
