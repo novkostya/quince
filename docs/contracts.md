@@ -797,6 +797,8 @@ PUT /api/config   → full-document replace; validated then atomically written t
 POST /api/config/storage
                   → add one storage: 200 {config, warnings, source} | 422.
                     Splices SERVER-SIDE, for the identical reason the DELETE does.
+                    REFUSED 422 while the file on disk was DISCARDED at load — the
+                    splice would replace a config quince could not read. See below.
 DELETE /api/config/storage/{name}
                   → forget one storage: 200 {config, warnings, source} | 404 | 422.
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
@@ -855,6 +857,47 @@ it differs toward the question that was asked.
 quince#683's ruling put that check in `replaceLocked`, which `config.AddStorage` writes through — so
 this path inherits it along with `Validate` and `CheckStorages`. Two call sites for one invariant is
 how they diverge.
+
+**RULED and IMPLEMENTED: THE ADD IS REFUSED WHILE THE FILE ON DISK WAS DISCARDED AT LOAD**
+(Operator ruling 2026-08-12,
+[quince#852](https://github.com/novkostya/quince/issues/852)). A `422` whose `path` is the offending
+**config** path — `storage[0].zfs.mode`, not a field the caller typed — and whose message names that
+line, its message, the file, and the remedy.
+
+**It is the one refusal on this endpoint that is about the SERVER'S state rather than the caller's
+entry**, which is why it runs before every check above it: nothing the caller could type makes it
+right, and reporting it against a form field would name the wrong thing.
+
+**What it prevents was measured, not reasoned** (2026-08-12, real container). When `Load` cannot
+validate the file it returns `OK: false` and `Config: Default()` — so `Current()` has **no storage**,
+and a splice over it writes *defaults plus the new entry*. A `config.yml` declaring a zfs storage
+with a `parent_dataset` and a `hook_cmd` became three lines; the response carried `warnings: []`, so
+every surface afterwards reported health. No backup data was at risk. The operator's **declaration**
+was, by the single action the first-run screen invites.
+
+**`DISCARDED` IS NOT `HAS WARNINGS`, and conflating them would be a second bug.** A file that parses
+with warnings — an unknown key, which §6 makes a warning and never an error — keeps its `Storage`
+through the load, so a splice over it loses nothing. The guard is on the discard, so quince does not
+decline to work on a config it is perfectly happy to run.
+
+**The two alternatives were considered and ruled against.** A UI confirmation is a guard on the
+browser and `curl` walks around it, leaving the destructive path reachable by everything that is not
+the UI. Preserving the unparseable entries through the splice would have quince write back keys its
+own loader could not validate — a larger promise than this endpoint should make, and it yields a file
+that can be rewritten while containing something the daemon refuses to start on.
+
+**The remedy names a RESTART, and that is not padding.** There is no reload path (quince#727), so
+editing `config.yml` is not enough on its own; a remedy that left the operator pressing the same
+button again would be the wrong half of the answer.
+
+**`PUT /api/config` IS DELIBERATELY NOT REFUSED** by this guard, and the asymmetry is the point: a
+full-document replace is how an operator without shell access repairs the very file this refusal is
+about. A successful replace **clears** the discard record in the same process, so the guard cannot
+outlive the condition it guards against.
+
+**`DELETE /api/config/storage/{name}` needs no equivalent** — measured: on a discarded config
+`Current().Storage` is nil, so the forget answers `404` and writes nothing. The hazard is specific to
+the path that *adds* to a list it believes is empty.
 
 **Two fields are refused rather than defaulted, and both refusals are load-bearing:**
 

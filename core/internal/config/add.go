@@ -49,6 +49,14 @@ func (s *Service) AddStorage(entry StorageEntry) (AddOutcome, []wire.ConfigError
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
+	// REFUSED BEFORE ANYTHING ELSE WHEN THE FILE ON DISK COULD NOT BE READ (Operator ruling
+	// 2026-08-12, quince#852). This is the only refusal here that is about the SERVER'S state rather
+	// than the caller's entry, which is why it runs first: nothing the caller could type makes it
+	// right, and reporting a field error for it would name the wrong thing.
+	if errs := s.refuseIfConfigDiscarded(); len(errs) > 0 {
+		return AddRefused, errs, nil, nil
+	}
+
 	cur := s.Current()
 
 	if errs := validateAddition(entry, cur.Storage); len(errs) > 0 {
@@ -91,6 +99,63 @@ func (s *Service) AddStorage(entry StorageEntry) (AddOutcome, []wire.ConfigError
 		return AddRefused, errs, nil, nil
 	}
 	return AddDone, nil, warns, nil
+}
+
+// refuseIfConfigDiscarded is the ruled guard on quince#852: an operation must not silently destroy
+// the operator's declaration.
+//
+// WHAT IT PREVENTS, measured rather than reasoned (2026-08-12). With a `config.yml` carrying the
+// retired `storage.zfs.mode: exec`, `Load` discards the document and `Current()` is `Default()` with
+// no storage. One `POST /api/config/storage` then returned `200` and left the file holding ONLY the
+// new entry — the zfs storage, its parent dataset and its hook command gone, no undo, and
+// `warnings: []` in the response so every surface afterwards reported health.
+//
+// IT REFUSES RATHER THAN PRESERVING, and that was ruled against the two alternatives. A UI
+// confirmation is a guard on the browser and `curl` walks around it, leaving the destructive path
+// reachable by everything that is not the UI. Preserving the unparseable entries through the splice
+// would have quince write back keys its own loader could not validate — a larger promise than this
+// endpoint should make, and it produces a file that can be rewritten while containing something the
+// daemon refuses to run.
+//
+// THE REFUSAL NAMES THE LINE, and that is a requirement rather than a courtesy: `qn.6g` ruled that a
+// remedy the user cannot follow is the same defect as a silent failure, so "config invalid" with no
+// path would be this bug in a politer form. Everything needed is in hand — `Load` reported exactly
+// which key it choked on, and `GET /api/config` already serves the operator's own `file_text`
+// beside it.
+//
+// THE REMEDY NAMES A RESTART because there is no reload path: `Load` runs at construction and
+// nothing re-reads the file (quince#727). Editing `config.yml` is therefore not enough on its own,
+// and a remedy that leaves the operator pressing the same button again would be the wrong half of
+// the answer.
+func (s *Service) refuseIfConfigDiscarded() []wire.ConfigError {
+	s.mu.RLock()
+	errs := s.loadErrs
+	path := s.path
+	s.mu.RUnlock()
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	// THE FIRST ERROR IS THE ONE NAMED, and the count carries the rest. A caller adding one storage
+	// renders one sentence; listing every fault of a file they are about to open in an editor is
+	// less useful than telling them where to start and that there is more.
+	first := errs[0]
+	more := ""
+	if len(errs) > 1 {
+		more = fmt.Sprintf(" (and %d other problem(s) in the same file)", len(errs)-1)
+	}
+	return []wire.ConfigError{{
+		// KEYED ON THE OFFENDING CONFIG PATH, not on a form field, because no form field is wrong.
+		// A client that highlights by path will match nothing and fall back to showing the message,
+		// which is the correct behaviour here.
+		Path: first.Path,
+		Message: fmt.Sprintf(
+			"quince could not read %s, so it is running on defaults — adding a storage now would "+
+				"REPLACE that file and lose what it declares. The problem is %s: %s%s. Fix that line "+
+				"in %s and restart quince, then add the storage.",
+			path, first.Path, first.Message, more, path),
+	}}
 }
 
 // validateAddition reports what is wrong with THE ENTRY BEING ADDED, keyed on the field a form
