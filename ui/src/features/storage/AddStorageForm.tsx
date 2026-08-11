@@ -109,7 +109,10 @@ export function AddStorageForm({
   onSaved,
   footer,
 }: {
-  onSaved: () => void;
+  // onSaved CARRIES THE NEW STORAGE'S NAME, because one caller navigates to it (quince#846) and the
+  // other does not. `""` means the saved entry could not be found in the document that came back —
+  // see `save()` — and a caller must treat it as "somewhere sensible", never as a name.
+  onSaved: (name: string) => void;
   // footer renders the action row. It receives everything a caller needs to draw its own buttons
   // without reaching into this component's state.
   footer: (a: { save: () => void; canSave: boolean; saving: boolean; adopting: boolean }) => ReactNode;
@@ -206,9 +209,17 @@ export function AddStorageForm({
       // owner is asked to refetch rather than a key being invalidated. The applier has already
       // made the storage live server-side; this is the client catching up.
 
-
+      // WHICH ENTRY IS THE NEW ONE — matched on the path just saved, which is the probe's
+      // `clean_path` and is unique across entries by the schema's own rule. Not "the last one":
+      // the response is the config as RE-LOADED, so its order is the file's rather than an append.
+      //
+      // `name` is populated even when the user never wrote one — it defaults to `path` at load
+      // (quince#504), and this document went through a load. An empty answer therefore means the
+      // entry was not found at all, which the caller lands somewhere honest for rather than
+      // building a URL out of.
+      const created = (saved.config.storage ?? []).find((s) => s.path === probe.clean_path);
       reset();
-      onSaved();
+      onSaved(created?.name ?? "");
     } catch (e) {
       setError(serverSentence(e, "could not add that storage"));
     } finally {

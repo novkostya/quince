@@ -9,6 +9,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { DeviceDetailsPage } from "@/pages/DeviceDetailsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
+import { AddStoragePage } from "@/pages/AddStoragePage";
 
 export const router = createBrowserRouter([
   // OUTSIDE EVERY GUARD, and that is the decision rather than an oversight (qn.6f rung-ruled 6).
@@ -88,6 +89,16 @@ export const router = createBrowserRouter([
       { index: true, element: <DashboardPage /> },
       { path: "devices", element: <Navigate to="/" replace /> },
       { path: "devices/:udid", element: <DeviceDetailsPage /> },
+      // ADDING A STORAGE IS A DESTINATION, not an interruption (quince#846) — the same conclusion
+      // `/onboarding/storage` reached, now applied to the in-app route. It sits INSIDE the shell,
+      // unlike the first-run step: there is a Home to come back to and a sidebar that renders.
+      //
+      // IT SHADOWS A STORAGE NAMED `new`, and that is a real cost rather than a theoretical one.
+      // React Router ranks a static segment above `storage/:name`, so the shadow is deterministic
+      // — but a config that says `name: new` would make that storage's details page unreachable.
+      // Accepted because `name` defaults to the PATH (quince#504), which is absolute, so reaching
+      // it takes someone deliberately naming a storage after this route.
+      { path: "storage/new", element: <AddStoragePage /> },
       // Routed on NAME, not id: the API addresses a storage by its config name (quince#570), and a
       // name exists for every declared storage where an id does not — one that was never created
       // has none, and that is exactly the storage a user goes looking for.

@@ -1,11 +1,13 @@
+import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
+import { Plus } from "lucide-react";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
+import { Button } from "@/components/ui/button";
 import { DeviceCard } from "@/features/devices/DeviceCard";
 import { RescanButton } from "@/features/devices/RescanButton";
 import { VersionList } from "@/features/versions/VersionList";
 import { StorageCard } from "@/features/storage/StorageCard";
-import { AddStorage } from "@/features/storage/AddStorage";
 import { useStorages } from "@/features/jobs/useStorages";
 
 export function DashboardPage() {
@@ -98,9 +100,20 @@ export function DashboardPage() {
           )}
           {/* At the FOOT of its own section, matching Rescan under Devices. Not in a row with it:
               Rescan is idempotent and free, this writes config, and adjacency would imply they are
-              the same kind of act. */}
+              the same kind of act.
+
+              A LINK, NOT A DIALOG TRIGGER (quince#846). The placement is unchanged and deliberate:
+              a ghost button at the section foot, with `-ml-3` cancelling the size's `px-3` inset so
+              the label starts at the column margin — a ghost button has no background, so without
+              it the label reads as a stray indent. `asChild` keeps that appearance on a real
+              anchor, which is long-pressable, middle-clickable, and has a URL. */}
           <div className="mt-3">
-            <AddStorage onAdded={storages.reload} />
+            <Button asChild variant="ghost" size="sm" className="-ml-3">
+              <Link to="/storage/new" data-testid="add-storage">
+                <Plus size={14} />
+                Add storage
+              </Link>
+            </Button>
           </div>
         </div>
       ) : null}

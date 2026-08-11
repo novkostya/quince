@@ -35,8 +35,15 @@ test("Add storage sits at the foot of Storage, probes a real path, and reports t
   expect(addBox).not.toBeNull();
   expect(addBox!.y).toBeGreaterThan(headingBox!.y);
 
+  // IT IS A LINK, NOT A DIALOG TRIGGER (quince#846) — so it has a URL, and the URL is the claim.
+  await expect(add).toHaveAttribute("href", "/storage/new");
   await add.click();
-  await expect(page.getByRole("heading", { name: /add a storage/i })).toBeVisible();
+  await expect(page).toHaveURL(/\/storage\/new$/);
+  await expect(page.getByRole("heading", { name: /add a storage/i, level: 1 })).toBeVisible();
+  // NOTHING TO DISMISS. The dismissal is why the surface moved: quince#818 writes an SSH keypair to
+  // disk partway through this flow, and the dialog had no `onPointerDownOutside` or
+  // `onEscapeKeyDown` guard, so an outside tap discarded it silently.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // Nothing is offered before a probe: the form is probe-first, so there is nothing to save yet.
   await expect(page.getByTestId("add-storage-save")).toBeDisabled();
@@ -169,17 +176,20 @@ test("docs references in the add flow are links, not bare repo paths", async ({ 
   await page.getByTestId("probe-check").click();
   await page.getByTestId("backend-select").selectOption("zfs");
 
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("deploy/storage.md");
+  // SCOPED TO THE SHELL'S CONTENT REGION, which is the job `getByRole("dialog")` was doing until
+  // quince#846: bound the count to this surface, so a docs link elsewhere in the app cannot satisfy
+  // it. `<main>` is the outlet the router renders into; the sidebar and top bar are outside it.
+  const surface = page.locator("main");
+  await expect(surface).toContainText("deploy/storage.md");
 
   // EVERY occurrence is inside an anchor, asserted by counting rather than by finding one — a
   // single linked instance beside an unlinked one is the exact state this test exists to catch.
-  const mentions = await dialog.getByText("deploy/storage.md").count();
-  const links = await dialog.locator('a[href*="deploy/storage.md"]').count();
+  const mentions = await surface.getByText("deploy/storage.md").count();
+  const links = await surface.locator('a[href*="deploy/storage.md"]').count();
   expect(links).toBe(mentions);
   expect(links).toBeGreaterThan(0);
 
-  const href = await dialog.locator('a[href*="deploy/storage.md"]').first().getAttribute("href");
+  const href = await surface.locator('a[href*="deploy/storage.md"]').first().getAttribute("href");
   expect(href).toMatch(/^https:\/\/github\.com\/novkostya\/quince\/blob\/main\//);
 });
 
@@ -296,4 +306,89 @@ test("adding the first storage lands on Home and does not bounce back", async ({
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await page.waitForTimeout(500);
   expect(page.url()).not.toContain("/onboarding/storage");
+});
+
+// quince#846 — THE SURFACE IS A PAGE, AND THESE ARE THE THREE THINGS THAT BUYS. Each was either
+// impossible in a dialog or was the dialog's defect.
+//
+// The defect is the first one. `dialog.tsx` and the old `AddStorage.tsx` set no
+// `onPointerDownOutside` and no `onEscapeKeyDown`, so Radix's defaults applied and an outside tap
+// or `Escape` discarded five filled fields silently. After quince#818 the same tap would leave an
+// SSH keypair under `/data/keys/` that no storage references — a different class of loss, and the
+// reason this landed first.
+test("the add surface cannot be dismissed, back cancels it, and the next visit is a clean sheet", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await expect(page.getByTestId("backend-select")).toBeVisible();
+
+  // ESCAPE DOES NOTHING, which is the whole point. On the dialog this discarded everything.
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/storage\/new$/);
+  await expect(page.getByTestId("backend-select")).toBeVisible();
+
+  // BACK IS THE CANCEL — offered as a visible link, because a desktop user has no back gesture.
+  // Scoped to `main`: the shell's sidebar carries its own Home link, and the claim here is that
+  // THIS PAGE offers the way out, the way `StorageDetailsPage` and `DeviceDetailsPage` both do.
+  await expect(page.getByRole("main").getByRole("link", { name: /^home$/i })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+
+  // A CLEAN SHEET ON THE NEXT VISIT. The dialog got this from remounting on open; a page does not
+  // get it for free, and a stale probe result attached to a field the user is about to retype is
+  // worse than an empty form.
+  await page.getByTestId("add-storage").click();
+  await expect(page).toHaveURL(/\/storage\/new$/);
+  await expect(page.getByLabel("Path")).toHaveValue("");
+  await expect(page.getByTestId("backend-select")).toHaveCount(0);
+});
+
+// SUCCESS LANDS ON THE NEW STORAGE, not on Home — the dialog closed and left the user to find the
+// new card themselves.
+//
+// THE NAME COMES FROM THE RESPONSE, and the fixture proves it rather than allowing it: the returned
+// entry is named `shuttle` while its path is `/tmp`, so a client that assumed name-equals-path, or
+// that guessed from what it typed, would route somewhere else. `name` defaults to `path` at config
+// LOAD (quince#504) and this document went through one, so the field is always populated — the
+// difference is only visible when the two disagree, which is why they do here.
+//
+// `/api/config/storage` IS INTERCEPTED for the same reason the first-run tests intercept
+// `/api/config`: the state under test belongs to the CLIENT — where does it route — and `--demo`
+// serves a fabricated storage list, so a real add could not be followed to a details page anyway.
+// What that page RENDERS is story 7's; this asserts only where the user is put.
+test("a successful add lands on the new storage's own page, named from the daemon's answer", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  await page.route("**/api/config/storage", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        config: { storage: [{ name: "shuttle", path: "/tmp", default: true, backend: "copy" }] },
+        warnings: [],
+        source: { path: "/data/config.yml", mtime: new Date().toISOString() },
+        file_text: "",
+      }),
+    });
+  });
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await expect(page.getByTestId("add-storage-save")).toBeEnabled();
+  await page.getByTestId("add-storage-save").click();
+
+  await expect(page).toHaveURL(/\/storage\/shuttle$/);
+
+  // AND BACK FROM THERE GOES HOME, not into a re-armed form for a storage that now exists — which
+  // is what the add page's `replace` is for.
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 });
