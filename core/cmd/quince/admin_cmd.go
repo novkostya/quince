@@ -9,19 +9,24 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 )
 
-// The qn.4b operator escape-hatch CLIs (design §4; CLI-only, no REST/contract surface):
+// The operator escape-hatch CLIs (design §4; CLI-only, no REST/contract surface):
 //
 //	quince versions verify <version-id> | --udid <udid>   re-run structural verification
 //	quince device repair-working-copy <udid>              rebuild working/ from the last good version
+//	quince auth reset --yes                               clear the password + every passkey (qn.6k)
 //
-// Both operate on a reconciled *storage.Manager built WITHOUT the muxer / device registry / engine
-// goroutines the full serve stack spins up (buildStorage) — they only touch storage.
+// The first two operate on a reconciled *storage.Manager built WITHOUT the muxer / device registry
+// / engine goroutines the full serve stack spins up (buildStorage) — they only touch storage.
+// `auth reset` touches NEITHER storage nor the muxers, so it opens the store alone; giving it the
+// storage stack would make an account-recovery command fail on a box whose disk is unreachable,
+// which is a state it must work in.
 
 // withStorage opens the store + config + bus, builds a reconciled storage.Manager, and runs fn.
 func withStorage(fn func(mgr *storage.Manager) error) error {
@@ -127,4 +132,63 @@ func encWord(encrypted bool) string {
 		return "encrypted"
 	}
 	return "unencrypted"
+}
+
+// authCmd is the console escape hatch — qn.6k slice 2, Operator ruling on quince#657. It ships
+// BEFORE passkeys can be registered, because a credential that is the only way in, on a phone that
+// is lost, locks the user out of their own backups.
+//
+// It opens the store DIRECTLY rather than through withStorage: recovery must work on a box whose
+// disk is unreachable, and reconciling storage first would make it fail exactly there.
+func authCmd(args []string) error {
+	if len(args) == 0 || args[0] != "reset" {
+		return errors.New("usage: quince auth reset --yes")
+	}
+
+	// --yes IS REQUIRED, and it is not ceremony. What follows a reset is not "the box is safe": it
+	// is `needs_setup`, and POST /api/auth/setup is pre-auth by necessity — so between the reset and
+	// somebody setting a new password, THE FIRST CALLER TO REACH THAT ENDPOINT OWNS THE BOX. On a
+	// LAN that is a window with other people in it. The flag makes the operator say it on purpose;
+	// the warning below tells them what they just opened.
+	if len(args) != 2 || args[1] != "--yes" {
+		return errors.New("usage: quince auth reset --yes  (refusing without --yes: this clears the " +
+			"admin password and every passkey, and leaves quince in first-run setup, which the next " +
+			"caller on the network can claim)")
+	}
+
+	bootstrap, bwarn := config.LoadBootstrap(os.Environ())
+	log := newLogger()
+	for _, w := range bwarn {
+		log.Warn("bootstrap warning", "path", w.Path, "message", w.Message)
+	}
+	st, err := store.Open(bootstrap.DBPath())
+	if err != nil {
+		return fmt.Errorf("open db %s: %w", bootstrap.DBPath(), err)
+	}
+	defer func() { _ = st.Close() }()
+
+	res, err := auth.Reset(st)
+	if err != nil {
+		// PARTIAL WORK IS REPORTED, NEVER SWALLOWED. auth.Reset returns what it had already done
+		// when it failed, and printing that is the difference between "re-run it" and "work out
+		// what state this box is in".
+		fmt.Printf("auth reset: FAILED after %s\n", resetSummary(res))
+		return err
+	}
+
+	fmt.Printf("auth reset: %s\n", resetSummary(res))
+	fmt.Println("quince is now in first-run setup. THE NEXT CALLER TO REACH IT CAN SET THE PASSWORD —")
+	fmt.Println("set one yourself before this box is reachable by anyone else.")
+	return nil
+}
+
+// resetSummary says what actually happened in counts, never "done". A reset that removed 2 passkeys
+// tells the operator this box had credentials; one that removed 0 tells them it did not. Both are
+// facts they did not have before, and neither survives being summarised.
+func resetSummary(r auth.ResetResult) string {
+	pw := "no password was set"
+	if r.HadPassword {
+		pw = "password cleared"
+	}
+	return fmt.Sprintf("%s, %d passkey(s) removed, %d session(s) invalidated", pw, r.Passkeys, r.Sessions)
 }

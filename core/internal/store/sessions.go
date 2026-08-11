@@ -59,12 +59,31 @@ func (s *Store) DeleteAuthSession(id string) error {
 	return err
 }
 
-// DeleteAllAuthSessions is DELIBERATELY ABSENT. It existed to rotate on login by evicting every
-// other device, and the Operator ruled that policy out (quince#373): a login now supersedes only
-// the caller's own session, through DeleteAuthSession above.
+// DeleteAllAuthSessions removes every session and returns how many went.
 //
-// Removed rather than left unused, because a "clear every session" primitive sitting beside the
-// per-client one is a footgun — it reads like the rotation helper and would silently restore the
-// behaviour that was ruled against. A future deliberate "sign out other devices" action (option 3
-// on that issue) should re-add it with its own caller and its own control, which is the point: the
-// eviction becomes something the user chooses rather than a side effect of logging in.
+// IT WAS DELIBERATELY ABSENT UNTIL qn.6k, AND THE REASON IT IS BACK IS THE ONE THAT PARAGRAPH
+// NAMED. It existed to rotate on login by evicting every other device; the Operator ruled that
+// policy out (quince#373), and it was removed rather than left unused because a "clear every
+// session" primitive sitting beside the per-client one reads like the rotation helper and would
+// silently restore the ruled-against behaviour. The tombstone said a future deliberate action
+// "should re-add it with its own caller and its own control, which is the point: the eviction
+// becomes something the user chooses rather than a side effect of logging in."
+//
+// `quince auth reset` is exactly that: one caller, run by hand on the host, doing nothing else.
+// IT IS NOT A LOGIN PATH AND MUST NOT ACQUIRE ONE. If a second caller ever appears, re-read
+// quince#373 before adding it — the ruling is about login, and this function is one `Login()` call
+// away from breaking it again.
+//
+// WHY RESET NEEDS IT, measured rather than assumed: `Service.Authenticate` never consults the
+// password. It checks the session row and its expiry, nothing else. So clearing the password alone
+// leaves a live cookie passing `authGuard` and reaching every protected route, while the UI reads
+// `needs_setup` off `Status()` — which DOES short-circuit on the missing password. Reset would
+// otherwise look complete and leave the box authenticated.
+func (s *Store) DeleteAllAuthSessions() (int, error) {
+	res, err := s.db.Exec(`DELETE FROM sessions_auth`)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
