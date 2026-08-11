@@ -280,9 +280,16 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 		PublicKey:    cred.PublicKey,
 		RPID:         pending.rpID,
 		SignCount:    cred.Authenticator.SignCount,
-		AAGUID:       cred.Authenticator.AAGUID,
-		Name:         name,
-		CreatedAt:    now,
+		// THE FLAGS, WITHOUT WHICH NO SYNCED PASSKEY CAN EVER SIGN IN. The library compares
+		// BackupEligible on every assertion and refuses a mismatch; a credential reconstructed
+		// without it reports false, while any iCloud- or Google-synced passkey asserts true.
+		// Measured on hardware: registration, autofill and Face ID all succeeded and the server
+		// then refused with "Backup Eligible flag inconsistency".
+		BackupEligible: &cred.Flags.BackupEligible,
+		BackupState:    &cred.Flags.BackupState,
+		AAGUID:         cred.Authenticator.AAGUID,
+		Name:           name,
+		CreatedAt:      now,
 	}
 	if err := st.InsertPasskey(pk); err != nil {
 		return store.Passkey{}, err
@@ -312,6 +319,13 @@ func existingCredentials(st *store.Store, rpID string) ([]webauthn.Credential, e
 			return nil, fmt.Errorf("passkey %q: undecodable credential id: %w", p.Name, err)
 		}
 		c := webauthn.Credential{ID: id, PublicKey: p.PublicKey}
+		// Restored, or the assertion is validated against zero flags — see InsertPasskey above.
+		if p.BackupEligible != nil {
+			c.Flags.BackupEligible = *p.BackupEligible
+		}
+		if p.BackupState != nil {
+			c.Flags.BackupState = *p.BackupState
+		}
 		c.Authenticator.SignCount = p.SignCount
 		c.Authenticator.AAGUID = p.AAGUID
 		out = append(out, c)

@@ -18,10 +18,15 @@ type Passkey struct {
 	PublicKey    []byte
 	RPID         string // the rpId this credential was registered against (spec qn.6k D2)
 	SignCount    uint32
-	AAGUID       []byte
-	Transports   string // JSON array as reported at registration
-	Name         string
-	CreatedAt    time.Time
+	// BackupEligible is IMMUTABLE per the spec and is compared at every assertion; BackupState can
+	// change and is rewritten on each one. Pointers because NULL means "registered before quince
+	// recorded these", which is not the same as false — see 0009_passkey_flags.sql.
+	BackupEligible *bool
+	BackupState    *bool
+	AAGUID         []byte
+	Transports     string // JSON array as reported at registration
+	Name           string
+	CreatedAt      time.Time
 	// LastUsedAt is the zero time until the credential's first successful assertion. Zero means
 	// NEVER USED rather than "used at the epoch", and the Settings surface has to render that
 	// difference — a credential nobody has signed in with is exactly the one worth removing.
@@ -37,10 +42,11 @@ type Passkey struct {
 func (s *Store) InsertPasskey(p Passkey) error {
 	_, err := s.db.Exec(
 		`INSERT INTO passkeys
-		   (credential_id, public_key, rp_id, sign_count, aaguid, transports, name, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (credential_id, public_key, rp_id, sign_count, aaguid, transports, name, created_at,
+		    backup_eligible, backup_state)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.CredentialID, p.PublicKey, p.RPID, p.SignCount, p.AAGUID, p.Transports, p.Name,
-		fmtTime(p.CreatedAt))
+		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState)
 	return err
 }
 
@@ -80,13 +86,24 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 		transports sql.NullString
 		created    string
 		lastUsed   sql.NullString
+		beligible  sql.NullBool
+		bstate     sql.NullBool
 	)
 	if err := sc.Scan(&p.CredentialID, &p.PublicKey, &p.RPID, &p.SignCount, &aaguid,
-		&transports, &p.Name, &created, &lastUsed); err != nil {
+		&transports, &p.Name, &beligible, &bstate, &created, &lastUsed); err != nil {
 		return Passkey{}, err
 	}
 	p.AAGUID = aaguid
 	p.Transports = transports.String
+	// NULL stays nil rather than becoming false. A credential registered before quince recorded
+	// these cannot have them reconstructed, and false is the answer that would make a synced passkey
+	// fail validation for ever — the exact bug 0009 exists to fix.
+	if beligible.Valid {
+		p.BackupEligible = &beligible.Bool
+	}
+	if bstate.Valid {
+		p.BackupState = &bstate.Bool
+	}
 	var err error
 	if p.CreatedAt, err = parseTime(created); err != nil {
 		return Passkey{}, err
@@ -100,6 +117,7 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 }
 
 const passkeyCols = `credential_id, public_key, rp_id, sign_count, aaguid, transports, name,
+	backup_eligible, backup_state,
 	created_at, last_used_at`
 
 // GetPasskey returns one credential by its id, and whether it exists.
@@ -144,14 +162,18 @@ func (s *Store) ListPasskeys() ([]Passkey, error) {
 // TouchPasskey records a successful assertion: the authenticator's new signature counter and when
 // it was used.
 //
+// BACKUP STATE IS REWRITTEN, and that is the library's own recommendation: BackupEligible "should
+// NEVER change" and is a fact about the credential, while BackupState "can change" — a passkey can
+// become backed up after it was made. Recording it keeps the row agreeing with the authenticator.
+//
 // THE SIGN COUNT IS STORED, NOT COMPARED HERE. Clone detection is the WebAuthn library's job and it
 // happens before this is called; this records the accepted value. Splitting it that way keeps the
 // store free of protocol judgement — a store method that silently declined to write a lower counter
 // would be a security decision hidden in a setter.
-func (s *Store) TouchPasskey(credentialID string, signCount uint32, usedAt time.Time) error {
+func (s *Store) TouchPasskey(credentialID string, signCount uint32, backupState *bool, usedAt time.Time) error {
 	_, err := s.db.Exec(
-		`UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE credential_id = ?`,
-		signCount, fmtTime(usedAt), credentialID)
+		`UPDATE passkeys SET sign_count = ?, backup_state = ?, last_used_at = ? WHERE credential_id = ?`,
+		signCount, backupState, fmtTime(usedAt), credentialID)
 	return err
 }
 

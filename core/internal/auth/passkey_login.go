@@ -101,7 +101,8 @@ func (s *Service) FinishPasskeyAssertion(cer *PasskeyCeremonies, key, rpID, clie
 	// The counter is recorded AFTER verification, which is where the library's clone detection has
 	// already run. Storing it is not a policy decision; refusing a regression is, and that is the
 	// library's (spec D4).
-	if err := s.store.TouchPasskey(resolved.CredentialID, cred.Authenticator.SignCount, now); err != nil {
+	if err := s.store.TouchPasskey(resolved.CredentialID, cred.Authenticator.SignCount,
+		&cred.Flags.BackupState, now); err != nil {
 		return store.AuthSession{}, "", err
 	}
 
