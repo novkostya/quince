@@ -392,3 +392,81 @@ test("a successful add lands on the new storage's own page, named from the daemo
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 });
+
+// quince#849 — THE FIRST-RUN SCREEN MUST NOT TELL AN OPERATOR THEY HAVE NO STORAGE WHEN THEIR OWN
+// FILE DECLARES ONE.
+//
+// Measured on a real container (quince#817): a `config.yml` carrying the retired `zfs.mode: exec` is
+// DISCARDED at load, so quince runs on defaults with no storage, `RequireStorage` routes here, and
+// this page said *"quince needs somewhere to keep backups"* — about an install whose file declares
+// somewhere. `ConfigView` is the only other component that renders `warnings`, and it lives behind
+// `RequireStorage`, which is the guard this state fails: the one surface that could explain the
+// problem sat behind the gate the problem closes.
+//
+// THE HEADLINE IS INTERIM AND THE TEST SAYS SO. `GET /api/config` carries `warnings` but not
+// `Loaded.Errors`, so a client cannot separate a discarded config from one that merely parsed with
+// an ignored unknown key — and those want opposite headlines. The bit is ruled and pending
+// (quince#849, a contracts addition). What is asserted here is the half that does not depend on it:
+// the false claim is gone, and the daemon's own path, message and remedy are on screen.
+test("a config quince could not use is explained, not reported as 'you have no storage'", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  await page.route("**/api/config", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.config.storage = null;
+    body.warnings = [
+      { path: "storage[0].zfs.mode", message: 'invalid value: invalid value "exec"; must be one of [hook]' },
+    ];
+    body.file_text = "storage:\n  - path: /backups\n    backend: zfs\n    zfs:\n      mode: exec\n";
+    await route.fulfill({ response: res, json: body });
+  });
+
+  await page.goto("/");
+  await page.waitForURL(/\/onboarding\/storage/);
+
+  // THE FALSE CLAIM IS GONE. This is the assertion the issue was filed for.
+  await expect(page.getByRole("heading", { name: /add your first storage/i })).toHaveCount(0);
+  await expect(page.getByText(/needs somewhere to keep backups before/i)).toHaveCount(0);
+
+  // AND THE DAEMON'S OWN SENTENCE IS ON SCREEN — path and message, not a client rewording.
+  const warnings = page.getByTestId("config-warnings");
+  await expect(warnings).toBeVisible();
+  await expect(warnings).toContainText("storage[0].zfs.mode");
+  await expect(warnings).toContainText("must be one of [hook]");
+
+  // A REMEDY THE OPERATOR CAN FOLLOW (qn.6g) — the file to edit, and the restart, which is not
+  // optional because there is no reload path (quince#727).
+  await expect(page.getByText(/restart quince/i)).toBeVisible();
+
+  // THE FILE ITSELF, which is where the offending line actually lives.
+  await page.getByText(/show the file quince read/i).click();
+  await expect(page.getByText("mode: exec")).toBeVisible();
+
+  // AND THE FORM IS STILL THERE. It is not a trap since quince#857 refuses the write and names the
+  // line; removing it would also break the ordinary first-run path, which is this same screen.
+  await expect(page.getByTestId("add-storage-save")).toBeVisible();
+});
+
+// THE ORDINARY FIRST RUN IS UNCHANGED, which is what stops the test above from passing on a screen
+// that has simply lost its heading. No warnings — the overwhelmingly common case — still reads as
+// the first-run step it is.
+test("a clean first run still says 'Add your first storage'", async ({ page }) => {
+  await authenticate(page);
+
+  await page.route("**/api/config", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.config.storage = null;
+    body.warnings = [];
+    await route.fulfill({ response: res, json: body });
+  });
+
+  await page.goto("/");
+  await page.waitForURL(/\/onboarding\/storage/);
+
+  await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+  await expect(page.getByTestId("config-warnings")).toHaveCount(0);
+});
