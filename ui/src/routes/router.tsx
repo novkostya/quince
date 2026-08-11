@@ -3,6 +3,7 @@ import { AppLayout } from "./AppLayout";
 import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
+import { OnboardingPasskeyPage } from "@/pages/OnboardingPasskeyPage";
 import { OnboardingStoragePage } from "@/pages/OnboardingStoragePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -57,6 +58,21 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <OnboardingStoragePage />
+      </RequireAuth>
+    ),
+  },
+  // THE PASSKEY OFFER (qn.6k story 9). Behind `RequireAuth` and outside the shell, like the storage
+  // step above — registration needs a session by definition, and the offer arrives immediately
+  // after setup, where the shell has nothing to show yet.
+  //
+  // NOT under `RequireStorage`, and not a gate of its own. It is a step the user passes THROUGH:
+  // both buttons navigate to `/`, and the page renders nothing at all where passkeys cannot work,
+  // so it can never become somewhere a first run gets stuck.
+  {
+    path: "/onboarding/passkey",
+    element: (
+      <RequireAuth>
+        <OnboardingPasskeyPage />
       </RequireAuth>
     ),
   },
