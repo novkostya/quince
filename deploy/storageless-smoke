@@ -251,5 +251,39 @@ echo "  ok  the CAUSE is surfaced over the API, naming storage[0].zfs.mode and i
 grep -q 'mode: exec' "$WORK/cfg-invalid.json" || fail "file_text does not carry the operator's own config"
 echo "  ok  file_text carries the offending file, so a surface has something to show"
 
+# THE ADD IS REFUSED, AND THE FILE SURVIVES IT (quince#852, Operator ruling 2026-08-12).
+#
+# THIS IS THE ASSERTION THE BUG WAS FOUND BY. It returned `200` here and left `config.yml` holding
+# only the new entry — the zfs storage, its parent dataset and its hook command gone, no undo, and
+# `warnings: []` in the response so every surface then reported health. It is gated end to end rather
+# than only in Go because that is how it was found: `config.AddStorage`'s unit tests all seeded a
+# valid config, so none of them was ever in this state.
+t2=$(curl -s -b "$JAR2" -c "$JAR2" "http://127.0.0.1:$PORT2/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
+code=$(curl -s -b "$JAR2" -o "$WORK/add-invalid.json" -w '%{http_code}' -X POST \
+	-H 'Content-Type: application/json' -H "X-CSRF-Token: $t2" \
+	-d '{"name":"rescue","path":"/cache","backend":"copy"}' \
+	"http://127.0.0.1:$PORT2/api/config/storage")
+[ "$code" = "422" ] || fail "adding a storage over a DISCARDED config = $code, want 422 — this write replaces the operator's file
+$(cat "$WORK/add-invalid.json")"
+echo "  ok  the add is REFUSED rather than replacing a config quince could not read"
+
+# THE REFUSAL NAMES THE LINE AND A REMEDY — `qn.6g`: a remedy the user cannot follow is the same
+# defect as a silent failure, so a bare "config invalid" would be this bug in a politer form.
+jq -e '.errors[0].path == "storage[0].zfs.mode"' "$WORK/add-invalid.json" >/dev/null \
+	|| fail "the refusal is not keyed on the offending config path — $(jq -c .errors "$WORK/add-invalid.json")"
+jq -r '.errors[0].message' "$WORK/add-invalid.json" | grep -q 'restart' \
+	|| fail "the refusal does not tell the operator what to do — $(jq -r '.errors[0].message' "$WORK/add-invalid.json")"
+echo "  ok  it names the offending line and the remedy, not just 'invalid'"
+
+# AND THE DECLARATION IS STILL ON DISK. Asserted on the FILE, because the file is what was lost —
+# a refusal that returned 422 and wrote anyway would pass every check above this one.
+grep -q 'parent_dataset: pool/backups' "$WORK/invalid-data/config.yml" \
+	|| fail "the operator's declaration was rewritten by a REFUSED add
+$(cat "$WORK/invalid-data/config.yml")"
+grep -q 'hook_cmd:' "$WORK/invalid-data/config.yml" \
+	|| fail "the operator's hook_cmd is gone from config.yml after a refused add
+$(cat "$WORK/invalid-data/config.yml")"
+echo "  ok  config.yml is untouched — the declaration survives the refusal"
+
 echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart, and an
   invalid config reaches the same setup state with its cause carried through rather than lost"

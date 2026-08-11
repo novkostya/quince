@@ -256,6 +256,26 @@ type Service struct {
 	warnings []Warning
 	source   Source
 
+	// loadErrs is WHY the file on disk was discarded, and until quince#852 it was recorded nowhere.
+	// `Load` returns `OK: false` with these errors and `Config: Default()`; `NewService` logged them
+	// and kept neither — so nothing downstream could tell *the operator declared nothing* from *the
+	// operator's declaration could not be parsed*.
+	//
+	// THAT DISTINCTION IS WHAT MAKES A SPLICE SAFE OR DESTRUCTIVE. `AddStorage` reads `Current()`
+	// and writes the result; on this path `Current()` is `Default()` with no storage, so the write
+	// replaces the operator's file with defaults plus one new entry. Measured 2026-08-12: a zfs
+	// storage carrying a `parent_dataset` and a `hook_cmd` was reduced to three lines, `warnings`
+	// came back `[]`, and every surface then reported health.
+	//
+	// EMPTY IS THE ORDINARY CASE, AND IT INCLUDES A FILE THAT PARSED WITH WARNINGS — which is a
+	// different state and must not be confused with this one. An unknown-key warning leaves
+	// `cfg.Storage` intact, so a splice over it loses nothing. Refusing on any warning would decline
+	// writes that are perfectly safe, on a config quince is perfectly happy to run.
+	//
+	// Cleared by `replaceLocked` on a successful write, beside `warnings`, for the same reason: the
+	// document now on disk is one this process built and validated.
+	loadErrs []wire.ConfigError
+
 	// appliers is written ONLY at wiring time and read under mu on every write.
 	//
 	// Registration is deliberately not a runtime operation (spec decision 3): a fixed list cannot
@@ -352,7 +372,14 @@ func NewService(path string, log *slog.Logger) *Service {
 	for _, w := range l.Warnings {
 		log.Warn("config warning", "path", w.Path, "message", w.Message)
 	}
-	return &Service{path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings, source: l.Source}
+	// `l.Errors` IS CARRIED ONLY WHEN `!l.OK`, and the guard is the point rather than an
+	// optimisation: `Load` may return errors alongside a document it still accepted, and this field
+	// means "the file was DISCARDED", not "something was reported about the file". See loadErrs.
+	var loadErrs []wire.ConfigError
+	if !l.OK {
+		loadErrs = l.Errors
+	}
+	return &Service{path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings, source: l.Source, loadErrs: loadErrs}
 }
 
 // Snapshot returns the live config, its warnings, and its source (for GET /api/config).
@@ -549,6 +576,12 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// write added would look undeclared again.
 	s.declared = declared
 	s.warnings = nil // a valid structured replace clears prior file warnings
+	// AND SO DOES THE DISCARD RECORD (quince#852). `loadErrs` says the file ON DISK could not be
+	// read; the bytes just written were built and validated by this process, so the statement it
+	// makes has stopped being true. Without this line, a config repaired through `PUT /api/config`
+	// would leave `AddStorage` refusing for the lifetime of the process — a guard that cannot be
+	// cleared by fixing the thing it guards against.
+	s.loadErrs = nil
 	s.source = Source{Path: s.path, Mtime: mtime}
 	s.mu.Unlock()
 
