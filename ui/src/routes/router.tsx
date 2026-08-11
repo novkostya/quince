@@ -8,6 +8,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DeviceDetailsPage } from "@/pages/DeviceDetailsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SettingsAuthPage } from "@/pages/SettingsAuthPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
 
@@ -104,6 +105,10 @@ export const router = createBrowserRouter([
       // has none, and that is exactly the storage a user goes looking for.
       { path: "storage/:name", element: <StorageDetailsPage /> },
       { path: "settings", element: <SettingsPage /> },
+      // The auth surface is its OWN PAGE, linked from Settings — quince#841 ruling A. A child of
+      // the authed shell, unlike its onboarding sibling, which is a top-level route: one has a
+      // session and one does not, which is the whole of qn.6m D2.
+      { path: "settings/auth", element: <SettingsAuthPage /> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
