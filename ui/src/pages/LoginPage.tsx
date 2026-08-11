@@ -42,6 +42,7 @@ export function LoginPage() {
       // ARMED ON LOGIN ONLY. The setup page shares this component and must NOT arm it: there is
       // nothing to sign in to before a password exists (qn.6k).
       passkeys
+      onPasskey={onPasskey}
       notice={
         isPublicDemo ? (
           <div className="mt-3 space-y-2 rounded-card border border-line bg-bg px-3 py-2 text-sm text-muted">

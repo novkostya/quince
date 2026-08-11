@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
+import { signInWithPasskey } from "@/lib/webauthn";
 
 // Shared full-page password form for first-run setup and login.
 export function PasswordForm({
@@ -14,6 +15,7 @@ export function PasswordForm({
   cta,
   notice,
   passkeys = false,
+  onPasskey,
   onSubmit,
 }: {
   title: string;
@@ -24,6 +26,9 @@ export function PasswordForm({
   // deliberately: there is nothing to sign in to before a password exists, and the browser would be
   // asked to offer a credential for an account that has not been created.
   passkeys?: boolean;
+  // onPasskey is called after a successful passkey sign-in, so the page can route exactly as it
+  // does after a password one. Absent on setup, where there is nothing to sign in to yet.
+  onPasskey?: () => void;
   onSubmit: (password: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState("");
@@ -32,6 +37,42 @@ export function PasswordForm({
   // connection — so it is the one that has to offer somewhere else to go.
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // THE EXPLICIT PASSKEY BUTTON — Operator-raised, and it is what makes the feature findable.
+  //
+  // Conditional mediation puts the passkey in the browser's autofill dropdown, which is elegant and
+  // INVISIBLE: on hardware the Operator only found it by tapping the key icon on the iOS keyboard,
+  // past a suggestion list whose first entry was a password. A feature nobody can find is not a
+  // feature, and this is how every bank does it.
+  //
+  // It does not contradict the ruling against an unconditional modal. That objection was about
+  // firing a sheet at users who have no passkey — credential presence is undetectable, so an
+  // unprompted modal guesses wrong for everyone without one. A BUTTON cannot make that mistake: the
+  // user asked, and "no passkey here" is a fine answer to a question they posed.
+  //
+  // It also gets its own user activation, which the conditional path cannot share: iOS 16+ grants
+  // exactly ONE gesture-free `credentials.get()` per page load, and arming conditional mediation on
+  // mount consumes it. The click is a second, fresh one.
+  async function passkeySignIn() {
+    setBusy(true);
+    setError(null);
+    try {
+      await signInWithPasskey({ conditional: false });
+      onPasskey?.();
+    } catch (err) {
+      if (err instanceof APIError) {
+        setError({ message: err.message, code: err.code });
+      } else if (err instanceof Error && err.name === "NotAllowedError") {
+        // Cancelled or not permitted — the browser will not say which, so the message says what is
+        // true of both rather than guessing at one. Never silent: the user pressed a button.
+        setError({ message: "No passkey was used — the request was cancelled, or this device has none for quince." });
+      } else {
+        setError({ message: "Could not sign in with a passkey." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -163,6 +204,25 @@ export function PasswordForm({
         <Button type="submit" className="mt-4 w-full" disabled={busy || password.length === 0}>
           {busy ? "…" : cta}
         </Button>
+
+        {/* SHOWN WHENEVER PASSKEYS ARE ARMED, not only when one exists — because whether this device
+            has one is UNDETECTABLE. Hiding it until we "know" is not an option the platform offers,
+            and a button that says what it does costs a user without a passkey one tap and a plain
+            sentence, where its absence costs a user WITH one the entire feature.
+
+            `type="button"`, because components/ui/button.tsx sets none and a Button inside a form is
+            a submit by default (quince#824, quince#828). Here that would post an empty password. */}
+        {passkeys ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            disabled={busy}
+            onClick={passkeySignIn}
+          >
+            Sign in with a passkey
+          </Button>
+        ) : null}
       </form>
     </div>
   );
