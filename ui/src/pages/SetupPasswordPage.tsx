@@ -11,6 +11,14 @@ export function SetupPasswordPage() {
       title="Set an admin password"
       subtitle="This protects quince and your backups — you'll use it to sign in."
       cta="Set password and continue"
+      // A PAGE, NOT A CARD — ruling A on quince#841, spec D1. Measured before the change: the two
+      // onboarding steps either side of this one are `max-w-2xl` and `max-w-xl` with no card, while
+      // the auth surfaces were `max-w-sm rounded-card`. Two and two, and this was the odd pair.
+      //
+      // `OnboardingStoragePage`'s own header comment already carries the reasoning: "A first-run
+      // step is a DESTINATION, not an interruption." `/login` deliberately does NOT take this — it
+      // is a recurring destination on an existing install rather than a step (D1).
+      variant="page"
       onSubmit={async (pw) => {
         // SEEDED, NOT INVALIDATED — and TWO gates are why. This page sits inside `SetupGate`
         // (`state !== "needs_setup"` → Navigate to "/") and the destination sits inside
