@@ -64,6 +64,10 @@ describe("EncryptionDialog", () => {
     expect(anchor).toHaveAttribute("autocomplete", "username");
     expect(anchor).toHaveAttribute("readonly");
     expect(anchor).not.toBeDisabled();
+    // Out of the tab order, so the first Tab in the dialog reaches a password field rather than a
+    // label nobody can edit — quince#824. Not `disabled`, which would hide it from autofill too.
+    expect(anchor).toHaveAttribute("tabindex", "-1");
+    expect((screen.getByLabelText("Current password") as HTMLInputElement).tabIndex).toBe(0);
   });
 
   // THE FALLBACK LIVES HERE, NOT AT THE CALL SITE, so a second call site cannot mint a different

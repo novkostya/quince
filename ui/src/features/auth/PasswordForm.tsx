@@ -92,7 +92,22 @@ export function PasswordForm({
             cannot be skipped for being invisible, so it is the safe default until G1 says otherwise.
 
             NOT `disabled`: a disabled control is excluded from form submission and is skipped by
-            autofill, which would defeat the whole point. */}
+            autofill, which would defeat the whole point.
+
+            `tabIndex={-1}` BECAUSE THERE IS NOTHING TO DO HERE — quince#824. A read-only anchor
+            defaults to `tabindex=0`, so it sits in the tab order and can hold the focus ring ahead
+            of the field the user actually types in. It stays FOCUSABLE (`.focus()` still works,
+            unlike `disabled`) and stays visible to autofill: developers trying to SUPPRESS Chrome
+            and Safari autofill with exactly `readonly` + tab tricks report the managers ignore
+            them, which is the same property working in our favour here.
+
+            AND DO NOT ADD MORE AUTOFOCUS MACHINERY TO CHASE THE iOS KEYBOARD. `autoFocus` below
+            already focuses the password correctly — measured on both engines against a real build,
+            `focused=input#password` in Chromium AND WebKit. iOS deliberately declines to raise the
+            keyboard for a programmatic focus that did not come from a user gesture, so the opening
+            tap on a phone is a platform decision and CANNOT be removed from this page. A
+            `setTimeout` + `.focus()` is the shape that looks like it should fix it; it does not,
+            and it is how this comment came to be written (quince#824). */}
         <div className="mt-4 flex flex-col gap-1">
           <Label htmlFor="username">Username</Label>
           <Input
@@ -101,6 +116,7 @@ export function PasswordForm({
             type="text"
             autoComplete="username"
             readOnly
+            tabIndex={-1}
             value="quince-admin"
           />
         </div>

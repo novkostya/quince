@@ -41,6 +41,21 @@ describe("the password form's username anchor", () => {
     renderForm(() => Promise.resolve());
     expect(screen.getByLabelText("Password")).toHaveFocus();
   });
+
+  // AND IT MUST NOT BE REACHABLE BY TAB EITHER — quince#824. A read-only input defaults to
+  // `tabindex=0`, so the anchor sat in the tab order ahead of the password and could hold the focus
+  // ring in front of the only field on the page with anything to type into. `-1` removes it from
+  // the sequence without making it `disabled`, which would take it out of autofill's sight too.
+  it("keeps the anchor out of the tab order without disabling it", () => {
+    renderForm(() => Promise.resolve());
+
+    const anchor = screen.getByLabelText("Username");
+    expect(anchor).toHaveAttribute("tabindex", "-1");
+    expect(anchor).not.toBeDisabled();
+    // The property, not the attribute — the password carries no explicit `tabindex` and must not
+    // acquire one; 0 is what "still in the natural tab order" looks like.
+    expect((screen.getByLabelText("Password") as HTMLInputElement).tabIndex).toBe(0);
+  });
 });
 
 describe("the password form's error", () => {
