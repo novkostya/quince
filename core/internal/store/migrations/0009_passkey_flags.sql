@@ -1,0 +1,24 @@
+-- qn.6k fix: the credential's BACKUP flags, without which no synced passkey can ever sign in.
+--
+-- MEASURED ON HARDWARE, not anticipated. An iPhone passkey registered against the staging stand was
+-- accepted, stored, offered in the autofill sheet, and passed Face ID — and the server then refused
+-- the assertion with "Backup Eligible flag inconsistency detected during login validation".
+--
+-- The cause is that 0008 stored the credential id, public key, sign count and AAGUID and NOTHING
+-- ELSE. The library records four flags on a credential at registration and compares two of them at
+-- login; reconstructing a credential without them yields BackupEligible=false, while an
+-- iCloud-synced passkey asserts true. Every platform passkey worth having is synced, so this made
+-- assertion impossible for exactly the credentials the rung exists to support.
+--
+-- BE IS IMMUTABLE AND BS IS NOT, and that difference is why they are two columns rather than one.
+-- The library's own comments: BackupEligible "should NEVER change" — a mismatch is the error above,
+-- and treating it as a fact about the credential is the point. BackupState "can change but it's
+-- recommended that RP's keep track of this value": a credential can become backed up later, so it is
+-- written on every successful assertion beside the signature counter.
+--
+-- NULLABLE, and NULL means "registered before quince recorded this". Those rows cannot be repaired —
+-- the flags live in an authenticatorData quince did not keep — so they are re-registered rather than
+-- guessed at. Defaulting them to 0 would have been a guess that reads as a measurement, and for a
+-- synced credential it would be the wrong one.
+ALTER TABLE passkeys ADD COLUMN backup_eligible INTEGER;
+ALTER TABLE passkeys ADD COLUMN backup_state INTEGER;

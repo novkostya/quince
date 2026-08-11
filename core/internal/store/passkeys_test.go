@@ -67,7 +67,7 @@ func TestLastUsedIsZeroUntilTouched(t *testing.T) {
 	}
 
 	used := now.Add(time.Hour)
-	if err := s.TouchPasskey("c-1", 7, used); err != nil {
+	if err := s.TouchPasskey("c-1", 7, nil, used); err != nil {
 		t.Fatalf("TouchPasskey: %v", err)
 	}
 	pk, _, err = s.GetPasskey("c-1")
@@ -103,7 +103,7 @@ func TestRenamePasskeyChangesOnlyTheName(t *testing.T) {
 	s := passkeyStore(t)
 	created := time.Now().UTC().Truncate(time.Second)
 	seed(t, s, "c-1", "phone", "quince.example.com", created)
-	if err := s.TouchPasskey("c-1", 3, created.Add(time.Minute)); err != nil {
+	if err := s.TouchPasskey("c-1", 3, nil, created.Add(time.Minute)); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
 	before, _, _ := s.GetPasskey("c-1")
@@ -127,5 +127,65 @@ func TestRenamePasskeyChangesOnlyTheName(t *testing.T) {
 
 	if renamed, err := s.RenamePasskey("c-missing", "x"); err != nil || renamed {
 		t.Errorf("renaming an absent credential: renamed=%v err=%v, want false and no error", renamed, err)
+	}
+}
+
+// THE BUG THAT MADE EVERY SYNCED PASSKEY UNUSABLE, PINNED — measured on hardware, not anticipated.
+//
+// The library compares BackupEligible on every assertion and refuses a mismatch. 0008 stored no
+// flags, so a credential rebuilt from the row reported false while an iCloud-synced passkey asserts
+// true, and the server refused with "Backup Eligible flag inconsistency detected during login
+// validation" — after registration, autofill and Face ID had all succeeded.
+func TestPasskeyFlagsSurviveARoundTrip(t *testing.T) {
+	s := passkeyStore(t)
+	yes, no := true, false
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := s.InsertPasskey(Passkey{
+		CredentialID: "c-1", PublicKey: []byte("cose"), RPID: "quince.example.com", Name: "phone",
+		CreatedAt: now, BackupEligible: &yes, BackupState: &no,
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	pk, ok, err := s.GetPasskey("c-1")
+	if err != nil || !ok {
+		t.Fatalf("GetPasskey: ok=%v err=%v", ok, err)
+	}
+	if pk.BackupEligible == nil || !*pk.BackupEligible {
+		t.Errorf("BackupEligible = %v, want true — a synced passkey can never assert without it", pk.BackupEligible)
+	}
+	if pk.BackupState == nil || *pk.BackupState {
+		t.Errorf("BackupState = %v, want false", pk.BackupState)
+	}
+
+	// BackupState CHANGES — a credential can become backed up later, and the library recommends
+	// keeping track. BackupEligible must not move.
+	if err := s.TouchPasskey("c-1", 4, &yes, now.Add(time.Hour)); err != nil {
+		t.Fatalf("TouchPasskey: %v", err)
+	}
+	pk, _, _ = s.GetPasskey("c-1")
+	if pk.BackupState == nil || !*pk.BackupState {
+		t.Errorf("BackupState after touch = %v, want true", pk.BackupState)
+	}
+	if pk.BackupEligible == nil || !*pk.BackupEligible {
+		t.Errorf("BackupEligible moved to %v — it is immutable", pk.BackupEligible)
+	}
+}
+
+// A ROW FROM BEFORE 0009 READS AS UNKNOWN, NOT AS false. False is the value that would make a synced
+// credential fail validation for ever; nil lets the caller tell "never recorded" from "recorded as
+// not eligible", which is the difference between re-registering and being permanently broken.
+func TestPasskeyFlagsAreNilWhenNeverRecorded(t *testing.T) {
+	s := passkeyStore(t)
+	seed(t, s, "c-old", "pre-0009", "quince.example.com", time.Now().UTC())
+
+	pk, _, err := s.GetPasskey("c-old")
+	if err != nil {
+		t.Fatalf("GetPasskey: %v", err)
+	}
+	if pk.BackupEligible != nil || pk.BackupState != nil {
+		t.Errorf("got %v/%v, want nil/nil for a row that never carried flags",
+			pk.BackupEligible, pk.BackupState)
 	}
 }
