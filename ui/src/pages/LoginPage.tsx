@@ -24,8 +24,12 @@ export function LoginPage() {
   // A passkey sign-in lands in exactly the place a password one does — same query invalidation,
   // same `next`. The two paths converge here rather than in the hook, so there is one definition of
   // "signed in" and the hook stays a credential mechanism with no opinion about routing.
-  const onPasskey = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: authStatusKey });
+  // AWAITED, exactly as the password path below awaits it — and the difference was a real bug.
+  // Navigating before the auth-status query has refetched leaves `RequireAuth` still seeing
+  // `needs_login`, so it bounces straight back here, this page remounts, and the passkey ceremony
+  // arms a SECOND time. Operator-reported: the sheet appeared again on the Home screen.
+  const onPasskey = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: authStatusKey });
     nav(next, { replace: true });
   }, [qc, nav, next]);
   usePasskeyLogin(onPasskey);
