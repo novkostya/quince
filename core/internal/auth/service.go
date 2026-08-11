@@ -118,10 +118,56 @@ func (s *Service) HasPassword() (bool, error) {
 	return ok, err
 }
 
+// Configured reports whether this install has been CLAIMED — a password hash exists, OR at least
+// one passkey does. It is the predicate behind `needs_setup` and behind the one-shot guard on
+// `POST /api/auth/setup`, and it is qn.6m D3.
+//
+// WITHOUT THE PASSKEY HALF, PASSWORDLESS IS AN UNAUTHENTICATED ADMIN TAKEOVER. Every one of these
+// three facts predates this function, and none of them consulted the credentials table:
+//
+//	Status()                          → needs_setup on password absence ALONE
+//	SetPassword()                     → 409 guard was HasPassword() + SetSettingIfAbsent
+//	"POST /api/auth/setup"            → PRE-AUTH, by exact path (middleware.go)
+//
+// So the moment a passwordless install can exist, the password row is gone and an anonymous visitor
+// is told `needs_setup`, shown the first-run screen, and allowed to complete setup — after which
+// issueSessionResponse hands them an admin session. It also falsifies a promise already written in
+// contracts §1: that setup "can never be an unauthenticated password reset".
+//
+// COUNTED WITHOUT AN rpId FILTER, WHICH IS THE OPPOSITE OF WHAT existingCredentials DOES, and the
+// difference is the whole subtlety. Those two ask different questions:
+//
+//	can this credential SIGN IN here?      → filter by rpId. A credential bound elsewhere cannot.
+//	has this install ever been CLAIMED?    → do NOT filter. It has been, wherever it was claimed.
+//
+// A quince reachable at two addresses whose only passkey is bound to the OTHER one must offer
+// LOGIN at this one — which then fails honestly with qn.6k D2's "registered for <domain>" message —
+// rather than offering first-run setup to a stranger. Filtering here would reopen the takeover
+// through the second address, which is why the plainest-looking reuse in this package is wrong.
+func (s *Service) Configured() (bool, error) {
+	has, err := s.HasPassword()
+	if err != nil {
+		return false, err
+	}
+	if has {
+		return true, nil
+	}
+	// PASSWORD FIRST, deliberately: on the overwhelmingly common configured install this returns
+	// before touching the credentials table at all, so the check costs one setting read rather than
+	// a second query — and SetPassword's amplifier guard (quince#463) depends on being cheap.
+	n, err := s.store.CountPasskeys()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // Status returns the tri-state for GET /api/auth/status given the request's session id
 // ("" if no cookie).
 func (s *Service) Status(sessionID string) (string, error) {
-	has, err := s.HasPassword()
+	// Configured(), NOT HasPassword() — qn.6m D3. A passwordless install has been claimed and must
+	// answer `needs_login`, so that an anonymous visitor is offered login rather than first run.
+	has, err := s.Configured()
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +211,12 @@ func (s *Service) SetPassword(password, clientIP string) error {
 	// ~85 ms out, on a route that is pre-auth and carries no rate limit because first-run setup
 	// must be reachable with no session. Measured before this check existed: 9 MB → 2063 MB RSS
 	// over 60 requests, tracking peak concurrency × the argon2 memory parameter (quince#463).
-	has, err := s.HasPassword()
+	// Configured(), NOT HasPassword() — qn.6m D3, and THIS is the line that closes the takeover.
+	// Setup succeeds exactly once per install, and "once" has to mean "once it has been claimed by
+	// any credential", or removing the password re-opens first-run setup to anyone who can load the
+	// page. SetSettingIfAbsent below remains the atomic authority for the password row; this is an
+	// additional refusal in front of it, exactly as the HasPassword short-circuit already was.
+	has, err := s.Configured()
 	if err != nil {
 		return err
 	}
