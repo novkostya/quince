@@ -1,4 +1,5 @@
-import { api } from "@/lib/api";
+import { api, APIError } from "@/lib/api";
+import { forgetPasskey, rememberPasskey } from "@/lib/passkeyHint";
 
 // The WebAuthn wire helpers and the registration ceremony, in one place — qn.6k follow-up.
 //
@@ -79,6 +80,7 @@ export async function registerPasskey(name: string): Promise<boolean> {
       },
     },
   );
+  rememberPasskey();
   return true;
 }
 
@@ -121,18 +123,35 @@ export async function signInWithPasskey(opts: {
   if (!cred) throw new Error("no credential");
 
   const resp = cred.response as AuthenticatorAssertionResponse;
-  return api.post(
-    `/api/auth/passkeys/login/finish?ceremony=${encodeURIComponent(begin.ceremony)}`,
-    {
-      id: cred.id,
-      rawId: bytesToB64url(cred.rawId),
-      type: cred.type,
-      response: {
-        clientDataJSON: bytesToB64url(resp.clientDataJSON),
-        authenticatorData: bytesToB64url(resp.authenticatorData),
-        signature: bytesToB64url(resp.signature),
-        userHandle: resp.userHandle ? bytesToB64url(resp.userHandle) : null,
+  try {
+    const out = await api.post(
+      `/api/auth/passkeys/login/finish?ceremony=${encodeURIComponent(begin.ceremony)}`,
+      {
+        id: cred.id,
+        rawId: bytesToB64url(cred.rawId),
+        type: cred.type,
+        response: {
+          clientDataJSON: bytesToB64url(resp.clientDataJSON),
+          authenticatorData: bytesToB64url(resp.authenticatorData),
+          signature: bytesToB64url(resp.signature),
+          userHandle: resp.userHandle ? bytesToB64url(resp.userHandle) : null,
+        },
       },
-    },
-  );
+    );
+    // A passkey worked HERE. This is the case registration alone would miss: an iCloud-synced
+    // credential created on a phone is usable on a Mac that never registered anything.
+    rememberPasskey();
+    return out;
+  } catch (err) {
+    // THE SERVER REJECTED IT — so stop firing the sheet unprompted and let the button be the way
+    // back. Deliberately NOT reached for a dismissed sheet: `credentials.get()` throws before this
+    // point in that case, so cancelling never disables the feature.
+    //
+    // quince answers 401 identically for "no such credential" and "assertion rejected", on purpose —
+    // telling them apart would answer "does this quince know this passkey" to anyone who asked. The
+    // client therefore cannot distinguish them, and does not need to: either way this credential did
+    // not work here, which is exactly what the hint tracks.
+    if (err instanceof APIError) forgetPasskey();
+    throw err;
+  }
 }

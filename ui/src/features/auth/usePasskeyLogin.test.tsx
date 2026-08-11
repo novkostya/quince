@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import { usePasskeyLogin } from "./usePasskeyLogin";
 import { PasswordForm } from "./PasswordForm";
-import { MemoryRouter } from "react-router-dom";
 
-// The whole of qn.6k slice 4's risk is in the NEGATIVE paths. Conditional mediation is an optional
-// convenience layered onto a login form that must keep working — so what these assert is mostly
-// what does NOT happen: no call where unsupported, no error surfaced, no interference.
+// REWRITTEN for the on-load sheet. The earlier suite asserted CONDITIONAL mediation — a non-modal
+// call armed on mount, offered inside the browser's autofill dropdown. That shape was replaced after
+// hardware showed it is undiscoverable: the Operator found the passkey only by tapping the key icon
+// on the iOS keyboard, past a suggestion list whose first entry was a password.
+//
+// What replaced it is a modal on load GATED ON MEMORY, plus an unconditional button. The tests below
+// are about the gate, because the gate is the whole reason an unprompted sheet is defensible.
 
 function Harness({ onSuccess }: { onSuccess?: () => void }) {
   usePasskeyLogin(onSuccess ?? (() => {}));
@@ -19,64 +23,64 @@ const origCreds = navigator.credentials;
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.stubGlobal("fetch", vi.fn());
+  localStorage.clear();
 });
 
 afterEach(() => {
-  // `window.PublicKeyCredential` is restored by `unstubAllGlobals` where it was stubbed, and jsdom
-  // does not define it in the first place — so only `navigator.credentials`, which these tests
-  // assign directly, has to be put back by hand.
   // @ts-expect-error — jsdom's navigator.credentials is not typed as assignable.
   navigator.credentials = origCreds;
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
-// THE GATE, AND THE REASON IT EXISTS. Calling `get({mediation: "conditional"})` unguarded produces
-// a user-visible error on browsers without it — on a page the user has not asked to do anything on.
-// jsdom has no PublicKeyCredential at all, which is exactly the unsupported case.
-describe("conditional mediation is gated", () => {
-  it("makes no request at all where the API is absent", async () => {
-    // @ts-expect-error — jsdom has none; make the absence explicit.
-    window.PublicKeyCredential = undefined;
+// THE GATE, AND IT IS THE POINT OF THE DESIGN. Credential presence is undetectable — no API will say
+// whether this device holds a passkey, because that would be a fingerprinting vector. So an on-load
+// modal is a guess, and it guesses wrong for everyone who has none: a fresh install, a box after
+// `quince auth reset`, the public demo, a laptop the admin never set one up on.
+//
+// Firing only where a passkey has already been created or used IN THIS BROWSER removes every one of
+// those cases without a device heuristic and without asking the server anything.
+describe("the unprompted sheet is gated on memory", () => {
+  it("does nothing at all on a browser that has never used a passkey", async () => {
+    // @ts-expect-error — minimal stand-in for the browser global.
+    window.PublicKeyCredential = {};
+    // @ts-expect-error — stand-in for the credentials container.
+    navigator.credentials = { get: vi.fn() };
 
     render(<Harness />);
     await screen.findByText("armed");
 
+    // No ceremony begun, and — the part that matters — no sheet.
     expect(fetch).not.toHaveBeenCalled();
+    expect(navigator.credentials.get).not.toHaveBeenCalled();
   });
 
-  // THE GUARD THAT IS ACTUALLY LOAD-BEARING, and the assertion that discriminates it: with
-  // conditional mediation unavailable, `navigator.credentials.get()` must NOT be called. That call
-  // is what produces the user-visible error on such a browser — and unlike the `typeof` check
-  // above, deleting this one changes behaviour rather than being absorbed by the catch.
-  it("never calls credentials.get where conditional mediation is unavailable", async () => {
-    // @ts-expect-error — minimal stand-in for the browser global.
-    window.PublicKeyCredential = { isConditionalMediationAvailable: vi.fn().mockResolvedValue(false) };
+  it("fires once a passkey has been seen in this browser", async () => {
+    localStorage.setItem("quince.passkey.seen", "1");
+    // @ts-expect-error — stand-in.
+    window.PublicKeyCredential = {};
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ ceremony: "c", options: { publicKey: { challenge: "AAAA" } } }),
     } as Response);
-    // @ts-expect-error — stand-in for the credentials container.
+    // @ts-expect-error — stand-in.
     navigator.credentials = { get: vi.fn().mockResolvedValue(null) };
 
     render(<Harness />);
-    await waitFor(() =>
-      expect(window.PublicKeyCredential.isConditionalMediationAvailable).toHaveBeenCalled(),
-    );
 
-    expect(navigator.credentials.get).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
+    await waitFor(() => expect(navigator.credentials.get).toHaveBeenCalled());
   });
 });
 
-// A FAILURE HERE IS NEVER THE USER'S PROBLEM. Every one of them — no passkey, no endpoint, sheet
-// dismissed — is indistinguishable from the others by design, and the user is looking at a password
-// form that works. An error on the login screen would turn an optional convenience into an apparent
-// fault.
-describe("failures are silent", () => {
+// A FAILURE ON THIS PATH IS NEVER THE USER'S PROBLEM — nobody asked for it. The password form is
+// right there and works; an error message would turn an optional convenience into an apparent fault.
+// The BUTTON is the opposite case and reports its failures, which is asserted below.
+describe("the on-load path is silent", () => {
   it("swallows a rejected begin and leaves the form usable", async () => {
+    localStorage.setItem("quince.passkey.seen", "1");
     // @ts-expect-error — stand-in.
-    window.PublicKeyCredential = { isConditionalMediationAvailable: vi.fn().mockResolvedValue(true) };
+    window.PublicKeyCredential = {};
     vi.mocked(fetch).mockRejectedValue(new Error("no such endpoint"));
 
     render(
@@ -87,21 +91,20 @@ describe("failures are silent", () => {
     );
 
     await waitFor(() => expect(fetch).toHaveBeenCalled());
-
-    // The password path is untouched: the field is there, and nothing rendered an error.
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.queryByText(/no such endpoint/i)).not.toBeInTheDocument();
   });
 
-  it("does not call onSuccess when the authenticator returns nothing", async () => {
+  it("does not sign in when the authenticator returns nothing", async () => {
+    localStorage.setItem("quince.passkey.seen", "1");
     // @ts-expect-error — stand-in.
-    window.PublicKeyCredential = { isConditionalMediationAvailable: vi.fn().mockResolvedValue(true) };
+    window.PublicKeyCredential = {};
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ ceremony: "c", options: { publicKey: { challenge: "AAAA" } } }),
     } as Response);
-    // @ts-expect-error — stand-in for the credentials container.
+    // @ts-expect-error — stand-in.
     navigator.credentials = { get: vi.fn().mockResolvedValue(null) };
 
     const onSuccess = vi.fn();
@@ -112,28 +115,25 @@ describe("failures are silent", () => {
   });
 });
 
-// THE TOKEN THE BROWSER READS. Conditional mediation offers the credential against a field carrying
-// `webauthn` in its autocomplete; without it the dropdown shows saved passwords and no passkey.
-// And it must NOT appear on the setup form, which shares this component and has nothing to sign
-// in to.
-describe("the webauthn autocomplete token", () => {
-  it("is present on both fields when passkeys are armed", () => {
+// THE BUTTON IS UNCONDITIONAL, and that is what makes the feature findable at all. It cannot make
+// the wrong-guess mistake the gate exists to prevent: the user pressed it, so "no passkey here" is a
+// fine answer to a question they asked.
+describe("the explicit button", () => {
+  it("is offered whenever passkeys are armed, with no memory required", () => {
     render(
       <MemoryRouter>
         <PasswordForm title="Sign in" subtitle="s" cta="Sign in" passkeys onSubmit={() => Promise.resolve()} />
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText("Username")).toHaveAttribute("autocomplete", "username webauthn");
-    expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password webauthn");
+    expect(screen.getByRole("button", { name: /sign in with a passkey/i })).toBeInTheDocument();
   });
 
-  it("is ABSENT by default, which is the setup page's case", () => {
+  it("is ABSENT on the setup form, which shares this component", () => {
     render(
       <MemoryRouter>
         <PasswordForm title="Set a password" subtitle="s" cta="Set" onSubmit={() => Promise.resolve()} />
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText("Username")).toHaveAttribute("autocomplete", "username");
-    expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password");
+    expect(screen.queryByRole("button", { name: /sign in with a passkey/i })).not.toBeInTheDocument();
   });
 });
