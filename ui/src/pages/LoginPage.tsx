@@ -1,6 +1,8 @@
+import { useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { PasswordForm } from "@/features/auth/PasswordForm";
+import { usePasskeyLogin } from "@/features/auth/usePasskeyLogin";
 import { authStatusKey, login } from "@/lib/auth";
 import { useDemoResetMinutes, useIsPublicDemo } from "@/lib/health";
 import { formatResetInterval } from "@/lib/format";
@@ -19,11 +21,23 @@ export function LoginPage() {
   const isPublicDemo = useIsPublicDemo();
   const interval = formatResetInterval(useDemoResetMinutes());
 
+  // A passkey sign-in lands in exactly the place a password one does — same query invalidation,
+  // same `next`. The two paths converge here rather than in the hook, so there is one definition of
+  // "signed in" and the hook stays a credential mechanism with no opinion about routing.
+  const onPasskey = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: authStatusKey });
+    nav(next, { replace: true });
+  }, [qc, nav, next]);
+  usePasskeyLogin(onPasskey);
+
   return (
     <PasswordForm
       title="Sign in"
       subtitle={isPublicDemo ? "This is a public demo of quince." : "Enter your admin password."}
       cta="Sign in"
+      // ARMED ON LOGIN ONLY. The setup page shares this component and must NOT arm it: there is
+      // nothing to sign in to before a password exists (qn.6k).
+      passkeys
       notice={
         isPublicDemo ? (
           <div className="mt-3 space-y-2 rounded-card border border-line bg-bg px-3 py-2 text-sm text-muted">
