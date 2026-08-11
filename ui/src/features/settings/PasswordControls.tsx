@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
-import { passkeysKey } from "@/features/settings/Passkeys";
+import { passkeysKey, usePasskeyList } from "@/features/settings/Passkeys";
 
 // The password controls on `/settings/auth` — qn.6m slice 6b, D4 and D7.
 //
@@ -47,6 +47,17 @@ function PasswordlessCost() {
 
 export function PasswordControls() {
   const qc = useQueryClient();
+  // quince#855 — WITHOUT THIS THE SCREEN LIED QUIETLY. It said "Change your password / Current
+  // password" on a passwordless install, where the field had to be left blank and nothing said so.
+  // `PUT /api/auth/password` already handled that case correctly, so the defect was entirely in what
+  // this surface CLAIMED — the state-honesty rule applied to a form's own labels.
+  //
+  // UNDEFINED WHILE LOADING, AND THE FALLBACK IS `true` (a password exists). That is the shape the
+  // overwhelming majority of installs have, and it is the SAFE guess of the two: showing a Current
+  // field that turns out to be unnecessary costs one ignored input, where hiding one that IS
+  // required costs a 401 the user cannot act on.
+  const list = usePasskeyList();
+  const hasPassword = list.data?.has_password ?? true;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [changeBusy, setChangeBusy] = useState(false);
@@ -67,7 +78,15 @@ export function PasswordControls() {
       // A SUCCESS MESSAGE, because nothing else on screen changes. A password change that looks
       // like nothing happened invites a second attempt with the OLD current password, which then
       // 401s and reads as "the change failed" — the opposite of the truth.
-      setChangeMsg({ ok: true, text: "Password changed. Your other devices stay signed in." });
+      setChangeMsg({
+        ok: true,
+        text: hasPassword
+          ? "Password changed. Your other devices stay signed in."
+          : "Password set. You can now sign in with it as well as your passkey.",
+      });
+      // The list carries `has_password`, and SETTING one changes it — so the surface that just
+      // said "Set a password" must stop saying it. Invalidated for the same reason removal is.
+      await qc.invalidateQueries({ queryKey: passkeysKey });
     } catch (err) {
       setChangeMsg({ ok: false, text: messageFor(err, "Could not change the password.") });
     } finally {
@@ -94,7 +113,18 @@ export function PasswordControls() {
   return (
     <div className="mt-8 space-y-8">
       <section>
-        <h2 className="text-sm font-semibold">Change your password</h2>
+        {/* THE HEADING IS THE ACTION, and on a passwordless install the action is SET, not change.
+            Same form, same endpoint — `PUT /api/auth/password` treats an absent current password as
+            "there is none" — so only the words and the one field differ. */}
+        <h2 className="text-sm font-semibold">
+          {hasPassword ? "Change your password" : "Set a password"}
+        </h2>
+        {!hasPassword ? (
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            This quince has no password — you sign in with a passkey. Adding one gives you a second
+            way in that does not depend on a device.
+          </p>
+        ) : null}
         <form onSubmit={submitChange} className="mt-3 max-w-sm space-y-3">
           {/* THE ANCHOR AGAIN — quince#819. A password manager keys on (origin, username), and this
               is a THIRD password surface on the same origin. Without it, a manager offers to update
@@ -110,16 +140,21 @@ export function PasswordControls() {
             className="hidden"
             aria-hidden="true"
           />
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="current-password">Current password</Label>
-            <Input
-              id="current-password"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-            />
-          </div>
+          {/* ABSENT WHEN THERE IS NO PASSWORD TO CONFIRM. Rendering it and expecting a blank is
+              what quince#855 filed: a required-looking field that must be left empty, with nothing
+              on screen saying so. */}
+          {hasPassword ? (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="current-password">Current password</Label>
+              <Input
+                id="current-password"
+                type="password"
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+              />
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1">
             <Label htmlFor="new-password">New password</Label>
             <Input
@@ -136,11 +171,27 @@ export function PasswordControls() {
             </div>
           ) : null}
           <Button type="submit" disabled={changeBusy || next.length === 0}>
-            {changeBusy ? "…" : "Change password"}
+            {changeBusy ? "…" : hasPassword ? "Change password" : "Set password"}
           </Button>
         </form>
       </section>
 
+      {/* NOTHING TO REMOVE WHEN THERE IS NO PASSWORD — quince#855. The section below offers a
+          destructive action against a thing that does not exist, and its cost list describes a
+          state the user is ALREADY IN. Replaced by a statement of that state rather than hidden
+          silently: "this option is missing" is a worse answer than "you are already here", and the
+          form above is the way out of it. */}
+      {!hasPassword ? (
+        <section>
+          <h2 className="text-sm font-semibold">You sign in with a passkey only</h2>
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            There is no password on this quince. If you lose the device holding your passkey, the
+            only way back is <code className="font-mono text-fg">quince auth reset</code> on the
+            machine running quince — which needs console or SSH access to it, and clears every
+            passkey and session as well.
+          </p>
+        </section>
+      ) : (
       <section>
         <h2 className="text-sm font-semibold">Sign in with a passkey only</h2>
         <p className="mt-1 max-w-xl text-sm text-muted">
@@ -174,6 +225,7 @@ export function PasswordControls() {
           </Button>
         )}
       </section>
+      )}
     </div>
   );
 }

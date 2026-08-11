@@ -9,7 +9,16 @@ import { api, APIError } from "@/lib/api";
 // side, where the decision is irreversible without console access and the server is the only thing
 // that knows whether it is allowed.
 
-function renderControls() {
+// THE LIST IS NOW AN INPUT TO THIS COMPONENT (quince#855): it carries `has_password`, and the whole
+// surface renders differently on the two states. Mocked per test rather than globally, because the
+// PASSWORDLESS case is the one the issue was filed about and it must be reachable here.
+function renderControls(hasPassword = true) {
+  vi.spyOn(api, "get").mockResolvedValue({
+    passkeys: [],
+    rp_id: "quince.example.com",
+    supported: true,
+    has_password: hasPassword,
+  });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -138,5 +147,68 @@ describe("removing the password", () => {
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
 
     expect(await screen.findByText(/shared with every visitor/i)).toBeInTheDocument();
+  });
+});
+
+// quince#855 — THE SCREEN USED TO LIE QUIETLY. On a passwordless install it said "Change your
+// password / Current password", where the field had to be left blank and nothing said so.
+// `PUT /api/auth/password` handled that case correctly all along, so the defect was entirely in
+// what this surface CLAIMED.
+describe("a passwordless install", () => {
+  it("asks to SET a password, with no current-password field", async () => {
+    renderControls(false);
+
+    expect(await screen.findByRole("heading", { name: "Set a password" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("New password")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
+  });
+
+  it("says why there is no current password to give", async () => {
+    renderControls(false);
+    expect(await screen.findByText(/no password — you sign in with a passkey/i)).toBeInTheDocument();
+  });
+
+  // NOTHING TO REMOVE. Offering a destructive action against a thing that does not exist, with a
+  // cost list describing the state the user is ALREADY IN, is the same class of lie one section up.
+  it("does not offer to remove a password that is not there", async () => {
+    renderControls(false);
+
+    await screen.findByRole("heading", { name: "Set a password" });
+    expect(screen.queryByRole("button", { name: "Remove password" })).not.toBeInTheDocument();
+    // Replaced rather than hidden: "you are already here" beats a missing section.
+    expect(screen.getByRole("heading", { name: /you sign in with a passkey only/i })).toBeInTheDocument();
+  });
+
+  // THE COST STILL HAS TO BE ON SCREEN. The user is living with it now, so the console-access fact
+  // is MORE relevant here, not less — it is what they need if the device is ever lost.
+  it("still states that recovery needs a shell on the machine", async () => {
+    renderControls(false);
+    expect(await screen.findByText(/console or SSH access/i)).toBeInTheDocument();
+  });
+});
+
+describe("an install with a password", () => {
+  it("asks to CHANGE it, and offers removal", async () => {
+    renderControls(true);
+
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove password" })).toBeInTheDocument();
+  });
+
+  // THE FALLBACK WHILE THE LIST IS IN FLIGHT IS "a password exists", which is the safe guess of the
+  // two: a Current field that turns out to be unnecessary costs one ignored input, where hiding one
+  // that IS required costs a 401 the user cannot act on.
+  it("assumes a password exists before the list has answered", () => {
+    vi.spyOn(api, "get").mockReturnValue(new Promise(() => {})); // never resolves
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PasswordControls />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
   });
 });
