@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -63,6 +64,11 @@ type Deps struct {
 	// and the routes are not registered when it is, so a nil here is unreachable rather than a
 	// panic waiting.
 	Passkeys *auth.PasskeyCeremonies
+	// PasswordAdmin backs PUT/DELETE /api/auth/password (qn.6m). NIL IN --demo, ON PURPOSE — and
+	// unlike Passkeys above, the routes ARE still registered when it is nil, because NewRouter
+	// installs UnavailablePasswordAdmin and the surface must refuse with a stated reason rather
+	// than quietly vanish.
+	PasswordAdmin PasswordAdmin
 }
 
 // WorkingReset drives POST /api/devices/{udid}/reset-working (qn.5b, contracts §1): discard a
@@ -257,3 +263,43 @@ func (UnavailableStorages) Recheck(string) (wire.Storage, bool) {
 // No storage subsystem means no jobs bound to one, so a forget is never refused for liveness here.
 // Nil rather than an error, for the same reason the reads above degrade rather than fail.
 func (UnavailableStorages) JobsOn(string) []string { return nil }
+
+// PasswordAdmin drives PUT and DELETE /api/auth/password (qn.6m D6, contracts §1) — changing the
+// admin password, and removing it to go passwordless.
+//
+// THE DEMO CARVE-OUT IS AN UNWIRED CAPABILITY, NOT AN `if demo` BRANCH, and that shape is quince#841's
+// instruction rather than a preference: "quince has no demo flag at the API layer … no handler
+// contains an `if demo` branch". The public demo presets a shared password that every visitor is
+// told, so letting one visitor change or remove it would lock out everybody else — but the refusal
+// belongs in the wiring, beside the four stand-ins already here, so that adding a second pattern
+// does not become the first.
+//
+// The real implementation is *auth.Service; UnavailablePasswordAdmin stands in when it is not wired
+// (--demo). Returns an HTTP status + reason so the handler maps outcomes without reaching for
+// cross-package sentinels — the same shape as WorkingReset and JobControl above.
+type PasswordAdmin interface {
+	ChangePassword(current, next, clientIP string) error
+	RemovePassword(rpID, clientIP string) error
+}
+
+// UnavailablePasswordAdmin is the PasswordAdmin used when none is wired (--demo): both operations
+// refuse with 503 and a STATED REASON, rather than the surface quietly hiding its buttons.
+//
+// `no silent caps or fallbacks` — the UI is expected to show the controls and report this sentence,
+// because a demo visitor who cannot find the setting learns nothing, where one who is told why
+// learns what the real thing does.
+type UnavailablePasswordAdmin struct{}
+
+// ErrPasswordAdminUnavailable is what both refusals return. A sentinel rather than a fresh error per
+// call, so the handler maps it to 503 by identity and cannot mistake it for an internal failure.
+var ErrPasswordAdminUnavailable = errors.New(
+	"the admin password cannot be changed here: this is the public demo, and its password is shared " +
+		"with every visitor")
+
+func (UnavailablePasswordAdmin) ChangePassword(string, string, string) error {
+	return ErrPasswordAdminUnavailable
+}
+
+func (UnavailablePasswordAdmin) RemovePassword(string, string) error {
+	return ErrPasswordAdminUnavailable
+}

@@ -62,3 +62,35 @@ func TestPasskeyAssertionIsInAllThreeExactPathLists(t *testing.T) {
 		}
 	}
 }
+
+// THE PASSWORD-MUTATION PAIR MUST BE IN NONE OF THE THREE — qn.6m D4, asserted here beside the
+// passkey routes because it is the same mistake with a worse blast radius.
+//
+// Both need a session by definition. `PUT` in `authExempt` would be an unauthenticated password
+// change — the exact thing contracts §1 promises `POST /api/auth/setup` can never be, arriving
+// through a different door. `DELETE` in `authExempt` would let anyone make the install passwordless
+// and then register their own credential.
+//
+// `csrfExempt` is the one that looks harmless and is not: these are state-changing requests made by
+// an authenticated browser, which is precisely what the double-submit token exists for. Exempting
+// them would make a password change reachable from any page the admin happens to visit.
+//
+// METHOD-SENSITIVE, and asserted that way. The lists key on METHOD + PATH, so `PUT` and `DELETE` on
+// `/api/auth/password` are different entries from each other and from anything else on that path.
+func TestPasswordMutationIsInNoneOfTheExactPathLists(t *testing.T) {
+	for _, m := range []string{"PUT", "DELETE"} {
+		r := httptest.NewRequest(m, "/api/auth/password", nil)
+		if authExempt(r) {
+			t.Errorf("%s /api/auth/password IS in authExempt — an unauthenticated caller could "+
+				"change or remove the admin password", m)
+		}
+		if setupAllowed(r) {
+			t.Errorf("%s /api/auth/password IS in setupAllowed — reachable on a storageless "+
+				"install, which is a first-run state where no password may be mutated", m)
+		}
+		if csrfExempt(r) {
+			t.Errorf("%s /api/auth/password IS in csrfExempt — a state-changing request from an "+
+				"authenticated browser is exactly what double-submit protects", m)
+		}
+	}
+}

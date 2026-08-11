@@ -299,6 +299,8 @@ func serve(args []string) error {
 		// Passkeys (qn.6k). The ceremony store is per-process and in memory; the credentials
 		// themselves live in the app DB, which is why both are wired and neither is optional here.
 		Store: st, Passkeys: auth.NewPasskeyCeremonies(),
+		// Nil in demo mode — the carve-out is the nil, not a branch in a handler (qn.6m D6).
+		PasswordAdmin: passwordAdmin(demoMode, authSvc),
 	})
 
 	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
@@ -747,4 +749,25 @@ func storageRequired(demoMode bool, cfgSvc *config.Service) func() bool {
 		scfg := cfgSvc.Current().Storage
 		return scfg == nil || len(*scfg) == 0
 	}
+}
+
+// passwordAdmin decides whether PUT/DELETE /api/auth/password have a real implementation behind
+// them — qn.6m D6, and the second demo carve-out in this file to be spelled the same way.
+//
+// NIL IN DEMO MODE, and the nil IS the carve-out. `httpapi.NewRouter` turns it into
+// `UnavailablePasswordAdmin`, which refuses both operations with 503 and a stated reason, so the
+// surface still exists and explains itself. quince#841 is explicit that this is the shape to use:
+// "quince has no demo flag at the API layer … no handler contains an `if demo` branch", and adding
+// one here would be the first of a second pattern.
+//
+// WHY THE DEMO MUST REFUSE, which is a product fact rather than a technical one: the public demo
+// presets a shared password and PUBLISHES it on the login screen. One visitor changing it — or
+// removing it to go passwordless against a passkey only they hold — locks out every other visitor
+// until the periodic reset. That is the same reasoning that keeps the demo's other destructive
+// surfaces unwired, and it is why ruling B says passwordless is "never on the demo".
+func passwordAdmin(demoMode bool, authSvc *auth.Service) httpapi.PasswordAdmin {
+	if demoMode {
+		return nil
+	}
+	return authSvc
 }

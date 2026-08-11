@@ -34,10 +34,14 @@ func testDeps(t *testing.T) Deps {
 	b := bus.New()
 	prov := demo.NewProvider(b, log)
 	return Deps{
-		Log:      log,
-		Version:  "test-1.2.3",
-		Config:   cfgSvc,
-		Auth:     auth.NewService(st, log),
+		Log:     log,
+		Version: "test-1.2.3",
+		Config:  cfgSvc,
+		Auth:    auth.NewService(st, log),
+		// Set because a real server always sets it — surfaces that read rows need it, and a test
+		// router without it diverges from production in a way tests then have to work around.
+		// Passkey routes stay unregistered regardless: that needs `Passkeys` non-nil too.
+		Store:    st,
 		Bus:      b,
 		Devices:  prov,
 		Jobs:     prov,

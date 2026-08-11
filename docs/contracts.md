@@ -76,6 +76,58 @@ POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session 
 POST /api/auth/logout            → 204, clears the cookie.
 ```
 
+The admin password is MUTABLE (qn.6m D4; Operator ruling B on quince#841):
+
+```
+PUT    /api/auth/password {current_password, new_password}  → 204
+       // SESSION REQUIRED, and the CURRENT password besides. A session is proof of a PAST
+       // authentication, not of present possession, and the one irreversible thing an attacker
+       // holding a stolen cookie can do is change the password and keep the owner out.
+       // `current_password` IS OMITTED EXACTLY WHEN NO PASSWORD EXISTS — on a passwordless
+       // install "change" IS "set", and the server decides which case applies from its own
+       // state, so there is no client flag to get wrong. Where a password DOES exist, an empty
+       // value is simply a wrong one and takes the same 401.
+       // 401 bad_password · 422 weak_password · 429 rate_limited — THE SAME BUCKET as
+       // POST /api/auth/login, because it verifies a password and holding a session must not
+       // buy a fresh budget to guess in · 503 unavailable on the demo (below).
+DELETE /api/auth/password                                   → 204
+       // SESSION REQUIRED. Makes the install PASSWORDLESS. Ruling B superseded qn.6k's "a
+       // passkey is an addition, never a replacement"; `quince auth reset` is what carries the
+       // recovery cost, and it needs console access to the box.
+       // 409 last_credential when no passkey exists FOR THIS rpId. The message names the
+       // address this request arrived on AND the addresses the credentials it did find belong
+       // to — "no passkeys" at a box that visibly has some reads as quince being broken.
+       // 503 unavailable on the demo (below).
+```
+
+**BOTH ARE IN NONE OF THE THREE EXACT-PATH LISTS** — the opposite of the assertion pair, the same as
+registration: they need a session by definition. `PUT` in the pre-auth list would be an
+unauthenticated password change, which is the thing `POST /api/auth/setup` promises never to be
+arriving through another door; and `csrfExempt` is the one that looks harmless and is not, since
+these are state-changing requests from an authenticated browser. Asserted by exact path **and by
+method**, in `passkey_allowlist_test.go`.
+
+**THE rpId FILTER ON `DELETE` IS THE OPPOSITE OF `configured`'s, AND BOTH ARE CORRECT.** The two ask
+different questions and the pair now lives in one file, so it is written here rather than left to be
+re-derived:
+
+| question | filter by rpId? | guards |
+| --- | --- | --- |
+| has this install been **claimed**? | **no** | first-run setup (D3, below) |
+| can the user still **sign in** here? | **yes** | the lockout, on `DELETE` |
+
+A credential bound to another domain cannot sign in at this address, so counting it on `DELETE`
+would let somebody go passwordless and lock themselves out — with the phone still listing a passkey
+that cannot help. That is `qn.6k` D2's hazard reached from the other side.
+
+**NOT ON THE PUBLIC DEMO — and the refusal is an UNWIRED CAPABILITY, not an `if demo` branch.**
+quince#841 is explicit that quince has no demo flag at the API layer and that no handler contains
+such a branch. `PasswordAdmin` is left nil in demo mode and `NewRouter` installs
+`UnavailablePasswordAdmin` beside the four stand-ins already there, so **both routes still exist and
+refuse with 503 and a stated reason** rather than 404ing. The demo publishes a shared password on its
+own login screen; one visitor changing it — or removing it against a credential only they hold —
+would lock out every other visitor until the periodic reset.
+
 **`CONFIGURED` MEANS A PASSWORD HASH **OR** AT LEAST ONE PASSKEY — qn.6m D3, and it is what keeps
 `needs_setup` from becoming an unauthenticated admin takeover.** It is the predicate behind both
 `needs_setup` above and the 409 on `POST /api/auth/setup`; neither consulted the credentials table

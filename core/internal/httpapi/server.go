@@ -109,6 +109,13 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.WorkingReset == nil { // no backup engine wired → reset surface 503
 		deps.WorkingReset = UnavailableWorkingReset{}
 	}
+	// --demo leaves this nil ON PURPOSE (qn.6m D6): the demo's password is shared with every
+	// visitor, so one visitor changing or removing it would lock out the rest. The surface still
+	// EXISTS and refuses with a stated reason — no `if demo` in any handler, which is quince#841's
+	// instruction and keeps this the same shape as the four stand-ins above.
+	if deps.PasswordAdmin == nil {
+		deps.PasswordAdmin = UnavailablePasswordAdmin{}
+	}
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
@@ -116,6 +123,14 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
+	// Changing and removing the admin password (qn.6m D4). BOTH NEED A SESSION, so they sit inside
+	// authGuard with everything else and join NEITHER exact-path allowlist — which is the same
+	// reasoning that keeps passkey REGISTRATION out of them, and the opposite of the assertion pair.
+	//
+	// Registered UNCONDITIONALLY, unlike the passkey routes below: a nil PasswordAdmin has already
+	// become UnavailablePasswordAdmin above, and the demo must REFUSE with a reason rather than 404.
+	apiMux.HandleFunc("PUT /api/auth/password", deps.handleChangePassword())
+	apiMux.HandleFunc("DELETE /api/auth/password", deps.handleRemovePassword())
 	// Registration needs a session, so these sit inside authGuard with everything else and touch
 	// neither exact-path allowlist. Registered only when the ceremony store is wired (qn.6k).
 	if deps.Passkeys != nil && deps.Store != nil {
