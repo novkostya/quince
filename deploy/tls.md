@@ -55,6 +55,15 @@ proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 proxy_set_header Host              $host;
 ```
 
+**`Host` IS LOAD-BEARING FOR PASSKEYS, AND SILENTLY SO** (`qn.6k`). quince derives the WebAuthn
+relying party — the domain a passkey is bound to — from the request's `Host`, deliberately rather
+than from a config key, so that it stays correct across every tier on this page without anyone
+editing YAML. Caddy's `reverse_proxy` preserves `Host` by default; **nginx does not, which is why
+that third line is here.** Delete it and quince sees the upstream name, so the browser refuses to
+mint a credential for a relying party outside the origin it is visiting — and what the user gets is
+an opaque `SecurityError` on the tier passkeys are chiefly built for. Registration fails and nothing
+says why.
+
 **`X-Forwarded-Proto` can only ever upgrade — and only from a proxy you have named.** quince treats
 it as evidence the origin is secure and never as evidence it is not, so a proxy that omits it
 produces the login loop rather than a silent downgrade. If step 1 will not complete behind your

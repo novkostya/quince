@@ -121,6 +121,8 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Passkeys != nil && deps.Store != nil {
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/begin", deps.handlePasskeyRegisterBegin())
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
+		apiMux.HandleFunc("POST /api/auth/passkeys/login/begin", deps.handlePasskeyLoginBegin())
+		apiMux.HandleFunc("POST /api/auth/passkeys/login/finish", deps.handlePasskeyLoginFinish())
 	}
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
