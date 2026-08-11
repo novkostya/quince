@@ -25,7 +25,12 @@ type Passkey = {
 
 type PasskeyList = { passkeys: Passkey[]; rp_id: string; supported: boolean };
 
-const key = ["auth", "passkeys"] as const;
+// EXPORTED since qn.6m slice 6b: `PasswordControls` sits on the same page and going passwordless
+// changes what this list should say about itself, so it must be able to invalidate it. Shared from
+// here rather than redeclared there — two spellings of one query key is a cache that silently
+// splits in two.
+export const passkeysKey = ["auth", "passkeys"] as const;
+const key = passkeysKey;
 
 
 

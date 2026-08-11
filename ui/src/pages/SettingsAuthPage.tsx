@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { Passkeys } from "@/features/settings/Passkeys";
+import { PasswordControls } from "@/features/settings/PasswordControls";
 
 // The auth surface as A PAGE OF ITS OWN — quince#841 ruling A, qn.6m D2.
 //
@@ -44,6 +45,11 @@ export function SettingsAuthPage() {
 
       <div className="mt-6 max-w-xl">
         <Passkeys />
+        {/* PASSKEYS FIRST, PASSWORD SECOND — qn.6m slice 6b. The rung exists because typing an
+            admin password on a phone is the worst part of using quince, so the surface leads with
+            the thing that replaces it. It also puts the DESTRUCTIVE action (removing the password)
+            furthest from the top of the page. */}
+        <PasswordControls />
       </div>
     </section>
   );
