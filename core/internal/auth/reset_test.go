@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -93,21 +94,37 @@ func TestResetClearsPasswordPasskeysAndSessions(t *testing.T) {
 //
 // This test asserts BOTH halves: that the hole is real if you only clear the password, and that
 // Reset closes it. Delete the session clear from Reset and the second half fails.
+//
+// HALF 1 WAS REWRITTEN BY qn.6m D3, AND THE HOLE IT DOCUMENTS SURVIVED THE REWRITE. It used to
+// assert that a password-only clear made `Status()` read `needs_setup` — the box LOOKING reset while
+// `Authenticate` still passed. Under D3 `Status()` is computed from `Configured()`, which is a
+// password OR a passkey, and this fixture seeds both — so after clearing the password the install is
+// still claimed by its credential and `Status()` no longer claims to be reset at all.
+//
+// That is a BETTER outcome behind a WORSE-LOOKING symptom, which is why the assertion moved rather
+// than being deleted: the box now reads `authenticated` outright instead of contradicting itself.
+// What has not changed is the thing Reset's third step exists for — `Authenticate` never consults
+// the password, so a live cookie still reaches every protected route.
 func TestResetClosesTheStaleSessionHole(t *testing.T) {
 	st := seedReset(t)
 	svc := NewService(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	// Half 1 — clearing ONLY the password leaves the session usable. If this half ever stops
-	// holding, `Authenticate` grew a password check and Reset's third step may be redundant.
+	// Half 1 — clearing ONLY the password leaves the session usable. If this ever stops holding,
+	// `Authenticate` grew a password check and Reset's third step may be redundant.
 	if _, err := st.DeleteSetting(settingPasswordHash); err != nil {
 		t.Fatalf("clear password: %v", err)
-	}
-	if state, err := svc.Status("sess-1"); err != nil || state != StateNeedsSetup {
-		t.Fatalf("Status = %q (err=%v), want %q — the UI should read needs_setup", state, err, StateNeedsSetup)
 	}
 	if _, err := svc.Authenticate("sess-1"); err != nil {
 		t.Fatalf("Authenticate rejected the session after a password-only clear (%v) — "+
 			"the hole this test documents is gone; re-read auth.Reset's third step", err)
+	}
+	// D3's half: the passkey still claims the install, so first run stays CLOSED. A half-reset that
+	// reopened `POST /api/auth/setup` would be the takeover reached by clearing one row.
+	if ok, err := svc.Configured(); err != nil || !ok {
+		t.Fatalf("Configured = %v (err=%v) after a password-only clear — the passkey still claims this install", ok, err)
+	}
+	if err := svc.SetPassword("stranger", "203.0.113.1"); !errors.Is(err, ErrAlreadyConfigured) {
+		t.Fatalf("SetPassword after a password-only clear = %v, want ErrAlreadyConfigured", err)
 	}
 
 	// Half 2 — the real Reset closes it.

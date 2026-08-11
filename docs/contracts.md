@@ -67,14 +67,46 @@ GET  /api/auth/status  → {state: "needs_setup" | "needs_login" | "authenticate
      // first-run detection + reload-auth check + CSRF-token delivery in one call;
      // always reachable without a session.
 POST /api/auth/setup {password}  → 200 {state, csrf_token} + session cookie
-     // FIRST-RUN ONLY: 409 if a password already exists — setup succeeds exactly once
-     // and can never be an unauthenticated password reset. Auto-logs-in on success.
+     // FIRST-RUN ONLY: 409 if this install is already CONFIGURED — setup succeeds exactly
+     // once and can never be an unauthenticated password reset. Auto-logs-in on success.
      // 426 insecure_origin, BEFORE the password is stored (see below).
 POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session cookie
      // 401 on bad password; 429 when the per-IP login rate limit trips;
      // 426 insecure_origin, BEFORE the password is checked (see below).
 POST /api/auth/logout            → 204, clears the cookie.
 ```
+
+**`CONFIGURED` MEANS A PASSWORD HASH **OR** AT LEAST ONE PASSKEY — qn.6m D3, and it is what keeps
+`needs_setup` from becoming an unauthenticated admin takeover.** It is the predicate behind both
+`needs_setup` above and the 409 on `POST /api/auth/setup`; neither consulted the credentials table
+before 2026-08-11.
+
+**No endpoint is added or removed by this and two change MEANING**, which is why it is written here
+rather than left in the spec. On an install with a passkey and no password: `GET /api/auth/status`
+answers **`needs_login`**, not `needs_setup`, and `POST /api/auth/setup` answers **409**.
+
+Without it, the moment a passwordless install can exist the password row is gone, `status` tells an
+anonymous visitor `needs_setup`, the UI shows them first run, and `setup` — **pre-auth by exact
+path** — succeeds and issues them an admin session. That also falsifies the promise three lines
+above, that setup *"can never be an unauthenticated password reset"*.
+
+**THE PASSKEY COUNT IS NOT FILTERED BY rpId, WHICH IS THE OPPOSITE OF THE RULE EVERYWHERE ELSE IN
+THIS SECTION.** Assertion and registration filter, because a credential bound to another domain
+cannot be *used* here. This question is not about using one:
+
+| question | filter by rpId? |
+| --- | --- |
+| can this credential **sign in** here? | **yes** |
+| has this install ever been **claimed**? | **no** |
+
+A quince reachable at two addresses, whose only passkey is bound to the other one, must offer
+**login** at this address — failing honestly with `passkey_rp_mismatch` and the domain name — rather
+than offering first-run setup to a stranger. **Filtering here reopens the takeover through the
+second address.**
+
+`quince auth reset` clears the password *and* every passkey, so it still returns an install to
+genuinely unclaimed and first run stays reachable. That is load-bearing rather than incidental: it
+is the whole of the recovery story ruling B leans on (quince#841).
 
 Passkeys — registration (qn.6k; Operator ruling on quince#657, 2026-08-11):
 
