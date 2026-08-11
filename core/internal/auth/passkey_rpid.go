@@ -105,3 +105,8 @@ func isUsableRPID(rpID string) bool {
 	}
 	return strings.Contains(rpID, ".")
 }
+
+// RPIDSupported reports whether this address can be a relying party, for surfaces that need to say
+// so BEFORE a ceremony is attempted (spec story 4: refuse the tier rather than offer a button that
+// cannot work). The ceremony enforces the same predicate itself; this is the read-only half.
+func RPIDSupported(rpID string) bool { return isUsableRPID(rpID) }

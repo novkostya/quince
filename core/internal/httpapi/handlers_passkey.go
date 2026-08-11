@@ -181,3 +181,91 @@ func (d Deps) handlePasskeyLoginFinish() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
 	}
 }
+
+// GET /api/auth/passkeys → 200 {passkeys: [...]}
+//
+// SESSION REQUIRED, like registration. The list is what the Settings surface reads to let an admin
+// remove the phone they no longer own, so it carries the name, when it was created, when it was
+// last used, and the domain it is bound to — and NOT the public key or anything else a compromised
+// session could enumerate for no benefit (see wire.Passkey).
+func (d Deps) handlePasskeyList() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := d.Store.ListPasskeys()
+		if err != nil {
+			d.Log.Error("passkey list failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not list passkeys")
+			return
+		}
+		out := make([]wire.Passkey, 0, len(rows))
+		for _, p := range rows {
+			out = append(out, passkeyToWire(p))
+		}
+		// THE CURRENT rpId TRAVELS WITH THE LIST so the UI can mark the rows that will not work
+		// here without deriving the domain itself. A browser can read `location.hostname`, but it
+		// cannot know what quince considered the relying party — behind a proxy those are the same
+		// only if the proxy preserves Host, which is exactly the thing that can be misconfigured
+		// (deploy/tls.md). Sending it makes the UI's warning agree with the server's behaviour
+		// rather than with a guess.
+		writeJSON(w, d.Log, http.StatusOK, wire.PasskeyList{
+			Passkeys:  out,
+			RPID:      auth.RPIDFromRequest(r),
+			Supported: auth.RPIDSupported(auth.RPIDFromRequest(r)),
+		})
+	}
+}
+
+// DELETE /api/auth/passkeys/{id} → 204
+//
+// 204 WHETHER OR NOT A ROW WENT. Removing a credential that is already gone is the state the caller
+// wanted, and a 404 there would make a second tab, or a retry after a dropped response, look like a
+// failure the user must act on.
+func (d Deps) handlePasskeyDelete() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := d.Store.DeletePasskey(r.PathValue("id")); err != nil {
+			d.Log.Error("passkey delete failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove the passkey")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// PATCH /api/auth/passkeys/{id} {name} → 200 {passkey}
+func (d Deps) handlePasskeyRename() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
+			return
+		}
+		name := strings.TrimSpace(body.Name)
+		if name == "" {
+			writeError(w, d.Log, http.StatusUnprocessableEntity, "name_required",
+				"give this passkey a name you will recognise later")
+			return
+		}
+		id := r.PathValue("id")
+		renamed, err := d.Store.RenamePasskey(id, name)
+		if err != nil {
+			d.Log.Error("passkey rename failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not rename the passkey")
+			return
+		}
+		if !renamed {
+			// UNLIKE DELETE, a 404 is right here: the caller asked for a specific end state — this
+			// credential, that name — and it did not happen. Reporting 200 would tell the UI to
+			// render a row that does not exist.
+			writeError(w, d.Log, http.StatusNotFound, "not_found", "no such passkey")
+			return
+		}
+		pk, _, err := d.Store.GetPasskey(id)
+		if err != nil {
+			d.Log.Error("passkey reread failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not read the passkey back")
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, passkeyToWire(pk))
+	}
+}
