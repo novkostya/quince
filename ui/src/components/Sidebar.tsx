@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { House, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import { useConnectionStore } from "@/stores/connection";
 import { ConnBadge } from "./ConnBadge";
+import { SignOutButton } from "./SignOutButton";
 
 // `Home`, not `Devices` (Operator ruling, quince#443). `Devices` had stopped describing its own
 // page once storage moved onto it, and the replacement names the POSITION rather than the contents —
@@ -48,8 +49,14 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-1 sm:mt-auto sm:px-5 sm:py-4">
-        <ConnBadge />
+      {/* Status first, then the action — and sign out is LAST on purpose, at the far end of the bar
+          on a phone and the bottom of the column on desktop. It is the one control here whose
+          misfire costs the user something, so it does not sit adjacent to Home and Settings. */}
+      <div className="flex items-center gap-1 px-1 sm:mt-auto sm:flex-col sm:items-stretch sm:gap-2 sm:px-3 sm:py-4">
+        <div className="sm:px-2">
+          <ConnBadge />
+        </div>
+        <SignOutButton />
       </div>
     </aside>
   );
