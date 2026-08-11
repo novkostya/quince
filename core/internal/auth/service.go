@@ -34,6 +34,11 @@ var (
 	ErrNoSession         = errors.New("auth: no such session")
 	ErrSessionExpired    = errors.New("auth: session expired")
 	ErrWeakPassword      = errors.New("auth: password too short") // → 422
+	// ErrNoCredential — the assertion named a passkey this quince does not hold (qn.6k). It is
+	// deliberately NOT distinguishable by a caller from a credential registered against another
+	// rpId: ResolveCredential checks existence FIRST, so the mismatch message is only ever shown
+	// for a credential this quince actually has.
+	ErrNoCredential = errors.New("auth: no such passkey")
 )
 
 // Service holds the auth dependencies and tunables.
