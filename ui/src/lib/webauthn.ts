@@ -81,3 +81,58 @@ export async function registerPasskey(name: string): Promise<boolean> {
   );
   return true;
 }
+
+type BeginAssertion = {
+  ceremony: string;
+  options: { publicKey: PublicKeyCredentialRequestOptions };
+};
+
+/**
+ * signInWithPasskey runs the assertion ceremony and resolves the authenticated status.
+ *
+ * `conditional` picks the SHAPE of the request, and it is the whole difference between the two ways
+ * quince offers a passkey:
+ *
+ *   - true  — non-modal. The credential appears in the browser's own autofill dropdown and the call
+ *             waits indefinitely for the user to pick it. Armed on page load.
+ *   - false — modal. The system sheet opens immediately. Only ever from a button, because the user
+ *             asked for it: credential presence is undetectable, so an unprompted modal would fire
+ *             at people who have no passkey.
+ *
+ * ONE SHARED CEREMONY FOR BOTH, deliberately. The registration path already cost a bug that only
+ * one of three copies would have carried; assertion is not getting three either.
+ */
+export async function signInWithPasskey(opts: {
+  conditional: boolean;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  const begin = await api.post<BeginAssertion>("/api/auth/passkeys/login/begin", {});
+  const pk = begin.options.publicKey;
+
+  const cred = (await navigator.credentials.get({
+    ...(opts.conditional ? { mediation: "conditional" as CredentialMediationRequirement } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    publicKey: {
+      ...pk,
+      challenge: b64urlToBytes(pk.challenge as unknown as string),
+      allowCredentials: [],
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error("no credential");
+
+  const resp = cred.response as AuthenticatorAssertionResponse;
+  return api.post(
+    `/api/auth/passkeys/login/finish?ceremony=${encodeURIComponent(begin.ceremony)}`,
+    {
+      id: cred.id,
+      rawId: bytesToB64url(cred.rawId),
+      type: cred.type,
+      response: {
+        clientDataJSON: bytesToB64url(resp.clientDataJSON),
+        authenticatorData: bytesToB64url(resp.authenticatorData),
+        signature: bytesToB64url(resp.signature),
+        userHandle: resp.userHandle ? bytesToB64url(resp.userHandle) : null,
+      },
+    },
+  );
+}
