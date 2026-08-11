@@ -100,10 +100,31 @@ that stays correct across the four `qn.6f` access tiers without editing YAML. It
 credential**, so a passkey presented on another tier can name the domain it belongs to instead of
 failing the way "no credential here" fails — `docs/specs/qn.6k/qn.6k.md` D2.
 
-**NEITHER ENDPOINT IS PRE-AUTH, so neither joins the two exact-path lists below.** Registration is
-something an authenticated admin does. **The assertion pair is pre-auth by necessity and must be
-added to BOTH lists when it lands** — the pre-auth exemption *and* the storageless-reachable one,
-because a storageless install is exactly the state where onboarding offers a passkey.
+**NEITHER REGISTRATION ENDPOINT IS PRE-AUTH, so neither joins any exact-path list.** Registration is
+something an authenticated admin does.
+
+Passkeys — assertion (qn.6k):
+
+```
+POST /api/auth/passkeys/login/begin  → 200 {ceremony, options}
+     // PRE-AUTH. Discoverable: no username, no account picker — one admin, no accounts.
+     // 429 when the per-visitor login rate limit trips — THE SAME BUCKET as POST /api/auth/login,
+     // because they are the same resource and the same attacker.
+     // 426 insecure_origin, as the password login is.
+POST /api/auth/passkeys/login/finish?ceremony=<key>  → 200 {state, csrf_token} + session cookie
+     // PRE-AUTH. The SAME response shape as POST /api/auth/login: a passkey login IS a login, and
+     // the session layer is untouched by this rung.
+     // 401 unauthorized for BOTH an unknown credential and a rejected one — deliberately
+     // indistinguishable, or the endpoint answers "does this quince know this passkey" to anyone.
+     // 429 rate limited · 409 passkey_rp_mismatch · 400 no_ceremony
+```
+
+**THE ASSERTION PAIR IS IN THREE EXACT-PATH LISTS, NOT TWO** — the pre-auth exemption, the
+storageless-reachable set (a storageless install is exactly where onboarding offers a passkey), and
+**the CSRF exemption**, because no CSRF cookie exists before login. The third was not anticipated
+when this section was first written; each omission fails differently and none of them fails
+obviously, so all three are asserted by exact path in `passkey_allowlist_test.go`, in both
+directions — the registration pair must stay OUT of all three.
 
 Onboarding (qn.6f):
 

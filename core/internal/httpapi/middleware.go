@@ -76,7 +76,11 @@ func authExempt(r *http.Request) bool {
 	// (Operator ruling 2026-08-02, quince#501). A prefix would silently exempt every future
 	// onboarding step, and this switch has no prefix support to do it with by accident.
 	case "GET /api/health", "GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup",
-		"GET /api/onboarding/https":
+		"GET /api/onboarding/https",
+		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
+		// Registration is deliberately NOT here: it needs a session, which is what makes it the
+		// half that touches none of these lists.
+		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish":
 		return true
 	}
 	return false
@@ -119,7 +123,12 @@ func isSafeMethod(m string) bool {
 
 func csrfExempt(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/api/auth/login", "/api/auth/setup":
+	case "/api/auth/login", "/api/auth/setup",
+		// THE THIRD EXACT-PATH LIST, which the qn.6k spec did not name — it said "both". There is
+		// no CSRF cookie before login, and the assertion pair is how a passkey user gets one, so
+		// omitting it here would make passkey sign-in fail on the double-submit check with a
+		// message about CSRF rather than about anything the user did.
+		"/api/auth/passkeys/login/begin", "/api/auth/passkeys/login/finish":
 		return true
 	}
 	return false
@@ -167,7 +176,10 @@ func setupAllowed(r *http.Request) bool {
 		"GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup", "POST /api/auth/logout",
 		"GET /api/onboarding/https",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
-		"POST /api/storages/probe", "POST /api/storages/probe/hook":
+		"POST /api/storages/probe", "POST /api/storages/probe/hook",
+		// A STORAGELESS INSTALL IS EXACTLY WHERE ONBOARDING OFFERS A PASSKEY, so signing in with
+		// one has to work here or the offer leads somewhere unusable (qn.6k).
+		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish":
 		return true
 	}
 	return false

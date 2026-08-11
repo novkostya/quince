@@ -113,3 +113,71 @@ func passkeyToWire(p store.Passkey) wire.Passkey {
 	}
 	return out
 }
+
+// POST /api/auth/passkeys/login/begin → 200 {ceremony, options}
+//
+// PRE-AUTH, and therefore in all THREE exact-path lists: `authExempt` (no session yet),
+// `setupAllowed` (a storageless install is exactly where onboarding offers a passkey), and
+// `csrfExempt` (no CSRF cookie exists before login). The spec named two; there are three.
+func (d Deps) handlePasskeyLoginBegin() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.refuseInsecureOrigin(w, r) {
+			return
+		}
+		options, ceremony, err := d.Auth.BeginPasskeyAssertion(d.Passkeys,
+			auth.RPIDFromRequest(r), d.Proxies.ClientIP(r))
+		if err != nil {
+			if errors.Is(err, auth.ErrRateLimited) {
+				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+				return
+			}
+			if d.writePasskeyError(w, err) {
+				return
+			}
+			d.Log.Error("passkey login begin failed", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not start passkey sign-in")
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.PasskeyRegisterBegin{Ceremony: ceremony, Options: options})
+	}
+}
+
+// POST /api/auth/passkeys/login/finish?ceremony=<key> → 200 {state, csrf_token} + session cookie
+//
+// The response is the SAME SHAPE POST /api/auth/login returns, because a passkey login IS a login:
+// the session layer is untouched by this rung and the client has one path to follow afterwards.
+func (d Deps) handlePasskeyLoginFinish() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.refuseInsecureOrigin(w, r) {
+			return
+		}
+		ceremony := strings.TrimSpace(r.URL.Query().Get("ceremony"))
+		if ceremony == "" {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "ceremony is required")
+			return
+		}
+		sess, csrf, err := d.Auth.FinishPasskeyAssertion(d.Passkeys, ceremony,
+			auth.RPIDFromRequest(r), d.Proxies.ClientIP(r), r, sessionCookieValue(r))
+		if err != nil {
+			switch {
+			case errors.Is(err, auth.ErrRateLimited):
+				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+			case d.writePasskeyError(w, err):
+				// already written
+			case errors.Is(err, auth.ErrNoCredential):
+				// DELIBERATELY THE SAME 401 A WRONG PASSWORD GETS. An unknown credential must not be
+				// distinguishable from a rejected one, or the endpoint answers "does this quince
+				// know this passkey" to anybody who asks.
+				writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "this passkey was not accepted")
+			default:
+				d.Log.Error("passkey login failed verification", "error", err)
+				writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "this passkey was not accepted")
+			}
+			return
+		}
+		secure := d.Auth.Secure(r)
+		http.SetCookie(w, auth.SessionCookie(sess, secure))
+		http.SetCookie(w, auth.CSRFCookie(csrf, secure))
+		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
+	}
+}
