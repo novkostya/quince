@@ -27,6 +27,16 @@ test("set password, land in the shell, devices appear, reload keeps session, sig
   await expect(page.locator("#password")).toBeFocused();
   await expect(anchor).toHaveAttribute("tabindex", "-1");
 
+  // THE PASSKEY OFFER IS ABSENT HERE, AND THIS ASSERTION EXISTS TO SAY SO OUT LOUD (qn.6m slice 4).
+  // The combined setup screen offers a passkey only when `PublicKeyCredential` exists AND the origin
+  // is a secure context. The demo is served over plain http to a NON-LOOPBACK host, so it is not one
+  // — which means this spec walks the password-only path and proves NOTHING about registration.
+  //
+  // Asserted rather than left as a comment because it began as an inference, and an inference about
+  // WHY a test passes is exactly the kind of thing that quietly stops being true: an https demo, or
+  // a move to localhost, would silently start exercising a path nobody meant this spec to cover.
+  await expect(page.getByRole("checkbox", { name: /set up a passkey/i })).toHaveCount(0);
+
   await page.getByLabel("Password").fill("demo");
   await page.getByRole("button", { name: /set password/i }).click();
 

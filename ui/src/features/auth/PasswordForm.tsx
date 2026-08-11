@@ -16,6 +16,7 @@ export function PasswordForm({
   subtitle,
   cta,
   notice,
+  extra,
   variant = "card",
   passkeys = false,
   onPasskey,
@@ -25,6 +26,8 @@ export function PasswordForm({
   subtitle: string;
   cta: string;
   notice?: ReactNode;
+  // Rendered between the password field and the submit button — the setup surface's passkey offer.
+  extra?: ReactNode;
   // `card` DEFAULT, `page` on setup — ruling A on quince#841, spec D1. Login is not an onboarding
   // step and keeps the card, so the default is the shape that must not change rather than the one
   // being introduced: a surface that forgets to pass this stays exactly as it was.
@@ -158,6 +161,13 @@ export function PasswordForm({
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
+        {/* `extra` — qn.6m slice 4. Whatever the surface wants BETWEEN the password and its button:
+            on setup that is the passkey offer, which is how quince#841 item 2 gets both options onto
+            one screen without a second route or a dialog.
+
+            ABOVE the error and the CTA on purpose. It is part of what the button is about to do, so
+            it belongs on the button's side of any message explaining why the last attempt failed. */}
+        {extra}
         {error ? (
           <div className="mt-2 text-sm text-danger">
             {error.message}
