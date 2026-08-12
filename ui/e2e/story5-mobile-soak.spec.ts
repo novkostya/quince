@@ -31,13 +31,41 @@ test("the dashboard fits a phone and lists an offline device with a disabled, ex
   );
   expect(overflow).toBeLessThanOrEqual(1);
 
-  // The DOCUMENT itself must not scroll vertically — the scroll region is <main>, not the page, so
-  // the top nav bar never scrolls away and there's no nested scroll. (Headless can't emulate the iOS
-  // toolbar that actually triggered the bug, but this holds the shell-owns-its-scroll invariant.)
-  const docVScroll = await page.evaluate(
-    () => document.documentElement.scrollHeight - document.documentElement.clientHeight,
-  );
-  expect(docVScroll).toBeLessThanOrEqual(1);
+  // THIS ASSERTION IS INVERTED FROM WHAT IT SAID, AND THE INVERSION IS THE POINT OF quince#838.
+  //
+  // It read: "The DOCUMENT itself must not scroll vertically — the scroll region is <main>, not the
+  // page, so the top nav bar never scrolls away." That was `qn.6a`'s invariant and the soak
+  // confirmed it. Operator direction 2026-08-11 REVERSES it — let Safari scroll the document
+  // natively — because the old shape is what made Back unable to restore a position (a history
+  // entry records `window.scrollY`, never an element's `scrollTop`) and what left the foot of a page
+  // clipped with no scroller able to reach it (quince#649).
+  //
+  // So this gate now asserts the OPPOSITE invariant, which is the same kind of claim rather than a
+  // weaker one: the document scrolls, and nothing inside the shell owns the vertical scroll.
+  //
+  // MOVE IT AND SEE WHAT MOVED, rather than asserting a height. The first version of this compared
+  // the document's scrollable extent against a margin and FLAKED: Home's height is not final when its
+  // cards appear — the storage section and the recent-backups list arrive over their own requests —
+  // so a single read caught it at 31px and the threshold was 50. Polling would have fixed the flake
+  // and left an arbitrary number behind. Scrolling by a distance and reading the offset back cannot
+  // be marginal: either the document is a scroller or `scrollY` stays 0.
+  const NUDGE = 30;
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight))
+    .toBeGreaterThanOrEqual(NUDGE);
+  await page.evaluate((to) => window.scrollTo(0, to), NUDGE);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(NUDGE);
+
+  // AND NOTHING INSIDE THE SHELL OWNS IT. `<main>` is named directly because it is the element that
+  // used to, and a regression would put it back there first.
+  const main = await page.evaluate(() => {
+    const el = document.querySelector("main")!;
+    return { overflowY: getComputedStyle(el).overflowY, scrollable: el.scrollHeight - el.clientHeight };
+  });
+  expect(main.overflowY).toBe("visible");
+  expect(main.scrollable).toBeLessThanOrEqual(1);
+
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   // The offline demo device (attic-ipad: no transport, but it has backups).
   const offline = page.getByTestId("device-card").filter({ hasText: "attic-ipad" });

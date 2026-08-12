@@ -91,6 +91,36 @@ that matters. Concretely —
   single WebSocket bridge multiplexes the event stream into the stores; TanStack Query
   for REST reads; TanStack Virtual for long lists; components stay presentational.
 - Icons: one line-icon set (lucide), 16/20 px, muted by default.
+- **THE DOCUMENT IS THE SCROLLER. THE SHELL IS NOT, AT ANY BREAKPOINT** — Operator direction
+  2026-08-11 (quince#838): *"do not use an internal scrollable container; let Safari scroll the
+  document natively."* This REVERSES the `qn.6a` phone model, which pinned the shell to the viewport
+  and made `<main>` the only scroll region, and which the soak confirmed as "perfect". Two filed bugs
+  share that one root and neither is fixable from inside a component: a history entry records
+  `window.scrollY` and has no way to record an element's `scrollTop`, so **Back could never restore a
+  position** (quince#838); and a shell pinned to an exact viewport height with `overflow-hidden`
+  **clips** anything past its box, with no scroller able to reach it, whenever the box and the
+  visible area disagree mid-toolbar-transition (quince#649). Inner scrollers stay legitimate where
+  the thing that scrolls is genuinely bounded — a dialog's card, the job-log tail — and those carry
+  `overscroll-contain` themselves, which is where scroll chaining is worth stopping.
+  **The acceptance signal costs nothing and cannot be faked: if the document really scrolls, Safari's
+  own toolbars start hiding on scroll.** They do not when a container owns it.
+- **Scroll restoration is ZERO LINES, and that is a rule rather than an accident.** Leave
+  `history.scrollRestoration` at `"auto"` and let the browser restore a traversal. React Router's
+  `<ScrollRestoration>` is the tempting wrong turn twice over — measured against 7.18.1: it is
+  window-only (`window.scrollY` to save, `window.scrollTo` to restore, so it could never have served
+  the old element scroller), and its first effect sets `"manual"`, taking restoration off the browser
+  and re-implementing it over `sessionStorage`. What an SPA *does* owe is the other half: a **pushed**
+  screen must be put at the top, because no new document is ever loaded to start it there
+  (`useScrollReset`). **A restored offset is only as good as the height it is restored into**, so a
+  section that renders nothing while its fetch is in flight shortens the page and the browser clamps
+  the restore — seed from last-known-good on a remount, and keep reporting a failure as a failure.
+- **`svh` for the document's own minimum height; `dvh` for a box that must track the visible area.**
+  Not a contradiction of quince#659, which ruled `dvh` over `vh` for the second case. A *minimum*
+  that grows when the toolbars collapse can flip a just-under-viewport page between scrollable and
+  not, which re-expands the toolbars — an oscillation. `svh` is the toolbars-shown height and never
+  moves. The same trap catches Tailwind's `h-screen`, which is `100vh`, the *large* viewport: **a
+  landscape phone is ≥ `sm`**, so a sticky sidebar sized that way stands one toolbar taller than what
+  is visible, with no scroller of its own to reach its foot.
 - **A PORTALLED SURFACE MUST POSITION ITSELF AGAINST THE VISIBLE AREA, AND `AppLayout` CANNOT DO IT
   FOR IT** (quince#762). `AppLayout` pads by `env(safe-area-inset-*)`, so everything rendered inside
   the shell clears the notch and the home indicator for free. A Radix portal renders into `<body>`
@@ -104,6 +134,7 @@ that matters. Concretely —
   shrink it when the keyboard opens — it shrinks the *visual* viewport. So `position: fixed` plus
   `top: 50%` centres against a box that is partly off-screen and partly behind a keyboard. There is
   no CSS-only fix today; `useVisualViewport` publishes the real box as custom properties and the
-  stylesheet does the arithmetic. Heights stay in `dvh`, never `vh` (quince#659).
+  stylesheet does the arithmetic. Heights stay in `dvh`, never `vh` (quince#659) — for a box that
+  must equal the visible area. The document's own minimum is the other case, two bullets up.
 - Screenshots for README/releases come from `quince serve --demo` with fixture data —
   keep fixture data presentable (real-looking device names, plausible sizes).
