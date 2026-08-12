@@ -1,0 +1,162 @@
+#!/bin/sh
+# demo-block-check — `deploy/demo.md`'s yaml block must still be `.github/workflows/demo-deploy.yml`.
+#
+# THE DUPLICATION IS DELIBERATE AND STAYS (quince#622). `deploy/demo.md` carries a byte-identical
+# copy of the deploy workflow, and its own prose says why: *"It lives here rather than in a PR
+# comment so there is one copy rather than two that drift."* The reason is structural —
+# **no agent seat can write under `.github/workflows/**`** (quince#113, measured for the implementer
+# PAT, the architect PAT and the coder App) — so the reference copy has to live somewhere an agent
+# can actually maintain. Deleting the duplication is not the fix; it would remove the thing that
+# caught the one real defect this arrangement has seen.
+#
+# THE NEAR-MISS, which is the whole argument. quince#618 installed `cron: "0 22 * * *"` — a value
+# `deploy/demo.md` had already tried and moved away from, quoting GitHub that top-of-hour queued
+# jobs *"may be dropped"*. Two seats found it independently by READING, minutes apart, and it was
+# corrected before merge. That is quince#408's argument arriving again: care worked, twice, and
+# care is not a control.
+#
+# WHO PAYS WHEN IT ROTS is what makes this worth a gate rather than attention. If the workflow is
+# the side that is wrong, no agent seat can repair it and the Operator must be interrupted. A
+# control that turns *"the Operator must be interrupted"* from a discovery into a gate failure is
+# worth more here than the same control over two files an implementer owns.
+#
+# ------------------------------------------------------------------------------------------------
+# SYMMETRIC ON PURPOSE: IT NAMES BOTH PATHS AND PICKS NO WINNER.
+#
+# The gate can say *they differ*. It cannot say *which is right*, and it must not try. quince#618 is
+# the evidence: the doc was the correct side and the workflow was the drifted one, so a gate that
+# resolved toward the workflow — the obvious choice, since the workflow is what actually runs —
+# would have picked wrong on the only instance there has ever been.
+#
+# ------------------------------------------------------------------------------------------------
+# ONE PAIR, HARDCODED. Architect ruling on quince#622, and it is a ruling against generality: a
+# reusable *"this fence mirrors that file"* mechanism needs a marker convention in the prose, which
+# every future document author would then have to know. `bin/gap-heading-check` declined to pay that
+# and so does this. A second pair is when to revisit, not before.
+#
+# ------------------------------------------------------------------------------------------------
+# WHY *EXACTLY ONE* YAML FENCE, RATHER THAN "THE FIRST ONE".
+#
+# quince#622 and its ruling both propose `awk '/^```yaml$/{f=1;next} /^```$/{if(f)exit} f'`, which
+# takes the FIRST yaml fence in the file. That is right today — `deploy/demo.md` has exactly one —
+# and it fails SILENTLY the day somebody adds a second yaml example above it: the gate then compares
+# the wrong block against the workflow, and reports a difference that is about neither file's
+# correctness. A green gate that is answering a different question is the failure this repository
+# keeps filing, so the count is asserted instead of assumed.
+#
+# Zero fences and two fences are both DID NOT RUN rather than a finding, because in both the
+# comparison never happened. The refusal names the count and the file, so the remedy is visible from
+# the message: either restore the block, or teach this gate which fence is the mirror.
+#
+# ------------------------------------------------------------------------------------------------
+# Three exit codes, the contract every gate in this repository uses (quince#41):
+#
+#   0  the block and the workflow are byte-identical
+#   1  they differ — the diff is printed, both paths are named, neither is declared authoritative
+#   2  DID NOT RUN — a file is missing, or the fence is absent, doubled, unterminated or empty
+#
+# A 2 is NEVER clean. It is the case where a silent pass would be worst: a missing or mangled fence
+# is exactly the state a careless edit to `deploy/demo.md` leaves behind, and it is indistinguishable
+# from "the two agree" to anything that only reads an exit code.
+set -eu
+
+ME=$(basename "$0")
+
+DOC_DEFAULT=deploy/demo.md
+WORKFLOW_DEFAULT=.github/workflows/demo-deploy.yml
+
+die2() { printf '%s: DID NOT RUN — %s\n' "$ME" "$1" >&2; exit 2; }
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME [<doc> <workflow>]
+
+  With no arguments, checks the one pair this repository has:
+      $DOC_DEFAULT   (its single \`\`\`yaml fence)
+      $WORKFLOW_DEFAULT
+
+  Both paths may be given explicitly; that exists for the suite, which builds fixtures
+  in a temp dir. Passing one without the other is an error, not a default.
+
+exit: 0 identical · 1 they differ · 2 DID NOT RUN
+EOF
+}
+
+for a in "$@"; do
+	case $a in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	-*) die2 "unknown option $a — see --help" ;;
+	esac
+done
+
+case "$#" in
+0)
+	DOC=$DOC_DEFAULT
+	WORKFLOW=$WORKFLOW_DEFAULT
+	;;
+2)
+	DOC=$1
+	WORKFLOW=$2
+	;;
+*) die2 "expected no arguments or exactly two (<doc> <workflow>), got $# — see --help" ;;
+esac
+
+[ -f "$DOC" ] || die2 "$DOC does not exist"
+[ -f "$WORKFLOW" ] || die2 "$WORKFLOW does not exist"
+
+# The fence opener, counted rather than assumed — see the header. `grep -c` exits 1 on no match,
+# which `set -e` would take as a script failure, so the count is captured with the exit swallowed.
+opens=$(grep -n '^```yaml$' "$DOC" | cut -d: -f1) || opens=""
+count=$(printf '%s' "$opens" | grep -c . ) || count=0
+
+case "$count" in
+0) die2 "$DOC has no \`\`\`yaml fence — the mirrored block is gone, so there was nothing to compare" ;;
+1) : ;;
+*) die2 "$DOC has $count \`\`\`yaml fences and this gate mirrors exactly one — it cannot tell which is the copy of $WORKFLOW" ;;
+esac
+
+open_line=$opens
+body_start=$((open_line + 1))
+
+# The closing fence is the first bare ``` at or after the first body line. `sed` prints the tail and
+# `grep -n` numbers it from there, so the offset is relative and has to be added back.
+tail_lines=$(sed -n "${body_start},\$p" "$DOC")
+close_off=$(printf '%s\n' "$tail_lines" | grep -n '^```$' | head -1 | cut -d: -f1) || close_off=""
+[ -n "$close_off" ] || die2 "$DOC:$open_line opens a \`\`\`yaml fence that is never closed"
+
+close_line=$((body_start + close_off - 1))
+body_end=$((close_line - 1))
+
+[ "$body_end" -ge "$body_start" ] || die2 "$DOC:$open_line opens a \`\`\`yaml fence with no content"
+
+block=$(sed -n "${body_start},${body_end}p" "$DOC")
+[ -n "$block" ] || die2 "$DOC:$open_line opens a \`\`\`yaml fence with no content"
+
+# `diff` rather than a string compare, so a finding says WHAT differs. The labels carry the real
+# paths — including the doc's line range, because the block has no filename of its own and a reader
+# otherwise has to go and find it.
+if printf '%s\n' "$block" | diff -u \
+	--label "$WORKFLOW" "$WORKFLOW" \
+	--label "$DOC:${body_start}-${body_end} (the \`\`\`yaml block)" -; then
+	printf '%s: clean — %s:%s-%s is byte-identical to %s\n' "$ME" "$DOC" "$body_start" "$body_end" "$WORKFLOW"
+	exit 0
+fi
+
+cat >&2 <<EOF
+
+$ME: THE MIRRORED BLOCK AND THE WORKFLOW HAVE DRIFTED
+    $WORKFLOW
+    $DOC:${body_start}-${body_end}
+
+Both are printed above and NEITHER is authoritative — this gate does not know which side is
+right, deliberately. quince#618 is why: the doc was correct and the workflow was wrong, so a gate
+that resolved toward the running file would have picked the wrong side on the only instance there
+has been. Decide, then make them identical again.
+
+If the workflow is the side that must change, note that no agent seat can push under
+.github/workflows/** (quince#113) — that edit needs the Operator.
+EOF
+exit 1

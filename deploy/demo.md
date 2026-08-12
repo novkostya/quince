@@ -100,6 +100,16 @@ arrangement earned itself immediately: quince#618 first installed a `cron:` this
 already tried and moved away from, and one `diff` against this block found it. **Two copies still
 means two copies** — an edit to either belongs in the same change as an edit to the other.
 
+**`make demo-block-check` enforces that, in `gates-sh`** (quince#622). It compares the block below
+against the installed workflow and refuses when they differ, naming both paths and picking no
+winner — quince#618 is why it must not pick: the document was the correct side and the running file
+was the drifted one. Until it existed, the rule above was carried by whoever remembered to read.
+
+**The gate requires this file to hold EXACTLY ONE ` ```yaml ` fence, and that one is the mirror.**
+Adding a second yaml example anywhere in this document makes the check exit `2` — DID NOT RUN —
+rather than silently comparing the wrong block. If a second one is ever genuinely wanted, teach
+`bin/demo-block-check` which fence is the mirror in the same change.
+
 ```yaml
 name: demo-deploy
 
