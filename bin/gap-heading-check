@@ -51,7 +51,8 @@
 # does not anticipate. Both are accepted.
 #
 # ------------------------------------------------------------------------------------------------
-# WHERE A BLOCK ENDS: the next markdown heading, the next live marker, or EOF. Bounding is what
+# WHERE A BLOCK ENDS: the next markdown heading, the next live marker, the next CLOSED marker, or
+# EOF. The third is quince#503 and its pattern is defined with the others below. Bounding is what
 # stops an unrelated ruling further down the file being read as this block's own — the cheapest of
 # the three false-positive strategies quince#408 offers, and the only one that costs the documents
 # nothing.
@@ -143,6 +144,42 @@ done
 TICK=$(printf '\140')
 LIVE_RE="^[ 	]*[>#*${TICK} ]*PROPOSED (gap)${TICK}*:"
 
+# A CLOSED marker TERMINATES a block too (quince#503), and the narrowness of this pattern is the
+# whole of its correctness.
+#
+# THE DEFECT. The bounder stopped at the next heading or the next LIVE marker, so two adjacent gap
+# blocks were bounded by each other's leads. Flipping the LOWER one removes the live lead that was
+# terminating the UPPER one, whose bounds then run past it and pick up the neighbour's `RULED` text:
+#
+#     **PROPOSED (gap): question A**                              <- reported…
+#     **RULED (was `PROPOSED (gap)`): question B**                <- …for THIS, which is not its own
+#
+# Measured on quince#501's head, where the upper block — the plain-HTTP question — was reported for
+# the step-1 block's ruling. It RECURS BY CONSTRUCTION: any two adjacent gap blocks have this
+# property, every flip of a lower one breaks its upper neighbour, and they are accumulating.
+#
+# WHY THIS MATCHES THE MARKER CITATION AND NOT A BARE `RULED`. The failure direction that matters is
+# the other one: a terminator that is too greedy SHORTENS a block and hides a genuine instance, and a
+# missed instance produces no output at all. A half-ruling inside a live block is exactly the shape
+# quince#408 kept finding, and it is written as prose that happens to contain `RULED`:
+#
+#     **`Version.backend` — RULED (was the open half of this gap): KEEP IT.**
+#
+# That is a finding and must stay one. Requiring the line to cite the marker it replaced —
+# `RULED (was `PROPOSED (gap)`)` — separates the two: a line saying *this block was the gap* is a
+# flipped lead, a line saying *this half of the gap is answered* is the defect. The corpus agrees;
+# every flipped block on `main` writes the citation and no half-ruling does.
+#
+# So `RULED (was two bullets promising the opposite)` — which exists in canon — is deliberately NOT a
+# terminator. It is a prose correction, not a flipped gap block, and treating it as one would bound a
+# block at a line that never opened anything.
+#
+# THE RESIDUAL LIMIT, stated because the opt-out cannot reach it: a live block whose own body carries
+# a line OPENING with the full flipped-marker citation is bounded there. Such a line declares the
+# block flipped while its lead says otherwise, which is quince#408 instance 3's shape rather than
+# this one — a different gate's business, and unreachable in this corpus.
+CLOSED_RE="^[ 	]*[>#*${TICK} ]*RULED (was ${TICK}*PROPOSED (gap)${TICK}*)"
+
 if [ "$#" -gt 0 ]; then
 	FILES=$(printf '%s\n' "$@")
 else
@@ -167,13 +204,16 @@ for f in $FILES; do
 	total=$(wc -l <"$f")
 
 	for start in $starts; do
-		# The block ends at the next heading or the next live marker below it, whichever is
-		# first — not at the next blank line, because these blocks are multi-paragraph.
+		# The block ends at the next heading, the next live marker, or the next CLOSED marker
+		# below it, whichever is first — not at the next blank line, because these blocks are
+		# multi-paragraph. The closed marker is the third terminator (quince#503): without it, a
+		# flipped LOWER neighbour stops terminating its UPPER one and the upper block swallows the
+		# ruling that belongs to the lower.
 		after=$((start + 1))
 		end=$total
 		if [ "$after" -le "$total" ]; then
 			rest=$(sed -n "${after},\$p" "$f")
-			off=$(printf '%s\n' "$rest" | grep -n -e '^#\{1,6\} ' -e "$LIVE_RE" | head -1 | cut -d: -f1) || off=""
+			off=$(printf '%s\n' "$rest" | grep -n -e '^#\{1,6\} ' -e "$LIVE_RE" -e "$CLOSED_RE" | head -1 | cut -d: -f1) || off=""
 			[ -n "$off" ] && end=$((start + off - 1))
 		fi
 
