@@ -38,12 +38,17 @@ NAME="storageless-smoke-$$"
 # and a config that no longer parses — and they present as one symptom. They need two containers,
 # because the cause is a file that has to exist before the daemon starts.
 NAME2="$NAME-invalid"
+# THE THIRD ARM'S CONTAINER, declared HERE rather than beside its arm so `cleanup` can name it. The
+# trap body expands at exit time and `set -u` is on, so a run that dies before the third arm would
+# fail inside its own cleanup on an unset variable — leaving the first two containers behind.
+NAME3="$NAME-unreadable"
 WORK=$(mktemp -d)
 PORT="${PORT:-0}"
 
 cleanup() {
 	"$RUNTIME" rm -f "$NAME" >/dev/null 2>&1 || true
 	"$RUNTIME" rm -f "$NAME2" >/dev/null 2>&1 || true
+	"$RUNTIME" rm -f "$NAME3" >/dev/null 2>&1 || true
 	rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
@@ -285,5 +290,66 @@ grep -q 'hook_cmd:' "$WORK/invalid-data/config.yml" \
 $(cat "$WORK/invalid-data/config.yml")"
 echo "  ok  config.yml is untouched — the declaration survives the refusal"
 
-echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart, and an
-  invalid config reaches the same setup state with its cause carried through rather than lost"
+# ── THIRD ARM: A DISCARD WITH NO `Errors` AT ALL ──────────────────────────────────────────────────
+#
+# `Load` has THREE discard paths and only ONE fills `Errors` — an unreadable file and invalid YAML
+# both return `OK: false` with it empty. quince#852's first fix keyed its guard on the error list, so
+# it covered one of the three and let the others through to the write. Measured on a real container
+# before this arm existed: an unreadable `config.yml` served with `errors=0` and the add reached
+# `AtomicWrite`, answering `500` where a refused add answers `422`.
+#
+# A DIRECTORY AT THE CONFIG PATH is how this is reached honestly: `os.Stat` succeeds, so `Load` gets
+# past the no-file case, and `os.ReadFile` fails. Permissions would not do it — the container runs as
+# root, where a mode of 000 is still readable.
+#
+# WHAT IS ASSERTED IS THE STATUS, NOT THE FILE, and the difference is the point: on this path the
+# write would fail anyway, since nothing can rename over a directory — so a 500 and a 422 leave the
+# same bytes on disk. **Only the status distinguishes a guard that fired from a write that failed**,
+# and it is the guard that has to hold on the paths where the write WOULD have succeeded.
+echo "storageless-smoke: third arm — a config that cannot be read at all (warnings, no \`Errors\`)"
+
+PORT3=$((PORT + 2))
+# A DIRECTORY where the config file goes — `os.Stat` succeeds, `os.ReadFile` fails.
+mkdir -p "$WORK/unread-data/config.yml" "$WORK/unread-cache"
+
+LOGFROM="$NAME3"
+"$RUNTIME" run -d --name "$NAME3" -p "$PORT3":8968 \
+	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
+	-v "$WORK/unread-data":/data -v "$WORK/unread-cache":/cache \
+	"$IMAGE" serve >/dev/null || fail "could not start the container with an unreadable config"
+
+i=0
+while [ "$i" -lt 60 ]; do
+	if [ "$(status "http://127.0.0.1:$PORT3/api/health" /dev/null)" = "200" ]; then break; fi
+	i=$((i + 1))
+	sleep 1
+done
+[ "$i" -lt 60 ] || fail "the daemon never answered /api/health with an unreadable config"
+echo "  ok  it SERVES — so the add endpoint is reachable in this state"
+
+JAR3="$WORK/jar3"
+t3=$(curl -s -b "$JAR3" -c "$JAR3" "http://127.0.0.1:$PORT3/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
+curl -s -b "$JAR3" -c "$JAR3" -o /dev/null -X POST -H 'Content-Type: application/json' \
+	-H "X-CSRF-Token: $t3" -d '{"password":"smoketest1"}' \
+	"http://127.0.0.1:$PORT3/api/auth/setup" || fail "could not set the admin password on the unreadable-config daemon"
+t3=$(curl -s -b "$JAR3" -c "$JAR3" "http://127.0.0.1:$PORT3/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
+
+# THE CAUSE IS IN `warnings` WHILE `Errors` IS EMPTY — the exact shape that defeated the first guard.
+curl -s -b "$JAR3" -o "$WORK/cfg-unread.json" "http://127.0.0.1:$PORT3/api/config" \
+	|| fail "GET /api/config failed on the unreadable-config daemon"
+jq -e '.warnings | length > 0' "$WORK/cfg-unread.json" >/dev/null \
+	|| fail "no warning names the unreadable config — the cause reached the log and nothing else"
+echo "  ok  the cause is carried in warnings, where every discard path puts it"
+
+code=$(curl -s -b "$JAR3" -o "$WORK/add-unread.json" -w '%{http_code}' -X POST \
+	-H 'Content-Type: application/json' -H "X-CSRF-Token: $t3" \
+	-d '{"name":"rescue","path":"/cache","backend":"copy"}' \
+	"http://127.0.0.1:$PORT3/api/config/storage")
+[ "$code" = "422" ] || fail "adding a storage over an UNREADABLE config = $code, want 422 — a 500 means the guard did not fire and the write was attempted
+$(cat "$WORK/add-unread.json")"
+jq -r '.errors[0].message' "$WORK/add-unread.json" | grep -q 'restart' \
+	|| fail "the refusal does not tell the operator what to do — $(cat "$WORK/add-unread.json")"
+echo "  ok  the add is REFUSED on a discard carrying no \`Errors\`, and still names a remedy"
+
+echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart, and
+  every way a config can be DISCARDED refuses the add rather than replacing the file"

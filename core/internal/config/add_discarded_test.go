@@ -1,7 +1,10 @@
 package config
 
 import (
+	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -155,5 +158,80 @@ func TestASuccessfulReplaceClearsTheDiscardRecord(t *testing.T) {
 	}
 	if outcome != AddDone {
 		t.Fatalf("outcome = %v (errs %v), want AddDone — the config was repaired, so the guard must be clear", outcome, errs)
+	}
+}
+
+// THE CONDITION IS THE DISCARD, NOT THE ERROR LIST — the defect quince#852's own fix shipped with.
+//
+// `Load` has THREE discard paths and only ONE fills `Errors`:
+//
+//	cannot read config  → OK:false, Warnings set, Errors EMPTY
+//	invalid YAML        → OK:false, Warnings set, Errors EMPTY
+//	Validate failed     → OK:false, Warnings set, Errors set
+//
+// The first guard keyed on `len(loadErrs) > 0`, so it covered the third and let the other two
+// through to the write. Measured on a real container: an unreadable `config.yml` serves with
+// `errors=0`, and the add reached `AtomicWrite` — a `500`, where a refused add is a `422`.
+//
+// A DIRECTORY AT THE CONFIG PATH is the honest way to reach the read-failure branch in a test:
+// `os.Stat` succeeds, so `Load` gets past the no-file case, and `os.ReadFile` fails. Permissions
+// would not do it — these tests run as root, where a mode of 000 is still readable.
+func TestAddStorageRefusesWhenTheConfigCouldNotBeREADAtAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	outcome, errs, _, err := svc.AddStorage(newEntry(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v — the guard let the add reach the write", err)
+	}
+	if outcome != AddRefused {
+		t.Fatalf("outcome = %v, want AddRefused — a config that could not be READ is discarded too", outcome)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("errs = %v, want exactly one refusal", errs)
+	}
+	// AND IT STILL NAMES A CAUSE, from `warnings` rather than from `Errors` — which is empty here.
+	// A refusal that fires with nothing to say is the silent-failure defect wearing a 422.
+	if !strings.Contains(errs[0].Message, "cannot read config") {
+		t.Fatalf("the refusal does not carry the load's own reason: %s", errs[0].Message)
+	}
+	if !strings.Contains(errs[0].Message, "restart") {
+		t.Fatalf("the refusal does not carry a remedy: %s", errs[0].Message)
+	}
+}
+
+// AND THE SAME FOR A FILE THAT IS NOT YAML AT ALL. Unreachable through a serving daemon today —
+// `CheckStorages` reports `Malformed` and quince refuses to start (quince#508), measured — but the
+// guard is a property of the WRITE, not of today's startup path, so it holds here rather than
+// relying on the process having exited.
+func TestAddStorageRefusesWhenTheConfigIsNotValidYAML(t *testing.T) {
+	svc, path := serviceOver(t, "storage:\n  - name: one\n    path: [/backups\n")
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, errs, _, err := svc.AddStorage(newEntry(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome != AddRefused {
+		t.Fatalf("outcome = %v, want AddRefused — unparseable YAML is a discarded config", outcome)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "invalid YAML") {
+		t.Fatalf("the refusal does not carry the parser's own sentence: %v", errs)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("THE FILE WAS REWRITTEN by a refused add.\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
