@@ -61,7 +61,7 @@ func putConfig(t *testing.T, c *http.Client, srv *httptest.Server, body string) 
 }
 
 const storageJSON = `"storage":[{"name":"local","path":"/backups","default":true,"backend":"auto",` +
-	`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","seed":"auto"},` +
+	`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","ssh_user":"","ssh_host":"","ssh_port":0,"ssh_key":"","seed":"auto"},` +
 	`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}],`
 
 // This is interface fact 6 made executable, and it is the whole reason the TS `Config` type

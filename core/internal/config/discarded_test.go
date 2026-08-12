@@ -55,7 +55,8 @@ func TestEveryDiscardPathIsDiscardedAndCarriesItsCauseInWarnings(t *testing.T) {
 				p := filepath.Join(t.TempDir(), "config.yml")
 				body := "storage:\n  - name: one\n    path: /backups-a\n    default: true\n" +
 					"    backend: zfs\n    zfs:\n      parent_dataset: tank/one\n      mode: exec\n" +
-					"      hook_cmd: ssh h\n"
+					"      ssh_user: zfsuser\n" +
+					"      ssh_host: zfshost\n"
 				if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 					t.Fatal(err)
 				}

@@ -159,7 +159,19 @@ export interface StorageEntry {
   path: string;
   default: boolean;
   backend: string; // auto | zfs | reflink | hardlink | copy
-  zfs: { parent_dataset: string; mode: string; hook_cmd: string; seed: string };
+  zfs: {
+    parent_dataset: string;
+    mode: string;
+    // `hook_cmd` IS RETIRED and refused by the schema (quince#818). It stays on this type because
+    // the daemon still serves the key — the field is kept server-side so a config carrying it gets
+    // a refusal naming its successors rather than an "unknown key (ignored)".
+    hook_cmd: string;
+    ssh_user: string;
+    ssh_host: string;
+    ssh_port: number;
+    ssh_key: string;
+    seed: string;
+  };
   // Retention is a POINTER in Go, and null here for the same reason: `0` is a legal value for
   // every Keep*, so absent must stay distinguishable from zero. Absent means the code defaults.
   retention: { keep_recent: number; keep_daily: number; keep_weekly: number } | null;
@@ -378,7 +390,17 @@ export interface StorageAddition {
   // `mode` has ONE value: `exec` was removed on quince#793 (Operator ruling, quince#697) because
   // the shipped image has no `zfs` binary. The key is kept so the server can REFUSE an old `exec`
   // by path rather than ignore it as an unknown key.
-  zfs?: { parent_dataset: string; mode: "hook"; hook_cmd: string; seed: string };
+  // `ssh_port` and `ssh_key` are OMITTED on the happy path, not sent empty: they default
+  // server-side, and D12 says the file carries only what was set (quince#818).
+  zfs?: {
+    parent_dataset: string;
+    mode: "hook";
+    ssh_user: string;
+    ssh_host: string;
+    ssh_port?: number;
+    ssh_key?: string;
+    seed: string;
+  };
 }
 
 // StorageHookCheck is POST /api/storages/probe/hook (contracts §2, qn.6e) — does the operator's

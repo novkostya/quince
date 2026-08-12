@@ -219,19 +219,23 @@ func TestInspectNeverClaimsZFSUnsupported(t *testing.T) {
 // tier 1 can confer. A path that IS zfs with no parent dataset configured still is not a zfs
 // storage, because the backend would have nowhere to create its per-device datasets.
 func TestWantZFSIsIntentOnly(t *testing.T) {
+	// `hook` IS A BOOLEAN SINCE quince#818 — *is a transport configured*, not the command line. The
+	// caller composes the argv now, and `config.ZFSConfig.SSHArgv` returns nil when the transport is
+	// unset precisely so this predicate keeps meaning what it meant.
 	for _, tc := range []struct {
-		backend, parent, hook string
-		want                  bool
+		backend, parent string
+		hook            bool
+		want            bool
 	}{
-		{BackendZFS, "", "", true},
-		{"auto", "tank/x", "", true},
-		{"auto", "", "ssh host", true},
-		{"auto", "", "", false},
-		{BackendReflink, "tank/x", "", false},
-		{BackendCopy, "", "", false},
+		{BackendZFS, "", false, true},
+		{"auto", "tank/x", false, true},
+		{"auto", "", true, true},
+		{"auto", "", false, false},
+		{BackendReflink, "tank/x", false, false},
+		{BackendCopy, "", false, false},
 	} {
 		if got := WantZFS(tc.backend, tc.parent, tc.hook); got != tc.want {
-			t.Fatalf("WantZFS(%q,%q,%q) = %v, want %v", tc.backend, tc.parent, tc.hook, got, tc.want)
+			t.Fatalf("WantZFS(%q,%q,%v) = %v, want %v", tc.backend, tc.parent, tc.hook, got, tc.want)
 		}
 	}
 }

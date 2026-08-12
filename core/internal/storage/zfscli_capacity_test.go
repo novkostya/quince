@@ -17,7 +17,7 @@ import (
 
 func fakeCapacityCLI(out string, err error) (*zfsCLI, *[][]string) {
 	calls := &[][]string{}
-	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
+	c := newZFSCLI("rpool/quince-labtest", []string{"ssh", "-i", "/k", "host"})
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		*calls = append(*calls, argv)
 		return out, err
@@ -64,7 +64,7 @@ func TestZFSCapacityReadsUsedPlusAvailable(t *testing.T) {
 // one method, and a test pinning one verb would not see it.
 func TestEveryZFSOpGoesThroughTheHook(t *testing.T) {
 	calls := &[][]string{}
-	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
+	c := newZFSCLI("rpool/quince-labtest", []string{"ssh", "-i", "/k", "host"})
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		*calls = append(*calls, argv)
 		return "", nil
@@ -103,7 +103,7 @@ func TestEveryZFSOpGoesThroughTheHook(t *testing.T) {
 // one of them failing.
 func forcedCommandHook(t *testing.T, arms map[string]string) *zfsCLI {
 	t.Helper()
-	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
+	c := newZFSCLI("rpool/quince-labtest", []string{"ssh", "-i", "/k", "host"})
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		// argv is `ssh -i /k host <verb> [args…]`; the helper sees what follows the ssh target and
 		// dispatches on the FIRST TOKEN ONLY.

@@ -30,7 +30,8 @@ const discardedConfig = `storage:
     zfs:
       parent_dataset: tank/one
       mode: exec
-      hook_cmd: ssh h
+      ssh_user: zfsuser
+      ssh_host: zfshost
 `
 
 // THE REGRESSION, ASSERTED ON THE BYTES ON DISK rather than on the return value — because the return
@@ -64,7 +65,7 @@ func TestAddStorageRefusesWhileTheConfigOnDiskWasDiscarded(t *testing.T) {
 	}
 	// The operator's declaration is still in it, named specifically: "unchanged" above would also
 	// pass if nothing were ever written for an unrelated reason, and this is what was actually lost.
-	for _, want := range []string{"parent_dataset: tank/one", "hook_cmd: ssh h"} {
+	for _, want := range []string{"parent_dataset: tank/one", "ssh_host: zfshost"} {
 		if !strings.Contains(string(after), want) {
 			t.Fatalf("the declaration lost %q:\n%s", want, after)
 		}

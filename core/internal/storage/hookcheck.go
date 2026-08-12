@@ -95,9 +95,9 @@ const hookCheckTimeout = 20 * time.Second
 // `capacity` runs `zfs list -H -p -o used,available $PARENT`; `list` runs `zfs list -t snapshot -H
 // -o name -r <target>` behind a `case "$target" in "$PARENT"|"$PARENT"/*` guard. Nothing here can
 // create, destroy or write.
-func CheckHook(ctx context.Context, parentDataset, hookCmd string) HookCheck {
-	if strings.TrimSpace(hookCmd) == "" {
-		return HookCheck{Outcome: HookUnreachable, Reason: "no hook command is configured"}
+func CheckHook(ctx context.Context, parentDataset string, hookArgv []string) HookCheck {
+	if len(hookArgv) == 0 {
+		return HookCheck{Outcome: HookUnreachable, Reason: "no ssh transport is configured — set `ssh_user` and `ssh_host` on this storage"}
 	}
 	if !datasetPattern.MatchString(parentDataset) {
 		return HookCheck{Outcome: HookUnreachable,
@@ -107,7 +107,7 @@ func CheckHook(ctx context.Context, parentDataset, hookCmd string) HookCheck {
 	ctx, cancel := context.WithTimeout(ctx, hookCheckTimeout)
 	defer cancel()
 
-	cli := newZFSCLI(parentDataset, hookCmd)
+	cli := newZFSCLI(parentDataset, hookArgv)
 
 	capOut, capErr := cli.run(ctx, cli.argv("capacity"))
 	listOut, listErr := cli.run(ctx, cli.argv("list", parentDataset))

@@ -222,8 +222,11 @@ func checkStorageBackendProblems(storages *[]StorageEntry) []StorageBackendProbl
 	seen := map[string]claim{} // parent dataset → the storage that claimed it
 	var out []StorageBackendProblem
 	for i, e := range *storages {
+		// `SSHConfigured` rather than `HookCmd != ""` since quince#818: the transport is the four
+		// `ssh_*` keys now, and `hook_cmd` is a REFUSED key rather than a signal of zfs intent — a
+		// document carrying it never reaches here, because `Validate` discards it first.
 		isZFS := e.Backend == "zfs" ||
-			(e.Backend == "auto" && (e.ZFS.ParentDataset != "" || e.ZFS.HookCmd != ""))
+			(e.Backend == "auto" && (e.ZFS.ParentDataset != "" || e.ZFS.SSHConfigured()))
 		if isZFS && e.ZFS.ParentDataset == "" {
 			out = append(out, StorageBackendProblem{Index: i, Field: "zfs.parent_dataset", Message: fmt.Sprintf(
 				"storage %q resolves to the zfs backend but has no `zfs.parent_dataset` — set it in "+
@@ -233,6 +236,29 @@ func checkStorageBackendProblems(storages *[]StorageEntry) []StorageBackendProbl
 			continue
 		}
 		if !isZFS {
+			continue
+		}
+		// A ZFS STORAGE WITH NO TRANSPORT CANNOT REACH ITS POOL (quince#818), and this sits beside
+		// the parent-dataset check rather than in `Validate` for the reason that check already
+		// gives: a `Validate` failure discards the document, where this returns the error and writes
+		// nothing. Same class of problem, same place, same shape of message.
+		//
+		// USER AND HOST ONLY. `ssh_port` and `ssh_key` default, so their absence says nothing.
+		if !e.ZFS.SSHConfigured() {
+			var missing string
+			switch {
+			case e.ZFS.SSHHost != "":
+				missing = "`zfs.ssh_user`"
+			case e.ZFS.SSHUser != "":
+				missing = "`zfs.ssh_host`"
+			default:
+				missing = "`zfs.ssh_user` and `zfs.ssh_host`"
+			}
+			out = append(out, StorageBackendProblem{Index: i, Field: "zfs.ssh_host", Message: fmt.Sprintf(
+				"storage %q resolves to the zfs backend but has no %s — quince reaches a ZFS pool "+
+					"over ssh to the constrained helper, and the forced command in that user's "+
+					"`authorized_keys` is what bounds what quince can do on the host",
+				e.Name, missing)})
 			continue
 		}
 		if first, dup := seen[e.ZFS.ParentDataset]; dup {

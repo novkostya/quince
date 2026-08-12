@@ -126,7 +126,8 @@ export function AddStorageForm({
   const [error, setError] = useState("");
 
   const [parentDataset, setParentDataset] = useState("");
-  const [hookCmd, setHookCmd] = useState("");
+  const [sshUser, setSSHUser] = useState("");
+  const [sshHost, setSSHHost] = useState("");
   const [hookCheck, setHookCheck] = useState<StorageHookCheck | null>(null);
   const [hookChecking, setHookChecking] = useState(false);
 
@@ -136,7 +137,8 @@ export function AddStorageForm({
     setBackend("");
     setError("");
     setParentDataset("");
-    setHookCmd("");
+    setSSHUser("");
+    setSSHHost("");
     setHookCheck(null);
   }
 
@@ -145,7 +147,7 @@ export function AddStorageForm({
     setHookCheck(null);
     setError("");
     try {
-      const res = await checkStorageHook(parentDataset.trim(), hookCmd.trim());
+      const res = await checkStorageHook(parentDataset.trim(), sshUser.trim(), sshHost.trim());
       setHookCheck(res.check);
     } catch (e) {
       setError(serverSentence(e, "could not run the helper check"));
@@ -187,7 +189,8 @@ export function AddStorageForm({
               zfs: {
                 parent_dataset: parentDataset.trim(),
                 mode: "hook" as const,
-                hook_cmd: hookCmd.trim(),
+                ssh_user: sshUser.trim(),
+                ssh_host: sshHost.trim(),
                 seed: "auto",
               },
             }
@@ -243,7 +246,7 @@ export function AddStorageForm({
   // time — the exact failure this button exists to move forward from a multi-hour transfer to now.
   const helperUsable = hookCheck?.outcome === "ok" || hookCheck?.outcome === "not_migrated";
   const zfsReady =
-    parentDataset.trim() !== "" && hookCmd.trim() !== "" && helperUsable;
+    parentDataset.trim() !== "" && sshUser.trim() !== "" && sshHost.trim() !== "" && helperUsable;
 
   const canSave =
     (canAdopt || (isNew && backend !== "")) && (!needsZFS || zfsReady);
@@ -327,25 +330,41 @@ export function AddStorageForm({
               }}
             />
 
-            <label className="mt-3 block text-sm font-medium" htmlFor="zfs-hook">
-              Helper command
+            {/* THE ARGV IS GONE (quince#818). This asked for a whole command line — the least
+                self-explanatory field in the product, on the onboarding path. To fill it in
+                correctly you had to already know that a key was needed, where to put it so the
+                container could see it, that `BatchMode=yes` mattered, and that a forced command had
+                to be installed first. None of that was on screen.
+
+                QUINCE COMPOSES IT NOW, including every host-key option, so what is left is the two
+                things only the operator knows: who the helper runs as, and where it runs. */}
+            <label className="mt-3 block text-sm font-medium" htmlFor="zfs-ssh-host">
+              ZFS host
             </label>
             <Input
-              id="zfs-hook"
+              id="zfs-ssh-host"
               className="mt-1"
-              value={hookCmd}
-              /* THE HOST-KEY OPTIONS ARE PART OF THE EXAMPLE, not decoration. `BatchMode=yes`
-                 disables the accept-this-key prompt, so an ssh with no `known_hosts` entry
-                 REFUSES — and a container's `known_hosts` is empty at exactly the moment someone
-                 is filling this field in. Measured on a lab rig: without them `Test helper`
-                 answers `unreachable` / "Host key verification failed." with a correct key, a
-                 correct forced command and a correct dataset, and `unreachable`'s remedy text
-                 names all three. `accept-new` rather than `yes` here because a placeholder cannot
-                 seed a known_hosts file; deploy/storage.md recommends seeding and explains the
-                 difference. */
-              placeholder="ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=accept-new user@host"
+              value={sshHost}
+              placeholder="nas.local"
               onChange={(e) => {
-                setHookCmd(e.target.value);
+                setSSHHost(e.target.value);
+                setHookCheck(null);
+              }}
+            />
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="zfs-ssh-user">
+              Remote user
+            </label>
+            <Input
+              id="zfs-ssh-user"
+              className="mt-1"
+              value={sshUser}
+              /* THE USER WHOSE `authorized_keys` CARRIES THE FORCED COMMAND — which is the thing
+                 that bounds what quince can do on that host, so it is worth naming as itself rather
+                 than as part of a `user@host` string. */
+              placeholder="zfsuser"
+              onChange={(e) => {
+                setSSHUser(e.target.value);
                 setHookCheck(null);
               }}
             />
@@ -356,7 +375,10 @@ export function AddStorageForm({
                 size="sm"
                 onClick={() => void testHelper()}
                 disabled={
-                  hookChecking || parentDataset.trim() === "" || hookCmd.trim() === ""
+                  hookChecking ||
+                parentDataset.trim() === "" ||
+                sshUser.trim() === "" ||
+                sshHost.trim() === ""
                 }
                 data-testid="test-helper"
               >

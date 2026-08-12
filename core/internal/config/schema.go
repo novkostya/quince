@@ -184,7 +184,11 @@ func ResolveStorages(in *[]StorageEntry) *[]StorageEntry {
 	return &out
 }
 
-// ZFSConfig is `storage.zfs:`.
+// ZFSConfig is `storage[].zfs:` — PER ENTRY, not global.
+//
+// This comment said `storage.zfs:` until quince#818. The shape has been per-entry since `qn.6c`
+// (`StorageEntry.ZFS` is a value on each entry) and a global `zfs:` block has not existed since;
+// the stale form invited exactly the mistake the plural rung removed.
 type ZFSConfig struct {
 	ParentDataset string `yaml:"parent_dataset" json:"parent_dataset"`
 	// Mode has ONE legal value, `hook`, since the Operator removed `exec` (quince#697, quince#793).
@@ -198,8 +202,42 @@ type ZFSConfig struct {
 	//
 	// Removing the key stays available and gets easier, not harder: it wants a retired-key warning
 	// that names its successor, which is quince#401 and its own reviewable claim.
-	Mode    string `yaml:"mode" json:"mode"` // hook (the only value)
+	Mode string `yaml:"mode" json:"mode"` // hook (the only value)
+	// HookCmd IS RETIRED AND THE FIELD IS KEPT TO REFUSE IT (Operator ruling 2026-08-12,
+	// quince#818). It carried a free-text argv — `ssh -i /data/keys/zfs … user@host` — which is
+	// replaced by the four `ssh_*` keys below.
+	//
+	// KEPT FOR THE SAME REASON `Mode` IS. Deleting the field makes `hook_cmd:` an UNKNOWN key, and
+	// `unknownKeys` says *"unknown config key … (ignored)"* — so removing the transport would
+	// downgrade its diagnosis from a refusal naming the successors to something explicitly ignored,
+	// on the one key every existing zfs install has set. `Validate` answers against this exact path
+	// instead, which is what an operator upgrading actually needs.
+	//
+	// **A config carrying it is DISCARDED**, not repaired — the migration the ruling chose as the
+	// cheapest correct one. quince#852 and quince#849 are what make that safe: the operator meets a
+	// screen naming this key and its successors, is told nothing is being backed up, and the add
+	// button refuses rather than replacing their file.
 	HookCmd string `yaml:"hook_cmd" json:"hook_cmd"`
+	// SSHUser / SSHHost / SSHPort / SSHKey ARE THE TRANSPORT, and quince composes the argv from
+	// them (quince#818). SSH is the only shape rather than one option among many, because the
+	// guarantee hook mode rests on — `command="…quince-zfs-helper"` in `authorized_keys`, which
+	// pins the helper regardless of what the client asks for — is an SSH mechanism. Under any other
+	// transport the constraint would live only inside the script.
+	//
+	// THE ARGV IS BUILT, NOT SPLIT. `zfsCLI` used `strings.Fields(hook_cmd)`, a whitespace split of
+	// an operator string, so a key path containing a space produced a silently wrong argv. `SSHArgv`
+	// returns the array directly and that class is gone.
+	SSHUser string `yaml:"ssh_user" json:"ssh_user"`
+	SSHHost string `yaml:"ssh_host" json:"ssh_host"`
+	// SSHPort defaults to 22 and SSHKey to DefaultZFSKeyPath, so the happy path writes NEITHER into
+	// `config.yml` (D12: every setting has a sane default and the file carries only what was set).
+	//
+	// SSHKey stays settable rather than being hardcoded, and that is not hedging: the path is
+	// already settable today — it lives inside `hook_cmd` as `-i /data/keys/zfs` — so removing the
+	// ability would be a narrowing dressed as a simplification. An operator who already has a key
+	// with a forced command deployed should not have to move it to adopt this form.
+	SSHPort int    `yaml:"ssh_port" json:"ssh_port"`
+	SSHKey  string `yaml:"ssh_key" json:"ssh_key"`
 	// Seed is the in-container strategy for cloning latest/ → working/<udid> at job start (qn.5b;
 	// renamed from `mirror` when the reflink moved from commit-time to seed-time). auto | reflink |
 	// copy — the hardlink tier is never used for the seed (amendment A: it would alias the

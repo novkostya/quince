@@ -606,7 +606,8 @@ GET  /api/storages                                        → {storages: Storage
 GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
 POST /api/storages/{name}/recheck                          → 200 {storage} | 404
 POST /api/storages/probe {path}                            → 200 {probe} | 422
-POST /api/storages/probe/hook {parent_dataset, hook_cmd}   → 200 {check} | 422
+POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
+                               ssh_port?, ssh_key?}        → 200 {check} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -685,19 +686,29 @@ run, which is the one day this button matters most. Gated.
 whole answer and quince cannot improve on it. **It may name the operator's host**, so: shown to the
 authenticated admin in their own browser, and **never logged, never in a fixture, never pasted into a
 PR or an issue**. That is the privacy gate's actual scope rather than a redaction rule on a running
-product. **The argv is never included** — `hook_cmd` carries `user@host` by construction, where the
-output only sometimes does.
+product. **The argv is never included** — the composed transport carries `user@host` by
+construction, where the output only sometimes does.
 
-**DECLARED: this endpoint EXECUTES A REQUEST-SUPPLIED ARGV.** It adds no capability an authenticated
-admin lacks — `PUT /api/config` already stores a `hook_cmd` that quince execs at the next job — but
-it shortens the loop from *next backup* to *now*. Bounds: behind `authGuard` and `csrfGuard`, nothing
-added to the five-entry exempt set, an argv **array** and never a shell string, the dataset name
-validated against `datasetPattern` before anything runs, a bounded timeout, and the subprocess killed
-by process group on cancellation.
+**IT TAKES THE TRANSPORT STRUCTURED SINCE quince#818** — `ssh_user`, `ssh_host`, and optionally
+`ssh_port` / `ssh_key` — and **composes the argv with the same function the saved storage uses**.
+That identity is the point rather than tidiness: if this endpoint built its own command, the button
+could pass against a transport the running backup never takes, which is the exact failure `Test
+helper` exists to prevent. A form that has not asked for port or key sends neither, and both default
+server-side exactly as the config does.
 
-The `422` line is the probe's, unchanged: a malformed **question** — no `parent_dataset`, or no
-`hook_cmd` — is a `422`; every verdict about a real pair, `unreachable` included, is a `200`. A user
-who has not installed the helper has asked a perfectly good question.
+**DECLARED: this endpoint EXECUTES A REQUEST-INFLUENCED ARGV**, and quince#818 narrowed the
+influence rather than removing it — four typed fields through one composer, where it used to be the
+entire command line. It adds no capability an authenticated admin lacks — `PUT /api/config` already
+stores a transport that quince execs at the next job — but it shortens the loop from *next backup*
+to *now*. Bounds: behind `authGuard` and `csrfGuard`, nothing added to the five-entry exempt set, an
+argv **array** and never a shell string, the dataset name validated against `datasetPattern` before
+anything runs, a bounded timeout, and the subprocess killed by process group on cancellation.
+
+The `422` line is the probe's, unchanged: a malformed **question** — no `parent_dataset`, no
+`ssh_host`, or no `ssh_user` — is a `422`; every verdict about a real pair, `unreachable` included,
+is a `200`. A user who has not installed the helper has asked a perfectly good question. **`ssh_port`
+and `ssh_key` are absent from that list deliberately**: both default, so an omitted one is the
+ordinary request rather than a malformed one.
 
 **§2 carries `StorageHookCheck`.** Spec: `docs/specs/qn.6e/qn.6e.md`, G8.
 
@@ -1530,7 +1541,7 @@ remedies; this is the shape.
 
 **`detail` may name the operator's host.** Shown to the authenticated admin in their own browser;
 **never logged, never in a fixture, never pasted into a PR or an issue.** The argv is never included
-— `hook_cmd` carries `user@host` by construction. See §1 for why blanking it would be worse: ssh's
+— the composed transport carries `user@host` by construction. See §1 for why blanking it would be worse: ssh's
 own message is the whole answer to why a key does not work.
 
 **`reason` is quince's sentence and is safe to render anywhere**, which is the split: `reason` for
@@ -1802,7 +1813,21 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
                             # the shipped image has no `zfs` binary. A file still carrying
                             # `mode: exec` is REFUSED by path rather than ignored — the key
                             # outlived its second value so that the refusal exists at all.
-      hook_cmd: ""          # e.g. ssh -i /data/keys/zfs pve quince-zfs-helper
+      ssh_host: nas.local   # WHERE the quince-zfs-helper runs. quince composes the whole ssh
+                            # command from these four — including the host-key options — so the
+                            # file no longer carries an argv (Operator ruling 2026-08-12,
+                            # quince#818).
+      ssh_user: zfsuser     # WHOSE authorized_keys carries the forced command. That `command=`
+                            # entry is what bounds quince on the host, which is why SSH is the
+                            # only shape rather than one transport among several.
+      ssh_port: 22          # DEFAULTS. The happy path writes neither (D12), and `ssh_key` stays
+      ssh_key: /data/keys/zfs   # settable because the path was already settable inside hook_cmd —
+                            # removing it would be a narrowing dressed as a simplification.
+      hook_cmd: ""          # RETIRED, and the key is kept ONLY so a file carrying it is REFUSED by
+                            # path — naming ssh_user/ssh_host/ssh_port/ssh_key — rather than
+                            # reported as an unknown key and ignored. Same shape as `mode: exec`.
+                            # A config still carrying it is DISCARDED at load; quince#852 and
+                            # quince#849 are what make that safe and legible.
                             # (forced-command: snapshot/destroy/list @quince-*, create children,
                             #  seed working/<udid> from latest/, capacity; dataset destroy
                             #  impossible via the key)
@@ -1987,7 +2012,7 @@ or `retention` — the five inline directions on quince#461.
 storage:
   - path: /backups          # name and default optional, per the 2026-08-01 ruling
     backend: zfs            # concrete OR `auto`; see below
-    zfs: {parent_dataset: rpool/quince, mode: hook, hook_cmd: "…", seed: auto}
+    zfs: {parent_dataset: rpool/quince, mode: hook, ssh_user: zfsuser, ssh_host: nas, seed: auto}
     retention: {keep_recent: 10, keep_daily: 30, keep_weekly: 12}
   - {path: /mnt/shuttle, backend: hardlink}
 ```

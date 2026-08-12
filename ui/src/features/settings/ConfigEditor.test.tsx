@@ -53,7 +53,16 @@ function entry(over: Partial<StorageEntry> = {}): StorageEntry {
     path: "/backups",
     default: true,
     backend: "zfs",
-    zfs: { parent_dataset: "pool/quince", mode: "hook", hook_cmd: "", seed: "auto" },
+    zfs: {
+      parent_dataset: "pool/quince",
+      mode: "hook",
+      hook_cmd: "",
+      ssh_user: "zfsuser",
+      ssh_host: "zfshost",
+      ssh_port: 22,
+      ssh_key: "/data/keys/zfs",
+      seed: "auto",
+    },
     retention: { keep_recent: 10, keep_daily: 30, keep_weekly: 12 },
     ...over,
   };

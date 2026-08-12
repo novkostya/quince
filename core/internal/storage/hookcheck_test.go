@@ -63,7 +63,9 @@ func extractHelper(t *testing.T) string {
 //
 // zfsBehaviour is the stub's script body: it decides what `zfs` does, and therefore lets one harness
 // produce a working helper, an un-migrated one, or an unreachable host.
-func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) string {
+// RETURNS AN ARGV since quince#818 — `CheckHook` takes the composed transport as a []string rather
+// than splitting a command line. One element here: the shim IS the whole transport.
+func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) []string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -85,7 +87,7 @@ func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) string {
 	shim := filepath.Join(dir, "fake-ssh")
 	write(t, shim, "#!/bin/sh\nPATH="+bin+":$PATH\nexport PATH\n"+
 		"SSH_ORIGINAL_COMMAND=\"$*\"\nexport SSH_ORIGINAL_COMMAND\nexec /bin/sh "+helper+"\n")
-	return shim
+	return []string{shim}
 }
 
 func write(t *testing.T, path, body string) {
@@ -175,16 +177,16 @@ esac`
 }
 
 func TestCheckHookUnreachable(t *testing.T) {
-	got := CheckHook(context.Background(), "tank/backups", "/nonexistent/ssh")
+	got := CheckHook(context.Background(), "tank/backups", []string{"/nonexistent/ssh"})
 	if got.Outcome != HookUnreachable {
 		t.Fatalf("outcome = %q, want %q", got.Outcome, HookUnreachable)
 	}
 
-	if e := CheckHook(context.Background(), "tank/backups", ""); e.Outcome != HookUnreachable {
+	if e := CheckHook(context.Background(), "tank/backups", nil); e.Outcome != HookUnreachable {
 		t.Errorf("an empty hook_cmd = %q, want %q", e.Outcome, HookUnreachable)
 	}
 	// A dataset name that could not be safe in an argv is refused WITHOUT RUNNING ANYTHING.
-	bad := CheckHook(context.Background(), "tank/backups; rm -rf /", "/bin/true")
+	bad := CheckHook(context.Background(), "tank/backups; rm -rf /", []string{"/bin/true"})
 	if bad.Outcome != HookUnreachable || !strings.Contains(bad.Reason, "did not run") {
 		t.Errorf("an invalid dataset name must refuse before exec; got %q / %q", bad.Outcome, bad.Reason)
 	}
@@ -203,7 +205,7 @@ func TestCheckHookUnreachable(t *testing.T) {
 // the clause: the enumeration now has ONE home, and this proves that home reaches the surface a
 // user actually reads.
 func TestUnreachableRemedyNamesEveryCause(t *testing.T) {
-	got := CheckHook(context.Background(), "tank/backups", "/nonexistent/ssh")
+	got := CheckHook(context.Background(), "tank/backups", []string{"/nonexistent/ssh"})
 	if got.Outcome != HookUnreachable {
 		t.Fatalf("outcome = %q, want %q — this test is about the reachability remedy", got.Outcome, HookUnreachable)
 	}

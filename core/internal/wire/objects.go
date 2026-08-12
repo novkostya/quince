@@ -374,9 +374,25 @@ type OnboardingHTTPS struct {
 
 // StorageHookCheckRequest is POST /api/storages/probe/hook (qn.6e): does the operator's constrained
 // ZFS helper actually work, and does it agree about the parent dataset?
+//
+// IT TAKES THE TRANSPORT STRUCTURED, NOT AS AN ARGV (quince#818). It carried `hook_cmd` — a
+// free-text command line the caller composed — until the Operator ruled SSH the only shape. The
+// server builds the argv from these now, so the form asks for what a person knows (a user, a host)
+// rather than for something only quince should be writing.
+//
+// THAT ALSO NARROWS WHAT THIS ENDPOINT EXECUTES. The declaration below still holds — it runs a
+// request-influenced argv — but the influence is four typed fields through one composer, where it
+// used to be the entire command line.
 type StorageHookCheckRequest struct {
 	ParentDataset string `json:"parent_dataset"`
-	HookCmd       string `json:"hook_cmd"`
+	SSHUser       string `json:"ssh_user"`
+	SSHHost       string `json:"ssh_host"`
+	// SSHPort and SSHKey are OPTIONAL and default exactly as the config does — 22 and
+	// `/data/keys/zfs`. A form that has not asked for them sends neither, and the check then tests
+	// the same transport the saved storage will use, which is the only thing that makes this button
+	// mean anything.
+	SSHPort int    `json:"ssh_port"`
+	SSHKey  string `json:"ssh_key"`
 }
 
 // StorageHookCheck is the verdict. FOUR outcomes rather than ok/failed, because the remedies differ

@@ -13,12 +13,12 @@ import (
 // Options are the resolved config inputs the storage subsystem needs (mirrors config.Storage*,
 // passed as plain fields so this package does not import config).
 type Options struct {
-	Backend    string // auto | zfs | reflink | hardlink | copy
-	Backups    string // this storage's root (qn.6c; was QUINCE_BACKUPS)
-	AppVersion string
-	ZFSParent  string // storage.zfs.parent_dataset
-	ZFSHookCmd string // storage.zfs.hook_cmd — the only zfs transport (quince#697)
-	ZFSSeed    string // auto | reflink | copy (in-container seed strategy; hardlink never used — amendment A)
+	Backend     string // auto | zfs | reflink | hardlink | copy
+	Backups     string // this storage's root (qn.6c; was QUINCE_BACKUPS)
+	AppVersion  string
+	ZFSParent   string   // storage.zfs.parent_dataset
+	ZFSHookArgv []string // the composed ssh transport — config.ZFSConfig.SSHArgv() (quince#818)
+	ZFSSeed     string   // auto | reflink | copy (in-container seed strategy; hardlink never used — amendment A)
 }
 
 // Select resolves the effective backend (stack D5 auto-selection): explicit zfs intent
@@ -27,8 +27,8 @@ type Options struct {
 // reflink, link()+inode identity → hardlink, else copy. The choice + reason is returned for
 // onboarding and logged (never silent — a copy fallback is a surfaced degraded mode).
 func Select(baseCtx context.Context, opts Options, log *slog.Logger) (Backend, string, string) {
-	if WantZFS(opts.Backend, opts.ZFSParent, opts.ZFSHookCmd) {
-		cli := newZFSCLI(opts.ZFSParent, opts.ZFSHookCmd)
+	if WantZFS(opts.Backend, opts.ZFSParent, len(opts.ZFSHookArgv) > 0) {
+		cli := newZFSCLI(opts.ZFSParent, opts.ZFSHookArgv)
 		reason := "storage.zfs configured (parent dataset / hook set)"
 		if opts.Backend == BackendZFS {
 			reason = "storage.backend: zfs"

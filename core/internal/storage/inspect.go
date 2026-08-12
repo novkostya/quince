@@ -242,7 +242,7 @@ func kernelHasZFS() bool {
 // "zfs" where this one spells it BackendZFS, so a grep for either spelling finds only one of them.
 // The two packages deliberately do not import each other (see Options), so collapsing them needs a
 // layering decision this function does not make.
-func WantZFS(backend, parentDataset, hookCmd string) bool {
+func WantZFS(backend, parentDataset string, hookConfigured bool) bool {
 	return backend == BackendZFS ||
-		(backend == "auto" && (parentDataset != "" || hookCmd != ""))
+		(backend == "auto" && (parentDataset != "" || hookConfigured))
 }
