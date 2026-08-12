@@ -421,6 +421,10 @@ test("a config quince could not use is explained, not reported as 'you have no s
       { path: "storage[0].zfs.mode", message: 'invalid value: invalid value "exec"; must be one of [hook]' },
     ];
     body.file_text = "storage:\n  - path: /backups\n    backend: zfs\n    zfs:\n      mode: exec\n";
+    // THE FATALITY, which is what makes this the DISCARDED case rather than a merely-warned one
+    // (quince#849). Without it this fixture becomes the state in the test below, where
+    // "Add your first storage" is the CORRECT headline.
+    body.discarded = true;
     await route.fulfill({ response: res, json: body });
   });
 
@@ -430,6 +434,12 @@ test("a config quince could not use is explained, not reported as 'you have no s
   // THE FALSE CLAIM IS GONE. This is the assertion the issue was filed for.
   await expect(page.getByRole("heading", { name: /add your first storage/i })).toHaveCount(0);
   await expect(page.getByText(/needs somewhere to keep backups before/i)).toHaveCount(0);
+
+  // AND THE SHARPER CLAIM THE BIT BUYS — not "there is a problem", but that nothing is being backed
+  // up. That is the fact the operator came to this screen with, and the whole reason a boolean was
+  // worth a contracts change.
+  await expect(page.getByRole("heading", { name: /could not read your configuration/i })).toBeVisible();
+  await expect(page.getByText(/no backups are being made/i)).toBeVisible();
 
   // AND THE DAEMON'S OWN SENTENCE IS ON SCREEN — path and message, not a client rewording.
   const warnings = page.getByTestId("config-warnings");
@@ -469,4 +479,50 @@ test("a clean first run still says 'Add your first storage'", async ({ page }) =
 
   await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
   await expect(page.getByTestId("config-warnings")).toHaveCount(0);
+});
+
+// quince#849 — THE STATE THE BIT EXISTS TO SEPARATE, and the one the interim headline got wrong.
+//
+// A config that PARSED with a warning — an unknown key, which contracts §6 makes a warning and never
+// an error — keeps its storage through the load. On a fresh install that is somebody who has never
+// added a storage AND has a typo, and the correct headline is the first-run one.
+//
+// Before `discarded` this was indistinguishable on the wire from a discarded config, so the screen
+// said something true of both. This is the assertion that the distinction is real: same non-empty
+// `warnings`, opposite headline, and the warning still rendered rather than hidden behind the
+// headline's branch.
+test("a config that merely carries warnings still reads as first run, with the warning shown", async ({
+  page,
+}) => {
+  await authenticate(page);
+
+  await page.route("**/api/config", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.config.storage = null;
+    body.warnings = [{ path: "totally_unknown_key", message: 'unknown config key "totally_unknown_key" (ignored)' }];
+    body.file_text = "totally_unknown_key: 1\n";
+    // NOT discarded — quince read the file, kept it, and ignored one key.
+    body.discarded = false;
+    await route.fulfill({ response: res, json: body });
+  });
+
+  await page.goto("/");
+  await page.waitForURL(/\/onboarding\/storage/);
+
+  // THE FIRST-RUN HEADLINE IS CORRECT HERE, and claiming the config could not be read would be the
+  // same state-honesty defect pointed the other way.
+  await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /could not read your configuration/i })).toHaveCount(0);
+  await expect(page.getByText(/no backups are being made/i)).toHaveCount(0);
+
+  // AND THE WARNING IS STILL SHOWN. The headline branches on the fatality; the detail renders
+  // either way. Hiding it here would be a second place for the same signal to go unseen, which the
+  // ruling names explicitly.
+  const warnings = page.getByTestId("config-warnings");
+  await expect(warnings).toBeVisible();
+  await expect(warnings).toContainText("totally_unknown_key");
+
+  // The form is the point of this page in this state, so it is there and unqualified.
+  await expect(page.getByTestId("add-storage-save")).toBeVisible();
 });

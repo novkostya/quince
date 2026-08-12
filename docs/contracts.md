@@ -812,7 +812,7 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 ### Config
 
 ```
-GET /api/config   → {config, warnings: [], source: {path, mtime}, file_text}
+GET /api/config   → {config, warnings: [], source: {path, mtime}, file_text, discarded}
 PUT /api/config   → full-document replace; validated then atomically written to
                     /data/config.yml; 422 {errors: [{path, message}]} on invalid
 POST /api/config/storage
@@ -826,6 +826,38 @@ DELETE /api/config/storage/{name}
                     see the gap B ruling above for what a reconstructed full document
                     silently loses.
 ```
+
+**RULED and IMPLEMENTED: `discarded` — THE FILE ON DISK WAS REFUSED AT LOAD** (Operator ruling
+2026-08-12, [quince#849](https://github.com/novkostya/quince/issues/849)). A boolean, from
+`Loaded.OK` and nothing else: quince is running on `Default()` and **nothing the file declares is in
+effect**.
+
+**IT CARRIES THE FATALITY; `warnings` CARRIES THE CAUSE.** That split is the whole design. `warnings`
+is non-empty in two states that want **opposite** answers — a discarded config, where the declared
+storage is not running and nothing is backing up, and a config that parsed with an ignored unknown
+key, where the storage is fine. §6 makes an unknown key a warning and never an error, so the second
+is ordinary rather than exotic.
+
+**No client could infer it.** `config.storage: null` does not separate the two — a fresh install with
+a typo has that too — which is what makes this a field rather than a derivation.
+
+**A BOOLEAN RATHER THAN AN `errors: []`, on evidence rather than taste.** Only **one** of `Load`'s
+three discard paths fills `Errors`: an unreadable file and invalid YAML both return `OK: false` with
+it empty. A client keying off an error list would therefore tell somebody whose config cannot be
+parsed that their storage is fine and a key was ignored — worse than shipping nothing.
+
+**The consumer rule: branch the HEADLINE on this, render `warnings` either way.** Treating it as
+*"should I show the warnings at all"* would put one signal behind a second gate, which is the defect
+quince#849 was filed about. `OnboardingStoragePage` is the reference implementation.
+
+**Its companion invariant is gated, because the screen now depends on it: EVERY discard path records
+its cause in `warnings`.** All three do deliberately — the validation branch copies each error across
+in an explicit loop, the other two write their own sentence — but a boolean whose detail can go
+silently empty would name a problem and show nothing to fix. `TestEveryDiscardPathIsDiscardedAndCarriesItsCauseInWarnings`.
+
+**Same shape as `has_password` on `GET /api/auth/passkeys`** ([quince#855](https://github.com/novkostya/quince/issues/855), landed hours earlier): a fact the client
+cannot derive, added to an endpoint that **already requires a session**, so no disclosure question
+arises. This endpoint is in the storageless-reachable set rather than `authExempt`.
 
 **RULED and IMPLEMENTED: `file_text` — `config.yml` AS IT IS ON DISK** (`qn.6j`, Operator ruling
 2026-08-09 on [quince#728](https://github.com/novkostya/quince/issues/728)). The Settings panel is

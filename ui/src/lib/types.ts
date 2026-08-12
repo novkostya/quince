@@ -239,6 +239,22 @@ export interface ConfigResponse {
    * is no file yet.
    */
   file_text: string;
+  /**
+   * `discarded` — the file on disk was REFUSED at load, so quince is running on its defaults and
+   * nothing the file declares is in effect (Operator ruling 2026-08-12, quince#849).
+   *
+   * IT CARRIES THE FATALITY, NOT THE CAUSE, which is why it has to exist. The cause is in
+   * `warnings` and always is — but `warnings` is non-empty in two states that want OPPOSITE
+   * headlines: a discarded config, where the declared storage is not running and nothing is backing
+   * up, and one that parsed with an ignored unknown key, where the storage is fine.
+   * `config.storage: null` does not separate them either, since a fresh install with a typo has it
+   * too.
+   *
+   * SO A CLIENT BRANCHES ITS HEADLINE ON THIS AND RENDERS `warnings` AS THE DETAIL EITHER WAY.
+   * Reading it as "should I show the warnings at all" would put the same signal behind a second
+   * gate, which is the defect quince#849 was filed about.
+   */
+  discarded: boolean;
 }
 
 export interface ConfigFieldError {
