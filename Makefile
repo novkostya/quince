@@ -753,7 +753,7 @@ else
 endif
 
 .PHONY: gates-ui-e2e
-gates-ui-e2e: image ## Playwright stories 1-2 against `quince serve --demo` (two containers)
+gates-ui-e2e: image ## The WHOLE Playwright suite — every ui/e2e/*.spec.ts — against `quince serve --demo` (two containers)
 ifeq ($(E2E_NEEDED),3)
 	@echo "gates-ui-e2e: SKIPPED — nothing the image is built from changed in $(SCOPE). Same coverage as image, so the two skip together and e2e never runs against an image that was not built."
 else
