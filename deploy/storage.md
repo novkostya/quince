@@ -58,7 +58,8 @@ up-front refusal — which on Wi-Fi costs hours.
 `storage.zfs.mode: hook` is the only value and the default — quince reaches an SSH forced-command to
 a constrained helper on the ZFS host. This keeps the HTTP-facing container free of ZFS privileges.
 
-**QUINCE COMPOSES THE SSH COMMAND ITSELF** since quince#818 (Operator ruling 2026-08-12), from four
+**QUINCE COMPOSES THE SSH COMMAND ITSELF** since quince#818 — Operator ruling, relayed at
+<https://github.com/novkostya/quince/issues/818#issuecomment-5245496176> — from four
 per-storage keys: `ssh_user`, `ssh_host`, and optionally `ssh_port` (default 22) and `ssh_key`
 (default `/data/keys/zfs`). It builds an argv array, never a shell string.
 

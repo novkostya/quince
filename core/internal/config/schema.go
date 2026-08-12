@@ -203,9 +203,9 @@ type ZFSConfig struct {
 	// Removing the key stays available and gets easier, not harder: it wants a retired-key warning
 	// that names its successor, which is quince#401 and its own reviewable claim.
 	Mode string `yaml:"mode" json:"mode"` // hook (the only value)
-	// HookCmd IS RETIRED AND THE FIELD IS KEPT TO REFUSE IT (Operator ruling 2026-08-12,
-	// quince#818). It carried a free-text argv — `ssh -i /data/keys/zfs … user@host` — which is
-	// replaced by the four `ssh_*` keys below.
+	// HookCmd IS RETIRED AND THE FIELD IS KEPT TO REFUSE IT. Operator ruling, relayed at
+	// https://github.com/novkostya/quince/issues/818#issuecomment-5245496176. It carried a free-text
+	// argv — `ssh -i /data/keys/zfs … user@host` — which is replaced by the four `ssh_*` keys below.
 	//
 	// KEPT FOR THE SAME REASON `Mode` IS. Deleting the field makes `hook_cmd:` an UNKNOWN key, and
 	// `unknownKeys` says *"unknown config key … (ignored)"* — so removing the transport would
