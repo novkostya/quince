@@ -50,39 +50,83 @@
   --vv-pad-bottom: max(1rem, var(--safe-bottom));
 }
 
+/* THE DOCUMENT IS THE SCROLLER, AT EVERY BREAKPOINT — Operator direction 2026-08-11 (quince#838):
+ * "DO NOT USE AN INTERNAL SCROLLABLE CONTAINER. Let Safari scroll the document natively."
+ *
+ * THIS REVERSES A SOAK-CONFIRMED DECISION AND SAYS SO. `qn.6a` pinned the shell to the viewport and
+ * made `<main>` the only scroll region so the top bar stayed put and no toolbar could drive layout;
+ * the soak called it "perfect". What that bought was paid for twice over, by two filed bugs with one
+ * root:
+ *
+ *  - quince#838 — a browser can only restore a scroll position it owns. `window.scrollY` is what
+ *    history entries record, and an element's `scrollTop` is not, so Back could never return you to
+ *    where you were and no component could fix it from inside.
+ *  - quince#649 — a shell pinned to `100dvh` and `overflow-hidden` CLIPS anything past its box, with
+ *    no scroller that contains it, whenever the box and the visible area disagree mid-toolbar-
+ *    transition. Unreachable content, intermittently, with no steps.
+ *
+ * `min-height`, NOT `height`: a document that is too tall is scrolled to rather than clipped, which
+ * is the whole of quince#649's cure. Anything past the fold is reachable by construction.
+ *
+ * `svh`, NOT `dvh`, AND THAT IS NOT A CONTRADICTION OF quince#659. That ruling is `dvh` over `vh`
+ * for a box that must track the VISIBLE area — a dialog, which still uses `--vv-height` below. This
+ * is the document's own MINIMUM, and a minimum that grows when Safari's toolbars collapse can flip a
+ * just-under-viewport page between scrollable and not, which then re-expands the toolbars: an
+ * oscillation. `svh` is the toolbars-shown height and never moves, so a short page is exactly one
+ * screen and a long one scrolls. Different question, different unit.
+ *
+ * Inner scrollers that remain — a dialog's card, the job log — carry `overscroll-contain`
+ * themselves, which is where scroll chaining is actually worth stopping. */
 html,
 body,
 #root {
-  height: 100%; /* fallback for browsers without dvh */
-  height: 100dvh; /* PHONE: a definite viewport height so the fixed shell (h-full) can make <main>
-                     the only scroll region, tracking the mobile toolbar — no nested/document scroll. */
+  min-height: 100vh; /* fallback for browsers without svh */
+  min-height: 100svh;
 }
 
-@media (min-width: 640px) {
-  html,
-  body,
-  #root {
-    /* DESKTOP: natural height so the document itself scrolls (native macOS bounce), at least a
-       viewport tall. The sidebar is sticky; there is no forced-height seam. */
-    height: auto;
-    min-height: 100dvh;
-  }
+/* THE RUBBER-BAND STAYS. NOTHING HERE MAY TURN IT OFF.
+ *
+ * `qn.6a` set `overscroll-behavior: none` on the phone, for a document that was never meant to
+ * scroll. I removed it when the document became the scroller, then PUT IT BACK when the Operator
+ * reported the nav bar coming unstuck "when you bounce at the bottom" — reasoning that the bar is a
+ * control and the bounce is only a texture.
+ *
+ * That trade was mine to propose and not mine to make, and the answer was: **"did you disable
+ * bouncing? I didn't ask that, I love bouncing."** So the bounce is a requirement, and the bar had to
+ * stop being the kind of thing a bounce can dislodge — which is what `position: fixed` on the bar
+ * does (see `Sidebar`). A fixed element is not in the scroll at all, so there is no bound for an
+ * overscroll to drag it past. The sibling project reached the same shape and its stylesheet has no
+ * `overscroll-behavior` rule anywhere, which is the corroboration.
+ *
+ * SO THE FIX FOR THE BAR IS THE FIX FOR THE BOUNCE: one change removed both the need to suppress
+ * this and the reason the suppression was proposed. If a future symptom makes `overscroll-behavior:
+ * none` look attractive again, it is the bar that is wrong, not the bounce. */
+
+/* THE FIXED BAR'S HEIGHT, IN ONE PLACE, BECAUSE TWO THINGS MUST AGREE ABOUT IT.
+ *
+ * The phone nav bar is `position: fixed`, so it is out of flow and covers whatever is beneath it;
+ * the shell gets the same height back as padding. Declaring it once means the bar's `height` and the
+ * shell's `padding-top` cannot drift apart — a constant repeated twice is a content overlap waiting
+ * for someone to change a padding, and the e2e asserts `<main>` never starts above the bar's bottom
+ * so that even this cannot fail silently.
+ *
+ * `3.5rem` is the bar's own content box: a 40px tap target with 8px above and below. `--safe-top` is
+ * added rather than assumed, because in standalone mode the bar draws under the status bar. */
+:root {
+  --bar-h: calc(3.5rem + var(--safe-top));
 }
 
-html,
-body {
-  /* PHONE: kill the iOS document rubber-band — the page itself never scrolls (the region is <main>),
-     so an overscroll shouldn't bounce the document or chain to an outer scroller (qn.6a soak fix).
-     <main> carries overscroll-y-contain for the same reason. */
-  overscroll-behavior: none;
-}
-
-@media (min-width: 640px) {
-  html,
-  body {
-    /* DESKTOP: the document is the scroller, so keep the native macOS elastic (always-)bounce. */
-    overscroll-behavior: auto;
-  }
+/* RESERVE THE SCROLLBAR GUTTER, ALWAYS — and this is a consequence of the change above rather than
+ * a tidy-up. Once every page scrolls the document, a classic scrollbar appears and disappears as you
+ * move between a long page and a short one, and each appearance narrows the viewport by its width:
+ * the whole layout shifts sideways on navigation. Measured rather than reasoned — it surfaced as a
+ * 14px horizontal overflow in `story5`, INTERMITTENTLY, while the page settled and the scrollbar
+ * came and went underneath the measurement.
+ *
+ * It costs nothing on the surface this project is aimed at: `scrollbar-gutter` applies to CLASSIC
+ * scrollbars, and iOS and macOS both use overlay ones, which take no space and reserve none. */
+html {
+  scrollbar-gutter: stable;
 }
 
 body {

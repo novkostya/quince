@@ -51,11 +51,21 @@ export function AuthPage({
   // importing a background band onto the login screen to fix a problem that does not exist.
   //
   // WHAT `dvh` CAN DO is lag transiently during the toolbar animation, and whether that lag is a
-  // defect depends on the SCROLL STRUCTURE around it rather than on the unit. Every route using this
-  // component is a SIBLING of the `AppLayout` route rather than a child (`router.tsx`), so the
-  // DOCUMENT scrolls here and the worst a lag costs is a brief scroll that resolves itself. In the
-  // authed shell — `overflow-hidden`, no document scroll — the same lag puts content where no
-  // scroller reaches it. That is quince#649, and it is a property of that structure, not of the unit.
+  // defect depends on the SCROLL STRUCTURE around it rather than on the unit. The document scrolls
+  // here, so the worst a lag costs is a brief scroll that resolves itself.
+  //
+  // THAT USED TO BE A CONTRAST WITH THE AUTHED SHELL AND IT NO LONGER IS. The sentence here read:
+  // "In the authed shell — `overflow-hidden`, no document scroll — the same lag puts content where
+  // no scroller reaches it. That is quince#649." The shell stopped being a scroll container under
+  // quince#838 (Operator direction: let Safari scroll the document natively), and that is what
+  // closes quince#649 — rather than sizing around it. The reasoning above is unchanged and is now
+  // simply true everywhere.
+  //
+  // THE UNIT STILL DIFFERS FROM THE SHELL'S, DELIBERATELY. This box is meant to FILL the visible
+  // area, which is `dvh`'s job: it equals the visible height in both toolbar states. The shell's
+  // `min-h-svh` answers a different question — a document MINIMUM that must not grow when the
+  // toolbars collapse, because a growing minimum flips a just-taller-than-screen page between
+  // scrollable and not. `docs/ui.design.md` carries both.
   //
   // Safe-area padding keeps content clear of the status bar and the side notch (qn.6a soak fixes).
   const outer = isPage
