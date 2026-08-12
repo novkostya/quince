@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { ArrowLeft } from "lucide-react";
+import { BackLink } from "@/components/BackLink";
 import type { Device } from "@/lib/types";
 import { api } from "@/lib/api";
 import { isRunning, useJobsStore } from "@/stores/jobs";
@@ -75,9 +76,9 @@ export function DeviceDetailsPage() {
 
   return (
     <section>
-      <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
+      <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
         <ArrowLeft size={16} /> Home
-      </Link>
+      </BackLink>
 
       {!device ? (
         <div className="mt-6 text-sm text-muted">

@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { BackLink } from "@/components/BackLink";
+
 import { ChevronLeft } from "lucide-react";
 import { Passkeys } from "@/features/settings/Passkeys";
 import { PasswordControls } from "@/features/settings/PasswordControls";
@@ -28,13 +29,13 @@ export function SettingsAuthPage() {
       {/* A WAY BACK, because this is the first settings page that is not itself `/settings`. The
           sidebar highlights Settings but does not return you to it, and a phone user's alternative
           is the browser's back gesture — which works, and which nothing on screen promises. */}
-      <Link
+      <BackLink
         to="/settings"
         className="-ml-1 inline-flex items-center gap-1 text-sm text-muted transition-colors hover:text-fg"
       >
         <ChevronLeft size={16} strokeWidth={1.75} />
         Settings
-      </Link>
+      </BackLink>
       <h1 className="mt-2 text-xl font-semibold tracking-tight">Sign-in</h1>
       {/* NAMED FOR WHAT THE USER DOES, not for the subsystem. "Authentication" is the word the code
           uses; "Sign-in" is the word the person reading this screen used ten seconds ago. The route
