@@ -148,8 +148,10 @@ func TestLabGate12(t *testing.T) {
 
 	// (a') Reset discards any dirty working; idempotent (no-op when already clean). The next backup
 	// re-seeds from latest/.
-	if err := m.RepairWorkingCopy(udid); err != nil {
-		t.Fatalf("reset-working: %v", err)
+	// Through `RepairWorking`, which is the shipped Reset op — the `Manager.RepairWorkingCopy`
+	// wrapper this used to call was dead and resolved to the default slot (quince#509).
+	if status, reason := m.RepairWorking(udid, ""); status != 202 {
+		t.Fatalf("reset-working: %d %s", status, reason)
 	}
 	t.Log("reset-working (discard dirty working) OK")
 

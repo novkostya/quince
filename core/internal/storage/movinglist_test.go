@@ -187,29 +187,49 @@ func TestEveryPositionReaderSurvivesAnEmptyList(t *testing.T) {
 	if _, err := m.jobSlot("j1"); err == nil {
 		t.Error("jobSlot returned a slot on an empty list")
 	}
-	if err := m.RepairWorkingCopy(testUDID); err == nil {
-		t.Error("RepairWorkingCopy on an empty list did not error — it would nil-deref the Backend")
+	// Reset, through the SHIPPED op. This asserted `Manager.RepairWorkingCopy` errored, and that
+	// wrapper is gone (quince#509) — it was dead and resolved to the default slot. `RepairWorking`
+	// cannot nil-deref here for a structural reason rather than a guarded one: it iterates the
+	// slots and an unusable one goes to `blind` without its Backend being touched. So the claim
+	// that survives is the one this test is about — every position reader survives an empty list.
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Errorf("RepairWorking on an empty list = %d %q, want 202 — nothing is dirty because "+
+			"nothing is declared, and that is an answer rather than a failure", status, reason)
 	}
 }
 
-// RepairWorkingCopy must also refuse an UNREACHABLE default, which is the sharper of its two
-// guards: `Slot.Reachable`'s own doc says the Backend is NIL when it is false, so the old
-// unconditional dereference was safe only while nothing could replace a reachable slot with an
-// unreachable one mid-flight — the assumption this rung removes.
-func TestRepairWorkingCopyRefusesAnUnreachableDefault(t *testing.T) {
+// RESET AGAINST AN UNREACHABLE-ONLY LIST MUST NAME THE STORAGE, which is the only thing that tells
+// a user WHICH disk to reconnect. `Slot.Reachable`'s own doc says the Backend is NIL when it is
+// false, so this state is where an unconditional dereference would crash.
+//
+// It asserted `Manager.RepairWorkingCopy` returned an error naming the storage. That wrapper is
+// gone (quince#509), and the shipped op answers differently BY DESIGN rather than by accident:
+// `RepairWorking` returns 202 with the storage named in the `NOT inspected` clause, because
+// reset.go's rule is that unreachable storages are named and never silently skipped — "no silent
+// caps or fallbacks" applies to what could not be examined, not only to what changed.
+//
+// SO THE STATUS IS DELIBERATELY NOT ASSERTED AS AN ERROR HERE. The claim this test carries is the
+// naming, and the naming is what a user acts on. Whether 202 is the right code for "the only
+// declared storage is unreachable" is a live question about the shipped endpoint, not about the
+// deleted wrapper, and quince#509 does not rule on it.
+func TestResetNamesAnUnreachableStorageItCouldNotInspect(t *testing.T) {
 	m, _, _, _ := newNSManager(t, clonetree.Copy, generousPolicy())
 	m.ApplyStorages([]Slot{{
 		StorageID: "01JG0000000000000000000G", Name: "gone", Root: "/nowhere",
 		Reachable: false, UnreachableCode: "path_unreachable", UnreachableReason: "not mounted",
 	}})
 
-	err := m.RepairWorkingCopy(testUDID)
-	if err == nil {
-		t.Fatal("no error on an unreachable default — Backend is nil there, so this was a nil deref")
+	status, reason := m.RepairWorking(testUDID, "")
+	if status != 202 {
+		t.Fatalf("RepairWorking on an unreachable-only list = %d %q, want 202", status, reason)
 	}
-	if !strings.Contains(err.Error(), "gone") {
-		t.Errorf("the error %q does not name the storage, which is the only thing that tells a user "+
-			"WHICH disk to reconnect", err)
+	if !strings.Contains(reason, "gone") {
+		t.Errorf("the reason %q does not name the storage, which is the only thing that tells a user "+
+			"WHICH disk to reconnect", reason)
+	}
+	if !strings.Contains(reason, "NOT inspected") {
+		t.Errorf("the reason %q does not say the storage was not INSPECTED — a reset that examined "+
+			"nothing must not read as a reset that found nothing", reason)
 	}
 }
 
