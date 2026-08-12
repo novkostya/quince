@@ -1,12 +1,13 @@
 // WHAT COUNTS AS "THE THING THE ON-SCREEN KEYBOARD IS FOR".
 //
-// Two separate behaviours need this same judgement and must not drift apart, so it is written once:
+// ONE CALLER TODAY: `useScrollFocusIntoView`, which moves a focused field clear of the dialog's
+// edges and must NOT move for anything focused by a tap — scrolling between `mousedown` and
+// `mouseup` swallows the press entirely (quince#762, caught by `gates-ui-e2e`).
 //
-//  - `useScrollFocusIntoView` moves a focused field clear of the dialog's edges, and must NOT move
-//    for anything focused by a tap — scrolling between `mousedown` and `mouseup` swallows the press
-//    entirely (quince#762, caught by `gates-ui-e2e`);
-//  - `keyboardScrollReset` undoes iOS's leftover viewport offset once the keyboard is really gone,
-//    and must be able to tell "the keyboard closed" from "focus moved to the next field".
+// It is its own file because the judgement is subtler than the one use makes it look, not because it
+// is shared. This header used to name a second caller, `keyboardScrollReset`, which was added by
+// `f0d1ee7` and REVERTED by `1d0742a` — the comment outlived it here and in `useScrollFocusIntoView`,
+// so a reader sent looking for the counterpart found nothing (quince#838, quince#346's class).
 //
 // A `<select>` is deliberately absent: iOS answers it with a picker rather than a keyboard, and it
 // is tapped, so it belongs with the buttons on both counts.

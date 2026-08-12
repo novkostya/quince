@@ -56,8 +56,14 @@ const MARGIN = 24; // matches the card's own padding — one comfortable gutter,
 //
 // The correction exists to keep the field the KEYBOARD IS ABOUT TO COVER in view. Nothing that
 // cannot raise a keyboard needs it, so nothing else is moved, and the swallowed-tap class is closed
-// rather than tuned around. `raisesKeyboard` is shared with the shell's scroll reset, which has to
-// make the same judgement — see `keyboard.ts`.
+// rather than tuned around. The test itself lives in `keyboard.ts`, which explains what it excludes
+// and why.
+//
+// (That sentence used to end "`raisesKeyboard` is shared with the shell's scroll reset, which has to
+// make the same judgement." THERE IS NO SHELL SCROLL RESET — its one caller is this file. The
+// counterpart was reverted in `1d0742a` and the reference outlived it, so it sent the next reader
+// looking for a file to keep in step and there was none. Corrected under quince#838, which is the
+// work that opened this file and met it.)
 export function useScrollFocusIntoView(ref: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const container = ref.current;
