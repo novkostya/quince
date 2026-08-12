@@ -24,6 +24,21 @@
 // DO NOT "fix" this in the viewport meta. `maximum-scale=1` / `user-scalable=no` also stops the
 // zoom and disables pinch-zoom for the whole app — WCAG 1.4.4, and `ui/index.html` is deliberately
 // correct as it stands. Ruled binding on quince#616.
+//
+// `h-10 sm:h-9` — 40px on phones, 36px from `sm` up — is the HEIGHT half of the same mobile-first
+// idiom, and it is the other half of the line above (quince#619). `button.tsx` has stepped its
+// height by breakpoint since the qn.6a mobile pass; this string did not, so the two shared surfaces
+// disagreed about touch height and only one of them varied.
+//
+// The font change is what made it close to required: `text-base` puts 16px of type inside the box,
+// and 16px in a 36px box leaves about 10px of vertical padding in total. Desktop is unchanged at
+// 36px, so this is not a redesign — it is the two components agreeing.
+//
+// NOT 44px, and that is the ruling rather than an oversight. The commonly cited figure would raise
+// every control on a page canon wants dense, which is exactly why `Button` steps instead of picking
+// one number. Matching `Button` was ruled the answer; **quince meets no 44px bar and this does not
+// change that** — quince#619 records the target-size question as unmeasured, on a device and against
+// platform guidance, and it stays that way.
 export const fieldBase =
-  "h-9 w-full rounded-lg border border-line bg-bg px-3 text-base text-fg sm:text-sm " +
+  "h-10 w-full rounded-lg border border-line bg-bg px-3 text-base text-fg sm:h-9 sm:text-sm " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50";

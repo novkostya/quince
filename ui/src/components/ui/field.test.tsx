@@ -51,6 +51,29 @@ describe("full-width form controls are 16px on mobile", () => {
     }
   });
 
+  // THE HEIGHT HALF (quince#619). Same idiom, same file, same regression shape: a plain `h-9` is
+  // what this string carried, it reads as normal, and it is 36px unconditionally — which is what
+  // `button.tsx` deliberately stopped doing at the qn.6a mobile pass. 16px of type in a 36px box
+  // leaves about 10px of vertical padding in total, so the font change quince#616 shipped made this
+  // close to required and then landed without it.
+  it("both controls step 40px -> 36px at the sm breakpoint", () => {
+    const { container } = render(
+      <div>
+        <Input />
+        <Select>
+          <option value="auto">auto</option>
+        </Select>
+      </div>,
+    );
+    for (const el of container.querySelectorAll("input, select")) {
+      const tokens = el.className.split(/\s+/);
+      expect(tokens).toContain("h-10");
+      expect(tokens).toContain("sm:h-9");
+      // The unconditional form is the regression, exactly as `text-sm` is above.
+      expect(tokens).not.toContain("h-9");
+    }
+  });
+
   // THE POINT OF `fieldBase` IS THAT THERE IS ONE STRING, not that there is one component. The two
   // controls were a character-for-character duplicate before this; extracting a component while
   // leaving two copies of the responsive string would have rebuilt the same defect one size larger.
