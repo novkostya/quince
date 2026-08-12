@@ -18,11 +18,8 @@ import (
 // take the job's slot — resolved from the jobID they already carry, or passed in. `POST /api/jobs`
 // carries `storage_id` as of story 6b, so a backup lands on the storage the user chose.
 //
-// STILL DEFAULT-SCOPED, and each is now a STANDING fact rather than a deadline:
+// STILL DEFAULT-SCOPED, and it is now a STANDING fact rather than a deadline:
 //
-//	RepairWorkingCopy   device-scoped — no jobID to resolve, and the working copy it repairs
-//	                    belongs to whichever job last wrote it. WRONG for a job on a non-default
-//	                    storage; it needs a different key, not a different slot (unfixed).
 //	BackendName         health + onboarding report the DEFAULT's backend, which is the question
 //	                    being asked — correct rather than pending.
 //
@@ -565,24 +562,6 @@ func (m *Manager) policyFor(storageID string) (RetentionPolicy, bool) {
 		}
 	}
 	return RetentionPolicy{}, false
-}
-
-// RepairWorkingCopy rebuilds the mutable working area from the last good version (design §4).
-//
-// Guarded twice, and the second is the sharper one: an empty list has no slot, and an UNUSABLE slot
-// has a NIL Backend (`Slot.Reachable`'s doc: "BACKEND IS NIL WHEN THIS IS FALSE"). The old form
-// dereferenced it unconditionally, which was safe only while nothing could replace a reachable slot
-// with an unreachable one mid-flight — exactly the assumption this rung removes.
-func (m *Manager) RepairWorkingCopy(udid string) error {
-	d, ok := m.defaultSlot()
-	if !ok {
-		return fmt.Errorf("repair working copy for %s: no storage is declared", udid)
-	}
-	if !d.Usable() {
-		return fmt.Errorf("repair working copy for %s: the default storage %q is not reachable (%s): %s",
-			udid, d.Name, d.UnreachableCode, d.UnreachableReason)
-	}
-	return d.Backend.RepairWorkingCopy(udid)
 }
 
 // VerifyWork is the passwordless structural-verification exposed to the backup engine (qn.4a/qn.5b):

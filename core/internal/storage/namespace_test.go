@@ -94,15 +94,15 @@ func TestNamespaceDiscardKeepsWorking(t *testing.T) {
 	}
 }
 
-// Story 6 (Reset discards): RepairWorkingCopy discards the dirty working so the next backup
+// Story 6 (Reset discards): Reset discards the dirty working so the next backup
 // re-seeds; the committed version is untouched.
 func TestNamespaceResetWorking(t *testing.T) {
 	m, _, backups, _ := newNSManager(t, clonetree.Copy, generousPolicy())
 	commitGoodTree(t, m, testUDID)
 	// Leave a dirty working from a partial attempt.
 	goodEncryptedFull(t, seedTree(t, m, testUDID, "jobX"))
-	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("reset: %v", err)
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Fatalf("reset: %d %s", status, reason)
 	}
 	if _, err := os.Stat(workingParent(backups, testUDID)); !os.IsNotExist(err) {
 		t.Fatal("working/ should be gone after Reset")

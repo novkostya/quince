@@ -151,8 +151,8 @@ func TestZFSResetRollsBackToTheNewestVersion(t *testing.T) {
 	tree := seedTree(t, m, testUDID, "jobX")
 	writeFile(t, filepath.Join(tree, "PARTIAL"), []byte("abandon me"))
 
-	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("reset: %v", err)
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Fatalf("reset: %d %s", status, reason)
 	}
 	if _, err := os.Stat(filepath.Join(tree, "PARTIAL")); !os.IsNotExist(err) {
 		t.Error("the abandoned partial survived the rollback")
@@ -179,8 +179,8 @@ func TestZFSResetWithNoSnapshotEmptiesTheHead(t *testing.T) {
 	tree := seedTree(t, m, testUDID, "job1")
 	goodEncryptedFull(t, tree)
 
-	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("reset: %v", err)
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Fatalf("reset: %d %s", status, reason)
 	}
 	if !isEmptyDir(tree) {
 		t.Error("reset on a device with no committed version must empty the head")
@@ -202,8 +202,8 @@ func TestZFSResetWithNoSnapshotEmptiesTheHead(t *testing.T) {
 	commitGoodTree(t, m, testUDID)
 	tree2 := seedTree(t, m, testUDID, "job2")
 	writeFile(t, filepath.Join(tree2, "PARTIAL"), []byte("x"))
-	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("second reset: %v", err)
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Fatalf("second reset: %d %s", status, reason)
 	}
 	if !hasOp(f.calls, "rollback") {
 		t.Fatal("with a committed version present reset must roll back, never empty")

@@ -128,8 +128,8 @@ func TestResetRollbackArgvIsBounded(t *testing.T) {
 	v := m.Versions(testUDID)[0]
 	seedTree(t, m, testUDID, "jobX")
 
-	if err := m.RepairWorkingCopy(testUDID); err != nil {
-		t.Fatalf("reset: %v", err)
+	if status, reason := m.RepairWorking(testUDID, ""); status != 202 {
+		t.Fatalf("reset: %d %s", status, reason)
 	}
 	_ = backups
 
