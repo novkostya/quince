@@ -32,7 +32,7 @@ func TestHookCheckUnreachableIsATwoHundred(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	resp, err := c.Do(hookReq(t, srv, c, `{"parent_dataset":"tank/backups","hook_cmd":"/nonexistent/ssh"}`))
+	resp, err := c.Do(hookReq(t, srv, c, `{"parent_dataset":"tank/backups","ssh_user":"u","ssh_host":"nonexistent.invalid"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +61,10 @@ func TestHookCheckRefusesAMalformedQuestion(t *testing.T) {
 
 	for _, tc := range []struct{ name, body, wantPath string }{
 		{"no fields", `{}`, "parent_dataset"},
-		{"no parent", `{"hook_cmd":"ssh host"}`, "parent_dataset"},
-		{"no hook cmd", `{"parent_dataset":"tank/backups"}`, "hook_cmd"},
-		{"unknown field", `{"parent_dataset":"t/b","hook_cmd":"x","force":true}`, "parent_dataset"},
+		{"no parent", `{"ssh_user":"u","ssh_host":"h"}`, "parent_dataset"},
+		{"no ssh host", `{"parent_dataset":"tank/backups","ssh_user":"u"}`, "ssh_host"},
+		{"no ssh user", `{"parent_dataset":"tank/backups","ssh_host":"h"}`, "ssh_user"},
+		{"unknown field", `{"parent_dataset":"t/b","ssh_user":"u","ssh_host":"h","force":true}`, "parent_dataset"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := c.Do(hookReq(t, srv, c, tc.body))
@@ -96,7 +97,7 @@ func TestHookCheckIsNotAuthExempt(t *testing.T) {
 	defer srv.Close()
 
 	req := newReq(t, http.MethodPost, srv.URL+"/api/storages/probe/hook",
-		`{"parent_dataset":"tank/backups","hook_cmd":"/bin/true"}`)
+		`{"parent_dataset":"tank/backups","ssh_user":"u","ssh_host":"h"}`)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := srv.Client().Do(req)
 	if err != nil {
@@ -118,7 +119,7 @@ func TestHookCheckRefusesAnUnsafeDatasetWithoutExecuting(t *testing.T) {
 	c := authedClient(t, srv)
 
 	resp, err := c.Do(hookReq(t, srv, c,
-		`{"parent_dataset":"tank/backups; rm -rf /","hook_cmd":"/bin/true"}`))
+		`{"parent_dataset":"tank/backups; rm -rf /","ssh_user":"u","ssh_host":"h"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

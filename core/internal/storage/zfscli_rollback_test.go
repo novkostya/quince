@@ -18,7 +18,7 @@ import (
 
 func fakeRollbackCLI(out string, err error) (*zfsCLI, *[][]string) {
 	calls := &[][]string{}
-	c := newZFSCLI("rpool/quince-labtest", "ssh -i /k host")
+	c := newZFSCLI("rpool/quince-labtest", []string{"ssh", "-i", "/k", "host"})
 	c.run = func(_ context.Context, argv []string) (string, error) {
 		*calls = append(*calls, argv)
 		return out, err

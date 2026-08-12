@@ -35,10 +35,17 @@ type zfsCLI struct {
 	run      func(ctx context.Context, argv []string) (string, error)
 }
 
-func newZFSCLI(parent, hookCmd string) *zfsCLI {
+// newZFSCLI takes the transport as an ARGV THAT IS ALREADY COMPOSED (quince#818).
+//
+// It used to take the operator's `hook_cmd` string and `strings.Fields` it. That was a whitespace
+// split of free text, so a key path containing a space produced a silently wrong argv and there was
+// no spelling in which the operator could have escaped it. `config.ZFSConfig.SSHArgv` builds the
+// array from structured fields and this end simply receives it — the class is gone rather than
+// guarded against.
+func newZFSCLI(parent string, hookArgv []string) *zfsCLI {
 	return &zfsCLI{
 		parent:   parent,
-		hookArgv: strings.Fields(hookCmd), // operator-configured; argv, never a shell string
+		hookArgv: append([]string(nil), hookArgv...), // copied: a caller must not alias our prefix
 		run:      execRun,
 	}
 }

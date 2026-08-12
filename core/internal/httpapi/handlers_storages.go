@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -155,19 +156,33 @@ func (d Deps) handleStorageHookCheck() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req wire.StorageHookCheckRequest
 		if err := decodeJSON(r, &req); err != nil {
-			hookCheck422(w, d, "parent_dataset", "expected a JSON object with `parent_dataset` and `hook_cmd`")
+			hookCheck422(w, d, "parent_dataset", "expected a JSON object with `parent_dataset`, `ssh_user` and `ssh_host`")
 			return
 		}
 		if req.ParentDataset == "" {
 			hookCheck422(w, d, "parent_dataset", "must not be empty — quince cannot ask the helper about nothing")
 			return
 		}
-		if req.HookCmd == "" {
-			hookCheck422(w, d, "hook_cmd", "must not be empty — this is the command that reaches the helper")
+		// THE TWO FIELDS WITH NO DEFAULT (quince#818). `ssh_port` and `ssh_key` are omitted by a form
+		// that has not asked for them and default the way the config does, so refusing an absent one
+		// here would refuse the ordinary request.
+		if req.SSHHost == "" {
+			hookCheck422(w, d, "ssh_host", "must not be empty — this is the host running the quince-zfs-helper")
+			return
+		}
+		if req.SSHUser == "" {
+			hookCheck422(w, d, "ssh_user", "must not be empty — this is the remote user whose `authorized_keys` carries the forced command")
 			return
 		}
 
-		c := storage.CheckHook(r.Context(), req.ParentDataset, req.HookCmd)
+		// COMPOSED BY THE SAME FUNCTION THE SAVED STORAGE WILL USE, deliberately. If this built its
+		// own argv the button could pass against a transport the running backup never takes, which
+		// is the precise failure `Test helper` exists to prevent.
+		zc := config.ZFSConfig{
+			SSHUser: req.SSHUser, SSHHost: req.SSHHost,
+			SSHPort: req.SSHPort, SSHKey: req.SSHKey,
+		}
+		c := storage.CheckHook(r.Context(), req.ParentDataset, zc.SSHArgv())
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageHookCheckResponse{
 			Check: wire.StorageHookCheck{
 				Outcome: string(c.Outcome),

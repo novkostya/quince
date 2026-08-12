@@ -105,7 +105,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 		Path:    "/backups",
 		Default: true,
 		Backend: "zfs",
-		ZFS:     ZFSConfig{ParentDataset: "tank/quince", Mode: "hook", HookCmd: "/usr/local/bin/zfs-hook", Seed: "reflink"},
+		ZFS:     ZFSConfig{ParentDataset: "tank/quince", Mode: "hook", SSHUser: "u", SSHHost: "h", Seed: "reflink"},
 		// A POINTER, and that is what makes this worth pinning: absent differs from zero, so a
 		// dropped `retention:` does not read as "keep nothing" — it reads as "the user never
 		// wrote it", and the code defaults quietly take over. Silent, and wrong.

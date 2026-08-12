@@ -23,9 +23,9 @@ func collidingPair() Config {
 	c := Default()
 	list := []StorageEntry{
 		{Name: "one", Path: "/backups-a", Backend: "zfs", Default: true,
-			ZFS: ZFSConfig{ParentDataset: "tank/backups", Mode: "hook", HookCmd: "ssh h"}},
+			ZFS: ZFSConfig{ParentDataset: "tank/backups", Mode: "hook", SSHUser: "u", SSHHost: "h"}},
 		{Name: "two", Path: "/backups-b", Backend: "zfs",
-			ZFS: ZFSConfig{ParentDataset: "tank/backups", Mode: "hook", HookCmd: "ssh h"}},
+			ZFS: ZFSConfig{ParentDataset: "tank/backups", Mode: "hook", SSHUser: "u", SSHHost: "h"}},
 	}
 	for i := range list {
 		list[i] = list[i].Resolved()
@@ -139,9 +139,9 @@ func TestReplaceStillAcceptsACoherentConfig(t *testing.T) {
 	c := Default()
 	list := []StorageEntry{
 		{Name: "one", Path: "/backups-a", Backend: "zfs", Default: true,
-			ZFS: ZFSConfig{ParentDataset: "tank/one", Mode: "hook", HookCmd: "ssh h"}},
+			ZFS: ZFSConfig{ParentDataset: "tank/one", Mode: "hook", SSHUser: "u", SSHHost: "h"}},
 		{Name: "two", Path: "/backups-b", Backend: "zfs",
-			ZFS: ZFSConfig{ParentDataset: "tank/two", Mode: "hook", HookCmd: "ssh h"}},
+			ZFS: ZFSConfig{ParentDataset: "tank/two", Mode: "hook", SSHUser: "u", SSHHost: "h"}},
 	}
 	for i := range list {
 		list[i] = list[i].Resolved()

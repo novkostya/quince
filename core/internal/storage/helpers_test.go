@@ -231,7 +231,7 @@ func newZFSManagerCfg(t *testing.T, policy RetentionPolicy, seed string) (*Manag
 	st := openStore(t)
 	parent := "tank/backups/iphone-backup"
 	f := &fakeZFS{backups: backups, parent: parent}
-	cli := newZFSCLI(parent, "hook-placeholder")
+	cli := newZFSCLI(parent, []string{"hook-placeholder"})
 	cli.run = f.run
 	be := newZFSBackend(context.Background(), cli, backups, seed, "test", testLogger())
 	seedStorageMarker(t, backups, "", BackendZFS)

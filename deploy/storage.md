@@ -8,7 +8,7 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
 
 `storage.backend: auto` (the default) resolves at startup:
 
-- **zfs** — chosen when `storage.zfs.parent_dataset` (or a `hook_cmd`) is set, or `backend: zfs`
+- **zfs** — chosen when `storage.zfs.parent_dataset` (or an `ssh_user`/`ssh_host` pair) is set, or `backend: zfs`
   is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots.
   qn.6h: **the backup tree IS the child dataset root.** `idevicebackup2`'s target is the parent
   dataset and it appends the device's UDID itself, so a backup lands at `<parent>/<udid>/Info.plist`
@@ -55,11 +55,23 @@ up-front refusal — which on Wi-Fi costs hours.
 
 ## ZFS: the hook is the only transport
 
-`storage.zfs.mode: hook` is the only value and the default — quince runs `storage.zfs.hook_cmd`
-(an argv, never a shell string), typically an SSH forced-command to a constrained helper on the ZFS
-host. This keeps the HTTP-facing container free of ZFS privileges.
+`storage.zfs.mode: hook` is the only value and the default — quince reaches an SSH forced-command to
+a constrained helper on the ZFS host. This keeps the HTTP-facing container free of ZFS privileges.
 
-The transport binary the `hook_cmd` names (usually `ssh`) must exist **where quince runs**: the
+**QUINCE COMPOSES THE SSH COMMAND ITSELF** since quince#818 (Operator ruling 2026-08-12), from four
+per-storage keys: `ssh_user`, `ssh_host`, and optionally `ssh_port` (default 22) and `ssh_key`
+(default `/data/keys/zfs`). It builds an argv array, never a shell string.
+
+**SSH IS THE SHAPE, not one transport among several**, and the reason is the guarantee the design
+rests on: `command="/usr/local/sbin/quince-zfs-helper"` in `authorized_keys` pins the helper
+regardless of what the client asks for. Under any other transport that constraint would live only
+inside the script, and a caller could reach the host without going through it.
+
+**`hook_cmd` IS RETIRED and a file carrying it is REFUSED**, by path, naming its four successors —
+the same shape `mode: exec` uses and for the same reason: an unknown-key warning would say
+*"ignored"* about the one key every existing zfs install has set.
+
+The transport binary (`ssh`) must exist **where quince runs**: the
 runtime image ships `openssh-client` for exactly this (qn.4a gate-15 finding #2) — without it every
 hook call dies with `exec: "ssh": executable file not found` and no backup can seed.
 
@@ -202,12 +214,28 @@ Delete the case from your script — nothing calls it, and leaving it is a `cp -
 `rm -rf` reachable by a key that no longer needs them. Hookless deployments are likewise unaffected:
 the in-container seed ladder is not reached on zfs either.
 
-Then `storage.zfs.hook_cmd` (the helper runs regardless of the command text; quince appends the
-operation + target as argv):
+Then the transport. **You give quince the user and the host; it composes the rest** — the key, the
+port and all three host-key options — and appends the operation + target as argv:
 
 ```yaml
-hook_cmd: "ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=yes zfsuser@zfshost"
+zfs:
+  parent_dataset: rpool/quince
+  ssh_user: zfsuser
+  ssh_host: zfshost
+  # ssh_port: 22               # both OPTIONAL — these are the defaults, so leave them out
+  # ssh_key: /data/keys/zfs    # unless you already keep the key somewhere else
 ```
+
+which quince runs as:
+
+```
+ssh -i /data/keys/zfs -p 22 -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=yes zfsuser@zfshost
+```
+
+**`StrictHostKeyChecking=yes`, not `accept-new`.** `accept-new` trusts whatever answers first, which
+on a first connect is exactly the moment a machine-in-the-middle would want. Seeding `known_hosts`
+below is what makes `yes` workable, and it is the property standing between this and somebody else's
+host receiving your backups.
 
 **THE HOST KEY IS NOT OPTIONAL, AND OMITTING IT FAILS EVERY HOOK CALL FROM THE FIRST ONE.**
 `BatchMode=yes` disables the interactive *"are you sure you want to continue connecting?"* prompt —

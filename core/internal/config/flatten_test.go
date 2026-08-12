@@ -97,7 +97,7 @@ func TestEachStorageCarriesItsOwnBackendAndZFS(t *testing.T) {
     path: /backups
     default: true
     backend: zfs
-    zfs: {parent_dataset: rpool/quince, mode: hook, hook_cmd: "/x", seed: copy}
+    zfs: {parent_dataset: rpool/quince, mode: hook, ssh_user: u, ssh_host: h, seed: copy}
   - name: shuttle
     path: /mnt/shuttle
     backend: hardlink
@@ -165,11 +165,11 @@ func TestTwoZFSStoragesOnOneParentDatasetAreStillRefused(t *testing.T) {
     path: /backups
     default: true
     backend: zfs
-    zfs: {parent_dataset: rpool/quince}
+    zfs: {parent_dataset: rpool/quince, ssh_user: u, ssh_host: h}
   - name: b
     path: /mnt/other
     backend: zfs
-    zfs: {parent_dataset: rpool/quince}
+    zfs: {parent_dataset: rpool/quince, ssh_user: u, ssh_host: h}
 `)
 	got := CheckStorageBackends(&entries)
 	if len(got) != 1 {
@@ -187,11 +187,11 @@ func TestTwoZFSStoragesOnDifferentParentsArePermitted(t *testing.T) {
     path: /backups
     default: true
     backend: zfs
-    zfs: {parent_dataset: rpool/quince}
+    zfs: {parent_dataset: rpool/quince, ssh_user: u, ssh_host: h}
   - name: b
     path: /mnt/other
     backend: zfs
-    zfs: {parent_dataset: tank/quince}
+    zfs: {parent_dataset: tank/quince, ssh_user: u, ssh_host: h}
 `)
 	if got := CheckStorageBackends(&entries); len(got) != 0 {
 		t.Errorf("distinct parents refused: %v", got)
@@ -231,7 +231,7 @@ func TestAutoWithZFSIntentAndNoParentIsStillRefused(t *testing.T) {
   - name: pool
     path: /backups
     default: true
-    zfs: {hook_cmd: "/x"}
+    zfs: {ssh_user: u, ssh_host: h}
 `)
 	if got := CheckStorageBackends(&entries); len(got) != 1 {
 		t.Errorf("auto + a hook + no parent must refuse, got %v", got)

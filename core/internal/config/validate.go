@@ -123,6 +123,31 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 		if !oneOf(s.ZFS.Seed, "auto", "reflink", "copy") {
 			add(at+".zfs.seed", enumMsg(s.ZFS.Seed, "auto", "reflink", "copy"))
 		}
+		// `hook_cmd` IS REFUSED BY NAME, AND THE MESSAGE NAMES ITS SUCCESSORS (Operator ruling
+		// 2026-08-12, quince#818). Same shape as `mode: exec` above and for the same reason: the
+		// field is kept so this can be a refusal against the exact path rather than an "unknown key
+		// (ignored)" on the one key every existing zfs install has set.
+		//
+		// `qn.6g`: a remedy the user cannot follow is the same defect as a silent failure. So this
+		// does not say "retired" — it says what to write instead.
+		if s.ZFS.HookCmd != "" {
+			add(at+".zfs.hook_cmd", "retired in favour of `ssh_user`, `ssh_host`, `ssh_port` and "+
+				"`ssh_key` — quince composes the ssh command itself now. Replace the whole key: "+
+				"`ssh_user: <the helper's user>` and `ssh_host: <the ZFS host>`, plus `ssh_port` "+
+				"and `ssh_key` only if they are not 22 and "+DefaultZFSKeyPath)
+		}
+		// A MISSING TRANSPORT IS NOT VALIDATED HERE, and that is the same layering decision the
+		// parent-dataset check already records in `storagereq.go`: `Load` DISCARDS a config that
+		// fails `Validate` and falls back to `Default()`, so refusing here would trade a refusal
+		// naming the storage for a daemon running on defaults with no storage at all — quince#508's
+		// defect in a new guise. `CheckStorageBackendErrors` returns the errors and writes nothing,
+		// which is where a *missing configuration* belongs.
+		//
+		// A MALFORMED PORT IS DIFFERENT and stays here: it is a bad VALUE, the same class as the
+		// enums above, and there is no coherent document containing one.
+		if p := s.ZFS.SSHPort; p < 0 || p > 65535 {
+			add(at+".zfs.ssh_port", fmt.Sprintf("invalid port %d; must be 1-65535 (or unset for %d)", p, DefaultZFSSSHPort))
+		}
 		if r := s.Retention; r != nil {
 			if r.KeepRecent < 0 {
 				add(at+".retention.keep_recent", "must be >= 0")

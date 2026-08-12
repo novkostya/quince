@@ -64,12 +64,19 @@ export function addStorage(entry: StorageAddition): Promise<ConfigResponse> {
 //
 // Every verdict is a 200, `unreachable` included: a user who has not installed the helper yet has
 // asked a perfectly good question. Only a malformed question — no dataset, or no command — is a 422.
+//
+// IT SENDS THE TRANSPORT STRUCTURED and the server composes the argv (quince#818). `ssh_port` and
+// `ssh_key` are deliberately NOT sent: they default server-side exactly as the config does, so
+// omitting them tests the same transport the saved storage will use — which is the only thing that
+// makes this button mean anything.
 export function checkStorageHook(
   parentDataset: string,
-  hookCmd: string,
+  sshUser: string,
+  sshHost: string,
 ): Promise<StorageHookCheckResponse> {
   return api.post<StorageHookCheckResponse>("/api/storages/probe/hook", {
     parent_dataset: parentDataset,
-    hook_cmd: hookCmd,
+    ssh_user: sshUser,
+    ssh_host: sshHost,
   });
 }

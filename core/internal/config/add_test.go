@@ -29,7 +29,8 @@ func TestAddStorageSplicesWithoutTouchingSiblings(t *testing.T) {
     zfs:
       parent_dataset: tank/one
       mode: hook
-      hook_cmd: ssh h
+      ssh_user: zfsuser
+      ssh_host: zfshost
     retention:
       keep_recent: 3
       keep_daily: 7
@@ -46,7 +47,7 @@ func TestAddStorageSplicesWithoutTouchingSiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(b)
-	for _, want := range []string{"tank/one", "hook_cmd", "keep_recent: 3", "keep_weekly: 2", "/backups-b"} {
+	for _, want := range []string{"tank/one", "ssh_host", "keep_recent: 3", "keep_weekly: 2", "/backups-b"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("THE SPLICE LOST %q — a sibling's unrendered keys must survive an add.\n%s", want, got)
 		}
@@ -200,12 +201,13 @@ func TestAddStorageInheritsTheParentDatasetCheck(t *testing.T) {
     zfs:
       parent_dataset: tank/shared
       mode: hook
-      hook_cmd: ssh h
+      ssh_user: zfsuser
+      ssh_host: zfshost
 `)
 
 	_, errs, _, err := svc.AddStorage(newEntry(func(e *StorageEntry) {
 		e.Backend = "zfs"
-		e.ZFS = ZFSConfig{ParentDataset: "tank/shared", Mode: "hook", HookCmd: "ssh h"}
+		e.ZFS = ZFSConfig{ParentDataset: "tank/shared", Mode: "hook", SSHUser: "u", SSHHost: "h"}
 	}))
 	if err != nil {
 		t.Fatal(err)

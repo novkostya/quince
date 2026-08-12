@@ -31,6 +31,7 @@ package storage
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/bus"
@@ -76,7 +77,11 @@ func TestLabGate12(t *testing.T) {
 	log := testLogger()
 	backend, name, reason := Select(context.Background(), Options{
 		Backend: BackendZFS, Backups: backups, AppVersion: "lab",
-		ZFSParent: parent, ZFSHookCmd: os.Getenv("QUINCE_LAB_ZFS_HOOK"),
+		// STILL SPLIT ON WHITESPACE HERE, AND ONLY HERE (quince#818). The product composes its argv
+		// from structured fields now, but this gate takes a whole transport from ONE env var so a
+		// lab operator can point it at any shim. `strings.Fields` is right for that and wrong for
+		// config, which is the distinction the rung drew.
+		ZFSParent: parent, ZFSHookArgv: strings.Fields(os.Getenv("QUINCE_LAB_ZFS_HOOK")),
 		ZFSSeed: os.Getenv("QUINCE_LAB_ZFS_SEED"),
 	}, log)
 	if name != BackendZFS {
