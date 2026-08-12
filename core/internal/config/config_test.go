@@ -67,9 +67,6 @@ func TestParseKeepsDefaultsForMissingKeys(t *testing.T) {
 	if cfg.Storage != nil {
 		t.Errorf("storage should be nil when the key is absent, got %+v", cfg.Storage)
 	}
-	if cfg.Sessions.TTLMinutes != 30 {
-		t.Errorf("sessions.ttl_minutes default lost = %d", cfg.Sessions.TTLMinutes)
-	}
 }
 
 func TestUnknownKeysWarn(t *testing.T) {
@@ -99,13 +96,12 @@ func TestValidateCatchesBadEnums(t *testing.T) {
 	c.Storage = &[]StorageEntry{{Name: "local", Path: "/backups", Default: true, Backend: "banana",
 		ZFS: ZFSConfig{Mode: "hook", Seed: "auto"}}}
 	c.UI.Theme = "neon"
-	c.Sessions.TTLMinutes = 0
 	errs := Validate(c)
 	gotPaths := map[string]bool{}
 	for _, e := range errs {
 		gotPaths[e.Path] = true
 	}
-	for _, want := range []string{"storage[0].backend", "ui.theme", "sessions.ttl_minutes"} {
+	for _, want := range []string{"storage[0].backend", "ui.theme"} {
 		if !gotPaths[want] {
 			t.Errorf("missing validation error for %q; got %+v", want, errs)
 		}
@@ -114,15 +110,15 @@ func TestValidateCatchesBadEnums(t *testing.T) {
 
 func TestLoadHandEditVisible(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yml")
-	if err := os.WriteFile(path, []byte("sessions:\n  ttl_minutes: 45\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("reconcile:\n  interval_minutes: 45\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	l := Load(path)
 	if !l.OK {
 		t.Fatalf("expected OK load, got errors %+v", l.Errors)
 	}
-	if l.Config.Sessions.TTLMinutes != 45 {
-		t.Errorf("ttl_minutes = %d, want 45", l.Config.Sessions.TTLMinutes)
+	if l.Config.Reconcile.IntervalMinutes != 45 {
+		t.Errorf("interval_minutes = %d, want 45", l.Config.Reconcile.IntervalMinutes)
 	}
 	if l.Source.Mtime == "" {
 		t.Errorf("source mtime not set for an existing file")

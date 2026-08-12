@@ -304,10 +304,11 @@ type TLSConfig struct {
 // that case by the time anything can ask.
 func (t TLSConfig) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
 
-// SessionsConfig is the `sessions:` section (vault-unlock TTL — NOT the admin cookie TTL,
-// which has no config key in schema v0; see auth defaults).
+// SessionsConfig is the `sessions:` section. Admin-session timeouts have no config key in schema
+// v0 and are hardcoded; see auth defaults. `ttl_minutes` lived here, was read by nothing, and was
+// removed rather than relabelled (quince#656) — a key earns its place by being read, so a vault
+// unlock TTL gets minted when something reads it, with the right name and a consumer on the day.
 type SessionsConfig struct {
-	TTLMinutes int `yaml:"ttl_minutes" json:"ttl_minutes"`
 
 	// AllowInsecureTransport lets a user on a network they trust knowingly serve the session
 	// and CSRF cookies over plain http to a non-loopback host. Off by default. Operator
@@ -371,9 +372,6 @@ func Default() Config {
 			UsbmuxdSocket: "/var/run/usbmuxd",
 			NetmuxdAddr:   "127.0.0.1:27015",
 		},
-		Sessions: SessionsConfig{
-			TTLMinutes: 30,
-		},
 		Reconcile: ReconcileConfig{
 			IntervalMinutes: 360,
 		},
@@ -407,7 +405,7 @@ type ReconcileConfig struct {
 	// is not, and one key should not do both.
 	//
 	// INTEGER MINUTES RATHER THAN A DURATION STRING, following the document rather than expressiveness:
-	// `sessions.ttl_minutes`, `automation.staleness_days` and `automation.reminder_cooldown_hours` are
+	// `automation.staleness_days` and `automation.reminder_cooldown_hours` are
 	// all bare numbers with the unit in the name. `6h` would be the first duration string in the file.
 	//
 	// IT IS LIVE (contracts §6): the runner reads it when it schedules the NEXT pass, so an edit takes

@@ -83,13 +83,14 @@ test("saving does not tell the user to restart quince", async ({ page }) => {
   await expect(saved).toBeVisible();
 
   // THE STRING THAT WAS WRONG. It read "Saved · restart quince to apply", unconditionally, over a
-  // form whose every field is live or unread. Asserted page-wide rather than on the span, because
+  // form whose every field is live. Asserted page-wide rather than on the span, because
   // the failure this guards against is the notice MOVING rather than surviving in place.
   await expect(page.getByText(/restart quince to apply/i)).toHaveCount(0);
 
-  // AND NOT "Saved · applied" EITHER, which was the first draft and is a different lie:
-  // `sessions.ttl_minutes` is read by nothing (quince#656), so a save of that field neither applies
-  // nor fails — it lands in a file with no consumer. Trading a false restart promise for a false
-  // apply promise is not a fix, and this assertion is what stops it being made later.
+  // AND NOT "Saved · applied" EITHER, which was the first draft. It was a lie when written — the
+  // form then carried `sessions.ttl_minutes`, read by nothing, so a save of it neither applied nor
+  // failed. quince#656 removed that key, so every field here is now live and "applied" would be
+  // defensible — but promising it is a separate claim, and this assertion is what makes taking it a
+  // deliberate act rather than a drift.
   await expect(page.getByText(/Saved · applied/i)).toHaveCount(0);
 });

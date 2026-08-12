@@ -1,9 +1,8 @@
 // Package auth implements the single-admin authentication and web-security primitives
 // (design §6): argon2id password (first-run set-password with a one-shot 409 guard),
 // cookie sessions with per-client rotation-on-login and idle/absolute timeouts, per-IP login rate
-// limiting, and double-submit CSRF. Admin-session timeouts are hardcoded this rung —
-// schema v0 has no key for them (sessions.ttl_minutes is the vault-unlock TTL); a future
-// `auth:` config section is noted for qn.6.
+// limiting, and double-submit CSRF. Admin-session timeouts are hardcoded this rung — schema v0
+// has no key for them; a future `auth:` config section is noted for qn.6.
 package auth
 
 import (

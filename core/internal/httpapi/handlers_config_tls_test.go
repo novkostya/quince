@@ -82,7 +82,7 @@ func TestConfigRoundTripPreservesTLS(t *testing.T) {
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
-		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 
 	resp := putConfig(t, c, srv, body)
@@ -121,7 +121,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	withTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
-		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 	resp := putConfig(t, c, srv, withTLS)
 	_ = resp.Body.Close()
@@ -131,7 +131,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 
 	withoutTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
-		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 	resp2 := putConfig(t, c, srv, withoutTLS)
 	_ = resp2.Body.Close()
@@ -165,7 +165,7 @@ func TestConfigPutRejectsAHalfSetTLSPair(t *testing.T) {
 			body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
 				`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
 				tc.tlsJSON +
-				`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+				`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 				`"ui":{"theme":"system"}}`
 
 			resp := putConfig(t, c, srv, body)

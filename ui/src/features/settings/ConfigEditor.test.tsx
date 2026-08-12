@@ -73,7 +73,7 @@ function config(storage: StorageEntry[] | null): Config {
     backup: { preferred_transport: "usb", require_encryption: true },
     storage,
     devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
-    sessions: { ttl_minutes: 30 },
+    sessions: { allow_insecure_transport: false },
     reconcile: { interval_minutes: 360 },
     automation: { staleness_days: 3, reminder_cooldown_hours: 24 },
     ui: { theme: "system" },
@@ -134,8 +134,8 @@ describe("ConfigEditor labels are associated with their controls", () => {
     // The two the issue named…
     expect(screen.getByLabelText("Preferred transport")).toBeInTheDocument();
     expect(screen.getByLabelText("Theme")).toBeInTheDocument();
-    // …and the Input, which had the same gap and which the issue did not name.
-    expect(screen.getByLabelText("Session TTL (minutes)")).toBeInTheDocument();
+    // …and an Input, which had the same gap and which the issue did not name.
+    expect(screen.getByLabelText("Reconciliation interval (minutes)")).toBeInTheDocument();
   });
 
   // The association must reach the RIGHT element, not merely resolve. An id pointing at a wrapper
@@ -144,7 +144,7 @@ describe("ConfigEditor labels are associated with their controls", () => {
     renderEditor(config([entry()]));
     expect(screen.getByLabelText("Preferred transport").tagName).toBe("SELECT");
     expect(screen.getByLabelText("Theme").tagName).toBe("SELECT");
-    expect(screen.getByLabelText("Session TTL (minutes)").tagName).toBe("INPUT");
+    expect(screen.getByLabelText("Reconciliation interval (minutes)").tagName).toBe("INPUT");
   });
 
   // Each field mints its OWN id. `useId` guarantees it, and asserting it here is what stops a later
@@ -155,7 +155,7 @@ describe("ConfigEditor labels are associated with their controls", () => {
     const ids = [
       screen.getByLabelText("Preferred transport").id,
       screen.getByLabelText("Theme").id,
-      screen.getByLabelText("Session TTL (minutes)").id,
+      screen.getByLabelText("Reconciliation interval (minutes)").id,
     ];
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((i) => i !== "")).toBe(true);
@@ -171,12 +171,12 @@ describe("ConfigEditor promises no restart", () => {
   // restart-required — and that argument holds only while the form renders these four. A field
   // from contracts §6's restart bin (`sessions.allow_insecure_transport`, `devices.*`) appearing
   // here would make the deletion wrong, and this test is what notices.
-  it("renders only fields that are live or unread — the premise of deleting the notice", () => {
+  it("renders only LIVE fields — the premise of deleting the notice", () => {
     renderEditor(config([entry()]));
 
     expect(screen.getByText(/^Preferred transport$/)).toBeInTheDocument();
     expect(screen.getByText(/Require encryption/)).toBeInTheDocument();
-    expect(screen.getByText(/^Session TTL \(minutes\)$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Reconciliation interval \(minutes\)$/)).toBeInTheDocument();
     expect(screen.getByText(/^Theme$/)).toBeInTheDocument();
 
     // The two restart-bin keys, neither of which this form has ever edited. If either arrives, the
@@ -216,9 +216,9 @@ describe("ConfigEditor promises no restart", () => {
     // Reaching the confirmation is the precondition for the assertion after it.
     expect(await screen.findByText(/^Saved$/)).toBeInTheDocument();
     expect(screen.queryByText(/restart/i)).toBeNull();
-    // And NOT "Saved · applied", which was the first draft of the replacement and is a different
-    // lie: `sessions.ttl_minutes` is read by nothing (quince#656), so a save of it neither applies
-    // nor fails. Trading a false restart promise for a false apply promise is not a fix.
+    // And NOT "Saved · applied". Every field this form renders is live now that quince#656 removed
+    // the unread key, so the stronger word would be defensible — and upgrading what the form
+    // promises the user is its own claim, not a side effect of deleting a config key.
     expect(screen.queryByText(/applied/i)).toBeNull();
   });
 });

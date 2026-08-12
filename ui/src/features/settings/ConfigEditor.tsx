@@ -57,7 +57,6 @@ function Field({
 //
 //	backup.preferred_transport   LIVE   — the backup applier (qn.6g PR 5)
 //	backup.require_encryption    LIVE   — read per job, off a synchronized field (PR 5)
-//	sessions.ttl_minutes         UNREAD — quince#656; a restart would not make it take effect either
 //	ui.theme                     LIVE   — client-side, from the PUT response
 //
 // Storages are shown read-only here, and are live besides (PR 4).
@@ -67,6 +66,16 @@ function Field({
 // is ever added here — `sessions.allow_insecure_transport` and `devices.*` are the two bins
 // contracts §6 names — the notice comes back attached to THAT field, never to the Save row.** An
 // unconditional notice over a form of live fields is exactly what this change removes.
+//
+// WHEN YOU ADD A FIELD IN A SECTION THIS FORM ALREADY TOUCHES, SPREAD THE SECTION AND NOT ONLY THE
+// DOCUMENT. `{ ...draft, sessions: {…} }` keeps every other section and REPLACES this one, so any
+// key of `sessions:` the form does not render is dropped on save — and PUT is a full-document
+// replace, so dropped means reset to the Go zero value. This was a live hazard while the form
+// edited `sessions.ttl_minutes` beside `allow_insecure_transport`: editing the TTL would have
+// switched the other key back off with nothing said. `tsc` caught it once, because that field is
+// required. It is written here rather than beside a field because the field it guarded is gone
+// (quince#656) and the rule is not about that field — it is quince#493's hazard, which is that
+// nothing asserts the TS `Config` type covers every Go key.
 export function ConfigEditor({ config }: { config: Config }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Config>(config);
@@ -241,29 +250,6 @@ export function ConfigEditor({ config }: { config: Config }) {
         )}
       </Field>
 
-      <Field label="Session TTL (minutes)" error={errFor("sessions.ttl_minutes")}>
-        {(id) => (
-        <Input
-          id={id}
-          type="number"
-          min={1}
-          value={draft.sessions.ttl_minutes}
-          // SPREAD THE SECTION, not only the document. `{ ...draft, sessions: {…} }` keeps every
-          // other section and REPLACES this one, so any key of `sessions:` this form does not
-          // render is dropped on save — and PUT is a full-document replace, so dropped means reset
-          // to the Go zero value. Editing the TTL would have switched `allow_insecure_transport`
-          // back off with nothing said. `tsc` caught it the moment that field became required,
-          // which is the quince#493 hazard catching itself exactly once.
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              sessions: { ...draft.sessions, ttl_minutes: Number(e.target.value) },
-            })
-          }
-        />
-        )}
-      </Field>
-
       {/*
         qn.6i. LIVE, like everything else on this form — the runner re-reads the interval when it
         schedules the next wait, so an edit takes effect from the following tick and no restart
@@ -345,11 +331,12 @@ export function ConfigEditor({ config }: { config: Config }) {
         <Button type="submit" disabled={mutation.isPending}>
           Save
         </Button>
-        {/* "Saved", and NOT "Saved · applied". The stronger word was the first draft and it is a
-            lie about one of the four fields above: `sessions.ttl_minutes` is read by nothing
-            (quince#656), so a save neither applies nor fails to apply — it lands in a file with no
-            consumer. Trading a false restart promise for a false apply promise is not a fix.
-            Surfacing the unread field is quince#656's, and this spec puts it out of scope. */}
+        {/* "Saved", and NOT "Saved · applied" — still, and the reason has changed. It used to be
+            that one field here was read by nothing, so the stronger word would have been a lie
+            about it. That field is gone (quince#656) and every field this form now renders IS
+            live, so "applied" would be defensible. It is deliberately not taken here: this PR
+            removes a key, and upgrading what the form promises the user is a separate claim that
+            wants its own change. A save reports what it knows — that the document was written. */}
         {saved ? <span className="text-xs text-ok">Saved</span> : null}
         {errFor("") ? <span className="text-xs text-danger">{errFor("")}</span> : null}
       </div>
