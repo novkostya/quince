@@ -125,8 +125,18 @@ test("a zfs storage cannot be saved until the helper has answered", async ({ pag
   // command at nothing.
   await expect(page.getByTestId("test-helper")).toBeDisabled();
 
+  // BOTH FIELDS, because `Test helper` needs the whole transport (quince#818). It asked for one
+  // command line until the Operator ruled SSH the only shape; quince composes the argv now, so what
+  // is typed is the two things only the operator knows.
+  //
+  // `.invalid` IS RESERVED AND NEVER RESOLVES (RFC 2606), which is what keeps this fast. The old
+  // fixture was `/nonexistent/ssh` — an exec failure, instant. Composing means `ssh` really runs, so
+  // an unreachable host now costs a DNS lookup rather than nothing, and a plausible-looking hostname
+  // here would spend the check's 20-second bound twice before the suite saw an answer.
   await page.getByLabel("Parent dataset").fill("pool/backups");
-  await page.getByLabel("Helper command").fill("/nonexistent/ssh");
+  await page.getByLabel("ZFS host").fill("zfshost.invalid");
+  await expect(page.getByTestId("test-helper")).toBeDisabled();
+  await page.getByLabel("Remote user").fill("zfsuser");
   await expect(page.getByTestId("test-helper")).toBeEnabled();
 
   // STILL not saveable: the fields are filled and the helper has not answered.

@@ -253,7 +253,8 @@ test("a dialog centres in the visible area, clear of the notch and the home indi
 
 // quince#762 — FOCUSING A FIELD BELOW THE FOLD MUST NOT LEAVE IT ON THE EDGE OF THE SCROLL REGION.
 // On the Operator's phone `Parent dataset` came to rest half-cut at the bottom of the card and
-// `Helper command` did not come into view at all.
+// `Helper command` (the field quince#818 replaced with `ZFS host` / `Remote user`) did not come
+// into view at all.
 //
 // THIS TEST PASSES WITH THE CORRECTION REMOVED, and that is recorded here rather than left for the
 // next reader to discover. Measured: `make gates-ui-e2e` exit 0 with `useScrollFocusIntoView`
