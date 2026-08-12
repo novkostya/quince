@@ -1,0 +1,199 @@
+#!/bin/sh
+# demo-block-check-test — the gate's own failure paths, and the drift it exists to catch.
+#
+# WHY THE FIXTURES ARE BUILT AT RUNTIME. The gate's default pair is two real tracked files, and a
+# committed fixture pair would either be scanned by nothing (dead weight) or need an exclusion list,
+# which is the thing this repository keeps learning to distrust. Temp files cost nothing and cannot
+# be read by the real run by accident. Same reasoning as `bin/gap-heading-check-test`.
+#
+# WHAT THIS SUITE IS ACTUALLY FOR. The architect's ruling on quince#622 asks for one thing above the
+# rest: **`2` must be REACHABLE and TESTED**. `2` is DID NOT RUN, and it is the case where a silent
+# pass is worst — a mangled fence in `deploy/demo.md` looks exactly like "the two agree" to anything
+# that reads only an exit code. Five distinct routes to `2` are exercised below, plus the two
+# argument errors.
+#
+# The ruling also records that its author *"ran the mechanism once, on a clean tree"* and that its
+# failure modes are reasoned rather than exercised. That is what everything below the first section
+# is answering.
+set -eu
+
+cd "$(dirname "$0")/.."
+CHECK="${DEMO_BLOCK_BIN:-$PWD/bin/demo-block-check}"
+[ -x "$CHECK" ] || {
+	printf 'demo-block-check-test: %s is not executable\n' "$CHECK" >&2
+	exit 2
+}
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# `$1` name, `$2` expected exit, `$3` expected substring (may be empty), rest: argv.
+expect() {
+	_n=$1 _want=$2 _sub=$3
+	shift 3
+	_out=$("$@" 2>&1) && _got=0 || _got=$?
+	if [ "$_got" -ne "$_want" ]; then
+		bad "$_n — wanted exit $_want, got $_got"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	if [ -n "$_sub" ] && ! printf '%s\n' "$_out" | grep -qF "$_sub"; then
+		bad "$_n — exit $_got was right, output lacked: $_sub"
+		printf '%s\n' "$_out" | sed 's/^/    | /'
+		return 0
+	fi
+	ok "$_n (exit $_got)"
+}
+
+# A fence is assembled rather than written literally, for the reason `closing-refs-check-test`
+# assembles a bare issue reference and `gap-heading-check-test` assembles its marker: a suite about
+# markdown fences is the file most likely to confuse a reader — or shellcheck — about which fences
+# are fixture data and which are prose. A literal backtick run inside single quotes also reads as an
+# unexpanded command substitution to shellcheck (SC2016).
+F=$(printf '\140\140\140')
+
+# The workflow side, once. Short but shaped like the real one — the cron line is the field
+# quince#618 actually drifted on, so it is what the drift fixtures move.
+WF="$WORK/demo-deploy.yml"
+{
+	printf 'name: demo-deploy\n'
+	printf 'on:\n'
+	printf '  schedule:\n'
+	printf "    - cron: '17 22 * * *'\n"
+	printf 'jobs:\n'
+	printf '  deploy:\n'
+	printf '    runs-on: ubuntu-latest\n'
+} >"$WF"
+
+# doc_with <file> <block-file> — a plausible demo.md: prose, an unrelated sh fence, the yaml
+# mirror, more prose. The surrounding noise is not decoration: it is what proves the extractor
+# bounds the block rather than swallowing the file.
+doc_with() {
+	_d=$1 _b=$2
+	{
+		printf '# The public demo\n\n'
+		printf 'It lives here rather than in a PR comment so there is one copy rather than two that drift.\n\n'
+		printf '%ssh\n' "$F"
+		printf 'flyctl deploy --remote-only\n'
+		printf '%s\n\n' "$F"
+		printf 'The installed workflow, verbatim:\n\n'
+		printf '%syaml\n' "$F"
+		cat "$_b"
+		printf '%s\n\n' "$F"
+		printf 'Afterwards, check the run.\n'
+	} >"$_d"
+}
+
+# --- 1. THE TWO ANSWERS ------------------------------------------------------------------------
+
+doc_with "$WORK/clean.md" "$WF"
+expect "an identical block is clean, and the clean line names the doc's line range" 0 "byte-identical" \
+	"$CHECK" "$WORK/clean.md" "$WF"
+
+# quince#618's actual drift: a cron moved to the top of the hour, which GitHub may drop.
+sed "s/17 22/0 22/" "$WF" >"$WORK/drifted.yml"
+doc_with "$WORK/drift.md" "$WORK/drifted.yml"
+expect "a drifted block is a finding" 1 "HAVE DRIFTED" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+expect "the finding prints the differing line, not merely that they differ" 1 "0 22 * * *" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+expect "the finding names the workflow path" 1 "demo-deploy.yml" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+expect "the finding names the doc path" 1 "drift.md" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+
+# The property the ruling is most explicit about: symmetry. A gate that resolved toward the
+# workflow would have picked the wrong side on quince#618, the only instance there has been.
+expect "the finding declares NEITHER side authoritative" 1 "NEITHER is authoritative" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+expect "the finding says who must make the workflow-side edit" 1 "quince#113" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+
+# A block that differs only in TRAILING WHITESPACE is still drift. Asserted because it is the
+# difference a reader cannot see and would most plausibly be "tidied" into a tolerance.
+sed "s/^jobs:$/jobs: /" "$WF" >"$WORK/space.yml"
+doc_with "$WORK/space.md" "$WORK/space.yml"
+expect "a whitespace-only difference is drift, not a tolerance" 1 "HAVE DRIFTED" \
+	"$CHECK" "$WORK/space.md" "$WF"
+
+# --- 2. DID NOT RUN — the five routes to 2 ------------------------------------------------------
+# Every one of these is a state in which the comparison NEVER HAPPENED. Exiting 0 for any of them
+# would report agreement the gate never established (quince#41).
+
+expect "an absent doc is DID NOT RUN, never clean" 2 "does not exist" \
+	"$CHECK" "$WORK/no-such.md" "$WF"
+
+expect "an absent workflow is DID NOT RUN, never clean" 2 "does not exist" \
+	"$CHECK" "$WORK/clean.md" "$WORK/no-such.yml"
+
+{
+	printf '# The public demo\n\n'
+	printf 'The block was deleted in a tidy-up.\n'
+} >"$WORK/nofence.md"
+expect "no yaml fence at all is DID NOT RUN — the mirror is gone, so nothing was compared" 2 "no ${F}yaml fence" \
+	"$CHECK" "$WORK/nofence.md" "$WF"
+
+# THE CASE THE ISSUE'S PROPOSED awk GETS WRONG. Its `f=1` latches on the FIRST yaml fence, so a
+# second one added above the mirror silently compares the wrong block. Refusing names the count.
+{
+	printf '# The public demo\n\n'
+	printf 'An unrelated example first:\n\n'
+	printf '%syaml\n' "$F"
+	printf 'some: other-thing\n'
+	printf '%s\n\n' "$F"
+	printf 'And the installed workflow:\n\n'
+	printf '%syaml\n' "$F"
+	cat "$WF"
+	printf '%s\n' "$F"
+} >"$WORK/two-fences.md"
+expect "TWO yaml fences is DID NOT RUN — the gate must not guess which one is the mirror" 2 "has 2 ${F}yaml fences" \
+	"$CHECK" "$WORK/two-fences.md" "$WF"
+
+{
+	printf '# The public demo\n\n'
+	printf '%syaml\n' "$F"
+	cat "$WF"
+	printf 'and then the closing fence was lost\n'
+} >"$WORK/unterminated.md"
+expect "an unterminated fence is DID NOT RUN" 2 "never closed" \
+	"$CHECK" "$WORK/unterminated.md" "$WF"
+
+{
+	printf '# The public demo\n\n'
+	printf '%syaml\n' "$F"
+	printf '%s\n' "$F"
+} >"$WORK/empty.md"
+expect "an EMPTY fence is DID NOT RUN, not an empty-vs-workflow finding" 2 "no content" \
+	"$CHECK" "$WORK/empty.md" "$WF"
+
+# --- 3. ARGUMENT ERRORS -------------------------------------------------------------------------
+
+expect "one path without the other is refused rather than defaulted" 2 "exactly two" \
+	"$CHECK" "$WORK/clean.md"
+
+expect "an unknown option is DID NOT RUN, never clean" 2 "unknown option" \
+	"$CHECK" --nope
+
+expect "--help is exit 0 and prints the exit contract" 0 "0 identical" \
+	"$CHECK" --help
+
+# --- 4. THE CONTROL -----------------------------------------------------------------------------
+# The real pair, through the real default path. If this ever fails, the two files have drifted and
+# that is the finding the whole gate exists for — not a broken suite.
+
+expect "the repository's own demo.md and demo-deploy.yml agree (the default, no arguments)" 0 "byte-identical" \
+	"$CHECK"
+
+printf '\ndemo-block-check-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
