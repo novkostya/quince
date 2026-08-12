@@ -245,16 +245,23 @@ func checkStorageBackendProblems(storages *[]StorageEntry) []StorageBackendProbl
 		//
 		// USER AND HOST ONLY. `ssh_port` and `ssh_key` default, so their absence says nothing.
 		if !e.ZFS.SSHConfigured() {
-			var missing string
+			// `Field` MOVES WITH `missing`, and hardcoding it was a real defect rather than a
+			// tidiness one: this type's own comment says *"a client highlights the field it
+			// names"*, so an operator who set `ssh_host` and omitted `ssh_user` got a message
+			// about the user while the form highlighted the host they had filled in correctly —
+			// `qn.6g`'s rule broken by the code that cites it two lines up.
+			var missing, field string
 			switch {
 			case e.ZFS.SSHHost != "":
-				missing = "`zfs.ssh_user`"
+				missing, field = "`zfs.ssh_user`", "zfs.ssh_user"
 			case e.ZFS.SSHUser != "":
-				missing = "`zfs.ssh_host`"
+				missing, field = "`zfs.ssh_host`", "zfs.ssh_host"
 			default:
-				missing = "`zfs.ssh_user` and `zfs.ssh_host`"
+				// BOTH MISSING: point at the host. It is the first field on the form and the one
+				// with no plausible default, so it is where the operator starts either way.
+				missing, field = "`zfs.ssh_user` and `zfs.ssh_host`", "zfs.ssh_host"
 			}
-			out = append(out, StorageBackendProblem{Index: i, Field: "zfs.ssh_host", Message: fmt.Sprintf(
+			out = append(out, StorageBackendProblem{Index: i, Field: field, Message: fmt.Sprintf(
 				"storage %q resolves to the zfs backend but has no %s — quince reaches a ZFS pool "+
 					"over ssh to the constrained helper, and the forced command in that user's "+
 					"`authorized_keys` is what bounds what quince can do on the host",

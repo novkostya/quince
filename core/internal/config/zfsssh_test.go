@@ -89,7 +89,8 @@ func TestSSHArgvComposesStrictHostKeyChecking(t *testing.T) {
 	}
 }
 
-// `hook_cmd` IS REFUSED BY NAME AND THE MESSAGE NAMES ITS SUCCESSORS (Operator ruling 2026-08-12).
+// `hook_cmd` IS REFUSED BY NAME AND THE MESSAGE NAMES ITS SUCCESSORS. Operator ruling, relayed at
+// https://github.com/novkostya/quince/issues/818#issuecomment-5245496176.
 // `qn.6g`: a remedy the user cannot follow is the same defect as a silent failure, so "retired" on
 // its own would not be enough — it has to say what to write instead.
 func TestHookCmdIsRefusedAndTheRefusalNamesTheSuccessors(t *testing.T) {
@@ -145,5 +146,63 @@ func TestAZFSStorageWithNoTransportIsRefusedWithoutDiscardingTheDocument(t *test
 		if !strings.Contains(probs[0].Message, want) {
 			t.Fatalf("the refusal does not name %q: %s", want, probs[0].Message)
 		}
+	}
+}
+
+// THE REFUSAL MUST NAME THE FIELD IT IS ABOUT, on every branch — `StorageBackendProblem.Field` is
+// what a client highlights, and the type's own comment says so.
+//
+// THIS IS A REGRESSION TEST FOR A REVIEW FINDING, and the finding got through because the test
+// above asserts the MESSAGE and never the field. An operator who set `ssh_host` and omitted
+// `ssh_user` was told the user was missing while the form highlighted the host they had filled in
+// correctly — `qn.6g`'s rule broken by the code that cites it.
+func TestTheMissingTransportRefusalNamesTheFieldItIsAbout(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		zfs        ZFSConfig
+		wantField  string
+		wantNamed  string
+		wantNotSay string
+	}{
+		{
+			name:       "host set, user missing",
+			zfs:        ZFSConfig{ParentDataset: "tank/one", Mode: "hook", Seed: "auto", SSHHost: "nas"},
+			wantField:  "zfs.ssh_user",
+			wantNamed:  "`zfs.ssh_user`",
+			wantNotSay: "`zfs.ssh_host`",
+		},
+		{
+			name:      "user set, host missing",
+			zfs:       ZFSConfig{ParentDataset: "tank/one", Mode: "hook", Seed: "auto", SSHUser: "zfsuser"},
+			wantField: "zfs.ssh_host",
+			wantNamed: "`zfs.ssh_host`",
+		},
+		{
+			name:      "both missing",
+			zfs:       ZFSConfig{ParentDataset: "tank/one", Mode: "hook", Seed: "auto"},
+			wantField: "zfs.ssh_host",
+			wantNamed: "`zfs.ssh_user` and `zfs.ssh_host`",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list := []StorageEntry{{Name: "one", Path: "/backups", Default: true, Backend: "zfs", ZFS: tc.zfs}}
+
+			probs := CheckStorageBackendErrors(&list)
+			if len(probs) != 1 {
+				t.Fatalf("CheckStorageBackendErrors = %v, want exactly one problem", probs)
+			}
+			wantPath := "storage[0]." + tc.wantField
+			if probs[0].Path != wantPath {
+				t.Fatalf("Path = %q, want %q — a client highlights the field this names, so pointing "+
+					"at one the operator filled in correctly is the defect this guards",
+					probs[0].Path, wantPath)
+			}
+			if !strings.Contains(probs[0].Message, tc.wantNamed) {
+				t.Fatalf("message does not name %q: %s", tc.wantNamed, probs[0].Message)
+			}
+			if tc.wantNotSay != "" && strings.Contains(probs[0].Message, tc.wantNotSay) {
+				t.Fatalf("message names %q, which the operator DID set: %s", tc.wantNotSay, probs[0].Message)
+			}
+		})
 	}
 }

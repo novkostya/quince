@@ -123,10 +123,15 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 		if !oneOf(s.ZFS.Seed, "auto", "reflink", "copy") {
 			add(at+".zfs.seed", enumMsg(s.ZFS.Seed, "auto", "reflink", "copy"))
 		}
-		// `hook_cmd` IS REFUSED BY NAME, AND THE MESSAGE NAMES ITS SUCCESSORS (Operator ruling
-		// 2026-08-12, quince#818). Same shape as `mode: exec` above and for the same reason: the
-		// field is kept so this can be a refusal against the exact path rather than an "unknown key
-		// (ignored)" on the one key every existing zfs install has set.
+		// `hook_cmd` IS REFUSED BY NAME, AND THE MESSAGE NAMES ITS SUCCESSORS. Operator ruling,
+		// relayed at https://github.com/novkostya/quince/issues/818#issuecomment-5245496176 — cite
+		// the URL rather than a date, which is the relay's own instruction and which this comment
+		// got wrong once (it said 2026-08-12; the relay was posted 2026-08-10 under a 2026-08-11
+		// headline, so no date is a citation here).
+		//
+		// Same shape as `mode: exec` above and for the same reason: the field is kept so this can be
+		// a refusal against the exact path rather than an "unknown key (ignored)" on the one key
+		// every existing zfs install has set.
 		//
 		// `qn.6g`: a remedy the user cannot follow is the same defect as a silent failure. So this
 		// does not say "retired" — it says what to write instead.

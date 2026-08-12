@@ -1815,8 +1815,8 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
                             # outlived its second value so that the refusal exists at all.
       ssh_host: nas.local   # WHERE the quince-zfs-helper runs. quince composes the whole ssh
                             # command from these four — including the host-key options — so the
-                            # file no longer carries an argv (Operator ruling 2026-08-12,
-                            # quince#818).
+                            # file no longer carries an argv. Operator ruling, relayed at
+                            # quince#818 comment 5245496176.
       ssh_user: zfsuser     # WHOSE authorized_keys carries the forced command. That `command=`
                             # entry is what bounds quince on the host, which is why SSH is the
                             # only shape rather than one transport among several.
