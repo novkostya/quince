@@ -32,13 +32,32 @@ func (d Deps) configResponse(cfg config.Config, warns []config.Warning, src conf
 	}
 	// READ AT REQUEST TIME, never cached — see config.Service.FileText for why the alternative
 	// contradicts the subtitle this panel sits under.
-	return configGetResponse{Config: cfg, Warnings: warns, Source: src, FileText: d.Config.FileText()}
+	return configGetResponse{
+		Config: cfg, Warnings: warns, Source: src,
+		FileText: d.Config.FileText(), Discarded: d.Config.Discarded(),
+	}
 }
 
 type configGetResponse struct {
 	Config   config.Config    `json:"config"`
 	Warnings []config.Warning `json:"warnings"`
 	Source   config.Source    `json:"source"`
+	// Discarded — the file on disk was REFUSED at load, so quince is running on defaults and
+	// nothing the file declares is in effect (Operator ruling 2026-08-12, quince#849).
+	//
+	// IT CARRIES THE FATALITY, NOT THE CAUSE. The cause is in `warnings` and always is; what no
+	// client could infer is whether those warnings were fatal. `warnings` is non-empty in two states
+	// that want opposite headlines — a discarded config, where the declared storage is not running,
+	// and one that parsed with an ignored unknown key, where it is fine — and `config.storage: null`
+	// does not separate them, since a fresh install with a typo has that too.
+	//
+	// A BOOLEAN RATHER THAN AN `errors: []`, and that is evidence rather than taste: only ONE of
+	// `Load`'s three discard paths fills `Errors`, so a client keying off it would tell somebody
+	// whose config cannot be read that their storage is fine.
+	//
+	// Same shape as `has_password` on `GET /api/auth/passkeys` (quince#855): a fact the client
+	// cannot derive, on an endpoint that already requires a session, so no disclosure question.
+	Discarded bool `json:"discarded"`
 	// FileText is config.yml AS IT IS ON DISK (contracts §6, Operator ruling 2026-08-09 on
 	// quince#728). The panel is titled "Current configuration" and its subtitle invites a hand-edit,
 	// so it must show the FILE rather than a re-rendering of the parsed document — and after qn.6j

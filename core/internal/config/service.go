@@ -415,6 +415,27 @@ func (s *Service) Snapshot() (Config, []Warning, Source) {
 	return s.cfg, append([]Warning(nil), s.warnings...), s.source
 }
 
+// Discarded reports whether the file on disk was REFUSED at load, so this process is running on
+// `Default()` and nothing the file declares is in effect (contracts §1, Operator ruling 2026-08-12
+// on quince#852/quince#849).
+//
+// IT EXISTS BECAUSE NO CLIENT CAN INFER IT. `warnings` is served and carries the cause, but it is
+// non-empty in two states that want opposite answers: a discarded config, where the declared storage
+// is not running, and a config that parsed with an ignored unknown key, where it is fine.
+// `config.storage: null` does not separate them either — a fresh install with a typo has that too.
+//
+// `errors` WAS THE OTHER CANDIDATE AND IS WRONG, on evidence rather than taste: only ONE of `Load`'s
+// three discard paths fills `Errors`. A client keying off it would tell somebody whose config cannot
+// be read that their storage is fine — worse than saying nothing.
+//
+// **THE CAUSE IS ALWAYS IN `warnings`; THE FATALITY IS ONLY HERE.** That split is what lets a client
+// render the detail it already has and branch only its headline on this.
+func (s *Service) Discarded() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discarded
+}
+
 // Current returns just the live config for internal consumers.
 func (s *Service) Current() Config {
 	s.mu.RLock()

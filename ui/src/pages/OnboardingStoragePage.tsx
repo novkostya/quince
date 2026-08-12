@@ -30,37 +30,47 @@ export function OnboardingStoragePage() {
   const warnings = cfg.data?.warnings ?? [];
   const configPath = cfg.data?.source.path ?? "config.yml";
   const fileText = cfg.data?.file_text ?? "";
+  // THE FATALITY, WHICH NOTHING ELSE ON THE WIRE CARRIES (quince#849, Operator ruling 2026-08-12).
+  // `warnings` is non-empty in two states that want opposite headlines, and this is the only thing
+  // that separates them — see the field's comment in `types.ts`.
+  const discarded = cfg.data?.discarded ?? false;
 
   return (
     <div className="mx-auto min-h-dvh max-w-xl px-6 pb-16 pt-10">
+      {/* THE HEADLINE BRANCHES ON THE FATALITY; THE WARNINGS RENDER EITHER WAY. Those are two
+          different decisions and running them together is what this screen got wrong twice — first
+          by claiming the operator had no storage when their file declared one, then by saying
+          something true-of-both because the wire could not tell the cases apart. */}
+      {discarded ? (
+        <>
+          <h1 className="text-xl font-semibold tracking-tight">
+            quince could not read your configuration
+          </h1>
+          {/* THE FACT THE OPERATOR CAME FOR, and it is not the same as "there is a problem": their
+              backups are not happening. quince is on its defaults, so a storage the file declares
+              is not running — which is why this must not read as a first-run screen. */}
+          <p className="mt-2 text-sm text-muted">
+            quince is running on its defaults, so nothing your file declares is in effect —
+            including any storage. No backups are being made.
+          </p>
+        </>
+      ) : (
+        <>
+          <h1 className="text-xl font-semibold tracking-tight">Add your first storage</h1>
+          <p className="mt-2 text-sm text-muted">
+            quince needs somewhere to keep backups before it can do anything else. Point it at a
+            folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
+            dataset.
+          </p>
+          <p className="mt-2 text-sm text-muted">
+            Nothing is created or changed until you save. If the path is wrong, quince says so
+            rather than making it — see <DocLink path="deploy/storage.md" />.
+          </p>
+        </>
+      )}
+
       {warnings.length > 0 ? (
         <>
-          {/* THE HEADLINE MUST NOT CLAIM THE OPERATOR HAS NO STORAGE when their own file declares
-              one (quince#849). That claim is what this screen was making: an operator whose
-              `config.yml` had just become illegal was told *"quince needs somewhere to keep
-              backups"*, which is the state-honesty rule broken in the largest text on the page.
-
-              INTERIM WORDING, AND DELIBERATELY NEUTRAL BETWEEN TWO STATES THE WIRE CANNOT YET
-              SEPARATE. `GET /api/config` serves `warnings` but not `Loaded.Errors`, so a client
-              cannot tell a DISCARDED config — where the declared storage is not running and nothing
-              is backing up — from a config that parsed with an ignored unknown key, where the
-              storage is fine. `config.storage: null` does not separate them either: a fresh install
-              with a typo has that too.
-
-              Those two want opposite headlines, and the fact the user came here for is which one
-              they are in. The architect ruled the bit gets added to the config response
-              (quince#849, `needs-operator` — it is a contracts addition); until it lands this says
-              something TRUE OF BOTH rather than something confident and wrong half the time. When
-              the bit arrives, this branch splits and the warnings-only case gets `Add your first
-              storage` back. */}
-          <h1 className="text-xl font-semibold tracking-tight">
-            quince reported a problem with your configuration
-          </h1>
-          <p className="mt-2 text-sm text-muted">
-            quince is running on the settings it could load, so what your file declares may not all
-            be in effect.
-          </p>
-
           <div
             className="mt-4 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
             data-testid="config-warnings"
@@ -100,32 +110,26 @@ export function OnboardingStoragePage() {
             </details>
           ) : null}
 
-          <h2 className="mt-8 text-sm font-semibold text-muted">Add a storage</h2>
-          {/* THE FIRST-RUN PREMISE IS NOT REPEATED HERE, and dropping it is the fix rather than a
+          {/* THE SECOND HEADING IS THE DISCARDED CASE'S ONLY, because only there does the form stop
+              being the point of the page. On a merely-warned first run the form IS the page and a
+              subheading over it would be noise.
+
+              THE FIRST-RUN PREMISE IS NOT REPEATED HERE, and dropping it was the fix rather than a
               trim. *"quince needs somewhere to keep backups before it can do anything else"* does
               not literally claim the operator has none — but above a form, on a screen reached
-              because their declaration was discarded, it implies exactly that, which is the claim
-              this issue exists to remove. Caught by its own e2e assertion, which was written
-              against the ruling and failed on this paragraph. */}
-          <p className="mt-2 text-sm text-muted">
-            If you meant to declare a storage in the file, fixing the problem above is the thing to
-            do — adding one here will not clear it.
-          </p>
+              because their declaration was discarded, it implies exactly that. Caught by its own
+              e2e assertion, which was written against the ruling and failed on this paragraph. */}
+          {discarded ? (
+            <>
+              <h2 className="mt-8 text-sm font-semibold text-muted">Add a storage</h2>
+              <p className="mt-2 text-sm text-muted">
+                If you meant to declare a storage in the file, fixing the problem above is the thing
+                to do — adding one here will not clear it.
+              </p>
+            </>
+          ) : null}
         </>
-      ) : (
-        <>
-          <h1 className="text-xl font-semibold tracking-tight">Add your first storage</h1>
-          <p className="mt-2 text-sm text-muted">
-            quince needs somewhere to keep backups before it can do anything else. Point it at a
-            folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
-            dataset.
-          </p>
-          <p className="mt-2 text-sm text-muted">
-            Nothing is created or changed until you save. If the path is wrong, quince says so
-            rather than making it — see <DocLink path="deploy/storage.md" />.
-          </p>
-        </>
-      )}
+      ) : null}
 
       {/* THE FORM STAYS IN BOTH BRANCHES (quince#849, ruled). It is not a trap any more: quince#857
           refuses an add while the config on disk was discarded, and the refusal names the offending
