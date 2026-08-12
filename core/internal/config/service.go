@@ -274,7 +274,30 @@ type Service struct {
 	//
 	// Cleared by `replaceLocked` on a successful write, beside `warnings`, for the same reason: the
 	// document now on disk is one this process built and validated.
+	//
+	// IT IS THE DETAIL, NOT THE CONDITION — and reading it as the condition was quince#852's own
+	// fix reintroducing the defect it fixed. **`Load` has THREE discard paths and only ONE fills
+	// `Errors`**: an unreadable file and invalid YAML both return `OK: false` with `Errors` empty
+	// (see `Load`, this file). A guard keyed on `len(loadErrs) > 0` therefore covers one of the
+	// three states it is named for. Measured 2026-08-12 on a real container — a `config.yml` that
+	// stats and cannot be read serves with `errors=0`, and the add went THROUGH the guard to the
+	// write. `discarded` is the condition; this is only what the refusal says.
 	loadErrs []wire.ConfigError
+
+	// discarded is THE CONDITION: `Load` refused the file on disk, so this process is running on
+	// `Default()` and anything the file declared is not in effect. It is `!Loaded.OK` and nothing
+	// else, so it cannot drift from the thing it names.
+	//
+	// **THE CAUSE IS ALWAYS IN `warnings`; THE FATALITY IS ONLY HERE.** That split is deliberate on
+	// every path — the validation branch copies each error into `Warnings` in an explicit loop, and
+	// the other two write their own sentence there — which is why the refusal can key on this and
+	// still have something to say.
+	//
+	// One of the three is not reachable through a serving daemon and is covered anyway: invalid
+	// YAML makes `CheckStorages` report `Malformed` and quince refuses to start (quince#508), so no
+	// request arrives. Covered rather than excluded, because "the daemon exits" is a property of
+	// today's startup path and this is a property of the write.
+	discarded bool
 
 	// appliers is written ONLY at wiring time and read under mu on every write.
 	//
@@ -372,14 +395,17 @@ func NewService(path string, log *slog.Logger) *Service {
 	for _, w := range l.Warnings {
 		log.Warn("config warning", "path", w.Path, "message", w.Message)
 	}
-	// `l.Errors` IS CARRIED ONLY WHEN `!l.OK`, and the guard is the point rather than an
-	// optimisation: `Load` may return errors alongside a document it still accepted, and this field
-	// means "the file was DISCARDED", not "something was reported about the file". See loadErrs.
+	// `!l.OK` IS THE CONDITION AND `l.Errors` IS ONLY THE DETAIL — see the two field comments. The
+	// errors are carried only on the discard path, because `Load` may report on a document it still
+	// accepted and this must mean "the file was DISCARDED".
 	var loadErrs []wire.ConfigError
 	if !l.OK {
 		loadErrs = l.Errors
 	}
-	return &Service{path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings, source: l.Source, loadErrs: loadErrs}
+	return &Service{
+		path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings,
+		source: l.Source, loadErrs: loadErrs, discarded: !l.OK,
+	}
 }
 
 // Snapshot returns the live config, its warnings, and its source (for GET /api/config).
@@ -576,12 +602,16 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// write added would look undeclared again.
 	s.declared = declared
 	s.warnings = nil // a valid structured replace clears prior file warnings
-	// AND SO DOES THE DISCARD RECORD (quince#852). `loadErrs` says the file ON DISK could not be
-	// read; the bytes just written were built and validated by this process, so the statement it
-	// makes has stopped being true. Without this line, a config repaired through `PUT /api/config`
-	// would leave `AddStorage` refusing for the lifetime of the process — a guard that cannot be
-	// cleared by fixing the thing it guards against.
+	// AND SO DOES THE DISCARD RECORD (quince#852). It says the file ON DISK could not be read; the
+	// bytes just written were built and validated by this process, so the statement has stopped
+	// being true. Without this, a config repaired through `PUT /api/config` would leave `AddStorage`
+	// refusing for the lifetime of the process — a guard that cannot be cleared by fixing the thing
+	// it guards against.
+	//
+	// BOTH FIELDS, and the condition matters more than the detail: clearing only `loadErrs` would
+	// leave `discarded` true forever on the two paths that never set errors in the first place.
 	s.loadErrs = nil
+	s.discarded = false
 	s.source = Source{Path: s.path, Mtime: mtime}
 	s.mu.Unlock()
 

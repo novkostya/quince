@@ -129,12 +129,41 @@ func (s *Service) AddStorage(entry StorageEntry) (AddOutcome, []wire.ConfigError
 // the answer.
 func (s *Service) refuseIfConfigDiscarded() []wire.ConfigError {
 	s.mu.RLock()
+	discarded := s.discarded
 	errs := s.loadErrs
+	warns := s.warnings
 	path := s.path
 	s.mu.RUnlock()
 
-	if len(errs) == 0 {
+	// THE CONDITION IS THE DISCARD, NOT THE ERROR LIST. This read `len(errs) == 0` when quince#852
+	// first shipped, and that covers ONE of `Load`'s three discard paths: an unreadable file and
+	// invalid YAML both return `OK: false` with `Errors` EMPTY. Measured on a real container — an
+	// unreadable `config.yml` serves with `errors=0`, and the add went straight through this guard
+	// to the write.
+	if !discarded {
 		return nil
+	}
+
+	// THE DETAIL FALLS BACK TO `warnings`, WHICH IS WHERE THE CAUSE ALWAYS IS. The validation path
+	// copies every error into `Warnings` in an explicit loop; the read-failure and invalid-YAML
+	// paths write their own sentence there and set no errors at all. `Errors` is preferred where it
+	// exists so the validator's own wording survives, and this fallback is what lets the refusal
+	// name a line on the two paths that have none.
+	if len(errs) == 0 {
+		for _, w := range warns {
+			errs = append(errs, wire.ConfigError{Path: w.Path, Message: w.Message})
+		}
+	}
+	// A DISCARD WITH NOTHING TO SAY IS STILL A REFUSAL. Unreachable through `Load` as written —
+	// every discard path records its cause — but returning nil here would silently restore the
+	// destructive write, so the floor is a message rather than a hole.
+	if len(errs) == 0 {
+		return []wire.ConfigError{{
+			Path: path,
+			Message: fmt.Sprintf("quince could not read %s, so it is running on defaults — adding a "+
+				"storage now would REPLACE that file and lose what it declares. Fix %s and restart "+
+				"quince, then add the storage.", path, path),
+		}}
 	}
 
 	// THE FIRST ERROR IS THE ONE NAMED, and the count carries the rest. A caller adding one storage
