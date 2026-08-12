@@ -1712,7 +1712,6 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 | `devices.manage_muxer` · `.usbmuxd_socket` · `.netmuxd_addr` | **restart** | **D12 requires this sentence:** a netmuxd restart tears a live Wi-Fi backup, and Wi-Fi is the primary transport — so applying these live means first ruling on what happens to a running transfer. Out of scope for `qn.6g`, named rather than silent. |
 | `tls.cert_file` · `.key_file` | **paths: restart · contents: already live** | `tlsx.Keeper` re-reads the files on rotation, so a renewal already needs no restart. Changing the *paths*, or turning TLS on or off, needs a socket rebind. |
 | `sessions.allow_insecure_transport` | **restart** | Two consumers, both start-time: it decides the plain-half handler at bind, and `applyInsecureTransportOptIn` calls the auth service's setter once. **A settable field is not a live setting** — that setter runs only at startup and only ever with `true`, so nothing turns the opt-in back off in a running process. Stated because the setter's existence reads like half-liveness. |
-| `sessions.ttl_minutes` | **nothing reads it** | Validated and never consumed — **quince#656**. Its label says *"Session TTL"* on a page reached from a login, which is what makes it worse than a merely unused key. |
 | `automation.staleness_days` · `.reminder_cooldown_hours` | **nothing reads it (declared)** | `qn.12`'s — declared debt rather than a defect. |
 | `ui.theme` | **already live** | Client-side, applied from the `PUT` response. |
 
@@ -1721,16 +1720,28 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 `preferred_transport` and gave it a consumer. Recorded here because the spec still carries the stale
 row and points at this table for the correction.
 
+**`sessions.ttl_minutes` IS ABSENT FOR A DIFFERENT REASON: THE KEY WAS REMOVED RATHER THAN WIRED.**
+It sat in the third bin — validated, documented, editable, read by nothing — and the Operator ruled
+on 2026-08-04 to delete it and mint it again when something reads it (quince#656), on quince#378's
+precedent: *"I see no reason to accumulate backward-compatibility garbage."* **That is the opposite
+answer to `backup.transport`'s directly above, and the difference is not inconsistency:** that key
+had a consumer already in the tree, so wiring it made an existing undocumented policy visible. This
+one had nothing to wire to, and relabelling would only have produced a more accurately-named setting
+that still did nothing. **A key earns its place by being read.** A user who set it gets `unknown
+config key "sessions.ttl_minutes" (ignored)` and loses a value that never had an effect; quince#401
+does not apply, because there is no successor to name.
+
 **A key in the third bin is not made to work by a restart**, which is the whole reason that bin
-exists. Both of its occupants have an issue and neither is fixed by this rung: live-apply cannot make
-an unread field take effect, and folding the fix in would let this table claim a key works when
-nothing consumes it.
+exists. Its remaining occupant is the `automation.*` pair, which is **declared debt for `qn.12`**
+rather than a defect: live-apply cannot make an unread field take effect, and folding a fix in would
+let this table claim a key works when nothing consumes it.
 
 **THE UI RENDERS THIS VERDICT AND STORES NOTHING.** *"Restart to apply"* appears where this table
 says **restart** and nowhere else — which today means it appears on no field the Settings form
-renders, since every key that form edits is live or unread. That is why the notice was deleted rather
-than made conditional; if a **restart** key is ever added to that form, it comes back attached to
-that field.
+renders, since every key that form edits is **live**. That sentence read *"live or unread"* until
+quince#656 removed the one unread field the form carried. The notice was deleted rather than made
+conditional, and if a **restart** key is ever added to that form it comes back attached to that
+field.
 
 Schema v0:
 
@@ -1884,7 +1895,6 @@ tls:                        # qn.6f — the certificate quince serves ITSELF, fo
                             # the serve path instead: quince refuses to start, names the file and
                             # the reason, in the shape the storage requirement already uses.
 sessions:
-  ttl_minutes: 30
   allow_insecure_transport: false
                             # qn.6f — the user's own opt-in to plain http on a network they
                             # trust. OFF by default. Operator ruling 2026-08-02, option (b);

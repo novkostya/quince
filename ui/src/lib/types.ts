@@ -220,7 +220,7 @@ export interface Config {
   // replace decoded into a zero-valued Go struct, so a client that omits the key silently turns
   // the setting OFF on the next save. For this one that direction is safe-by-accident rather than
   // dangerous, but relying on which way an omission happens to fall is exactly quince#493.
-  sessions: { ttl_minutes: number; allow_insecure_transport: boolean };
+  sessions: { allow_insecure_transport: boolean };
   // reconcile.interval_minutes (qn.6i): how often the reconciliation pass runs on its own; 0
   // disables the SCHEDULE only — startup, storage-added and job-end still fire. Here for the same
   // full-document-replace reason as everything else in this interface.

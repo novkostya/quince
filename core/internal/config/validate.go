@@ -22,9 +22,6 @@ func Validate(c Config) []wire.ConfigError {
 	}
 	validateStorages(c.Storage, add)
 	validateTLS(c.TLS, add)
-	if c.Sessions.TTLMinutes <= 0 {
-		add("sessions.ttl_minutes", "must be > 0")
-	}
 	// `>= 0`, NOT `> 0`, and the difference IS the feature: 0 is how the schedule is turned off
 	// (qn.6i). A negative is meaningless rather than meaningful-and-off, so it is refused.
 	if c.Reconcile.IntervalMinutes < 0 {

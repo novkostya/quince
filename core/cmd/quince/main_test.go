@@ -25,7 +25,7 @@ func TestConfigValidateExitCodes(t *testing.T) {
 	dir := t.TempDir()
 
 	valid := filepath.Join(dir, "good.yml")
-	if err := os.WriteFile(valid, []byte("sessions:\n  ttl_minutes: 45\n"), 0o644); err != nil {
+	if err := os.WriteFile(valid, []byte("reconcile:\n  interval_minutes: 45\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := configCmd([]string{"validate", valid}); err != nil {
@@ -320,7 +320,7 @@ func TestDemoRestartResetsEverything(t *testing.T) {
 				}
 
 				// A visitor edits the config.
-				if err := os.WriteFile(cfgPath, []byte("sessions:\n  ttl_minutes: 999\n"), 0o600); err != nil {
+				if err := os.WriteFile(cfgPath, []byte("ui:\n  theme: dark\n"), 0o600); err != nil {
 					t.Fatalf("write config edit: %v", err)
 				}
 
@@ -350,9 +350,12 @@ func TestDemoRestartResetsEverything(t *testing.T) {
 				// absence would have been the easy way to keep this green and would have gated the
 				// wrong thing: what the reset owes a visitor is that their EDIT does not survive,
 				// not that the file is missing.
-				if ttl := cfgSvc2.Current().Sessions.TTLMinutes; ttl == 999 {
-					t.Errorf("after restart: sessions.ttl_minutes is still %d — the config edit "+
-						"outlived the reset", ttl)
+				// `ui.theme` is the VEHICLE and only the vehicle: any key whose default the edit
+				// can differ from would do. It replaced `sessions.ttl_minutes`, which quince#656
+				// removed — this assertion is about the RESET, never about the key.
+				if theme := cfgSvc2.Current().UI.Theme; theme == "dark" {
+					t.Errorf("after restart: ui.theme is still %q — the config edit "+
+						"outlived the reset", theme)
 				}
 				// And the declaration is restored, which is the ruling's own requirement: a visitor
 				// may edit or delete these entries, and the next start must put them back or the

@@ -67,7 +67,7 @@ func TestConfigResponsesNeverSendNullWarnings(t *testing.T) {
 	putBody := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":` + oneStorage + `,` +
 		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
-		`"sessions":{"ttl_minutes":30},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 	put := newReq(t, http.MethodPut, srv.URL+"/api/config", putBody)
 	put.Header.Set(auth.CSRFHeaderName, csrf())

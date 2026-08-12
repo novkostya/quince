@@ -30,7 +30,7 @@ const FULL_CONFIG = {
   config: {
     backup: { preferred_transport: "usb", require_encryption: true },
     storage: [{ name: "s" }],
-    sessions: { ttl_minutes: 60, allow_insecure_transport: false },
+    sessions: { allow_insecure_transport: false },
     reconcile: { interval_minutes: 360 },
     ui: { theme: "system" },
   },
