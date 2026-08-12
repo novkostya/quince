@@ -196,8 +196,28 @@ pattern_provenance() {
 		say "pattern source UNKNOWN — $PATTERN_DIR is not a git worktree, so staleness cannot be judged"
 		return 0
 	fi
+	# `--untracked-files=no` IS THE WHOLE OF THIS LINE'S CORRECTNESS (quince#864). Bare
+	# `--porcelain` reports untracked entries (`??`) alongside modified tracked ones, so any file
+	# that happens to sit in the layer's worktree — a scratch dir, a stray nested clone, an editor
+	# artifact — flipped this marker. Measured on the architect box 2026-08-12: two untracked
+	# entries, no modified tracked file, and the banner read `pattern source 5264185 2026-08-10
+	# +UNCOMMITTED` over a list at a clean committed ref.
+	#
+	# It never HID a real modification — it manufactured a false one, which is the conservative
+	# direction and is why this was a finding rather than an incident. The cost is that
+	# `+UNCOMMITTED` is the one signal that would reveal a locally WEAKENED pattern list: branch
+	# protection is unavailable on the private repo, so this marker and `patterns.floor` are what
+	# stand in for it. A marker that fires from cruft is a marker a session learns to read past, and
+	# it is then reading past the case it exists for.
+	#
+	# The two states this separates, and only the first is an alarm:
+	#   tracked files modified  → the list may differ from what review saw
+	#   untracked files present → says nothing about any pattern
+	#
+	# STAGED-BUT-UNCOMMITTED STILL FIRES, deliberately: `git add` of a new pattern file makes it
+	# tracked (`A `), and that IS a difference from the committed list. `-uno` drops `??` only.
 	_pp_dirty=''
-	[ -n "$(git -C "$PATTERN_DIR" status --porcelain 2>/dev/null || true)" ] && _pp_dirty=' +UNCOMMITTED'
+	[ -n "$(git -C "$PATTERN_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)" ] && _pp_dirty=' +UNCOMMITTED'
 	# `--left-right --count HEAD...@{upstream}` prints "<ahead>\t<behind>". No upstream: say that,
 	# rather than letting an empty string become a reassuring 0.
 	_pp_div=$(git -C "$PATTERN_DIR" rev-list --left-right --count 'HEAD...@{upstream}' 2>/dev/null || true)

@@ -489,5 +489,61 @@ git -C "$pat_noup" commit -qm "local only"
 expect "a clone with NO upstream says it cannot tell, rather than reporting 0 behind" 0 "cannot tell whether the list is current" -- \
 	at "$clean_repo" "$CHECK" --patterns "$pat_noup" --ref main...HEAD
 
+# --- +UNCOMMITTED means the LIST changed, not that the worktree has cruft in it (quince#864) ----
+#
+# `+UNCOMMITTED` is the one signal that would reveal a locally WEAKENED pattern list. Branch
+# protection is unavailable on the private repo, so this marker and `patterns.floor` are what stand
+# in for it. Bare `git status --porcelain` reports untracked entries too, so a scratch dir or an
+# editor artifact in the layer flipped it — measured on the architect box, two untracked entries and
+# a list at a clean committed ref, banner reading `+UNCOMMITTED`.
+#
+# THE DIRECTION IS WHY THESE ARE FOUR ASSERTIONS AND NOT ONE. The bug never hid a real modification;
+# it manufactured a false one. So the fix is only correct if it removes the false positive AND
+# leaves the alarm armed, and the last two are the cases a careless `-uno` would break.
+pat_dirty="$TMP/pat-dirty"
+git clone -q "$pat_remote" "$pat_dirty" 2>/dev/null
+
+# The suite's `expect` asserts a substring is PRESENT and there is no negative form, which is
+# exactly what half of these need. This reduces the banner to one word so both directions are a
+# plain equality, and reports in the same shape `expect` does.
+expect_marker() { # <name> <marked|unmarked>
+	em_name=$1 em_want=$2
+	em_out=$(at "$clean_repo" "$CHECK" --patterns "$pat_dirty" --ref main...HEAD 2>&1 || true)
+	if printf '%s\n' "$em_out" | grep -q '+UNCOMMITTED'; then
+		em_got=marked
+	else
+		em_got=unmarked
+	fi
+	if [ "$em_got" = "$em_want" ]; then
+		printf 'ok   %s (%s)\n' "$em_name" "$em_got"
+		pass=$((pass + 1))
+	else
+		printf 'FAIL %s\n  wanted %s, got %s\n' "$em_name" "$em_want" "$em_got"
+		printf '%s\n' "$em_out" | grep 'pattern source' | sed 's/^/    | /'
+		fail=$((fail + 1))
+	fi
+}
+
+expect_marker "a clean pattern clone carries no marker (the baseline)" unmarked
+
+# CRUFT: an untracked file says nothing about any pattern, so it must not read as a modified list.
+mkdir -p "$pat_dirty/scratch"
+printf 'an editor artifact\n' >"$pat_dirty/scratch/notes.tmp"
+printf 'a stray file at the top level\n' >"$pat_dirty/untracked.txt"
+expect_marker "UNTRACKED files must NOT flip +UNCOMMITTED — cruft is not a modified pattern list" unmarked
+
+# THE ALARM, still armed. This is the case the whole marker exists for: the committed list says one
+# thing and the file on disk says another, so this sweep did not use the list review saw. The
+# untracked cruft above is deliberately still present, because that is the real box's state.
+printf 'zzlocallyweakenedzz\n' >>"$pat_dirty/privacy-patterns.txt"
+expect_marker "a MODIFIED TRACKED pattern file DOES flip +UNCOMMITTED — the alarm survives the fix" marked
+
+# A STAGED NEW pattern file is tracked (`A `), not untracked, and it IS a difference from the
+# committed list. Asserted because `-uno` looks like it should drop this case and does not.
+git -C "$pat_dirty" checkout -q -- privacy-patterns.txt
+printf 'zzstagedzz\n' >"$pat_dirty/privacy-patterns-extra.txt"
+git -C "$pat_dirty" add privacy-patterns-extra.txt
+expect_marker "a STAGED new file still flips +UNCOMMITTED — -uno drops ?? only" marked
+
 printf '\nprivacy-check-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
