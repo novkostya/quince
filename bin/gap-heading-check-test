@@ -216,6 +216,110 @@ else
 	printf '%s\n' "$out" | sed 's/^/    | /'
 fi
 
+# --- A CLOSED MARKER BOUNDS THE BLOCK ABOVE IT (quince#503) ------------------------------------
+#
+# The assertion directly above is what BREAKS when a lower block is flipped: the live lead that was
+# terminating the upper block is gone, so the upper block's bounds run past it and pick up the
+# neighbour's ruling. It recurs by construction — every flip of a lower block breaks its upper
+# neighbour, and adjacent blocks are accumulating.
+#
+# `C` is a flipped lead: `RULED (was `PROPOSED (gap)`):`. Assembled from the same pieces as `M` for
+# the same reason.
+C="RULED (was ${TICK}PROPOSED (gap)${TICK}):"
+
+# quince#501's shape, reproduced: the plain-HTTP block above, the step-1 block below it, flipped.
+# Measured as a false positive on that PR's head, which is why it carried an opt-out.
+{
+	printf '## 6. Security\n\n'
+	printf '**%s may a user on a trusted network opt into plain HTTP?**\n\n' "$M"
+	printf 'Options (a) and (b) are set out below. Nothing here is decided.\n\n'
+	printf '**%s onboarding step 1 IS reachable without a session.**\n\n' "$C"
+	printf 'The step-1 question is answered: it is reachable.\n'
+} >"$WORK/flipped-neighbour.md"
+expect "quince#501: a FLIPPED lower block does not make its upper neighbour a finding" 0 "clean" \
+	"$CHECK" "$WORK/flipped-neighbour.md"
+
+# THE CONTROL, without which the assertion above proves only that some input passes: the same two
+# blocks with the lower one NOT yet flipped. It is clean for the ORIGINAL reason — a live marker
+# bounds — so the pair shows the flip is what changed and that both states are now clean.
+{
+	printf '## 6. Security\n\n'
+	printf '**%s may a user on a trusted network opt into plain HTTP?**\n\n' "$M"
+	printf 'Options (a) and (b) are set out below. Nothing here is decided.\n\n'
+	printf '**%s is onboarding step 1 reachable without a session?**\n\n' "$M"
+	printf 'The step-1 question is answered: it is RULED reachable.\n'
+} >"$WORK/unflipped-neighbour.md"
+out=$("$CHECK" "$WORK/unflipped-neighbour.md" 2>&1 || true)
+if printf '%s\n' "$out" | grep -qF 'unflipped-neighbour.md:7' && ! printf '%s\n' "$out" | grep -qF 'unflipped-neighbour.md:3'; then
+	ok "…and BEFORE the flip only the lower block was ever the finding (the control)"
+else
+	bad "the pre-flip control is wrong — the upper block should never have been reported"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+fi
+
+# THREE adjacent blocks, the MIDDLE one flipped. The top must be bounded at the flipped lead, and
+# the bottom must still be judged on its own body — a terminator that ended the scan rather than the
+# block would silence everything below it.
+{
+	printf '**%s the first question.**\n\nOpen, nothing decided here.\n\n' "$M"
+	printf '**%s the middle question.**\n\nDecided, and this body says RULED.\n\n' "$C"
+	printf '**%s the third question.**\n\nThis one is RULED too.\n' "$M"
+} >"$WORK/three.md"
+out=$("$CHECK" "$WORK/three.md" 2>&1 || true)
+if printf '%s\n' "$out" | grep -qF 'three.md:9' && ! printf '%s\n' "$out" | grep -qF 'three.md:1'; then
+	ok "a flipped MIDDLE block bounds the top and does not silence the bottom"
+else
+	bad "three-block bounding across a flipped middle is wrong"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+fi
+
+# --- AND IT MUST NOT SHORTEN A BLOCK ENOUGH TO HIDE A GENUINE INSTANCE --------------------------
+#
+# The failure direction that matters. quince#503 asks for exactly this check, and quince#478 is why:
+# a missed block produces NO OUTPUT, so a too-greedy terminator is invisible in a way a false
+# positive never is. Three shapes that must still fire.
+#
+# 1. The HALF-RULING, which is the shape quince#408 kept finding: the block is live, and its body
+#    answers one half. It cites *the open half of this gap*, not the marker, so it is not a flipped
+#    lead — and a terminator matching a bare `RULED (was` would swallow it and report nothing.
+{
+	printf '**%s a %sStorage%s as an object, and what happens to %sVersion.backend%s.**\n\n' "$M" "$TICK" "$TICK" "$TICK" "$TICK"
+	printf 'Options (a), (b) and (c) are set out below.\n\n'
+	printf '**RULED (was the open half of this gap): KEEP IT.**\n'
+} >"$WORK/half-ruling-lead.md"
+expect "a half-ruling LEAD citing the open half, not the marker, still fires" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/half-ruling-lead.md"
+
+# 2. A prose correction — `RULED (was two bullets promising the opposite)` exists in canon and opens
+#    no block. It must not terminate, or a block above it is silently shortened. Behaviour here is
+#    UNCHANGED by quince#503; the assertion exists to pin that the terminator stayed narrow.
+{
+	printf '**%s does X?**\n\n' "$M"
+	printf 'Nothing decided.\n\n'
+	printf '**RULED (was two bullets promising the opposite): the file contradicts itself.**\n'
+} >"$WORK/prose-correction.md"
+expect "a RULED (was …) that does NOT cite the marker is not a terminator" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/prose-correction.md"
+
+# 3. The bare-`RULED` lead the suite already pins two dozen lines up. Restated against the flipped
+#    form so the two cannot be confused: `RULED — yes.` is an ANSWER inside a live block and fires;
+#    `RULED (was `PROPOSED (gap)`):` is a flipped LEAD and bounds. One word apart, opposite meanings.
+{
+	printf '**%s does Y?**\n\n' "$M"
+	printf '**RULED — yes.**\n'
+} >"$WORK/bare-ruled-lead.md"
+expect "a bare RULED lead is an ANSWER and still fires, not a terminator" 1 "SAYS ITS OWN QUESTION IS RULED" \
+	"$CHECK" "$WORK/bare-ruled-lead.md"
+
+# A flipped lead is a terminator and must NOT itself be read as opening a block — otherwise every
+# correctly-closed block in canon becomes a finding the moment its body mentions a ruling.
+{
+	printf '**%s the question, now settled.**\n\n' "$C"
+	printf 'It is RULED, and the body says so at length.\n'
+} >"$WORK/flipped-alone.md"
+expect "a flipped block alone is clean, though its body says RULED (the seven on main)" 0 "clean" \
+	"$CHECK" "$WORK/flipped-alone.md"
+
 # The marker LINE itself is not searched: a lead asking whether something is RULED is the question.
 {
 	printf '**%s whether the RULED half of gap 2 also applies here.**\n\nNothing decided.\n' "$M"
