@@ -59,8 +59,44 @@ export interface Storages {
 // It refetched on `udid` alone, so a disk plugged in while Back up now was open stayed listed as
 // not connected until the page was remounted — the ruling behind the endpoint is "plug the disk in
 // and press the button", and there was no button.
+// LAST-KNOWN-GOOD, PER UDID, FOR THE FIRST RENDER OF A REMOUNT — quince#838 step 4.
+//
+// A RESTORED SCROLL POSITION IS ONLY AS GOOD AS THE HEIGHT IT IS RESTORED INTO, and this hook is the
+// one thing on Home that changes that height after the fact. Home hides its Storage section while
+// this reads `loading`, so a Back traversal rendered a SHORTER page than the one you left; a browser
+// clamps a restored offset to what is actually scrollable, so it landed high, and the section
+// arriving a moment later could no longer move it. The list appearing under you afterwards is the
+// "flash" half of the same report.
+//
+// A MODULE-LEVEL MAP RATHER THAN A QUERY CACHE, deliberately. `@tanstack/react-query` is already a
+// dependency and would give this for free, and moving this hook onto it is a wider change than the
+// defect warrants: the three-state contract above is load-bearing (a failed fetch must never render
+// as "there is one storage"), and `recheck`/`reload` are imperative in a way that would have to be
+// rebuilt rather than translated. One `Map`, keyed by the same string the effect keys on, is the
+// whole of it.
+//
+// IT SEEDS THE FIRST RENDER AND NOTHING ELSE. A revalidation that FAILS still lands on `failed`,
+// exactly as before — stale rows are not left standing over a fetch that did not work, which is the
+// silent fallback the three states exist to refuse. What this removes is a `loading` gap over data
+// the server has already given us; it does not remove the report that we could not ask again.
+const lastLoaded = new Map<string, Storage[]>();
+
+// FOR TESTS. Module state outlives a `renderHook`, so a suite that asserts fetch counts or a
+// `loading` first render needs it empty between cases — otherwise the second test in a file is
+// silently exercising the first one's cache and the failure looks like a race.
+//
+// NOT wired to sign-out, and that is a decision rather than an omission: quince has one account, the
+// map holds only what `GET /api/storages` already returns to any authenticated session, and it lives
+// in memory for the life of the tab. There is nothing for a second principal to inherit.
+export function clearStorageCache(): void {
+  lastLoaded.clear();
+}
+
 export function useStorages(udid: string): Storages {
-  const [state, setState] = React.useState<StoragesState>({ status: "loading" });
+  const [state, setState] = React.useState<StoragesState>(() => {
+    const seen = lastLoaded.get(udid);
+    return seen ? { status: "loaded", storages: seen } : { status: "loading" };
+  });
   const [rechecking, setRechecking] = React.useState<Record<string, RecheckState>>({});
 
   // `live` guards every setState against a udid change or an unmount mid-flight. It is a ref rather
@@ -82,14 +118,21 @@ export function useStorages(udid: string): Storages {
       const r = await api.get<{ storages: Storage[] }>(
         forUdid === "" ? `/api/storages` : `/api/storages?udid=${encodeURIComponent(forUdid)}`,
       );
-      if (live.current) setState({ status: "loaded", storages: r.storages ?? [] });
+      const storages = r.storages ?? [];
+      // Recorded whether or not this hook is still mounted: the answer is about the SERVER, and the
+      // next mount wants it even when the one that asked has gone.
+      lastLoaded.set(forUdid, storages);
+      if (live.current) setState({ status: "loaded", storages });
     } catch {
       if (live.current) setState({ status: "failed" });
     }
   }, []);
 
   React.useEffect(() => {
-    setState({ status: "loading" });
+    // `loading` only where there is nothing to show. On a remount with a cached answer the state is
+    // already `loaded` from the initialiser, and blanking it here would put the gap straight back.
+    const seen = lastLoaded.get(udid);
+    setState(seen ? { status: "loaded", storages: seen } : { status: "loading" });
     setRechecking({});
     void load(udid);
   }, [udid, load]);

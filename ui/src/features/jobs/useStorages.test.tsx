@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useStorages } from "./useStorages";
+import { clearStorageCache, useStorages } from "./useStorages";
 import type { Storage } from "@/lib/types";
 
 const get = vi.fn();
@@ -33,6 +33,10 @@ function storage(over: Partial<Storage>): Storage {
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
+  // The last-known-good map is MODULE state and outlives a `renderHook`. Without this every case
+  // after the first starts `loaded` from its predecessor's data, and a fetch-count assertion fails
+  // in a way that reads like a race rather than like leakage.
+  clearStorageCache();
 });
 
 describe("useStorages recheck", () => {
@@ -122,6 +126,63 @@ describe("useStorages recheck", () => {
 
     rerender({ udid: "DEV-2" });
     await waitFor(() => expect(result.current.rechecking["shuttle"]).toBeUndefined());
+  });
+});
+
+// THE HEIGHT OF THE PAGE IS PART OF THE SCROLL POSITION — quince#838 step 4.
+//
+// Home hides its Storage section while this hook reads `loading`, so a remount that starts there
+// renders a SHORTER page. On a Back traversal the browser has already restored an offset and clamps
+// it to what is scrollable, so a shorter page lands high and the section arriving afterwards can no
+// longer move it. These two cases state the fix and its bound.
+describe("useStorages remount", () => {
+  it("a remount for a device already seen starts loaded, never loading", async () => {
+    get.mockResolvedValue({ storages: [storage({ name: "shuttle" })] });
+
+    const first = renderHook(() => useStorages("DEV-1"));
+    await waitFor(() => expect(first.result.current.state.status).toBe("loaded"));
+    first.unmount();
+
+    // THE CLAIM IS ABOUT THE FIRST RENDER, so it is read synchronously rather than through
+    // `waitFor` — which would pass just as happily one tick later on the build without the cache.
+    const second = renderHook(() => useStorages("DEV-1"));
+    const initial = second.result.current.state;
+    expect(initial.status).toBe("loaded");
+    if (initial.status !== "loaded") return;
+    expect(initial.storages[0].name).toBe("shuttle");
+
+    // It still revalidates: the cache removes the gap, it does not replace the request.
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it("a revalidation that fails still reports failed rather than leaving stale rows", async () => {
+    get.mockResolvedValueOnce({ storages: [storage({})] });
+
+    const first = renderHook(() => useStorages("DEV-1"));
+    await waitFor(() => expect(first.result.current.state.status).toBe("loaded"));
+    first.unmount();
+
+    // THE BOUND ON THE CACHE, and the reason this is not a silent fallback. `failed` is a state the
+    // caller renders — "we could not load your storages, so this goes to the default" — and showing
+    // the last good answer over a fetch that did not work would be exactly the two-states-that-
+    // render-the-same defect the three-state contract exists to refuse.
+    get.mockRejectedValueOnce(new Error("offline"));
+    const second = renderHook(() => useStorages("DEV-1"));
+    expect(second.result.current.state.status).toBe("loaded"); // seeded
+    await waitFor(() => expect(second.result.current.state.status).toBe("failed"));
+  });
+
+  it("a device never seen still starts loading", async () => {
+    get.mockResolvedValue({ storages: [storage({})] });
+
+    const first = renderHook(() => useStorages("DEV-1"));
+    await waitFor(() => expect(first.result.current.state.status).toBe("loaded"));
+    first.unmount();
+
+    // Keyed per udid, because `will_be_full` is a fact about a (device, storage) PAIR. Seeding
+    // DEV-2 from DEV-1's answer would put another phone's transfer cost on this page.
+    const other = renderHook(() => useStorages("DEV-2"));
+    expect(other.result.current.state.status).toBe("loading");
   });
 });
 
