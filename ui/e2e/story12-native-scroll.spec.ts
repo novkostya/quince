@@ -371,6 +371,45 @@ test("the desktop sidebar fits the viewport it is pinned to, inset and all", asy
   expect(headingTop, "the page heading is under the status bar").toBeGreaterThanOrEqual(IPAD_INSET);
 });
 
+// THE IN-PAGE BACK LINK RESTORES THE SCROLL POSITION, LIKE THE GESTURE DOES.
+//
+// Operator-reported as the last item on quince#838: "scroll position is not preserved when you tap
+// on back button, e.g. `< Home`". A plain `<Link>` PUSHES, and a pushed entry has no saved offset —
+// so there was nothing to restore and `useScrollReset` correctly sent it to the top. The control now
+// performs a real traversal when the previous entry IS the destination it names.
+//
+// THE SAME `dispatchEvent` DODGE AS ABOVE: Playwright's `click()` would scroll the link into view
+// first, which on a page scrolled to a known offset is the test changing the very number it is about
+// to assert.
+test("the in-page back link restores the scroll position", async ({ page }) => {
+  await authenticate(page);
+  await expectCanHold(page, "Home");
+  await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+
+  await clickWithoutScrolling(page, "attic-ipad");
+  await expect(page).toHaveURL(/\/devices\//);
+  await expect(page.getByRole("heading", { name: "attic-ipad" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+
+  // TAP `< Home` — the IN-PAGE control, scoped to `main` because the nav bar has a `Home` link too
+  // and they are deliberately different acts: the nav item is a destination and pushes, this one is
+  // a back control and traverses. An unscoped locator matches both, which is how this test first
+  // failed, and it would have been the wrong element to prove anything about.
+  await page
+    .getByRole("main")
+    .getByRole("link", { name: "Home" })
+    .dispatchEvent("click", { bubbles: true, cancelable: true });
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+
+  // AND IT LEFT NO ENTRY BEHIND, which is the half that says it was a traversal rather than a push
+  // that happened to land well. If it had pushed, going back once would return to the DEVICE page;
+  // it must return to whatever preceded Home instead — here, nothing further in this app, so the
+  // check is that we are not on the device page.
+  await page.goBack();
+  await expect(page).not.toHaveURL(/\/devices\//);
+});
 
 test("the browser still owns scroll restoration — nothing has set it to manual", async ({ page }) => {
   await authenticate(page);

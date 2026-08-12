@@ -4,6 +4,7 @@ import { ReconcilingNotice } from "@/components/ReconcilingNotice";
 import { Sidebar } from "@/components/Sidebar";
 import { close, connect } from "@/ws/client";
 import { useScrollReset } from "./useScrollReset";
+import { useTrackNavigation } from "@/components/BackLink";
 
 // The authed shell. The WebSocket bridge lives only here — it connects on mount (once
 // authenticated) and closes on unmount (logout / auth loss).
@@ -17,6 +18,9 @@ export function AppLayout() {
   // deliberately empty.
   useScrollReset();
 
+  // Records where each navigation came FROM, so an in-page back link can tell whether going back
+  // would land on the destination it names. Once, here, because there is one history per document.
+  useTrackNavigation();
 
   // ONE SCROLL MODEL, EVERY BREAKPOINT: THE DOCUMENT SCROLLS. Operator direction 2026-08-11
   // (quince#838) — no internal scrollable container; Safari scrolls the page natively, as it does on

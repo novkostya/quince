@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import { BackLink } from "@/components/BackLink";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useDevicesStore } from "@/stores/devices";
@@ -51,7 +52,7 @@ export function StorageDetailsPage() {
     // typed or bookmarked is the least useful thing a page can say.
     return (
       <section>
-        <BackLink />
+        <BackToHome />
         <div className="mt-4 rounded-card border border-dashed border-line bg-card p-10 text-center">
           <div className="text-sm font-medium">No storage named {name}</div>
           <div className="mt-1 text-sm text-muted">
@@ -115,7 +116,7 @@ export function StorageDetailsPage() {
 
   return (
     <section>
-      <BackLink />
+      <BackToHome />
 
       <div className="mt-4">
         <h1 className="text-xl font-semibold tracking-tight">{storage.name}</h1>
@@ -303,11 +304,16 @@ export function StorageDetailsPage() {
   );
 }
 
-function BackLink() {
+// RENAMED FROM `BackLink`, which is now the name of the shared control it delegates to. This wrapper
+// survives because it is used twice in this file and carries the icon and the copy; what changed is
+// that the control underneath TRAVERSES history when the previous entry really is Home, so tapping
+// it restores the scroll position exactly as the swipe gesture does (quince#838). A plain `<Link>`
+// pushes, and a pushed entry has no saved offset to restore.
+function BackToHome() {
   return (
-    <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
+    <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
       <ArrowLeft size={14} /> Home
-    </Link>
+    </BackLink>
   );
 }
 

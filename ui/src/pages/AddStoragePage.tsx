@@ -1,4 +1,5 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { BackLink } from "@/components/BackLink";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddStorageForm } from "@/features/storage/AddStorageForm";
@@ -31,9 +32,9 @@ export function AddStoragePage() {
           is drawn as a link rather than as a second button beside Save because that is how
           `StorageDetailsPage` and `DeviceDetailsPage` already offer the same escape, and a desktop
           user with no back gesture needs it to be visible. */}
-      <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
+      <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
         <ArrowLeft size={16} /> Home
-      </Link>
+      </BackLink>
 
       <h1 className="mt-4 text-xl font-semibold tracking-tight">Add a storage</h1>
       <p className="mt-1 text-sm text-muted">
