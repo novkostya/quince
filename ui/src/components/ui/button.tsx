@@ -31,7 +31,29 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
-export function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
+export function Button({ className, variant, size, asChild = false, type, ...props }: ButtonProps) {
   const Comp = asChild ? Slot : "button";
-  return <Comp className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+
+  // `type="button"` BY DEFAULT, opt into `"submit"` explicitly (quince#828).
+  //
+  // HTML's default for a `<button>` inside a `<form>` is `submit`, so the dangerous behaviour was
+  // the one you got by writing nothing. Every call site in the product happened to be correct, held
+  // there entirely by each author remembering — and that has already been paid for twice:
+  // quince#820 set `type="button"` on five buttons to wrap one dialog in a form, and quince#824 is
+  // the second instance.
+  //
+  // A LINT RULE WAS THE ALTERNATIVE AND IT CANNOT SEE THIS TREE'S ACTUAL SHAPE. `AuthPage` renders
+  // the `<form>` and its buttons arrive as `children` from `PasswordForm` and `SetupPasswordPage` —
+  // different files. Whether a given `<Button>` sits inside a form depends on whether a caller three
+  // components away passed `onSubmit`, which no per-file rule can decide. A default fixes the class
+  // by construction where a rule would cover only the cases it can see.
+  //
+  // NOT DEFAULTED UNDER `asChild`: the rendered element is then whatever the caller passed — often
+  // an `<a>` — where `type` means something else entirely, or nothing. An explicit `type` is still
+  // forwarded, because that is the caller's decision about their own element.
+  const typeProps = asChild ? (type === undefined ? {} : { type }) : { type: type ?? "button" };
+
+  return (
+    <Comp className={cn(buttonVariants({ variant, size }), className)} {...typeProps} {...props} />
+  );
 }
