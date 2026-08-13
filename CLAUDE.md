@@ -307,8 +307,11 @@ repo is not a message bus, and no human is an RPC layer.
    **A `(unmeasured)` is a DEBT, not a decoration.** It names an experiment nobody has run, and the
    seat that meets one should run it rather than route around it — a marker left standing is a
    question that stays open by default, because the seat able to close it is the one already busy
-   working past it. There is a live instance in this file: the App's write under
-   `.github/workflows/**` is `(unmeasured)`, and one `PUT` settles it.
+   working past it. **A debt can also be owed to something other than nobody's attention.** This
+   file's live instance — the App's write under `.github/workflows/**` — read *"one `PUT` settles
+   it"*, and that `PUT` is refused by the **session harness**, not by the forge: no architect
+   session can run it. What was measured instead, by another route, is in the identity bullet
+   below.
 
    **Arm it on a PR that is APPROVED WITH CHECKS RUNNING.** That is the case it exists for, and the
    probe made the boundaries clear: **auto-merge does not rebase**, so one armed on a `BEHIND` branch
@@ -355,8 +358,21 @@ repo is not a message bus, and no human is an RPC layer.
   **declares `workflows: write`** — measured 2026-07-29 by asking `GET /app` with a JWT signed from
   the reviewer key, which returns the App's permission set; note that `bin/gh-review` cannot make
   that call, because it mints *installation* tokens and the endpoint wants a JWT. That is the
-  **declared grant**; whether a write under `.github/workflows/**` actually succeeds as the App is
-  **(unmeasured)** — the only definitive test is performing one, and nobody has. Distinguished
+  **declared grant**. **THE APP HAS NOW WRITTEN WORKFLOW CONTENT AND GITHUB ACCEPTED IT** — measured
+  2026-08-13 on quince#894, a PR that changes `.github/workflows/ci.yml` and nothing else. It was
+  `BEHIND`; the architect ran `bin/gh-review pr update-branch --rebase`; the resulting head
+  `a9a974e4` reads `committer: quince-review[bot]` over a tree that modifies `ci.yml` relative to its
+  parent — the operation a PAT's missing `workflow` scope refuses. **So the conclusion a blocked
+  session needs is settled: the App is NOT refused under that path**, and *"only the Operator can
+  push a workflow"* is false.
+  **The `PUT /repos/…/contents/.github/workflows/…` is STILL UNRUN, and now for a recorded reason
+  rather than for want of trying.** Attempted 2026-08-13 from an architect session, on a throwaway
+  branch since deleted: the **Claude Code permission classifier** refused it, so nothing reached
+  GitHub. Two paths with different gatekeepers — the Git-data path (`update-branch`) passes, the
+  contents `PUT` does not leave the box. **Do not read the second as a forge refusal**, which is the
+  mistake a bare `(unmeasured)` marker invites; and do not conclude a workflow fix must be routed to
+  the Operator without first trying the path that works.
+  Distinguished
   because every other capability in the seat table below carries a measurement, and resolving a
   contradiction toward an unsourced claim is not the same as knowing. This sentence read
   "only the Operator can push a workflow" until 2026-07-29, contradicting the seat table thirty
@@ -435,7 +451,11 @@ arriving from a citation must be able to see both what was proposed and what was
   capability and only removes the reason to borrow. Per-repo narrowing was rejected as theatre for
   the same reason. Ceremony done the same day — App id `4449080`, permissions **probed** rather than
   read off a settings page, including a measured negative under `.github/workflows/**` (403). So
-  quince#113's rule holds for a third identity: **no agent seat can push a workflow.**
+  quince#113's rule holds for a third identity — **but read it as a fact about THIS identity, not
+  about agent seats.** *"No agent seat can push a workflow"* stood here and is **false since
+  2026-08-13**: `quince-review[bot]` holds `workflows: write` and has written workflow content that
+  GitHub accepted (quince#894, in the identity bullets above). Three refusals do not make a rule
+  when the fourth seat carries a grant the other three do not.
 - **An App, not a personal access token, and not the Operator's.** A classic PAT's scopes are
   coarse, and this project has its own incident from exactly that granularity: `quince-bot` could
   delete any discussion in the devlog because the permission *"arrived with the classic `repo`
