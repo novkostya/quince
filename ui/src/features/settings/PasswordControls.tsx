@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
-import { passkeysKey, usePasskeyList } from "@/features/settings/Passkeys";
+import { passkeysKey, usePasskeyList, type PasskeyList } from "@/features/settings/Passkeys";
 
 // The password controls on `/settings/auth` — qn.6m slice 6b, D4 and D7.
 //
@@ -45,6 +45,47 @@ function PasswordlessCost() {
   );
 }
 
+// `has_password: false` MEANS THREE DIFFERENT THINGS AND THIS SURFACE RENDERED ONE — quince#888
+// item 2. It said *"This quince has no password — you sign in with a passkey"* for all of them,
+// which is a confident description of a configuration the user may not have:
+//
+//	passwordless        a passkey works at THIS address. The sentence is true.
+//	elsewhere-only      passkeys exist, none bound here. NOTHING can sign in at this address.
+//	unconfigured        no credentials at all.
+//
+// ELSEWHERE-ONLY IS THE REACHABLE ONE, and it survives quince#888 item 1. That guard refuses to
+// remove the last credential that works HERE, so it cannot be emptied — but an install can arrive in
+// this state by being reached at a second address, which is qn.6k D2's whole hazard. The user is then
+// told they sign in with a passkey while standing at an address where no passkey of theirs works.
+//
+// UNCONFIGURED is now hard to reach through the UI and is still rendered honestly, because *"assume
+// the safe one"* is what produced this bug: the surface picked the reassuring reading of an ambiguous
+// field rather than the one it could actually establish. `quince auth reset` clears sessions too, so
+// nobody sees this screen after one — but a hand-edited DB, or a future path nobody has thought of,
+// should not be met with an inviting sentence about a passkey that does not exist.
+//
+// AN UNKNOWN rpId IS NOT AN ACCUSATION. If the payload carries no `rp_id`, this cannot judge which
+// credentials work here, so it reports plain `passwordless` rather than claiming the user is locked
+// out. A wrong lockout warning would send someone to the console for nothing.
+type CredentialState = "has-password" | "passwordless" | "elsewhere-only" | "unconfigured";
+
+function credentialState(data: PasskeyList | undefined, hasPassword: boolean): CredentialState {
+  if (hasPassword) return "has-password";
+  const rows = Array.isArray(data?.passkeys) ? data.passkeys : [];
+  if (rows.length === 0) return "unconfigured";
+  const rpID = typeof data?.rp_id === "string" ? data.rp_id : "";
+  if (!rpID) return "passwordless";
+  return rows.some((p) => p.rp_id === rpID) ? "passwordless" : "elsewhere-only";
+}
+
+// The rpIds the credentials DO belong to, so the warning can name them. Same reasoning as the
+// server's `last_credential` message: "your passkeys do not work here" at a box that visibly lists
+// some reads as quince being broken, where naming the address it wants is an instruction.
+function boundElsewhere(data: PasskeyList | undefined): string[] {
+  const rows = Array.isArray(data?.passkeys) ? data.passkeys : [];
+  return [...new Set(rows.map((p) => p.rp_id).filter(Boolean))];
+}
+
 export function PasswordControls() {
   const qc = useQueryClient();
   // quince#855 — WITHOUT THIS THE SCREEN LIED QUIETLY. It said "Change your password / Current
@@ -58,6 +99,7 @@ export function PasswordControls() {
   // required costs a 401 the user cannot act on.
   const list = usePasskeyList();
   const hasPassword = list.data?.has_password ?? true;
+  const credentials = credentialState(list.data, hasPassword);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [changeBusy, setChangeBusy] = useState(false);
@@ -78,11 +120,18 @@ export function PasswordControls() {
       // A SUCCESS MESSAGE, because nothing else on screen changes. A password change that looks
       // like nothing happened invites a second attempt with the OLD current password, which then
       // 401s and reads as "the change failed" — the opposite of the truth.
+      // THE SAME ASSUMPTION AS THE HEADINGS, IN THE PLACE IT IS HARDEST TO SPOT — quince#888 item 2.
+      // *"as well as your passkey"* holds only in the `passwordless` state; in the other two the
+      // password just set is the ONLY thing that can sign in here, which is both the more important
+      // fact and the opposite reassurance.
       setChangeMsg({
         ok: true,
-        text: hasPassword
-          ? "Password changed. Your other devices stay signed in."
-          : "Password set. You can now sign in with it as well as your passkey.",
+        text:
+          credentials === "has-password"
+            ? "Password changed. Your other devices stay signed in."
+            : credentials === "passwordless"
+              ? "Password set. You can now sign in with it as well as your passkey."
+              : "Password set. This is now the only way to sign in at this address.",
       });
       // The list carries `has_password`, and SETTING one changes it — so the surface that just
       // said "Set a password" must stop saying it. Invalidated for the same reason removal is.
@@ -119,10 +168,28 @@ export function PasswordControls() {
         <h2 className="text-sm font-semibold">
           {hasPassword ? "Change your password" : "Set a password"}
         </h2>
-        {!hasPassword ? (
+        {/* ONE SENTENCE PER STATE, and the two that are not `passwordless` are WARNINGS rather than
+            explanations: in both, setting a password is not an improvement to a working setup, it is
+            the repair for one that cannot sign anybody in at this address. */}
+        {credentials === "passwordless" ? (
           <p className="mt-1 max-w-xl text-sm text-muted">
             This quince has no password — you sign in with a passkey. Adding one gives you a second
             way in that does not depend on a device.
+          </p>
+        ) : null}
+        {credentials === "elsewhere-only" ? (
+          <p className="mt-1 max-w-xl text-sm text-warn">
+            This quince has no password, and none of its passkeys works at this address — they are
+            registered for{" "}
+            <span className="font-mono">{boundElsewhere(list.data).join(", ")}</span>. A passkey only
+            works at the address it was created on, so nothing can sign in here at the moment. Set a
+            password to fix that, or add a passkey for this address.
+          </p>
+        ) : null}
+        {credentials === "unconfigured" ? (
+          <p className="mt-1 max-w-xl text-sm text-danger">
+            This quince has no password and no passkeys — there is nothing to sign in with. Set a
+            password now: your session is currently the only access to this install.
           </p>
         ) : null}
         <form onSubmit={submitChange} className="mt-3 max-w-sm space-y-3">
@@ -199,7 +266,7 @@ export function PasswordControls() {
           state the user is ALREADY IN. Replaced by a statement of that state rather than hidden
           silently: "this option is missing" is a worse answer than "you are already here", and the
           form above is the way out of it. */}
-      {!hasPassword ? (
+      {credentials === "passwordless" ? (
         <section>
           <h2 className="text-sm font-semibold">You sign in with a passkey only</h2>
           <p className="mt-1 max-w-xl text-sm text-muted">
@@ -209,7 +276,30 @@ export function PasswordControls() {
             passkey and session as well.
           </p>
         </section>
-      ) : (
+      ) : null}
+      {/* THE RECOVERY SENTENCE IS DIFFERENT HERE, WHICH IS WHY THIS IS NOT THE SAME BLOCK. The
+          passwordless copy above says the way back is `quince auth reset` — true when a passkey is
+          your one credential and it is lost. In these two states there is no working credential at
+          this address ALREADY, so a reset is not a way back in; it clears what is there and leaves
+          the install in first-run, which the form above reaches without a shell. Telling a user to
+          go and find a console when the fix is one field away would be the more expensive mistake,
+          and it is exactly the copy the old single branch would have shown them. */}
+      {credentials === "elsewhere-only" || credentials === "unconfigured" ? (
+        <section>
+          <h2 className="text-sm font-semibold">
+            {credentials === "unconfigured"
+              ? "This quince has no way to sign in"
+              : "No passkey of yours works at this address"}
+          </h2>
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            Use the form above — you are signed in now, so you can set a password without console
+            access. <code className="font-mono text-fg">quince auth reset</code> is not the way back
+            from here: it clears credentials rather than restoring them, and you would still have to
+            set one afterwards.
+          </p>
+        </section>
+      ) : null}
+      {hasPassword ? (
       <section>
         <h2 className="text-sm font-semibold">Sign in with a passkey only</h2>
         <p className="mt-1 max-w-xl text-sm text-muted">
@@ -243,7 +333,7 @@ export function PasswordControls() {
           </Button>
         )}
       </section>
-      )}
+      ) : null}
     </div>
   );
 }
