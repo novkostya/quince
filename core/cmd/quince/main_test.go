@@ -878,3 +878,138 @@ func TestInsecureTransportOptInAppliesLiveInBothDirections(t *testing.T) {
 		}
 	}
 }
+
+// `tls.cert_file`/`.key_file` applied LIVE — the last thing quince#900 needs (the mux is
+// already bound whether or not a certificate exists). Three transitions, and the middle one is
+// the reason the applier warns rather than refuses.
+func TestTLSPathsApplyLive(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "applied")
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cfgSvc := config.NewService(filepath.Join(dir, "config.yml"), quiet)
+	keeper := tlsx.NewEmptyKeeper()
+	subscribeTLS(cfgSvc, keeper, quiet)
+
+	// Validate refuses a config with no storage declared, and every Replace below goes through
+	// it — so the fixture carries one. It is the section this test does not touch.
+	base := cfgSvc.Current()
+	base.Storage = &[]config.StorageEntry{{Name: "test", Path: filepath.Join(dir, "backups"), Default: true, Backend: "copy"}}
+
+	if keeper.HasCertificate() {
+		t.Fatal("the keeper started with a certificate; this test cannot observe one arriving")
+	}
+
+	// ON — the transition the whole issue exists for.
+	on := base
+	on.TLS.CertFile, on.TLS.KeyFile = certFile, keyFile
+	errs, warns, err := cfgSvc.Replace(on)
+	if err != nil || len(errs) > 0 {
+		t.Fatalf("turning TLS on: errs=%v err=%v", errs, err)
+	}
+	if len(warns) > 0 {
+		t.Errorf("applying a usable certificate warned: %+v", warns)
+	}
+	if !keeper.HasCertificate() {
+		t.Fatal("the certificate was written and NOT applied — turning TLS on still needs a restart")
+	}
+
+	// A BAD EDIT: saved, warned, and the incumbent keeps serving. The applier cannot refuse —
+	// the file is already on disk — so the warning is the whole of the honesty here.
+	bad := base
+	bad.TLS.CertFile, bad.TLS.KeyFile = filepath.Join(dir, "gone.pem"), filepath.Join(dir, "gone.key")
+	if _, warns, err = cfgSvc.Replace(bad); err != nil {
+		t.Fatalf("writing an unusable pair: %v", err)
+	}
+	if !keeper.HasCertificate() {
+		t.Error("a bad path edit took TLS DOWN — a config typo must not cost the daemon its https")
+	}
+	var named bool
+	for _, w := range warns {
+		if strings.Contains(w.Message, "NOT applied") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("an unapplied certificate produced no warning: %+v — the file says one thing "+
+			"and the process is doing another, silently", warns)
+	}
+
+	// OFF — clearing both keys drops the certificate, which is the revert direction.
+	off := base
+	if _, _, err = cfgSvc.Replace(off); err != nil {
+		t.Fatalf("turning TLS off: %v", err)
+	}
+	if keeper.HasCertificate() {
+		t.Error("clearing tls.cert_file left the certificate in place, so nothing can turn TLS " +
+			"back off without a restart")
+	}
+}
+
+// The two appliers compose into the flow quince#900 exists to unblock: apply a certificate,
+// have the plain half start redirecting, then take the plaintext opt-in back down — all in one
+// process. Asserted end to end because each half was proved separately above, and the claim
+// that matters is that they agree.
+func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "flow")
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cfgSvc := config.NewService(filepath.Join(dir, "config.yml"), quiet)
+	authSvc := newDemoAuth(t)
+	keeper := tlsx.NewEmptyKeeper()
+	subscribeTLS(cfgSvc, keeper, quiet)
+	subscribeInsecureTransport(cfgSvc, authSvc, quiet)
+
+	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
+	plain := plainHalf(app, keeper, func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport })
+	code := func() int {
+		rec := httptest.NewRecorder()
+		plain.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/", nil))
+		return rec.Code
+	}
+
+	base := cfgSvc.Current()
+	base.Storage = &[]config.StorageEntry{{Name: "test", Path: filepath.Join(dir, "backups"), Default: true, Backend: "copy"}}
+
+	// Where a first-run install on a LAN starts: no certificate, and the opt-in on so the
+	// cookie survives plain http.
+	start := base
+	start.Sessions.AllowInsecureTransport = true
+	if _, _, err := cfgSvc.Replace(start); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusOK {
+		t.Fatalf("status %d before any certificate, want 200", got)
+	}
+	if authSvc.Secure(httptest.NewRequest("GET", "http://quince.example:8968/", nil)) {
+		t.Fatal("the opt-in did not reach the auth service")
+	}
+
+	// Apply the certificate. The opt-in still beats the redirect, per the Operator's ruling.
+	withCert := start
+	withCert.TLS.CertFile, withCert.TLS.KeyFile = certFile, keyFile
+	if _, _, err := cfgSvc.Replace(withCert); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusOK {
+		t.Errorf("status %d with a certificate AND the opt-in, want 200 — the opt-in beats the "+
+			"redirect and applying a certificate must not silently override it", got)
+	}
+
+	// Withdraw the opt-in: the last step of keeping the certificate, and the one that was
+	// impossible in a running process before quince#900.
+	final := withCert
+	final.Sessions.AllowInsecureTransport = false
+	if _, _, err := cfgSvc.Replace(final); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusMovedPermanently {
+		t.Errorf("status %d after the opt-in was withdrawn, want 301", got)
+	}
+	if !authSvc.Secure(httptest.NewRequest("GET", "http://quince.example:8968/", nil)) {
+		t.Error("the cookie relaxation survived the setting being withdrawn — the two halves of " +
+			"one security setting have gone out of step, which is the failure this PR pair " +
+			"exists to make impossible")
+	}
+}
