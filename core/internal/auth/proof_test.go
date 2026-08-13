@@ -155,8 +155,12 @@ func TestAProofCannotBeSpentByAnotherSession(t *testing.T) {
 	p, _ := newProofs(t)
 
 	tok := mustMint(t, p, OpRemovePassword, "", ProofSubject{CredentialID: cred1})
-	if _, err := p.Consume(tok, OpRemovePassword, "", "another-session"); !errors.Is(err, ErrProofNotForThis) {
-		t.Fatalf("Consume under another session = %v, want ErrProofNotForThis", err)
+	// ErrNoProof, NOT ErrProofNotForThis — spec review. The error is chosen by the REMEDY, and a
+	// session mismatch shares ErrNoProof's: start again. The other error's sentence would have been
+	// literally false here ("issued for a different operation" — it was not), and its stated cause,
+	// a client bug, would send a user to fix something that is not broken.
+	if _, err := p.Consume(tok, OpRemovePassword, "", "another-session"); !errors.Is(err, ErrNoProof) {
+		t.Fatalf("Consume under another session = %v, want ErrNoProof", err)
 	}
 }
 
