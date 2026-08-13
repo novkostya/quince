@@ -9,8 +9,8 @@ import { fieldBase } from "./field";
 //
 // **iOS capitalises the first letter of a text field by default**, and the software keyboard opens
 // shifted. Every free-text field quince has is a case-sensitive technical identifier — a path, a ZFS
-// dataset, a hostname, a remote user, a socket address — so the platform default turns `pool/backups`
-// into `Pool/backups`, `nas.local` into `Nas.local` and `zfsuser` into `Zfsuser`. Each of those is a
+// dataset, a hostname, a remote user, a socket address — so the platform default turns `rpool/quince`
+// into `Rpool/quince`, `nas.local` into `Nas.local` and `quince` into `Quince`. Each of those is a
 // value that fails somewhere else later: a dataset that does not exist, a host that does not resolve,
 // a user with no `authorized_keys` entry. **The failure never names the capital letter.**
 //
