@@ -31,8 +31,8 @@ type TLSRequirement struct {
 	KeyFile  string
 
 	// Unusable is the fault: the pair could not be loaded. Detail is the reason, already
-	// phrased to name the file — tlsx.NewKeeper does that mapping, because the standard
-	// library's own message for a mismatched pair contains no path at all.
+	// phrased to name the file — tlsx.Keeper's classify does that mapping, because the
+	// standard library's own message for a mismatched pair contains no path at all.
 	Unusable bool
 	Detail   string
 }
@@ -44,8 +44,12 @@ type TLSRequirement struct {
 func (r TLSRequirement) OK() bool { return !r.Unusable }
 
 // CheckTLS decides whether the configured certificate can be served. load is the loader —
-// tlsx.NewKeeper in production, a stub in tests — and is called ONLY when both keys are set,
-// so a deployment with TLS off touches no filesystem.
+// (*tlsx.Keeper).SetFiles in production, a stub in tests — and is called ONLY when both keys
+// are set, so a deployment with TLS off touches no filesystem.
+//
+// It was `tlsx.NewKeeper` until quince#900, and naming the old one here would now be worse
+// than vague: `NewKeeper` has no production caller at all, so a reader following this comment
+// to learn what the loader is would land on a function nothing calls.
 func CheckTLS(c Config, load func(certFile, keyFile string) error) TLSRequirement {
 	r := TLSRequirement{CertFile: c.TLS.CertFile, KeyFile: c.TLS.KeyFile}
 	if !c.TLS.Enabled() {
