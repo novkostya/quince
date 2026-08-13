@@ -48,6 +48,14 @@ test("Add storage sits at the foot of Storage, probes a real path, and reports t
   // Nothing is offered before a probe: the form is probe-first, so there is nothing to save yet.
   await expect(page.getByTestId("add-storage-save")).toBeDisabled();
 
+  // ENTER RUNS THE CHECK. A text input beside a button is a form to anybody who types, and on the
+  // first-run screen *Path* + *Check* is the ONLY control on the page — so Enter is the natural next
+  // keystroke, and it used to do nothing at all: no check, no error, no movement (Operator, from a
+  // phone, 2026-08-13). Asserted before the click path below, which is the one that already worked.
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByLabel("Path").press("Enter");
+  await expect(page.getByTestId("backend-select")).toBeVisible();
+
   await page.getByLabel("Path").fill("/tmp");
   await page.getByTestId("probe-check").click();
 

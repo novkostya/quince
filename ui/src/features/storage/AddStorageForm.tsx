@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,30 @@ function serverSentence(err: unknown, fallback: string): string {
     return err.message;
   }
   return fallback;
+}
+
+// onEnter runs a field's own action when Enter is pressed, and only while that action is available.
+//
+// A TEXT INPUT BESIDE A BUTTON IS A FORM TO ANYBODY WHO TYPES. On the first-run screen *Path* +
+// *Check* is the only control on the page, so Enter is the natural next keystroke and it did
+// nothing at all — no check, no error, no movement (Operator, from a phone, 2026-08-13).
+//
+// NOT `<form onSubmit>`, which is the obvious answer and the wrong one here: this component has
+// three independent actions — Check, Test helper, and Save — and one submit handler fires whichever
+// the browser picks, which depends on which button is first in the DOM rather than on which field
+// has focus. Save is the least recoverable of the three and would be the one it picked.
+//
+// `enabled` MIRRORS THE BUTTON'S OWN `disabled`, passed in from the same expression rather than
+// re-derived, so Enter can never reach an action a click could not. Re-deriving it is how the two
+// drift.
+function onEnter(run: () => void, enabled: boolean) {
+  return (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || !enabled) return;
+    // Stops an implicit submit if this form is ever nested in one, and stops the keypress
+    // reaching a parent handler that might navigate.
+    e.preventDefault();
+    run();
+  };
 }
 
 function bytes(n: number): string {
@@ -285,6 +309,15 @@ export function AddStorageForm({
   const isNew = probe?.outcome === "new";
   const needsZFS = isNew && backend === "zfs";
 
+  // THE BUTTONS' `disabled` AND THE ENTER KEY READ THE SAME EXPRESSION. Written once here so a
+  // later edit to one cannot leave the keyboard reaching an action the mouse cannot — see onEnter.
+  const canCheck = !checking && path.trim() !== "";
+  const canTestHelper =
+    !hookChecking &&
+    parentDataset.trim() !== "" &&
+    sshUser.trim() !== "" &&
+    sshHost.trim() !== "";
+
   // THE KEY IS FETCHED WHEN THE ZFS BRANCH OPENS, not when the form mounts (quince#818 piece B).
   // The endpoint GENERATES on its first call, so asking earlier would leave a keypair on disk for
   // every copy-backend storage anybody ever added.
@@ -342,12 +375,13 @@ export function AddStorageForm({
               setPath(e.target.value);
               setProbe(null);
             }}
+            onKeyDown={onEnter(() => void check(), canCheck)}
           />
           <Button
             variant="outline"
             size="sm"
             onClick={() => void check()}
-            disabled={checking || path.trim() === ""}
+            disabled={!canCheck}
             data-testid="probe-check"
           >
             Check
@@ -418,6 +452,7 @@ export function AddStorageForm({
                 setHelper(null);
                 setHelperError("");
               }}
+              onKeyDown={onEnter(() => void testHelper(), canTestHelper)}
             />
 
             {/* THE ARGV IS GONE (quince#818). This asked for a whole command line — the least
@@ -440,6 +475,7 @@ export function AddStorageForm({
                 setSSHHost(e.target.value);
                 setHookCheck(null);
               }}
+              onKeyDown={onEnter(() => void testHelper(), canTestHelper)}
             />
 
             <label className="mt-3 block text-sm font-medium" htmlFor="zfs-ssh-user">
@@ -457,6 +493,7 @@ export function AddStorageForm({
                 setSSHUser(e.target.value);
                 setHookCheck(null);
               }}
+              onKeyDown={onEnter(() => void testHelper(), canTestHelper)}
             />
 
             {/* THE KEY, AND THE LINE THAT CONSTRAINS IT (quince#818 piece B). Before this, a user had
@@ -572,12 +609,7 @@ export function AddStorageForm({
                 variant="outline"
                 size="sm"
                 onClick={() => void testHelper()}
-                disabled={
-                  hookChecking ||
-                parentDataset.trim() === "" ||
-                sshUser.trim() === "" ||
-                sshHost.trim() === ""
-                }
+                disabled={!canTestHelper}
                 data-testid="test-helper"
               >
                 Test helper
