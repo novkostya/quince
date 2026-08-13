@@ -198,3 +198,51 @@ func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
 		Errors []wire.ConfigError `json:"errors"`
 	}{Errors: []wire.ConfigError{{Path: path, Message: msg}}})
 }
+
+// handleStorageZFSKey serves POST /api/storages/zfs/key → 200 {key} | 500 (contracts §1,
+// quince#818 piece B).
+//
+// It answers *"what key should I put on my ZFS host?"* — and it can only ever answer about ONE path,
+// `config.DefaultZFSKeyPath`, which is quince's own `/data/keys/zfs`.
+//
+// NO PATH IN THE REQUEST, and that is the security shape rather than a missing feature. A
+// caller-supplied path would make this an authenticated *write-a-file-anywhere* primitive whose
+// contents happen to be a private key; refusing to take one means the endpoint has no reachable
+// target but its own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses
+// this button — the field stays settable for exactly that case.
+//
+// IT DISCOVERS BEFORE IT GENERATES, which is the property that protects existing installs. A key
+// already at that path may have its public half in an `authorized_keys` on a host quince cannot see,
+// so replacing it would break a working storage silently, with the failure surfacing at the next
+// backup rather than here. `EnsureZFSKey` therefore has no force flag, and a file that is not a key
+// is a REFUSAL rather than a reason to overwrite.
+//
+// THE PRIVATE HALF NEVER REACHES THE RESPONSE. `storage.ZFSKey` carries only the public line, the
+// complete `authorized_keys` line, the path, and whether it was just created — the same discipline
+// backup passwords follow. `Created` is on the wire because the form must be able to say *found
+// yours* rather than *made you one*.
+func (d Deps) handleStorageZFSKey() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := d.ZFSKeyPath
+		if path == "" {
+			path = config.DefaultZFSKeyPath
+		}
+		k, err := storage.EnsureZFSKey(path)
+		if err != nil {
+			// THE DAEMON'S OWN SENTENCE, because the two reachable failures both need the operator to
+			// do something specific: a `/data` that is not writable, and a file at that path which is
+			// not a key. A generic "could not create key" would name neither.
+			d.Log.Error("zfs key", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "zfs_key", err.Error())
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSKeyResponse{
+			Key: wire.StorageZFSKey{
+				Path:           k.Path,
+				PublicKey:      k.PublicKey,
+				AuthorizedKeys: k.AuthorizedKeys,
+				Created:        k.Created,
+			},
+		})
+	}
+}

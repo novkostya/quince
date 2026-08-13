@@ -608,6 +608,7 @@ POST /api/storages/{name}/recheck                          → 200 {storage} | 4
 POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
+POST /api/storages/zfs/key    (NO BODY — see below)        → 200 {key} | 500
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -711,6 +712,46 @@ and `ssh_key` are absent from that list deliberately**: both default, so an omit
 ordinary request rather than a malformed one.
 
 **§2 carries `StorageHookCheck`.** Spec: `docs/specs/qn.6e/qn.6e.md`, G8.
+
+**RULED and IMPLEMENTED: `POST /api/storages/zfs/key` — quince's own helper key** (quince#818 piece
+B, under the ruling relayed at
+[issuecomment-5245496176](https://github.com/novkostya/quince/issues/818#issuecomment-5245496176)).
+
+It answers *"what do I put on my ZFS host?"* — returning the key at `/data/keys/zfs` and
+**generating one only if there is nothing there.**
+
+**IT TAKES NO BODY, AND THAT IS THE SECURITY SHAPE RATHER THAN A MISSING FEATURE.** A
+caller-supplied path would make this an authenticated *write-a-file-anywhere* primitive whose
+contents happen to be a private key. Taking none means the endpoint has no reachable target but
+quince's own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses the
+button — which is why that field stays settable.
+
+**DISCOVERY BEFORE GENERATION, and it is the property that protects existing installs.** A key
+already at that path may have its public half in an `authorized_keys` on a host quince cannot see;
+replacing it breaks a working storage **silently**, with the failure surfacing at the next backup
+rather than at the press. So there is no force flag, and **a file that is not a key is a refusal**
+rather than a reason to overwrite.
+
+**`created` IS ON THE WIRE BECAUSE THE SCREEN MUST SAY WHICH.** *"quince made you a key"* and
+*"quince found the one it made earlier"* call for different next steps — the first has to be pasted,
+the second may already be installed — and guessing wrong invites replacing an entry that works.
+
+**BOTH THE PUBLIC KEY AND THE COMPLETE `authorized_keys` LINE ARE SERVED**, and the line is the
+artifact. `command="/usr/local/sbin/quince-zfs-helper"` is what pins the helper regardless of what
+the client asks for, so serving a bare key would invite pasting one — an unconstrained shell login
+on the storage host rather than a helper bounded to one dataset.
+
+**THE PRIVATE HALF NEVER REACHES THE RESPONSE.** Not on the type, never logged, never in a fixture —
+the discipline backup passwords already follow. `ed25519` is generated **in-process**
+(`crypto/ed25519` + `x/crypto/ssh`, already a direct dependency) rather than by `ssh-keygen`, so it
+never passes through argv, a temp file or another process. `ssh-keygen` **is** in the runtime image;
+this is a choice, not a necessity.
+
+**`500` rather than a `422`**, because neither reachable failure is the caller's fault: a `/data`
+quince cannot write, and something at that path which is not a key. Both carry the daemon's own
+sentence, since a generic *"could not create key"* would name neither.
+
+**§2 carries `StorageZFSKey`.**
 
 **The `?udid=` form and the re-probe were BUILT by `qn.6c` and never listed here** — they existed
 only in the prose below and in §2's `will_be_full` comment. Listing them is a drift correction, not
@@ -1546,6 +1587,26 @@ own message is the whole answer to why a key does not work.
 
 **`reason` is quince's sentence and is safe to render anywhere**, which is the split: `reason` for
 the UI, `detail` for the user's eyes on their own machine.
+
+### StorageZFSKey (`quince#818`)
+
+`POST /api/storages/zfs/key`'s answer. §1 carries the endpoint's rules; this is the shape.
+
+```jsonc
+{
+  "path":            "/data/keys/zfs",   // where the PRIVATE half lives; never its contents
+  "public_key":      "ssh-ed25519 AAAA… quince",
+  "authorized_keys": "command=\"/usr/local/sbin/quince-zfs-helper\",no-port-forwarding,… ssh-ed25519 AAAA… quince",
+  "created":         true                // false when quince FOUND a key already there
+}
+```
+
+**EVERY FIELD IS SAFE TO RENDER.** The private half is not on the type, is never logged and is never
+in a fixture — the discipline `StorageHookCheck.detail` needs a paragraph for, this one gets by
+construction.
+
+**`authorized_keys` IS THE ARTIFACT and `public_key` is context.** The forced command is what bounds
+quince on the host, so the two are one string rather than a key plus a suggestion.
 
 ## 3. WebSocket (`/api/ws`)
 
