@@ -36,14 +36,33 @@ export function OnboardingStoragePage() {
   const discarded = cfg.data?.discarded ?? false;
 
   return (
-    <div className="mx-auto min-h-dvh max-w-xl px-6 pb-16 pt-10">
-      {/* THE HEADLINE BRANCHES ON THE FATALITY; THE WARNINGS RENDER EITHER WAY. Those are two
+    // THE PADDING IS ON THE OUTER BOX AND THE WIDTH ON THE INNER ONE, and swapping them is not
+    // cosmetic. `box-sizing: border-box` means a `max-w-xl` that also carries `px-6` caps the
+    // element at 36rem INCLUDING the padding, so its content is 33rem — while `AuthPage`'s page
+    // variant, which puts the padding outside, gets a full 36rem. This screen and *Set an admin
+    // password* are consecutive steps of one flow and sat 48px apart, from two rules that both
+    // read `max-w-xl`.
+    //
+    // AuthPage's own comment says it was built to look like THIS page. It could not, because the
+    // difference is where the padding sits rather than what either file says the width is.
+    //
+    // The safe-area insets come with it, for the reason AuthPage carries them: this flow is walked
+    // from a phone, and `px-6` alone does not clear a notch.
+    <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
+      <div className="mx-auto w-full max-w-xl">
+        {/* THE WORDMARK, which the other two first-run steps carry and this one did not. Onboarding
+            is three consecutive full-page steps — password, https, storage — and it was the only
+            one that dropped it, so the flow lost its anchor exactly once, in the middle. Same
+            element and size as `AuthPage` and `OnboardingHTTPSPage` rather than a copy that can
+            drift in one place. */}
+        <div className="text-lg font-semibold tracking-tight">quince</div>
+        {/* THE HEADLINE BRANCHES ON THE FATALITY; THE WARNINGS RENDER EITHER WAY. Those are two
           different decisions and running them together is what this screen got wrong twice — first
           by claiming the operator had no storage when their file declared one, then by saying
           something true-of-both because the wire could not tell the cases apart. */}
       {discarded ? (
         <>
-          <h1 className="text-xl font-semibold tracking-tight">
+          <h1 className="mt-4 text-xl font-semibold tracking-tight">
             quince could not read your configuration
           </h1>
           {/* THE FACT THE OPERATOR CAME FOR, and it is not the same as "there is a problem": their
@@ -56,7 +75,7 @@ export function OnboardingStoragePage() {
         </>
       ) : (
         <>
-          <h1 className="text-xl font-semibold tracking-tight">Add your first storage</h1>
+          <h1 className="mt-4 text-xl font-semibold tracking-tight">Add your first storage</h1>
           <p className="mt-2 text-sm text-muted">
             quince needs somewhere to keep backups before it can do anything else. Point it at a
             folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
@@ -155,6 +174,7 @@ export function OnboardingStoragePage() {
             </div>
           )}
         />
+        </div>
       </div>
     </div>
   );

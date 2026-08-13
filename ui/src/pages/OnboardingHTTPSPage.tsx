@@ -32,10 +32,20 @@ export function OnboardingHTTPSPage() {
     // that does NOT is `lvh` — and this route is a sibling of `AppLayout` rather than a child, so
     // the document scrolls. A transient lag during the toolbar animation costs a brief scroll, not
     // reachability. Do not "unify" this with the authed shell's rule without reading that comment.
-    <div className="min-h-dvh bg-bg pb-10 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      <div className="mx-auto w-full max-w-2xl">
+    <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
+      {/* `max-w-xl`, MATCHING THE OTHER TWO FIRST-RUN STEPS — Operator direction 2026-08-13. This
+          was `max-w-2xl`, and `AuthPage` records the reason: this step "is wider because it is
+          prose to READ". That argument does not survive being applied — 36rem is roughly 70
+          characters at this size and 42rem is roughly 85, so the narrower box is the BETTER measure
+          for prose. Onboarding is three consecutive full-page steps and the middle one sat 96px
+          wider than its neighbours.
+
+          The heading moves to `text-xl` for the same reason: AuthPage's own rule is that a PAGE's
+          heading is `text-xl` and a CARD's is `text-base`. This is a page, and it was the only one
+          taking the card's size. */}
+      <div className="mx-auto w-full max-w-xl">
         <div className="text-lg font-semibold tracking-tight">quince</div>
-        <h1 className="mt-4 text-base font-semibold">Reaching quince securely</h1>
+        <h1 className="mt-4 text-xl font-semibold tracking-tight">Reaching quince securely</h1>
 
         {q.isPending ? (
           <p className="mt-1 text-sm text-muted">Checking this connection…</p>
