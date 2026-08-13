@@ -337,5 +337,61 @@ else
 	bad "an empty gate list did not stop the build — gates would depend on nothing and pass"
 fi
 
+# --- 10. A SCOPED LADDER SAYS WHAT IT SKIPPED (quince#531) ---------------------------------------
+#
+# `make -n gates SCOPE=…` has always shown the selection as a dependency list, and that visibility
+# lives somewhere nobody stands: the session that needs to know a gate was skipped is the one
+# reading the output of the ladder it already started, not the one running a second command to ask.
+# `image` announced its own skip and the other three announced nothing, so a scoped run that
+# executed one gate out of four reported success and looked exactly like a full pass — a truncated
+# result presented as a whole one, which is what `no silent caps or fallbacks` forbids.
+#
+# ASSERTED THROUGH `gates-announce` rather than a full `make -n gates`, because the announcement is
+# the claim and a dry run of the whole ladder drags in every toolchain prerequisite.
+
+# A range that cannot touch the vault. Both halves are asserted: "what ran" without "what did not"
+# is the report that was already there and is what quince#531 is about.
+out=$(make gates-announce SCOPE=origin/main~2...origin/main 2>&1 || true)
+case $out in
+*"gates: running"*) ok "a scoped ladder names the gates it is about to run" ;;
+*)
+	bad "no 'gates: running' line — the ladder does not say what it selected"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	;;
+esac
+case $out in
+*SKIPPED*gates-vault*) ok "a scoped ladder names the gates it SKIPPED, and names the right one" ;;
+*)
+	bad "no SKIPPED gates-vault on a range that cannot touch the vault"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	;;
+esac
+
+# THE CONTROL, without which the two above pass for a target that prints SKIPPED unconditionally.
+# `SCOPE=` on the command line CONSTRUCTS the no-scope state, and MAKEFLAGS is emptied — part 9
+# above is the record of why that has to be built rather than read.
+out=$(MAKEFLAGS='' make gates-announce SCOPE= 2>&1 || true)
+case $out in
+*SKIPPED*)
+	bad "an UNSCOPED ladder claimed it skipped something — nothing is skipped when SCOPE is empty"
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	;;
+*) ok "an unscoped ladder announces no skip, because there is none (the control)" ;;
+esac
+
+# THE TWO ROSTERS MUST AGREE. The skipped set is `filter-out $(SCOPED_GATES),$(ALL_GATES)`, so a
+# gate that `gate-scope` knows about and `ALL_GATES` omits can NEVER be reported as skipped. The
+# under-report would then be exactly the gate nobody noticed was gone — this file's own subject, one
+# level up.
+all_gates=$(make -s print-all-gates 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')
+scope_gates=$("$GS" --list 2>/dev/null | sort | tr '\n' ' ')
+if [ "$all_gates" = "$scope_gates" ] && [ -n "$all_gates" ]; then
+	ok "Makefile ALL_GATES and gate-scope's unscoped list are the same set"
+else
+	bad "ALL_GATES and gate-scope disagree — the skipped set cannot name a gate ALL_GATES omits"
+	printf 'ALL_GATES:  %s\n' "$all_gates" | sed 's/^/    | /'
+	printf 'gate-scope: %s\n' "$scope_gates" | sed 's/^/    | /'
+fi
+
 printf '\ngate-scope-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
