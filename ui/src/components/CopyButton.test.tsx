@@ -71,6 +71,16 @@ describe("CopyButton", () => {
     fireEvent.click(screen.getByTestId("copy-button"));
 
     await waitFor(() => expect(screen.getByTestId("copy-button").dataset.state).toBe("failed"));
-    expect(screen.getByTestId("copy-button").textContent).toContain("⌘C");
+
+    // IT MUST SAY WHAT TO DO. The state alone is not a remedy — this is the one moment the component
+    // has to hand the operator back the job it failed at.
+    const label = screen.getByTestId("copy-button").textContent ?? "";
+    expect(label).toContain("by hand");
+
+    // AND NOT NAME A KEY THE DEVICE DOES NOT HAVE. This copy read `Press ⌘C` until quince#885's
+    // review: a Mac shortcut, on a screen whose own comment says it is used from a phone. A remedy
+    // the user cannot follow is the same defect as a silent failure (qn.6g), so the rule is asserted
+    // here rather than left to the next person to re-derive from the same wrong instinct.
+    expect(label).not.toContain("⌘");
   });
 });

@@ -20,6 +20,12 @@ import { Button } from "@/components/ui/button";
 //     by hand. A copy button that reports success it did not achieve is worse than no button: the
 //     user walks away believing they have the line, and pastes whatever was on the clipboard before.
 //
+// RUNG 3 IS NOT A NICETY, AND `execCommand` IS DEPRECATED. When browsers finally remove it, rung 2
+// disappears and rung 3 BECOMES the plain-http path — the honest failure is what keeps this screen
+// usable, not a corner nobody reaches. Its wording is load-bearing for the same reason: a remedy the
+// user cannot follow is the same defect as a silent failure (qn.6g), so it must not name a key that
+// the phone this screen is used from does not have.
+//
 // `copied` REVERTS AFTER A MOMENT so the control is reusable, and because a permanently-green button
 // stops being a report about the last press.
 type CopyState = "idle" | "copied" | "failed";
@@ -86,7 +92,7 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
       aria-label={label}
     >
       {state === "copied" ? <Check size={14} /> : <Copy size={14} />}
-      {state === "copied" ? "Copied" : state === "failed" ? "Press ⌘C" : label}
+      {state === "copied" ? "Copied" : state === "failed" ? "Copy it by hand" : label}
     </Button>
   );
 }
