@@ -251,9 +251,18 @@ func (d Deps) handleStorageZFSHelper() http.HandlerFunc {
 				writeError(w, d.Log, http.StatusInternalServerError, "zfs_helper", err.Error())
 				return
 			}
+			// THE REFUSAL NAMES THE MISTAKE THE SCREEN INVITES, which is a filesystem path — the
+			// field directly above this one on the same form takes `/backups`, and carrying that
+			// down is the obvious thing to do. The old wording said only "must be a valid ZFS
+			// dataset name", which is true, unarguable, and no help at all to somebody looking at
+			// `/backups` and seeing nothing wrong with it (Operator, from a phone, 2026-08-13).
+			//
+			// qn.6g's rule: a remedy the user cannot follow is the same defect as a silent failure.
 			hookCheck422(w, d, "parent_dataset",
-				"must be a valid ZFS dataset name — quince puts this straight into the helper "+
-					"script, so a name it cannot vouch for is refused rather than escaped")
+				"must be a ZFS dataset name like `rpool/quince` — a pool and a path inside it, with "+
+					"no leading `/`. This is not the folder path from the field above. quince puts "+
+					"it straight into the helper script, so a name it cannot vouch for is refused "+
+					"rather than escaped")
 			return
 		}
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHelperResponse{
