@@ -589,6 +589,30 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   await expect(copy).toHaveAttribute("data-state", "copied");
   await expect(copy).toContainText("Copied");
 
+  // AND THE CLIPBOARD ACTUALLY HOLDS THE LINE — which is a different claim from the one above, and
+  // the gap is exactly what this component exists to close. `data-state="copied"` means
+  // `execCommand` RETURNED TRUE; it does not mean anything reached the clipboard. Asserting only the
+  // button's own report would be trusting the component's self-assessment to prove the component,
+  // which is the shape of every green check this project has had to withdraw.
+  //
+  // So paste it back. `navigator.clipboard.readText` is unavailable here — insecure context, the
+  // same reason rung 1 does not work — so the read goes through a real paste into a real field.
+  await page.evaluate(() => {
+    const ta = document.createElement("textarea");
+    ta.id = "e2e-paste-target";
+    document.body.appendChild(ta);
+    ta.focus();
+  });
+  await page.keyboard.press("ControlOrMeta+V");
+  const contents = await page.evaluate(() => {
+    const ta = document.getElementById("e2e-paste-target") as HTMLTextAreaElement | null;
+    const v = ta?.value ?? "";
+    ta?.remove();
+    return v;
+  });
+  expect(contents).toContain('command="/usr/local/sbin/quince-zfs-helper"');
+  expect(contents).toContain("ssh-ed25519 ");
+
   // THE PANEL IS ZFS-ONLY. A copy-backend storage must not cause a keypair to be generated at all,
   // which is why the fetch is on the branch rather than on mount.
   await page.getByTestId("backend-select").selectOption("copy");
