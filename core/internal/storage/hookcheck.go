@@ -131,8 +131,22 @@ func CheckHook(ctx context.Context, parentDataset string, hookArgv []string) Hoo
 		// first run. `list` returns the @quince-* snapshots under the parent, and a storage with no
 		// backups yet has none — so the correct, working, freshly-installed case answers exit 0 with
 		// nothing on stdout. Only the error matters here; the output is never inspected for content.
+		// IT REPORTS WHAT IT MEASURED, AND SNAPSHOTTING IS NOT THAT (Operator, 2026-08-13).
+		//
+		// This read "— quince can snapshot here", which is an INFERENCE from two READ-ONLY verbs.
+		// The check runs `capacity` and `list`; it never attempts `snapshot`, deliberately, because
+		// a form must not create anything on the operator's pool to answer a question. So a helper
+		// whose `snapshot)` arm is missing, mistyped, or refused by zfs permissions passes both
+		// verbs and this sentence, and fails at commit — after a multi-hour Wi-Fi transfer, which
+		// is the exact failure `Test helper` exists to move earlier.
+		//
+		// The three things it DOES prove are worth naming individually, because each is a separate
+		// way to be wrong and the operator has just typed all three: the key reached the host, the
+		// forced command ran, and the dataset the helper is pinned to is the one in the form.
 		return HookCheck{Outcome: HookOK,
-			Reason: "the helper answered and its parent dataset matches — quince can snapshot here",
+			Reason: "the key, the forced command and the parent dataset all line up — the helper " +
+				"answered both read-only checks. Writing is not tested here: the first backup is " +
+				"what proves that",
 			Detail: strings.TrimSpace(capOut)}
 
 	case capErr != nil && listErr == nil:

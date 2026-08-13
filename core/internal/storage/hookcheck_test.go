@@ -368,3 +368,47 @@ func TestTheRealHelperBoundsRollback(t *testing.T) {
 		}
 	})
 }
+
+// THE `ok` REASON MUST NOT CLAIM WHAT THE CHECK DID NOT DO (Operator, 2026-08-13).
+//
+// It read "quince can snapshot here", which is an INFERENCE from two READ-ONLY verbs. `CheckHook`
+// runs `capacity` and `list` and never attempts `snapshot` — deliberately, because a form must not
+// create anything on the operator's pool to answer a question. A helper whose `snapshot)` arm is
+// missing, mistyped or refused by zfs permissions passes both verbs and would have passed that
+// sentence, then failed at commit after a multi-hour transfer. That is the exact failure this button
+// exists to move earlier.
+//
+// Asserted as a BAN plus the facts that replace it, so a future reword cannot quietly reintroduce a
+// capability claim while still reading well.
+func TestCheckHookOKClaimsOnlyWhatItMeasured(t *testing.T) {
+	requireSh(t)
+	const parent = "tank/backups"
+	zfs := `case "$*" in
+  *"-t snapshot"*) exit 0 ;;
+  *available*)     echo "10	20" ; exit 0 ;;
+  *)               exit 0 ;;
+esac`
+	got := CheckHook(context.Background(), parent, hookHarness(t, parent, zfs, helperSource(t)))
+	if got.Outcome != HookOK {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, HookOK)
+	}
+
+	// NOTHING ABOUT WRITING. `snapshot` is the verb that was not run.
+	for _, banned := range []string{"can snapshot", "will snapshot", "snapshot here"} {
+		if strings.Contains(got.Reason, banned) {
+			t.Errorf("the ok reason claims %q, which the read-only checks did not prove.\ngot: %s",
+				banned, got.Reason)
+		}
+	}
+	// AND IT NAMES THE THREE THINGS IT DID PROVE, each a separate way to be wrong and each just
+	// typed by the operator.
+	for _, want := range []struct{ fact, why string }{
+		{"key", "that it reached the host at all"},
+		{"forced command", "that the helper ran rather than a shell"},
+		{"parent dataset", "that the helper is pinned to the dataset in the form"},
+	} {
+		if !strings.Contains(got.Reason, want.fact) {
+			t.Errorf("the ok reason does not name %q — %s.\ngot: %s", want.fact, want.why, got.Reason)
+		}
+	}
+}
