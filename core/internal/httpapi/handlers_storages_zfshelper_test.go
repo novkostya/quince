@@ -112,3 +112,49 @@ func TestZFSHelperEndpointRefusalNamesParentDataset(t *testing.T) {
 		t.Fatalf("errors = %+v, want one naming parent_dataset", got.Errors)
 	}
 }
+
+// THE REFUSAL NAMES THE MISTAKE, NOT JUST THE RULE.
+//
+// A filesystem path is what a user actually types here, because the field DIRECTLY ABOVE this one
+// on the same form takes one — `/backups` — so carrying it down is the obvious move. The message
+// read "must be a valid ZFS dataset name": true, unarguable, and no use at all to somebody looking
+// at `/backups` and seeing nothing wrong with it. Reported from a phone on a first-run stand,
+// 2026-08-13, where it was the only thing between the operator and a working storage.
+//
+// ASSERTED PER FACT rather than as one substring of the whole sentence, so a reword that drops the
+// path-vs-dataset distinction fails even if what remains still reads well.
+func TestZFSHelperRefusalTellsThemItIsNotAPath(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(testDeps(t)))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	// The exact value a user carries down from the Path field above it.
+	resp := getHelper(t, srv, c, "/backups")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+
+	var got struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Errors) != 1 {
+		t.Fatalf("errors = %+v, want exactly one", got.Errors)
+	}
+	msg := got.Errors[0].Message
+
+	for _, want := range []struct{ fact, why string }{
+		{"no leading `/`", "the single thing wrong with the value they typed"},
+		{"field above", "which field they took it from — both are on one screen"},
+		{"rpool/quince", "an example, because the rule alone does not show the shape"},
+	} {
+		if !strings.Contains(msg, want.fact) {
+			t.Errorf("the refusal does not carry %q — %s.\ngot: %s", want.fact, want.why, msg)
+		}
+	}
+}

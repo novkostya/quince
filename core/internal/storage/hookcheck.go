@@ -100,8 +100,15 @@ func CheckHook(ctx context.Context, parentDataset string, hookArgv []string) Hoo
 		return HookCheck{Outcome: HookUnreachable, Reason: "no ssh transport is configured — set `ssh_user` and `ssh_host` on this storage"}
 	}
 	if !datasetPattern.MatchString(parentDataset) {
+		// SAME FIELD, SAME SCREEN, SAME WORDS as the helper endpoint's refusal — the two buttons sit
+		// inches apart on the add-storage form, so a user who mistypes this reaches whichever they
+		// press first and must not get two different explanations. Naming the likely mistake is the
+		// point: the field above takes `/backups`, so a filesystem path is what gets carried down
+		// (Operator, from a phone, 2026-08-13).
 		return HookCheck{Outcome: HookUnreachable,
-			Reason: "that is not a valid ZFS dataset name, so quince did not run anything"}
+			Reason: "that is not a ZFS dataset name — quince expects a pool and a path inside it, " +
+				"like `rpool/quince`, with no leading `/`. It is not the folder path from the field " +
+				"above, and quince did not run anything"}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, hookCheckTimeout)
