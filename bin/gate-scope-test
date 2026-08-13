@@ -349,28 +349,56 @@ fi
 # ASSERTED THROUGH `gates-announce` rather than a full `make -n gates`, because the announcement is
 # the claim and a dry run of the whole ladder drags in every toolchain prerequisite.
 
-# A range that cannot touch the vault. Both halves are asserted: "what ran" without "what did not"
-# is the report that was already there and is what quince#531 is about.
-out=$(make gates-announce SCOPE=origin/main~2...origin/main 2>&1 || true)
+# THE SELECTION IS CONSTRUCTED, NOT READ, AND THAT IS THE WHOLE OF THIS BLOCK'S CORRECTNESS.
+#
+# The first version passed `SCOPE=origin/main~2...origin/main` — a real range over live history —
+# and asserted that `gates-vault` came back SKIPPED. **That reddened `main` within the hour.** The
+# range means a different pair of commits every time anything merges, and on CI it resolved to a set
+# that required all four gates, so there was no SKIPPED line and the assertion failed. Nothing was
+# wrong with the code it was testing.
+#
+# It is the FOURTH time this file has been bitten by the same thing, and part 9 above says so in as
+# many words: *"an assertion about a default has to build the default"* and *"the third time this
+# repository has been bitten by an assertion that reads a state instead of building one."* Written
+# out again here rather than cross-referenced, because the previous three were about SCOPE reaching
+# make and this one is about the SELECTION, so a reader following the citation lands on the right
+# lesson wearing the wrong clothes.
+#
+# `SCOPED_GATES` is a command-line override, which outranks the `:=` in the Makefile. So this asks
+# the question the announcement actually answers — *given this selection, what do you print* — with
+# no git history in the loop at all. `gate-scope`'s own decisions are covered exhaustively by parts
+# 1-8 against the hermetic fixture repo; they do not need re-testing through a recipe.
+#
+# `SCOPE` IS DECORATIVE HERE and only reaches the printed message, so it is a word rather than a
+# range. Make still evaluates the parse-time `$(shell bin/gate-scope --list …)` with it and
+# gate-scope FAIL-SAFES ALOUD — *"cannot resolve the range … running every gate"* — on stderr, which
+# `2>&1` captures into `$out`. **That warning is expected, is the tool behaving correctly (part 2
+# asserts exactly it), and cannot affect this assertion**, because the value it computes is the one
+# the command line overrides. Said here so a reader meeting it in a passing suite does not go
+# looking for a fault.
+out=$(make gates-announce SCOPED_GATES='gates-go gates-sh' SCOPE='<constructed>' 2>&1 || true)
 case $out in
-*"gates: running"*) ok "a scoped ladder names the gates it is about to run" ;;
+*"gates: running gates-go gates-sh"*) ok "a scoped ladder names the gates it is about to run" ;;
 *)
 	bad "no 'gates: running' line — the ladder does not say what it selected"
 	printf '%s\n' "$out" | sed 's/^/    | /'
 	;;
 esac
+# BOTH missing gates, not just one: `filter-out` returning a partial set would satisfy a check for
+# either name alone.
 case $out in
-*SKIPPED*gates-vault*) ok "a scoped ladder names the gates it SKIPPED, and names the right one" ;;
+*SKIPPED*gates-vault*gates-ui*) ok "…and names BOTH gates it SKIPPED, in the ALL_GATES order" ;;
 *)
-	bad "no SKIPPED gates-vault on a range that cannot touch the vault"
+	bad "the SKIPPED line does not name both gates-vault and gates-ui"
 	printf '%s\n' "$out" | sed 's/^/    | /'
 	;;
 esac
 
 # THE CONTROL, without which the two above pass for a target that prints SKIPPED unconditionally.
-# `SCOPE=` on the command line CONSTRUCTS the no-scope state, and MAKEFLAGS is emptied — part 9
-# above is the record of why that has to be built rather than read.
-out=$(MAKEFLAGS='' make gates-announce SCOPE= 2>&1 || true)
+# Constructed the same way and for the same reason: the full roster as the selection means nothing
+# is missing, so nothing may be announced as missing. `MAKEFLAGS=''` is part 9's lesson — a
+# command-line SCOPE in a parent make reaches this sub-make through it.
+out=$(MAKEFLAGS='' make gates-announce SCOPED_GATES="$(make -s print-all-gates)" SCOPE= 2>&1 || true)
 case $out in
 *SKIPPED*)
 	bad "an UNSCOPED ladder claimed it skipped something — nothing is skipped when SCOPE is empty"
