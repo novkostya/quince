@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
-import { passkeysKey, usePasskeyList, type PasskeyList } from "@/features/settings/Passkeys";
+import { passkeysKey, usePasskeyList, rpIDOf, worksHere, passkeysSupported, type PasskeyList } from "@/features/settings/Passkeys";
 
 // The password controls on `/settings/auth` — qn.6m slice 6b, D4 and D7.
 //
@@ -73,9 +73,9 @@ function credentialState(data: PasskeyList | undefined, hasPassword: boolean): C
   if (hasPassword) return "has-password";
   const rows = Array.isArray(data?.passkeys) ? data.passkeys : [];
   if (rows.length === 0) return "unconfigured";
-  const rpID = typeof data?.rp_id === "string" ? data.rp_id : "";
+  const rpID = rpIDOf(data);
   if (!rpID) return "passwordless";
-  return rows.some((p) => p.rp_id === rpID) ? "passwordless" : "elsewhere-only";
+  return rows.some((p) => worksHere(rpID, p.rp_id)) ? "passwordless" : "elsewhere-only";
 }
 
 // The rpIds the credentials DO belong to, so the warning can name them. Same reasoning as the
@@ -100,6 +100,12 @@ export function PasswordControls() {
   const list = usePasskeyList();
   const hasPassword = list.data?.has_password ?? true;
   const credentials = credentialState(list.data, hasPassword);
+  const elsewhere = boundElsewhere(list.data);
+  // WHETHER THIS ADDRESS CAN HOLD A PASSKEY AT ALL — a different question from whether an existing
+  // one works here, and the one that decides whether the second remedy below is offerable. Read
+  // through the shared helper so this cannot answer differently from the `Passkeys` card, which is
+  // the defect the review found.
+  const canHoldPasskeys = passkeysSupported(list.data);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [changeBusy, setChangeBusy] = useState(false);
@@ -177,13 +183,35 @@ export function PasswordControls() {
             way in that does not depend on a device.
           </p>
         ) : null}
+        {/* THE SECOND REMEDY IS CONDITIONAL, AND OMITTING IT IS THE WHOLE FIX — quince#888 item 2
+            review. This said *"Set a password to fix that, or add a passkey for this address"*
+            unconditionally, while `Passkeys` ten lines above said *"an address like this cannot hold
+            a passkey"* with its Add button disabled. Two sections of one screen answering the same
+            question differently, and the sentence pointed at the one the user cannot follow.
+
+            AT A BARE IP THAT IS THE ONLY REACHABLE SHAPE OF THIS STATE, not a corner: `RPIDFromRequest`
+            returns the IP rather than "", so the unknown-rpId fallback above never fires, and
+            `isUsableRPID` refuses an IP, so no credential can ever match it. Every passwordless
+            install with a passkey, reached at its address, landed here.
+
+            `qn.6g`: a remedy the user cannot follow is the same defect as a silent failure. Saying
+            WHY it is not offered is left to the section above, which already says it in full — a
+            silent omission is honest, a contradiction is not.
+
+            NAMED ADDRESSES ONLY WHEN THERE ARE ANY. A row with an empty `rp_id` cannot be produced by
+            this server, but it would have rendered "registered for ." rather than degrading. */}
         {credentials === "elsewhere-only" ? (
           <p className="mt-1 max-w-xl text-sm text-warn">
-            This quince has no password, and none of its passkeys works at this address — they are
-            registered for{" "}
-            <span className="font-mono">{boundElsewhere(list.data).join(", ")}</span>. A passkey only
-            works at the address it was created on, so nothing can sign in here at the moment. Set a
-            password to fix that, or add a passkey for this address.
+            This quince has no password, and none of its passkeys works at this address
+            {elsewhere.length > 0 ? (
+              <>
+                {" — they are registered for "}
+                <span className="font-mono">{elsewhere.join(", ")}</span>
+              </>
+            ) : null}
+            . A passkey only works at the address it was created on, so nothing can sign in here at
+            the moment. Set a password to fix that
+            {canHoldPasskeys ? ", or add a passkey for this address" : ""}.
           </p>
         ) : null}
         {credentials === "unconfigured" ? (

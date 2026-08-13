@@ -46,6 +46,39 @@ export function usePasskeyList() {
   return useQuery({ queryKey: key, queryFn: () => api.get<PasskeyList>("/api/auth/passkeys") });
 }
 
+// ONE ANSWER TO "DOES A PASSKEY WORK HERE", SHARED BY BOTH SURFACES ON `/settings/auth` — quince#888
+// item 2 review. This page asks that question in three places: the per-row warning below, and twice
+// inside `PasswordControls`. They were three separate comparisons, and the review's blocking finding
+// was exactly two of them disagreeing — one section telling the user to add a passkey for this
+// address while the other said the address cannot hold one.
+//
+// SHARED BECAUSE THEY MUST NOT BE ABLE TO DISAGREE, not to save the lines. Both surfaces already
+// import `PasskeyList` from here, so this is the type's own home.
+//
+// THIS IS DESCRIBING STATE, NOT GATING AN ACTION, and the distinction is why it does not contradict
+// the comment on the removal button — that one argues against re-deriving an rpId rule to decide
+// whether an action is ALLOWED, which is the server's call. Saying what the user is looking at is
+// the client's.
+export function rpIDOf(data: PasskeyList | undefined): string {
+  return typeof data?.rp_id === "string" ? data.rp_id : "";
+}
+
+// A CREDENTIAL BOUND ELSEWHERE CANNOT SIGN IN HERE — qn.6k D2, and nothing in WebAuthn warns about
+// it. An UNKNOWN rpId answers false for every credential, which callers must read as "cannot judge"
+// rather than "locked out": `credentialState` treats that case as plain passwordless rather than
+// accusing, because a wrong lockout warning sends someone to a console for nothing.
+export function worksHere(rpID: string, credentialRPID: string): boolean {
+  return rpID !== "" && credentialRPID === rpID;
+}
+
+// CAN THIS ADDRESS HOLD A PASSKEY AT ALL — a separate question from whether an existing one works
+// here, and the one the review's blocking finding turned on. An rpId must be a domain, so at a bare
+// IP the answer is no and no certificate changes it. Absent is treated as NOT supported, so nothing
+// offers a ceremony this address may be unable to complete.
+export function passkeysSupported(data: PasskeyList | undefined): boolean {
+  return data?.supported === true;
+}
+
 
 
 export function Passkeys() {
@@ -77,10 +110,10 @@ export function Passkeys() {
   // which is exactly the malformed-response case.
   const data = list.data;
   const rows = Array.isArray(data?.passkeys) ? data.passkeys : [];
-  const rpID = typeof data?.rp_id === "string" ? data.rp_id : "";
+  const rpID = rpIDOf(data);
   // `supported` absent is treated as NOT supported, so the add button stays disabled rather than
   // offering a ceremony this address may not be able to complete.
-  const supported = data?.supported === true;
+  const supported = passkeysSupported(data);
 
   return (
     <div className="mt-8">
@@ -135,7 +168,7 @@ export function Passkeys() {
                     passkey while the phone still lists them, and nothing in the protocol says so.
                     Comparing against the SERVER's rpId rather than location.hostname is what makes
                     this agree with what would actually happen. */}
-                {rpID && p.rp_id !== rpID ? (
+                {rpID && !worksHere(rpID, p.rp_id) ? (
                   <div className="text-xs text-warn">
                     set up for <span className="font-mono">{p.rp_id}</span> — will not work at{" "}
                     <span className="font-mono">{rpID}</span>
