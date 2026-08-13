@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
+import { useAuthStatus } from "@/lib/auth";
 
 // The onboarding HTTPS check (qn.6f). Reachable with no session and with no password in
 // existence — see the route in `routes/router.tsx` and rung-ruled decision 6.
@@ -13,6 +14,16 @@ import { useOnboardingHTTPS } from "@/lib/onboarding";
 // an edit needing any of those means the pre-auth exemption is wrong for that edit.
 export function OnboardingHTTPSPage() {
   const q = useOnboardingHTTPS();
+  // FIRST RUN IS A DIFFERENT AUDIENCE, NOT A DIFFERENT PAGE (quince#908 §2). Since quince#923 a
+  // first-run visitor is SENT here rather than arriving by choice, so this page is the whole of
+  // what they can see — and what they need is a decision, where a returning user reading the same
+  // URL wants reference material.
+  //
+  // `needs_setup` AND NOTHING ELSE, deliberately: a loading or errored status renders the
+  // instructional page, which is the version that is correct for everybody. The failure direction
+  // matches `useInsecureOrigin`'s — the safe answer is the one that changes nothing.
+  const auth = useAuthStatus();
+  const firstRun = auth.data?.state === "needs_setup";
 
   // THE TIERS RENDER FOR BOTH `not complete` AND `check failed`, and they live here rather than
   // inside a branch for that reason. They are static prose: correct whether or not the server
@@ -54,10 +65,10 @@ export function OnboardingHTTPSPage() {
         ) : q.data.complete ? (
           <Complete detected={q.data.detected} />
         ) : (
-          <Incomplete />
+          <Incomplete firstRun={firstRun} />
         )}
 
-        {showTiers ? <Tiers /> : null}
+        {showTiers ? <Tiers firstRun={firstRun} /> : null}
       </div>
     </div>
   );
@@ -97,27 +108,58 @@ function Complete({ detected }: { detected: "tls" | "forwarded_proto" | "none" }
   );
 }
 
-function Incomplete() {
+function Incomplete({ firstRun }: { firstRun: boolean }) {
   return (
     <>
       <div className="mt-3 flex items-center gap-2">
         <Badge tone="warn">Not encrypted</Badge>
       </div>
       {/* The consequence first, in the user's terms. "Your browser discards the cookie" is
-          the mechanism; "you cannot sign in from your phone" is what they came here about. */}
-      <p className="mt-3 text-sm text-muted">
-        This connection is plain HTTP, so signing in from a phone or another computer will not
-        work — the browser discards the session cookie and returns you to the login page without
-        an error. Some features are also unavailable on an unencrypted connection, whatever you
-        do about signing in. Pick one of these.
-      </p>
+          the mechanism; "you cannot sign in from your phone" is what they came here about.
+
+          FIRST RUN IS A STRICTLY WORSE FACT AND SAYS SO (quince#908). A returning user cannot
+          sign in FROM ELSEWHERE and can still reach quince on localhost; a first-run user cannot
+          finish setup AT ALL, because `refuseInsecureOrigin` refuses `POST /api/auth/setup`
+          before it looks at the password. Telling them "signing in will not work" would
+          understate it — they have no account to sign in to, and the sentence would read as a
+          problem for later. */}
+      {firstRun ? (
+        <p className="mt-3 text-sm text-muted">
+          This connection is plain HTTP, so quince cannot finish setting up over it — a password
+          set here would be discarded by the browser along with the session it earns, so quince
+          refuses rather than let you set one that will not work. Nothing is wrong with quince or
+          with your network. Pick how you want to reach it.
+        </p>
+      ) : (
+        <p className="mt-3 text-sm text-muted">
+          This connection is plain HTTP, so signing in from a phone or another computer will not
+          work — the browser discards the session cookie and returns you to the login page without
+          an error. Some features are also unavailable on an unencrypted connection, whatever you
+          do about signing in. Pick one of these.
+        </p>
+      )}
     </>
   );
 }
 
 // Tiers is the static half of the page: five options that do not depend on what the check
 // returned. Rendered for a failed check as well as an unencrypted one.
-function Tiers() {
+//
+// TWO MODES, NOT A REDESIGN (quince#908 §2). Today’s bodies are good REFERENCE material and
+// survive unchanged for a returning user; first run gets a CHOOSER. Building a variant rather
+// than replacing the page is the cheaper half of that decision and the safer one — it avoids
+// making the instructional version worse in order to make the actionable one better.
+//
+// THE TEST FOR WHAT STAYS IS ONE QUESTION: does this sentence help me DECIDE? Each card
+// currently answers "is this right for me?" and "how do I do it?", and a chooser needs only
+// the first. So `quince serves both protocols on the same port` moves out — it is how-to — while
+// the plain-http card’s notification foreclosure STAYS in compressed form, because it names
+// something you permanently give up and that is a decision, not a procedure.
+//
+// THE BADGES STAY IN BOTH MODES. They are the most useful thing on the page: they rank four
+// options at a glance, which is exactly what somebody choosing needs.
+// returned. Rendered for a failed check as well as an unencrypted one.
+function Tiers({ firstRun }: { firstRun: boolean }) {
   return (
     <>
       <div className="mt-6 flex flex-col gap-4">
@@ -131,10 +173,12 @@ function Tiers() {
                 reverse proxy — Caddy, nginx, Traefik — works too, as long as it sets{" "}
                 <code className="font-mono">X-Forwarded-Proto</code>.
               </p>
-              <p className="mt-2">
-                quince needs no configuration for this: load the page over HTTPS and this check
-                completes itself.
-              </p>
+              {firstRun ? null : (
+                <p className="mt-2">
+                  quince needs no configuration for this: load the page over HTTPS and this check
+                  completes itself.
+                </p>
+              )}
             </>
           }
           docs="deploy/tls.md"
@@ -152,10 +196,15 @@ function Tiers() {
                 read-only. From <code className="font-mono">acme.sh</code>,{" "}
                 <code className="font-mono">tailscale cert</code>, or a wildcard you already have.
               </p>
-              <p className="mt-2">
-                quince serves both protocols on the same port, so this URL keeps working — it just
-                becomes HTTPS. Renewals are picked up without a restart.
-              </p>
+              {/* THE ISSUE'S OWN WORKED EXAMPLE of the test above: "quince serves both protocols
+                  on the same port" is how-to, and it goes. It is a good sentence and it answers a
+                  question the chooser has not asked yet. */}
+              {firstRun ? null : (
+                <p className="mt-2">
+                  quince serves both protocols on the same port, so this URL keeps working — it
+                  just becomes HTTPS. Renewals are picked up without a restart.
+                </p>
+              )}
             </>
           }
           docs="deploy/tls.md"
@@ -181,12 +230,24 @@ function Tiers() {
                   LAN address is not one — so this option rules out push exactly as a
                   click-through certificate does. Said now, while it is a choice, rather than
                   discovered when the feature arrives and does not work. */}
-              <p className="mt-2">
-                It also rules out notifications. Browsers only allow web push on an encrypted
-                origin, so quince will never be able to tell you that a backup is waiting for your
-                passcode. That feature is not built yet — which is exactly why it is worth knowing
-                now, while this is still a choice.
-              </p>
+              {/* COMPRESSED IN THE CHOOSER, NOT DROPPED. This paragraph names something you give
+                  up PERMANENTLY, which is decision-relevant by the test above — the only card
+                  content that survives the shortening on its own merits rather than by being
+                  short. */}
+              {firstRun ? (
+                <p className="mt-2">
+                  It also rules out notifications for good: browsers only allow web push on an
+                  encrypted origin, so quince could never tell you a backup is waiting for your
+                  passcode.
+                </p>
+              ) : (
+                <p className="mt-2">
+                  It also rules out notifications. Browsers only allow web push on an encrypted
+                  origin, so quince will never be able to tell you that a backup is waiting for
+                  your passcode. That feature is not built yet — which is exactly why it is worth
+                  knowing now, while this is still a choice.
+                </p>
+              )}
             </>
           }
           docs="deploy/tls.md"

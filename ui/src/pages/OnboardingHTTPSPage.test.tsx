@@ -125,15 +125,81 @@ describe("the onboarding HTTPS check", () => {
     expect(screen.queryByText("Put something in front of quince")).not.toBeInTheDocument();
   });
 
-  // THE PRE-AUTH GUARANTEE, as far as a component test can carry it: the page asks for exactly
-  // one endpoint, and it is the exempt one. A second call — to /api/devices, say — would be
-  // behind the auth guard and would 401 for the visitor this page exists to help.
-  it("calls only the pre-auth endpoint", async () => {
+  // THE PRE-AUTH GUARANTEE, as far as a component test can carry it: everything this page asks
+  // for is exempt from the auth guard. A call to /api/devices, say, would 401 for the one visitor
+  // this page exists to help.
+  //
+  // ASSERTED AS THE GUARANTEE, NOT AS A CALL COUNT (quince#908). This read
+  // `toHaveBeenCalledTimes(1)` — an exact proxy while the page asked for exactly one thing. The
+  // two-mode split added `GET /api/auth/status`, which is ITSELF authExempt (`middleware.go`'s
+  // list), so the guarantee held and only its proxy broke.
+  //
+  // The allowlist is SPELLED OUT rather than derived, so adding a call means editing this line and
+  // meeting the question it asks: is that endpoint pre-auth? A count would only have said
+  // "something changed", which is the same signal for a safe call and an unsafe one.
+  it("calls only pre-auth endpoints", async () => {
+    const exempt = ["/api/onboarding/https", "/api/auth/status"];
     const get = vi.spyOn(api, "get").mockResolvedValue({ complete: false, detected: "none" });
     renderPage();
     await screen.findByText("Not encrypted");
 
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith("/api/onboarding/https");
+    expect(get).toHaveBeenCalled();
+    for (const [path] of get.mock.calls) {
+      expect(exempt).toContain(path);
+    }
+  });
+});
+
+// quince#908 §2 — TWO MODES, not a redesign. A first-run visitor is SENT here since quince#923, so
+// this page is the whole of what they can see and it must read as a decision; a returning user
+// reading the same URL wants the reference material, which survives unchanged.
+describe("the two modes", () => {
+  function renderAs(state: "needs_setup" | "needs_login" | undefined) {
+    vi.spyOn(api, "get").mockImplementation(((path: string) =>
+      path === "/api/auth/status"
+        ? Promise.resolve(state === undefined ? {} : { state, csrf_token: "t" })
+        : Promise.resolve({ complete: false, detected: "none" })) as typeof api.get);
+    return renderPage();
+  }
+
+  it("tells a first-run visitor that setup cannot be completed, not that sign-in will not work", async () => {
+    renderAs("needs_setup");
+    expect(await screen.findByText(/quince cannot finish setting up over it/i)).toBeInTheDocument();
+    // The returning-user sentence would UNDERSTATE it: they have no account to sign in to, so it
+    // would read as a problem for later rather than the thing blocking them now.
+    expect(screen.queryByText(/signing in from a phone or another computer/i)).not.toBeInTheDocument();
+  });
+
+  it("drops the how-to sentences from the chooser", async () => {
+    renderAs("needs_setup");
+    await screen.findByText(/quince cannot finish setting up over it/i);
+    // The issue's own worked example of the test: this answers "how do I do it", which the
+    // chooser has not asked yet.
+    expect(screen.queryByText(/serves both protocols on the same port/i)).not.toBeInTheDocument();
+    // …and the badges STAY. They rank four options at a glance, which is what choosing needs.
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    expect(screen.getByText("Not recommended")).toBeInTheDocument();
+  });
+
+  it("keeps the permanent cost in the chooser, because that is a decision and not a procedure", async () => {
+    renderAs("needs_setup");
+    await screen.findByText(/quince cannot finish setting up over it/i);
+    expect(screen.getByText(/rules out notifications for good/i)).toBeInTheDocument();
+  });
+
+  it("leaves the reference page untouched for a returning user", async () => {
+    renderAs("needs_login");
+    expect(await screen.findByText(/signing in from a phone or another computer/i)).toBeInTheDocument();
+    expect(screen.getByText(/serves both protocols on the same port/i)).toBeInTheDocument();
+    expect(screen.queryByText(/quince cannot finish setting up over it/i)).not.toBeInTheDocument();
+  });
+
+  // THE SAFE DIRECTION, and it is the same one `useInsecureOrigin` takes: an unknown auth state
+  // renders the version that is correct for everybody. Guessing "first run" for a visitor who has
+  // an account would tell them setup is blocked when they were only trying to sign in.
+  it("falls back to the reference page when the auth state is unknown", async () => {
+    renderAs(undefined);
+    expect(await screen.findByText(/signing in from a phone or another computer/i)).toBeInTheDocument();
+    expect(screen.queryByText(/quince cannot finish setting up over it/i)).not.toBeInTheDocument();
   });
 });

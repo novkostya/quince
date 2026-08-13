@@ -107,6 +107,45 @@ arriving through another door; and `csrfExempt` is the one that looks harmless a
 these are state-changing requests from an authenticated browser. Asserted by exact path **and by
 method**, in `passkey_allowlist_test.go`.
 
+**PROPOSED (gap): a PRE-AUTH CONFIG WRITE, for the one escape a stranded first-run user can take.**
+
+<!-- gap-heading-check: ignore — the next marker in this file is the qn.6e FIRST-RUN STORAGE ruling
+     ("RULED and IMPLEMENTED: the FIRST-RUN SETUP STATE"), a different question about a different
+     subsystem, which this block neither cites nor depends on. This block's span ends at its own
+     last paragraph and nothing in it is answered below: the pre-auth config WRITE is open. -->
+
+Raised by the implementer seat 2026-08-13 while building quince#908; **nothing is built and nothing
+here is decided.** That issue's slice 6 — the plain-HTTP confirm — is stopped pending a ruling.
+
+**The dead end has no unauthenticated exit today.** On plain http at a LAN address
+`refuseInsecureOrigin` refuses `POST /api/auth/setup` **before** examining the password, so no
+credential can be obtained — and **no config-writing route is `authExempt`**; the list is nine
+routes, all auth, health, or an onboarding *read*. quince#908 §3 rules that an actionable config
+control **is** safe in `needs_setup` and only there, on the argument that `setup` is already
+authExempt and one-shot, so anyone reaching the port can claim the install outright and a config
+write grants strictly less than that. **That settles the policy and not the mechanism**, and the
+mechanism is a contracts change: the first pre-auth **mutating** endpoint in this product that is not
+about obtaining a credential.
+
+**Why it is more than plumbing: the `needs_setup` bound must be enforced by the SERVER.** An attacker
+does not use the UI, so a client-side gate is not a control. Without a server-side `Configured()`
+guard, the same route on a *configured* install is an unauthenticated *turn off the transport
+requirement* primitive — flip it, wait for the admin to sign in over plain http, read the cookie.
+That is exactly the downgrade quince#908 §3 says must not be generalised, and it would arrive by
+implementing the ruling carelessly rather than by disagreeing with it.
+
+**The shape that seems to follow**, offered as the implementer's reading rather than a decision: a
+narrow route — *not* `PUT /api/config` exempted, which would expose every key — writing only
+`sessions.allow_insecure_transport`, guarded by `auth.Configured()` exactly as `POST /api/auth/setup`
+is, closing the instant the install is claimed. `authExempt` is exact-path with no prefix support,
+which the qn.6f ruling calls a constraint rather than a style, so this would be one more literal path.
+
+**The questions that are the Operator's rather than the implementer's:** whether a pre-auth config
+write should exist at all, when the alternative is telling the user to edit `config.yml` on the box;
+whether `Configured()` is the right guard or the bound should be narrower; and whether such a route
+belongs under `/api/onboarding/`, where the qn.6f ruling deliberately exempted **step 1 only, by
+exact path**, so that no future onboarding step could be exempted by accident.
+
 **THE rpId FILTER ON `DELETE` IS THE OPPOSITE OF `configured`'s, AND BOTH ARE CORRECT.** The two ask
 different questions and the pair now lives in one file, so it is written here rather than left to be
 re-derived:
