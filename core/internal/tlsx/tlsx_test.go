@@ -191,6 +191,215 @@ func TestKeeperKeepsServingWhenReloadFails(t *testing.T) {
 	}
 }
 
+// quince#900: an install that has configured NO certificate must still produce a serving
+// Keeper. Before this the only constructor loaded a pair or failed, so "no TLS" was expressed
+// as a nil *Keeper and a branch at the bind — which is exactly what made turning TLS on need a
+// restart.
+func TestEmptyKeeperHoldsNothingAndSaysSo(t *testing.T) {
+	k := NewEmptyKeeper()
+
+	if k.HasCertificate() {
+		t.Error("a Keeper constructed with no pair reports that it has a certificate")
+	}
+	if _, err := k.GetCertificate(nil); err == nil {
+		t.Fatal("GetCertificate returned a certificate from a Keeper that holds none")
+	}
+	// changed() must not thrash on the empty pair: it stats nothing, so a handshake against an
+	// unconfigured install costs no filesystem call at all.
+	if k.changed() {
+		t.Error("changed() reports a change on a Keeper with no files configured")
+	}
+}
+
+// The handshake half of the above, over a real client, because "GetCertificate returns an
+// error" and "the TLS server refuses the connection" are different claims and the second is
+// the one the mux's TLS half now depends on.
+func TestEmptyKeeperFailsTheHandshakeRatherThanServing(t *testing.T) {
+	k := NewEmptyKeeper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "served") }),
+		ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig:         &tls.Config{GetCertificate: k.GetCertificate, MinVersion: tls.VersionTLS12},
+	}
+	go func() { _ = srv.ServeTLS(ln, "", "") }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // the point is that the SERVER refuses
+	}
+	resp, err := client.Get("https://" + ln.Addr().String() + "/") //nolint:noctx // t.Cleanup closes it
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("the handshake SUCCEEDED against a server holding no certificate — a client " +
+			"would take that for a working TLS deployment")
+	}
+}
+
+// quince#900 item 3: the Keeper learns new PATHS at runtime, which is what makes
+// `tls.cert_file`/`.key_file` live. Rotation already worked and is a different thing — same
+// paths, new content.
+func TestKeeperLearnsNewPathsAtRuntime(t *testing.T) {
+	dir := t.TempDir()
+	firstCert, firstKey := writePair(t, dir, "first")
+	secondCert, secondKey := writePair(t, dir, "second")
+
+	k, err := NewKeeper(firstCert, firstKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := k.GetCertificate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cn := leafCN(t, before); cn != "first" {
+		t.Fatalf("served CN = %q, want first", cn)
+	}
+
+	if err := k.SetFiles(secondCert, secondKey); err != nil {
+		t.Fatalf("SetFiles to a usable pair: %v", err)
+	}
+	after, err := k.GetCertificate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cn := leafCN(t, after); cn != "second" {
+		t.Errorf("after a path change the served CN is %q, want second — the Keeper is still "+
+			"serving the pair it was constructed with", cn)
+	}
+}
+
+// TLS OFF, LIVE. This is the direction the whole feature is for: an operator applies a
+// certificate, it does not work, and the setting goes back. Nothing in the process could lower
+// it before.
+func TestKeeperSetFilesEmptyTurnsTLSOff(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writePair(t, dir, "going-away")
+
+	k, err := NewKeeper(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !k.HasCertificate() {
+		t.Fatal("a freshly loaded Keeper reports no certificate")
+	}
+
+	if err := k.SetFiles("", ""); err != nil {
+		t.Fatalf("clearing the pair returned an error: %v", err)
+	}
+	if k.HasCertificate() {
+		t.Error("the certificate survived being cleared, so nothing in a running process can " +
+			"turn TLS back off")
+	}
+	if _, err := k.GetCertificate(nil); err == nil {
+		t.Error("GetCertificate still serves a certificate after the pair was cleared — the " +
+			"files are gone from the config and the handshake would still succeed")
+	}
+	// The files are untouched on disk; it is the CONFIG that stopped naming them.
+	if _, err := os.Stat(certFile); err != nil {
+		t.Errorf("clearing the config disturbed the certificate file: %v", err)
+	}
+}
+
+// A live path edit to something unusable must NOT take the daemon's TLS down, and must not be
+// swallowed either. The applier that calls this cannot refuse the write — the file is already
+// saved — so the error is a warning to surface, and the old certificate goes on serving.
+func TestKeeperSetFilesKeepsTheOldCertificateWhenTheNewPairIsUnusable(t *testing.T) {
+	dir := t.TempDir()
+	goodCert, goodKey := writePair(t, dir, "incumbent")
+	k, err := NewKeeper(goodCert, goodKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missingCert := filepath.Join(dir, "not-yet.pem")
+	missingKey := filepath.Join(dir, "not-yet.key")
+	err = k.SetFiles(missingCert, missingKey)
+	if err == nil {
+		t.Fatal("SetFiles accepted a pair that does not exist, so the operator would be told " +
+			"nothing while TLS quietly stayed on the old certificate")
+	}
+	if !strings.Contains(err.Error(), "cannot read") {
+		t.Errorf("the error does not name the fault: %q", err)
+	}
+	cert, err := k.GetCertificate(nil)
+	if err != nil {
+		t.Fatalf("TLS went down on a bad config edit: %v", err)
+	}
+	if cn := leafCN(t, cert); cn != "incumbent" {
+		t.Errorf("served CN = %q, want the cached incumbent", cn)
+	}
+
+	// SELF-HEALING, which is the reason the failed SetFiles keeps the new paths: the operator
+	// wrote the config before copying the files in, and copying them in is enough.
+	arrivingCert, arrivingKey := writePair(t, dir, "arrived")
+	renewInPlace(t, arrivingCert, missingCert)
+	renewInPlace(t, arrivingKey, missingKey)
+
+	healed, err := k.GetCertificate(nil)
+	if err != nil {
+		t.Fatalf("GetCertificate after the files arrived: %v", err)
+	}
+	if cn := leafCN(t, healed); cn != "arrived" {
+		t.Errorf("the served CN is %q — the Keeper never picked up the pair the config names, "+
+			"so the operator has to restart after all", cn)
+	}
+}
+
+// The paths are mutable now, so they are shared state between the config applier's goroutine
+// and every handshake. Under `go test -race` this fails if the lock is wrong; without it the
+// test still asserts nothing panics and a certificate is always available.
+func TestKeeperSetFilesIsSafeBesideConcurrentHandshakes(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writePair(t, dir, "a")
+	certB, keyB := writePair(t, dir, "b")
+
+	k, err := NewKeeper(certA, keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				// Either pair is a correct answer; a nil certificate with no error is not.
+				if c, err := k.GetCertificate(nil); err == nil && c == nil {
+					t.Error("GetCertificate returned no certificate and no error")
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 50; i++ {
+		if err := k.SetFiles(certB, keyB); err != nil {
+			t.Errorf("SetFiles(b): %v", err)
+			break
+		}
+		if err := k.SetFiles(certA, keyA); err != nil {
+			t.Errorf("SetFiles(a): %v", err)
+			break
+		}
+	}
+	close(stop)
+	wg.Wait()
+}
+
 // renewInPlace rewrites `to` with the contents of `from` — same path, new content, as acme.sh does
 // — and then moves its mtime a minute forward.
 //
