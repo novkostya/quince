@@ -206,8 +206,20 @@ func (p *Proofs) Consume(token string, op ProofOperation, target, sessionID stri
 	}
 	// THE SESSION MUST BE THE MINTING ONE. Compared in constant time beside the others; it is a
 	// secret in the same sense the token is.
+	//
+	// ErrNoProof, NOT ErrProofNotForThis — spec-review finding on quince#920, and what it fixes is a
+	// sentence that was FALSE. *"This proof was issued for a different operation"* is untrue here: it
+	// was issued for a different SESSION.
+	//
+	// WHAT DECIDES THE ERROR IS THE REMEDY, which is ErrNoProof's own stated rule. A session mismatch
+	// shares that remedy exactly — the legitimate way to reach it is logging out and back in between
+	// proving and mutating, where *start again* is precisely right. ErrProofNotForThis' cause is "a
+	// client bug, not an expiry", which would send a user to fix something that is not broken.
+	//
+	// Non-disclosure agrees rather than pulling the other way: ErrNoProof is the LESS informative of
+	// the two, so filing a mismatch there tells a holder less rather than more.
 	if subtle.ConstantTimeCompare([]byte(found.sessionID), []byte(sessionID)) != 1 {
-		return ProofSubject{}, ErrProofNotForThis
+		return ProofSubject{}, ErrNoProof
 	}
 	return found.subject, nil
 }
