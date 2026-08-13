@@ -446,3 +446,14 @@ export interface StorageZFSKey {
 export interface StorageZFSKeyResponse {
   key: StorageZFSKey;
 }
+
+// StorageZFSHelperResponse is GET /api/storages/zfs/helper (contracts §1, quince#818 piece C) — the
+// constrained helper with the operator's own `parent_dataset` already in it.
+export interface StorageZFSHelperResponse {
+  // script is the WHOLE file, ready to save. Not an excerpt: the operator saves this and nothing
+  // else, which is the difference between an instruction and a reference.
+  script: string;
+  // path is where it goes — the same constant the `authorized_keys` line pins as its forced command,
+  // so a helper saved anywhere else is simply never reached.
+  path: string;
+}

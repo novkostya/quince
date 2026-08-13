@@ -139,7 +139,7 @@ func TestTheAuthorizedKeysLinePinsTheHelperAndRestrictsTheSession(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if !strings.HasPrefix(k.AuthorizedKeys, `command="`+zfsHelperPath+`"`) {
+	if !strings.HasPrefix(k.AuthorizedKeys, `command="`+ZFSHelperPath+`"`) {
 		t.Fatalf("the line does not START with the forced command, so an operator truncating it "+
 			"keeps the key and loses the constraint: %s", k.AuthorizedKeys)
 	}

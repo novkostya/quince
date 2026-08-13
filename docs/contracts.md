@@ -609,6 +609,7 @@ POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
 POST /api/storages/zfs/key    (NO BODY — see below)        → 200 {key} | 500
+GET  /api/storages/zfs/helper?parent_dataset=<ds>          → 200 {script, path} | 422 | 500
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -1608,6 +1609,42 @@ construction.
 
 **`authorized_keys` IS THE ARTIFACT and `public_key` is context.** The forced command is what bounds
 quince on the host, so the two are one string rather than a key plus a suggestion.
+
+### StorageZFSHelper (`quince#818` piece C)
+
+`GET /api/storages/zfs/helper?parent_dataset=<ds>`'s answer — the constrained helper script with the
+operator's own dataset already substituted.
+
+```jsonc
+{
+  "script": "#!/bin/sh\n… PARENT=\"tank/backups/iphone\" …",  // the WHOLE file, saveable as-is
+  "path":   "/usr/local/sbin/quince-zfs-helper"               // where it goes
+}
+```
+
+**THE SCRIPT IS SERVED RENDERED, NOT AS A TEMPLATE.** The substitution is one line and a client could
+do it — but the value goes inside a double-quoted assignment in a script the operator runs **as root
+on another machine**, so whoever substitutes must also validate. Server-side keeps the validation,
+the placeholder guard and the refusal in one place, beside the pattern that already guards dataset
+names for argv use.
+
+**A `parent_dataset` that could break out of the quotes is `422`, naming that field** — refused
+rather than escaped. Every legal ZFS name already matches `datasetPattern`, so nothing valid is lost,
+and an escaping routine is a thing that can have a bug where a refusal cannot.
+
+**`path` IS ON THE WIRE BECAUSE IT IS HALF THE INSTRUCTION.** It is the same constant the
+`authorized_keys` line pins as its forced command, so the two cannot drift — a helper saved anywhere
+else is never reached, and a script with no destination leaves the operator something to look up,
+which is what this endpoint exists to end.
+
+**`500` is reserved for one case that should be unreachable:** the embedded script no longer carries
+the line quince substitutes. Serving it anyway would hand over a valid script pointing at the
+placeholder dataset, so it refuses; a build-time test asserts the placeholder exists, which is what
+makes the `500` a backstop rather than a live path.
+
+**No state, no write, nothing about this install** — the answer is a pure function of the embedded
+script and one query parameter, which is why it is a `GET` where the key endpoint beside it is a
+`POST`.
 
 ## 3. WebSocket (`/api/ws`)
 

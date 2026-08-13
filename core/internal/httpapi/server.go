@@ -181,6 +181,10 @@ func NewRouter(deps Deps) http.Handler {
 	// one writes to quince's own volume — see handleStorageZFSKey for why it can only ever touch
 	// that one path, and why it refuses rather than replacing whatever it finds.
 	apiMux.HandleFunc("POST /api/storages/zfs/key", deps.handleStorageZFSKey())
+	// The constrained helper, rendered with the caller's `parent_dataset` (quince#818 piece C). A
+	// GET, unlike the key above, because it reads nothing and writes nothing: the answer is a pure
+	// function of the embedded script and one query parameter.
+	apiMux.HandleFunc("GET /api/storages/zfs/helper", deps.handleStorageZFSHelper())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

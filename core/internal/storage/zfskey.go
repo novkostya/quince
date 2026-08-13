@@ -36,8 +36,11 @@ type ZFSKey struct {
 	Created bool
 }
 
-// zfsHelperPath is the forced command the authorized_keys line pins, matching deploy/storage.md.
-const zfsHelperPath = "/usr/local/sbin/quince-zfs-helper"
+// ZFSHelperPath is the forced command the authorized_keys line pins — and, since quince#818 piece C,
+// what GET /api/storages/zfs/helper tells the operator to save the script AS. Exported so the two
+// cannot drift: the path the key is constrained to and the path the instruction names are now one
+// constant, and a helper installed anywhere else is simply never reached.
+const ZFSHelperPath = "/usr/local/sbin/quince-zfs-helper"
 
 // authorizedKeysOptions are the restrictions that ride with the forced command, in the order
 // deploy/storage.md publishes them so an operator can diff the two by eye.
@@ -120,6 +123,6 @@ func zfsKeyFromPublic(path string, pub ssh.PublicKey) ZFSKey {
 	return ZFSKey{
 		Path:           path,
 		PublicKey:      line,
-		AuthorizedKeys: fmt.Sprintf("command=%q,%s %s", zfsHelperPath, authorizedKeysOptions, line),
+		AuthorizedKeys: fmt.Sprintf("command=%q,%s %s", ZFSHelperPath, authorizedKeysOptions, line),
 	}
 }

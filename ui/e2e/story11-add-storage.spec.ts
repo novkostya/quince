@@ -618,3 +618,51 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   await page.getByTestId("backend-select").selectOption("copy");
   await expect(page.getByTestId("zfs-key")).toHaveCount(0);
 });
+
+// quince#818 piece C — THE HELPER, RENDERED WITH THE OPERATOR'S OWN PARENT.
+//
+// The half deferred on quince#884. Before this the screen showed a key whose forced command names a
+// script the screen never mentioned — so a user who installed only the key reached a host that
+// refuses everything, which presents as `unreachable` and is indistinguishable from a wrong key.
+test("the zfs branch renders the helper script with the typed parent dataset", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await page.getByTestId("backend-select").selectOption("zfs");
+  await expect(page.getByTestId("zfs-fields")).toBeVisible();
+
+  // NOTHING IS OFFERED UNTIL THERE IS A DATASET TO RENDER FOR. A script with an empty PARENT is not
+  // a useful artifact, and asking for one would be a request per keystroke besides.
+  await expect(page.getByTestId("show-helper")).toHaveCount(0);
+
+  await page.getByLabel("Parent dataset").fill("tank/backups/iphone");
+  await page.getByTestId("show-helper").click();
+
+  const panel = page.getByTestId("zfs-helper");
+  await expect(panel).toBeVisible();
+
+  const script = page.getByTestId("zfs-helper-script");
+  // THE OPERATOR'S DATASET IS IN IT — the one line they used to have to edit by hand, and the one
+  // line that decides where every backup goes.
+  await expect(script).toContainText('PARENT="tank/backups/iphone"');
+  // AND THE PLACEHOLDER IS GONE. This is the assertion with teeth: a script that kept
+  // `pool/path/to/iphone-backup` is perfectly valid, installs cleanly, and silently sends the
+  // backups somewhere that is not theirs. Nothing about it looks wrong on screen.
+  await expect(script).not.toContainText("pool/path/to/iphone-backup");
+  // It is the WHOLE file — the operator saves this and nothing else.
+  await expect(script).toContainText("#!/bin/sh");
+  await expect(script).toContainText("capacity)");
+  await expect(script).toContainText("rollback)");
+  // AND IT SAYS WHERE TO PUT IT. The path is half the instruction, and it is the same path the
+  // `authorized_keys` line above pins as its forced command — a helper saved elsewhere is never run.
+  await expect(panel).toContainText("/usr/local/sbin/quince-zfs-helper");
+
+  // THE SCRIPT IS DROPPED WHEN THE DATASET CHANGES. A rendered helper left standing after the field
+  // beneath it moved is a correct-looking file with somebody else's PARENT, and the operator has no
+  // way to tell by looking.
+  await page.getByLabel("Parent dataset").fill("tank/other");
+  await expect(page.getByTestId("zfs-helper")).toHaveCount(0);
+  await expect(page.getByTestId("show-helper")).toBeVisible();
+});

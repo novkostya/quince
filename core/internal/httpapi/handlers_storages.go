@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"path/filepath"
 
@@ -221,6 +222,47 @@ func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
 // complete `authorized_keys` line, the path, and whether it was just created — the same discipline
 // backup passwords follow. `Created` is on the wire because the form must be able to say *found
 // yours* rather than *made you one*.
+// handleStorageZFSHelper serves GET /api/storages/zfs/helper?parent_dataset=<ds> →
+// 200 {script, path} | 422 | 500 (contracts §1, quince#818 piece C).
+//
+// It answers the question the form used to leave to the operator: *"what exactly do I put on the ZFS
+// host?"* The script comes back with `PARENT=` already set to the dataset they typed on the same
+// screen, so the one line they had to edit by hand is not theirs to get wrong.
+//
+// 422 RATHER THAN A RENDER, on a dataset name that could break out of the quotes. The value is
+// interpolated into a double-quoted assignment in a script the operator will run as root on another
+// machine, so this is the one place in the API where an invalid name is not merely useless but
+// dangerous. `storage.RenderZFSHelper` refuses before interpolating; the handler reports which field
+// was wrong rather than serving a script it could not build honestly.
+//
+// NO STATE, NO WRITE, AND NOTHING ABOUT THIS INSTALL. The response is a pure function of the
+// embedded script and one query parameter — no key material, no config read, nothing from `/data`.
+// That is why it is a GET and why it needs none of the ordering care `handleStorageZFSKey` above
+// does.
+func (d Deps) handleStorageZFSHelper() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		parent := r.URL.Query().Get("parent_dataset")
+		script, err := storage.RenderZFSHelper(parent)
+		if err != nil {
+			if errors.Is(err, storage.ErrHelperPlaceholder) {
+				// NOT the caller's fault, and not something they can fix — the shipped script lost
+				// the line quince substitutes. A build-time test exists to make this unreachable.
+				d.Log.Error("zfs helper", "error", err)
+				writeError(w, d.Log, http.StatusInternalServerError, "zfs_helper", err.Error())
+				return
+			}
+			hookCheck422(w, d, "parent_dataset",
+				"must be a valid ZFS dataset name — quince puts this straight into the helper "+
+					"script, so a name it cannot vouch for is refused rather than escaped")
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHelperResponse{
+			Script: script,
+			Path:   storage.ZFSHelperPath,
+		})
+	}
+}
+
 func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := d.ZFSKeyPath

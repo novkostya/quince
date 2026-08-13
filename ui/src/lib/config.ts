@@ -6,6 +6,7 @@ import type {
   StorageAddition,
   StorageHookCheckResponse,
   StorageProbeResponse,
+  StorageZFSHelperResponse,
   StorageZFSKeyResponse,
 } from "./types";
 
@@ -94,4 +95,18 @@ export function checkStorageHook(
 // working storage silently.
 export function ensureZFSKey(): Promise<StorageZFSKeyResponse> {
   return api.post<StorageZFSKeyResponse>("/api/storages/zfs/key", {});
+}
+
+// fetchZFSHelper asks quince for the constrained helper script with the operator's own
+// `parent_dataset` already substituted (contracts §1, quince#818 piece C).
+//
+// THE SUBSTITUTION IS THE SERVER'S, NOT OURS, and that is deliberate rather than lazy. The value
+// lands inside a double-quoted assignment in a script the operator runs as root on their storage
+// host, so whoever substitutes must also validate — and the validator, the placeholder guard and the
+// refusal all live together on the far side. A dataset name quince cannot vouch for comes back 422
+// naming `parent_dataset` rather than as a script.
+export function fetchZFSHelper(parentDataset: string): Promise<StorageZFSHelperResponse> {
+  return api.get<StorageZFSHelperResponse>(
+    `/api/storages/zfs/helper?parent_dataset=${encodeURIComponent(parentDataset)}`,
+  );
 }

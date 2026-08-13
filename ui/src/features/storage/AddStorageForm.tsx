@@ -3,11 +3,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { addStorage, checkStorageHook, configKey, ensureZFSKey, probeStorage } from "@/lib/config";
+import {
+  addStorage,
+  checkStorageHook,
+  configKey,
+  ensureZFSKey,
+  fetchZFSHelper,
+  probeStorage,
+} from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
 import { CopyButton } from "@/components/CopyButton";
 import { APIError } from "@/lib/api";
-import type { ConfigFieldError, StorageHookCheck, StorageProbe, StorageZFSKey } from "@/lib/types";
+import type {
+  ConfigFieldError,
+  StorageHookCheck,
+  StorageProbe,
+  StorageZFSHelperResponse,
+  StorageZFSKey,
+} from "@/lib/types";
 
 // serverSentence pulls the daemon's own words out of a 422. Same rule ForgetStorage states: the
 // refusal names the field AND the remedy, and re-wording it client-side drops the half that tells
@@ -133,6 +146,30 @@ export function AddStorageForm({
   const [hookChecking, setHookChecking] = useState(false);
   const [zfsKey, setZFSKey] = useState<StorageZFSKey | null>(null);
   const [keyError, setKeyError] = useState("");
+  // THE HELPER IS FETCHED ON REQUEST, NOT ON MOUNT (quince#818 piece C). It is rendered for whatever
+  // `parentDataset` currently says, and that field changes on every keystroke — so fetching as they
+  // type would be a request per character, each answering about a half-typed dataset. A press is
+  // also the honest moment: the operator is telling us they are ready to install it.
+  const [helper, setHelper] = useState<StorageZFSHelperResponse | null>(null);
+  const [helperError, setHelperError] = useState("");
+  const [helperLoading, setHelperLoading] = useState(false);
+
+  async function showHelper() {
+    setHelperLoading(true);
+    setHelperError("");
+    try {
+      setHelper(await fetchZFSHelper(parentDataset.trim()));
+    } catch (e) {
+      // THE DAEMON'S OWN SENTENCE, through the same extractor every other refusal on this form uses.
+      // A 422 here means the dataset name is one quince will not put into a script it hands over,
+      // and its message says why — re-wording it would drop the half that explains how a name that
+      // looks fine was refused.
+      setHelperError(serverSentence(e, "could not render the helper"));
+      setHelper(null);
+    } finally {
+      setHelperLoading(false);
+    }
+  }
 
   function reset() {
     setPath("");
@@ -149,6 +186,11 @@ export function AddStorageForm({
     // a line that is already installed.
     setZFSKey(null);
     setKeyError("");
+    // Same reason one line up, pointed at the other artifact: a helper rendered for the storage that
+    // was just saved carries that storage's `PARENT=`, and leaving it on screen for the next one is
+    // a correct-looking script for the wrong dataset.
+    setHelper(null);
+    setHelperError("");
   }
 
   async function testHelper() {
@@ -361,6 +403,12 @@ export function AddStorageForm({
               onChange={(e) => {
                 setParentDataset(e.target.value);
                 setHookCheck(null);
+                // THE RENDERED HELPER IS ABOUT *THIS* DATASET, so it is dropped with the answer it
+                // was rendered for. A script left on screen after the field beneath it changed is
+                // worse than none: it is a correct-looking file with somebody else's `PARENT=`, and
+                // the operator has no way to tell by looking.
+                setHelper(null);
+                setHelperError("");
               }}
             />
 
@@ -453,6 +501,61 @@ export function AddStorageForm({
                   The private half stays in{" "}
                   <code className="font-mono">{zfsKey.path}</code> and never leaves this machine.
                 </div>
+              </div>
+            ) : null}
+
+            {/* THE SECOND HALF OF THE INSTALL, and until quince#818 piece C it was the half the
+                screen said nothing about. The `authorized_keys` line above pins a forced command;
+                this is the script that command runs. A key installed without it reaches a host that
+                refuses everything, which presents as `unreachable` — indistinguishable from a wrong
+                key unless you already know the helper is missing.
+
+                IT IS RENDERED WITH THEIR OWN `PARENT=`, which is the whole point of the piece: the
+                one line an operator had to edit by hand is the one line that decides where every
+                backup goes, and a wrong value produces a script that works and writes to the wrong
+                dataset. */}
+            {parentDataset.trim() !== "" ? (
+              <div className="mt-3">
+                {helper === null ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void showHelper()}
+                    disabled={helperLoading}
+                    data-testid="show-helper"
+                  >
+                    {helperLoading ? "Rendering…" : "Show the helper script"}
+                  </Button>
+                ) : (
+                  <div className="rounded-card border border-line bg-card p-3" data-testid="zfs-helper">
+                    <div className="text-sm font-medium">The helper script, ready to install</div>
+                    <div className="mt-1 text-sm text-muted">
+                      Save this on{" "}
+                      <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> as{" "}
+                      <code className="font-mono text-xs">{helper.path}</code> and make it
+                      executable. Its <code className="font-mono text-xs">PARENT=</code> is already
+                      set to <span className="text-fg">{parentDataset.trim()}</span> — nothing in it
+                      needs editing.
+                    </div>
+                    {/* CAPPED AND SCROLLABLE. It is ~70 lines: rendered full-height it would bury
+                        the rest of the form on a phone, and this is a thing to COPY rather than to
+                        read. */}
+                    <pre
+                      className="mt-2 max-h-64 overflow-auto rounded bg-elevated p-2 text-xs"
+                      data-testid="zfs-helper-script"
+                    >
+                      {helper.script}
+                    </pre>
+                    <div className="mt-2">
+                      <CopyButton value={helper.script} label="Copy the script" />
+                    </div>
+                  </div>
+                )}
+                {helperError !== "" ? (
+                  <div className="mt-2 text-sm" data-testid="zfs-helper-error">
+                    {helperError}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
