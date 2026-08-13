@@ -71,6 +71,11 @@ func (d Deps) handleAuthSetup() http.HandlerFunc {
 				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			case errors.Is(err, auth.ErrAlreadyConfigured):
 				writeError(w, d.Log, http.StatusConflict, "already_configured", "admin password is already set")
+			case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
+				// 401 — NOTHING USABLE WAS PRESENTED, which is the same class of refusal as a wrong
+				// password and takes the same status. The server's own sentence carries the remedy:
+				// re-authenticate, or present the right proof.
+				writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
 			case errors.Is(err, auth.ErrWeakPassword):
 				writeError(w, d.Log, http.StatusUnprocessableEntity, "weak_password", "password does not meet requirements")
 			default:
@@ -150,7 +155,11 @@ func (d Deps) handleAuthLogout() http.HandlerFunc {
 // credentials, and the secrets rule keeps them out of argv, env and any URL that could be logged.
 type changePasswordBody struct {
 	CurrentPassword string `json:"current_password"`
-	NewPassword     string `json:"new_password"`
+	// Proof is a token from POST /api/auth/reauth/finish — qn.6n rules 1 and 3. EITHER field
+	// satisfies the rule; a passkey is the alternative for an install that has no password to type,
+	// which is the case that used to require nothing at all.
+	Proof       string `json:"proof"`
+	NewPassword string `json:"new_password"`
 }
 
 // PUT /api/auth/password — change the admin password. SESSION REQUIRED (authGuard).
@@ -161,7 +170,9 @@ func (d Deps) handleChangePassword() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
 			return
 		}
-		err := d.PasswordAdmin.ChangePassword(body.CurrentPassword, body.NewPassword, d.Proxies.ClientIP(r))
+		err := d.PasswordAdmin.ChangePassword(d.Proofs,
+			auth.Presented{Password: body.CurrentPassword, Proof: body.Proof},
+			body.NewPassword, sessionCookieValue(r), d.Proxies.ClientIP(r))
 		switch {
 		case err == nil:
 			w.WriteHeader(http.StatusNoContent)
@@ -174,6 +185,11 @@ func (d Deps) handleChangePassword() http.HandlerFunc {
 			// 401 — the CURRENT password was wrong. Deliberately the same code the login form uses
 			// for the same mistake, so a client need not learn a second spelling of it.
 			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
+		case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
+			// 401 — NOTHING USABLE WAS PRESENTED, which is the same class of refusal as a wrong
+			// password and takes the same status. The server's own sentence carries the remedy:
+			// re-authenticate, or present the right proof.
+			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
 		case errors.Is(err, auth.ErrWeakPassword):
 			writeError(w, d.Log, http.StatusUnprocessableEntity, "weak_password", "password does not meet requirements")
 		default:

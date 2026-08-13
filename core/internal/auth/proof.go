@@ -223,3 +223,74 @@ func (p *Proofs) Consume(token string, op ProofOperation, target, sessionID stri
 	}
 	return found.subject, nil
 }
+
+// Presented is what a credential-mutating call offers as its PRESENT authentication — qn.6n slice 4,
+// rules 1 and 3.
+//
+// EXACTLY ONE OF THE TWO, and they are not interchangeable in cost: a password is verified here and
+// now, where a proof was earned by an assertion at `reauth/finish` and is single-use. Both are real
+// presentations, which is the ruling's point — *"the password remains the lighter alternative, since
+// either factor is accepted"*.
+type Presented struct {
+	// Password is the admin password, typed into this request.
+	Password string
+	// Proof is a token from POST /api/auth/reauth/finish.
+	Proof string
+}
+
+// RequirePresent enforces the ruling's rules 1 and 3: changing the credential set demands a PRESENT
+// credential, not merely a session.
+//
+// IT RETURNS THE SUBJECT, which rules 1 and 3 do not need and rule 2 cannot work without. Slice 5
+// compares it against the credential being removed; returning it here rather than adding it later
+// keeps one function answering "what proved this request" for every caller.
+//
+// THE ONLY EXCEPTION IS AN INSTALL WITH NO CREDENTIALS AT ALL — first launch, or after
+// `quince auth reset`. It is `Configured()`, the same predicate that decides `needs_setup`, so the
+// exemption cannot drift from the state that makes first run legal. Nothing else is exempt: the
+// ruling considered a carve-out for *"a credential exists but cannot be presented here"* and
+// REJECTED it, because an attacker holding a stolen session controls the `Host` header and could
+// manufacture that state with one crafted request — the waiver would hand them their own trigger.
+//
+// RATE-LIMITED ON THE LOGIN BUCKET when a password is presented, for `ChangePassword`'s reason:
+// holding a session must not buy a fresh budget to guess in.
+func (s *Service) RequirePresent(proofs *Proofs, pres Presented, op ProofOperation,
+	target, sessionID, clientIP string) (ProofSubject, error) {
+	configured, err := s.Configured()
+	if err != nil {
+		return ProofSubject{}, err
+	}
+	if !configured {
+		// NOTHING TO PRESENT AND NOTHING TO PROTECT. The install is unclaimed, which is the state
+		// `POST /api/auth/setup` is already open in; demanding proof here would make an install with
+		// no credentials unrecoverable rather than merely empty.
+		return ProofSubject{}, nil
+	}
+
+	if pres.Proof != "" {
+		return proofs.Consume(pres.Proof, op, target, sessionID)
+	}
+
+	hash, hasPassword, err := s.store.GetSetting(settingPasswordHash)
+	if err != nil {
+		return ProofSubject{}, err
+	}
+	if !hasPassword {
+		// PASSWORDLESS: there is no password to present, so a proof is the only thing that can
+		// satisfy the rule — and this is the branch that used to accept an empty `current_password`
+		// and no proof at all, which is what quince#888 item 3's table called "nothing".
+		return ProofSubject{}, ErrNoProof
+	}
+	if !s.limiter.allow(clientIP, s.now()) {
+		return ProofSubject{}, ErrRateLimited
+	}
+	ok, err := verifyPassword(pres.Password, hash)
+	if err != nil {
+		return ProofSubject{}, err
+	}
+	if !ok {
+		s.audit("present_failed", clientIP)
+		return ProofSubject{}, ErrBadPassword
+	}
+	return ProofSubject{Password: true}, nil
+}
