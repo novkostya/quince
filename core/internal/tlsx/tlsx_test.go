@@ -772,3 +772,124 @@ func snapshotDir(t *testing.T, dir string) string {
 	}
 	return b.String()
 }
+
+// quince#905 review, finding 1: `NewKeeper` must refuse an empty path. The two constructors
+// exist so that "nothing is configured" and "the certificate is fine" are not expressed
+// through one return value, and without the guard `NewKeeper("", "")` did exactly that.
+//
+// Latent while `config.CheckTLS` was the only caller — it returns before the loader when TLS
+// is off — and no longer latent: production passes `SetFiles`, so this constructor has no
+// caller left to be guarded by.
+func TestNewKeeperRefusesAnEmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writePair(t, dir, "present")
+
+	tests := []struct {
+		name      string
+		cert, key string
+	}{
+		{name: "both empty", cert: "", key: ""},
+		{name: "cert empty", cert: "", key: keyFile},
+		{name: "key empty", cert: certFile, key: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			k, err := NewKeeper(tc.cert, tc.key)
+			if err == nil {
+				t.Fatalf("NewKeeper(%q, %q) returned keeper=%v and no error — "+
+					"an unconfigured install is being reported as a loaded certificate", tc.cert, tc.key, k != nil)
+			}
+			if k != nil {
+				t.Error("a refused NewKeeper still returned a Keeper")
+			}
+			if !strings.Contains(err.Error(), "NewEmptyKeeper") {
+				t.Errorf("the error does not point at the constructor that IS right for this "+
+					"case, so the caller has to guess: %q", err)
+			}
+		})
+	}
+}
+
+// quince#905 review, finding 2: the self-heal must not be inferable from stamps alone.
+//
+// After a failed path change the Keeper holds the OLD pair's stamps and the NEW pair's paths,
+// so a stamp comparison asks "have these files been rewritten" when the question is "are we
+// serving the pair the config names". If the two pairs collide on (mtime, size) the answer
+// comes back no, forever — and mtime is PRESERVED by `cp -p`, `rsync -a` and a restored
+// archive, so the collision is something operators produce routinely.
+//
+// MODELLED THROUGH THE statFn SEAM rather than by trying to manufacture a real collision: a
+// stub that reports one identical stamp for every file IS the collision, exactly and without
+// a sleep. Before the `dirty` flag this test hangs on to the incumbent certificate forever.
+func TestSelfHealIsNotDefeatedByAStampCollision(t *testing.T) {
+	dir := t.TempDir()
+	goodCert, goodKey := writePair(t, dir, "incumbent")
+
+	frozen := stamp{mod: time.Unix(1, 0), size: 42}
+	k := NewEmptyKeeper()
+	k.statFn = func(string) (stamp, error) { return frozen, nil }
+	if err := k.SetFiles(goodCert, goodKey); err != nil {
+		t.Fatal(err)
+	}
+	if cn := leafCN(t, mustCert(t, k)); cn != "incumbent" {
+		t.Fatalf("served CN = %q, want incumbent", cn)
+	}
+
+	// The operator points the config at a pair that is not there yet.
+	missingCert := filepath.Join(dir, "later.pem")
+	missingKey := filepath.Join(dir, "later.key")
+	if err := k.SetFiles(missingCert, missingKey); err == nil {
+		t.Fatal("SetFiles accepted a pair that does not exist")
+	}
+	if cn := leafCN(t, mustCert(t, k)); cn != "incumbent" {
+		t.Fatalf("the bad edit took TLS down; served CN = %q", cn)
+	}
+
+	// …and then copies the files in, mtime preserved, so every stamp still looks identical.
+	arrivingCert, arrivingKey := writePair(t, dir, "arrived")
+	renewInPlace(t, arrivingCert, missingCert)
+	renewInPlace(t, arrivingKey, missingKey)
+
+	if cn := leafCN(t, mustCert(t, k)); cn != "arrived" {
+		t.Errorf("the served CN is %q — the stamps collided, so `changed()` reported nothing "+
+			"to do and the Keeper is serving a certificate the config stopped naming. Nothing "+
+			"logs this, and only a restart clears it.", cn)
+	}
+}
+
+// A dirty Keeper whose files are STILL absent must not re-read on every handshake. The flag
+// forces a re-check where there is something to re-check, not a retry loop against a config
+// that is simply wrong — which would be one WARN per connection for as long as it stayed so.
+func TestDirtyDoesNotThrashWhileTheFilesAreAbsent(t *testing.T) {
+	dir := t.TempDir()
+	goodCert, goodKey := writePair(t, dir, "incumbent")
+	k, err := NewKeeper(goodCert, goodKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reloads := 0
+	k.OnReloadError = func(error) { reloads++ }
+	if err := k.SetFiles(filepath.Join(dir, "nope.pem"), filepath.Join(dir, "nope.key")); err == nil {
+		t.Fatal("SetFiles accepted a pair that does not exist")
+	}
+
+	for i := 0; i < 5; i++ {
+		if _, err := k.GetCertificate(nil); err != nil {
+			t.Fatalf("handshake %d refused: %v", i, err)
+		}
+	}
+	if reloads != 0 {
+		t.Errorf("%d failed reloads across 5 handshakes — a permanently wrong config path is "+
+			"re-read and re-logged per connection", reloads)
+	}
+}
+
+func mustCert(t *testing.T, k *Keeper) *tls.Certificate {
+	t.Helper()
+	c, err := k.GetCertificate(nil)
+	if err != nil {
+		t.Fatalf("GetCertificate: %v", err)
+	}
+	return c
+}
