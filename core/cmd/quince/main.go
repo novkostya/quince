@@ -331,6 +331,7 @@ func serve(args []string) error {
 		// a trail, rather than a browser error being the first anyone hears of it.
 		log.Warn("tls certificate reload failed, still serving the previous one", "error", err)
 	}
+	subscribeTLS(cfgSvc, keeper, log)
 
 	log.Info("quince serving",
 		"version", version.String(), "listen", listen, "tls", keeper.HasCertificate(),
@@ -556,6 +557,46 @@ func subscribeInsecureTransport(cfgSvc *config.Service, authSvc *auth.Service, l
 		log.Info("sessions.allow_insecure_transport applied without a restart",
 			"allow_insecure_transport", next.Sessions.AllowInsecureTransport)
 		return config.DegradedModeWarnings(next)
+	})
+}
+
+// subscribeTLS makes `tls.cert_file` and `.key_file` LIVE — the sixth consumer of the config
+// seam, and the last thing quince#900 needs to turn TLS on without a restart.
+//
+// The mux is already bound whether or not a certificate exists (see runHTTP), so the socket
+// has stopped being what stands in the way. What was missing is anyone telling the Keeper that
+// the config named a different pair — this is that.
+//
+// IT WARNS AND NEVER REFUSES, and the asymmetry with startup is deliberate rather than a
+// weakening. `config.CheckTLS` stops the process for an unusable certificate, because starting
+// on plain http for somebody who asked for https is a silent downgrade. Here the file has
+// ALREADY been written — an Applier runs after the write and cannot refuse it, by design — so
+// refusing would express nothing. The daemon keeps serving the certificate it already had, the
+// warning rides out with the `PUT` response, and `SetFiles` keeps the new paths so the next
+// handshake picks them up the moment the files become readable.
+//
+// SO A BAD EDIT CANNOT LOCK ANYBODY OUT, and that is the property to check if this ever
+// changes. The plain half redirects on `HasCertificate()` — LOADED, not configured — so a
+// config naming a certificate that does not parse leaves the plain half serving rather than
+// redirecting into a handshake that cannot complete.
+func subscribeTLS(cfgSvc *config.Service, keeper *tlsx.Keeper, log *slog.Logger) {
+	cfgSvc.Subscribe("tls", func(old, next config.Config) []config.Warning {
+		if old.TLS == next.TLS {
+			return nil // an edit to some other section
+		}
+		if err := keeper.SetFiles(next.TLS.CertFile, next.TLS.KeyFile); err != nil {
+			log.Warn("tls certificate could not be applied, still serving the previous one",
+				"cert_file", next.TLS.CertFile, "key_file", next.TLS.KeyFile, "error", err)
+			return []config.Warning{{
+				Path: "tls.cert_file",
+				Message: "saved, but NOT applied: " + err.Error() + ". quince is still serving the " +
+					"certificate it had — it will pick this pair up as soon as both files are " +
+					"readable, with no restart. Until then https is unchanged.",
+			}}
+		}
+		log.Info("tls certificate applied without a restart",
+			"enabled", next.TLS.Enabled(), "cert_file", next.TLS.CertFile)
+		return nil
 	})
 }
 
