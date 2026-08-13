@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/id"
@@ -56,7 +57,12 @@ type Service struct {
 	insecureCookies bool // demo only: never set Secure, so cookies work over plain http
 	// allowInsecureTransport is the user's `sessions.allow_insecure_transport` opt-in. Not
 	// the same thing as insecureCookies above — see SetAllowInsecureTransport.
-	allowInsecureTransport bool
+	//
+	// ATOMIC BECAUSE IT IS LIVE NOW (quince#900). It was a plain bool written once at startup
+	// before anything served; the config applier writes it while every request in flight
+	// reads it. `insecureCookies` above stays plain deliberately — it comes from a
+	// command-line flag and has no live path to be written from.
+	allowInsecureTransport atomic.Bool
 	// proxies gates X-Forwarded-Proto in SecureOrigin (quince#555). Nil behaves as "unset",
 	// which believes the header from anyone — today's behaviour, and the shipping default.
 	proxies *TrustedProxies
@@ -88,8 +94,12 @@ func (s *Service) SetInsecureCookies(v bool) { s.insecureCookies = v }
 // affordance that must never be set in production. Two reasons, two switches, and
 // collapsing them would make a production setting reachable from a demo flag.
 //
-// Applied at process start — schema v0 has no live config reload.
-func (s *Service) SetAllowInsecureTransport(v bool) { s.allowInsecureTransport = v }
+// IT GOES BOTH WAYS, AND UNTIL quince#900 IT DID NOT. The setter has always accepted a
+// `false`, but its only caller returned early on one — so nothing in a running process could
+// lower the opt-in, and a settable field was not a live setting. The direction that could not
+// be expressed is the one that matters: turn a certificate on, prove it works, and put the
+// plaintext relaxation back. The config applier now calls this with whatever the file says.
+func (s *Service) SetAllowInsecureTransport(v bool) { s.allowInsecureTransport.Store(v) }
 
 // Secure decides the Secure cookie flag for this request: the loopback-vs-https rule
 // (cookie.go) relaxed by the user's own opt-in, and overridden off entirely in demo mode.
@@ -97,7 +107,7 @@ func (s *Service) Secure(r *http.Request) bool {
 	if s.insecureCookies {
 		return false
 	}
-	return secureCookie(r, s.allowInsecureTransport, s.proxies)
+	return secureCookie(r, s.allowInsecureTransport.Load(), s.proxies)
 }
 
 // CookieWillBeDiscarded reports whether a session cookie issued for THIS request would be

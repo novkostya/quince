@@ -356,9 +356,34 @@ func TestOptInAlsoDisarmsTheInsecureOriginRefusal(t *testing.T) {
 	if !(&Service{}).CookieWillBeDiscarded(lan) {
 		t.Fatal("without the opt-in the cookie IS discarded — the refusal must fire")
 	}
-	if (&Service{allowInsecureTransport: true}).CookieWillBeDiscarded(lan) {
+	// Through the setter rather than a struct literal: the field is an atomic.Bool since
+	// quince#900, because the config applier writes it while requests read it.
+	optedIn := &Service{}
+	optedIn.SetAllowInsecureTransport(true)
+	if optedIn.CookieWillBeDiscarded(lan) {
 		t.Error("with the opt-in the cookie survives, so the refusal must NOT fire; " +
 			"a second switch has appeared somewhere and the two can now disagree")
+	}
+}
+
+// The opt-in goes DOWN as well as up (quince#900). Until then nothing in a running process
+// could lower it: the setter accepted a `false` and its only caller returned before reaching
+// it, so `sessions.allow_insecure_transport` was a one-way latch — armed at startup, never
+// disarmed. That is the direction an apply-a-certificate-and-keep-it flow needs, because it
+// is the last step of it.
+func TestOptInCanBeTurnedBackOff(t *testing.T) {
+	lan := httptest.NewRequest("POST", "http://quince.example:8968/api/auth/login", nil)
+	svc := &Service{}
+
+	svc.SetAllowInsecureTransport(true)
+	if svc.Secure(lan) {
+		t.Fatal("the opt-in did not take effect, so this test cannot observe it being removed")
+	}
+
+	svc.SetAllowInsecureTransport(false)
+	if !svc.Secure(lan) {
+		t.Error("the cookie is STILL served without Secure after the opt-in was turned off — " +
+			"the relaxation outlived the setting that authorised it")
 	}
 }
 

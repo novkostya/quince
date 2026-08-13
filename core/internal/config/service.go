@@ -184,10 +184,10 @@ func Load(path string) Loaded {
 		}
 		return Loaded{Config: Default(), Warnings: warnings, Errors: errs, Source: src, OK: false}
 	}
-	return Loaded{Config: cfg, Declared: declared, Warnings: append(warnings, degradedModeWarnings(cfg)...), Source: src, OK: true}
+	return Loaded{Config: cfg, Declared: declared, Warnings: append(warnings, DegradedModeWarnings(cfg)...), Source: src, OK: true}
 }
 
-// degradedModeWarnings surfaces settings that are VALID and deliberately weaker than the
+// DegradedModeWarnings surfaces settings that are VALID and deliberately weaker than the
 // security baseline. They are not errors — the user asked for them — but `no silent caps or
 // fallbacks` means a running quince keeps saying so, and a warning is the channel the UI
 // already renders in Settings.
@@ -195,7 +195,13 @@ func Load(path string) Loaded {
 // Only on the OK path, and that is the right place rather than an oversight: an invalid
 // config is discarded in favour of Default(), which has no degraded mode to report, so
 // warning there would name a setting that is not actually in force.
-func degradedModeWarnings(c Config) []Warning {
+//
+// EXPORTED FOR THE APPLIER THAT MAKES THE OPT-IN LIVE (quince#900). This runs on LOAD, and a
+// `PUT` is not a load — so a write switching a degraded mode ON returned nothing about it,
+// which was tolerable only while such a write did not take effect until a restart. The
+// applier calls this rather than restating the prose, so there stays exactly one copy of the
+// sentence a user reads when they relax the baseline.
+func DegradedModeWarnings(c Config) []Warning {
 	var out []Warning
 	if c.Sessions.AllowInsecureTransport {
 		out = append(out, Warning{

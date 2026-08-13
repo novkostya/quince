@@ -2,10 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +28,7 @@ import (
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
 	"github.com/novkostya/quince/core/internal/store"
+	"github.com/novkostya/quince/core/internal/tlsx"
 )
 
 func TestConfigValidateExitCodes(t *testing.T) {
@@ -618,5 +628,253 @@ func TestRedirectToHTTPSPreservesHostPortAndPath(t *testing.T) {
 				t.Errorf("Location = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// writeTestPair mints a throwaway self-signed pair on disk, for the serve-path tests below.
+// crypto/x509 rather than `openssl`, for the reason tlsx's own helper gives: nothing here is a
+// secret, but a key path in argv is the habit the secrets rule exists to prevent.
+func writeTestPair(t *testing.T, dir, cn string) (certFile, keyFile string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: cn},
+		DNSNames:     []string{cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certFile = filepath.Join(dir, cn+".pem")
+	keyFile = filepath.Join(dir, cn+".key")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile
+}
+
+// The plain half decides PER REQUEST, over the two inputs that can now both move under a
+// running process (quince#900). All four combinations, because the interesting one — a
+// certificate present and the opt-in on — is the case the Operator's ruling turns on, and a
+// three-case test would pass against a handler that ignored one input entirely.
+func TestPlainHalfDecidesPerRequest(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "plainhalf")
+
+	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
+
+	tests := []struct {
+		name         string
+		withCert     bool
+		optIn        bool
+		wantRedirect bool
+	}{
+		{name: "no certificate, no opt-in: serve — there is nothing to redirect TO", withCert: false, optIn: false, wantRedirect: false},
+		{name: "no certificate, opt-in: serve", withCert: false, optIn: true, wantRedirect: false},
+		{name: "certificate, no opt-in: redirect", withCert: true, optIn: false, wantRedirect: true},
+		{name: "certificate, opt-in: serve — the opt-in beats the redirect", withCert: true, optIn: true, wantRedirect: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			keeper := tlsx.NewEmptyKeeper()
+			if tc.withCert {
+				if err := keeper.SetFiles(certFile, keyFile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h := plainHalf(app, keeper, func() bool { return tc.optIn })
+
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/devices", nil))
+
+			if tc.wantRedirect {
+				if rec.Code != http.StatusMovedPermanently {
+					t.Fatalf("status %d, want 301 — the plain half served the app where it should redirect", rec.Code)
+				}
+				if got := rec.Header().Get("Location"); got != "https://quince.example:8968/devices" {
+					t.Errorf("Location = %q, want the same host, port and path over https", got)
+				}
+				return
+			}
+			if rec.Code != http.StatusOK || rec.Body.String() != "app" {
+				t.Errorf("status %d body %q, want 200 app — the plain half redirected when it must not",
+					rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// The point of deciding per request: BOTH inputs can move between two requests, and the
+// answer moves with them. This is what the bind-time choice could not do, and it is the
+// difference between a live setting and a settable one.
+func TestPlainHalfFollowsBothInputsWithoutRebuilding(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "moving")
+	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
+
+	keeper := tlsx.NewEmptyKeeper()
+	optIn := false
+	h := plainHalf(app, keeper, func() bool { return optIn })
+
+	code := func() int {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/", nil))
+		return rec.Code
+	}
+
+	if got := code(); got != http.StatusOK {
+		t.Fatalf("status %d with no certificate, want 200", got)
+	}
+
+	// Turning TLS on, live. The same handler must now redirect.
+	if err := keeper.SetFiles(certFile, keyFile); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusMovedPermanently {
+		t.Errorf("status %d after a certificate was applied, want 301 — the handler is still "+
+			"deciding from the state it was built in", got)
+	}
+
+	// And the opt-in, live, over the top of it.
+	optIn = true
+	if got := code(); got != http.StatusOK {
+		t.Errorf("status %d after the opt-in went on, want 200 — the opt-in beats the redirect "+
+			"(Operator ruling 2026-08-02) and that must hold at request time too", got)
+	}
+
+	// Turning TLS back OFF must stop the redirect, which is the direction that matters: a
+	// redirect surviving the certificate would send every plain request into a handshake
+	// nothing can complete, and there is no channel left to ask for a revert.
+	optIn = false
+	if err := keeper.SetFiles("", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusOK {
+		t.Errorf("status %d after the certificate was cleared, want 200 — the plain half is "+
+			"redirecting to an https listener that can no longer complete a handshake", got)
+	}
+}
+
+// The whole serve path, with NO certificate configured, over a real listener: plain http is
+// served, and a ClientHello reaches the TLS half and fails there rather than being answered
+// as a malformed HTTP request. Before quince#900 this install had no TLS half at all.
+//
+// Through serveBothProtocols rather than a mux assembled in the test, so what runs here is
+// the wiring that ships.
+func TestServeBothProtocolsBindsTheMuxWithNoCertificate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+
+	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- serveBothProtocols(ctx, ln, addr, app, tlsx.NewEmptyKeeper(),
+			func() bool { return false }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://" + addr + "/") //nolint:noctx // bounded by the client timeout
+	if err != nil {
+		t.Fatalf("plain http against an install with no certificate: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "app" {
+		t.Errorf("status %d body %q, want 200 app", resp.StatusCode, string(body))
+	}
+
+	// A ClientHello now reaches a TLS server holding nothing. It must fail the handshake —
+	// which is a DIFFERENT failure from the malformed-request rejection it used to get, and
+	// the wire-behaviour change quince#900 states as a cost.
+	tlsConn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // the point is that the SERVER refuses
+	if err == nil {
+		_ = tlsConn.Close()
+		t.Error("the handshake SUCCEEDED against an install with no certificate configured")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("shutdown returned %v", err)
+	}
+}
+
+// The fifth consumer of the config seam: `sessions.allow_insecure_transport` applied live, in
+// BOTH directions, with the relaxation surfaced on the way up.
+//
+// The down direction is the one that did not exist. `applyInsecureTransportOptIn` returned
+// before its setter when the opt-in was off, so nothing in a running process could lower it —
+// and lowering it is the last step of applying a certificate and keeping it.
+func TestInsecureTransportOptInAppliesLiveInBothDirections(t *testing.T) {
+	lan := httptest.NewRequest("GET", "http://quince.example:8968/api/health", nil)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+
+	cfgSvc := config.NewService(cfgPath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Validate refuses a config with no storage declared, and every Replace below goes
+	// through it — so the fixture carries one. It is the section this test does not touch.
+	base := cfgSvc.Current()
+	base.Storage = &[]config.StorageEntry{{Name: "test", Path: filepath.Join(dir, "backups"), Default: true, Backend: "copy"}}
+	authSvc := newDemoAuth(t)
+	subscribeInsecureTransport(cfgSvc, authSvc, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if !authSvc.Secure(lan) {
+		t.Fatal("Secure was already relaxed before anything was written")
+	}
+
+	on := base
+	on.Sessions.AllowInsecureTransport = true
+	errs, warns, err := cfgSvc.Replace(on)
+	if err != nil || len(errs) > 0 {
+		t.Fatalf("turning the opt-in on: errs=%v err=%v", errs, err)
+	}
+	if authSvc.Secure(lan) {
+		t.Error("the opt-in was written and did NOT take effect — it still needs a restart")
+	}
+	var named bool
+	for _, w := range warns {
+		if w.Path == "sessions.allow_insecure_transport" {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("relaxing the baseline returned no warning naming the setting: %+v — a "+
+			"security relaxation that takes effect quietly is indistinguishable from a bug", warns)
+	}
+
+	off := base
+	off.Sessions.AllowInsecureTransport = false
+	if _, warns, err = cfgSvc.Replace(off); err != nil {
+		t.Fatalf("turning the opt-in off: %v", err)
+	}
+	if !authSvc.Secure(lan) {
+		t.Error("the opt-in was turned OFF and the relaxation survived it — the latch this " +
+			"change exists to remove is still there")
+	}
+	for _, w := range warns {
+		if w.Path == "sessions.allow_insecure_transport" {
+			t.Errorf("turning the degraded mode off still warns about it: %q", w.Message)
+		}
 	}
 }

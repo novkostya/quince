@@ -161,6 +161,10 @@ func serve(args []string) error {
 	// live stack. `--demo` then forces Secure off entirely, which is a superset of this
 	// rather than a conflict.
 	applyInsecureTransportOptIn(authSvc, cfgSvc.Current(), os.Stderr)
+	// …and it stays applied, in both directions, for the life of the process (quince#900).
+	// Wiring-time subscription, which is what Subscribe requires; it fires on writes only, so
+	// the call above is still what establishes the startup state.
+	subscribeInsecureTransport(cfgSvc, authSvc, log)
 	authSvc.SetTrustedProxies(proxies)
 	eventBus := bus.New()
 
@@ -309,41 +313,52 @@ func serve(args []string) error {
 	// the daemon on plain http for somebody who asked for https. Placed OUTSIDE the demo
 	// branch, unlike CheckStorages: TLS governs how every mode is reached, and a deployment
 	// with TLS off never reaches the loader at all.
-	var keeper *tlsx.Keeper
-	if req := config.CheckTLS(cfgSvc.Current(), func(certFile, keyFile string) error {
-		k, err := tlsx.NewKeeper(certFile, keyFile)
-		keeper = k
-		return err
-	}); !req.OK() {
+	//
+	// THE KEEPER IS ALWAYS THERE NOW, EMPTY WHEN NO CERTIFICATE IS CONFIGURED (quince#900).
+	// It used to be a nil *Keeper, and that nil was the thing that made turning TLS on need a
+	// restart: `runHTTP` branched on it at the bind, so an install that started without a
+	// certificate had no TLS half at all and no amount of config writing could give it one.
+	// CheckTLS's contract is unchanged — it calls this only when the config asks for TLS, so a
+	// configured-but-unusable pair still REFUSES TO START, which is the whole point of the
+	// check being here rather than in Validate.
+	keeper := tlsx.NewEmptyKeeper()
+	if req := config.CheckTLS(cfgSvc.Current(), keeper.SetFiles); !req.OK() {
 		return req.Explain(os.Stderr, cfgPath)
 	}
-	if keeper != nil {
-		keeper.OnReloadError = func(err error) {
-			// Not fatal: a half-written key mid-renewal is transient and the cached
-			// certificate is still valid. WARN so a rotation that is genuinely broken leaves
-			// a trail, rather than a browser error being the first anyone hears of it.
-			log.Warn("tls certificate reload failed, still serving the previous one", "error", err)
-		}
+	keeper.OnReloadError = func(err error) {
+		// Not fatal: a half-written key mid-renewal is transient and the cached
+		// certificate is still valid. WARN so a rotation that is genuinely broken leaves
+		// a trail, rather than a browser error being the first anyone hears of it.
+		log.Warn("tls certificate reload failed, still serving the previous one", "error", err)
 	}
 
 	log.Info("quince serving",
-		"version", version.String(), "listen", listen, "tls", keeper != nil,
+		"version", version.String(), "listen", listen, "tls", keeper.HasCertificate(),
 		"ui_embedded", webui.Built(), "demo", demoMode, "public_demo", *publicDemo)
 
-	return runHTTP(ctx, listen, handler, keeper, cfgSvc.Current().Sessions.AllowInsecureTransport, log)
+	// READ LIVE, NOT CAPTURED — the same reasoning as StorageRequired above. The opt-in is a
+	// live setting since quince#900, and capturing the boolean here would leave the plain half
+	// deciding from the value the process started with while the auth service had already
+	// moved on: two halves of one setting disagreeing, which is worse than either answer.
+	return runHTTP(ctx, listen, handler, keeper,
+		func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport }, log)
 }
 
-// runHTTP runs the HTTP server, and when a certificate is configured runs BOTH protocols on the
-// single port QUINCE_LISTEN names (gap A, Operator ruling 2026-08-02, option (c)).
+// runHTTP runs BOTH protocols on the single port QUINCE_LISTEN names (gap A, Operator ruling
+// 2026-08-02, option (c)) — ALWAYS, whether or not a certificate is configured (quince#900).
 //
-// With no certificate this is the plain http.Server it always was, so the reverse-proxy and
-// --demo tiers get none of the machinery below.
-func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure bool, log *slog.Logger) error {
-	if keeper == nil {
-		srv := newHTTPServer(listen, handler)
-		return runUntilDone(ctx, log, srv.ListenAndServe, srv.Shutdown)
-	}
-
+// THE MUX IS BOUND UNCONDITIONALLY, AND THAT IS THE WHOLE POINT OF THIS FUNCTION NOW. There
+// used to be a `keeper == nil` early return here, and it is what made turning TLS on a
+// restart: an install that started without a certificate had no TLS half, so writing one into
+// config.yml could not produce a listener that would serve it.
+//
+// IT COSTS EVERY CONNECTION A ONE-BYTE SNIFF, INCLUDING ON INSTALLS THAT NEVER USE TLS, and
+// that is a decision rather than a side effect (quince#900). An HTTP-only quince — the
+// reverse-proxy and --demo tiers — used to bypass the mux entirely; now it peeks one byte and
+// carries `peekTimeout` for a client that connects and sends nothing. The trade is that TLS
+// becomes reachable at runtime, which is what makes an apply-and-revert flow possible in
+// memory instead of as an on-disk two-phase commit across a restart.
+func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool, log *slog.Logger) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		// A BIND FAILURE IS A LOUD NAMED ERROR, NEVER A FALLBACK TO ANOTHER PORT. Under
@@ -351,25 +366,24 @@ func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *t
 		// moving would leave quince at an address the user will never guess.
 		return fmt.Errorf("listen on %s: %w", listen, err)
 	}
+	return serveBothProtocols(ctx, ln, listen, handler, keeper, allowInsecure, log)
+}
+
+// serveBothProtocols is runHTTP's body once the port is bound, split out so a test can drive
+// the REAL routing over a `127.0.0.1:0` listener (quince#900).
+//
+// The alternative was to have the test rebuild this wiring beside the code — a mux, two
+// servers, and the plain-half choice — which is the shape that passes while the thing it
+// claims to cover has changed underneath it. `listen` still rides along because
+// `newHTTPServer` records it as `Addr`; nothing serves from it once `Serve` is handed a
+// listener.
+func serveBothProtocols(ctx context.Context, ln net.Listener, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool, log *slog.Logger) error {
 	mux := tlsx.NewMux(ln)
 
 	tlsSrv := newHTTPServer(listen, handler)
 	tlsSrv.TLSConfig = &tls.Config{GetCertificate: keeper.GetCertificate, MinVersion: tls.VersionTLS12}
 
-	// The plain half either redirects or serves, and WHICH is the user's setting rather than
-	// ours. `sessions.allow_insecure_transport` beats the redirect (Operator, same ruling):
-	// over a VPN the transport is already encrypted, and a redirect overriding an explicit,
-	// off-by-default, surfaced opt-in would make that setting undeclarable on exactly the
-	// deployments that want it — every one where a certificate also exists.
-	//
-	// The spec permitted slice 4 to ship the redirect UNCONDITIONAL, reasoning that slice 8's
-	// flag did not exist yet so there was no user it could wrong. That expired when slice 8
-	// merged first (quince#540), so the exception ships with the redirect rather than after.
-	plainHandler := http.Handler(redirectToHTTPS())
-	if allowInsecure {
-		plainHandler = handler
-	}
-	plainSrv := newHTTPServer(listen, plainHandler)
+	plainSrv := newHTTPServer(listen, plainHalf(handler, keeper, allowInsecure))
 
 	errCh := make(chan error, 2)
 	serveHalf := func(name string, f func() error) {
@@ -399,24 +413,35 @@ func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *t
 	}
 }
 
-// runUntilDone is the pre-TLS serve loop, unchanged in behaviour and factored out so the
-// no-certificate path stays visibly the same code it was.
-func runUntilDone(ctx context.Context, log *slog.Logger, start func() error, shutdown func(context.Context) error) error {
-	errCh := make(chan error, 1)
-	go func() {
-		if err := start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+// plainHalf is the handler on the non-TLS side of the mux: it redirects to https, or serves
+// the app, and it decides WHICH PER REQUEST rather than at the bind (quince#900).
+//
+// It used to be chosen once, when the listener was created, which was correct while both
+// inputs were fixed for the life of the process. Both are now live — a certificate can be
+// applied or cleared through `PUT /api/config`, and so can the opt-in — so a choice made at
+// bind time would be a third copy of the setting, going stale the moment either moves.
+//
+// TWO INPUTS, AND THE ORDER OF THE TEST IS THE SAFETY PROPERTY.
+//
+//   - `keeper.HasCertificate()` — LOADED, not merely configured. Redirecting when nothing can
+//     complete a handshake is the trap this whole feature exists inside: once the plain half
+//     redirects, EVERY http request is redirected into the failure, so the client has no
+//     working channel left to ask for a revert. Asking whether a certificate is actually
+//     loaded is what makes an unusable one a non-event instead of a lockout.
+//   - `allowInsecure()` — `sessions.allow_insecure_transport` beats the redirect (Operator
+//     ruling 2026-08-02). Over a VPN the transport is already encrypted, and a redirect
+//     overriding an explicit, off-by-default, surfaced opt-in would make that setting
+//     undeclarable on exactly the deployments that want it — every one where a certificate
+//     also exists.
+func plainHalf(app http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool) http.Handler {
+	redirect := redirectToHTTPS()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if keeper.HasCertificate() && !allowInsecure() {
+			redirect.ServeHTTP(w, r)
+			return
 		}
-	}()
-	select {
-	case err := <-errCh:
-		return fmt.Errorf("http server: %w", err)
-	case <-ctx.Done():
-		log.Info("shutdown signal received, draining")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return shutdown(shutdownCtx)
-	}
+		app.ServeHTTP(w, r)
+	})
 }
 
 // redirectToHTTPS sends plain-http callers to the same host and port over https, which is
@@ -486,16 +511,52 @@ const demoPassword = "demo"
 //
 // It is ONE of the three channels the ruling names. The config warning is the second. The
 // third — a non-dismissible in-app banner — is NOT built here; quince#539.
+//
+// THE SETTER IS NOW CALLED UNCONDITIONALLY, AND THE EARLY RETURN MOVED BELOW IT (quince#900).
+// It used to return before the setter when the opt-in was off, which was harmless at startup —
+// the field's zero value is already `false` — but it made this function express only one
+// direction, and the applier below shares it. A function that can only ever arm a flag is not
+// something a revert can be built on.
 func applyInsecureTransportOptIn(authSvc *auth.Service, cfg config.Config, w io.Writer) {
+	authSvc.SetAllowInsecureTransport(cfg.Sessions.AllowInsecureTransport)
 	if !cfg.Sessions.AllowInsecureTransport {
 		return
 	}
-	authSvc.SetAllowInsecureTransport(true)
 	_, _ = fmt.Fprint(w, "quince: sessions.allow_insecure_transport is ON — session and CSRF cookies\n"+
 		"quince: will be served WITHOUT the Secure flag to plain-http clients, so they cross\n"+
 		"quince: the network in clear and anyone who can read the path can sign in as you.\n"+
 		"quince: This is a deliberate setting for a network you trust (a VPN, or a LAN you\n"+
 		"quince: control). Turn it off in config.yml if you did not mean it.\n")
+}
+
+// subscribeInsecureTransport makes `sessions.allow_insecure_transport` LIVE — the fifth
+// consumer of the config seam (qn.6g), and the half of quince#900 that is not about sockets.
+//
+// THE SETTING HAD TWO CONSUMERS AND MOVING ONLY ONE WOULD BE WORSE THAN MOVING NEITHER. The
+// plain half now reads it per request (see plainHalf); this is the other one. A handler that
+// had stopped allowing insecure transport while the auth service still thought it was allowed
+// would be two halves of one security setting disagreeing, and the disagreement would show up
+// as a cookie without `Secure` on a deployment that had just turned the opt-in off.
+//
+// IT WARNS ON THE WAY UP, AND THE WARNING IS NOT DECORATIVE. `DegradedModeWarnings` runs on
+// the LOAD path only, so before this a `PUT` that switched the opt-in on returned nothing
+// about it — acceptable while the write did not take effect until a restart, and not
+// acceptable now that it takes effect immediately. `No silent caps or fallbacks` is the rule,
+// and the applier's returned warnings are the channel that reaches the Settings form.
+//
+// The stderr banner is NOT re-printed. It is a startup fact — see applyInsecureTransportOptIn
+// on why it writes to the stream — where this is an event, and the log line is what an event
+// gets.
+func subscribeInsecureTransport(cfgSvc *config.Service, authSvc *auth.Service, log *slog.Logger) {
+	cfgSvc.Subscribe("sessions", func(old, next config.Config) []config.Warning {
+		if old.Sessions == next.Sessions {
+			return nil // an edit to some other section
+		}
+		authSvc.SetAllowInsecureTransport(next.Sessions.AllowInsecureTransport)
+		log.Info("sessions.allow_insecure_transport applied without a restart",
+			"allow_insecure_transport", next.Sessions.AllowInsecureTransport)
+		return config.DegradedModeWarnings(next)
+	})
 }
 
 func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) error {

@@ -64,6 +64,9 @@ both on the same day and either sequence builds.
   which is a job-semantics question this rung does not need to answer to be useful.
 - **`tls.*` on/off and the listen address.** Both need a socket rebind. The address is not even in
   `config.yml` (it is `QUINCE_LISTEN`, bootstrap env — contracts §6), so D12 does not reach it.
+  **`tls.*` STOPPED NEEDING ONE: quince#900 binds the mux on every start, so the TLS half exists
+  whether or not a certificate does.** The listen address still does. Said here rather than left
+  standing, because this sentence is the reason a reader would give for not attempting it.
 - **Fixing the fields nothing reads.** `backup.transport` is quince#654; `sessions.ttl_minutes` is
   quince#656, filed while writing this spec. Live-apply cannot make an unread field take effect, and
   folding the fix in here would let this rung's table claim a key works when nothing consumes it.
