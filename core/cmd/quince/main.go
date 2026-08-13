@@ -585,19 +585,55 @@ func subscribeTLS(cfgSvc *config.Service, keeper *tlsx.Keeper, log *slog.Logger)
 			return nil // an edit to some other section
 		}
 		if err := keeper.SetFiles(next.TLS.CertFile, next.TLS.KeyFile); err != nil {
-			log.Warn("tls certificate could not be applied, still serving the previous one",
-				"cert_file", next.TLS.CertFile, "key_file", next.TLS.KeyFile, "error", err)
+			// ASKED AFTER THE FAILED SetFiles, WHICH IS WHAT MAKES IT THE RIGHT QUESTION: a failed
+			// load keeps whatever was already loaded, so this is exactly "is there an incumbent to
+			// go on serving" (quince#916 review).
+			serving := keeper.HasCertificate()
+			log.Warn("tls certificate could not be applied",
+				"cert_file", next.TLS.CertFile, "key_file", next.TLS.KeyFile,
+				"still_serving_previous", serving, "error", err)
 			return []config.Warning{{
-				Path: "tls.cert_file",
-				Message: "saved, but NOT applied: " + err.Error() + ". quince is still serving the " +
-					"certificate it had — it will pick this pair up as soon as both files are " +
-					"readable, with no restart. Until then https is unchanged.",
+				Path:    tlsWarningPath(old.TLS, next.TLS),
+				Message: "saved, but NOT applied: " + err.Error() + ". " + tlsNotAppliedRemedy(serving),
 			}}
 		}
 		log.Info("tls certificate applied without a restart",
 			"enabled", next.TLS.Enabled(), "cert_file", next.TLS.CertFile)
 		return nil
 	})
+}
+
+// tlsNotAppliedRemedy says what an unapplied certificate MEANS, and the two answers are not
+// variations on one sentence (quince#916 review).
+//
+// The message this replaces said "quince is still serving the certificate it had … https is
+// unchanged" in both cases. That is true of a rotation or a path change, which is what it was
+// written for. It is FALSE of the ordinary first-run mistake — a typo in the path on the first
+// save — where the Keeper holds nothing, there is no certificate it had, and "https is
+// unchanged" means unchanged from not working at all. A user reading that would have no reason
+// to think anything was wrong with their https, because they would believe they had some.
+func tlsNotAppliedRemedy(serving bool) string {
+	if serving {
+		return "quince is still serving the certificate it had — it will pick this pair up as " +
+			"soon as both files are readable, with no restart. Until then https is unchanged."
+	}
+	return "quince has NO certificate to serve, so https is not working — plain http still is, " +
+		"and is not being redirected. It will start serving TLS as soon as both files are " +
+		"readable, with no restart."
+}
+
+// tlsWarningPath names the key that actually moved, rather than always `tls.cert_file`
+// (quince#916 review). Both keys reach the same loader and the same error, so the fault cannot
+// be attributed between them — but WHICH ONE THE USER EDITED can be, and that is what a path on
+// a warning is for.
+//
+// It falls back to `tls.cert_file` when both moved, which is the common case (turning TLS on or
+// off sets or clears the pair) and the one where either answer is equally true.
+func tlsWarningPath(old, next config.TLSConfig) string {
+	if old.CertFile == next.CertFile && old.KeyFile != next.KeyFile {
+		return "tls.key_file"
+	}
+	return "tls.cert_file"
 }
 
 func configureDemoAuth(authSvc *auth.Service, log *slog.Logger, public bool) error {

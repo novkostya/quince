@@ -1013,3 +1013,121 @@ func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
 			"exists to make impossible")
 	}
 }
+
+// quince#916 review: the not-applied warning must not claim an incumbent that does not exist.
+//
+// THE SEQUENCE THE APPLIER TEST ABOVE DOES NOT REACH is the ordinary first-run mistake — TLS
+// turned on for the FIRST time with a typo in the path. The Keeper holds nothing, so "quince is
+// still serving the certificate it had" names a certificate that never existed and "https is
+// unchanged" means unchanged from not working at all. A user reading that has no reason to think
+// their https is broken, because they believe they have some.
+func TestTLSNotAppliedWarningDoesNotInventAnIncumbent(t *testing.T) {
+	dir := t.TempDir()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfgSvc := config.NewService(filepath.Join(dir, "config.yml"), quiet)
+	keeper := tlsx.NewEmptyKeeper()
+	subscribeTLS(cfgSvc, keeper, quiet)
+
+	base := cfgSvc.Current()
+	base.Storage = &[]config.StorageEntry{{Name: "test", Path: filepath.Join(dir, "backups"), Default: true, Backend: "copy"}}
+
+	// FIRST configuration, and it is wrong. Nothing has ever been loaded.
+	first := base
+	first.TLS.CertFile, first.TLS.KeyFile = filepath.Join(dir, "typo.pem"), filepath.Join(dir, "typo.key")
+	_, warns, err := cfgSvc.Replace(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keeper.HasCertificate() {
+		t.Fatal("the keeper loaded something from paths that do not exist")
+	}
+
+	msg := tlsWarning(t, warns)
+	if strings.Contains(msg, "still serving the certificate it had") {
+		t.Errorf("the warning claims an incumbent certificate on a FIRST configuration, where "+
+			"there has never been one:\n  %s", msg)
+	}
+	if strings.Contains(msg, "https is unchanged") {
+		t.Errorf("the warning says https is unchanged, which on this path means unchanged from "+
+			"not working at all:\n  %s", msg)
+	}
+	if !strings.Contains(msg, "https is not working") {
+		t.Errorf("the warning does not say that https is not working, which is the one fact the "+
+			"user needs:\n  %s", msg)
+	}
+
+	// …and the OTHER case still says what it always said, because it is true there. A one-sided
+	// test would pass against a message that had simply lost the incumbent sentence entirely.
+	good := base
+	good.TLS.CertFile, good.TLS.KeyFile = writeTestPair(t, dir, "incumbent")
+	if _, _, err := cfgSvc.Replace(good); err != nil {
+		t.Fatal(err)
+	}
+	if !keeper.HasCertificate() {
+		t.Fatal("the good pair did not load, so the incumbent case cannot be observed")
+	}
+	broken := base
+	broken.TLS.CertFile, broken.TLS.KeyFile = filepath.Join(dir, "gone.pem"), filepath.Join(dir, "gone.key")
+	if _, warns, err = cfgSvc.Replace(broken); err != nil {
+		t.Fatal(err)
+	}
+	msg = tlsWarning(t, warns)
+	if !strings.Contains(msg, "still serving the certificate it had") {
+		t.Errorf("with an incumbent loaded the warning no longer says so:\n  %s", msg)
+	}
+}
+
+// The warning names the key the USER edited. Both keys reach the same loader and the same error,
+// so the fault cannot be attributed between them — but which one moved can be, and that is what
+// a path on a warning is for (quince#916 review).
+func TestTLSWarningNamesTheKeyThatMoved(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "named")
+
+	tests := []struct {
+		name      string
+		old, next config.TLSConfig
+		want      string
+	}{
+		{
+			name: "only the key file moved",
+			old:  config.TLSConfig{CertFile: certFile, KeyFile: keyFile},
+			next: config.TLSConfig{CertFile: certFile, KeyFile: "/tmp/other.key"},
+			want: "tls.key_file",
+		},
+		{
+			name: "only the cert file moved",
+			old:  config.TLSConfig{CertFile: certFile, KeyFile: keyFile},
+			next: config.TLSConfig{CertFile: "/tmp/other.pem", KeyFile: keyFile},
+			want: "tls.cert_file",
+		},
+		{
+			name: "both moved — turning TLS on, where either answer is equally true",
+			old:  config.TLSConfig{},
+			next: config.TLSConfig{CertFile: certFile, KeyFile: keyFile},
+			want: "tls.cert_file",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tlsWarningPath(tc.old, tc.next); got != tc.want {
+				t.Errorf("tlsWarningPath = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// tlsWarning returns the one warning under a `tls.*` path, failing if there is not exactly one.
+func tlsWarning(t *testing.T, warns []config.Warning) string {
+	t.Helper()
+	var found []string
+	for _, w := range warns {
+		if strings.HasPrefix(w.Path, "tls.") {
+			found = append(found, w.Message)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one tls warning, got %d: %+v", len(found), warns)
+	}
+	return found[0]
+}
