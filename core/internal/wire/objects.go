@@ -508,3 +508,19 @@ type StorageZFSKey struct {
 type StorageZFSKeyResponse struct {
 	Key StorageZFSKey `json:"key"`
 }
+
+// StorageZFSHelperResponse carries the constrained helper script with the operator's own
+// `parent_dataset` already substituted — quince#818 piece C.
+//
+// THE SCRIPT IS SERVED RENDERED RATHER THAN AS A TEMPLATE, and that is a deliberate split of
+// responsibility. The substitution is one line, so a client could do it; but the value goes inside a
+// double-quoted assignment in a script the operator runs as root on another machine, so whoever
+// substitutes must also validate. Doing it on the server keeps the validation, the placeholder guard
+// and the refusal in one place, next to the pattern that already guards dataset names for argv use.
+type StorageZFSHelperResponse struct {
+	// Script is the complete file, ready to save as /usr/local/sbin/quince-zfs-helper.
+	Script string `json:"script"`
+	// Path is where it goes. On the wire because it is half the instruction — a script with no
+	// destination is a thing the operator still has to look up, which is what piece C exists to end.
+	Path string `json:"path"`
+}
