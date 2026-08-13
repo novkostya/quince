@@ -1,48 +1,30 @@
 #!/bin/sh
-# quince-zfs-helper — the only command quince may run on this host.
-#
-# Install as /usr/local/sbin/quince-zfs-helper, chmod +x, and pin it as the forced command in
-# ~/.ssh/authorized_keys. It allows, under $PARENT and nothing else:
-#   snapshot | destroy | rollback   @quince-* snapshots only
-#   list                            snapshots under $PARENT
-#   create                          children of $PARENT
-#   capacity                        used/available for $PARENT; takes no argument
-# Destroying a DATASET is deliberately unreachable — quince prints that command for a human instead.
+# quince-zfs-helper — the only command quince may run here. It cannot destroy a dataset.
 set -eu
-PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
+PARENT="pool/path/to/iphone-backup"
 
-# Unquoted on purpose: ssh delivers the request as one string, so splitting it IS how this script
-# gets its arguments. Quoting would make every verb fall through to the refusal at the bottom.
+# Unquoted on purpose: ssh delivers the request as one string, so this split IS the arg parsing.
 # shellcheck disable=SC2086
 set -- $SSH_ORIGINAL_COMMAND
 op="${1:-}"
-# The target is the LAST argument: quince sends flags before it (`create -p <ds>`).
 target=""; for a in "$@"; do target="$a"; done
 case "$op" in
   create)   case "$target" in "$PARENT"/*)
-              # Check the parent exists BEFORE creating: `zfs create -p` would otherwise build a
-              # whole tree from a typo in the PARENT= line above, with no quota and no
-              # com.sun:auto-snapshot=false, surfacing much later as ENOSPC or as retention
-              # reclaiming nothing.
+              # Checked first: `zfs create -p` silently builds a whole tree from a typo in PARENT.
               pmp=$(zfs get -H -o value mountpoint "$PARENT" 2>/dev/null) || pmp=""
               [ -n "$pmp" ] && [ -d "$pmp" ] || {
                 echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the PARENT= line" >&2
                 exit 1; }
               zfs create -p "$target" || exit 1
-              # New datasets are owned by host root; quince may run as a userns-mapped root and
-              # could not write. The uid is inherited from the parent's mountpoint, which quince
-              # already writes to, so there is no constant to get wrong.
+              # A new dataset is host-root-owned; quince may be a userns-mapped root that cannot write it.
               ctuid=$(stat -c %u "$pmp")
               chown "$ctuid:$ctuid" "$(zfs get -H -o value mountpoint "$target")"
               exit 0 ;; esac ;;
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
-  destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
-            # No -r, and none can reach here — the parse above drops every flag. Without -r,
-            # `zfs rollback` refuses any snapshot but the newest, so this cannot destroy a
-            # committed version.
+  destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;
+            # No -r, and the parse drops flags, so rollback cannot reach anything but the newest snapshot.
   rollback) case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-            # No caller argument reaches zfs here — tighter than the guarded arms above.
   capacity) exec zfs list -H -p -o used,available "$PARENT" ;;
 esac
 echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
