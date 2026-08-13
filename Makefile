@@ -412,6 +412,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/gh-analyst \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
+                   core/internal/storage/zfshelper/quince-zfs-helper \
                    deploy/storageless-smoke \
                    deploy/fly-deploy \
                    bin/allowlist-coverage bin/allowlist-coverage-test \

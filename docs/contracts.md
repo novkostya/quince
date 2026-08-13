@@ -663,8 +663,9 @@ answered by a failed multi-hour Wi-Fi transfer at commit time: the key, the forc
 was configured with.
 
 **Two read-only verbs, in this order, and the order is part of the answer.** `capacity` first —
-it takes **no caller argument at all** (`deploy/storage.md` calls that *"TIGHTER than the arms
-above"*), so a failure there is unambiguously about reachability. Then `list <typed parent>`, whose
+it takes **no caller argument at all** (the helper's own comment calls that *"TIGHTER than the arms
+above"* — `core/internal/storage/zfshelper/quince-zfs-helper`, moved out of a `deploy/storage.md`
+fence by quince#818 piece C), so a failure there is unambiguously about reachability. Then `list <typed parent>`, whose
 `case "$target" in "$PARENT"|"$PARENT"/*` guard is the only thing that can see a parent
 disagreement. Reversed, one refusal would be two hypotheses. Nothing here can create, destroy or
 write.

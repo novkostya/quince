@@ -99,83 +99,32 @@ the exact `zfs destroy <dataset>` command for a human instead.
 command="/usr/local/sbin/quince-zfs-helper",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... quince
 ```
 
-`/usr/local/sbin/quince-zfs-helper` (the parent dataset is baked in here, not taken from the
-client — the client cannot escape it):
+`/usr/local/sbin/quince-zfs-helper` — the parent dataset is baked into the script rather than taken
+from the client, which is what stops the client escaping it.
 
-```sh
-#!/bin/sh
-# Constrained ZFS helper for quince. Allows ONLY:
-#   snapshot|destroy|rollback on @quince-* snapshots under $PARENT, list under $PARENT,
-#   create of children of $PARENT, and capacity (which takes no argument at all).
-# Dataset destroy is intentionally NOT reachable.
-#
-# EVERY VERB IS NOW O(1) AND LIFECYCLE-INDEPENDENT, which is qn.6h's prize: this script no longer
-# contains any of quince's backup lifecycle, so quince can change how it writes without asking
-# anyone to hand-edit a file on a machine it does not manage.
-#
-# CHANGED VERBS, for an operator upgrading an existing helper — two edits, no procedure:
-#   - DELETE the `seed)` case (qn.5b's clone of latest/ → working/<udid>). quince no longer seeds
-#     on this backend: the tool writes straight into the dataset root.
-#   - ADD the `rollback)` case below. It is what Reset uses, and until it is present the FIRST
-#     reset a user asks for fails with this script's own `refused:` line on stderr.
-# Nothing else changes, and backups keep working across the gap: only reset needs the new verb.
-set -eu
-PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
-# THERE IS NO `CTUID=` TO SET ANY MORE (quince#818). It was a constant an operator had to know:
-# 0 for privileged/native, the userns base (e.g. 100000) for an unprivileged LXC — a number that is
-# invisible from inside the container, so quince could not fill it in and a wrong one made the
-# create chown a silent no-op. The create arm derives it instead; see there for why that is sound.
-set -- $SSH_ORIGINAL_COMMAND
-op="${1:-}"
-# The dataset/snapshot is the LAST arg, not $2: quince sends flags BEFORE it — `create -p <ds>`,
-# `list -t snapshot -H -o name -r <ds>` — so $2 is a flag and $2-based matching REFUSES those verbs.
-target=""; for a in "$@"; do target="$a"; done
-case "$op" in
-  create)   case "$target" in "$PARENT"/*)
-              # THE PARENT MUST ALREADY EXIST, AND THIS IS CHECKED BEFORE THE CREATE — measured on a
-              # real pool, 2026-08-12 (quince#818). `zfs create -p` creates missing PARENTS too, so
-              # a typo in the PARENT= line above did not fail: it silently built a whole new dataset
-              # tree and put backups in it. That tree has neither of the two settings this document
-              # opens by requiring — no `com.sun:auto-snapshot=false`, no quota — so the failure
-              # surfaces much later as retention reclaiming nothing, or as ENOSPC mid-backup.
-              #
-              # Checking first turns that into a refusal naming the dataset. It costs one `zfs get`
-              # per create, which is once per device rather than once per backup.
-              pmp=$(zfs get -H -o value mountpoint "$PARENT" 2>/dev/null) || pmp=""
-              [ -n "$pmp" ] && [ -d "$pmp" ] || {
-                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the PARENT= line" >&2
-                exit 1; }
-              zfs create -p "$target" || exit 1
-              # host root owns the new dataset; when quince runs in an unprivileged-userns container
-              # its mapped root can't write the root-owned mountpoint — chown so the backup can land.
-              #
-              # THE UID IS INHERITED FROM THE PARENT, NOT CONFIGURED (quince#818). The parent's
-              # mountpoint must ALREADY be writable by quince — it is where backups go — so its
-              # owner IS the container's mapped root: 0 on privileged/native, the userns base on an
-              # unprivileged LXC. That makes the old `CTUID=` constant a question nobody has to
-              # answer, and removes the failure where a wrong one made this chown a silent no-op.
-              ctuid=$(stat -c %u "$pmp")
-              chown "$ctuid:$ctuid" "$(zfs get -H -o value mountpoint "$target")"
-              exit 0 ;; esac ;;
-  snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
-  destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
-  rollback) # qn.6h ABANDON: return the device dataset to its newest @quince-* snapshot. NO -r, and
-            # none can reach here — the parse above discards every flag. Without -r, `zfs rollback`
-            # refuses any snapshot but the most recent, and -r/-R are what destroy NEWER snapshots,
-            # i.e. committed versions. So this verb structurally cannot lose one.
-            case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
-  list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-  capacity) # qn.6d: the storage card's free-of-total. NO caller argument reaches zfs — the verb
-            # takes none, and $PARENT is the helper's own. That makes it TIGHTER than the arms
-            # above, which accept a pattern-guarded $target.
-            exec zfs list -H -p -o used,available "$PARENT" ;;
-esac
-echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
-exit 1
-```
+**THE SCRIPT IS A FILE, NOT A FENCE IN THIS DOCUMENT** — `core/internal/storage/zfshelper/quince-zfs-helper`.
 
-**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case above**, the same way the header
-records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
+It moved there (quince#818 piece C) because it is becoming a **product artifact** rather than an
+excerpt: the point of that piece is that quince serves the script back with your `parent_dataset`
+already substituted, so the *Add storage* screen hands you a finished file instead of asking you to
+edit one. That needs `go:embed`, which cannot reach outside its module, and the module root is
+`core/` — so the path is decided by the mechanism rather than by taste.
+
+**The serving is NOT BUILT YET; this move is what makes it possible.** Today the file is the same
+script it always was, in a place quince can embed it from. Until that lands, set the `PARENT=` line
+by hand as before.
+
+**Two things followed from the move, and both are the point rather than side effects.** The Go gate
+that runs the real helper against a stubbed `zfs` now reads the file instead of parsing this
+document for a fenced block, so a prose edit can no longer break a gate. And `shellcheck` opened the
+script **for the first time** — it had never been linted while it lived in a fence — which is where
+the `SC2086` note now standing above `set -- $SSH_ORIGINAL_COMMAND` came from.
+
+**Read it there.** It is a short file and it carries its own reasoning, including which verbs changed
+for an operator upgrading an existing helper.
+
+**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case from that file**, the same way its
+header records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
 space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
 Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
 number rather than showing a wrong one — which is why this is a migration note rather than a
