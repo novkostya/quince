@@ -303,6 +303,7 @@ func serve(args []string) error {
 		// Passkeys (qn.6k). The ceremony store is per-process and in memory; the credentials
 		// themselves live in the app DB, which is why both are wired and neither is optional here.
 		Store: st, Passkeys: auth.NewPasskeyCeremonies(),
+		Reauth: auth.NewReauthCeremonies(), Proofs: auth.NewProofs(),
 		// Nil in demo mode — the carve-out is the nil, not a branch in a handler (qn.6m D6).
 		PasswordAdmin: passwordAdmin(demoMode, authSvc),
 	})

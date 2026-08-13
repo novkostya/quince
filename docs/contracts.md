@@ -226,6 +226,44 @@ first-come-first-served for a credential on the same terms and behind the same o
 simultaneously on a virgin install can both finish; both belong to whoever was at the machine during
 first run, and `quince auth reset` removes every credential.
 
+Re-authentication — **a THIRD pair, session-required, minting a PROOF rather than a session**
+(qn.6n D3, D4):
+
+```
+POST /api/auth/reauth/begin {operation, target?}  → 200 {ceremony, options}
+     // SESSION REQUIRED, and therefore in NONE of the three exact-path lists — the opposite of
+     // the assertion pair below, which is in all three. That placement IS the decision: those
+     // routes are the least-guarded in the system, and a pair whose purpose is gating
+     // privileged operations must not share them (D3).
+     // `operation` is one of add_passkey · remove_passkey · remove_password · set_password.
+     // A CLOSED SET, and `rename_passkey` is deliberately absent (D6).
+     // `target` is the credential id, REQUIRED for remove_passkey and refused for the rest —
+     // rule 2 compares the presented credential against it, and a target on an operation that
+     // reads none is a binding that becomes decorative.
+     // 422 bad_operation names what was wrong · 429 rate_limited, THE SAME BUCKET as login,
+     // because holding a session must not buy a fresh budget to guess with (D7)
+     // 409 passkeys_unsupported_here at an address that cannot be a relying party.
+POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
+     // SESSION REQUIRED, AND IT SETS NO COOKIE. `passkeys/login/finish` sets two and returns
+     // {state, csrf_token}; this returns a token and nothing else. Issuing a session here
+     // would make it a second login path reachable from an authenticated context, and would
+     // bind the proof to a session id that is gone by the time the mutating call arrives.
+     // THE PROOF CARRIES FOUR BINDINGS: single-use, the operation (with its target), the
+     // CREDENTIAL THAT ASSERTED, and the session that BEGAN the ceremony. The third is what
+     // lets rule 2 refuse a removal proven by the credential being removed; it cannot be added
+     // later without changing this contract.
+     // The ceremony's own rpId and session win over the request's — the authenticator signed
+     // for the domain the challenge was issued on, and a ceremony finished by another client
+     // is not a re-authentication of that client.
+     // 401 unauthorized for a rejected OR unknown credential, deliberately indistinguishable
+     // · 400 no_ceremony · 429 rate_limited · 409 passkey_rp_mismatch.
+```
+
+**NOTHING CONSUMES THE PROOF YET.** Slices 4 and 5 of `qn.6n` make the mutating endpoints demand
+one; this pair is the way to obtain one, landed first so the two can be reviewed apart. A proof
+minted today is spendable nowhere, which is the same shape `qn.6k` slice 2 shipped `InsertPasskey`
+in and `quince auth reset` before it.
+
 Passkeys — assertion (qn.6k):
 
 ```
