@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { PasswordControls } from "./PasswordControls";
+import { Passkeys } from "./Passkeys";
 import { api, APIError } from "@/lib/api";
 
 // qn.6m slice 6b — D4 and D7. The change form is ordinary; everything interesting is on the REMOVE
@@ -25,14 +26,21 @@ function passkeyAt(rpID: string, id = "pk-1") {
 // in precisely the way the component was: `has_password: false` was taken to mean "you have a
 // passkey" when it can equally mean "you have nothing", and code and tests assumed the reassuring
 // reading together. The default is now a passkey bound HERE, which is what those tests meant.
+//
+// AND IT NO LONGER DISCARDS AN ARGUMENT IT WAS GIVEN. This read `passkeys: hasPassword ? [] : passkeys`,
+// so `renderControls(true, [passkeyAt(ELSEWHERE)])` would silently have received `[]`. Harmless today —
+// `credentialState` short-circuits on `hasPassword` — but a fixture that quietly means something
+// other than what it says is the exact thing that hid the bug this PR fixes, so it is not left in.
 function renderControls(
   hasPassword = true,
   passkeys: ReturnType<typeof passkeyAt>[] = [passkeyAt(HERE)],
+  rpID = HERE,
+  supported = true,
 ) {
   vi.spyOn(api, "get").mockResolvedValue({
-    passkeys: hasPassword ? [] : passkeys,
-    rp_id: HERE,
-    supported: true,
+    passkeys,
+    rp_id: rpID,
+    supported,
     has_password: hasPassword,
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -300,4 +308,66 @@ describe("passwordless is not the only reading of has_password: false", () => {
 
     expect(await screen.findByText(/only way to sign in at this address/i)).toBeInTheDocument();
   });
+});
+
+// THE TWO SECTIONS OF ONE SCREEN MUST NOT CONTRADICT EACH OTHER — quince#888 item 2 review, the
+// blocking finding. `PasswordControls` offered *"or add a passkey for this address"* while `Passkeys`,
+// rendered ten lines above it on `/settings/auth`, said *"an address like this cannot hold a passkey"*
+// with its Add button disabled.
+//
+// AT A BARE IP THIS IS THE ONLY REACHABLE SHAPE OF `elsewhere-only`, not a corner case:
+// `RPIDFromRequest` returns the IP rather than "", so the unknown-rpId fallback never fires, and
+// `isUsableRPID` refuses an IP, so no credential can ever match it. Every passwordless install with a
+// passkey, reached at its address, landed here — the Operator's own scenario.
+//
+// RENDERED TOGETHER, WHICH IS THE POINT. Either component alone is self-consistent; the defect only
+// exists in their composition, so a test of one could not see it. `192.0.2.10` is TEST-NET-1 (RFC
+// 5737), documentation-reserved, so no real address enters a fixture.
+describe("the two sections of /settings/auth cannot contradict each other", () => {
+  function renderBoth(rpID: string, supported: boolean) {
+    vi.spyOn(api, "get").mockResolvedValue({
+      passkeys: [passkeyAt(ELSEWHERE, "pk-elsewhere")],
+      rp_id: rpID,
+      supported,
+      has_password: false,
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <Passkeys />
+        <PasswordControls />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("does not offer a passkey at an address that cannot hold one", async () => {
+    renderBoth("192.0.2.10", false);
+
+    // The tier refusal is on screen…
+    expect(await screen.findByText(/cannot hold a passkey/i)).toBeInTheDocument();
+    // …so the remedy that depends on it must not be.
+    expect(screen.queryByText(/add a passkey for this address/i)).not.toBeInTheDocument();
+    // And the state is still reported: the omission is of the REMEDY, not of the warning.
+    expect(screen.getByText(/none of its passkeys works at this address/i)).toBeInTheDocument();
+    // Setting a password is still offered, because it is the remedy that works here.
+    expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
+  });
+
+  it("still offers it where the address CAN hold one", async () => {
+    renderBoth(HERE, true);
+
+    expect(await screen.findByText(/add a passkey for this address/i)).toBeInTheDocument();
+    expect(screen.queryByText(/cannot hold a passkey/i)).not.toBeInTheDocument();
+  });
+});
+
+// A row with an empty `rp_id` cannot be produced by this server — `RPIDFromRequest` is never empty on
+// an HTTP/1.1 request — so this is degradation rather than a reachable case. Without it the sentence
+// renders "registered for ." Asserted because "cannot happen" is how the unreachable case becomes the
+// one nobody notices.
+it("does not render an empty address list when no rp_id can be named", async () => {
+  renderControls(false, [{ ...passkeyAt(""), id: "pk-blank" }], HERE, true);
+
+  const warning = await screen.findByText(/none of its passkeys works at this address/i);
+  expect(warning.textContent).not.toMatch(/registered for\s*\./);
 });
