@@ -65,120 +65,120 @@ export function OnboardingStoragePage() {
           different decisions and running them together is what this screen got wrong twice — first
           by claiming the operator had no storage when their file declared one, then by saying
           something true-of-both because the wire could not tell the cases apart. */}
-      {discarded ? (
-        <>
-          <h1 className="mt-4 text-xl font-semibold tracking-tight">
-            quince could not read your configuration
-          </h1>
-          {/* THE FACT THE OPERATOR CAME FOR, and it is not the same as "there is a problem": their
-              backups are not happening. quince is on its defaults, so a storage the file declares
-              is not running — which is why this must not read as a first-run screen. */}
-          <p className="mt-2 text-sm text-muted">
-            quince is running on its defaults, so nothing your file declares is in effect —
-            including any storage. No backups are being made.
-          </p>
-        </>
-      ) : (
-        <>
-          <h1 className="mt-4 text-xl font-semibold tracking-tight">Add your first storage</h1>
-          <p className="mt-2 text-sm text-muted">
-            quince needs somewhere to keep backups before it can do anything else. Point it at a
-            folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
-            dataset.
-          </p>
-          <p className="mt-2 text-sm text-muted">
-            Nothing is created or changed until you save. If the path is wrong, quince says so
-            rather than making it — see <DocLink path="deploy/storage.md" />.
-          </p>
-        </>
-      )}
+        {discarded ? (
+          <>
+            <h1 className="mt-4 text-xl font-semibold tracking-tight">
+              quince could not read your configuration
+            </h1>
+            {/* THE FACT THE OPERATOR CAME FOR, and it is not the same as "there is a problem": their
+                backups are not happening. quince is on its defaults, so a storage the file declares
+                is not running — which is why this must not read as a first-run screen. */}
+            <p className="mt-2 text-sm text-muted">
+              quince is running on its defaults, so nothing your file declares is in effect —
+              including any storage. No backups are being made.
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="mt-4 text-xl font-semibold tracking-tight">Add your first storage</h1>
+            <p className="mt-2 text-sm text-muted">
+              quince needs somewhere to keep backups before it can do anything else. Point it at a
+              folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
+              dataset.
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              Nothing is created or changed until you save. If the path is wrong, quince says so
+              rather than making it — see <DocLink path="deploy/storage.md" />.
+            </p>
+          </>
+        )}
 
-      {warnings.length > 0 ? (
-        <>
-          <div
-            className="mt-4 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
-            data-testid="config-warnings"
-          >
-            {/* THE DAEMON'S OWN PATH AND SENTENCE, which is the half `qn.6g` makes non-optional: a
-                remedy the user cannot follow is the same defect as a silent failure, and "there is
-                a problem" without the line is exactly that. Same treatment as `ConfigView`'s list —
-                both fields are arbitrary-length server strings (quince#631). */}
-            <ul className="list-disc pl-5 font-mono text-xs break-words">
-              {warnings.map((w, i) => (
-                <li key={i}>
-                  {w.path ? `${w.path}: ` : ""}
-                  {w.message}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* THE RESTART IS PART OF THE REMEDY, not padding. There is no reload path — `Load` runs
-              at construction and nothing re-reads the file (quince#727) — so editing `config.yml`
-              alone changes nothing about the running process. */}
-          <p className="mt-2 text-sm text-muted">
-            Fix it in <code className="font-mono text-xs">{configPath}</code> and restart quince.
-          </p>
-
-          {fileText !== "" ? (
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm text-muted">
-                Show the file quince read
-              </summary>
-              {/* `file_text` IS THE FILE, not a rendering of the parsed document (contracts §6) —
-                  which is the whole reason it is worth showing here. The paths above point INTO
-                  this, and after a bad hand-edit it is the only place the offending line exists. */}
-              <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs whitespace-pre-wrap break-words">
-                {fileText}
-              </pre>
-            </details>
-          ) : null}
-
-          {/* THE SECOND HEADING IS THE DISCARDED CASE'S ONLY, because only there does the form stop
-              being the point of the page. On a merely-warned first run the form IS the page and a
-              subheading over it would be noise.
-
-              THE FIRST-RUN PREMISE IS NOT REPEATED HERE, and dropping it was the fix rather than a
-              trim. *"quince needs somewhere to keep backups before it can do anything else"* does
-              not literally claim the operator has none — but above a form, on a screen reached
-              because their declaration was discarded, it implies exactly that. Caught by its own
-              e2e assertion, which was written against the ruling and failed on this paragraph. */}
-          {discarded ? (
-            <>
-              <h2 className="mt-8 text-sm font-semibold text-muted">Add a storage</h2>
-              <p className="mt-2 text-sm text-muted">
-                If you meant to declare a storage in the file, fixing the problem above is the thing
-                to do — adding one here will not clear it.
-              </p>
-            </>
-          ) : null}
-        </>
-      ) : null}
-
-      {/* THE FORM STAYS IN BOTH BRANCHES (quince#849, ruled). It is not a trap any more: quince#857
-          refuses an add while the config on disk was discarded, and the refusal names the offending
-          line — so pressing it fails honestly rather than replacing the file. Removing it would
-          also break the ordinary first-run path, which is the same screen. */}
-      <div className="mt-8">
-        <AddStorageForm
-          // THE ONLY WAY OUT OF THIS SCREEN IS TO SUCCEED, so there is no cancel. Adding a storage
-          // is what lifts the daemon's setup mode; a dismissal would return the user to a Home that
-          // cannot render and an API that refuses.
-          //
-          // THE NAME IS DELIBERATELY IGNORED, unlike `AddStoragePage`, which navigates to it
-          // (quince#846). This step's destination is Home and is not cosmetic: quince#683 was a
-          // bounce straight back to this page, caused by ordering, and story 11's last test gates
-          // the landing. First run ends on the page the product opens with, not on a details page
-          // for the only storage there is.
-          onSaved={() => navigate("/", { replace: true })}
-          footer={({ save, canSave, saving, adopting }) => (
-            <div className="mt-6">
-              <Button onClick={save} disabled={!canSave || saving} data-testid="add-storage-save">
-                {adopting ? "Use this storage" : "Add storage"}
-              </Button>
+        {warnings.length > 0 ? (
+          <>
+            <div
+              className="mt-4 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
+              data-testid="config-warnings"
+            >
+              {/* THE DAEMON'S OWN PATH AND SENTENCE, which is the half `qn.6g` makes non-optional: a
+                  remedy the user cannot follow is the same defect as a silent failure, and "there is
+                  a problem" without the line is exactly that. Same treatment as `ConfigView`'s list —
+                  both fields are arbitrary-length server strings (quince#631). */}
+              <ul className="list-disc pl-5 font-mono text-xs break-words">
+                {warnings.map((w, i) => (
+                  <li key={i}>
+                    {w.path ? `${w.path}: ` : ""}
+                    {w.message}
+                  </li>
+                ))}
+              </ul>
             </div>
-          )}
-        />
+
+            {/* THE RESTART IS PART OF THE REMEDY, not padding. There is no reload path — `Load` runs
+                at construction and nothing re-reads the file (quince#727) — so editing `config.yml`
+                alone changes nothing about the running process. */}
+            <p className="mt-2 text-sm text-muted">
+              Fix it in <code className="font-mono text-xs">{configPath}</code> and restart quince.
+            </p>
+
+            {fileText !== "" ? (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm text-muted">
+                  Show the file quince read
+                </summary>
+                {/* `file_text` IS THE FILE, not a rendering of the parsed document (contracts §6) —
+                    which is the whole reason it is worth showing here. The paths above point INTO
+                    this, and after a bad hand-edit it is the only place the offending line exists. */}
+                <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs whitespace-pre-wrap break-words">
+                  {fileText}
+                </pre>
+              </details>
+            ) : null}
+
+            {/* THE SECOND HEADING IS THE DISCARDED CASE'S ONLY, because only there does the form stop
+                being the point of the page. On a merely-warned first run the form IS the page and a
+                subheading over it would be noise.
+
+                THE FIRST-RUN PREMISE IS NOT REPEATED HERE, and dropping it was the fix rather than a
+                trim. *"quince needs somewhere to keep backups before it can do anything else"* does
+                not literally claim the operator has none — but above a form, on a screen reached
+                because their declaration was discarded, it implies exactly that. Caught by its own
+                e2e assertion, which was written against the ruling and failed on this paragraph. */}
+            {discarded ? (
+              <>
+                <h2 className="mt-8 text-sm font-semibold text-muted">Add a storage</h2>
+                <p className="mt-2 text-sm text-muted">
+                  If you meant to declare a storage in the file, fixing the problem above is the thing
+                  to do — adding one here will not clear it.
+                </p>
+              </>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* THE FORM STAYS IN BOTH BRANCHES (quince#849, ruled). It is not a trap any more: quince#857
+            refuses an add while the config on disk was discarded, and the refusal names the offending
+            line — so pressing it fails honestly rather than replacing the file. Removing it would
+            also break the ordinary first-run path, which is the same screen. */}
+        <div className="mt-8">
+          <AddStorageForm
+            // THE ONLY WAY OUT OF THIS SCREEN IS TO SUCCEED, so there is no cancel. Adding a storage
+            // is what lifts the daemon's setup mode; a dismissal would return the user to a Home that
+            // cannot render and an API that refuses.
+            //
+            // THE NAME IS DELIBERATELY IGNORED, unlike `AddStoragePage`, which navigates to it
+            // (quince#846). This step's destination is Home and is not cosmetic: quince#683 was a
+            // bounce straight back to this page, caused by ordering, and story 11's last test gates
+            // the landing. First run ends on the page the product opens with, not on a details page
+            // for the only storage there is.
+            onSaved={() => navigate("/", { replace: true })}
+            footer={({ save, canSave, saving, adopting }) => (
+              <div className="mt-6">
+                <Button onClick={save} disabled={!canSave || saving} data-testid="add-storage-save">
+                  {adopting ? "Use this storage" : "Add storage"}
+                </Button>
+              </div>
+            )}
+          />
         </div>
       </div>
     </div>

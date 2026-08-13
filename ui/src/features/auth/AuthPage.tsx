@@ -71,8 +71,15 @@ export function AuthPage({
   const outer = isPage
     ? // A PAGE TOP-ALIGNS. It is a destination with room to grow — slice 4 adds a passkey offer here
       // — and vertically centring a tall step makes its top edge move as the content changes.
-      // Matches `OnboardingStoragePage`, which is the sibling step this one is being made to look
-      // like, rather than `OnboardingHTTPSPage`, which is wider because it is prose to READ.
+      // Matches `OnboardingStoragePage` AND `OnboardingHTTPSPage` — the three first-run steps are
+      // one flow and share this outer/inner split and this width.
+      //
+      // THIS CLAUSE USED TO EXEMPT THE HTTPS STEP as "wider because it is prose to READ", and that
+      // stopped being true here: the flow is sized by its WIDEST step, which is the storage one,
+      // because it renders the whole helper script and was clipping it (Operator, 2026-08-13).
+      // Corrected rather than left standing — a documented reason for the middle step to differ is
+      // exactly what would send the next reader to re-widen it, or to file a defect against a
+      // deliberate change.
       "min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg"
     : // A CARD sits toward the top on a phone so the keyboard / Face ID sheet has room below it
       // (dead-centring looks unbalanced once the sheet slides up), and centres on desktop.
