@@ -138,8 +138,27 @@ func TrustHostKey(knownHostsPath, line string) error {
 	if marker != "" {
 		return fmt.Errorf("refusing a %q marker line — quince records plain host keys only", marker)
 	}
-	if len(hosts) == 0 || key == nil {
-		return errors.New("that known_hosts line names no host or carries no key")
+	if key == nil {
+		return errors.New("that known_hosts line carries no key")
+	}
+	// EXACTLY ONE HOST, AND THIS IS THE GUARD THAT MAKES THE CONFLICT CHECK BELOW MEAN ANYTHING
+	// (quince#919 review). The conflict check asks about `hosts[0]`; a line may name any number of
+	// patterns, so `decoy.example,nas.example KEY_B` is checked against `decoy.example` — which is
+	// not in the file — and appended. The refusal never fires, and `known_hosts` ends up holding two
+	// different keys for `nas.example`.
+	//
+	// THAT IS WORSE THAN AN UNCHECKED APPEND: ssh accepts a host key matching ANY line for that
+	// host, so the smuggled key becomes usable, and "quince will not overwrite it" stays literally
+	// true while being beside the point — nothing was overwritten, something was added alongside.
+	//
+	// One host is also what the ceremony means. The operator compared a fingerprint belonging to one
+	// machine, so the scope of what is stored must equal the scope of what they confirmed —
+	// otherwise "the thing confirmed and the thing stored are one string" is only half true.
+	// `knownhosts.Line` with a single address produces exactly one pattern, so nothing a scan can
+	// generate is rejected here.
+	if len(hosts) != 1 {
+		return fmt.Errorf("that known_hosts line names %d hosts — quince records one host per "+
+			"confirmed key, because the fingerprint you checked belongs to one machine", len(hosts))
 	}
 
 	existing, err := os.ReadFile(knownHostsPath) //nolint:gosec // a path from config, not a request
