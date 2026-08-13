@@ -93,7 +93,11 @@ describe("what passwordless costs is on the screen", () => {
   it("names the recovery command, what it clears, and that it needs a shell", () => {
     renderControls();
 
-    expect(screen.getByText(/quince auth reset/)).toBeInTheDocument();
+    // `getAllBy`, BECAUSE THE COMMAND IS NOW NAMED TWICE — quince#902. It appears in the bullet that
+    // introduces it and again in the one describing what it clears, which used to say "that command"
+    // and is now two bullets away from its antecedent. A `getBy` here fails on "multiple elements",
+    // which is a real consequence of that edit rather than a test to loosen away.
+    expect(screen.getAllByText(/quince auth reset/)).toHaveLength(2);
     expect(screen.getByText(/every passkey/i)).toBeInTheDocument();
     expect(screen.getByText(/console or SSH access/i)).toBeInTheDocument();
     expect(screen.getByText(/no way back in at all/i)).toBeInTheDocument();
@@ -370,4 +374,28 @@ it("does not render an empty address list when no rp_id can be named", async () 
 
   const warning = await screen.findByText(/none of its passkeys works at this address/i);
   expect(warning.textContent).not.toMatch(/registered for\s*\./);
+});
+
+// THE COST LIST NAMED THE DEVICE AND NOT THE ADDRESS — quince#902. All three original bullets were
+// about losing the hardware; a passkey is bound to an `rp_id`, so on a passwordless install the
+// address changing is the same event as the device being lost, and it is the more likely one. This
+// page recommends one of the triggers a few lines up: *"A reverse proxy or Tailscale gives you one"*.
+describe("what passwordless costs names BOTH ways to lose the credential", () => {
+  it("says the address matters as much as the device, and that a password survives it", () => {
+    renderControls();
+
+    const cost = screen.getByText(/the address matters as much as the device/i);
+    // THE ASYMMETRY IS THE PART THE USER CANNOT GUESS, so it is asserted rather than left to the
+    // reader of the bullet: a password is not rpId-bound and survives every item on this list.
+    expect(cost.parentElement?.textContent).toMatch(/a password would have survived/i);
+  });
+
+  // NAMED, NOT PRONOUNED. The command is now two bullets from its introduction, and "that command"
+  // reaching that far is one insertion away from pointing at the wrong thing.
+  it("names the recovery command in the bullet that describes what it clears", () => {
+    renderControls();
+
+    const clears = screen.getByText(/every passkey/i);
+    expect(clears.parentElement?.textContent).toMatch(/quince auth reset/);
+  });
 });
