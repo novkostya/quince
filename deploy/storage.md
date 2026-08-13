@@ -121,8 +121,10 @@ client — the client cannot escape it):
 # Nothing else changes, and backups keep working across the gap: only reset needs the new verb.
 set -eu
 PARENT="pool/path/to/iphone-backup"   # <-- set to your storage.zfs.parent_dataset
-CTUID=0   # container's mapped root uid: 0 for privileged/native; the userns base (e.g. 100000)
-          # when quince runs in an UNPRIVILEGED LXC — else the create chown below is a no-op fix.
+# THERE IS NO `CTUID=` TO SET ANY MORE (quince#818). It was a constant an operator had to know:
+# 0 for privileged/native, the userns base (e.g. 100000) for an unprivileged LXC — a number that is
+# invisible from inside the container, so quince could not fill it in and a wrong one made the
+# create chown a silent no-op. The create arm derives it instead; see there for why that is sound.
 set -- $SSH_ORIGINAL_COMMAND
 op="${1:-}"
 # The dataset/snapshot is the LAST arg, not $2: quince sends flags BEFORE it — `create -p <ds>`,
@@ -130,10 +132,30 @@ op="${1:-}"
 target=""; for a in "$@"; do target="$a"; done
 case "$op" in
   create)   case "$target" in "$PARENT"/*)
+              # THE PARENT MUST ALREADY EXIST, AND THIS IS CHECKED BEFORE THE CREATE — measured on a
+              # real pool, 2026-08-12 (quince#818). `zfs create -p` creates missing PARENTS too, so
+              # a typo in the PARENT= line above did not fail: it silently built a whole new dataset
+              # tree and put backups in it. That tree has neither of the two settings this document
+              # opens by requiring — no `com.sun:auto-snapshot=false`, no quota — so the failure
+              # surfaces much later as retention reclaiming nothing, or as ENOSPC mid-backup.
+              #
+              # Checking first turns that into a refusal naming the dataset. It costs one `zfs get`
+              # per create, which is once per device rather than once per backup.
+              pmp=$(zfs get -H -o value mountpoint "$PARENT" 2>/dev/null) || pmp=""
+              [ -n "$pmp" ] && [ -d "$pmp" ] || {
+                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the PARENT= line" >&2
+                exit 1; }
               zfs create -p "$target" || exit 1
               # host root owns the new dataset; when quince runs in an unprivileged-userns container
-              # its mapped root can't write the root-owned mountpoint — chown so working/ is writable.
-              chown "$CTUID:$CTUID" "$(zfs get -H -o value mountpoint "$target")"
+              # its mapped root can't write the root-owned mountpoint — chown so the backup can land.
+              #
+              # THE UID IS INHERITED FROM THE PARENT, NOT CONFIGURED (quince#818). The parent's
+              # mountpoint must ALREADY be writable by quince — it is where backups go — so its
+              # owner IS the container's mapped root: 0 on privileged/native, the userns base on an
+              # unprivileged LXC. That makes the old `CTUID=` constant a question nobody has to
+              # answer, and removes the failure where a wrong one made this chown a silent no-op.
+              ctuid=$(stat -c %u "$pmp")
+              chown "$ctuid:$ctuid" "$(zfs get -H -o value mountpoint "$target")"
               exit 0 ;; esac ;;
   snapshot) case "$target" in "$PARENT"/*@quince-*) exec zfs snapshot "$target" ;; esac ;;
   destroy)  case "$target" in "$PARENT"/*@quince-*) exec zfs destroy "$target" ;; esac ;;  # snapshot only (has '@')
