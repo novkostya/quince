@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Passkeys } from "./Passkeys";
-import { api } from "@/lib/api";
+import { api, APIError } from "@/lib/api";
 
 // Fictional domains throughout — a real one is Operator-private and the privacy gate does not catch
 // a bare domain, so the fixture discipline is the control on this rung.
@@ -122,5 +122,41 @@ describe("the row", () => {
     renderCard();
 
     expect(await screen.findByText(/never used/i)).toBeInTheDocument();
+  });
+});
+
+// THE REFUSAL HAS TO LAND SOMEWHERE — quince#888 item 1. Until the server grew a lockout guard this
+// mutation could not fail in a way the user was meant to act on, so nothing rendered `remove.error`.
+// Adding a 409 to the endpoint without adding this would have made the button do nothing at all:
+// the row stays, no message appears, and the user retries forever. That is the silent-fallback shape
+// the hard rules forbid, and it is invisible to every server-side test.
+describe("removal refused because it would be the last credential", () => {
+  it("shows the SERVER's sentence, not generic copy", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: false,
+      passkeys: [{ id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null }],
+    });
+    // The real 409 body, as the API client would surface it.
+    const refusal = new APIError(
+      409,
+      "last_credential",
+      `removing this passkey would leave no way to sign in: this quince has no password, and no other passkey for "${HERE}". Set a password first, or add another passkey.`,
+    );
+    const del = vi.spyOn(api, "del").mockRejectedValue(refusal);
+
+    renderCard();
+    (await screen.findByRole("button", { name: /^remove$/i })).click();
+
+    // The message names what to do next, which is knowledge this client does not have. Asserting on
+    // the REMEDY rather than on any old error text is what makes a generic fallback fail this test.
+    const shown = await screen.findByText(/set a password first/i);
+    expect(shown.textContent).toContain(HERE);
+    expect(del).toHaveBeenCalledTimes(1);
+
+    // AND THE ROW SURVIVES. A UI that optimistically dropped it would show the refusal beside an
+    // empty list, which contradicts the refusal it is displaying.
+    expect(screen.getByText("phone")).toBeInTheDocument();
   });
 });

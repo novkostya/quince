@@ -223,19 +223,35 @@ func (d Deps) handlePasskeyList() http.HandlerFunc {
 	}
 }
 
-// DELETE /api/auth/passkeys/{id} → 204
+// DELETE /api/auth/passkeys/{id} → 204, or 409 last_credential
 //
 // 204 WHETHER OR NOT A ROW WENT. Removing a credential that is already gone is the state the caller
 // wanted, and a 404 there would make a second tab, or a retry after a dropped response, look like a
 // failure the user must act on.
+//
+// THAT INDIFFERENCE SURVIVES THE LOCKOUT GUARD, and the two rules meeting on one handler is the
+// question quince#888 raised about this endpoint. They do not collide: the 204 is about whether a
+// ROW existed, and the refusal is about what the install would be LEFT WITH. An id matching no row
+// leaves the state unchanged, so it cannot be the last credential, so it still gets its 204.
+//
+// IT GOES THROUGH Auth RATHER THAN STRAIGHT TO THE STORE, and that was the whole defect: this
+// handler called d.Store.DeletePasskey directly, so there was no layer for the check to live in.
 func (d Deps) handlePasskeyDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, err := d.Store.DeletePasskey(r.PathValue("id")); err != nil {
+		_, err := d.Auth.RemovePasskey(r.PathValue("id"), auth.RPIDFromRequest(r))
+		var lastKey auth.ErrLastPasskey
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.As(err, &lastKey):
+			// 409 AND THE ERROR'S OWN SENTENCE, exactly as DELETE /api/auth/password does — it names
+			// this address and the addresses the remaining credentials belong to, which is the
+			// difference between a mystery and an instruction.
+			writeError(w, d.Log, http.StatusConflict, "last_credential", lastKey.Error())
+		default:
 			d.Log.Error("passkey delete failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove the passkey")
-			return
 		}
-		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
