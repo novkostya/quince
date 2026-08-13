@@ -257,6 +257,18 @@ DELETE /api/auth/passkeys/{id}   → 204
        // SESSION REQUIRED. 204 WHETHER OR NOT A ROW WENT: removing a credential that is already
        // gone is the state the caller wanted, and a 404 would make a retry, or a second tab, look
        // like a failure the user must act on.
+       // 409 last_credential when the install has NO PASSWORD and this is the last passkey that
+       // works at this rpId — the mirror of DELETE /api/auth/password's refusal, which this
+       // endpoint shipped without (quince#888). Without it, password → passkey emptied the
+       // credential set in two clicks, at which point `configured` is false, `auth/status`
+       // answers `needs_setup`, and POST /api/auth/setup is pre-auth by exact path: anyone who
+       // could reach the address completed first run.
+       // THE SAME CODE AS THE PASSWORD PATH, not a second one: both mean "this removal would
+       // leave you no way in", and a client already knows which endpoint it called. The two
+       // messages differ, because the remedies do — there, add a passkey; here, set a password
+       // or add another.
+       // IT IS A CLAIM ABOUT THE RESULTING STATE, which is what keeps the 204 above intact: an
+       // id matching no row changes nothing, so it cannot be the last credential.
 PATCH  /api/auth/passkeys/{id} {name} → 200 {passkey}
        // SESSION REQUIRED. 404 when there is no such credential — UNLIKE delete, because the
        // caller asked for a specific end state that did not happen. 422 name_required.

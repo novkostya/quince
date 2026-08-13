@@ -2,7 +2,7 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { api, messageFor } from "@/lib/api";
 import { AddPasskeyDialog } from "./AddPasskeyDialog";
 import { forgetPasskey } from "@/lib/passkeyHint";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -154,6 +154,17 @@ export function Passkeys() {
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {/* THE REFUSAL HAS TO LAND SOMEWHERE. Until quince#888 this mutation could not fail in a way
+          the user was meant to act on, so nothing rendered `remove.error` — a 409 would have been
+          swallowed and the row would simply have stayed put, which is the silent-fallback shape the
+          hard rules forbid. The server's own sentence, because `last_credential` names which
+          addresses hold credentials and what to do first; this client knows neither. */}
+      {remove.isError ? (
+        <p className="mt-3 text-sm text-danger">
+          {messageFor(remove.error, "Could not remove the passkey.")}
+        </p>
       ) : null}
 
       <div className="mt-4">

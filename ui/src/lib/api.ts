@@ -15,6 +15,19 @@ export class APIError extends Error {
   }
 }
 
+// messageFor prefers THE SERVER'S OWN SENTENCE, falling back to the caller's copy when there is
+// none. `last_credential` is why it exists: that refusal names which addresses hold credentials and
+// what to do first, which is knowledge this client does not have and cannot reconstruct — generic
+// copy would throw away the only useful part of the response.
+//
+// It lived in `features/settings/PasswordControls.tsx` until quince#888 put a second `last_credential`
+// on the passkey-removal path. Two components rendering the same server refusal is what moved it
+// beside APIError rather than leaving one importing the other across features.
+export function messageFor(err: unknown, fallback: string): string {
+  if (err instanceof APIError && err.message) return err.message;
+  return fallback;
+}
+
 // UnauthorizedError is thrown on any 401. It carries the SERVER's code and message rather than a
 // fixed string: a 401 is not one thing. An expired session is `unauthorized`/"authentication
 // required" from the guard middleware; a wrong password at the login form is

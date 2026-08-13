@@ -340,7 +340,18 @@ func (s *Service) RemovePassword(rpID, clientIP string) error {
 	elsewhere := make([]string, 0, len(rows))
 	for _, p := range rows {
 		if p.RPID == rpID {
-			// A usable credential exists — nothing else to check.
+			// A ROW EXISTS FOR THIS rpId. That is what is checked, and it is NOT the same as "a
+			// usable credential exists" — which is what this comment claimed until quince#888.
+			//
+			// A server-side row outlives the credential in ordinary use: the passkey is deleted
+			// from the device, the device is lost or wiped, the keychain entry goes. quince cannot
+			// tell from here; only an assertion can, and this path performs none. So removing the
+			// password against a dead row leaves console access as the only way back — the cost
+			// qn.6m D7 names, accepted here on the strength of a check that does not establish it.
+			//
+			// Left as a row check on purpose: making it a USABILITY check is quince#888 item 3,
+			// which needs a ruling because the fix interacts with step-up auth. Saying what the
+			// code actually does is the state-honesty rule and does not wait for that.
 			if _, err := s.store.DeleteSetting(settingPasswordHash); err != nil {
 				return err
 			}
@@ -353,6 +364,85 @@ func (s *Service) RemovePassword(rpID, clientIP string) error {
 		}
 	}
 	return ErrLastCredential{Presented: rpID, Elsewhere: elsewhere}
+}
+
+// ErrLastPasskey — removing THIS passkey would leave no way to sign in at THIS address.
+//
+// A separate type from ErrLastCredential, carrying the same wire code, because the two differ only
+// in the remedy they can offer: there, add a passkey; here, set a password OR add another passkey.
+// Both mean "this removal would leave you locked out", which is why `last_credential` is the honest
+// code for both — quince#888 proposed a second one, and a client already knows which endpoint it
+// called, so the code would distinguish nothing the caller does not have.
+type ErrLastPasskey struct {
+	Presented string   // the rpId this request arrived on
+	Elsewhere []string // rpIds of the passkeys that WOULD REMAIN, none of which works here
+}
+
+func (e ErrLastPasskey) Error() string {
+	if len(e.Elsewhere) == 0 {
+		return fmt.Sprintf("removing this passkey would leave no way to sign in: this quince has no "+
+			"password, and no other passkey for %q. Set a password first, or add another passkey.",
+			e.Presented)
+	}
+	return fmt.Sprintf("removing this passkey would leave no way to sign in at %q: this quince has "+
+		"no password, and the passkeys it would still hold are registered for %s — a passkey only "+
+		"works at the address it was created on. Set a password first, or add a passkey for %q.",
+		e.Presented, strings.Join(e.Elsewhere, ", "), e.Presented)
+}
+
+// RemovePasskey deletes one credential, REFUSING WHEN THAT WOULD EMPTY THE INSTALL — quince#888
+// item 1, the mirror `RemovePassword` never had.
+//
+// Without it the two removal paths asked different questions: one asked "will anything be left?"
+// and the other asked nothing. So password → passkey, in two clicks from Settings, emptied the
+// credential set; Configured() then answered false, GET /api/auth/status answered `needs_setup`,
+// and POST /api/auth/setup is pre-auth by exact path. Anyone who could reach the address completed
+// first run and owned the install. Measured on a stand, not inferred.
+//
+// IT IS PHRASED AS A CLAIM ABOUT THE RESULTING STATE, and that is load-bearing rather than stylistic:
+//
+//   - It is what makes the guard STRICTLY STRONGER than "the set must not empty". A passkey bound
+//     to another address cannot sign in here, so a set that is non-empty can still be a lockout —
+//     RemovePassword has filtered by rpId since qn.6m for exactly that reason, and a mirror that
+//     did not would guard the takeover while leaving the lockout open on the same handler.
+//   - It KEEPS THE 204 FOR "already gone" with no special case. Deleting an id that matches no row
+//     leaves the state unchanged, so the resulting state is the current one, so the guard passes.
+//     The endpoint's documented indifference to whether a row went (see the handler) and this
+//     refusal therefore do not meet: one is about the row, this is about what remains.
+//
+// The password is checked FIRST and short-circuits: on an install that has one, no removal can lock
+// anybody out, and the credentials table is not read at all.
+func (s *Service) RemovePasskey(credentialID, rpID string) (bool, error) {
+	has, err := s.HasPassword()
+	if err != nil {
+		return false, err
+	}
+	if !has {
+		rows, err := s.store.ListPasskeys()
+		if err != nil {
+			return false, err
+		}
+		seen := make(map[string]bool, len(rows))
+		elsewhere := make([]string, 0, len(rows))
+		usableHere := 0
+		for _, p := range rows {
+			if p.CredentialID == credentialID {
+				continue // the one on its way out — it is not part of the resulting state
+			}
+			if p.RPID == rpID {
+				usableHere++
+				continue
+			}
+			if !seen[p.RPID] {
+				seen[p.RPID] = true
+				elsewhere = append(elsewhere, p.RPID)
+			}
+		}
+		if usableHere == 0 {
+			return false, ErrLastPasskey{Presented: rpID, Elsewhere: elsewhere}
+		}
+	}
+	return s.store.DeletePasskey(credentialID)
 }
 
 // Login verifies the password (rate-limited first) and, on success, rotates to a fresh

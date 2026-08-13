@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { APIError } from "@/lib/api";
+import { messageFor } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
 import { passkeysKey, usePasskeyList } from "@/features/settings/Passkeys";
 
@@ -246,13 +246,4 @@ export function PasswordControls() {
       )}
     </div>
   );
-}
-
-// The server's own sentence wherever there is one. `last_credential` and the demo's `unavailable`
-// both carry messages that name something this client does not know — which addresses hold
-// credentials, and why the demo refuses — so replacing them with generic copy would throw away the
-// only useful part of the response.
-function messageFor(err: unknown, fallback: string): string {
-  if (err instanceof APIError && err.message) return err.message;
-  return fallback;
 }
