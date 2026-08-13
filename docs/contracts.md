@@ -424,11 +424,35 @@ double-submit check against the readable `quince_csrf` cookie. The session cooki
 ### Health — and `reconciling`, the one field with a promise attached
 
 ```
-GET  /api/health  → {status, version, mode, demo_reset_minutes?, reconciling, muxers[]}
+GET  /api/health  → {status, version, mode, demo_reset_minutes?, reconciling, insecure_origin,
+                     muxers[]}
 ```
 
 **`/api/health` is deliberately NOT frozen** — it says so at its own definition, and `qn.6` used that
 to add `mode`. What follows is therefore a promise about *meaning*, not a frozen shape.
+
+**`insecure_origin: true` means NO CREDENTIAL CAN BE ESTABLISHED OVER THIS CONNECTION** (`qn.6f`,
+quince#908). A session cookie earned here would be marked `Secure` and then discarded by the browser,
+so `POST /api/auth/setup` and `POST /api/auth/login` both answer `426 insecure_origin` **before
+examining the credential** — on a fresh install that means first-run setup cannot be completed at all.
+It is `refuseInsecureOrigin`'s own predicate rather than a second copy of it, so this field and the
+426 cannot disagree.
+
+**IT IS A PROPERTY OF THE CONNECTION, NOT OF THE DAEMON**, and it is the only field here that is.
+`mode` and `demo_reset_minutes` are the same for every caller; this one differs between a browser on
+`https://name` and a browser on `http://ip` talking to the same process. That is what makes it usable:
+a client learns it about the connection it is actually on, which no daemon-wide fact could tell it.
+
+**It is NOT `GET /api/onboarding/https`'s `complete`, and the two disagree on loopback.** That step
+reports `complete: false` on `http://localhost` deliberately — it asks *"can you reach quince from
+your phone"* — while a session cookie survives loopback perfectly well, so `insecure_origin` is
+`false` there. A client that keyed first-run routing on the onboarding fact would send every developer
+on `localhost` to the HTTPS page. Both are correct answers to different questions, and the questions
+are easy to conflate.
+
+**A client must act only on a POSITIVE answer.** An unreachable or still-loading health probe is not
+evidence of a secure origin *or* an insecure one, and the failure that matters is routing somebody
+away from a page that would have worked.
 
 **`reconciling: true` means A VERSION LIST MAY BE SHORT** — Operator ruling 2026-08-08 (quince#731,
 blocker 2), built in `qn.6i`. Reconciliation no longer completes before the listener binds, so quince
