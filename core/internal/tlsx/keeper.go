@@ -44,6 +44,21 @@ type Keeper struct {
 	keyFile  string
 	cert     *tls.Certificate
 	stamps   [2]stamp // certFile, keyFile — as observed when `cert` was loaded
+	// dirty means the config names a pair we are NOT serving — set when the paths move and
+	// cleared only by a load that succeeds against those same paths (quince#905 review).
+	//
+	// WITHOUT IT THE SELF-HEAL IS INFERRED FROM STAMPS, AND CAN FAIL SILENTLY. After a failed
+	// path change `stamps` describes the OLD pair while `certFile`/`keyFile` name the new one,
+	// so `changed()` is asking "have these files been rewritten" when the question is "are we
+	// serving the pair the config names". A `(mtime, size)` collision between the two pairs
+	// makes the first answer no and the second answer no as well — and mtime is PRESERVED by
+	// `cp -p`, `rsync -a` and a restored archive, so the collision is a thing operators
+	// routinely produce rather than a coincidence. Then the daemon serves the old certificate
+	// forever and nothing ever says why.
+	//
+	// The second answer is known exactly rather than inferable, so it is recorded rather than
+	// deduced.
+	dirty bool
 
 	// OnReloadError is called when a rotation re-read fails while a usable certificate is
 	// still cached. The caller sets it to log; nil means silence, which is only right in
@@ -80,7 +95,21 @@ func statFile(path string) (stamp, error) {
 //
 // The error is the startup refusal's evidence, so it must survive being printed to an
 // operator with no other context — see config.TLSRequirement.
+//
+// AN EMPTY PATH IS REFUSED HERE, WHERE `SetFiles` TREATS IT AS "TURN TLS OFF" (quince#905
+// review). The two answers are the whole reason there are two constructors, and without this
+// guard `NewKeeper("", "")` returned a usable Keeper and a nil error — expressing "nothing is
+// configured" through the return value that means "the certificate is fine", which is the
+// conflation the doc comment on NewEmptyKeeper claims cannot happen.
+//
+// It was latent while `config.CheckTLS` was the only caller, since that returns before the
+// loader when `!c.TLS.Enabled()`. It stopped being latent when production moved to `SetFiles`:
+// this constructor now has NO caller to be guarded by, so its contract has to hold on its own.
 func NewKeeper(certFile, keyFile string) (*Keeper, error) {
+	if certFile == "" || keyFile == "" {
+		return nil, fmt.Errorf("no certificate configured: cert_file=%q key_file=%q — "+
+			"use NewEmptyKeeper for an install that has not configured TLS", certFile, keyFile)
+	}
 	k := NewEmptyKeeper()
 	if err := k.SetFiles(certFile, keyFile); err != nil {
 		return nil, err
@@ -124,12 +153,16 @@ func (k *Keeper) SetFiles(certFile, keyFile string) error {
 	if certFile == "" || keyFile == "" {
 		k.mu.Lock()
 		k.certFile, k.keyFile = "", ""
-		k.cert, k.stamps = nil, [2]stamp{}
+		k.cert, k.stamps, k.dirty = nil, [2]stamp{}, false
 		k.mu.Unlock()
 		return nil
 	}
 	k.mu.Lock()
 	k.certFile, k.keyFile = certFile, keyFile
+	// NOT YET PROVEN to be serving what the config names — reload clears this, and nothing
+	// else does. Set BEFORE the load so a load that never stores (the stale-path drop below)
+	// leaves the Keeper knowing it is behind rather than believing it is current.
+	k.dirty = true
 	k.mu.Unlock()
 	return k.reload()
 }
@@ -184,7 +217,7 @@ func (k *Keeper) reload() error {
 		k.mu.Unlock()
 		return nil
 	}
-	k.cert, k.stamps = &cert, [2]stamp{cs, ks}
+	k.cert, k.stamps, k.dirty = &cert, [2]stamp{cs, ks}, false
 	k.mu.Unlock()
 	return nil
 }
@@ -228,6 +261,19 @@ func (k *Keeper) changed() bool {
 	}
 	k.mu.RLock()
 	defer k.mu.RUnlock()
+	// DIRTY BEATS THE STAMPS, and the order matters (quince#905 review). The stamps answer
+	// "have these files been rewritten"; `dirty` answers "are we serving the pair the config
+	// names", and after a failed path change only the second one is the question. Comparing
+	// stamps there compares the NEW paths against the OLD pair's, so a `(mtime, size)`
+	// collision — routine, since `cp -p` and `rsync -a` preserve mtime — would report no
+	// change and the self-heal would never fire.
+	//
+	// AFTER the stat guard above, deliberately: a dirty Keeper whose files are still absent
+	// has nothing to pick up, and returning true there would re-read and re-log on every
+	// single handshake for as long as the config stayed wrong.
+	if k.dirty {
+		return true
+	}
 	return cs != k.stamps[0] || ks != k.stamps[1]
 }
 
