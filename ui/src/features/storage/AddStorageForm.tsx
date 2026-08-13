@@ -399,7 +399,7 @@ export function AddStorageForm({
               id="zfs-parent"
               className="mt-1"
               value={parentDataset}
-              placeholder="pool/backups"
+              placeholder="rpool/quince"
               onChange={(e) => {
                 setParentDataset(e.target.value);
                 setHookCheck(null);
@@ -444,7 +444,7 @@ export function AddStorageForm({
               /* THE USER WHOSE `authorized_keys` CARRIES THE FORCED COMMAND — which is the thing
                  that bounds what quince can do on that host, so it is worth naming as itself rather
                  than as part of a `user@host` string. */
-              placeholder="zfsuser"
+              placeholder="quince"
               onChange={(e) => {
                 setSSHUser(e.target.value);
                 setHookCheck(null);
