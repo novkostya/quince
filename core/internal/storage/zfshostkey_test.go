@@ -162,3 +162,43 @@ func TestTrustHostKeyRefusesJunkAndMarkers(t *testing.T) {
 		})
 	}
 }
+
+// A MULTI-HOST LINE IS REFUSED, AND WITHOUT THIS THE CHANGED-KEY GUARD IS BYPASSABLE.
+//
+// Found by the architect on quince#919 with a working reproduction. The conflict check asks about
+// `hosts[0]`, so putting the target host SECOND walks past it: `decoy.example,nas.example KEY_B` is
+// checked against `decoy.example`, which is not in the file, and appended — leaving two different
+// keys for `nas.example`.
+//
+// That is worse than an unchecked append, because ssh accepts a host key matching ANY line for that
+// host. The smuggled key becomes usable while the refusal's promise — "quince will not overwrite
+// it" — stays literally true and beside the point: nothing was overwritten, something was added
+// alongside.
+//
+// It is also what the ceremony means. The operator compared a fingerprint belonging to ONE machine,
+// so what is stored must have the same scope as what they confirmed.
+func TestTrustHostKeyRefusesAMultiHostLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	first, _ := aHostKeyLine(t, "nas.example:22")
+	if err := TrustHostKey(path, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same shape the reproduction used: a second key for the SAME host, hidden behind a decoy.
+	second, key := aHostKeyLine(t, "nas.example:22")
+	_ = second
+	smuggled := knownhosts.Line([]string{"decoy.example", "nas.example"}, key)
+
+	if err := TrustHostKey(path, smuggled); err == nil {
+		t.Fatal("a multi-host line was accepted — the changed-key refusal is bypassable")
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(got), "nas.example"); n != 1 {
+		t.Errorf("known_hosts mentions nas.example %d times, want 1 — a second key for one host is "+
+			"usable, because ssh accepts a match on ANY line:\n%s", n, got)
+	}
+}
