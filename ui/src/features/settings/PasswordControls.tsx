@@ -129,17 +129,35 @@ export function PasswordControls() {
           {/* THE ANCHOR AGAIN — quince#819. A password manager keys on (origin, username), and this
               is a THIRD password surface on the same origin. Without it, a manager offers to update
               the entry it already holds for the login form using whatever it sees here. Read-only
-              and out of the tab order for the same reasons as on the login form (quince#824). */}
-          <input
-            type="text"
-            name="username"
-            autoComplete="username"
-            readOnly
-            tabIndex={-1}
-            value="quince-admin"
-            className="hidden"
-            aria-hidden="true"
-          />
+              and out of the tab order for the same reasons as on the login form (quince#824).
+
+              VISIBLE, AND IT WAS `className="hidden" aria-hidden="true"` UNTIL THIS COMMIT —
+              Operator-reported. That is `display:none`, which is the one variant quince#819 ruled
+              AGAINST: the report came from Safari, no authoritative WebKit source was found either
+              way, and *"a `display:none` field is the variant most likely to be ignored. Visible is
+              the option that cannot be skipped for being invisible."* `PasswordForm` and
+              `EncryptionDialog` both carry the ruled shape; this surface was the odd one out.
+
+              IT IS ALSO THE SURFACE WHERE BEING IGNORED COSTS MOST. On the login form a missed
+              anchor means the manager files an origin-only entry. Here it means a CHANGE is filed as
+              a NEW entry rather than an update — two credentials for `quince-admin` with nothing to
+              say which is current, which is exactly the case quince#819's follow-up names as still
+              owed a device.
+
+              NOT `disabled`, and not `hidden`: both are skipped by autofill, which is the whole
+              point of the field. */}
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="change-username">Username</Label>
+            <Input
+              id="change-username"
+              name="username"
+              type="text"
+              autoComplete="username"
+              readOnly
+              tabIndex={-1}
+              value="quince-admin"
+            />
+          </div>
           {/* ABSENT WHEN THERE IS NO PASSWORD TO CONFIRM. Rendering it and expecting a blank is
               what quince#855 filed: a required-looking field that must be left empty, with nothing
               on screen saying so. */}
