@@ -468,3 +468,10 @@ func TestReadEndpointsMatchGolden(t *testing.T) {
 		}
 	}
 }
+
+// Constructors for the ceremony stores, so tests in this package can register the passkey and reauth
+// routes without importing `auth` at every call site. Named rather than inlined because forgetting
+// one makes the routes UNREGISTERED, and a 404 passes most assertions vacuously.
+func newPasskeyCeremoniesForTest() *auth.PasskeyCeremonies { return auth.NewPasskeyCeremonies() }
+func newReauthCeremoniesForTest() *auth.ReauthCeremonies   { return auth.NewReauthCeremonies() }
+func newProofsForTest() *auth.Proofs                       { return auth.NewProofs() }

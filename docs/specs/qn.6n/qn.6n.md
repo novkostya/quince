@@ -322,12 +322,22 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | | | code-owned? | |
 | --- | --- | --- | --- |
 | **1** | **this spec** — `docs/specs/**` is *not* code-owned | no | *this PR* |
-| **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4. | no | not open |
-| **3** | **the reauth endpoint pair** + the allowlist assertions (G1). Still no mutating endpoint consumes it. | **YES** — `contracts.md` | not open |
+| **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4, **G4b's session half**. | no | quince#920, **merged** |
+| **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922 |
 | **4** | **rule 1 and rule 3** — `PUT /api/auth/password` and passkey registration demand proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | not open |
 | **5** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** — `contracts.md` | not open |
 | **6** | **the UI prompt** — one component, used by every mutating control. | no | not open |
 | **7** | **D8's copy** — lands with or after 4, never before. | no | not open |
+
+**G4b IS THE ONLY GATE WHOSE HALVES BELONG TO DIFFERENT SLICES, AND IT WAS ASSIGNED TO NEITHER** —
+review finding on quince#922. It appeared in the Gates list and in no row of this table, which is
+how its second half nearly shipped untested: the session binding is slice 2's (quince#920 did it),
+and the no-`Set-Cookie` assertion is slice 3's, because that is where the endpoint first exists.
+
+**This is the defect quince#910 amended this table to prevent, one column over.** That PR's sentence
+was *"an unassigned canon edit is the one that lands in whichever PR notices it last"*, and a gate is
+the same shape. The rule generalises: **anything the Gates section names must appear in a row**, and
+a gate spanning two slices is named in both rather than in the later one.
 
 **§6 GOES IN SLICE 4 BECAUSE THAT IS WHERE THE MODEL ACTUALLY MOVES.** Rule 1 is the point at which a
 session stops being sufficient to change the credential set; slice 5 completes the picture but
