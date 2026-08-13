@@ -130,6 +130,18 @@ password, and removing the password may **not** be proven by the password.
 **Single-use and short-lived**, reusing the existing ceremony-key machinery and its TTL rather than
 inventing a second expiring-token store.
 
+**AND BOUND TO THE SESSION THAT MINTED IT — four bindings, not three.** Added at spec review, because
+an enumeration is read as exhaustive and slice 2 is where an omission becomes a contract. A proof is
+a credential-equivalent for one operation, so it must not be usable by a client that did not earn it;
+the ceremony key is returned only to the minting client today, which makes the gap narrow rather than
+absent, and *narrow* is not a property worth relying on when the binding costs one comparison.
+
+**`reauth/finish` MUST NOT ISSUE OR ROTATE A SESSION**, which is the one place it differs sharply
+from `passkeys/login/finish` and the reason session binding is coherent at all. That endpoint's whole
+job is to mint a session; this one verifies the same assertion and mints a *proof*. If it rotated the
+session, it would be a second login path reachable from an authenticated context — and the proof
+would be bound to a session id that no longer exists by the time the mutating call arrives.
+
 ### D5. There is NO exception for "a credential exists but cannot be presented here", and this is the sharpest part of the ruling
 
 A passkey is bound to an `rp_id`, which quince derives from the request's **`Host` header**. So a
@@ -228,6 +240,10 @@ Beyond `make gates` / `make gates-ui` / `make gates-ui-e2e`:
   target rejected by `remove_passkey`. Table-driven over all four operations.
 - **G3** — replay: the same proof presented twice, second refused.
 - **G4** — expiry: a proof past its TTL refused.
+- **G4b** — the session binding (D4): a proof minted under one session refused when presented with
+  another. And `reauth/finish` **issues no `Set-Cookie`** — asserted on the response, because the
+  endpoint it is modelled on does issue one, and inheriting that would silently make this a second
+  login path.
 - **G5** — the first-run exemption, asserted on a store with **no** credentials, next to a store with
   one, in a single test — the pair, because the exception and the rule are one decision.
 - **G6** — `PUT /api/auth/password` with neither `current_password` nor `proof`, on a **passwordless**
@@ -293,18 +309,30 @@ consistent with this rung being inert in exactly the same way.
 
 ## Slices
 
-Sequenced from `main`, **not stacked**. Contract-touching slices need `@novkostya`; the others do not
-and must not be made to wait behind one.
+Sequenced from `main`, **not stacked**. Code-owned slices need `@novkostya`; the others do not and
+must not be made to wait behind one.
 
-| | | contracts? | |
+**THE COLUMN ASKS `code-owned?`, NOT `contracts?`, AND THE DIFFERENCE IS A TRAP** — spec review.
+`.github/CODEOWNERS` routes **`docs/quince.design.md` exactly as it routes `docs/contracts.md`**, and
+this rung's Boundary puts design §6 in scope. A column named for `contracts.md` reads as the whole
+gating fact, so a reader adding a slice would check the wrong file, mark a design-touching slice `no`,
+and discover at merge time that it needs the code owner. Nothing is mis-marked today — §6 lands in a
+slice already marked **YES** — which is exactly when a naming trap is cheap to remove.
+
+| | | code-owned? | |
 | --- | --- | --- | --- |
-| **1** | **this spec** | no | *this PR* |
-| **2** | **the proof primitive** — `operation`/`target`/subject, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4. | no | not open |
-| **3** | **the reauth endpoint pair** + the allowlist assertions (G1). Still no mutating endpoint consumes it. | **YES** | not open |
-| **4** | **rule 1 and rule 3** — `PUT /api/auth/password` and passkey registration demand proof. G5, G6. | **YES** | not open |
-| **5** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** | not open |
+| **1** | **this spec** — `docs/specs/**` is *not* code-owned | no | *this PR* |
+| **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4. | no | not open |
+| **3** | **the reauth endpoint pair** + the allowlist assertions (G1). Still no mutating endpoint consumes it. | **YES** — `contracts.md` | not open |
+| **4** | **rule 1 and rule 3** — `PUT /api/auth/password` and passkey registration demand proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | not open |
+| **5** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** — `contracts.md` | not open |
 | **6** | **the UI prompt** — one component, used by every mutating control. | no | not open |
 | **7** | **D8's copy** — lands with or after 4, never before. | no | not open |
+
+**§6 GOES IN SLICE 4 BECAUSE THAT IS WHERE THE MODEL ACTUALLY MOVES.** Rule 1 is the point at which a
+session stops being sufficient to change the credential set; slice 5 completes the picture but
+changes no statement §6 makes. Naming the slice matters more than which one it is — an unassigned
+canon edit is the one that lands in whichever PR notices it last.
 
 **2 IS SEPARATE AND HAS NO CALLER ON PURPOSE**, which is `qn.6m` slice 5a's ordering and `qn.6k`'s
 before it: the guard lands, alone and reviewable, before anything can depend on it. It is also the
