@@ -24,69 +24,93 @@ export function SettingsPage() {
         restarts.
       </p>
 
-      {/* THE PASSKEYS CARD HAS MOVED TO `/settings/auth` — quince#841 ruling A, qn.6m slice 6. What
-          stands here is a LINK, and the move settles an argument this spot had already half-lost.
+      {/* THE COLUMNS RENDER UNCONDITIONALLY; THEIR CONTENTS ARE GUARDED INDIVIDUALLY.
+          Operator-reported 2026-08-12: the Sign-in row used to sit ABOVE this grid, which pushed
+          BOTH columns down and moved "Current configuration" off the top of the page where it had
+          always been.
 
-          quince#834 put the card in the Edit column, above the file, on the reading that "passkeys
-          are a thing you CHANGE, so they belong beside the other things you change". Ruling A draws
-          the line one step further out: **auth is not configuration**, and Settings is a config
-          editor plus a config dump plus storages — a fourth section makes it a drawer.
+          Putting the row inside the left column fixes desktop and phone with one move — the right
+          column returns to the top, and on a phone the columns stack in DOM order, so the config
+          dump is last. It could not simply move inside the old `{data ? …}` block, because the row
+          must survive a config that FAILS TO LOAD (quince#853): that was the whole point of getting
+          it out of that guard, and `SettingsAuthPage.test.tsx` renders this page with the config
+          query REJECTING and requires the link to still be there.
 
-          OUTSIDE THE `data` GUARD, WHICH IS THE POINT AND NOT A DETAIL. quince#834 stated and
-          accepted a cost: the card sat inside that guard, so a box whose config failed to LOAD showed
-          no passkey surface at all. Moving the card to its own page only pays that back if the way to
-          REACH it is not behind the same condition — a link inside the guard would leave somebody
-          with a broken config unable to get at the credentials they sign in with, which is the same
-          defect one level up. Asserted, not just intended: SettingsAuthPage.test.tsx renders this
-          page with the config query REJECTING and requires the link to still be there.
+          Hence the shape: the grid and both columns are unconditional, and `data ?` now wraps only
+          the config-derived parts. A broken config costs you the editor and the dump, not the way to
+          your own credentials.
 
-          Above the columns rather than below: on a phone they stack, and the config dump is long
-          enough to bury anything after it. */}
-      <Link
-        to="/settings/auth"
-        className="mt-6 flex max-w-xl items-center justify-between rounded-card border border-line bg-card px-4 py-3 text-sm transition-colors hover:bg-elevated"
-      >
-        <span>
-          <span className="font-medium">Sign-in</span>
-          <span className="mt-0.5 block text-muted">Password and passkeys</span>
-        </span>
-        <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-muted" />
-      </Link>
+          `min-w-0` ON BOTH COLUMNS IS THE STRUCTURAL HALF OF quince#631, and it is not decoration.
+          A grid item defaults to `min-width: auto`, so a column will not shrink below the INTRINSIC
+          width of its widest child. One long line in the config dump therefore widened this column,
+          this grid, and the whole content area with it — sliding the editor's own fields off the
+          left edge on a phone, so you had to scroll back to reach them. `AppLayout` installs the
+          same guard one level up; the chain was broken here, and a guard is only as strong as its
+          shortest link. Both columns, not only the one that overflowed: the editor renders config
+          VALUES too and is one long default away from the same behaviour. */}
+      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+        <div className="min-w-0">
+          {/* NOT A CARD ANY MORE. As a bordered `bg-card` block it was the only card on the page and
+              read as a banner dropped on top of the settings rather than as part of them — which is
+              what "looks off" was about. It is now a ROW: same border and radius as the inputs
+              beside it, so it belongs to the column it sits in, with the chevron carrying the "this
+              goes somewhere" affordance the border used to shout.
 
-      {isLoading ? <div className="mt-6 text-sm text-muted">Loading…</div> : null}
-      {isError ? <div className="mt-6 text-sm text-danger">Could not load configuration.</div> : null}
+              ABOVE the `Edit` heading rather than under it: it is not a config field, and quince#841
+              ruling A is that auth is not configuration. It sits in this column because that is
+              where "things you change" live, not because it is one of them. */}
+          {/* `max-w-md` IS `ConfigEditor`'S OWN CONSTRAINT, not a number chosen to look right. That
+              form is `flex max-w-md flex-col gap-4`, so this row ends exactly where the fields below
+              it do — Operator-reported 2026-08-12, DESKTOP ONLY, because the column is wider than
+              the form and a full-width row overhangs everything it sits above. On a phone the column
+              is narrower than `md` and this changes nothing, which is why it read fine there.
 
-      {data ? (
-        // `min-w-0` ON BOTH COLUMNS IS THE STRUCTURAL HALF OF quince#631, and it is not decoration.
-        //
-        // A grid item defaults to `min-width: auto`, so a column will not shrink below the INTRINSIC
-        // width of its widest child. One long line in the config dump therefore widened this column,
-        // this grid, and the whole content area with it — sliding the editor's own fields off the
-        // left edge on a phone, so you had to scroll back to reach them.
-        //
-        // `AppLayout` already installs this guard one level up and states the intent in a comment:
-        // `min-w-0` on `<main>` so wide children scroll inside themselves rather than moving the
-        // page. THE CHAIN WAS BROKEN HERE — `<main>` could shrink, this column could not, and a
-        // guard is only as strong as the shortest link below it.
-        //
-        // Both columns, not only the one that overflowed. The editor renders config VALUES too and
-        // is one long default away from the same behaviour; fixing the column that happened to
-        // break first leaves the same bug waiting on the other.
-        <div className="mt-6 grid gap-8 lg:grid-cols-2">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-muted">Edit</h2>
-            <div className="mt-3">
-              <ConfigEditor config={data.config} />
+              A SHARED TOKEN RATHER THAN A MATCHING GUESS: `SettingsPage.test.tsx` asserts the two
+              carry the same max-width class, so changing one without the other is a test failure
+              rather than a slow drift nobody notices until a screenshot. */}
+          <Link
+            to="/settings/auth"
+            className="flex max-w-md items-center justify-between rounded-lg border border-line px-3 py-2.5 text-sm transition-colors hover:bg-elevated"
+          >
+            <span>
+              <span className="font-medium">Sign-in</span>
+              <span className="mt-0.5 block text-muted">Password and passkeys</span>
+            </span>
+            <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-muted" />
+          </Link>
+
+          {/* IN THIS COLUMN, NOT ABOVE THE GRID. Above, they pushed both columns down for as long
+              as the query was in flight — the same defect as the Sign-in row, arriving on every
+              load rather than permanently. */}
+          {isLoading ? <div className="mt-6 text-sm text-muted">Loading…</div> : null}
+          {isError ? (
+            <div className="mt-6 text-sm text-danger">Could not load configuration.</div>
+          ) : null}
+
+          {data ? (
+            <div className="mt-6">
+              <h2 className="text-sm font-semibold text-muted">Edit</h2>
+              <div className="mt-3">
+                <ConfigEditor config={data.config} />
+              </div>
             </div>
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-muted">Current configuration</h2>
-            <div className="mt-3">
-              <ConfigView data={data} />
-            </div>
-          </div>
+          ) : null}
         </div>
-      ) : null}
+
+        {/* LAST ON A PHONE, BY DOM ORDER RATHER THAN BY A CLASS. The columns stack below `lg`, so
+            second-in-source is last-on-screen — and this is the one block that should be, because
+            it is long, read-only, and buries whatever follows it. */}
+        <div className="min-w-0">
+          {data ? (
+            <>
+              <h2 className="text-sm font-semibold text-muted">Current configuration</h2>
+              <div className="mt-3">
+                <ConfigView data={data} />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }
