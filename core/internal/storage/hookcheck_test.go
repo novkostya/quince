@@ -179,6 +179,39 @@ func TestCheckHookUnreachable(t *testing.T) {
 	}
 }
 
+// THE REFUSAL NAMES THE MISTAKE, and this is the half that was unguarded.
+//
+// `Test helper` and `Show the helper script` sit inches apart on one form and validate the same
+// field, so a mistype reaches whichever button the user presses first. Two different explanations
+// for one error would be worse than one bad explanation — which is the reason both messages were
+// changed together, and it is worth exactly nothing if only one of them is pinned.
+//
+// The httpapi side has `TestZFSHelperRefusalTellsThemItIsNotAPath`. Before this test, a reword here
+// that dropped the path-vs-dataset distinction passed every gate in the repository — the divergence
+// the change exists to prevent, arriving through the unguarded half (quince#909 review).
+//
+// SAME FACTS, DELIBERATELY NOT THE SAME STRING. Only one of the two can end "and quince did not run
+// anything", so asserting the sentences match would be asserting something false. Asserting the
+// FACTS is what actually holds the two together.
+func TestCheckHookRefusalTellsThemItIsNotAPath(t *testing.T) {
+	// The exact value a user carries down from the Path field above it on the same form.
+	got := CheckHook(context.Background(), "/backups", []string{"/bin/true"})
+
+	if got.Outcome != HookUnreachable {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, HookUnreachable)
+	}
+	for _, want := range []struct{ fact, why string }{
+		{"no leading `/`", "the single thing wrong with the value they typed"},
+		{"field above", "which field they took it from — both are on one screen"},
+		{"rpool/quince", "an example, because the rule alone does not show the shape"},
+		{"did not run", "that nothing was executed, which this message has always promised"},
+	} {
+		if !strings.Contains(got.Reason, want.fact) {
+			t.Errorf("the refusal does not carry %q — %s.\ngot: %s", want.fact, want.why, got.Reason)
+		}
+	}
+}
+
 // THE REMEDY MUST NAME THE CAUSE THAT WAS MEASURED TO PRODUCE THIS (quince#799).
 //
 // It named the key, the forced command and the host, and omitted the HOST KEY — the one thing
