@@ -33,17 +33,17 @@ export function OnboardingHTTPSPage() {
     // the document scrolls. A transient lag during the toolbar animation costs a brief scroll, not
     // reachability. Do not "unify" this with the authed shell's rule without reading that comment.
     <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      {/* `max-w-xl`, MATCHING THE OTHER TWO FIRST-RUN STEPS — Operator direction 2026-08-13. This
-          was `max-w-2xl`, and `AuthPage` records the reason: this step "is wider because it is
-          prose to READ". That argument does not survive being applied — 36rem is roughly 70
-          characters at this size and 42rem is roughly 85, so the narrower box is the BETTER measure
-          for prose. Onboarding is three consecutive full-page steps and the middle one sat 96px
-          wider than its neighbours.
+      {/* `max-w-2xl`, AND IT IS THE OTHER TWO STEPS THAT MOVED TO MATCH IT — Operator direction
+          2026-08-13. The first attempt at making the three consistent narrowed THIS page instead,
+          on the argument that 36rem is the better measure for prose. That was the wrong direction,
+          and the storage step is why: it renders the whole `quince-zfs-helper` script, whose lines
+          run past 90 characters, and at 36rem the script was clipped mid-line. A width chosen for
+          prose is not a width that can hold a shell script, and the flow has to fit its widest
+          step rather than its most readable one.
 
-          The heading moves to `text-xl` for the same reason: AuthPage's own rule is that a PAGE's
-          heading is `text-xl` and a CARD's is `text-base`. This is a page, and it was the only one
-          taking the card's size. */}
-      <div className="mx-auto w-full max-w-xl">
+          The heading is `text-xl` — AuthPage's own rule is that a PAGE's heading is `text-xl` and a
+          CARD's is `text-base`, and this is a page. That half of the alignment stands. */}
+      <div className="mx-auto w-full max-w-2xl">
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Reaching quince securely</h1>
 

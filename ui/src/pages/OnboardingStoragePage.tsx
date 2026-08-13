@@ -37,19 +37,24 @@ export function OnboardingStoragePage() {
 
   return (
     // THE PADDING IS ON THE OUTER BOX AND THE WIDTH ON THE INNER ONE, and swapping them is not
-    // cosmetic. `box-sizing: border-box` means a `max-w-xl` that also carries `px-6` caps the
-    // element at 36rem INCLUDING the padding, so its content is 33rem — while `AuthPage`'s page
-    // variant, which puts the padding outside, gets a full 36rem. This screen and *Set an admin
-    // password* are consecutive steps of one flow and sat 48px apart, from two rules that both
-    // read `max-w-xl`.
+    // cosmetic. `box-sizing: border-box` means a max-width that also carries `px-6` caps the
+    // element INCLUDING the padding, so its content is 3rem short — while `AuthPage`'s page
+    // variant, which puts the padding outside, gets the whole width. This screen and *Set an admin
+    // password* are consecutive steps of one flow and sat 48px apart, from two rules that both read
+    // the same `max-w-xl`.
     //
     // AuthPage's own comment says it was built to look like THIS page. It could not, because the
     // difference is where the padding sits rather than what either file says the width is.
     //
+    // THE WIDTH IS `max-w-2xl` BECAUSE THIS PAGE SETS THE FLOOR FOR THE FLOW (Operator, 2026-08-13):
+    // it renders the whole `quince-zfs-helper` script, whose lines run past 90 characters, and at
+    // `max-w-xl` the script was clipped mid-line. The other two steps followed it up rather than
+    // this one being narrowed down to them.
+    //
     // The safe-area insets come with it, for the reason AuthPage carries them: this flow is walked
     // from a phone, and `px-6` alone does not clear a notch.
     <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      <div className="mx-auto w-full max-w-xl">
+      <div className="mx-auto w-full max-w-2xl">
         {/* THE WORDMARK, which the other two first-run steps carry and this one did not. Onboarding
             is three consecutive full-page steps — password, https, storage — and it was the only
             one that dropped it, so the flow lost its anchor exactly once, in the middle. Same

@@ -30,7 +30,9 @@ describe("the two shapes", () => {
       </AuthPage>,
     );
     const b = box(container);
-    expect(b.className).toContain("max-w-xl");
+    // `max-w-2xl` since 2026-08-13 (Operator): the onboarding flow is sized by its widest step,
+    // which is the storage one — it renders the whole helper script and was clipping it at `xl`.
+    expect(b.className).toContain("max-w-2xl");
     expect(b.className).not.toContain("rounded-card");
     expect(b.className).not.toContain("max-w-sm");
   });
@@ -106,7 +108,7 @@ describe("which surface gets which shape", () => {
 
   it("setup is a PAGE — ruling A", () => {
     const { container } = renderPage(<SetupPasswordPage />);
-    expect(box(container).className).toContain("max-w-xl");
+    expect(box(container).className).toContain("max-w-2xl");
     expect(box(container).className).not.toContain("rounded-card");
   });
 
