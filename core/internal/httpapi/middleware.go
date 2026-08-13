@@ -183,6 +183,18 @@ func setupAllowed(r *http.Request) bool {
 		"GET /api/onboarding/https",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
 		"POST /api/storages/probe", "POST /api/storages/probe/hook",
+		// THE ZFS BRANCH OF THAT SAME FORM (quince#818 pieces B and C). `probe` and `probe/hook`
+		// were exempted and these two were not, which made the zfs path of the first-run screen
+		// unreachable ON THE FIRST RUN: pressing either button returned this guard's 503, so the
+		// key could not be generated and the helper could not be rendered — and neither can be
+		// skipped, because the helper cannot answer `probe/hook` until its key is installed. A
+		// chicken-and-egg with no way out of it, found by walking onboarding on a clean stand.
+		//
+		// NO GATE IS BEING WEAKENED. Both are already behind `RequireAuth`; this guard is about
+		// SERVER READINESS, not authorisation. `zfs/key` writes only to quince's own `/data/keys`
+		// and takes no caller path (see handleStorageZFSKey), and `zfs/helper` is a pure function
+		// of the embedded script plus one validated query parameter.
+		"POST /api/storages/zfs/key", "GET /api/storages/zfs/helper",
 		// A STORAGELESS INSTALL IS EXACTLY WHERE ONBOARDING OFFERS A PASSKEY, so signing in with
 		// one has to work here or the offer leads somewhere unusable (qn.6k).
 		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish",

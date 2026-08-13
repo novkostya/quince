@@ -72,6 +72,37 @@ func TestSetupModeLeavesTheSetupSurfaceOpen(t *testing.T) {
 	}
 }
 
+// THE ZFS BRANCH OF THE SAME FORM, WHICH WAS A DEADLOCK ON A CLEAN INSTALL (quince#818 B and C).
+//
+// The two probes above were exempted and these two were not, so on a genuinely storageless stand
+// the zfs path 503'd at both buttons: no key could be generated and no helper could be rendered.
+// Neither is skippable — `probe/hook` cannot answer until the helper is installed on the host, and
+// the helper cannot be installed without the key and the script these two serve. The form offered
+// three controls and the only one that worked was the one you cannot use yet.
+//
+// IT SURVIVED EVERY EXISTING GATE because the demo server the e2e drives always HAS a storage, so
+// this guard never fires there. Found by walking onboarding on a clean stand instead, which is the
+// one path nobody exercises twice.
+func TestSetupModeLeavesTheZFSSetupSurfaceOpen(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(storagelessDeps(t, true)))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	key := newReq(t, http.MethodPost, srv.URL+"/api/storages/zfs/key", "")
+	key.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
+	if code := doStatus(t, c, key); code == http.StatusServiceUnavailable {
+		t.Errorf("POST /api/storages/zfs/key was refused BY THE SETUP GUARD — the first-run zfs " +
+			"form cannot show the operator a key to install without it")
+	}
+
+	helper := newReq(t, http.MethodGet,
+		srv.URL+"/api/storages/zfs/helper?parent_dataset=tank%2Fbackups", "")
+	if code := doStatus(t, c, helper); code == http.StatusServiceUnavailable {
+		t.Errorf("GET /api/storages/zfs/helper was refused BY THE SETUP GUARD — the operator " +
+			"cannot install a helper they cannot be shown")
+	}
+}
+
 // THE GUARD RUNS AFTER auth, not before, and the order is a disclosure decision rather than a
 // detail. Setup mode is a fact about a configured-but-unfinished install; a stranger who can reach
 // the port must get a 401, not "this quince is not set up yet".
