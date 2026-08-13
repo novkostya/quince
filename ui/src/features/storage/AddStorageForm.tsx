@@ -381,7 +381,15 @@ export function AddStorageForm({
         ) : null}
 
         {needsZFS ? (
-          <div className="mt-3 rounded-card border border-line bg-elevated p-3" data-testid="zfs-fields">
+          // NOT A CARD. These are the same kind of thing as *Path* and *Backend* directly above —
+          // fields you fill in — and boxing them indented everything one level deeper than the two
+          // fields it continues, so the form read as a form containing a different form (Operator,
+          // 2026-08-13). The zfs branch is more of the same question, not a subsection of it.
+          //
+          // The KEY and the HELPER panels below stay boxed, and the distinction is what they are:
+          // those are artifacts to copy out and install elsewhere, not inputs. A border around a
+          // thing you take away is doing work; a border around three more text fields is not.
+          <div className="mt-3" data-testid="zfs-fields">
             {/* THE MODE IS NOT A CHOICE, and saying so is more honest than a disabled dropdown.
                 `exec` runs `zfs` inside the container, and the runtime image does not contain it
                 (quince#697) — so offering the option would be offering something that cannot work.
@@ -587,7 +595,14 @@ export function AddStorageForm({
                   // answer to why a key does not work, and quince cannot improve on it. It may name
                   // this operator's host, so it is shown here and nowhere else — never logged,
                   // never in a fixture, never pasted into a PR.
-                  <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs text-muted">
+                  // IT WRAPS RATHER THAN SCROLLING. ssh's messages are long single lines —
+                  // "No ED25519 host key is known for <host> and you have requested strict
+                  // checking" runs past 90 characters — and in a horizontally scrolling box the
+                  // operator sees the first half of the one sentence that says what is wrong
+                  // (Operator, from a phone, 2026-08-13). This is prose to READ, unlike the helper
+                  // script above it, which is a thing to COPY and where wrapping would corrupt what
+                  // you paste.
+                  <pre className="mt-2 rounded bg-card p-2 text-xs whitespace-pre-wrap break-words text-muted">
                     {hookCheck.detail}
                   </pre>
                 ) : null}
