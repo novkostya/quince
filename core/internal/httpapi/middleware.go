@@ -195,6 +195,9 @@ func setupAllowed(r *http.Request) bool {
 		// and takes no caller path (see handleStorageZFSKey), and `zfs/helper` is a pure function
 		// of the embedded script plus one validated query parameter.
 		"POST /api/storages/zfs/key", "GET /api/storages/zfs/helper",
+		// The host-key ceremony, for the same reason: it is the LAST step of the first-run zfs
+		// form, so 503ing it would reproduce quince#898 one endpoint over (quince#912).
+		"POST /api/storages/zfs/hostkey", "POST /api/storages/zfs/hostkey/trust",
 		// A STORAGELESS INSTALL IS EXACTLY WHERE ONBOARDING OFFERS A PASSKEY, so signing in with
 		// one has to work here or the offer leads somewhere unusable (qn.6k).
 		"POST /api/auth/passkeys/login/begin", "POST /api/auth/passkeys/login/finish",

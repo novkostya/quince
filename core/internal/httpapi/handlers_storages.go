@@ -297,3 +297,79 @@ func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 		})
 	}
 }
+
+// handleStorageZFSHostKey serves POST /api/storages/zfs/hostkey → 200 {found, host_key, reason} |
+// 422 (contracts §1, quince#912).
+//
+// THE FIRST HALF OF A TWO-STEP CEREMONY. It asks the host what key it offers and shows the
+// FINGERPRINT. It authenticates nothing, sends no credential, and writes nothing — see
+// `storage.ScanHostKey`.
+//
+// EVERY ANSWER ABOUT A REAL ADDRESS IS A 200, including "nothing answered", for the same reason
+// `probe` and `probe/hook` do it: a host that is not up yet is the ANSWER to the question, not a
+// failure to answer it, and the form renders it beside the same field. Only a malformed question —
+// no host — is a 422.
+//
+// IT DIALS AN ADDRESS THE CALLER SUPPLIED, which is the thing to declare. It adds no capability an
+// authenticated admin lacks — `PUT /api/config` already stores an `ssh_host` that quince connects to
+// at the next job — and it is strictly narrower than the hook check beside it, which runs a
+// subprocess: this opens a TCP connection, reads one handshake, and closes it.
+func (d Deps) handleStorageZFSHostKey() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req wire.StorageZFSHostKeyRequest
+		if err := decodeJSON(r, &req); err != nil || req.SSHHost == "" {
+			hookCheck422(w, d, "ssh_host",
+				"must not be empty — this is the host whose key quince needs to trust")
+			return
+		}
+		hk, err := storage.ScanHostKey(r.Context(), req.SSHHost, req.SSHPort)
+		if err != nil {
+			writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHostKeyResponse{
+				Found: false, Reason: err.Error(),
+			})
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHostKeyResponse{
+			Found: true,
+			HostKey: &wire.StorageZFSHostKey{
+				Host: hk.Host, Port: hk.Port, KeyType: hk.Type,
+				Fingerprint: hk.Fingerprint, Line: hk.Line,
+			},
+		})
+	}
+}
+
+// handleStorageZFSHostKeyTrust serves POST /api/storages/zfs/hostkey/trust → 200 {trusted, path} |
+// 422 | 500 (contracts §1, quince#912).
+//
+// THE SECOND HALF. It records the line the operator confirmed — the one from the scan, passed back
+// unchanged — and never re-scans. See `storage.TrustHostKey` for why that distinction is the whole
+// point of the ceremony rather than an implementation detail.
+//
+// A CHANGED HOST KEY IS A 422, NOT AN OVERWRITE. It means either a rebuilt host or an impersonation,
+// quince cannot tell which, and resolving it silently would make this button trust an attacker as
+// readily as the real host. The daemon's sentence names both possibilities and the file.
+func (d Deps) handleStorageZFSHostKeyTrust() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req wire.StorageZFSHostKeyTrustRequest
+		if err := decodeJSON(r, &req); err != nil || req.Line == "" {
+			hookCheck422(w, d, "line",
+				"must carry the known_hosts line quince showed you — trust records what you "+
+					"confirmed, and never re-reads the host")
+			return
+		}
+		path := d.ZFSKnownHostsPath
+		if path == "" {
+			path = config.DefaultZFSKnownHosts
+		}
+		if err := storage.TrustHostKey(path, req.Line); err != nil {
+			// The refusals here are the operator's business — a changed key, or a line quince will
+			// not write — and each names what to do. A write failure is quince's own and is a 500.
+			hookCheck422(w, d, "line", err.Error())
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHostKeyTrustResponse{
+			Trusted: true, Path: path,
+		})
+	}
+}

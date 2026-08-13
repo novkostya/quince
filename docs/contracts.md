@@ -622,6 +622,8 @@ POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
 POST /api/storages/zfs/key    (NO BODY — see below)        → 200 {key} | 500
 GET  /api/storages/zfs/helper?parent_dataset=<ds>          → 200 {script, path} | 422 | 500
+POST /api/storages/zfs/hostkey {ssh_host, ssh_port?}     → 200 {found, host_key, reason} | 422
+POST /api/storages/zfs/hostkey/trust {line}                → 200 {trusted, path} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
 
@@ -1658,6 +1660,39 @@ makes the `500` a backstop rather than a live path.
 script and one query parameter, which is why it is a `GET` where the key endpoint beside it is a
 `POST`.
 
+
+### StorageZFSHostKey (`quince#912`)
+
+`POST /api/storages/zfs/hostkey` and `POST /api/storages/zfs/hostkey/trust` — the two halves of the host-key ceremony.
+
+```jsonc
+// scan → 200
+{
+  "found": true,
+  "host_key": {
+    "host": "nas.local", "port": 22,
+    "key_type": "ssh-ed25519",
+    "fingerprint": "SHA256:…",                  // the form `ssh-keygen -lf` prints
+    "line": "nas.local ssh-ed25519 AAAA…"       // the complete known_hosts entry
+  },
+  "reason": ""
+}
+
+// trust ← {"line": "…"}   → 200
+{ "trusted": true, "path": "/data/keys/known_hosts" }
+```
+
+**WHY IT EXISTS AT ALL.** quince composes `StrictHostKeyChecking=yes`, and `config/zfsssh.go` argues for it correctly — `accept-new` trusts whatever answers on the first connect, which is exactly the moment an attacker would want. But nothing put an entry in `known_hosts`, and the file is **inside the container**, so the only remedy was `docker exec`. That made the zfs branch of the add-storage form impossible to finish from the UI (quince#912).
+
+**THE SPLIT IS THE SECURITY PROPERTY, not ergonomics.** Scan reads what the host offers and returns its **fingerprint**; it authenticates nothing, sends no credential and writes nothing. Trust records **the line the caller passes back** — the one the operator was shown — and never re-scans. If it re-scanned, a host answering differently between the two calls would be recorded *after* the operator confirmed a different fingerprint, and the confirmation would be theatre.
+
+**A CHANGED KEY IS A `422` AND THE EXISTING ENTRY SURVIVES.** An entry for that host with a different key means either a rebuilt host — ordinary — or an impersonation. quince cannot tell them apart and must not choose: silently replacing would make this button trust an attacker as readily as the real host. The refusal names both possibilities and the file, and the operator removes the old line by hand once they know which.
+
+**EVERY ANSWER ABOUT A REAL ADDRESS IS A `200`, including "nothing answered"** — the rule `probe` and `probe/hook` already follow. A host that is not up yet has answered the question. Only a malformed request — no `ssh_host`, or a trust with no `line` — is a `422`.
+
+**Recording the same key twice is a no-op**, not a second line: a `known_hosts` with a hundred identical entries is one nobody reads when it matters.
+
+**Nothing here is secret.** A host's public key is handed to every client that connects. The private half of quince's OWN key is a different thing and is never on this or any wire (see `StorageZFSKey`).
 ## 3. WebSocket (`/api/ws`)
 
 One socket per client, server→client only (commands go via REST). Envelope:

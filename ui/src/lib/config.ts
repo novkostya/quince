@@ -7,6 +7,8 @@ import type {
   StorageHookCheckResponse,
   StorageProbeResponse,
   StorageZFSHelperResponse,
+  StorageZFSHostKeyResponse,
+  StorageZFSHostKeyTrustResponse,
   StorageZFSKeyResponse,
 } from "./types";
 
@@ -109,4 +111,25 @@ export function fetchZFSHelper(parentDataset: string): Promise<StorageZFSHelperR
   return api.get<StorageZFSHelperResponse>(
     `/api/storages/zfs/helper?parent_dataset=${encodeURIComponent(parentDataset)}`,
   );
+}
+
+// scanZFSHostKey asks what key a host offers (contracts §1, quince#912). It authenticates nothing
+// and writes nothing — it is the half that lets the operator SEE a fingerprint before deciding.
+export function scanZFSHostKey(
+  sshHost: string,
+  sshPort?: number,
+): Promise<StorageZFSHostKeyResponse> {
+  return api.post<StorageZFSHostKeyResponse>("/api/storages/zfs/hostkey", {
+    ssh_host: sshHost,
+    ...(sshPort ? { ssh_port: sshPort } : {}),
+  });
+}
+
+// trustZFSHostKey records the line the operator confirmed.
+//
+// IT SENDS THE LINE BACK, NEVER THE HOST. The server does not re-scan, and that is deliberate: a
+// host answering differently between the two calls would otherwise be trusted after the operator
+// approved a different fingerprint, making the confirmation theatre.
+export function trustZFSHostKey(line: string): Promise<StorageZFSHostKeyTrustResponse> {
+  return api.post<StorageZFSHostKeyTrustResponse>("/api/storages/zfs/hostkey/trust", { line });
 }
