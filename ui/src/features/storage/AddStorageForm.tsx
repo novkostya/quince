@@ -9,6 +9,8 @@ import {
   configKey,
   ensureZFSKey,
   fetchZFSHelper,
+  scanZFSHostKey,
+  trustZFSHostKey,
   probeStorage,
 } from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
@@ -19,6 +21,7 @@ import type {
   StorageHookCheck,
   StorageProbe,
   StorageZFSHelperResponse,
+  StorageZFSHostKey,
   StorageZFSKey,
 } from "@/lib/types";
 
@@ -177,6 +180,53 @@ export function AddStorageForm({
   const [helper, setHelper] = useState<StorageZFSHelperResponse | null>(null);
   const [helperError, setHelperError] = useState("");
   const [helperLoading, setHelperLoading] = useState(false);
+
+  // THE HOST KEY, WHICH IS THE LAST THING BETWEEN A CORRECT SETUP AND A WORKING ONE (quince#912).
+  // quince composes `StrictHostKeyChecking=yes` — the right choice, argued in `config/zfsssh.go` —
+  // so `Test helper` answers `unreachable` with "Host key verification failed" until something puts
+  // an entry in the container's `known_hosts`. Nothing did, and the file is inside the container, so
+  // the only remedy was `docker exec`.
+  //
+  // TWO STEPS, AND THE SPLIT IS THE POINT: scan shows a FINGERPRINT and writes nothing; trust sends
+  // that exact line back. The operator checks it against `ssh-keygen -lf` on the host in between,
+  // which is the human half of trust-on-first-use and the reason `accept-new` was refused.
+  const [hostKey, setHostKey] = useState<StorageZFSHostKey | null>(null);
+  const [hostKeyError, setHostKeyError] = useState("");
+  const [hostKeyBusy, setHostKeyBusy] = useState(false);
+  const [hostKeyTrusted, setHostKeyTrusted] = useState("");
+
+  async function scanHostKey() {
+    setHostKeyBusy(true);
+    setHostKeyError("");
+    setHostKeyTrusted("");
+    try {
+      const res = await scanZFSHostKey(sshHost.trim());
+      if (res.found && res.host_key) setHostKey(res.host_key);
+      else setHostKeyError(res.reason);
+    } catch (e) {
+      setHostKeyError(serverSentence(e, "could not ask that host for its key"));
+    } finally {
+      setHostKeyBusy(false);
+    }
+  }
+
+  async function trustHostKey() {
+    if (hostKey === null) return;
+    setHostKeyBusy(true);
+    setHostKeyError("");
+    try {
+      // THE LINE FROM THE SCAN, unchanged. Never the host — see the comment above.
+      const res = await trustZFSHostKey(hostKey.line);
+      setHostKeyTrusted(res.path);
+      setHostKey(null);
+      // The helper check is the thing this unblocks, so its stale answer must not survive.
+      setHookCheck(null);
+    } catch (e) {
+      setHostKeyError(serverSentence(e, "could not record that host key"));
+    } finally {
+      setHostKeyBusy(false);
+    }
+  }
 
   async function showHelper() {
     setHelperLoading(true);
@@ -604,6 +654,93 @@ export function AddStorageForm({
               </div>
             ) : null}
 
+
+            {/* THE HOST KEY, ABOVE `Test helper` BECAUSE IT GATES IT (quince#912). Until an entry
+                exists, the check answers `unreachable` with ssh's "Host key verification failed",
+                and the operator's only remedy was to edit a file inside the container.
+
+                THE FINGERPRINT IS SHOWN AND NOT ACTED ON. quince will not trust a key it merely
+                fetched — that is `accept-new`, which trusts whatever answers on the first connect,
+                exactly when an attacker is positioned. The operator compares it against
+                `ssh-keygen -lf` on the host, which is one command they can actually run, and then
+                presses the second button. Two steps with a human in the middle. */}
+            {sshHost.trim() !== "" ? (
+              <div className="mt-3" data-testid="zfs-hostkey">
+                {hostKey === null ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void scanHostKey()}
+                    disabled={hostKeyBusy}
+                    data-testid="hostkey-scan"
+                  >
+                    {hostKeyBusy ? "Asking…" : "Check this host's key"}
+                  </Button>
+                ) : (
+                  <div className="rounded-card border border-line bg-card p-3">
+                    <div className="text-sm font-medium">Is this the right host?</div>
+                    <div className="mt-1 text-sm text-muted">
+                      <span className="text-fg">{hostKey.host}</span> offered a{" "}
+                      <span className="text-fg">{hostKey.key_type}</span> key. Check it against the
+                      host itself before trusting it — quince cannot tell a rebuilt machine from
+                      something impersonating one.
+                    </div>
+                    {/* IT WRAPS RATHER THAN SCROLLING. This is a single unbroken token the operator
+                        compares character by character, and half of it behind a scrollbar is worse
+                        than useless. */}
+                    <pre
+                      className="mt-2 rounded bg-elevated p-2 text-xs whitespace-pre-wrap break-all"
+                      data-testid="hostkey-fingerprint"
+                    >
+                      {hostKey.fingerprint}
+                    </pre>
+                    <div className="mt-2 text-xs text-muted">
+                      Run this on the host and compare:{" "}
+                      <code className="font-mono">
+                        ssh-keygen -lf /etc/ssh/ssh_host_{hostKey.key_type.replace(/^ssh-/, "")}
+                        _key.pub
+                      </code>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void trustHostKey()}
+                        disabled={hostKeyBusy}
+                        data-testid="hostkey-trust"
+                      >
+                        It matches — trust it
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHostKey(null);
+                          setHostKeyError("");
+                        }}
+                        disabled={hostKeyBusy}
+                        data-testid="hostkey-cancel"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {hostKeyTrusted !== "" ? (
+                  <div className="mt-2 text-sm text-muted" data-testid="hostkey-trusted">
+                    Recorded in <code className="font-mono text-xs">{hostKeyTrusted}</code>.
+                  </div>
+                ) : null}
+                {hostKeyError !== "" ? (
+                  /* THE DAEMON'S SENTENCE. The one that matters most is the changed-key refusal,
+                     which names both explanations and the file — quince will not choose between
+                     "rebuilt" and "impersonated" on the operator's behalf. */
+                  <div className="mt-2 text-sm" data-testid="hostkey-error">
+                    {hostKeyError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="mt-3">
               <Button
                 variant="outline"

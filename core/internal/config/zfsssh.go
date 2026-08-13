@@ -34,9 +34,18 @@ const DefaultZFSSSHPort = 22
 //   - `UserKnownHostsFile` points at the volume, per DefaultZFSKnownHosts.
 //   - `StrictHostKeyChecking=yes` is what stands between this and a machine-in-the-middle on the
 //     operator's backups. `accept-new` trusts whatever answers first, which on a first connect is
-//     exactly the moment an attacker would want. quince#818's form seeds `known_hosts` from a
-//     fingerprint the operator confirms, so by the time this argv runs there IS an entry — and if
-//     there is not, failing is the honest outcome rather than trusting one.
+//     exactly the moment an attacker would want. The add-storage form seeds `known_hosts` from a
+//     fingerprint the operator confirms — `POST /api/storages/zfs/hostkey` then `…/trust`
+//     (quince#912) — so by the time this argv runs there IS an entry, and if there is not, failing
+//     is the honest outcome rather than trusting one.
+//
+// THAT LAST CLAUSE WAS FALSE FOR THE WHOLE OF quince#818, and it is why the gap survived. It
+// credited the seeding to #818's form, which never touched `known_hosts` — so the refusal was not
+// the honest outcome of a step somebody skipped, it was the only outcome there had ever been, on a
+// file inside the container that no operator could reach. Anybody auditing this strict-checking
+// decision read the claim and concluded the seeding was finished work belonging to someone else.
+// Recorded rather than quietly corrected: a comment asserting a mechanism that does not exist is
+// this project's most-filed defect, and this instance cost a blocked first run.
 //
 // `-o` PAIRS ARE TWO ELEMENTS, not one. `-oBatchMode=yes` also works, but the split form is what
 // every doc and every operator's muscle memory writes, and an argv is read by people during an

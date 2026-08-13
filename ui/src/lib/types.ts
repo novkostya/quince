@@ -457,3 +457,32 @@ export interface StorageZFSHelperResponse {
   // so a helper saved anywhere else is simply never reached.
   path: string;
 }
+
+// The host-key ceremony (contracts §1, quince#912). quince composes StrictHostKeyChecking=yes, so
+// an entry has to exist before the helper can be reached — and until this, nothing put one there.
+export interface StorageZFSHostKey {
+  host: string;
+  port: number;
+  key_type: string;
+  // fingerprint is the SHA256 form ssh prints, so it compares character for character against
+  // `ssh-keygen -lf /etc/ssh/ssh_host_<type>_key.pub` run on the host — the check that makes the
+  // operator's confirmation mean something.
+  fingerprint: string;
+  // line is the complete known_hosts entry and goes BACK unchanged on the trust call. That round
+  // trip is the security property: if trust re-scanned, a host answering differently between the
+  // two calls would be recorded after the operator approved a different fingerprint.
+  line: string;
+}
+
+export interface StorageZFSHostKeyResponse {
+  found: boolean;
+  host_key: StorageZFSHostKey | null;
+  // reason is the daemon's own sentence when there is no key to show — unreachable, refused, no
+  // answer. Every one of those is a 200: it is the ANSWER to the question, not a failure to answer.
+  reason: string;
+}
+
+export interface StorageZFSHostKeyTrustResponse {
+  trusted: boolean;
+  path: string;
+}

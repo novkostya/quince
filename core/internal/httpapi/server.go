@@ -185,6 +185,11 @@ func NewRouter(deps Deps) http.Handler {
 	// GET, unlike the key above, because it reads nothing and writes nothing: the answer is a pure
 	// function of the embedded script and one query parameter.
 	apiMux.HandleFunc("GET /api/storages/zfs/helper", deps.handleStorageZFSHelper())
+	// The host-key ceremony (quince#912), two steps because the split IS the security property:
+	// scan shows a fingerprint and writes nothing; trust records the line that was confirmed and
+	// never re-reads the host. POST for both — one opens a connection, the other writes a file.
+	apiMux.HandleFunc("POST /api/storages/zfs/hostkey", deps.handleStorageZFSHostKey())
+	apiMux.HandleFunc("POST /api/storages/zfs/hostkey/trust", deps.handleStorageZFSHostKeyTrust())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

@@ -524,3 +524,47 @@ type StorageZFSHelperResponse struct {
 	// destination is a thing the operator still has to look up, which is what piece C exists to end.
 	Path string `json:"path"`
 }
+
+// StorageZFSHostKeyRequest asks what host key an address offers (quince#912).
+type StorageZFSHostKeyRequest struct {
+	SSHHost string `json:"ssh_host"`
+	SSHPort int    `json:"ssh_port,omitempty"`
+}
+
+// StorageZFSHostKey is what the scan found — all of it public by construction, since every client
+// that connects to that host is handed the same key.
+type StorageZFSHostKey struct {
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	KeyType string `json:"key_type"`
+	// Fingerprint is the SHA256 form ssh prints, so it compares character for character against
+	// `ssh-keygen -lf /etc/ssh/ssh_host_<type>_key.pub` run on the host — the one command an
+	// operator can actually use to check it.
+	Fingerprint string `json:"fingerprint"`
+	// Line is the complete known_hosts entry, and it goes BACK on the trust call unchanged.
+	//
+	// THAT ROUND TRIP IS THE SECURITY PROPERTY, not a convenience. If trust re-scanned instead, a
+	// host answering differently between the two calls would have its key recorded after the
+	// operator confirmed a different fingerprint, and the confirmation would mean nothing.
+	Line string `json:"line"`
+}
+
+// StorageZFSHostKeyResponse carries the scan. `reason` is set when there is no key to show —
+// unreachable, refused, no answer — and is the daemon's own sentence.
+type StorageZFSHostKeyResponse struct {
+	Found   bool               `json:"found"`
+	HostKey *StorageZFSHostKey `json:"host_key"`
+	Reason  string             `json:"reason"`
+}
+
+// StorageZFSHostKeyTrustRequest records a confirmed key. It carries the LINE the operator was
+// shown, never a host to re-scan.
+type StorageZFSHostKeyTrustRequest struct {
+	Line string `json:"line"`
+}
+
+// StorageZFSHostKeyTrustResponse says where it was written, so the screen can name the file.
+type StorageZFSHostKeyTrustResponse struct {
+	Trusted bool   `json:"trusted"`
+	Path    string `json:"path"`
+}
