@@ -16,42 +16,29 @@ import (
 // exits 0 — and no gate could have caught it, because "the tests stub the transport, so they assert
 // the argv SENT and the stub answers whatever the test chose: A MIRROR, NOT A PEER."
 //
-// So the script under test is the operator's actual one, extracted from deploy/storage.md and run
-// under /bin/sh. What gets stubbed is `zfs` itself — one layer below the thing whose behaviour is in
-// question. That makes the forced-command semantics real: $SSH_ORIGINAL_COMMAND splitting, last-arg
-// targeting, the `case` guards, and the exit-1 fall-through are all genuinely exercised.
+// So the script under test is the operator's actual one, read from the file quince itself embeds and
+// run under /bin/sh. What gets stubbed is `zfs` itself — one layer below the thing whose behaviour
+// is in question. That makes the forced-command semantics real: $SSH_ORIGINAL_COMMAND splitting,
+// last-arg targeting, the `case` guards, and the exit-1 fall-through are all genuinely exercised.
 //
-// THE SCRIPT IS EXTRACTED, NOT COPIED INTO testdata/. A second copy drifts, and the doc is the
-// artifact operators actually install — so a doc edit that breaks the helper turns this gate red.
-// Extraction FAILS LOUDLY rather than skipping (see extractHelper); a gate that quietly stops
-// running is the failure mode this rung keeps naming.
+// THE SCRIPT IS READ, NOT COPIED INTO testdata/. A second copy drifts, and this file is the artifact
+// operators actually install, so an edit that breaks the helper turns this gate red.
+//
+// IT USED TO BE PARSED OUT OF `deploy/storage.md`, and that is what quince#818 piece C ended. The
+// extractor pinned itself to the document's shape with two content markers and a `PARENT="…"` string
+// replacement, each with its own loud failure, because a fence has no other handle. `go:embed`
+// needed a real file anyway; the gate reading one is what that bought, and a prose edit can no
+// longer take a gate down.
 
-// extractHelper pulls the `quince-zfs-helper` script out of deploy/storage.md.
-//
-// It refuses rather than skipping when it cannot find it. The cost of extraction is exactly this
-// coupling to the document's shape, and the mitigation is that the failure is a red build with a
-// sentence saying what to look at — never a silent pass. Rung-local and reversible to a testdata/
-// copy if it proves brittle (qn.6e Gates).
-func extractHelper(t *testing.T) string {
+// helperSource reads the real helper. It refuses rather than skipping: a gate that quietly stops
+// running is the failure mode this rung keeps naming.
+func helperSource(t *testing.T) string {
 	t.Helper()
-	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "storage.md"))
+	src, err := os.ReadFile(filepath.Join("zfshelper", "quince-zfs-helper"))
 	if err != nil {
-		t.Fatalf("G8 CANNOT RUN: reading deploy/storage.md: %v", err)
+		t.Fatalf("G8 CANNOT RUN: reading the helper: %v", err)
 	}
-	// The helper is the fenced block that starts with a shebang and defines PARENT — pinned on two
-	// markers rather than on a fence index, so an inserted example above it does not silently
-	// select the wrong block.
-	blocks := strings.Split(string(doc), "```")
-	for _, b := range blocks {
-		body := strings.TrimPrefix(strings.TrimPrefix(b, "sh"), "\n")
-		if strings.HasPrefix(body, "#!/bin/sh") && strings.Contains(body, "quince-zfs-helper") &&
-			strings.Contains(body, "capacity)") {
-			return body
-		}
-	}
-	t.Fatalf("G8 CANNOT RUN: no quince-zfs-helper script found in deploy/storage.md. " +
-		"If the doc's shape changed, fix this extractor — do NOT let the gate stop running.")
-	return ""
+	return string(src)
 }
 
 // hookHarness writes the real helper, a stub `zfs`, and an ssh-shaped shim, and returns a hook_cmd.
@@ -73,8 +60,8 @@ func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) []string 
 	// The published script carries a placeholder PARENT; an operator edits it, and so do we.
 	src := strings.Replace(helperSrc, `PARENT="pool/path/to/iphone-backup"`, `PARENT="`+parent+`"`, 1)
 	if !strings.Contains(src, `PARENT="`+parent+`"`) {
-		t.Fatalf("G8 CANNOT RUN: the PARENT assignment in deploy/storage.md changed shape; " +
-			"the extractor found the script but could not point it at a test dataset")
+		t.Fatalf("G8 CANNOT RUN: the PARENT assignment in zfshelper/quince-zfs-helper changed " +
+			"shape; the script was read but could not be pointed at a test dataset")
 	}
 	write(t, helper, src)
 
@@ -109,7 +96,7 @@ func TestCheckHookEmptyListIsSuccess(t *testing.T) {
   *available*)     echo "10	20" ; exit 0 ;;
   *)               exit 0 ;;
 esac`
-	hook := hookHarness(t, parent, zfs, extractHelper(t))
+	hook := hookHarness(t, parent, zfs, helperSource(t))
 
 	got := CheckHook(context.Background(), parent, hook)
 
@@ -127,7 +114,7 @@ esac`
 func TestCheckHookNotMigratedWhenCapacityIsMissing(t *testing.T) {
 	requireSh(t)
 	const parent = "tank/backups"
-	src := extractHelper(t)
+	src := helperSource(t)
 	cut := strings.Index(src, "  capacity)")
 	if cut < 0 {
 		t.Fatalf("G8 CANNOT RUN: no `capacity)` arm in the published helper to remove")
@@ -165,7 +152,7 @@ func TestCheckHookParentMismatch(t *testing.T) {
   *)               exit 0 ;;
 esac`
 	// The helper is configured for one dataset; the form asks about another.
-	hook := hookHarness(t, "tank/backups", zfs, extractHelper(t))
+	hook := hookHarness(t, "tank/backups", zfs, helperSource(t))
 
 	got := CheckHook(context.Background(), "tank/somewhere-else", hook)
 
@@ -232,7 +219,7 @@ case "$*" in
   *available*)     echo "10	20" ; exit 0 ;;
   *)               exit 0 ;;
 esac`
-	hook := hookHarness(t, parent, zfs, extractHelper(t))
+	hook := hookHarness(t, parent, zfs, helperSource(t))
 
 	// Ask `list` with flags a caller might hope get forwarded.
 	cli := newZFSCLI(parent, hook)
@@ -279,7 +266,7 @@ func TestTheRealHelperBoundsRollback(t *testing.T) {
 	run := func(t *testing.T, args ...string) (string, error) {
 		t.Helper()
 		rec := filepath.Join(t.TempDir(), "argv")
-		hook := hookHarness(t, parent, `echo "$*" >> `+rec+"\nexit 0", extractHelper(t))
+		hook := hookHarness(t, parent, `echo "$*" >> `+rec+"\nexit 0", helperSource(t))
 		cli := newZFSCLI(parent, hook)
 		_, err := cli.run(context.Background(), cli.argv(args[0], args[1:]...))
 		b, readErr := os.ReadFile(rec)
