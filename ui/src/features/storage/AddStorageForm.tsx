@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { addStorage, checkStorageHook, configKey, ensureZFSKey, probeStorage } from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
+import { CopyButton } from "@/components/CopyButton";
 import { APIError } from "@/lib/api";
 import type { ConfigFieldError, StorageHookCheck, StorageProbe, StorageZFSKey } from "@/lib/types";
 
@@ -440,6 +441,14 @@ export function AddStorageForm({
                 >
                   {zfsKey.authorized_keys}
                 </pre>
+                {/* COPYING THIS BY HAND IS THE STEP MOST LIKELY TO GO WRONG. It is one line, it
+                    wraps across three on a phone, and a selection that clips the leading
+                    `command="…"` leaves a WORKING key with no constraint — an unrestricted shell
+                    login on the storage host rather than a helper pinned to one dataset. The button
+                    copies the whole line or says it could not. */}
+                <div className="mt-2">
+                  <CopyButton value={zfsKey.authorized_keys} label="Copy the line" />
+                </div>
                 <div className="mt-2 text-xs text-muted">
                   The private half stays in{" "}
                   <code className="font-mono">{zfsKey.path}</code> and never leaves this machine.
