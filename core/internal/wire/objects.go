@@ -479,3 +479,32 @@ type PasskeyList struct {
 	// in what the surface CLAIMED.
 	HasPassword bool `json:"has_password"`
 }
+
+// StorageZFSKey is the keypair quince uses to reach the ZFS helper, as a form needs it
+// (quince#818 piece B). POST /api/storages/zfs/key.
+//
+// EVERYTHING HERE IS SAFE TO RENDER. The private half never leaves `/data/keys/` — it is not on this
+// type, it is not logged, and it is never in a fixture. Same discipline as a backup password.
+type StorageZFSKey struct {
+	// Path is where the private half lives, so the form can say what `ssh_key` would point at.
+	Path string `json:"path"`
+	// PublicKey is the `ssh-ed25519 AAAA… quince` line on its own.
+	PublicKey string `json:"public_key"`
+	// AuthorizedKeys is the COMPLETE line to paste on the ZFS host, forced command included.
+	//
+	// BOTH ARE SERVED because they are different acts: the public key is what an operator recognises,
+	// and this is what they must actually paste. A key shown WITHOUT its `command="…"` prefix invites
+	// pasting a naked key, which is an unconstrained shell login on the storage host rather than a
+	// helper pinned to one dataset.
+	AuthorizedKeys string `json:"authorized_keys"`
+	// Created is true when quince made this key just now, false when it FOUND one already there.
+	//
+	// ON THE WIRE BECAUSE THE FORM MUST SAY WHICH. "quince made you a key" and "quince found your
+	// existing key" call for different next steps — the first needs pasting, the second may already
+	// be installed — and guessing wrong invites an operator to replace an entry that works.
+	Created bool `json:"created"`
+}
+
+type StorageZFSKeyResponse struct {
+	Key StorageZFSKey `json:"key"`
+}

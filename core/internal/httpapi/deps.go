@@ -32,9 +32,16 @@ type Deps struct {
 	Versions         VersionReader
 	VersionAdmin     VersionAdmin
 	Storages         StorageReader
-	Muxer            MuxerControl
-	Ops              DeviceOps
-	WorkingReset     WorkingReset
+	// ZFSKeyPath is where POST /api/storages/zfs/key generates or finds the helper key. Empty means
+	// `config.DefaultZFSKeyPath`, which is what production leaves it as (quince#818).
+	//
+	// IT IS A DEPENDENCY SO TESTS CAN BE HERMETIC, not so an operator can retarget it: the handler
+	// takes no path from the request precisely so the endpoint has no reachable target but quince's
+	// own, and a test writing into `/data` would either fail or dirty the box.
+	ZFSKeyPath   string
+	Muxer        MuxerControl
+	Ops          DeviceOps
+	WorkingReset WorkingReset
 	// Reconcile publishes `reconciling` on GET /api/health (qn.6i). Nil wherever no asynchronous
 	// reconciliation exists — `--demo`, the admin CLIs, every test router — and nil reports false,
 	// which is the truth there rather than a default: with no runner there is no provisional state.

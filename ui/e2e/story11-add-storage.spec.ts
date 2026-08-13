@@ -536,3 +536,42 @@ test("a config that merely carries warnings still reads as first run, with the w
   // The form is the point of this page in this state, so it is there and unqualified.
   await expect(page.getByTestId("add-storage-save")).toBeVisible();
 });
+
+// quince#818 piece B — THE KEY AND THE LINE THAT CONSTRAINS IT.
+//
+// Before this, the zfs branch asked for a command line and said nothing about the key it named: a
+// user had to already know one was needed, where to put it so the container could see it, and that a
+// forced command had to be installed on the other end first.
+//
+// THE `authorized_keys` LINE IS THE ARTIFACT, not the public key. `command="…"` is what pins the
+// helper regardless of what the client asks for — a bare key pasted into `authorized_keys` is an
+// unconstrained shell login on the operator's storage host.
+test("the zfs branch shows the key and the complete authorized_keys line", async ({ page }) => {
+  await authenticate(page);
+
+  await page.getByTestId("add-storage").click();
+  await page.getByLabel("Path").fill("/tmp");
+  await page.getByTestId("probe-check").click();
+  await page.getByTestId("backend-select").selectOption("zfs");
+  await expect(page.getByTestId("zfs-fields")).toBeVisible();
+
+  const panel = page.getByTestId("zfs-key");
+  await expect(panel).toBeVisible();
+
+  // THE FORCED COMMAND LEADS THE LINE. An operator who truncates it keeps the key and loses the
+  // constraint, so it must not be something they scroll to find.
+  const line = page.getByTestId("zfs-authorized-keys");
+  await expect(line).toContainText('command="/usr/local/sbin/quince-zfs-helper"');
+  await expect(line).toContainText("no-port-forwarding");
+  await expect(line).toContainText("ssh-ed25519 ");
+
+  // AND IT SAYS WHERE THE PRIVATE HALF STAYS, which is the sentence that stops somebody hunting for
+  // a file to copy off the box.
+  await expect(panel).toContainText("/data/keys/zfs");
+  await expect(panel).toContainText(/never leaves this machine/i);
+
+  // THE PANEL IS ZFS-ONLY. A copy-backend storage must not cause a keypair to be generated at all,
+  // which is why the fetch is on the branch rather than on mount.
+  await page.getByTestId("backend-select").selectOption("copy");
+  await expect(page.getByTestId("zfs-key")).toHaveCount(0);
+});

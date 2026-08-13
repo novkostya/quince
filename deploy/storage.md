@@ -261,10 +261,16 @@ the key you verified, once, and `StrictHostKeyChecking=yes` refuses anything els
 ssh-keyscan -t ed25519 zfshost >> /path/to/quince/data/keys/known_hosts   # then EYEBALL it
 ```
 
-**`StrictHostKeyChecking=accept-new` is the documented alternative** — it records the key on first
-contact and refuses a *change* thereafter. Strictly better than `no` (which accepts a changed key
-silently, and must never appear here), strictly weaker than seeding: it trusts whatever answers the
-first time. Use it where seeding is impractical, and know which one you chose.
+**`StrictHostKeyChecking=accept-new` IS NO LONGER SELECTABLE, and this paragraph used to offer it.**
+It was *"the documented alternative"* — record the key on first contact, refuse a *change*
+thereafter; weaker than seeding, because it trusts whatever answers the first time. That was a real
+choice while the operator wrote the whole command. **Since quince#818 quince composes it**, so the
+only reachable value is `yes` and there is no spelling of `config.yml` that yields `accept-new`.
+
+**Corrected rather than deleted, because it was live guidance the day before** — an operator who
+chose `accept-new` deliberately needs to know it is gone, rather than wonder why their setting
+stopped having an effect. Seeding is therefore no longer *recommended over* the alternative; it is
+the only path, which is why the step above is required.
 
 Child-dataset visibility: a dataset created after the container starts appears as an empty stub
 inside a plain bind mount. The host `zfs create` must propagate through **both** hops — into the

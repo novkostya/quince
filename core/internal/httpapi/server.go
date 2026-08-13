@@ -176,6 +176,11 @@ func NewRouter(deps Deps) http.Handler {
 	// REQUEST-SUPPLIED ARGV. See handleStorageHookCheck for why that adds no capability an
 	// authenticated admin lacks, and what bounds it.
 	apiMux.HandleFunc("POST /api/storages/probe/hook", deps.handleStorageHookCheck())
+	// POST rather than GET because it CAN CREATE (quince#818): it returns the key at
+	// `/data/keys/zfs`, generating one only if there is nothing there. Not exempt either, and this
+	// one writes to quince's own volume — see handleStorageZFSKey for why it can only ever touch
+	// that one path, and why it refuses rather than replacing whatever it finds.
+	apiMux.HandleFunc("POST /api/storages/zfs/key", deps.handleStorageZFSKey())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())

@@ -6,6 +6,7 @@ import type {
   StorageAddition,
   StorageHookCheckResponse,
   StorageProbeResponse,
+  StorageZFSKeyResponse,
 } from "./types";
 
 export const configKey = ["config"] as const;
@@ -79,4 +80,18 @@ export function checkStorageHook(
     ssh_user: sshUser,
     ssh_host: sshHost,
   });
+}
+
+// ensureZFSKey asks quince for the key it uses to reach the ZFS helper — generating one at
+// `/data/keys/zfs` only if there is nothing there (contracts §1, quince#818 piece B).
+//
+// NO PATH IS SENT, and the endpoint takes none. That is what keeps it from being an authenticated
+// write-a-file-anywhere primitive whose contents happen to be a private key; quince can only ever
+// touch its own path. An operator who keeps a key elsewhere sets `ssh_key` by hand instead.
+//
+// `created` DISTINGUISHES *made you one* FROM *found yours*, which the screen must say: an existing
+// key's public half may already be installed on a host, and offering to replace it would break a
+// working storage silently.
+export function ensureZFSKey(): Promise<StorageZFSKeyResponse> {
+  return api.post<StorageZFSKeyResponse>("/api/storages/zfs/key", {});
 }

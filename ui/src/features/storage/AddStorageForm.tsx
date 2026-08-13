@@ -1,12 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { addStorage, checkStorageHook, configKey, probeStorage } from "@/lib/config";
+import { addStorage, checkStorageHook, configKey, ensureZFSKey, probeStorage } from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
 import { APIError } from "@/lib/api";
-import type { ConfigFieldError, StorageHookCheck, StorageProbe } from "@/lib/types";
+import type { ConfigFieldError, StorageHookCheck, StorageProbe, StorageZFSKey } from "@/lib/types";
 
 // serverSentence pulls the daemon's own words out of a 422. Same rule ForgetStorage states: the
 // refusal names the field AND the remedy, and re-wording it client-side drops the half that tells
@@ -130,6 +130,8 @@ export function AddStorageForm({
   const [sshHost, setSSHHost] = useState("");
   const [hookCheck, setHookCheck] = useState<StorageHookCheck | null>(null);
   const [hookChecking, setHookChecking] = useState(false);
+  const [zfsKey, setZFSKey] = useState<StorageZFSKey | null>(null);
+  const [keyError, setKeyError] = useState("");
 
   function reset() {
     setPath("");
@@ -140,6 +142,12 @@ export function AddStorageForm({
     setSSHUser("");
     setSSHHost("");
     setHookCheck(null);
+    // CLEARED SO THE NEXT ZFS STORAGE RE-ASKS, and `created` is why. After one add the key exists,
+    // so a second one must read "quince found an ssh key it made earlier" — keeping the old answer
+    // would tell the operator quince had just made them a key it had not, and invite them to paste
+    // a line that is already installed.
+    setZFSKey(null);
+    setKeyError("");
   }
 
   async function testHelper() {
@@ -233,6 +241,31 @@ export function AddStorageForm({
   const canAdopt = probe?.outcome === "adopt";
   const isNew = probe?.outcome === "new";
   const needsZFS = isNew && backend === "zfs";
+
+  // THE KEY IS FETCHED WHEN THE ZFS BRANCH OPENS, not when the form mounts (quince#818 piece B).
+  // The endpoint GENERATES on its first call, so asking earlier would leave a keypair on disk for
+  // every copy-backend storage anybody ever added.
+  //
+  // ONCE — `zfsKey !== null` in the guard means switching backend away and back does not re-ask. A
+  // second call would find the same key by construction, so the only thing a repeat buys is noise.
+  useEffect(() => {
+    if (!needsZFS || zfsKey !== null) return;
+    let live = true;
+    void (async () => {
+      try {
+        const res = await ensureZFSKey();
+        if (live) setZFSKey(res.key);
+      } catch (e) {
+        // SURFACED, NEVER SWALLOWED. Both reachable failures — a `/data` quince cannot write, and
+        // something at that path that is not a key — need the operator to act, and an empty panel
+        // would read as "no key is needed here".
+        if (live) setKeyError(serverSentence(e, "could not prepare the ssh key"));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [needsZFS, zfsKey]);
 
   // A ZFS STORAGE CANNOT BE SAVED UNTIL THE HELPER HAS ANSWERED, and `ok` is not the only answer
   // that clears it.
@@ -368,6 +401,51 @@ export function AddStorageForm({
                 setHookCheck(null);
               }}
             />
+
+            {/* THE KEY, AND THE LINE THAT CONSTRAINS IT (quince#818 piece B). Before this, a user had
+                to know a key was needed at all, where to put it so the container could see it, and
+                that a forced command had to be installed first — none of it on screen.
+
+                THE `authorized_keys` LINE IS THE ARTIFACT, not the public key. `command="…"` is what
+                pins the helper regardless of what the client asks for, so showing a bare key would
+                invite pasting one — an unconstrained shell login on the operator's storage host.
+                The public key is shown too, but second, and labelled as the thing this is built
+                from. */}
+            {keyError !== "" ? (
+              <div className="mt-3 text-sm" data-testid="zfs-key-error">
+                {keyError}
+              </div>
+            ) : null}
+
+            {zfsKey !== null ? (
+              <div className="mt-3 rounded-card border border-line bg-card p-3" data-testid="zfs-key">
+                <div className="text-sm font-medium">
+                  {/* WHICH ONE IT IS MATTERS. An existing key's public half may already be installed
+                      on the host, so "quince found" means *you may be done*, where "quince made"
+                      means *this still has to be pasted*. Guessing wrong invites replacing a working
+                      entry. */}
+                  {zfsKey.created
+                    ? "quince made an ssh key for this"
+                    : "quince found an ssh key it made earlier"}
+                </div>
+                <div className="mt-1 text-sm text-muted">
+                  Add this one line to <code className="font-mono text-xs">~{"/"}.ssh/authorized_keys</code>{" "}
+                  for <span className="text-fg">{sshUser.trim() === "" ? "the remote user" : sshUser.trim()}</span> on{" "}
+                  <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> — it
+                  restricts the key to the helper, so it cannot be used for anything else.
+                </div>
+                <pre
+                  className="mt-2 overflow-x-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap break-all"
+                  data-testid="zfs-authorized-keys"
+                >
+                  {zfsKey.authorized_keys}
+                </pre>
+                <div className="mt-2 text-xs text-muted">
+                  The private half stays in{" "}
+                  <code className="font-mono">{zfsKey.path}</code> and never leaves this machine.
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-3">
               <Button

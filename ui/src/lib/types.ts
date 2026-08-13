@@ -420,3 +420,29 @@ export interface StorageHookCheck {
 export interface StorageHookCheckResponse {
   check: StorageHookCheck;
 }
+
+// StorageZFSKey is POST /api/storages/zfs/key (contracts §1, quince#818 piece B).
+//
+// EVERYTHING HERE IS SAFE TO RENDER. The private half never leaves `/data/keys/` — it is not on this
+// type, never logged, never in a fixture.
+export interface StorageZFSKey {
+  /** Where the private half lives, so the form can say what `ssh_key` would point at. */
+  path: string;
+  /** The `ssh-ed25519 AAAA… quince` line on its own. */
+  public_key: string;
+  /**
+   * The COMPLETE line to paste on the ZFS host, forced command included.
+   *
+   * BOTH ARE SERVED BECAUSE THEY ARE DIFFERENT ACTS: the public key is what an operator recognises,
+   * this is what they must actually paste. A key shown without its `command="…"` prefix invites
+   * pasting a naked key — an unconstrained shell login on the storage host rather than a helper
+   * pinned to one dataset.
+   */
+  authorized_keys: string;
+  /** true when quince made this key just now; false when it FOUND one already there. */
+  created: boolean;
+}
+
+export interface StorageZFSKeyResponse {
+  key: StorageZFSKey;
+}
