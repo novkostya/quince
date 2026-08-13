@@ -117,14 +117,53 @@ by hand as before.
 **Two things followed from the move, and both are the point rather than side effects.** The Go gate
 that runs the real helper against a stubbed `zfs` now reads the file instead of parsing this
 document for a fenced block, so a prose edit can no longer break a gate. And `shellcheck` opened the
-script **for the first time** — it had never been linted while it lived in a fence — which is where
-the `SC2086` note now standing above `set -- $SSH_ORIGINAL_COMMAND` came from.
+script **for the first time** — it had never been linted while it lived in a fence — which is what
+produced the `SC2086` question the next section answers.
 
-**Read it there.** It is a short file and it carries its own reasoning, including which verbs changed
-for an operator upgrading an existing helper.
+**THE FILE IS DELIBERATELY SPARE, AND THIS SECTION IS WHY IT CAN BE** — Operator ruling on
+quince#887. The script is displayed verbatim in the UI and then installed on somebody's storage host,
+so it is read there as an *artifact*, not as our notebook: a reader deciding whether to trust a file
+they are about to run as root should not have to page through this project's reasoning to find the
+code. It was **90 lines, 65 of them comment**; it is now 49, with the code byte-identical. The
+comments that survive are the ones an operator needs *at that moment* — what the script allows, and
+why three lines that look wrong are not.
 
-**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case from that file**, the same way its
-header records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
+**What moved here, so nothing is lost:**
+
+- **`set -- $SSH_ORIGINAL_COMMAND` is unquoted on purpose.** A forced command receives the client's
+  request as one string, never as argv, so splitting it on whitespace is how the script gets its
+  arguments at all. Quoting it — what `SC2086` asks for — makes the whole request one word, no arm
+  matches, and every verb falls through to the refusal. **`set -f` would be a genuine narrowing** and
+  is deliberately not applied: no legal dataset or snapshot name contains a glob character, so
+  nothing valid would break, but it is a behaviour change to a security boundary that **no agent seat
+  can test** (quince#730 — the zfs branch has no live host outside the Operator's). What holds
+  without it is that every arm guards `$target` against `"$PARENT"`/`"$PARENT"/*` before reaching
+  `zfs`.
+- **The `create` arm checks the parent exists BEFORE creating** — measured on a real pool, 2026-08-12
+  (quince#818). `zfs create -p` creates missing *parents* too, so a typo in the `PARENT=` line did
+  not fail: it silently built a whole new dataset tree and put backups in it. That tree has neither
+  of the two settings this document opens by requiring — no `com.sun:auto-snapshot=false`, no quota —
+  so the failure surfaces much later as retention reclaiming nothing, or as ENOSPC mid-backup.
+  Checking first turns that into a refusal naming the dataset, at a cost of one `zfs get` per create,
+  which is once per device rather than once per backup.
+- **The chown uid is inherited, not configured** (quince#818). There used to be a `CTUID=` constant an
+  operator had to know: `0` for privileged/native, the userns base (e.g. `100000`) for an
+  unprivileged LXC — a number that is invisible from inside the container, so quince could not fill
+  it in and a wrong one made the chown a silent no-op. The parent's mountpoint must already be
+  writable by quince, so its owner **is** the mapped root.
+- **`rollback` takes no `-r`, and none can reach it** — the parse drops every flag. Without `-r`,
+  `zfs rollback` refuses any snapshot but the most recent, and `-r`/`-R` are what destroy *newer*
+  snapshots, i.e. committed versions. So the verb structurally cannot lose one.
+- **`capacity` takes no caller argument at all**, which makes it *tighter* than the pattern-guarded
+  arms — it is why the helper check fires it first: a failure there is unambiguously about
+  reachability.
+- **Verbs that changed, for an operator upgrading an existing helper:** `seed)` was **deleted**
+  (qn.5b's clone of `latest/` → `working/<udid>`; quince no longer seeds on this backend) and
+  `rollback)` was **added** (what Reset uses). Backups keep working across that gap — only reset
+  needs the new verb.
+
+**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case from that file**, the same way this
+section records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
 space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
 Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
 number rather than showing a wrong one — which is why this is a migration note rather than a
