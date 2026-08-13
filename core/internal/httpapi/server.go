@@ -161,6 +161,10 @@ func NewRouter(deps Deps) http.Handler {
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/begin", deps.handlePasskeyLoginBegin())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/finish", deps.handlePasskeyLoginFinish())
+		// The reauth pair — qn.6n D3. In NONE of the three exact-path lists, unlike the login pair
+		// directly above, which is in all three.
+		apiMux.HandleFunc("POST /api/auth/reauth/begin", deps.handleReauthBegin())
+		apiMux.HandleFunc("POST /api/auth/reauth/finish", deps.handleReauthFinish())
 		apiMux.HandleFunc("GET /api/auth/passkeys", deps.handlePasskeyList())
 		apiMux.HandleFunc("DELETE /api/auth/passkeys/{id}", deps.handlePasskeyDelete())
 		apiMux.HandleFunc("PATCH /api/auth/passkeys/{id}", deps.handlePasskeyRename())

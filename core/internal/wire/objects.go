@@ -568,3 +568,16 @@ type StorageZFSHostKeyTrustResponse struct {
 	Trusted bool   `json:"trusted"`
 	Path    string `json:"path"`
 }
+
+// ReauthFinish is POST /api/auth/reauth/finish's response (qn.6n D4).
+//
+// A TOKEN AND NOTHING ELSE — no session, no CSRF token, no `state`. The endpoint it is modelled on,
+// `passkeys/login/finish`, returns all three because its job is to sign somebody in; this one's job
+// is to prove a credential is present, and the difference is the whole of D3. A response shape that
+// looked like a login's would be the first step towards behaving like one.
+//
+// The proof is single-use, expiring, and bound to the operation named at `begin`, to the credential
+// that asserted, and to the session that began the ceremony.
+type ReauthFinish struct {
+	Proof string `json:"proof"`
+}

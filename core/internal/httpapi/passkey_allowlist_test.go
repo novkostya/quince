@@ -144,3 +144,55 @@ func TestFirstRunPasskeyPairIsInAllThreeExactPathLists(t *testing.T) {
 		}
 	}
 }
+
+// THE REAUTH PAIR IS IN NONE OF THE THREE — qn.6n D3, gate G1.
+//
+// This is the assertion the whole of D3 rests on. The pair could have reused
+// `passkeys/login/begin|finish`, which is in ALL three lists; the spec refused because giving the
+// least-guarded routes in the system a second job whose purpose is gating privileged operations is
+// the wrong trade. That refusal is only worth anything if the new routes stay out.
+//
+// Each membership would fail differently and none obviously:
+//
+//   - in `authExempt`   → re-authentication reachable with no session, so a proof could be minted
+//     by anybody who can reach the address and hold an authenticator to it;
+//   - in `setupAllowed` → reachable on a storageless install, which is a state that has no
+//     credentials to re-present and is exactly where first run must not be shadowed;
+//   - in `csrfExempt`   → a cross-site page could begin and finish a ceremony against a logged-in
+//     browser, which is the mint step of a privileged operation.
+//
+// BY EXACT PATH AND BY METHOD, matching the lists' own shape: they are exact-path on purpose, and a
+// prefix would silently widen them every time a route is added.
+func TestTheReauthPairIsInNoneOfTheThreeExactPathLists(t *testing.T) {
+	for _, p := range []string{"/api/auth/reauth/begin", "/api/auth/reauth/finish"} {
+		r := httptest.NewRequest("POST", p, nil)
+		if authExempt(r) {
+			t.Errorf("%s IS in authExempt — a proof could be minted with no session at all", p)
+		}
+		if setupAllowed(r) {
+			t.Errorf("%s IS in setupAllowed — reachable on an install with no credentials to present", p)
+		}
+		if csrfExempt(r) {
+			t.Errorf("%s IS in csrfExempt — a cross-site page could mint a proof against a "+
+				"logged-in browser", p)
+		}
+	}
+}
+
+// AND IT IS NOT REACHED BY A PREFIX FROM THE LOGIN PAIR. `/api/auth/reauth/*` and
+// `/api/auth/passkeys/login/*` share no prefix today, so this cannot regress by accident — but the
+// lists are the kind of thing a later change makes prefix-matched "to tidy them up", and that is the
+// change this assertion exists to fail. A path that merely STARTS like an exempt one must not be
+// exempt.
+func TestTheListsDoNotMatchByPrefix(t *testing.T) {
+	for _, p := range []string{
+		"/api/auth/passkeys/login/begin/../../../reauth/begin",
+		"/api/auth/passkeys/login/beginning",
+		"/api/auth/reauth/begin/extra",
+	} {
+		r := httptest.NewRequest("POST", p, nil)
+		if authExempt(r) || setupAllowed(r) || csrfExempt(r) {
+			t.Errorf("%s matched a list — these are EXACT-path lists, not prefixes", p)
+		}
+	}
+}

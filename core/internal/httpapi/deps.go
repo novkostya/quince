@@ -75,6 +75,11 @@ type Deps struct {
 	// and the routes are not registered when it is, so a nil here is unreachable rather than a
 	// panic waiting.
 	Passkeys *auth.PasskeyCeremonies
+	// Reauth and Proofs back the qn.6n re-authentication pair. Nil in the same places Passkeys is,
+	// and the routes are registered under the same condition, so a nil here is unreachable for the
+	// same reason rather than a second thing to remember.
+	Reauth *auth.ReauthCeremonies
+	Proofs *auth.Proofs
 	// PasswordAdmin backs PUT/DELETE /api/auth/password (qn.6m). NIL IN --demo, ON PURPOSE — and
 	// unlike Passkeys above, the routes ARE still registered when it is nil, because NewRouter
 	// installs UnavailablePasswordAdmin and the surface must refuse with a stated reason rather
