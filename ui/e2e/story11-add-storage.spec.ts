@@ -570,6 +570,25 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   await expect(panel).toContainText("/data/keys/zfs");
   await expect(panel).toContainText(/never leaves this machine/i);
 
+  // THE COPY BUTTON WORKS HERE, AND *HERE* IS THE WHOLE ASSERTION.
+  //
+  // This suite drives `http://<host>:8968` — a hostname, not localhost — so the page is an INSECURE
+  // CONTEXT and `navigator.clipboard` is undefined, exactly as it is on the LAN address a real
+  // operator reaches quince at. That is asserted rather than assumed, because if the harness ever
+  // moves to localhost this test would quietly start proving the easy path instead of the shipped
+  // one, and still pass.
+  expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
+  expect(await page.evaluate(() => navigator.clipboard === undefined)).toBe(true);
+
+  // So a `copied` here can only have come from the `execCommand` rung. A button that reported
+  // success it did not achieve would be worse than no button: the operator walks away believing
+  // they hold the constrained line, and pastes whatever was on the clipboard before.
+  const copy = page.getByTestId("copy-button");
+  await expect(copy).toBeVisible();
+  await copy.click();
+  await expect(copy).toHaveAttribute("data-state", "copied");
+  await expect(copy).toContainText("Copied");
+
   // THE PANEL IS ZFS-ONLY. A copy-backend storage must not cause a keypair to be generated at all,
   // which is why the fetch is on the branch rather than on mount.
   await page.getByTestId("backend-select").selectOption("copy");
