@@ -694,24 +694,32 @@ export function AddStorageForm({
                     >
                       {hostKey.fingerprint}
                     </pre>
-                    {/* IT LISTS THEM RATHER THAN NAMING ONE, because quince cannot know the path
-                        and must not pretend to (Operator, from the lab rig, 2026-08-13).
+                    {/* IT ASKS THE RUNNING sshd, AND SO NAMES NO PATH AT ALL (Operator direction via
+                        quince#921, measured against a live sshd).
 
-                        This derived the filename from the key type — `ssh-ed25519` →
-                        `ssh_host_ed25519_key.pub`. That is right for two of the three common types
-                        and WRONG for ecdsa: the type carries the curve (`ecdsa-sha2-nistp256`) and
-                        the filename does not (`ssh_host_ecdsa_key.pub`). It printed a path that
-                        cannot exist, in the one instruction whose entire job is to be runnable.
+                        Two wrong answers preceded it. It first derived the filename from the key
+                        type — right for `ssh-ed25519`, and WRONG for ecdsa, where the type carries
+                        the curve (`ecdsa-sha2-nistp256`) and the filename does not
+                        (`ssh_host_ecdsa_key.pub`): an impossible path, in the one instruction whose
+                        entire job is to be runnable. Then a glob over `/etc/ssh`, which still
+                        guessed the DIRECTORY — `sshd_config`'s `HostKey` may point anywhere, and a
+                        wrong directory lists nothing.
 
-                        A corrected mapping would still be a guess — `sshd_config`'s `HostKey` can
-                        point anywhere, so no table is right on every host. Listing what is actually
-                        there needs no mapping, and the operator matches on the SHA256 string, which
-                        is what they were going to compare anyway. */}
+                        `ssh-keyscan` removes the guess instead of narrowing it, and is better than
+                        reading files for a second reason: it reports what sshd is actually
+                        PRESENTING. A key on disk that sshd does not serve is a fingerprint that can
+                        never match, however carefully it is compared. It is also the same question
+                        quince asks, from the other side — quince scans the host, this scans
+                        localhost on it — so a mismatch means something real rather than a lookup
+                        gone wrong.
+
+                        `ssh-keygen -lf` takes exactly ONE file, so the loop was not avoidable by
+                        argument list; the `-` stdin form is what reads a stream of several keys. */}
                     <div className="mt-2 text-xs text-muted">
                       Run this on <span className="text-fg">{hostKey.host}</span> and look for the
                       same fingerprint:
                       <pre className="mt-1 rounded bg-elevated p-2 whitespace-pre-wrap break-all">
-                        for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf &quot;$f&quot;; done
+                        ssh-keyscan localhost | ssh-keygen -lf -
                       </pre>
                     </div>
                     <div className="mt-2 flex gap-2">
