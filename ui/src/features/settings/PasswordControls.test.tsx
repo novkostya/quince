@@ -9,13 +9,29 @@ import { api, APIError } from "@/lib/api";
 // side, where the decision is irreversible without console access and the server is the only thing
 // that knows whether it is allowed.
 
+const HERE = "quince.example.com";
+const ELSEWHERE = "quince.example.net";
+
+function passkeyAt(rpID: string, id = "pk-1") {
+  return { id, name: "phone", rp_id: rpID, created_at: "2026-08-01T00:00:00Z", last_used_at: null };
+}
+
 // THE LIST IS NOW AN INPUT TO THIS COMPONENT (quince#855): it carries `has_password`, and the whole
 // surface renders differently on the two states. Mocked per test rather than globally, because the
 // PASSWORDLESS case is the one the issue was filed about and it must be reachable here.
-function renderControls(hasPassword = true) {
+// THE PASSKEYS ARE A SECOND INPUT NOW, AND THE DEFAULT CHANGED — quince#888 item 2. This helper
+// passed `passkeys: []` for every case, so `renderControls(false)` meant *no password AND no
+// credentials at all*, while every test below read it as *passwordless*. The fixture was ambiguous
+// in precisely the way the component was: `has_password: false` was taken to mean "you have a
+// passkey" when it can equally mean "you have nothing", and code and tests assumed the reassuring
+// reading together. The default is now a passkey bound HERE, which is what those tests meant.
+function renderControls(
+  hasPassword = true,
+  passkeys: ReturnType<typeof passkeyAt>[] = [passkeyAt(HERE)],
+) {
   vi.spyOn(api, "get").mockResolvedValue({
-    passkeys: [],
-    rp_id: "quince.example.com",
+    passkeys: hasPassword ? [] : passkeys,
+    rp_id: HERE,
     supported: true,
     has_password: hasPassword,
   });
@@ -210,5 +226,78 @@ describe("an install with a password", () => {
 
     expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
     expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+  });
+});
+
+// `has_password: false` MEANS THREE THINGS AND THE SURFACE RENDERED ONE — quince#888 item 2.
+//
+// The old copy said *"This quince has no password — you sign in with a passkey"* whenever the field
+// was false, which is a confident description of a configuration the user may not have. These are
+// the two states where it was untrue, and neither was expressible with the old fixture.
+describe("passwordless is not the only reading of has_password: false", () => {
+  // THE REACHABLE ONE, and it survives item 1's lockout guard. That guard stops the credential set
+  // being emptied; it does not stop an install being reached at a SECOND address, where the passkeys
+  // it holds cannot sign anybody in. qn.6k D2's hazard, met from the settings screen.
+  it("says nothing can sign in here when every passkey belongs elsewhere, and names where", async () => {
+    renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
+
+    const warning = await screen.findByText(/none of its passkeys works at this address/i);
+    // NAMING THE ADDRESS IS THE POINT, not the warning itself: "your passkeys do not work" at a box
+    // that visibly lists one reads as quince being broken. Same reasoning as the server's
+    // `last_credential` message and `passkey_rp_mismatch`.
+    expect(warning.textContent).toContain(ELSEWHERE);
+    // And the reassuring sentence is GONE, not merely supplemented.
+    expect(screen.queryByText(/you sign in with a passkey/i)).not.toBeInTheDocument();
+  });
+
+  it("says there is nothing to sign in with when there are no passkeys at all", async () => {
+    renderControls(false, []);
+
+    expect(await screen.findByText(/no password and no passkeys/i)).toBeInTheDocument();
+    expect(screen.queryByText(/you sign in with a passkey/i)).not.toBeInTheDocument();
+  });
+
+  // THE RECOVERY ADVICE INVERTS, WHICH IS THE PART THAT COULD SEND SOMEBODY TO A CONSOLE FOR
+  // NOTHING. In the passwordless state `quince auth reset` genuinely is the way back if the device
+  // is lost. In these two there is already no working credential here, so a reset clears what
+  // exists and leaves first-run — while the form on screen fixes it without a shell.
+  it("does not send the user to a console when the fix is the form above", async () => {
+    renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
+
+    await screen.findByText(/none of its passkeys works at this address/i);
+    expect(screen.getByText(/is not the way back from here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/console or SSH access/i)).not.toBeInTheDocument();
+  });
+
+  // AN UNKNOWN rpId IS NOT AN ACCUSATION. Without `rp_id` the client cannot judge which credentials
+  // work here, so it must not claim a lockout — a wrong lockout warning is its own harm.
+  it("does not accuse when the payload carries no rp_id", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      passkeys: [passkeyAt(ELSEWHERE, "pk-elsewhere")],
+      supported: true,
+      has_password: false,
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <PasswordControls />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/no password — you sign in with a passkey/i)).toBeInTheDocument();
+    expect(screen.queryByText(/none of its passkeys works/i)).not.toBeInTheDocument();
+  });
+
+  // THE SUCCESS MESSAGE CARRIES THE SAME ASSUMPTION IN THE PLACE IT IS HARDEST TO SPOT: it is shown
+  // AFTER the state has been repaired, so "as well as your passkey" would be reassuring the user
+  // about a credential that still does not work at this address.
+  it("does not promise a working passkey after setting a password from the broken state", async () => {
+    vi.spyOn(api, "put").mockResolvedValue(undefined);
+    renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
+
+    fireEvent.change(await screen.findByLabelText("New password"), { target: { value: "new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+
+    expect(await screen.findByText(/only way to sign in at this address/i)).toBeInTheDocument();
   });
 });
