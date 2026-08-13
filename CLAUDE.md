@@ -641,6 +641,17 @@ the retry is §5's rung 3 — close and reopen, which re-triggers CI with no com
 (`ci.yml` declares `pull_request:` with no `types:`, so the default set applies and it includes
 `reopened`).
 
+**AND THE REOPEN SILENTLY DROPS ANY AUTO-MERGE ARM. THE REBASE DOES NOT.** Measured 2026-08-13 on
+quince#905 by two seats independently, and the contrast is the whole of it: after `update-branch
+--rebase` the arm reads back intact, after close-and-reopen `autoMergeRequest` is `null`. §6 tells
+the merging seat to arm auto-merge on an approved PR whose checks are running, and this paragraph
+tells it to reopen — **nothing said the second undoes the first**, so a seat that does both leaves a
+PR approved, green and unmerged, which is indistinguishable from one still waiting on a check.
+**Re-arm after every reopen, and READ IT BACK** — `autoMergeRequest` is in none of `state`,
+`reviewDecision` or `mergeStateStatus`, so a seat checking those three has not checked the arm. That
+is exactly how this was missed: the architect asserted *"still armed"* from those fields and the
+implementer measured otherwise.
+
 Note the rebase moves the head: re-read the range-diff before letting an approval stand, because
 GitHub does **not** necessarily dismiss the approval (it did not on quince#216 — verified pure by
 identical patch hashes, not assumed).
