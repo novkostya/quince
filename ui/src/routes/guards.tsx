@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuthStatus } from "@/lib/auth";
 import { useConfig } from "@/lib/config";
+import { useInsecureOrigin } from "@/lib/health";
 
 function Loading() {
   return (
@@ -23,10 +24,37 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// SetupGate holds `/setup`, and since quince#908 it also decides that a first run over a connection
+// which cannot carry a session cookie belongs somewhere else entirely.
+//
+// THE FORM BEHIND THIS GATE CANNOT SUCCEED WHEN `insecure_origin` IS TRUE. `refuseInsecureOrigin`
+// runs BEFORE the credential is examined — before `SetPassword` — so a fresh install reached over
+// plain http at a LAN address answers 426 to every password the user types. What stood here was a
+// working form guaranteed to fail, whose only exits were editing YAML on the box or knowing about
+// `localhost`.
+//
+// FIRST RUN ONLY, AND THE BOUND IS THE SAFETY ARGUMENT rather than a scoping convenience
+// (quince#908 §3). In the pre-credential window `POST /api/auth/setup` is already authExempt and
+// one-shot, so anyone who reaches the port can claim the install outright — routing them to a page
+// about transport grants strictly less than what is already on offer. Once a credential exists that
+// reasoning stops holding, so `needs_login` keeps the "How to fix this" LINK on the login form and
+// gets no redirect.
+//
+// SetupGate IS THE SINGLE FUNNEL, which is why this lives here rather than in three places:
+// `RequireAuth` and `LoginGate` both send `needs_setup` to `/setup`, so every route into first run
+// passes through this component.
+//
+// `replace`, NEVER A PUSH. A pushed entry makes Back return to `/setup`, which redirects forward
+// again — a two-entry trap with no exit. `/onboarding/https` is top-level and behind no gate, so
+// the redirect itself cannot bounce.
 export function SetupGate({ children }: { children: ReactNode }) {
   const { data, isLoading } = useAuthStatus();
+  const insecureOrigin = useInsecureOrigin();
   if (isLoading) return <Loading />;
   if (data?.state !== "needs_setup") return <Navigate to="/" replace />;
+  // AFTER the state check, deliberately. This is a statement about FIRST RUN; reading it earlier
+  // would let the transport decide a route while the auth state was still unknown.
+  if (insecureOrigin) return <Navigate to="/onboarding/https" replace />;
   return <>{children}</>;
 }
 

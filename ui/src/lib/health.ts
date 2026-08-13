@@ -57,6 +57,19 @@ export function useReconciling(): boolean {
   return data?.reconciling === true;
 }
 
+// useInsecureOrigin is first-run routing's question: would a session cookie earned on THIS
+// connection be discarded, so that no credential can be established over it at all (contracts §1)?
+//
+// FALSE WHILE LOADING AND FALSE ON A FAILED PROBE, like the two hooks around it — and here the
+// direction has teeth rather than being a house style. A false POSITIVE routes somebody away from
+// a setup form they were about to complete successfully; a false NEGATIVE leaves them in the dead
+// end they are in today, unchanged. One of those is a regression and the other is the status quo,
+// so the answer that does nothing is the safe one.
+export function useInsecureOrigin(): boolean {
+  const { data } = useHealth();
+  return data?.insecure_origin === true;
+}
+
 // useIsPublicDemo is the question every caller actually has. It is false while loading and false on
 // a failed probe, so demo copy appears only on a POSITIVE answer from the server.
 export function useIsPublicDemo(): boolean {
