@@ -137,9 +137,20 @@ export function AddPasskeyDialog({
         <form onSubmit={submit}>
           <div className="mt-4 flex flex-col gap-1">
             <Label htmlFor="passkey-name">Name</Label>
+            {/* THE ONE FIELD IN THE PRODUCT THAT TAKES HUMAN LANGUAGE, so it opts back in to the
+                platform's capitalisation and spellcheck. `Input` defaults them OFF because every
+                other text field is a case-sensitive identifier — a path, a dataset, a hostname, a
+                remote user — where iOS's shifted keyboard silently produces a value that fails
+                somewhere else later.
+
+                A nickname is the opposite case: *"My iPhone"* is what somebody means to type, and
+                fighting the keyboard here would be the same mistake pointed the other way. */}
             <Input
               id="passkey-name"
               autoFocus
+              autoCapitalize="sentences"
+              autoCorrect="on"
+              spellCheck
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="my iPhone"
