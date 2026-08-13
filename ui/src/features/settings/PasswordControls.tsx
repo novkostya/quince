@@ -24,6 +24,25 @@ import { passkeysKey, usePasskeyList, rpIDOf, worksHere, passkeysSupported, type
 //
 // The second is the one a user cannot discover for themselves, and it is the one that decides
 // whether this option is safe for THEIR deployment.
+//
+// THE ADDRESS IS A SECOND WAY TO LOSE THE CREDENTIAL AND THIS LIST NAMED ONLY THE DEVICE — quince#902.
+// A passkey is bound to an `rp_id`, the domain quince derives from the request's `Host`, so a passkey
+// that works at one address does not work at another (qn.6k D2, already surfaced per row in the
+// `Passkeys` list). On a passwordless install **the address changing is the same event as the device
+// being lost**: rename the box, put it behind a proxy, reconfigure one to stop preserving `Host`,
+// move to a Tailscale name, switch to an IP where an rpId is impossible at all.
+//
+// IT IS MORE LIKELY THAN LOSING THE PHONE, AND THIS PAGE RECOMMENDS ONE OF THE TRIGGERS — the
+// `Passkeys` card says *"A reverse proxy or Tailscale gives you one"* a few lines up.
+//
+// AND THE ASYMMETRY IS THE PART A USER CANNOT GUESS: a password is NOT rpId-bound, so an install that
+// has one survives every item on this list — sign in with it, register a fresh passkey at the new
+// address, no console. Passwordless is the only configuration where a hostname change is
+// unrecoverable, which is precisely the decision this panel exists to inform.
+//
+// SECOND IN THE LIST, NOT FOURTH. The two ways to LOSE the credential belong together; the remaining
+// bullets are about the remedy, and a way-to-lose-it arriving after *"there is no way back in at
+// all"* reads as an afterthought to a conclusion.
 function PasswordlessCost() {
   return (
     <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted">
@@ -32,11 +51,21 @@ function PasswordlessCost() {
         <code className="font-mono text-fg">quince auth reset</code> on the machine running quince.
       </li>
       <li>
-        That command clears the password, <span className="font-medium">every passkey</span> and every
-        signed-in session — it is a fresh start, not a repair.
+        <span className="font-medium">The address matters as much as the device.</span> A passkey only
+        works at the name you set it up on, so renaming this machine, putting it behind a proxy, or
+        moving to a Tailscale name breaks it just as completely — and a password would have survived
+        all of those.
       </li>
       <li>
-        It needs console or SSH access to that machine.{" "}
+        {/* `quince auth reset` NAMED AGAIN RATHER THAN "that command". It is now two bullets from its
+            introduction, and a pronoun reaching that far is one insertion away from pointing at the
+            wrong thing. */}
+        <code className="font-mono text-fg">quince auth reset</code> clears the password,{" "}
+        <span className="font-medium">every passkey</span> and every signed-in session — it is a fresh
+        start, not a repair.
+      </li>
+      <li>
+        It runs on the machine itself, so it needs console or SSH access.{" "}
         <span className="font-medium">
           If you cannot get a shell on it, there is no way back in at all.
         </span>
