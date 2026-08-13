@@ -114,6 +114,15 @@ edit one. That needs `go:embed`, which cannot reach outside its module, and the 
 script it always was, in a place quince can embed it from. Until that lands, set the `PARENT=` line
 by hand as before.
 
+**How to install it, which the file itself deliberately does not say.** Copy it to the ZFS host as
+`/usr/local/sbin/quince-zfs-helper`, `chmod +x` it, set `PARENT=` to your parent dataset, and pin it
+as the forced command in the `authorized_keys` line above. Those instructions live here rather than
+in the script's own header because **a file that says *"install as …"* is addressing somebody who has
+not installed it, and every reader of the installed copy has.** Once it is on disk at that path the
+line is noise at best and contradicts its own location at worst — and once quince serves the script
+(piece C) the screen carries the instruction beside the copy button, which is where somebody about to
+paste is actually looking.
+
 **Two things followed from the move, and both are the point rather than side effects.** The Go gate
 that runs the real helper against a stubbed `zfs` now reads the file instead of parsing this
 document for a fenced block, so a prose edit can no longer break a gate. And `shellcheck` opened the
