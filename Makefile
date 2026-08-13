@@ -254,10 +254,44 @@ tc-uv: preflight
 # ---------------------------------------------------------------------------
 # Gate ladder.
 # ---------------------------------------------------------------------------
+# EVERY gate `gates` can run, so the SKIPPED set is derivable rather than remembered. It is a
+# literal list beside a literal list — `bin/gate-scope`'s own `covers()` is the other one — and
+# `gate-scope-test` asserts the two agree, because a skipped-set computed from a stale roster would
+# under-report exactly the gate nobody noticed was gone.
+ALL_GATES := gates-go gates-vault gates-ui gates-sh
+
 .PHONY: gates
 # Prerequisites come from gate-scope so the SKIPPING is visible as a dependency list rather than
 # hidden inside a recipe: `make -n gates SCOPE=…` shows exactly what will run.
-gates: $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only what the range affects)
+#
+# THAT VISIBILITY LIVES SOMEWHERE NOBODY STANDS, WHICH IS WHY THE ANNOUNCEMENT EXISTS (quince#531).
+# `make -n` is a different command from the one you just ran, and the session that needs to know a
+# gate was skipped is the session reading the output of the ladder it already started. `image`
+# already announces its own skip; three of the four gates announced nothing, so a scoped run that
+# executed one gate out of four reported success and looked like a full pass — a truncated result
+# presented as a whole one, which is what `no silent caps or fallbacks` forbids.
+#
+# FIRST PREREQUISITE, not a recipe line: a recipe runs AFTER its prerequisites, so an announcement
+# there would arrive once the gates it describes had already run. That is a report, not a heading.
+gates: gates-announce $(SCOPED_GATES) ## Run the whole gate ladder (SCOPE=<git-range> runs only what the range affects)
+
+# Undocumented (no `##`) deliberately: it is not a gate and it is not something to run on its own,
+# so it stays out of `make help` and out of the allowlist `bin/allowlist-coverage` keys on
+# documented targets — the same reason `print-sh-suite-image` is undocumented.
+.PHONY: gates-announce
+gates-announce:
+	@printf 'gates: running %s\n' '$(strip $(SCOPED_GATES))'
+ifneq ($(strip $(filter-out $(SCOPED_GATES),$(ALL_GATES))),)
+	@printf 'gates: SKIPPED %s — not touched by %s. gate-scope decided; pass no SCOPE to force them.\n' \
+	  '$(strip $(filter-out $(SCOPED_GATES),$(ALL_GATES)))' '$(SCOPE)'
+endif
+
+# Also undocumented, and it exists for `bin/gate-scope-test`: the suite asserts that ALL_GATES and
+# gate-scope's own roster are the same set, and restating the four names inside the suite would stop
+# matching the day a fifth gate lands — which is the drift that assertion is there to catch.
+.PHONY: print-all-gates
+print-all-gates:
+	@echo "$(ALL_GATES)"
 
 # The lists are explicit and grow as scripts land — a glob would silently start linting (or
 # silently stop linting) files nobody decided on.
