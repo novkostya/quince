@@ -268,26 +268,35 @@ func (s *Service) SetPassword(password, clientIP string) error {
 // endpoint, and somebody holding a session must not get a fresh budget to guess the current password
 // in. NOT reset on success — Login resets because a correct password is evidence the client is the
 // owner, where here the session already said that, so a reset would only hand budget back.
-func (s *Service) ChangePassword(current, next, clientIP string) error {
+// SUPERSEDED IN ONE CLAUSE BY qn.6n — the ruling on quince#888 item 3. Everything above remains the
+// reasoning for demanding a present credential; what changed is that a PASSKEY is now an equal
+// alternative, and that the empty-`current` case is no longer unguarded.
+//
+// *"`current` MAY BE EMPTY, AND EXACTLY WHEN NO PASSWORD EXISTS"* WAS A HOLE, and quince#888's table
+// named it: on a passwordless install this path accepted **no proof at all** and minted a credential
+// the owner could not revoke without console access. Rule 1 closes it — adding a password to a
+// passwordless install now requires presenting the passkey.
+//
+// AND RULE 3 IS NOT A RELAXATION, though beside "the current password" it reads like one. The same
+// authority was already reachable in two steps: `DELETE /api/auth/password`, needing only a passkey
+// ROW, then this endpoint with an empty `current`, needing nothing at all. Rule 3 is that authority
+// in one prompt instead of two, with the two-step path closed.
+func (s *Service) ChangePassword(proofs *Proofs, pres Presented, next, sessionID, clientIP string) error {
 	if !s.limiter.allow(clientIP, s.now()) {
 		return ErrRateLimited
 	}
 	if len(next) < s.minPasswordLen {
 		return ErrWeakPassword
 	}
-	hash, hasPassword, err := s.store.GetSetting(settingPasswordHash)
-	if err != nil {
-		return err
-	}
-	if hasPassword {
-		ok, err := verifyPassword(current, hash)
-		if err != nil {
-			return err
-		}
-		if !ok {
+	// THE PRESENT CREDENTIAL, BEFORE ANYTHING IS WRITTEN. `RequirePresent` carries the first-run
+	// exemption, the rate limit on the password branch and the proof's own bindings. The audit line
+	// stays here because "a password change was refused" is this operation's event, not the
+	// verifier's — the same reason the two have different names.
+	if _, err := s.RequirePresent(proofs, pres, OpSetPassword, "", sessionID, clientIP); err != nil {
+		if errors.Is(err, ErrBadPassword) {
 			s.audit("password_change_failed", clientIP)
-			return ErrBadPassword
 		}
+		return err
 	}
 	newHash, err := s.hash(next, s.params)
 	if err != nil {

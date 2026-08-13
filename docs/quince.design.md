@@ -625,6 +625,30 @@ This app shows a person's entire digital life; "LAN-only" is context, not a defe
 (external-review point, accepted). The web-facing baseline lands with qn.1 and is
 non-negotiable:
 
+**A SESSION AUTHORISES USE. IT DOES NOT AUTHORISE CHANGING WHAT CAN AUTHENTICATE** — Operator
+ruling, 2026-08-13, on [quince#888](https://github.com/novkostya/quince/issues/888) item 3, built as
+`qn.6n`. Stated before the bullets rather than inside them, because those describe the session and
+this describes its limit.
+
+A session proves a **past** authentication. Every operation that changes the credential set — adding
+a credential, removing one, changing the password — requires a **present** one, presented as part of
+that operation: the password, or a passkey assertion carried as a single-use proof (`contracts.md`
+§1, `POST /api/auth/reauth/*`).
+
+**Per-operation proof, not a sudo window.** The window was considered and rejected: its grant is
+ambient, so a stolen session acting inside it inherits exactly the authority being defended against.
+
+**Removing a credential requires presenting a DIFFERENT one**, which does more than it looks like.
+The surviving credential is proven *usable* by the act of presenting it, so quince cannot remove its
+own last way in — and no lockout check implements that. It is unreachable by construction.
+
+**The only exemption is an install with no credentials at all** — first launch, or after
+`quince auth reset`. There is deliberately none for *"a credential exists but cannot be presented
+here"*, the state a `Host`-rewriting proxy produces: an attacker holding a stolen session controls
+that header and could manufacture the state with one crafted request, so the waiver would hand them
+their own trigger. The remedy for that state is `quince auth reset`, and its cost is stated on the
+screen that offers passwordless.
+
 - **Transport**: HTTPS via user's reverse proxy or built-in self-signed fallback; Web
   Push (later) requires a real cert — documented, not solved by us.
 - **Auth**: single admin password (argon2id hash in app DB), cookie sessions

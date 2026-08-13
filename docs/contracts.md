@@ -87,7 +87,20 @@ PUT    /api/auth/password {current_password, new_password}  → 204
        // install "change" IS "set", and the server decides which case applies from its own
        // state, so there is no client flag to get wrong. Where a password DOES exist, an empty
        // value is simply a wrong one and takes the same 401.
-       // 401 bad_password · 422 weak_password · 429 rate_limited — THE SAME BUCKET as
+       // AND SINCE qn.6n IT TAKES `proof` AS AN EQUAL ALTERNATIVE — a token from
+       // POST /api/auth/reauth/finish, minted for operation `set_password`. Either field
+       // satisfies rules 1 and 3; the password is the lighter of the two and a passkey is what
+       // an install with no password to type must use.
+       // THE OMITTED-`current_password` CASE WAS PROVED BY NOTHING AT ALL until that ruling,
+       // which quince#888 item 3 named: a stolen session could mint a credential the owner
+       // could not revoke without console access. It now requires the passkey.
+       // THE ONLY EXEMPTION IS AN INSTALL WITH NO CREDENTIALS AT ALL — `configured` false,
+       // first launch or after `quince auth reset`. There is deliberately NO exemption for
+       // "a credential exists but cannot be presented here": an attacker holding a stolen
+       // session controls the Host header and could manufacture that state on demand, so the
+       // waiver would hand them their own trigger. The remedy for it is `quince auth reset`.
+       // 401 bad_password · 401 reauth_required when nothing usable was presented, carrying the
+       // server's own sentence · 422 weak_password · 429 rate_limited — THE SAME BUCKET as
        // POST /api/auth/login, because it verifies a password and holding a session must not
        // buy a fresh budget to guess in · 503 unavailable on the demo (below).
 DELETE /api/auth/password                                   → 204

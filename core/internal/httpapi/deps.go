@@ -294,7 +294,10 @@ func (UnavailableStorages) JobsOn(string) []string { return nil }
 // (--demo). Returns an HTTP status + reason so the handler maps outcomes without reaching for
 // cross-package sentinels — the same shape as WorkingReset and JobControl above.
 type PasswordAdmin interface {
-	ChangePassword(current, next, clientIP string) error
+	// CHANGED BY qn.6n: it takes the proof store, what was PRESENTED, and the session — rules 1 and
+	// 3 mean a session alone no longer authorises a password change, and the proof must be checked
+	// against the session that minted it.
+	ChangePassword(proofs *auth.Proofs, pres auth.Presented, next, sessionID, clientIP string) error
 	RemovePassword(rpID, clientIP string) error
 }
 
@@ -312,7 +315,7 @@ var ErrPasswordAdminUnavailable = errors.New(
 	"the admin password cannot be changed here: this is the public demo, and its password is shared " +
 		"with every visitor")
 
-func (UnavailablePasswordAdmin) ChangePassword(string, string, string) error {
+func (UnavailablePasswordAdmin) ChangePassword(*auth.Proofs, auth.Presented, string, string, string) error {
 	return ErrPasswordAdminUnavailable
 }
 

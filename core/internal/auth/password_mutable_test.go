@@ -33,7 +33,7 @@ func configured(t *testing.T, pw string) (*Service, func()) {
 func TestChangeRequiresTheCurrentPassword(t *testing.T) {
 	svc, _ := configured(t, "old-one")
 
-	if err := svc.ChangePassword("not-it", "new-one", ip); !errors.Is(err, ErrBadPassword) {
+	if err := svc.ChangePassword(NewProofs(), Presented{Password: "not-it"}, "new-one", sess, ip); !errors.Is(err, ErrBadPassword) {
 		t.Fatalf("wrong current = %v, want ErrBadPassword (401)", err)
 	}
 	// AND IT DID NOT WRITE. A refusal that had already replaced the hash would be the worst of both.
@@ -45,7 +45,7 @@ func TestChangeRequiresTheCurrentPassword(t *testing.T) {
 func TestChangeReplacesThePasswordAndRetiresTheOld(t *testing.T) {
 	svc, _ := configured(t, "old-one")
 
-	if err := svc.ChangePassword("old-one", "new-one", ip); err != nil {
+	if err := svc.ChangePassword(NewProofs(), Presented{Password: "old-one"}, "new-one", sess, ip); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 	if _, _, err := svc.Login("new-one", ip, ""); err != nil {
@@ -56,18 +56,71 @@ func TestChangeReplacesThePasswordAndRetiresTheOld(t *testing.T) {
 	}
 }
 
-// ON A PASSWORDLESS INSTALL "CHANGE" IS "SET", served by the same endpoint with `current` absent. A
-// separate add-a-password endpoint would be a fourth spelling of one idea, and the state that
-// decides which spelling applies is server-side anyway.
-func TestChangeOnAPasswordlessInstallNeedsNoCurrent(t *testing.T) {
+// THIS TEST HAS INVERTED — qn.6n rule 1, gate G6. It was
+// `TestChangeOnAPasswordlessInstallNeedsNoCurrent`, and it asserted that a passwordless install
+// could set a password with an empty `current`. That WAS the design (qn.6m D4, *"change IS set"*),
+// and quince#888 item 3's table named it as the row proved by NOTHING:
+//
+//	set a password on a passwordless install | nothing — an empty current_password is accepted by
+//	design | mints a credential the owner cannot revoke without console access
+//
+// The simplification is still right and is untouched: one endpoint, and the server decides which
+// spelling applies from its own state. What changed is that the spelling with no password to type
+// now needs the PASSKEY instead of needing nothing.
+//
+// Inverted in place rather than deleted and replaced, because a reader who knew the old behaviour
+// needs to see that it was removed on purpose.
+func TestSettingAPasswordOnAPasswordlessInstallNowNeedsThePasskey(t *testing.T) {
 	svc, st := newConfiguredService(t)
 	seedPasskey(t, st, "cred-1", here) // configured by credential, no password row
 
-	if err := svc.ChangePassword("", "brand-new", ip); err != nil {
-		t.Fatalf("ChangePassword on a passwordless install: %v", err)
+	if err := svc.ChangePassword(NewProofs(), Presented{}, "brand-new", sess, ip); !errors.Is(err, ErrNoProof) {
+		t.Fatalf("setting a password with nothing presented = %v, want ErrNoProof", err)
+	}
+	// AND IT DID NOT WRITE. A refusal that had already set the hash would be the worst of both: the
+	// credential minted, and the attempt reported as prevented.
+	if _, _, err := svc.Login("brand-new", ip, ""); !errors.Is(err, ErrNoPassword) {
+		t.Fatalf("a password was set despite the refusal: %v", err)
+	}
+}
+
+// AND THE PASSKEY IS WHAT LETS IT THROUGH — the other half of the pair above. Rule 1 is a
+// requirement, not a prohibition: a passwordless install must still be able to ADD a password, and
+// that is the remedy `/settings/auth` points at.
+func TestAProofSetsThePasswordOnAPasswordlessInstall(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	seedPasskey(t, st, "cred-1", here)
+
+	proofs := NewProofs()
+	tok, err := proofs.Mint(OpSetPassword, "", ProofSubject{CredentialID: "cred-1"}, sess)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := svc.ChangePassword(proofs, Presented{Proof: tok}, "brand-new", sess, ip); err != nil {
+		t.Fatalf("ChangePassword with a proof: %v", err)
 	}
 	if _, _, err := svc.Login("brand-new", ip, ""); err != nil {
 		t.Fatalf("the password just set does not work: %v", err)
+	}
+}
+
+// G5 — THE EXEMPTION AND THE RULE ASSERTED TOGETHER, ON TWO STORES DIFFERING BY ONE ROW.
+//
+// The exception and the rule are one decision, and a test proving only the exemption would pass on a
+// build that exempted everything. `Configured()` is the predicate, so the exemption cannot drift
+// from the state that makes first run legal in the first place.
+func TestOnlyAnUnclaimedInstallIsExemptFromPresentingSomething(t *testing.T) {
+	// No password, no passkeys — unclaimed. Nothing to present, and nothing yet to protect.
+	virgin, _ := newConfiguredService(t)
+	if err := virgin.ChangePassword(NewProofs(), Presented{}, "first-one", sess, ip); err != nil {
+		t.Fatalf("an unclaimed install refused a password: %v — first run would be unrecoverable", err)
+	}
+
+	// One passkey, no password — CLAIMED, and therefore not exempt. One row is the whole difference.
+	claimed, st := newConfiguredService(t)
+	seedPasskey(t, st, "cred-1", here)
+	if err := claimed.ChangePassword(NewProofs(), Presented{}, "first-one", sess, ip); !errors.Is(err, ErrNoProof) {
+		t.Fatalf("a claimed install was exempt = %v, want ErrNoProof", err)
 	}
 }
 
@@ -75,7 +128,7 @@ func TestChangeOnAPasswordlessInstallNeedsNoCurrent(t *testing.T) {
 func TestChangeRejectsAnEmptyCurrentWhenAPasswordExists(t *testing.T) {
 	svc, _ := configured(t, "old-one")
 
-	if err := svc.ChangePassword("", "new-one", ip); !errors.Is(err, ErrBadPassword) {
+	if err := svc.ChangePassword(NewProofs(), Presented{}, "new-one", sess, ip); !errors.Is(err, ErrBadPassword) {
 		t.Fatalf("empty current against a set password = %v, want ErrBadPassword", err)
 	}
 }
@@ -87,7 +140,7 @@ func TestChangeIsRateLimitedOnTheLoginBucket(t *testing.T) {
 
 	var lastErr error
 	for i := 0; i < 40; i++ {
-		lastErr = svc.ChangePassword("wrong", "new-one", ip)
+		lastErr = svc.ChangePassword(NewProofs(), Presented{Password: "wrong"}, "new-one", sess, ip)
 		if errors.Is(lastErr, ErrRateLimited) {
 			break
 		}
