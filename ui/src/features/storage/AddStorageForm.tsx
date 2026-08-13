@@ -1,4 +1,5 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { AlertCircle, Check } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -770,9 +771,34 @@ export function AddStorageForm({
               <div className="mt-3 text-sm" data-testid="hook-result" data-outcome={hookCheck.outcome}>
                 {/* THE DAEMON'S SENTENCE, VERBATIM, for all four outcomes. Each has a different
                     remedy — install the helper, add the `capacity)` arm, fix the dataset, fix the
-                    key — and a client that re-worded them would drop the half that says what to do. */}
-                <div>{hookCheck.reason}</div>
-                {hookCheck.detail !== "" ? (
+                    key — and a client that re-worded them would drop the half that says what to do.
+
+                    THE MARK IS THE OUTCOME, NOT DECORATION. Four states with four remedies read as
+                    one wall of grey text, and `ok` is the one the operator is scanning for after
+                    each attempt (Operator, 2026-08-13). `not_migrated` deliberately gets the warn
+                    tone rather than the ok one: the helper works and the cost is a card reading
+                    "free space unavailable", which is neither success nor failure. */}
+                <div className="flex items-start gap-2">
+                  {hookCheck.outcome === "ok" ? (
+                    <Check size={16} className="mt-0.5 shrink-0 text-ok" aria-hidden />
+                  ) : (
+                    <AlertCircle
+                      size={16}
+                      className={
+                        (hookCheck.outcome === "not_migrated" ? "text-warn" : "text-danger") +
+                        " mt-0.5 shrink-0"
+                      }
+                      aria-hidden
+                    />
+                  )}
+                  <div>{hookCheck.reason}</div>
+                </div>
+                {/* THE RAW OUTPUT IS FOR DIAGNOSING A FAILURE, so it is not shown on success. On
+                    `ok` it is `capacity`'s two numbers in BYTES — `98304  128848920576` — which
+                    reads as a fault rather than as evidence, and the storage card already shows the
+                    same figures in units a person uses (Operator, 2026-08-13). Every other outcome
+                    keeps it: ssh's own words are the whole answer to why a key does not work. */}
+                {hookCheck.detail !== "" && hookCheck.outcome !== "ok" ? (
                   // THE TRANSPORT'S OWN OUTPUT. ssh's "Permission denied (publickey)" is the whole
                   // answer to why a key does not work, and quince cannot improve on it. It may name
                   // this operator's host, so it is shown here and nowhere else — never logged,
