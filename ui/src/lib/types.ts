@@ -328,6 +328,17 @@ export interface Health {
   // reads `undefined` rather than a false `false`: absent means the server predates the field, and
   // a server that predates it also reconciled before it served anything.
   reconciling?: boolean;
+  // insecure_origin: a session cookie earned on THIS connection would be marked Secure and then
+  // discarded, so NO credential can be established over it — `POST /api/auth/setup` and
+  // `/api/auth/login` both answer 426 before looking at what you sent (quince#908, contracts §1).
+  //
+  // NOT "this is http". It is FALSE on `http://localhost`, in `--demo`, and with
+  // `sessions.allow_insecure_transport` on — all plain http, all of them fine to log in over,
+  // which is exactly why a client must read this instead of `window.location.protocol`.
+  //
+  // Optional for the same reason as `reconciling`: a UI newer than its server reads `undefined`
+  // rather than a false `false`. Every consumer must therefore act on `=== true` and nothing else.
+  insecure_origin?: boolean;
 }
 
 // --- onboarding (qn.6f) ---

@@ -59,12 +59,30 @@ import (
 // has three fields describing its condition (`reachable`, `unreachable_code`, `unreachable_reason`)
 // and a fourth is a bigger contracts change than this rung needs (spec open question 1).
 type HealthResponse struct {
-	Status           string        `json:"status"`
-	Version          string        `json:"version"`
-	Mode             string        `json:"mode"` // normal | demo | public_demo
-	DemoResetMinutes int           `json:"demo_reset_minutes,omitempty"`
-	Reconciling      bool          `json:"reconciling"`
-	Muxers           []MuxerHealth `json:"muxers"`
+	Status           string `json:"status"`
+	Version          string `json:"version"`
+	Mode             string `json:"mode"` // normal | demo | public_demo
+	DemoResetMinutes int    `json:"demo_reset_minutes,omitempty"`
+	Reconciling      bool   `json:"reconciling"`
+	// InsecureOrigin says a session cookie earned on THIS connection would be marked Secure
+	// and then discarded by the browser — so no credential can be established over it at all
+	// (quince#908). It is `refuseInsecureOrigin`'s own predicate, surfaced rather than
+	// re-derived: two implementations of one predicate is the hazard `RequireStorage` carries
+	// a paragraph about, from having been bitten by it.
+	//
+	// PER REQUEST, UNLIKE EVERYTHING ELSE IN THIS PAYLOAD. `mode` and `demo_reset_minutes` are
+	// properties of the daemon; this is a property of the CONNECTION, and the same daemon
+	// answers differently to a browser on `https://name` and one on `http://ip`. That is what
+	// makes it usable — a client learns it about the connection it is actually on.
+	//
+	// IT IS NOT `GET /api/onboarding/https`'s `complete`, AND THE DIFFERENCE IS LOOPBACK.
+	// `detectHTTPS` reports `complete: false` on `http://localhost` deliberately, because that
+	// step asks "can you reach quince from your phone" — but a cookie survives loopback fine,
+	// so a client keying a redirect on THAT fact would send every developer on localhost to
+	// the HTTPS onboarding page. Two questions that agree on most deployments and disagree on
+	// the one a contributor runs.
+	InsecureOrigin bool          `json:"insecure_origin"`
+	Muxers         []MuxerHealth `json:"muxers"`
 }
 
 // Serving modes reported by GET /api/health (public-demo spec story 5).
@@ -234,12 +252,22 @@ func (d Deps) handleHealth() http.HandlerFunc {
 		if d.Reconcile != nil {
 			reconciling = d.Reconcile.Reconciling()
 		}
+		// FROM THE AUTH SERVICE'S OWN PREDICATE, so this answer and the 426 that enforces it
+		// cannot disagree.
+		//
+		// NO NIL GUARD, and that is measured rather than assumed. `Auth` is a pointer, so one
+		// looks prudent — but `middleware.go`'s CSRF chain calls `d.Auth.Secure(r)` on EVERY
+		// request including the authExempt ones, so a router with no auth service cannot serve
+		// this endpoint or any other. A guard here would be unreachable code whose comment
+		// described a router that cannot exist. Written after a test case for it returned 500
+		// from the middleware rather than 200 from the guard.
 		writeJSON(w, d.Log, http.StatusOK, HealthResponse{
 			Status:           "ok",
 			Version:          d.Version,
 			Mode:             mode,
 			DemoResetMinutes: d.DemoResetMinutes,
 			Reconciling:      reconciling,
+			InsecureOrigin:   d.Auth.CookieWillBeDiscarded(r),
 			Muxers:           muxers,
 		})
 	}
