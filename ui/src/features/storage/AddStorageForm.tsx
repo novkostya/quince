@@ -694,12 +694,25 @@ export function AddStorageForm({
                     >
                       {hostKey.fingerprint}
                     </pre>
+                    {/* IT LISTS THEM RATHER THAN NAMING ONE, because quince cannot know the path
+                        and must not pretend to (Operator, from the lab rig, 2026-08-13).
+
+                        This derived the filename from the key type — `ssh-ed25519` →
+                        `ssh_host_ed25519_key.pub`. That is right for two of the three common types
+                        and WRONG for ecdsa: the type carries the curve (`ecdsa-sha2-nistp256`) and
+                        the filename does not (`ssh_host_ecdsa_key.pub`). It printed a path that
+                        cannot exist, in the one instruction whose entire job is to be runnable.
+
+                        A corrected mapping would still be a guess — `sshd_config`'s `HostKey` can
+                        point anywhere, so no table is right on every host. Listing what is actually
+                        there needs no mapping, and the operator matches on the SHA256 string, which
+                        is what they were going to compare anyway. */}
                     <div className="mt-2 text-xs text-muted">
-                      Run this on the host and compare:{" "}
-                      <code className="font-mono">
-                        ssh-keygen -lf /etc/ssh/ssh_host_{hostKey.key_type.replace(/^ssh-/, "")}
-                        _key.pub
-                      </code>
+                      Run this on <span className="text-fg">{hostKey.host}</span> and look for the
+                      same fingerprint:
+                      <pre className="mt-1 rounded bg-elevated p-2 whitespace-pre-wrap break-all">
+                        for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf &quot;$f&quot;; done
+                      </pre>
                     </div>
                     <div className="mt-2 flex gap-2">
                       <Button
