@@ -505,6 +505,42 @@ func (e ErrLastPasskey) Error() string {
 // that is not it — so the guard passes and `DeletePasskey` reports the row was already absent.
 func (s *Service) RemovePasskey(proofs *Proofs, pres Presented, credentialID, rpID, sessionID,
 	clientIP string) (bool, error) {
+	// A DEAD END IS ITS OWN REFUSAL, AND IT IS DECIDED BEFORE A PROOF IS DEMANDED — D4, where the
+	// ORDERING is the whole of it. Operator-reported 2026-08-14 from the running stand: one passkey,
+	// no password, press Remove, and the answer was `reauth_required` — *"authenticate again"* — for
+	// an operation nothing on the install could ever authorise.
+	//
+	// `RequirePresent` RAN FIRST AND WON. Nothing was presented, so it returned `ErrNoProof` before
+	// anything asked whether a proof was POSSIBLE. `ErrLastPasskey` is produced by `provable`, which
+	// only the CEREMONY path calls — so this path could never reach the refusal that explains itself,
+	// and the client was handed a demand it could not render a challenge for: `accepts` was empty,
+	// which D4 says must never reach the wire.
+	//
+	// IT ASKS `Accepts` RATHER THAN RE-DERIVING, for the reason slice 2 gave when it asked
+	// `allowedForRemoval`: that predicate decides what the WIRE says would work, so a second spelling
+	// here could disagree with the field the client reads — on exactly the case hardest to notice.
+	//
+	// ONLY ON A CONFIGURED INSTALL. Unclaimed is `RequirePresent`'s documented exemption and holds no
+	// credentials to compare; refusing there would break first run to fix a message.
+	configured, err := s.Configured()
+	if err != nil {
+		return false, err
+	}
+	if configured {
+		accepts, err := s.Accepts(OpRemovePasskey, rpID, credentialID)
+		if err != nil {
+			return false, err
+		}
+		// `passkeyRemovalRefusal` answers nil when something CAN prove it, which cannot happen under
+		// an empty `accepts`. Guarded anyway: a nil arriving here falls through to the proof demand
+		// rather than becoming a silent success.
+		if len(accepts) == 0 {
+			if refusal := s.passkeyRemovalRefusal(credentialID, rpID); refusal != nil {
+				return false, refusal
+			}
+		}
+	}
+
 	subject, err := s.RequirePresent(proofs, pres, OpRemovePasskey, credentialID, sessionID, clientIP)
 	if err != nil {
 		return false, err
