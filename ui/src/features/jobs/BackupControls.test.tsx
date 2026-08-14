@@ -484,3 +484,40 @@ describe("the disabled button and the unavailability line agree", () => {
     expect(screen.queryByTestId("storage-unavailable")).toBeNull();
   });
 });
+
+// quince#889: encryption off + `require_encryption` is a press that cannot succeed. It used to
+// start a job, fail at preflight and leave a row reading "Backup needs attention" — the same words
+// a transfer that died at 40 GB gets. Same rule as the two cases above: disabled, with the reason
+// rendered where a phone can see it.
+describe("a backup that encryption policy forbids", () => {
+  function renderBoth(encryptionBlocks: boolean) {
+    const dev = { ...device({ usb: "t" }), backup_encryption: "off" as const };
+    return render(
+      <MemoryRouter>
+        <BackupControls
+          device={dev}
+          start={ok}
+          cancel={ok}
+          busy={false}
+          {...storageProps}
+          encryptionBlocks={encryptionBlocks}
+        />
+        <BackupControlsStatus device={dev} error={null} {...statusProps} encryptionBlocks={encryptionBlocks} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("disables the button and says why", () => {
+    renderBoth(true);
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/have to be encrypted/i)).toBeTruthy();
+  });
+
+  // The permissive policy is the other half, and it is the half a regression would hit: encryption
+  // off is legal there, so nothing about this device may change.
+  it("leaves an unencrypted device alone when the policy permits it", () => {
+    renderBoth(false);
+    expect((screen.getByTestId("backup-now") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/have to be encrypted/i)).toBeNull();
+  });
+});
