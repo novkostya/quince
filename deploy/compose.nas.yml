@@ -6,42 +6,27 @@
 # device. On a typical NAS the storage backend auto-selects `reflink` (Btrfs/XFS) or
 # `hardlink`/`copy` (ext4) — no zfs host hook needed (D5).
 #
-# ── What in this file has been RUN, and what is reasoning ──────────────────────────────────
-# A deployment example gives no way to tell a measured instruction from a plausible one, so
-# this file says which its own lines are. Read anything not listed here as reasoned.
+# ── What has actually been run ─────────────────────────────────────────────────────────────
+# You cannot tell a tested instruction from a plausible one by reading it, so this file says
+# which of its own are which. Treat anything not listed here as reasoning, not experience.
 #
-# RUN, once, end to end — Docker CE 29.7.2 on Debian 13, a real iPhone and iPad, 2026-08-14
-# (quince#651). Storageless first run -> onboarding -> pair -> a completed, verified, COMMITTED
-# backup, unprivileged throughout (`Privileged=false`, `CapAdd=[]`). What that covers:
-#   - this file starting at all as written: the service, the volume set, the environment,
-#     `restart: unless-stopped` and `container_name`;
-#   - both managed muxers coming up inside the container and staying up;
-#   - `device_cgroup_rules: c 189:* rmw` carrying a REAL PHONE through usbmuxd, not merely
-#     opening a device node (quince#650 left that reasoned for Docker; it no longer is);
-#   - the `/dev/bus/usb` VOLUME bind, and pairing over it;
-#   - the storage backend probe on a real share, selecting `reflink`;
-#   - a SECOND, incremental backup on the same storage: the seed ran, verify passed, the first
-#     version was displaced into `versions/<ts>/` intact, and the two versions cost 4.4 G of
-#     disk for 7.4 G of apparent tree — the reflink space claim, measured rather than asserted;
-#   - BOTH halves of the Wi-Fi paragraph below — bridged really does discover nothing, and
-#     `network_mode: host` really does fix it, on this runtime.
+# TESTED end to end on 2026-08-14: Docker CE 29.7.2 on Debian 13, a real iPhone and iPad,
+# first run through onboarding and pairing to two completed backups — the second incremental —
+# with the container unprivileged the whole time. That covers this file starting as written,
+# both in-container muxers, the USB permission below carrying a real phone rather than merely
+# opening a device node, the storage backend choosing itself on a real share, the incremental
+# re-using the previous backup's files (two 3.7 G backups cost 4.4 G of disk), and both halves
+# of the Wi-Fi paragraph that follows.
 #
-# NOT run, and not claimed:
-#   - Synology and QNAP. That was a plain Docker host, which is one of the three platforms the
-#     first line names and not the other two.
-#   - nerdctl, podman and unprivileged LXC — the `privileged: true` alternative at the end of
-#     the USB paragraph is REASONED for podman and LXC, and quince#650 measured it FALSE for
-#     nerdctl. Do not read it as tested.
-#   - macvlan, named below as the isolation-preserving alternative. Nobody has built one.
-#   - any throughput number. None is offered anywhere in this file.
-#   - retention, restore, and browse. One device, two versions, nothing pruned.
+# NOT TESTED: Synology and QNAP — that was a plain Docker host. nerdctl, podman and
+# unprivileged LXC: the alternative at the end of the USB paragraph is reasoning for two of
+# them and is known WRONG for nerdctl. macvlan. Restore and browse. Speed, about which this
+# file offers no number anywhere.
 #
-# `ghcr.io/novkostya/quince:latest` DOES NOT EXIST YET (quince#725), so a literal `compose up`
-# of this file fails at the pull. The run above supplied the image through a second file
-# (`docker-compose.override.yml`) rather than editing the line, deliberately, so that this
-# stays visible rather than papered over. NOTE that `docker-compose.override.yml` is only
-# auto-loaded for the DEFAULT file names — with `-f compose.nas.yml` it must be passed as a
-# second `-f`, which nothing else here would tell you.
+# WHAT WILL BITE YOU FIRST: the image named below is not published yet, so `compose up` fails
+# at the pull until it is — supply your own in a second file. And `docker-compose.override.yml`
+# is picked up automatically only for the DEFAULT filenames, so with `-f compose.nas.yml` you
+# must pass it as a second `-f`.
 #
 # ── Wi-Fi needs the container on the LAN (a first-class deployment constraint) ─────────────
 # netmuxd finds Wi-Fi devices ONLY by mDNS (`_apple-mobdev2._tcp.local`). Multicast does not
@@ -52,10 +37,9 @@
 #
 #   network_mode: host        # and DELETE the `ports:` block — QUINCE_LISTEN binds host :8968
 #
-# BOTH HALVES OF THIS PARAGRAPH ARE MEASURED (quince#651, 2026-08-14): bridged, a paired device
-# backed up over USB and netmuxd discovered nothing over Wi-Fi for as long as it stayed bridged;
-# with the two-line edit above, the same device appeared over mDNS within seconds. Applying this
-# edit is FOLLOWING this file, not deviating from it.
+# BOTH HALVES OF THIS ARE TESTED: bridged, a paired device backed up fine over USB and nothing
+# ever appeared over Wi-Fi; with the two-line edit above, the same device appeared over Wi-Fi
+# within seconds. Making that edit is FOLLOWING this file, not deviating from it.
 #
 # Honest tradeoff: host networking shares the host's network namespace with the container, so
 # the container can reach (and bind) anything the host can — strictly weaker isolation than the
