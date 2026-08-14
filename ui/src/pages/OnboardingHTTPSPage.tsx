@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
@@ -212,7 +213,16 @@ function Tiers({ firstRun }: { firstRun: boolean }) {
               {/* THE ISSUE'S OWN WORKED EXAMPLE of the test above: "quince serves both protocols
                   on the same port" is how-to, and it goes. It is a good sentence and it answers a
                   question the chooser has not asked yet. */}
-              {firstRun ? null : (
+              {firstRun ? (
+                // ITS OWN ROUTE (§4), because the flow is multi-step and stateful and an accordion
+                // is application state with no URL. The link is the affordance; the page is where
+                // both halves of the check live.
+                <p className="mt-3">
+                  <Link className="underline" to="/onboarding/https/certificate">
+                    Check a certificate and key
+                  </Link>
+                </p>
+              ) : (
                 <p className="mt-2">
                   quince serves both protocols on the same port, so this URL keeps working — it
                   just becomes HTTPS. Renewals are picked up without a restart.

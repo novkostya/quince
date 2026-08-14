@@ -365,6 +365,34 @@ export interface OnboardingHTTPS {
   detected: "tls" | "forwarded_proto" | "none";
 }
 
+// CertificateProbe is POST /api/onboarding/certificate — the OFFLINE half of the certificate step
+// (quince#908 §5, contracts §1). No network: it answers what two files ARE.
+//
+// `outcome` is FROZEN, like `StorageProbe.outcome`: a client renders different prose and a different
+// next action for each, so adding one is a contract change.
+//
+// `names` is populated even on `wrong_host` — ESPECIALLY then, because "does not cover
+// quince.example" is a status and "covers quince.lan, not quince.example" is something a person can
+// act on. `chain_length: 1` is a leaf with no intermediate: not an error, and often a problem.
+export interface CertificateProbe {
+  cert_file: string;
+  key_file: string;
+  hostname: string;
+  outcome:
+    | "usable"
+    | "unreadable"
+    | "malformed"
+    | "mismatched"
+    | "not_yet_valid"
+    | "expired"
+    | "wrong_host";
+  reason: string;
+  names: string[];
+  not_before: string;
+  not_after: string;
+  chain_length: number;
+}
+
 // ProbeNonce is GET /api/onboarding/probe/nonce — obtained SAME-ORIGIN, then presented to a name the
 // user is considering. The mint is never CORS-readable, and that asymmetry is the gate (contracts §1).
 export interface ProbeNonce {
