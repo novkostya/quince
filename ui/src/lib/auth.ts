@@ -77,3 +77,25 @@ export async function removePassword(): Promise<void> {
   const proof = await proveWithPasskey("remove_password");
   return api.del<void>("/api/auth/password", { proof });
 }
+
+// removePasskey deletes one credential, presenting a DIFFERENT one — qn.6n rule 2, slice 6b.
+//
+// TWO FACTORS QUALIFY HERE, UNLIKE `removePassword`, and that is what makes this the one removal
+// with a choice to make. A passkey may be removed by the password or by another passkey; only the
+// credential being removed is excluded. `removePassword` had no such choice — nothing but a passkey
+// can prove it — which is why that one prompts unconditionally and this one does not.
+//
+// THE PASSKEY IS TRIED FIRST AND THE CALLER SUPPLIES THE PASSWORD ONLY ON THE FALLBACK. The server
+// refuses `reauth/begin` when no non-target credential exists at this address, and its sentence says
+// which of the two states that is — a dead end, or *confirm with your password instead*. Deciding
+// client-side which factor is available would be a second implementation of an rpId rule, which is
+// the shape this file already refuses on the removal path above.
+export async function removePasskey(id: string, currentPassword?: string): Promise<void> {
+  const path = `/api/auth/passkeys/${encodeURIComponent(id)}`;
+  if (currentPassword) return api.del<void>(path, { current_password: currentPassword });
+  // THE TARGET TRAVELS WITH THE CEREMONY. `remove_passkey` is the one operation that carries one,
+  // and the server both excludes it from `allowCredentials` and refuses a proof whose subject IS it
+  // — so passing the wrong id here does not weaken the rule, it removes the wrong credential.
+  const proof = await proveWithPasskey("remove_passkey", id);
+  return api.del<void>(path, { proof });
+}

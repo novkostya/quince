@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Passkeys } from "./Passkeys";
 import { api, APIError } from "@/lib/api";
+import * as reauth from "@/lib/reauth";
 
 // Fictional domains throughout — a real one is Operator-private and the privacy gate does not catch
 // a bare domain, so the fixture discipline is the control on this rung.
@@ -138,13 +139,17 @@ describe("removal refused because it would be the last credential", () => {
       has_password: false,
       passkeys: [{ id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null }],
     });
-    // The real 409 body, as the API client would surface it.
+    // THE REFUSAL MOVED IN qn.6n AND THE CLAIM DID NOT. It used to come back from `DELETE`; since
+    // rule 2 the client proves a passkey first, so the server refuses at `reauth/begin` — before any
+    // authenticator sheet — and this mocks it there. Mocking `del` would assert against a call this
+    // flow no longer reaches.
     const refusal = new APIError(
       409,
       "last_credential",
       `removing this passkey would leave no way to sign in: this quince has no password, and no other passkey for "${HERE}". Set a password first, or add another passkey.`,
     );
-    const del = vi.spyOn(api, "del").mockRejectedValue(refusal);
+    const del = vi.spyOn(api, "del");
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(refusal);
 
     renderCard();
     (await screen.findByRole("button", { name: /^remove$/i })).click();
@@ -153,10 +158,83 @@ describe("removal refused because it would be the last credential", () => {
     // the REMEDY rather than on any old error text is what makes a generic fallback fail this test.
     const shown = await screen.findByText(/set a password first/i);
     expect(shown.textContent).toContain(HERE);
-    expect(del).toHaveBeenCalledTimes(1);
+    // AND NOTHING WAS DELETED — the refusal arrives before the endpoint is called at all.
+    expect(del).not.toHaveBeenCalled();
+    // NO PASSWORD FORM ON THIS INSTALL. `has_password` is false, so there is nothing to fall back
+    // to, and offering a field would be asking for something that does not exist.
+    expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
 
     // AND THE ROW SURVIVES. A UI that optimistically dropped it would show the refusal beside an
     // empty list, which contradicts the refusal it is displaying.
     expect(screen.getByText("phone")).toBeInTheDocument();
+  });
+});
+
+// RULE 2's SECOND FACTOR — qn.6n slice 6b. On an install WITH a password, "no other passkey here"
+// is not a lockout: the password can prove the removal, and the server's sentence says so. The form
+// appears only after that refusal, never speculatively.
+describe("removal falls back to the password", () => {
+  function refusalWithPassword() {
+    return new APIError(
+      409,
+      "last_credential",
+      "a passkey cannot authorise its own removal, and this quince holds no other passkey for " +
+        `"${HERE}". Confirm with your password instead.`,
+    );
+  }
+
+  it("offers the field only after the server refuses, then sends what was typed", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: true,
+      passkeys: [{ id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null }],
+    });
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(refusalWithPassword());
+    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+
+    renderCard();
+    // NOT BEFORE THE REFUSAL. The client does not decide which factor is available — that is an rpId
+    // rule and it lives on the server.
+    expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
+
+    (await screen.findByRole("button", { name: /^remove$/i })).click();
+
+    const field = await screen.findByLabelText(/your password/i);
+    fireEvent.change(field, { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+
+    // THE CREDENTIAL ID IS PART OF THE ASSERTION, not just "delete was called" — this removal names
+    // a target, so a call that deleted the wrong row would pass a laxer check.
+    await waitFor(() =>
+      expect(del).toHaveBeenCalledWith("/api/auth/passkeys/a", { current_password: "hunter2" }),
+    );
+  });
+
+  // A WRONG PASSWORD MUST NOT RE-OFFER THE FORM FROM SCRATCH, which is what a fallback that fired on
+  // every error would do — the user would type, be refused, and watch the field reset with no reason
+  // shown. The server's sentence is what they need.
+  it("shows why a typed password was refused rather than looping", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: true,
+      passkeys: [{ id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null }],
+    });
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(refusalWithPassword());
+    vi.spyOn(api, "del").mockRejectedValue(
+      new APIError(401, "bad_password", "current password is incorrect"),
+    );
+
+    renderCard();
+    (await screen.findByRole("button", { name: /^remove$/i })).click();
+    fireEvent.change(await screen.findByLabelText(/your password/i), {
+      target: { value: "wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+
+    expect(await screen.findByText(/current password is incorrect/i)).toBeInTheDocument();
+    // The field is still there, holding what was typed, so the user can correct it.
+    expect(screen.getByLabelText(/your password/i)).toHaveValue("wrong");
   });
 });
