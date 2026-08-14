@@ -29,8 +29,23 @@
 # receives no USB hotplug events, so a post-startup device is surfaced by clicking Rescan in the
 # UI). So bind /dev/bus/usb as a VOLUME (its contents stay live) and grant char-device access:
 #   - Docker: the `device_cgroup_rules` below allow major 189 (USB) — no privileged needed.
-#   - nerdctl / podman / unprivileged LXC (no device_cgroup_rules support): DROP that block and
-#     add `privileged: true` instead — that is how the container opens USB char devices there.
+#     MEASURED (quince#650): Docker CE 29.7.2 on Debian 13, an iPad and an iPhone paired through
+#     the container, with `Privileged: false`, no `cap_add`, and the AppArmor profile and the
+#     masked /proc and /sys paths all intact. The cgroup rule and the bind are the whole of it.
+#   - nerdctl inside an unprivileged LXC (no device_cgroup_rules support): DROP that block and add
+#     NOTHING in its place. MEASURED (quince#650): the live bind alone opens USB char devices.
+#     This file required `privileged: true` here and it was never needed — it rode along with the
+#     hotplug fix above as reasoning rather than as a result, and nobody removed it to check.
+#     It also costs the confinement the Docker line keeps: no AppArmor profile, no masked /proc.
+#   - podman, or any other runtime: UNTESTED. Nobody has run quince on one, so this file has no
+#     answer to give and will not borrow the nerdctl one. Start from the bind alone; if a device
+#     cannot be opened, that is worth an issue rather than a `privileged: true` copied from here.
+#
+# What is measured on both runtimes is the PERMISSION, which is a smaller claim than it looks:
+# usbmuxd runs inside the container, so a paired device means it opened the char device, and a
+# device cgroup gates open() rather than anything on the resulting fd. A completed USB backup is
+# a separate claim — about transfer reliability, not permission — and neither runtime has one
+# recorded here.
 
 services:
   quince:
@@ -52,4 +67,4 @@ services:
       # - ./quince/certs:/certs:ro
       - /dev/bus/usb:/dev/bus/usb  # LIVE USB bind — NOT `devices:` (that snapshots & defeats Rescan)
     device_cgroup_rules:
-      - "c 189:* rmw" # allow opening USB char devices (major 189). nerdctl/LXC: drop this, use `privileged: true`.
+      - "c 189:* rmw" # allow opening USB char devices (major 189). Docker only — nerdctl drops this block and adds nothing; see the header.
