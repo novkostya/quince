@@ -301,11 +301,27 @@ Sequenced from `main`, **not stacked**.
 
 | | | code-owned? | |
 | --- | --- | --- | --- |
-| **1** | **this spec** | no | *this PR* |
-| **2** | **`accepts` on the wire** — the field, the per-operation computation, G1/G2/G3/G4. No client reads it yet. | **YES** — `contracts.md` | not open |
+| **1** | **this spec** | no | quince#972, **merged** |
+| **2** | **`accepts` on the wire** — the field, the per-operation computation, G1/G2/G3/G4. No client reads it yet. | no | quince#982, **open** |
 | **3** | **the challenge surface** — `PasswordForm`-based, driven by `accepts`, G5/G6. No caller yet. | no | not open |
 | **4** | **the add row + retiring `AddPasskeyDialog`** — D6, D7, D8, D9. Where the regression actually closes. | no | not open |
-| **5** | **fold slice 6b's removal fallback into the challenge** — D8's deferred half. | **YES** — `contracts.md` | not open |
+| **5** | **fold slice 6b's removal fallback into the challenge** — D8's deferred half. | no | not open |
+
+**NO SLICE HERE IS CODE-OWNED, AND ROWS 2 AND 5 SAID `YES — contracts.md` UNTIL THIS EDIT.**
+`docs/contracts.md` is **absent from `.github/CODEOWNERS` on purpose** — Operator ruling
+2026-08-14, quince#953, which the file states at the line where a reader would otherwise
+add it back: *"Do not 'restore' it as a missing line."* So a `contracts.md` change takes an
+ordinary architect approval, and **the architect can land it**.
+
+**Kept as a correction rather than silently retyped, because the failure mode is waiting.** A
+session reading `YES` routes its PR to the Operator — the seat this project deliberately keeps out
+of the per-rung loop — and then waits for an approval nobody owes it. Nothing on the forge would
+say it was waiting for the wrong thing.
+
+**It was wrong when quince#972 merged**, not made wrong by a later ruling: the ruling and this spec
+are the same day, and the table asserted a routing fact that had already been decided the other
+way. Found by the architect while approving slice 2 (quince#982), which is the one place a stale
+routing claim gets tested — a reviewer deciding whether it may merge the PR in front of it.
 
 **2 BEFORE 3 BEFORE 4, and the ordering is `qn.6n`'s lesson rather than taste.** That rung put a
 server demand on `main` ahead of any client that could satisfy it, and the rule it wrote for itself
