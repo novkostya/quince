@@ -2271,6 +2271,13 @@ One socket per client, server→client only (commands go via REST). Envelope:
 Client contract: reconnect with backoff + `GET` refresh of current views on reconnect
 (events are notifications, not a replayable log).
 
+**The refresh goes UNDER the events, never over them.** A `GET` issued on `hello` returns a snapshot
+of the moment it was *served*, so any event delivered while it is in flight is newer than what comes
+back — and a client that swaps its whole state for that snapshot discards it. Nothing refetches
+until the next reconnect, so the discard is permanent, not late. So a client holds the events that
+arrive during a refresh and replays them once the snapshot has landed. Not a nicety: it is what made
+an attached device stay invisible until the next reconnect (quince#948).
+
 ## 4. Vault RPC (core ⇄ `quince-vault serve`)
 
 JSON-RPC 2.0, newline-delimited, over stdio. The first frame MUST be `initialize` —
