@@ -92,25 +92,29 @@ export function checkStorageHook(
 // write-a-file-anywhere primitive whose contents happen to be a private key; quince can only ever
 // touch its own path. An operator who keeps a key elsewhere sets `ssh_key` by hand instead.
 //
+// THE DATASET IS SENT, AND IT IS NOT A PATH (quince#985). It goes inside the `command="…"` forced
+// command on the returned `authorized_keys` line, which is now the only place a key's confinement is
+// written down — the helper script itself is identical on every install. A name quince cannot vouch
+// for comes back 422 naming `parent_dataset`, refused rather than escaped.
+//
 // `created` DISTINGUISHES *made you one* FROM *found yours*, which the screen must say: an existing
 // key's public half may already be installed on a host, and offering to replace it would break a
 // working storage silently.
-export function ensureZFSKey(): Promise<StorageZFSKeyResponse> {
-  return api.post<StorageZFSKeyResponse>("/api/storages/zfs/key", {});
+export function ensureZFSKey(parentDataset: string): Promise<StorageZFSKeyResponse> {
+  return api.post<StorageZFSKeyResponse>("/api/storages/zfs/key", {
+    parent_dataset: parentDataset,
+  });
 }
 
-// fetchZFSHelper asks quince for the constrained helper script with the operator's own
-// `parent_dataset` already substituted (contracts §1, quince#818 piece C).
+// fetchZFSHelper asks quince for the constrained helper script (contracts §1, quince#818 piece C).
 //
-// THE SUBSTITUTION IS THE SERVER'S, NOT OURS, and that is deliberate rather than lazy. The value
-// lands inside a double-quoted assignment in a script the operator runs as root on their storage
-// host, so whoever substitutes must also validate — and the validator, the placeholder guard and the
-// refusal all live together on the far side. A dataset name quince cannot vouch for comes back 422
-// naming `parent_dataset` rather than as a script.
-export function fetchZFSHelper(parentDataset: string): Promise<StorageZFSHelperResponse> {
-  return api.get<StorageZFSHelperResponse>(
-    `/api/storages/zfs/helper?parent_dataset=${encodeURIComponent(parentDataset)}`,
-  );
+// IT TAKES NO ARGUMENT SINCE quince#985. The script used to arrive with the operator's dataset
+// substituted into a `PARENT=` line, so every install's file differed while there was one documented
+// place to put it — and a second zfs storage on one host overwrote the first's helper, breaking it
+// silently. The dataset moved into the `authorized_keys` forced command, which is per key, so this
+// answer is now the same bytes for everyone.
+export function fetchZFSHelper(): Promise<StorageZFSHelperResponse> {
+  return api.get<StorageZFSHelperResponse>("/api/storages/zfs/helper");
 }
 
 // scanZFSHostKey asks what key a host offers (contracts §1, quince#912). It authenticates nothing

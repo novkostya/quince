@@ -200,17 +200,40 @@ func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
 	}{Errors: []wire.ConfigError{{Path: path, Message: msg}}})
 }
 
-// handleStorageZFSKey serves POST /api/storages/zfs/key → 200 {key} | 500 (contracts §1,
-// quince#818 piece B).
+// handleStorageZFSHelper serves GET /api/storages/zfs/helper → 200 {script, path} (contracts §1,
+// quince#818 piece C; quince#985).
+//
+// It answers the question the form used to leave to the operator: *"what exactly do I put on the ZFS
+// host?"*
+//
+// IT TAKES NO PARAMETER AND CANNOT FAIL, WHICH IS quince#985's DOING. The script used to come back
+// with `PARENT=` set to the dataset typed on the same screen — so every install's file differed,
+// while `ZFSHelperPath` said there was one place to put it. A second zfs storage saved its helper
+// over the first's and the first broke at its next commit. The dataset now rides in the
+// `authorized_keys` forced command, which is per key, so the file is the same bytes everywhere.
+//
+// WHAT THAT REMOVES: the `422` (there is no caller value left to be unsafe) and the `500` (there is
+// no substitution left to no-op). The dataset's refusal moved to `POST /api/storages/zfs/key`, which
+// is now where it is interpolated — see `TestHelperTakesItsParentFromTheForcedCommand` for the
+// build-time guard that replaced the runtime one.
+//
+// NO STATE, NO WRITE, AND NOTHING ABOUT THIS INSTALL — more so than before: the response is a
+// constant. That is why it is a GET, and it is what makes serving it to an unauthenticated fetch a
+// question about convenience rather than about secrets.
+func (d Deps) handleStorageZFSHelper() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHelperResponse{
+			Script: storage.ZFSHelperScript(),
+			Path:   storage.ZFSHelperPath,
+		})
+	}
+}
+
+// handleStorageZFSKey serves POST /api/storages/zfs/key {parent_dataset} → 200 {key} | 422 | 500
+// (contracts §1, quince#818 piece B; quince#985).
 //
 // It answers *"what key should I put on my ZFS host?"* — and it can only ever answer about ONE path,
 // `config.DefaultZFSKeyPath`, which is quince's own `/data/keys/zfs`.
-//
-// NO PATH IN THE REQUEST, and that is the security shape rather than a missing feature. A
-// caller-supplied path would make this an authenticated *write-a-file-anywhere* primitive whose
-// contents happen to be a private key; refusing to take one means the endpoint has no reachable
-// target but its own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses
-// this button — the field stays settable for exactly that case.
 //
 // IT DISCOVERS BEFORE IT GENERATES, which is the property that protects existing installs. A key
 // already at that path may have its public half in an `authorized_keys` on a host quince cannot see,
@@ -222,64 +245,39 @@ func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
 // complete `authorized_keys` line, the path, and whether it was just created — the same discipline
 // backup passwords follow. `Created` is on the wire because the form must be able to say *found
 // yours* rather than *made you one*.
-// handleStorageZFSHelper serves GET /api/storages/zfs/helper?parent_dataset=<ds> →
-// 200 {script, path} | 422 | 500 (contracts §1, quince#818 piece C).
 //
-// It answers the question the form used to leave to the operator: *"what exactly do I put on the ZFS
-// host?"* The script comes back with `PARENT=` already set to the dataset they typed on the same
-// screen, so the one line they had to edit by hand is not theirs to get wrong.
+// THE BODY IS ONE FIELD AND IT IS NOT A PATH, which keeps the security shape §1 states. A
+// caller-supplied *path* would make this a write-a-file-anywhere primitive; a caller-supplied
+// *dataset* is interpolated into a line that is rendered on screen and never written by quince at
+// all. The key still lands at `config.DefaultZFSKeyPath` and nowhere else.
 //
-// 422 RATHER THAN A RENDER, on a dataset name that could break out of the quotes. The value is
-// interpolated into a double-quoted assignment in a script the operator will run as root on another
-// machine, so this is the one place in the API where an invalid name is not merely useless but
-// dangerous. `storage.RenderZFSHelper` refuses before interpolating; the handler reports which field
-// was wrong rather than serving a script it could not build honestly.
-//
-// NO STATE, NO WRITE, AND NOTHING ABOUT THIS INSTALL. The response is a pure function of the
-// embedded script and one query parameter — no key material, no config read, nothing from `/data`.
-// That is why it is a GET and why it needs none of the ordering care `handleStorageZFSKey` above
-// does.
-func (d Deps) handleStorageZFSHelper() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		parent := r.URL.Query().Get("parent_dataset")
-		script, err := storage.RenderZFSHelper(parent)
-		if err != nil {
-			if errors.Is(err, storage.ErrHelperPlaceholder) {
-				// NOT the caller's fault, and not something they can fix — the shipped script lost
-				// the line quince substitutes. A build-time test exists to make this unreachable.
-				d.Log.Error("zfs helper", "error", err)
-				writeError(w, d.Log, http.StatusInternalServerError, "zfs_helper", err.Error())
-				return
-			}
-			// THE REFUSAL NAMES THE MISTAKE THE SCREEN INVITES, which is a filesystem path — the
-			// field directly above this one on the same form takes `/backups`, and carrying that
-			// down is the obvious thing to do. The old wording said only "must be a valid ZFS
-			// dataset name", which is true, unarguable, and no help at all to somebody looking at
-			// `/backups` and seeing nothing wrong with it (Operator, from a phone, 2026-08-13).
-			//
-			// qn.6g's rule: a remedy the user cannot follow is the same defect as a silent failure.
-			hookCheck422(w, d, "parent_dataset",
-				"must be a ZFS dataset name like `rpool/quince` — a pool and a path inside it, with "+
-					"no leading `/`. This is not the folder path from the field above. quince puts "+
-					"it straight into the helper script, so a name it cannot vouch for is refused "+
-					"rather than escaped")
-			return
-		}
-		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHelperResponse{
-			Script: script,
-			Path:   storage.ZFSHelperPath,
-		})
-	}
-}
-
+// 422 IS NEW, AND IT IS THE ONE THE HELPER ENDPOINT GAVE UP (quince#985). The dataset goes inside
+// `command="…"` in a file sshd parses, so an unsafe name is refused rather than escaped — the same
+// rule, at the place where the interpolation now happens.
 func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var req wire.StorageZFSKeyRequest
+		if err := decodeJSON(r, &req); err != nil {
+			hookCheck422(w, d, "parent_dataset", "the request body could not be read as JSON")
+			return
+		}
 		path := d.ZFSKeyPath
 		if path == "" {
 			path = config.DefaultZFSKeyPath
 		}
-		k, err := storage.EnsureZFSKey(path)
+		k, err := storage.EnsureZFSKey(path, req.ParentDataset)
 		if err != nil {
+			if errors.Is(err, storage.ErrUnsafeDataset) {
+				// SAME FIELD, SAME FACTS as `CheckHook`'s refusal and the probe's — the buttons sit
+				// inches apart on one form, so a user who mistypes this must not get a different
+				// explanation depending on which one they pressed first.
+				hookCheck422(w, d, "parent_dataset",
+					"must be a ZFS dataset name like `rpool/quince` — a pool and a path inside it, "+
+						"with no leading `/`. This is not the folder path from the field above. "+
+						"quince puts it straight into the `authorized_keys` line, so a name it "+
+						"cannot vouch for is refused rather than escaped")
+				return
+			}
 			// THE DAEMON'S OWN SENTENCE, because the two reachable failures both need the operator to
 			// do something specific: a `/data` that is not writable, and a file at that path which is
 			// not a key. A generic "could not create key" would name neither.

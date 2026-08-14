@@ -2,13 +2,11 @@ package storage
 
 import (
 	_ "embed"
-	"errors"
-	"fmt"
 	"strings"
 )
 
 // The constrained forced-command helper an operator installs on the ZFS host, shipped IN THE BINARY
-// so quince can hand it over with the operator's own parent dataset already filled in.
+// so quince can hand it over rather than sending the operator to a document.
 //
 // IT IS THE SAME BYTES THE GATE RUNS. qn.6e's G8 executes this file against a stubbed `zfs`
 // (`hookcheck_test.go`), so the script quince serves is the script the suite proves — not a copy of
@@ -16,39 +14,34 @@ import (
 // block in `deploy/storage.md`, where nothing could embed it and shellcheck never opened it
 // (quince#818 piece C).
 //
+// AND IT IS NOW THE SAME BYTES FOR EVERY INSTALL. The dataset arrives from the forced command
+// (quince#985), so this file is no longer rendered per storage — which is what stops a second zfs
+// storage on one host from overwriting the first's helper and breaking it silently.
+//
 //go:embed zfshelper/quince-zfs-helper
 var zfsHelperScript string
 
-// The line an operator used to have to edit by hand. Substituting it is the entire product of this
-// file, and its exact text is therefore load-bearing — see RenderZFSHelper.
-const zfsHelperPlaceholder = `PARENT="pool/path/to/iphone-backup"`
-
-// ErrHelperPlaceholder means the embedded script no longer carries the line this code substitutes.
+// zfsHelperParentLine is the line that reads the parent out of the forced command. Its exact text is
+// load-bearing: `authorizedKeysLine` promises the operator that the dataset in `command="…"` is what
+// confines the helper, and this is the line that keeps that promise.
 //
-// IT IS A REFUSAL, NOT A FALLBACK, and that is the point of naming it. If the placeholder is ever
-// renamed in the script, the substitution silently no-ops and quince serves a helper that still says
-// `PARENT="pool/path/to/iphone-backup"` — which an operator would install verbatim, sending every
-// backup to a dataset that is not theirs, or to one that does not exist. Refusing turns a
-// silent-wrong-artifact into a 500 with a sentence, and `TestZFSHelperPlaceholderExists` turns it
-// into a red build before it can ever reach a user.
-var ErrHelperPlaceholder = errors.New("storage: the embedded zfs helper no longer carries the PARENT placeholder")
+// ASSERTED BY A BUILD-TIME TEST RATHER THAN AT RUNTIME, which is a change from what stood here.
+// While the script was rendered there was a substitution that could silently no-op, so serving it
+// had to be able to fail — `ErrHelperPlaceholder` and a `500`. A static file cannot fail that way:
+// nothing is substituted, so the only reachable defect is the script and the key line disagreeing
+// about the mechanism, and that is a property of the tree rather than of a request.
+const zfsHelperParentLine = `PARENT="${1:-}"`
 
-// RenderZFSHelper returns the helper with PARENT set to the operator's dataset.
+// ZFSHelperScript returns the helper exactly as it is installed.
 //
-// THE DATASET IS VALIDATED BEFORE IT IS INTERPOLATED, and here that guard is doing more work than it
-// does elsewhere in this package. Everywhere else `datasetPattern` keeps a name safe in an ARGV;
-// this call site puts it inside a double-quoted assignment in a SHELL SCRIPT THE OPERATOR WILL RUN
-// AS ROOT ON ANOTHER MACHINE. A name containing `"` would close the quote and everything after it
-// would be script — so the pattern's exclusion of quotes, spaces and metacharacters is what makes
-// this function safe to exist at all, rather than a tidiness check.
-func RenderZFSHelper(parent string) (string, error) {
-	if !datasetPattern.MatchString(parent) {
-		return "", fmt.Errorf("storage: invalid dataset name %q", parent)
-	}
-	if !strings.Contains(zfsHelperScript, zfsHelperPlaceholder) {
-		return "", ErrHelperPlaceholder
-	}
-	// Exactly one replacement: the placeholder appears once, and a second occurrence would mean the
-	// script grew a shape this function does not understand.
-	return strings.Replace(zfsHelperScript, zfsHelperPlaceholder, `PARENT="`+parent+`"`, 1), nil
+// NO PARAMETER, AND THAT IS THE POINT OF quince#985. It used to take the operator's dataset and
+// interpolate it into a `PARENT=` assignment, which made every install's file different and made the
+// single install path (`ZFSHelperPath`) a collision: a second storage's helper overwrote the first's,
+// and the first failed at its next commit with nothing pointing back here.
+func ZFSHelperScript() string { return zfsHelperScript }
+
+// helperReadsParentFromForcedCommand reports whether the embedded script still takes its parent from
+// $1. Used by the build-time test; kept beside the constant so the two cannot drift.
+func helperReadsParentFromForcedCommand() bool {
+	return strings.Contains(zfsHelperScript, zfsHelperParentLine)
 }

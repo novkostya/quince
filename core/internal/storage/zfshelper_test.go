@@ -5,27 +5,50 @@ import (
 	"testing"
 )
 
-// THE PLACEHOLDER MUST EXIST IN THE EMBEDDED SCRIPT, and this test is the reason RenderZFSHelper can
-// afford to be three lines.
+// THE SCRIPT MUST STILL READ ITS PARENT FROM THE FORCED COMMAND, and this test is what makes the
+// promise on the `authorized_keys` line true.
 //
-// If somebody renames the `PARENT=` line in the helper, `strings.Replace` finds nothing and returns
-// the script UNCHANGED — quince would then serve an operator a helper still pointing at
-// `pool/path/to/iphone-backup`. They would install it, and every backup would go somewhere that is
-// not theirs, or nowhere. Nothing about that failure looks wrong on screen: it is a valid script.
+// quince tells the operator that `command="/usr/local/sbin/quince-zfs-helper <dataset>"` is what
+// confines the helper. If somebody changes the script to take its parent from anywhere else — an
+// environment variable, a config file, a `PARENT=` assignment again — that line keeps being served,
+// keeps looking right, and confines nothing. Nothing about that failure looks wrong on screen.
 //
-// So the coupling is asserted here rather than discovered there. This is a build-time guard on a
-// runtime refusal — RenderZFSHelper also returns ErrHelperPlaceholder — because the cost of the two
-// is not comparable: red CI costs a commit, a wrong PARENT costs somebody's backups.
-func TestZFSHelperPlaceholderExists(t *testing.T) {
-	if !strings.Contains(zfsHelperScript, zfsHelperPlaceholder) {
+// IT REPLACES A RUNTIME REFUSAL WITH A BUILD-TIME ONE, deliberately. While the script was rendered
+// per install there was a substitution that could silently no-op, so `RenderZFSHelper` had to be able
+// to fail and the endpoint had to be able to answer `500`. A static file removes that path entirely:
+// there is nothing to substitute, so the only way to get this wrong is to commit it.
+func TestHelperTakesItsParentFromTheForcedCommand(t *testing.T) {
+	if !helperReadsParentFromForcedCommand() {
 		t.Fatalf("the embedded helper no longer contains %q.\n"+
-			"If the script's PARENT line changed shape, update zfsHelperPlaceholder to match — do "+
-			"NOT delete this test. Without the substitution quince serves a helper pointing at the "+
-			"placeholder dataset, which is a valid script that backs up to the wrong place.",
-			zfsHelperPlaceholder)
+			"If the script's PARENT line changed shape, update zfsHelperParentLine to match — do NOT "+
+			"delete this test. The authorized_keys line quince serves promises that the dataset in "+
+			"command=\"…\" is what bounds the helper, and this line is what keeps that promise.",
+			zfsHelperParentLine)
 	}
-	if n := strings.Count(zfsHelperScript, zfsHelperPlaceholder); n != 1 {
-		t.Fatalf("the placeholder appears %d times, want exactly 1 — RenderZFSHelper replaces one", n)
+	// IT MUST BE READ BEFORE $SSH_ORIGINAL_COMMAND IS SPLIT. `set -- $SSH_ORIGINAL_COMMAND` replaces
+	// the positional parameters, so a `PARENT="${1:-}"` below it would read the CLIENT'S first word
+	// as the parent — the client naming its own confinement, which is no confinement at all.
+	parent := strings.Index(zfsHelperScript, zfsHelperParentLine)
+	split := strings.Index(zfsHelperScript, "set -- $SSH_ORIGINAL_COMMAND")
+	if split < 0 {
+		t.Fatal("the helper no longer splits $SSH_ORIGINAL_COMMAND — this test cannot check the order")
+	}
+	if parent > split {
+		t.Fatal("THE PARENT IS READ AFTER THE CLIENT'S REQUEST IS SPLIT INTO $@, so the client " +
+			"supplies its own $PARENT. The operator's forced command must be read first.")
+	}
+}
+
+// A helper installed with no dataset in its forced command REFUSES rather than guessing.
+//
+// This is the failure mode quince#985 creates: the parent used to be inside the file, where it could
+// not be left out. Now it is one word in an `authorized_keys` line an operator types, so omitting it
+// is a new way to get this wrong — and an empty `$PARENT` would make `case "$target" in "$PARENT"/*`
+// match `/*`, which is a guard that no longer guards.
+func TestHelperRefusesWithNoParentInTheForcedCommand(t *testing.T) {
+	if !strings.Contains(zfsHelperScript, `[ -n "$PARENT" ]`) {
+		t.Error("the helper does not refuse an empty $PARENT — an unset forced-command argument " +
+			"would leave every `case` guard matching a bare `/*`")
 	}
 }
 
@@ -38,44 +61,24 @@ func TestZFSHelperEmbedMatchesTheFileTheGateRuns(t *testing.T) {
 	}
 }
 
-func TestRenderZFSHelperSubstitutesTheParent(t *testing.T) {
-	got, err := RenderZFSHelper("tank/backups/iphone")
-	if err != nil {
-		t.Fatalf("RenderZFSHelper: %v", err)
-	}
-	if !strings.Contains(got, `PARENT="tank/backups/iphone"`) {
-		t.Error("the operator's dataset is not in the rendered script")
+// THE SERVED SCRIPT IS THE EMBEDDED SCRIPT, BYTE FOR BYTE — nothing installation-specific in it.
+//
+// That is the property piece 3 rests on (serving it over plain HTTP, and offering it as readable
+// text on the page): a file that carries no operator's dataset carries nothing to leak, and two
+// installs of the same version can be compared by hash.
+func TestZFSHelperScriptIsStatic(t *testing.T) {
+	got := ZFSHelperScript()
+	if got != zfsHelperScript {
+		t.Fatal("ZFSHelperScript() does not return the embedded bytes")
 	}
 	if strings.Contains(got, "pool/path/to/iphone-backup") {
-		t.Error("the placeholder survived — an operator would install a script pointing at it")
+		t.Error("the script still carries the old placeholder dataset — under quince#985 the parent " +
+			"comes from the forced command, so nothing in the file names a dataset at all")
 	}
-	// The rest of the script is untouched: the guards are what make the helper a boundary.
+	// The guards are what make the helper a boundary; a static script keeps every one of them.
 	for _, want := range []string{"capacity)", "rollback)", `case "$op" in`, "exit 1"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("rendering dropped %q from the helper", want)
-		}
-	}
-}
-
-// A NAME THAT COULD BREAK OUT OF THE QUOTES IS REFUSED, NOT ESCAPED.
-//
-// This is the sharpest edge in this file: the value is interpolated into a double-quoted assignment
-// in a script the operator runs AS ROOT ON THE STORAGE HOST. `tank"; rm -rf /; x="` would close the
-// quote and the remainder would be code. Refusing is right rather than escaping — every legal ZFS
-// dataset name already matches the pattern, so nothing valid is lost, and an escaping routine is a
-// thing that can have a bug.
-func TestRenderZFSHelperRefusesUnsafeNames(t *testing.T) {
-	for _, bad := range []string{
-		`tank"; rm -rf /; x="`,
-		"tank/backups; rm -rf /",
-		"tank/backups $(id)",
-		"tank/backups`id`",
-		"tank/backups\nPARENT=\"other\"",
-		"",
-		"/leading-slash",
-	} {
-		if _, err := RenderZFSHelper(bad); err == nil {
-			t.Errorf("RenderZFSHelper(%q) was accepted — it must refuse before interpolating", bad)
+			t.Errorf("the served helper is missing %q", want)
 		}
 	}
 }

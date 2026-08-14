@@ -58,13 +58,11 @@ func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) []string 
 	dir := t.TempDir()
 
 	helper := filepath.Join(dir, "quince-zfs-helper")
-	// The published script carries a placeholder PARENT; an operator edits it, and so do we.
-	src := strings.Replace(helperSrc, `PARENT="pool/path/to/iphone-backup"`, `PARENT="`+parent+`"`, 1)
-	if !strings.Contains(src, `PARENT="`+parent+`"`) {
-		t.Fatalf("G8 CANNOT RUN: the PARENT assignment in zfshelper/quince-zfs-helper changed " +
-			"shape; the script was read but could not be pointed at a test dataset")
-	}
-	write(t, helper, src)
+	// THE SCRIPT IS INSTALLED UNMODIFIED SINCE quince#985 — the fixture used to substitute a
+	// `PARENT=` line, as an operator used to. The dataset now arrives as the forced command's own
+	// argument, which the shim below supplies, so what is written here is byte-for-byte what quince
+	// serves.
+	write(t, helper, helperSrc)
 
 	bin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(bin, 0o755); err != nil {
@@ -72,9 +70,14 @@ func hookHarness(t *testing.T, parent, zfsBehaviour, helperSrc string) []string 
 	}
 	write(t, filepath.Join(bin, "zfs"), "#!/bin/sh\n"+zfsBehaviour+"\n")
 
+	// THE PARENT IS THE FORCED COMMAND'S ARGUMENT AND THE REQUEST IS $SSH_ORIGINAL_COMMAND — the two
+	// arrive by different routes and that separation is the confinement (quince#985). sshd runs
+	// `command="<helper> <parent>"` and puts the client's words in the environment variable; the
+	// shim reproduces exactly that, so a bug that let the client name its own parent would show up
+	// here rather than on somebody's pool.
 	shim := filepath.Join(dir, "fake-ssh")
 	write(t, shim, "#!/bin/sh\nPATH="+bin+":$PATH\nexport PATH\n"+
-		"SSH_ORIGINAL_COMMAND=\"$*\"\nexport SSH_ORIGINAL_COMMAND\nexec /bin/sh "+helper+"\n")
+		"SSH_ORIGINAL_COMMAND=\"$*\"\nexport SSH_ORIGINAL_COMMAND\nexec /bin/sh "+helper+" '"+parent+"'\n")
 	return []string{shim}
 }
 
@@ -346,6 +349,53 @@ func TestTheRealHelperRefusesCapacityWithAnArgument(t *testing.T) {
 				"zfs saw %q", strings.TrimSpace(saw))
 		}
 	})
+}
+
+// quince#985 — A HELPER WHOSE FORCED COMMAND NAMES NO DATASET REFUSES, AND SAYS WHAT TO WRITE.
+//
+// This is the failure mode the change introduces, so it is the one that has to be measured. The
+// parent used to be inside the file, where it could not be left out; it is now one word in an
+// `authorized_keys` line an operator types, and omitting it is the obvious new mistake. An empty
+// `$PARENT` would leave every `case "$target" in "$PARENT"/*` matching a bare `/*` — a guard that
+// still looks like a guard.
+//
+// It presents to the user as `unreachable`, whose remedy names the forced command, and the helper's
+// own sentence arrives in `HookCheck.Detail` — so the diagnosis is on the screen even though the
+// outcome is the generic one.
+func TestTheRealHelperRefusesWithNoParentInTheForcedCommand(t *testing.T) {
+	requireSh(t)
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "quince-zfs-helper")
+	write(t, helper, helperSource(t))
+	rec := filepath.Join(dir, "argv")
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(bin, "zfs"), "#!/bin/sh\necho \"$*\" >> "+rec+"\nexit 0\n")
+
+	// The forced command with its argument LEFT OFF — everything else exactly as sshd delivers it.
+	cmd := exec.Command("/bin/sh", helper) //nolint:gosec // the helper is written by this test
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
+		"SSH_ORIGINAL_COMMAND=capacity")
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	err := cmd.Run()
+
+	if err == nil {
+		t.Fatal("the helper ran with no dataset in its forced command — it must refuse rather than " +
+			"operate against an empty $PARENT")
+	}
+	if _, statErr := os.Stat(rec); statErr == nil {
+		t.Error("zfs was invoked despite there being no parent to confine the call to")
+	}
+	// THE REMEDY IS THE LINE THEY HAVE TO FIX, not a restatement of the problem. An operator seeing
+	// this in `Test helper`'s detail has to know that the thing to edit is authorized_keys.
+	for _, want := range []string{"no parent dataset", "authorized_keys", "command="} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("the refusal does not carry %q; stderr = %q", want, errb.String())
+		}
+	}
 }
 
 func requireSh(t *testing.T) {

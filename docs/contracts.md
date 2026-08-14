@@ -1116,8 +1116,8 @@ POST /api/storages/{name}/recheck                          → 200 {storage} | 4
 POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
-POST /api/storages/zfs/key    (NO BODY — see below)        → 200 {key} | 500
-GET  /api/storages/zfs/helper?parent_dataset=<ds>          → 200 {script, path} | 422 | 500
+POST /api/storages/zfs/key {parent_dataset}                → 200 {key} | 422 | 500
+GET  /api/storages/zfs/helper  (NO PARAMETER — see below)  → 200 {script, path}
 POST /api/storages/zfs/hostkey {ssh_host, ssh_port?}     → 200 {found, host_key, reason, trust} | 422
 POST /api/storages/zfs/hostkey/trust {line}                → 200 {trusted, path} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
@@ -1232,11 +1232,26 @@ B, under the ruling relayed at
 It answers *"what do I put on my ZFS host?"* — returning the key at `/data/keys/zfs` and
 **generating one only if there is nothing there.**
 
-**IT TAKES NO BODY, AND THAT IS THE SECURITY SHAPE RATHER THAN A MISSING FEATURE.** A
+**IT TAKES NO *PATH*, AND THAT IS THE SECURITY SHAPE RATHER THAN A MISSING FEATURE.** A
 caller-supplied path would make this an authenticated *write-a-file-anywhere* primitive whose
 contents happen to be a private key. Taking none means the endpoint has no reachable target but
 quince's own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses the
 button — which is why that field stays settable.
+
+**IT TAKES ONE FIELD, `parent_dataset`, AND THAT IS quince#985.** The body is new; the rule above is
+not narrowed by it, because a dataset name is not a path and quince never writes it anywhere — it is
+interpolated into the `authorized_keys` line this endpoint *renders*. That line now carries the
+dataset inside its forced command, which is what confines the key: the helper script is identical on
+every install, so `command="…/quince-zfs-helper rpool/quince"` is the only place a storage's
+confinement is written down.
+
+**AN UNSAFE `parent_dataset` IS A `422` NAMING THAT FIELD** — the refusal `GET …/helper` used to
+carry, moved to where the interpolation moved. The value lands inside `command="…"` in a file **sshd
+parses**: a `"` closes the option value and everything after it is read as further options, so
+`tank" no-pty="` is not a syntax error but a different set of restrictions on a key that still works.
+Refused rather than escaped; every legal ZFS name already matches `datasetPattern`, so nothing valid
+is lost. **No key is written on that path**, so a refusal cannot leave a keypair on disk whose public
+half nobody was shown.
 
 **DISCOVERY BEFORE GENERATION, and it is the property that protects existing installs.** A key
 already at that path may have its public half in an `authorized_keys` on a host quince cannot see;
@@ -1249,9 +1264,9 @@ rather than a reason to overwrite.
 the second may already be installed — and guessing wrong invites replacing an entry that works.
 
 **BOTH THE PUBLIC KEY AND THE COMPLETE `authorized_keys` LINE ARE SERVED**, and the line is the
-artifact. `command="/usr/local/sbin/quince-zfs-helper"` is what pins the helper regardless of what
-the client asks for, so serving a bare key would invite pasting one — an unconstrained shell login
-on the storage host rather than a helper bounded to one dataset.
+artifact. `command="/usr/local/sbin/quince-zfs-helper rpool/quince"` is what pins the helper
+regardless of what the client asks for, so serving a bare key would invite pasting one — an
+unconstrained shell login on the storage host rather than a helper bounded to one dataset.
 
 **THE PRIVATE HALF NEVER REACHES THE RESPONSE.** Not on the type, never logged, never in a fixture —
 the discipline backup passwords already follow. `ed25519` is generated **in-process**
@@ -2221,10 +2236,17 @@ the UI, `detail` for the user's eyes on their own machine.
 {
   "path":            "/data/keys/zfs",   // where the PRIVATE half lives; never its contents
   "public_key":      "ssh-ed25519 AAAA… quince",
-  "authorized_keys": "command=\"/usr/local/sbin/quince-zfs-helper\",no-port-forwarding,… ssh-ed25519 AAAA… quince",
+  "authorized_keys": "command=\"/usr/local/sbin/quince-zfs-helper rpool/quince\",no-port-forwarding,… ssh-ed25519 AAAA… quince",
   "created":         true                // false when quince FOUND a key already there
 }
 ```
+
+**THE DATASET IS INSIDE THE FORCED COMMAND AND INSIDE THE SAME QUOTES** (quince#985). sshd parses
+`command="…"` as one option value, so the path and the dataset are one string with a space in it;
+closing the quote after the path would leave the dataset where sshd expects the next option name and
+the whole line is rejected. The helper reads it as `$1`, **before** it touches
+`$SSH_ORIGINAL_COMMAND` — which is the security split: the operator fixes the dataset in a file only
+they can edit, and the client supplies verb and target.
 
 **EVERY FIELD IS SAFE TO RENDER.** The private half is not on the type, is never logged and is never
 in a fixture — the discipline `StorageHookCheck.detail` needs a paragraph for, this one gets by
@@ -2235,39 +2257,38 @@ quince on the host, so the two are one string rather than a key plus a suggestio
 
 ### StorageZFSHelper (`quince#818` piece C)
 
-`GET /api/storages/zfs/helper?parent_dataset=<ds>`'s answer — the constrained helper script with the
-operator's own dataset already substituted.
+`GET /api/storages/zfs/helper`'s answer — the constrained helper script, exactly as it is installed.
 
 ```jsonc
 {
-  "script": "#!/bin/sh\n… PARENT=\"tank/backups/iphone\" …",  // the WHOLE file, saveable as-is
-  "path":   "/usr/local/sbin/quince-zfs-helper"               // where it goes
+  "script": "#!/bin/sh\n… PARENT=\"${1:-}\" …",   // the WHOLE file, saveable as-is
+  "path":   "/usr/local/sbin/quince-zfs-helper"  // where it goes
 }
 ```
 
-**THE SCRIPT IS SERVED RENDERED, NOT AS A TEMPLATE.** The substitution is one line and a client could
-do it — but the value goes inside a double-quoted assignment in a script the operator runs **as root
-on another machine**, so whoever substitutes must also validate. Server-side keeps the validation,
-the placeholder guard and the refusal in one place, beside the pattern that already guards dataset
-names for argv use.
+**THE ANSWER IS A CONSTANT, AND `parent_dataset` IS GONE** (quince#985). The script used to arrive
+with the operator's dataset substituted into a `PARENT=` line. That made every install's file
+different while `path` said there was one place to put it, so **two zfs storages on one host
+overwrote each other's helper and the first broke silently** — nothing failed until its next commit.
+The dataset moved into the `authorized_keys` forced command, which is per key, and the file is now
+the same bytes for every install of a version.
 
-**A `parent_dataset` that could break out of the quotes is `422`, naming that field** — refused
-rather than escaped. Every legal ZFS name already matches `datasetPattern`, so nothing valid is lost,
-and an escaping routine is a thing that can have a bug where a refusal cannot.
+**WHICH REMOVES BOTH FAILURE CODES.** The `422` moved to `POST /api/storages/zfs/key`, which is where
+a caller's dataset is now interpolated. The `500` — *the embedded script no longer carries the line
+quince substitutes* — has no analogue, because nothing is substituted; the equivalent guard is a
+build-time test asserting the script still reads its parent from `$1`, since a script that took it
+from anywhere else would leave the served `authorized_keys` line promising a confinement it no longer
+implements.
 
 **`path` IS ON THE WIRE BECAUSE IT IS HALF THE INSTRUCTION.** It is the same constant the
 `authorized_keys` line pins as its forced command, so the two cannot drift — a helper saved anywhere
 else is never reached, and a script with no destination leaves the operator something to look up,
-which is what this endpoint exists to end.
+which is what this endpoint exists to end. **One path is now one file**, which is what makes the
+constant correct rather than a collision.
 
-**`500` is reserved for one case that should be unreachable:** the embedded script no longer carries
-the line quince substitutes. Serving it anyway would hand over a valid script pointing at the
-placeholder dataset, so it refuses; a build-time test asserts the placeholder exists, which is what
-makes the `500` a backstop rather than a live path.
-
-**No state, no write, nothing about this install** — the answer is a pure function of the embedded
-script and one query parameter, which is why it is a `GET` where the key endpoint beside it is a
-`POST`.
+**No state, no write, nothing about this install** — more so than before: there is no parameter at
+all. That is why it is a `GET` where the key endpoint beside it is a `POST`, and it is what makes
+*"can this be fetched without a session?"* a question about convenience rather than about secrets.
 
 
 ### StorageZFSHostKey (`quince#912`)

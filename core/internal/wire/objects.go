@@ -610,14 +610,26 @@ type StorageZFSKeyResponse struct {
 	Key StorageZFSKey `json:"key"`
 }
 
-// StorageZFSHelperResponse carries the constrained helper script with the operator's own
-// `parent_dataset` already substituted — quince#818 piece C.
+// StorageZFSKeyRequest names the dataset the key will be confined to — quince#985.
 //
-// THE SCRIPT IS SERVED RENDERED RATHER THAN AS A TEMPLATE, and that is a deliberate split of
-// responsibility. The substitution is one line, so a client could do it; but the value goes inside a
-// double-quoted assignment in a script the operator runs as root on another machine, so whoever
-// substitutes must also validate. Doing it on the server keeps the validation, the placeholder guard
-// and the refusal in one place, next to the pattern that already guards dataset names for argv use.
+// THE ONLY FIELD, AND DELIBERATELY NOT A PATH. The endpoint took no body at all until the parent
+// moved into the forced command; §1's rule that it must not accept a *path* is unchanged, because a
+// caller-supplied path would make it a write-a-file-anywhere primitive whose contents are a private
+// key. A dataset name is interpolated into a line quince renders on screen and never writes itself.
+type StorageZFSKeyRequest struct {
+	// ParentDataset is what goes inside `command="/usr/local/sbin/quince-zfs-helper <this>"`.
+	// An unsafe name is 422 naming this field — refused rather than escaped.
+	ParentDataset string `json:"parent_dataset"`
+}
+
+// StorageZFSHelperResponse carries the constrained helper script — quince#818 piece C.
+//
+// THE SCRIPT IS THE SAME BYTES FOR EVERY INSTALL since quince#985, so this response is a constant.
+// It used to arrive with the operator's own `parent_dataset` substituted into a `PARENT=` line,
+// which made the one documented install path a collision: a second zfs storage on the same host
+// saved its helper over the first's, and the first broke at its next commit. The dataset now rides
+// in the `authorized_keys` forced command, which is per key, so nothing installation-specific is
+// left in the file.
 type StorageZFSHelperResponse struct {
 	// Script is the complete file, ready to save as /usr/local/sbin/quince-zfs-helper.
 	Script string `json:"script"`

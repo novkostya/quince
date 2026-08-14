@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 func TestEnsureZFSKeyGeneratesAUsableKeypair(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keys", "zfs")
 
-	k, err := EnsureZFSKey(path)
+	k, err := EnsureZFSKey(path, "tank/backups")
 	if err != nil {
 		t.Fatalf("EnsureZFSKey: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestEnsureZFSKeyWritesRestrictivePermissions(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "keys")
 	path := filepath.Join(dir, "zfs")
 
-	if _, err := EnsureZFSKey(path); err != nil {
+	if _, err := EnsureZFSKey(path, "tank/backups"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +76,7 @@ func TestEnsureZFSKeyWritesRestrictivePermissions(t *testing.T) {
 func TestEnsureZFSKeyNeverReplacesAKeyThatIsAlreadyThere(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keys", "zfs")
 
-	first, err := EnsureZFSKey(path)
+	first, err := EnsureZFSKey(path, "tank/backups")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestEnsureZFSKeyNeverReplacesAKeyThatIsAlreadyThere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := EnsureZFSKey(path)
+	second, err := EnsureZFSKey(path, "tank/backups")
 	if err != nil {
 		t.Fatalf("EnsureZFSKey on an existing key: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestEnsureZFSKeyRefusesToOverwriteSomethingThatIsNotAKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := EnsureZFSKey(path); err == nil {
+	if _, err := EnsureZFSKey(path, "tank/backups"); err == nil {
 		t.Fatalf("EnsureZFSKey accepted a file that is not a private key")
 	} else if !strings.Contains(err.Error(), path) {
 		t.Fatalf("the refusal does not name the file: %v", err)
@@ -134,14 +135,17 @@ func TestEnsureZFSKeyRefusesToOverwriteSomethingThatIsNotAKey(t *testing.T) {
 // a line rather than a key. `command="…"` pins the helper regardless of what the client asks for; a
 // naked public key pasted into authorized_keys is an unconstrained shell login on the storage host.
 func TestTheAuthorizedKeysLinePinsTheHelperAndRestrictsTheSession(t *testing.T) {
-	k, err := EnsureZFSKey(filepath.Join(t.TempDir(), "zfs"))
+	k, err := EnsureZFSKey(filepath.Join(t.TempDir(), "zfs"), "tank/backups")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !strings.HasPrefix(k.AuthorizedKeys, `command="`+ZFSHelperPath+`"`) {
-		t.Fatalf("the line does not START with the forced command, so an operator truncating it "+
-			"keeps the key and loses the constraint: %s", k.AuthorizedKeys)
+	// THE DATASET IS INSIDE THE FORCED COMMAND SINCE quince#985, and inside the SAME quotes. sshd
+	// parses `command="…"` as one option value, so a line that closed the quote after the path would
+	// leave the dataset where sshd expects the next option name, and the whole line is rejected.
+	if !strings.HasPrefix(k.AuthorizedKeys, `command="`+ZFSHelperPath+` tank/backups"`) {
+		t.Fatalf("the line does not START with the forced command and its dataset, so an operator "+
+			"truncating it keeps the key and loses the constraint: %s", k.AuthorizedKeys)
 	}
 	for _, want := range []string{
 		"no-port-forwarding", "no-agent-forwarding", "no-pty", "no-X11-forwarding",
@@ -161,7 +165,7 @@ func TestTheAuthorizedKeysLinePinsTheHelperAndRestrictsTheSession(t *testing.T) 
 // rule the backup password follows, and the reason everything here is safe to render.
 func TestZFSKeyCarriesNoPrivateMaterial(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "zfs")
-	k, err := EnsureZFSKey(path)
+	k, err := EnsureZFSKey(path, "tank/backups")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +188,43 @@ func TestZFSKeyCarriesNoPrivateMaterial(t *testing.T) {
 	} {
 		if strings.Contains(shown, body) {
 			t.Fatalf("%s carries the private key body", name)
+		}
+	}
+}
+
+// A NAME THAT COULD BREAK OUT OF THE QUOTES IS REFUSED, NOT ESCAPED — moved here from the helper
+// renderer by quince#985, because this is where the interpolation now happens.
+//
+// The value lands inside `command="…"` in a file SSHD PARSES. A `"` closes the option value, and
+// what follows is read as further options — `command="x" ,pty …` is not a syntax error, it is a
+// different set of restrictions. `%q` would escape it rather than refuse, which turns an unusable
+// name into an unreadable line an operator would paste anyway.
+//
+// Refusing is right rather than escaping: every legal ZFS dataset name already matches the pattern,
+// so nothing valid is lost, and an escaping routine is a thing that can have a bug.
+func TestEnsureZFSKeyRefusesADatasetThatCouldBreakTheLine(t *testing.T) {
+	for _, bad := range []string{
+		`tank" no-pty="`,
+		`tank",pty,command="/bin/sh`,
+		"tank/backups with spaces",
+		"tank/backups\ncommand=\"/bin/sh\" ssh-ed25519 AAAA",
+		"",
+		"/leading-slash",
+	} {
+		path := filepath.Join(t.TempDir(), "zfs")
+		_, err := EnsureZFSKey(path, bad)
+		if err == nil {
+			t.Errorf("EnsureZFSKey accepted the dataset %q — it must refuse before interpolating", bad)
+			continue
+		}
+		if !errors.Is(err, ErrUnsafeDataset) {
+			t.Errorf("EnsureZFSKey(%q) = %v, want ErrUnsafeDataset — the endpoint tells a 422 from a "+
+				"500 by this sentinel, so a plain error here becomes 'quince could not create a key'", bad, err)
+		}
+		// AND IT REFUSES BEFORE IT WRITES. A key generated for a request that then fails leaves a
+		// keypair on disk whose public half nobody was ever shown.
+		if _, statErr := os.Stat(path); statErr == nil {
+			t.Errorf("EnsureZFSKey(%q) wrote a key before refusing", bad)
 		}
 	}
 }

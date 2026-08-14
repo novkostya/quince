@@ -304,13 +304,13 @@ export function AddStorageForm({
     setHelperLoading(true);
     setHelperError("");
     try {
-      setHelper(await fetchZFSHelper(parentDataset.trim()));
+      setHelper(await fetchZFSHelper());
     } catch (e) {
       // THE DAEMON'S OWN SENTENCE, through the same extractor every other refusal on this form uses.
-      // A 422 here means the dataset name is one quince will not put into a script it hands over,
-      // and its message says why — re-wording it would drop the half that explains how a name that
-      // looks fine was refused.
-      setHelperError(serverSentence(e, "could not render the helper"));
+      // Since quince#985 this answer is a constant, so the only way here is a daemon that could not
+      // answer at all — but a swallowed failure would leave a button that does nothing when pressed,
+      // which is the shape quince#949 was filed on.
+      setHelperError(serverSentence(e, "could not fetch the helper"));
       setHelper(null);
     } finally {
       setHelperLoading(false);
@@ -444,26 +444,51 @@ export function AddStorageForm({
   // The endpoint GENERATES on its first call, so asking earlier would leave a keypair on disk for
   // every copy-backend storage anybody ever added.
   //
-  // ONCE — `zfsKey !== null` in the guard means switching backend away and back does not re-ask. A
-  // second call would find the same key by construction, so the only thing a repeat buys is noise.
+  // AND NOT UNTIL THERE IS A DATASET TO CONFINE IT TO (quince#985). The `authorized_keys` line the
+  // operator pastes now carries the parent inside its forced command — that line IS the confinement,
+  // since the helper script is identical on every install — so a line rendered before the field is
+  // filled in would be a line that bounds the key to nothing. The panel simply does not appear yet.
+  //
+  // RE-ASKED WHEN THE DATASET CHANGES, which is why the once-only guard is gone. The key itself is
+  // stable — the endpoint discovers before it generates, so every call after the first returns the
+  // same keypair — but the LINE is a function of the dataset, and a stale one pins the previous
+  // value. That is the same silent-wrong-artifact this issue is about, one screen earlier.
+  //
+  // DEBOUNCED, because this fires per keystroke otherwise. 400ms is long enough that typing a
+  // dataset name produces one request rather than twenty, and short enough that the panel appears
+  // while the operator is still looking at the field.
   useEffect(() => {
-    if (!needsZFS || zfsKey !== null) return;
+    const parent = parentDataset.trim();
+    if (!needsZFS || parent === "") {
+      setZFSKey(null);
+      return;
+    }
     let live = true;
-    void (async () => {
-      try {
-        const res = await ensureZFSKey();
-        if (live) setZFSKey(res.key);
-      } catch (e) {
-        // SURFACED, NEVER SWALLOWED. Both reachable failures — a `/data` quince cannot write, and
-        // something at that path that is not a key — need the operator to act, and an empty panel
-        // would read as "no key is needed here".
-        if (live) setKeyError(serverSentence(e, "could not prepare the ssh key"));
-      }
-    })();
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await ensureZFSKey(parent);
+          if (live) {
+            setZFSKey(res.key);
+            setKeyError("");
+          }
+        } catch (e) {
+          // SURFACED, NEVER SWALLOWED. Every reachable failure — a `/data` quince cannot write,
+          // something at that path that is not a key, and now a dataset name it will not put inside
+          // `command="…"` — needs the operator to act, and an empty panel would read as "no key is
+          // needed here".
+          if (live) {
+            setKeyError(serverSentence(e, "could not prepare the ssh key"));
+            setZFSKey(null);
+          }
+        }
+      })();
+    }, 400);
     return () => {
       live = false;
+      clearTimeout(t);
     };
-  }, [needsZFS, zfsKey]);
+  }, [needsZFS, parentDataset]);
 
   // A ZFS STORAGE CANNOT BE SAVED UNTIL THE HELPER HAS ANSWERED, and `ok` is not the only answer
   // that clears it.
@@ -648,7 +673,9 @@ export function AddStorageForm({
                   Add this one line to <code className="font-mono text-xs">~{"/"}.ssh/authorized_keys</code>{" "}
                   for <span className="text-fg">{sshUser.trim() === "" ? "the remote user" : sshUser.trim()}</span> on{" "}
                   <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> — it
-                  restricts the key to the helper, so it cannot be used for anything else.
+                  restricts the key to the helper, and to{" "}
+                  <span className="text-fg">{parentDataset.trim()}</span> within it, so it cannot be
+                  used for anything else.
                 </div>
                 <pre
                   className={`mt-2 whitespace-pre-wrap break-all ${codeBlock}`}
@@ -677,10 +704,11 @@ export function AddStorageForm({
                 refuses everything, which presents as `unreachable` — indistinguishable from a wrong
                 key unless you already know the helper is missing.
 
-                IT IS RENDERED WITH THEIR OWN `PARENT=`, which is the whole point of the piece: the
-                one line an operator had to edit by hand is the one line that decides where every
-                backup goes, and a wrong value produces a script that works and writes to the wrong
-                dataset. */}
+                IT IS THE SAME FILE FOR EVERYONE (quince#985). It used to arrive with their own
+                `PARENT=` filled in, which meant every install's copy differed while there was one
+                place to put it — so a second zfs storage overwrote the first's helper and the first
+                broke at its next commit. The dataset lives in the `authorized_keys` line above
+                instead, which is per key, and this script no longer names one at all. */}
             {parentDataset.trim() !== "" ? (
               <div className="mt-3">
                 {helper === null ? (
@@ -700,9 +728,9 @@ export function AddStorageForm({
                       Save this on{" "}
                       <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> as{" "}
                       <code className="font-mono text-xs">{helper.path}</code> and make it
-                      executable. Its <code className="font-mono text-xs">PARENT=</code> is already
-                      set to <span className="text-fg">{parentDataset.trim()}</span> — nothing in it
-                      needs editing.
+                      executable. Nothing in it needs editing, and it is the same file for every
+                      storage — the dataset comes from the line above, so a second one on this host
+                      shares this script rather than replacing it.
                     </div>
                     {/* CAPPED AND SCROLLABLE. It is ~70 lines: rendered full-height it would bury
                         the rest of the form on a phone, and this is a thing to COPY rather than to
