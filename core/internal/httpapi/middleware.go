@@ -77,6 +77,13 @@ func authExempt(r *http.Request) bool {
 	// onboarding step, and this switch has no prefix support to do it with by accident.
 	case "GET /api/health", "GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup",
 		"GET /api/onboarding/https",
+		// THE PROBE PAIR (Operator ruling 2026-08-14). Pre-auth for step 1's own reason: the page
+		// that runs the probe is the page explaining why you cannot log in yet, so it sits outside
+		// every guard and so must what it calls. Both are READS — the mint creates ceremony state,
+		// not configuration — so the qn.6f constraint this list carries is unmoved: `/api/onboarding/`
+		// still means pre-auth and read-only, and quince#908's pre-auth WRITE went elsewhere for
+		// exactly that reason.
+		"GET /api/onboarding/probe/nonce", "GET /api/onboarding/probe",
 		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
 		// Registration is deliberately NOT here: it needs a session, which is what makes it the
 		// half that touches none of these lists.
@@ -207,6 +214,10 @@ func setupAllowed(r *http.Request) bool {
 	case "GET /api/health",
 		"GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup", "POST /api/auth/logout",
 		"GET /api/onboarding/https",
+		// The probe pair, for the same reason the HTTPS step is here: a zero-storage first run is
+		// exactly when somebody is working out how to reach quince securely, and 503ing the probe
+		// would leave that step unable to check the name it is about to recommend.
+		"GET /api/onboarding/probe/nonce", "GET /api/onboarding/probe",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
 		// The pre-auth transport opt-in (quince#908 slice 6). A zero-storage first run is exactly
 		// the install it exists for — the user has declared nothing yet and cannot even set a

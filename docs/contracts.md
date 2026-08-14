@@ -194,7 +194,8 @@ disagreeing with it, which is why the guard is named in the ruling instead of le
 rest of the proposal — the shape it guessed at, and the three questions it left open — is gone: the
 ruling above says all of it, and two statements of one decision is how they come to disagree.
 
-**The dead end has no unauthenticated exit today.** On plain http at a LAN address
+**The dead end had no unauthenticated exit when this was raised** — read the tense literally, because
+the ruling above is what changed it and the counts below describe that moment. On plain http at a LAN address
 `refuseInsecureOrigin` refuses `POST /api/auth/setup` **before** examining the password, so no
 credential can be obtained — and **no config-writing route is `authExempt`**; the list is nine
 routes, all auth, health, or an onboarding *read*. quince#908 §3 rules that an actionable config
@@ -476,9 +477,69 @@ Onboarding (qn.6f):
 
 ```
 GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_proto" | "none"}
-     // PRE-AUTH — the fifth exempt route, and the only onboarding one, BY EXACT PATH.
+     // PRE-AUTH, BY EXACT PATH. It was the ONLY onboarding exemption until the probe
+     // pair below; the exact-path constraint is what let a second and third be added
+     // deliberately rather than by a prefix widening underneath everybody.
      // complete = this origin is already encrypted, so nothing needs doing.
+
+GET  /api/onboarding/probe/nonce  → {nonce}
+     // PRE-AUTH, SAME-ORIGIN, and NEVER CORS-readable. The asymmetry IS the gate.
+GET  /api/onboarding/probe?nonce= → {nonce, detected}
+     // PRE-AUTH, and the ONLY endpoint in this product answering
+     // Access-Control-Allow-Origin — and only to a nonce this daemon minted.
+     // An ungated call still answers 200 with no header: a refusal must be
+     // indistinguishable from a network error to the page that sent it.
 ```
+
+**RULED and IMPLEMENTED: the PROBE PAIR — Operator ruling 2026-08-14, for `qn.6f` slice 4 and
+quince#939.** A page redirects a user to a name only after proving *the client that is about to be
+redirected* can reach **this** quince there, and after learning **what quince saw** on that connection.
+
+**`/api/health` GETS NO CORS. Not now, and not by citing this ruling later.** That was the shape the
+issue proposed and it did not survive: health carries `version`, `mode`, `reconciling`, the muxer list
+with names and states, and `insecure_transport_allowed` — and that last one is a machine-readable
+*this box serves cookies without `Secure`*, which is a recon primitive quince#933's banner exists to
+warn a human about. **The probe does not need health's payload; it needs one readable fact.**
+
+**THE GATE IS THE NONCE, NOT THE INSTALL STATE.** `needs_setup` was the obvious gate and is wrong: an
+admin may configure TLS from Settings long after the install is claimed, and gating on first run would
+leave the later path unable to probe. A legitimate page obtained its nonce **same-origin**; a drive-by
+page has none, gets no header, and reads nothing — it cannot even distinguish *wrong quince* from
+*network error*, which is correct, because a failure is a failure either way.
+
+**Four constraints, part of the ruling rather than implementation detail:**
+
+1. **The nonce travels in the QUERY STRING and the request stays a SIMPLE GET.** A custom header
+   triggers a CORS **preflight**, and the `OPTIONS` preflight does not carry the header's *value* — so
+   the gate would have nothing to gate on, leaving only *allow every preflight blindly* or *refuse
+   them all*. Keeping it simple removes the problem rather than solving it.
+2. **Never `Access-Control-Allow-Credentials`.** The endpoint is unauthenticated and must stay so;
+   with credentials the widening becomes a cross-origin door onto a cookie-bearing request, which is a
+   different decision from the one taken.
+3. **Echo the caller's `Origin`, never `*`, and send `Vary: Origin`** — including on the ungranted
+   answer. The header is origin-dependent by construction, so an intermediary caching without `Vary`
+   can hand one origin's grant to another, quietly restoring the wildcard this ruling refused.
+4. **The body is `{nonce, detected}` and nothing else.** Adding a field is a contracts change **and
+   needs this ruling revisited**, because *it leaks nothing* is the entire safety argument. It has
+   already been revisited once: the body was `{nonce}` alone until quince#939 showed a probe that must
+   report what quince **saw** rather than only that it answered.
+
+**`detected` COMES FROM `detectHTTPS`** — the same function `GET /api/onboarding/https` uses, required
+by the ruling. A predicate computed twice diverges, and three separate files in this codebase carry a
+paragraph about having been bitten by exactly that.
+
+**THE NONCE IS MULTI-USE WITHIN A SHORT TTL, and that was left to the spec.** Chosen: **two minutes,
+multi-use.** A ceremony challenge is single-use because it is worth a **proof**, and a proof
+authorises a mutation — one that survives a failed attempt can be replayed against a second. This
+token is worth an **answer** to a question its holder could already ask same-origin, so a replay buys
+nothing; and single-use would break the legitimate case the ruling named, where **one probe tries more
+than one name** and a spent challenge makes the second attempt look like a failure. **The TTL is
+therefore the whole bound**, and it is sized for a human reading an answer rather than for a round
+trip.
+
+**The mint is capped and evicts oldest-first.** It is unauthenticated, so without a bound it is an
+allocation any visitor can drive; a refusal would let a flooder deny the mint to everybody else, where
+eviction costs the flooder their own oldest token.
 
 **RULED and IMPLEMENTED: the FIRST-RUN SETUP STATE — quince serves with no storage (`qn.6e`).**
 Operator ruling 2026-08-07 on quince#502, option (a): **any zero-storage start IS the onboarding
@@ -501,6 +562,7 @@ GET  /api/health                    GET/PUT /api/config
 GET  /api/auth/status               POST    /api/config/storage
 POST /api/auth/{setup,login,logout} POST    /api/storages/probe
 GET  /api/onboarding/https          POST    /api/storages/probe/hook
+GET  /api/onboarding/probe{,/nonce}
 ```
 
 **The two probes are not an afterthought.** The storage step's whole job is to let a user check a

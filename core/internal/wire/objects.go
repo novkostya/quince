@@ -372,6 +372,37 @@ type OnboardingHTTPS struct {
 	Detected string `json:"detected"` // tls | forwarded_proto | none
 }
 
+// ProbeNonce is GET /api/onboarding/probe/nonce — the token a page obtains SAME-ORIGIN before probing
+// a name it is about to be redirected to (Operator ruling 2026-08-14, for quince#908 slice 4 and
+// quince#939).
+//
+// The mint response is never CORS-readable, and that asymmetry IS the gate: a legitimate page holds a
+// nonce, a drive-by page holds none.
+type ProbeNonce struct {
+	Nonce string `json:"nonce"`
+}
+
+// ProbeResult is GET /api/onboarding/probe?nonce=… — the cross-origin half, and the only endpoint in
+// this product that answers with `Access-Control-Allow-Origin`.
+//
+// TWO FIELDS, AND THE LIMIT IS THE SAFETY ARGUMENT RATHER THAN TASTE. The ruling permitted the
+// widening because this body gives up nothing a successful connection has not already revealed to the
+// page that made it — so **adding a field is a contracts change AND needs that ruling revisited.** It
+// has been revisited once already: the body was `{nonce}` alone for about an hour, until quince#939
+// showed a probe that must report what quince SAW rather than only that it answered.
+//
+//	Nonce      echoed back. Proves the caller reached THIS quince rather than another one answering
+//	           at that name — without it, success means only "a quince answered".
+//	Detected   what quince saw on the probe request's OWN connection: its own TLS, a forwarded
+//	           scheme, or neither. `none` behind a working https proxy is the nginx caveat.
+//
+// `Detected` TAKES THE SAME VALUES AS `OnboardingHTTPS.Detected` and comes from the same function.
+// Two three-ways for one question is the defect this codebase names most often.
+type ProbeResult struct {
+	Nonce    string `json:"nonce"`
+	Detected string `json:"detected"` // tls | forwarded_proto | none
+}
+
 // StorageHookCheckRequest is POST /api/storages/probe/hook (qn.6e): does the operator's constrained
 // ZFS helper actually work, and does it agree about the parent dataset?
 //
