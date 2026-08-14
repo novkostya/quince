@@ -4,6 +4,89 @@ Breaking deployment changes, newest first. Each entry says what to do **before**
 
 ---
 
+## `storage.zfs.hook_cmd` is retired — convert it, AND trust the host key, before you upgrade
+
+**This one does not refuse to start.** Every other entry below stops the daemon and prints what to
+write. This one starts, discards the storage the invalid line belongs to, and shows you
+**"Add your first storage"** — on an install that has one and has been backing up to it for months.
+Backups stop, and the only account of why is a line in the startup log.
+
+So read this before you pull the image, not after.
+
+### Do this first
+
+`hook_cmd` was one free-text ssh command line. It is now the fields that command line contained:
+
+```yaml
+# before
+storage:
+  - name: nas
+    path: /backups
+    backend: zfs
+    zfs:
+      parent_dataset: tank/quince
+      hook_cmd: ssh -i /data/keys/zfs -p 22 quince-hook@nas.example
+
+# after
+storage:
+  - name: nas
+    path: /backups
+    backend: zfs
+    zfs:
+      parent_dataset: tank/quince
+      ssh_user: quince-hook
+      ssh_host: nas.example
+      ssh_port: 22             # optional, 22 if you leave it out
+      ssh_key: /data/keys/zfs  # optional, this is the default
+```
+
+`ssh_user` and `ssh_host` are the two with no default; the other two can be omitted entirely if
+they match the values above.
+
+### Then trust the host key — converting the keys is NOT enough
+
+Your old `hook_cmd` supplied its own ssh options. The composed transport supplies its own instead,
+and they are stricter: `BatchMode=yes`, `StrictHostKeyChecking=yes`, and
+`UserKnownHostsFile=/data/keys/known_hosts`.
+
+**That file is empty on an install upgrading from `hook_cmd`**, so ssh refuses every connection to
+your helper host until it has an entry — correctly, because a container has no terminal to answer a
+host-key prompt on and trusting whoever answers first is not a safe default.
+
+Two ways to fill it, and the first is the one to use:
+
+1. **The add-storage form does the whole ceremony.** It shows you the host's fingerprint, you check
+   it against the host itself, and quince writes the entry. On the host, the command to compare
+   against is:
+
+   ```sh
+   ssh-keyscan localhost | ssh-keygen -lf -
+   ```
+
+   That asks the running sshd what it actually presents, so a key sitting in a file that sshd does
+   not serve cannot produce a mismatch you would spend an hour on.
+
+2. Or write `/data/keys/known_hosts` yourself, in the ordinary `known_hosts` format, one host.
+
+### If you upgrade first
+
+Nothing is lost and nothing is written — the config is **discarded**, not rewritten, and your
+`config.yml` still says exactly what you wrote. The daemon serves setup only.
+
+The cause is in two places: the startup log (`config warning path=storage[0].zfs.hook_cmd`) and
+`GET /api/config`, which returns the same warning plus `discarded: true` and your file verbatim.
+It is **not** in the screen you land on. Fix the config, restart, and the storage comes back with
+its versions — startup reconciliation re-registers them from their `quince-version.json` markers,
+as it always has.
+
+### Why a free-text command line had to go
+
+`hook_cmd` was split on whitespace to build an argv, so a key path containing a space produced an
+argv that was silently wrong, with no escaping an operator could have written. Fields compose an
+array instead, and the question stops existing.
+
+---
+
 ## `qn.6c` — `storage:` is now the list itself
 
 **If you have already written `storage.storages:` per the entry below, that shape no longer parses.
