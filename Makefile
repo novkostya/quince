@@ -846,21 +846,44 @@ endif
 # is a race with whoever takes it in between; letting the RUNTIME fail to bind and trying the next
 # port makes the allocator and the binder the same actor, so there is no window. It reports the port
 # it got, because a demo URL nobody can derive is the same as no demo.
+#
+# RE-MEASURED 2026-08-14 and the `-p 0:` clause above still holds: `run-exit=1`, no published port,
+# no listening socket. Recorded because the first attempt at the fix below believed it had worked —
+# the run was wrapped in `>/dev/null 2>&1`, its exit code never read, and `nerdctl port` then printed
+# `0.0.0.0:0` for a container that had failed to start.
+#
+# WHAT CHANGED IS WHERE THE TRYING STARTS (quince#913). It began at a FIXED 8968 and scanned ten,
+# which is a window that closes on its own: this box runs several runners, each parks a demo for the
+# life of its PR, and on 2026-08-14 twelve containers held 8968-8977 and this target refused outright.
+# It now draws from the same wide range `deploy/storageless-smoke` uses and redraws on refusal, so a
+# busy box costs a retry rather than a refusal. The two scripts had mirror-image versions of one bug —
+# a fixed base with a short scan here, a random draw with an assumed neighbour there — and they are
+# fixed together, because fixing one leaves the other to be met from the opposite side.
+#
+# DEMO_PORT STILL PINS, AND NOW MEANS IT: a caller naming a port wants THAT port, so a refusal is
+# reported rather than silently walked away from.
 .PHONY: demo
 demo: image ## Build this branch and serve it in --demo mode on this box; prints a fetched URL
 	@set -e; \
 	$(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
-	port=$${DEMO_PORT}; [ "$$port" -ne 0 ] 2>/dev/null || port=8968; \
-	started=no; \
-	for try in 1 2 3 4 5 6 7 8 9 10; do \
+	pinned=$${DEMO_PORT}; [ "$$pinned" -ne 0 ] 2>/dev/null || pinned=""; \
+	started=no; try=0; \
+	while [ $$try -lt 20 ]; do \
+	  port=$$pinned; \
+	  [ -n "$$port" ] || port=$$(awk 'BEGIN{srand('$$try'+'$$$$');print 20000+int(rand()*20000)}'); \
 	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8968 \
 	       -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	       $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null 2>&1; then started=yes; break; fi; \
 	  $(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
-	  port=$$((port + 1)); \
+	  [ -z "$$pinned" ] || break; \
+	  try=$$((try + 1)); \
 	done; \
 	if [ "$$started" != yes ]; then \
-	  echo "demo: could not bind a port in 10 tries from $${DEMO_PORT:-8968} — say so as 'deploy: unavailable', never as silence"; \
+	  if [ -n "$$pinned" ]; then \
+	    echo "demo: DEMO_PORT=$$pinned could not be bound — say so as 'deploy: unavailable', never as silence"; \
+	  else \
+	    echo "demo: could not bind a free port in 20 tries — say so as 'deploy: unavailable', never as silence"; \
+	  fi; \
 	  exit 1; \
 	fi; \
 	ok=no; \
