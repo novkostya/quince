@@ -1177,18 +1177,39 @@ quince#756 gates that every field of it is present in every response; an attribu
 against data that already exists. What it would cost is removing `file_text`, which is the breaking
 direction — nearly free today (one user, no `v0.1` tag) and more expensive after release.
 
-**PROPOSED (gap): may a config write SUCCEED while the document declares NO STORAGE, when the write
-cannot change the storage list?**
+**RULED (was `PROPOSED (gap)`): a config write MAY succeed on a document declaring NO STORAGE, when
+the write does not REDUCE the declared count — Operator ruling 2026-08-14, relayed on quince#908.
+BUILT: `replaceLocked` refuses a transition, not a state.**
 
 <!-- gap-heading-check: ignore — this block cites the qn.6e zero-storage ruling and quince#394's,
-     quince#683's and quince#754's, all NEIGHBOURING rulings about other questions, as the evidence a
-     ruling on THIS one should have in hand. None of them answers it: whether a storage-neutral write
-     may succeed on a storageless document is open, and the block's span ends at its own last
-     paragraph. -->
+     quince#683's and quince#754's, all NEIGHBOURING rulings about other questions, as the evidence
+     the ruling on THIS one was taken against. Its own question is answered by the ruling stated in
+     its first paragraph, and the block's span ends at its own last paragraph. -->
 
-Raised by the implementer seat 2026-08-14 while building quince#908 slice 6c; **nothing is built and
-nothing here is decided.** The pre-auth transport route is stopped pending a ruling, and its mechanism
-exists only on a local branch.
+Raised by the implementer seat 2026-08-14 while building quince#908 slice 6c, and answered the same
+day. **`replaceLocked` now refuses a write that reduces the declared storage count to zero, and
+permits one that leaves an already-zero document at zero.**
+
+**THE SCOPE IS THE WRITE PATH, NOT THE PREDICATE, and that is part of the ruling rather than an
+implementation note.** `CheckStorages` has two callers asking different questions — `main.go` asks
+*may this daemon SERVE?*, at startup, where there is no previous document to compare against and
+`qn.6e`'s onboarding state depends on a static answer; `service.go` asks *may this WRITE land?*. The
+comparison lives at the second and the predicate stays static. Folding it into `CheckStorages` would
+silently delete the startup refusal `qn.6e` and quince#508 both rest on, and every write-path test
+would still pass.
+
+**Ruled knowing it is not scoped to the pre-auth route.** `PUT /api/config` gets the same relaxation:
+an authenticated admin on a storageless install now sees `200` where they saw `422`. That is recording
+reality rather than permitting a new state, and it was on the table when the ruling was taken rather
+than discovered during the build.
+
+**It also retires quince#574's workaround.** That defect — a public-demo visitor pressing Save with
+nothing changed and getting a `422`, because `config.storage` was null — was fixed by SEEDING demo
+storages in `serve()`, which is a workaround for a check that refused a state. The mechanism is gone
+at the root, so an unseeded demo saves too. The seeding stays for its other reason: the demo must
+declare the storages it SERVES, or Settings and the cards disagree.
+
+The reasoning that was put to the Operator is kept below, because the ruling turned on it.
 
 **IT IS MEASURED, NOT REASONED.** The route was written, and against a virgin install
 `POST /api/config/insecure-transport {"allow":true}` returned:
@@ -1210,33 +1231,19 @@ next restart"* (quince#394). That is a **regression** guard — a document going
 having none. It is implemented as a static predicate over the document, so it also fires when the
 count was already zero and the write leaves it zero.
 
-**Why this is not rung-local, and why the obvious fix was NOT taken.** The natural move is to let this
-one route write through a path that skips `CheckStorages`, on the ground that splicing a single
-boolean provably cannot change the storage list. That argument holds. What it costs is the invariant
-those comments are emphatic about: *"Both doors are now one door … Two call sites for one invariant is
-how they diverge"* (quince#683, quince#754). A third door that skips a ruled check is the shape canon
-warns against, and the seat that would add it is the seat that wants it.
+**The rejected fix is worth knowing, because it is the one somebody will re-propose.** Letting this one
+route write through a path that skips `CheckStorages` is locally justifiable — splicing a single
+boolean provably cannot change the storage list — and it was refused because it costs the invariant
+quince#683 and quince#754 are emphatic about: *"Both doors are now one door … Two call sites for one
+invariant is how they diverge."* The ruling fixes every door instead, which is the only option that
+honours those two rather than trading against them.
 
-**Two other facts a ruling should have in hand.**
-
-`qn.6e` already ruled that **a zero-storage start IS the onboarding state** and that the daemon serves
-in it (Operator, 2026-08-07, option (a)) — so the config this write would produce describes a state
-quince already runs in. The write is not creating an unstartable file; it is declining to record the
-state already in force.
-
-**And it is NOT reachable through `PUT /api/config` today**, measured rather than assumed: that route
+**And it was NOT reachable through `PUT /api/config` when this was filed**, measured rather than
+assumed — which is why it surfaced at the pre-auth route and not a rung earlier: that route
 is not in `authExempt`, so an unauthenticated `PUT` on a storageless install is `401`, not `422`. An
 *authenticated* admin would meet the same refusal, but `RequireStorage` routes them to
-`/onboarding/storage` before Settings renders. **So the only surface this blocks today is the pre-auth
-route — which is why it surfaced now rather than a rung ago.**
-
-**The questions that are the Operator's rather than the implementer's:** whether the storage
-requirement should become a **regression** check — refuse only a write that REDUCES the count to zero
-— which fixes every door at once and is what the check's own comment argues for; or whether a narrow
-storage-neutral write should be exempted case by case, keeping `PUT` strict at the cost of the second
-door canon dislikes; or whether a pre-auth caller should not be able to write to a storageless config
-at all, in which case quince#908 slice 6 needs a different exit from the dead end and the ruling of
-2026-08-14 is owed a correction.
+`/onboarding/storage` before Settings renders — so the pre-auth route was the only surface where it
+bit, and it bit there the day that route was first written.
 
 **RULED and IMPLEMENTED: `POST /api/config/storage` — the add (`qn.6e`, quince#502).**
 

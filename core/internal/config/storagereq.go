@@ -61,6 +61,21 @@ type StorageRequirement struct {
 // OK reports whether the process may serve.
 func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty && !r.Malformed }
 
+// declaredStorage counts the storages a document declares. Nil and empty both count zero — the
+// distinction `StorageRequirement` keeps as `Missing` versus `Empty` is worth two different
+// sentences to a user and nothing at all to a comparison.
+//
+// IT EXISTS FOR THE WRITE PATH'S TRANSITION CHECK and has exactly one caller (Operator ruling
+// 2026-08-14, quince#908). Unexported deliberately: anything outside this package asking "how many
+// storages" should read the list, and a helper that looks like a general accessor invites the
+// transition check to be re-derived somewhere it does not belong.
+func declaredStorage(c Config) int {
+	if c.Storage == nil {
+		return 0
+	}
+	return len(*c.Storage)
+}
+
 // CheckStorages evaluates the requirement. environ is os.Environ()-style; it is read ONLY to
 // detect a retired variable for the explanation, never to resolve a path.
 //
@@ -69,6 +84,20 @@ func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty && !r.Malf
 // nil `Storage` is indistinguishable from a file that genuinely declares nothing. Passing nil is
 // correct for a caller that did not load from disk — `Service.Replace` validates a document that
 // already parsed, so there is no parse failure it could be hiding.
+//
+// IT IS A STATIC PREDICATE OVER ONE DOCUMENT, AND IT STAYS ONE. That is half of the Operator's
+// ruling of 2026-08-14 (quince#908) rather than an accident of how it was written. Its two callers
+// ask different questions:
+//
+//	main.go     may this daemon SERVE?   static. At startup there is no previous document, and
+//	                                     `qn.6e`'s onboarding state depends on this answering about
+//	                                     the document as it stands.
+//	service.go  may this WRITE land?     a transition — and the comparison lives THERE, not here.
+//
+// SO DO NOT MAKE THIS FUNCTION A REGRESSION CHECK. *"The storage requirement becomes a regression
+// check"* is a sentence that reads as licence to edit this predicate, and doing so would silently
+// delete the startup refusal `qn.6e` and quince#508 both rest on — a daemon booting on defaults with
+// no storage and no error, which is the exact failure gap 3's ruling forbade.
 func CheckStorages(c Config, environ []string, warnings []Warning) StorageRequirement {
 	r := StorageRequirement{}
 	// THE PARSE FAILURE OUTRANKS EVERYTHING BELOW, because everything below is read off a Config
