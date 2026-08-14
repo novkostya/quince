@@ -16,7 +16,7 @@ import {
 } from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
 import { CopyButton } from "@/components/CopyButton";
-import { APIError } from "@/lib/api";
+import { APIError, UnreachableError } from "@/lib/api";
 import type {
   ConfigFieldError,
   StorageHookCheck,
@@ -30,6 +30,11 @@ import type {
 // refusal names the field AND the remedy, and re-wording it client-side drops the half that tells
 // the user what to do.
 function serverSentence(err: unknown, fallback: string): string {
+  // A REQUEST THAT NEVER REACHED THE DAEMON CARRIES ITS OWN SENTENCE, and it must survive rather
+  // than fall through to the caller's fallback. Every fallback here names the operation — "could not
+  // check that path", "could not ask that host for its key" — which is exactly the wrong thing to
+  // tell someone whose server is down: it blames the input they typed correctly.
+  if (err instanceof UnreachableError) return err.message;
   if (err instanceof APIError) {
     const details = err.details as { errors?: ConfigFieldError[] } | undefined;
     const errs = details?.errors;
