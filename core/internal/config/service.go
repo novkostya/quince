@@ -471,16 +471,15 @@ const (
 	// wrong attribution this change exists to prevent.
 	SourceDemoSeed = "demo seed"
 
-	// SourceApplyCertificate and SourceRevertCertificate are the two doors onto `tls.*`, and
-	// `SetTLSFiles` takes a source parameter rather than carrying a constant for exactly the reason
-	// `SourceDemoSeed` gives above: it genuinely has two callers.
+	// SourceApplyCertificate is the door onto `tls.*` — reached only once a certificate has proved
+	// itself over the daemon's own https half, which is why it is one constant rather than two.
 	//
-	// THE SECOND ONE IS THE POINT OF NAMING THEM AT ALL. An apply that is never confirmed is undone
-	// by the daemon itself, minutes later, with nobody watching — so the operator's evidence that
-	// their certificate was removed, and that quince removed it deliberately, is this line in the
-	// log. Without it the pair simply disappears from `config.yml` and nothing anywhere says why.
-	SourceApplyCertificate  = "POST /api/onboarding/certificate/apply"
-	SourceRevertCertificate = "certificate revert — apply was not confirmed"
+	// THERE IS NO REVERT SOURCE, AND ITS ABSENCE IS THE DESIGN. An earlier shape wrote the pair when
+	// the user pressed Apply and wrote the file AGAIN to undo it minutes later if nobody confirmed;
+	// that needed a second constant, so the operator could tell from the log why their certificate
+	// had vanished. The trial now lives in `tlsx.Keeper` and touches no file, so an abandoned
+	// certificate leaves nothing to explain (Operator, 2026-08-14, on quince#977).
+	SourceApplyCertificate = "POST /api/onboarding/certificate/confirm"
 )
 
 // Replace validates a full-document config, writes it canonically, updates the live snapshot, and
