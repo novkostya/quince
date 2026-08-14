@@ -470,6 +470,17 @@ const (
 	// callers, and a line reading `PUT /api/config` for a demo seed would be the exact class of
 	// wrong attribution this change exists to prevent.
 	SourceDemoSeed = "demo seed"
+
+	// SourceApplyCertificate and SourceRevertCertificate are the two doors onto `tls.*`, and
+	// `SetTLSFiles` takes a source parameter rather than carrying a constant for exactly the reason
+	// `SourceDemoSeed` gives above: it genuinely has two callers.
+	//
+	// THE SECOND ONE IS THE POINT OF NAMING THEM AT ALL. An apply that is never confirmed is undone
+	// by the daemon itself, minutes later, with nobody watching — so the operator's evidence that
+	// their certificate was removed, and that quince removed it deliberately, is this line in the
+	// log. Without it the pair simply disappears from `config.yml` and nothing anywhere says why.
+	SourceApplyCertificate  = "POST /api/onboarding/certificate/apply"
+	SourceRevertCertificate = "certificate revert — apply was not confirmed"
 )
 
 // Replace validates a full-document config, writes it canonically, updates the live snapshot, and
