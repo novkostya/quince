@@ -82,3 +82,66 @@ func TestZFSHelperScriptIsStatic(t *testing.T) {
 		}
 	}
 }
+
+// THE HEADER SAYS "EVERYTHING QUINCE IS ALLOWED TO DO", SO EVERY ARM HAS TO BE IN IT (quince#1008).
+//
+// It listed four of six: `list` and `capacity` were missing. The rewrite that introduced the
+// sentence argued for itself on exactly this ground — that the header "now states what the arms
+// below permit, so the sentence is checkable against the code under it" — and it was short by two.
+//
+// SO THE CHECK IS MECHANICAL NOW, because a totality claim maintained by hand is one verb behind
+// from the moment somebody adds a verb. `rollback` and `capacity` were both added after this file
+// was written, and both are how the header got out of date the last two times.
+//
+// IT READS THE ARMS OUT OF THE `case`, not out of a list here. A second list would be a third place
+// to forget, which is the defect one size up.
+func TestHelperHeaderNamesEveryArm(t *testing.T) {
+	header, _, found := strings.Cut(zfsHelperScript, "\nset -eu")
+	if !found {
+		t.Fatal("the helper no longer opens with a comment block followed by `set -eu` — this test " +
+			"cannot tell the header from the code")
+	}
+
+	// Each arm is `  <verb>) ` at the start of a line inside the case block. Taken from the file so
+	// a new verb is covered the day it lands rather than the day somebody remembers this test.
+	var arms []string
+	for _, line := range strings.Split(zfsHelperScript, "\n") {
+		verb, rest, ok := strings.Cut(strings.TrimSpace(line), ")")
+		if !ok || verb == "" || strings.ContainsAny(verb, " \t\"$#(|") || !strings.HasPrefix(rest, " ") {
+			continue
+		}
+		arms = append(arms, verb)
+	}
+	if len(arms) < 6 {
+		t.Fatalf("found %d case arms (%v) — the parse no longer matches the script's shape, so this "+
+			"test would pass by finding nothing", len(arms), arms)
+	}
+
+	// THE VERB ITSELF NEED NOT APPEAR — the header is prose for an operator, not a symbol table, and
+	// "read snapshot lists and free space" is better copy than "list, capacity". So each arm is
+	// matched against the words that stand for it, and a new arm with no entry here FAILS: that is
+	// the moment somebody has to decide what the header should say about it.
+	stands := map[string][]string{
+		"create":   {"create child datasets"},
+		"snapshot": {"take, destroy or roll back"},
+		"destroy":  {"take, destroy or roll back"},
+		"rollback": {"roll back"},
+		"list":     {"snapshot lists"},
+		"capacity": {"free space"},
+	}
+	for _, arm := range arms {
+		phrases, known := stands[arm]
+		if !known {
+			t.Errorf("the `%s)` arm is not described in the header, and this test does not know what "+
+				"it should say. Add the arm to the header sentence and a phrase for it here — the "+
+				"header claims to be EVERYTHING quince may do on that host.", arm)
+			continue
+		}
+		for _, p := range phrases {
+			if !strings.Contains(header, p) {
+				t.Errorf("the header does not say %q, which is what stands for the `%s)` arm.\n"+
+					"header:\n%s", p, arm, header)
+			}
+		}
+	}
+}

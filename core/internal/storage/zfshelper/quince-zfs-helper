@@ -2,8 +2,9 @@
 # quince-zfs-helper — everything quince is allowed to do on this host.
 #
 # Under one parent dataset, named in the authorized_keys forced command: create child datasets,
-# and take, destroy or roll back @quince-* snapshots. It cannot destroy a dataset, cannot touch
-# anything outside that parent, and runs no command that is not below.
+# take, destroy or roll back @quince-* snapshots, and read snapshot lists and free space. It
+# cannot destroy a dataset, cannot touch anything outside that parent, and runs no command that
+# is not below.
 set -eu
 
 # The parent comes from the forced command, so it is read before the client's request replaces "$@".
