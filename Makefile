@@ -818,9 +818,16 @@ endif
 # `ui/test-results/<test>-retry1/trace.zip`, 62 KB, plus `error-context.md` for both the attempt and
 # the retry. The repo is already bind-mounted, so the artifact was reachable all along and unadvertised.
 #
-# THE NO-TRACE BRANCH IS NOT A FAILURE PATH. `trace: on-first-retry` fires on a RETRY, and retries are
-# on only under `CI=1` — so a local run that fails once legitimately produces none, and saying "no
-# trace was written" without that sentence would send somebody looking for a lost file.
+# THE NO-TRACE BRANCH IS NOT A FAILURE PATH, and it is worded WITHOUT naming the setting on purpose.
+# Whether a trace exists is `ui/playwright.config.ts`'s `trace:` decision for this outcome — so "none
+# here" is a configuration, not a lost file, and saying so without that sentence would send somebody
+# hunting one.
+#
+# THE SETTING IS NOT NAMED BECAUSE IT IS MID-CHANGE. This was written against `on-first-retry` with
+# retries under `CI=1`; quince#964 replaces it with `retain-on-failure` and removes retries, which
+# makes a trace MORE available rather than less — the opposite of what a comment naming the old
+# setting would still be promising an hour later (quince#973 review). The `find` below globs rather
+# than naming a path for the same reason, so it locates whatever Playwright writes.
 #
 # CLEARED BEFORE THE RUN, so what is there is from THIS run. Stale results from a previous failure
 # would be worse than none: a session reading a trace for a test that passed this time is being
@@ -857,8 +864,8 @@ else
 	    find ui/test-results -name trace.zip 2>/dev/null | sed 's|^|  |'; \
 	    echo "  open one with:  pnpm -C ui exec playwright show-trace <path>"; \
 	  else \
-	    echo "gates-ui-e2e: NO trace was written — 'trace: on-first-retry' only fires on a RETRY,"; \
-	    echo "  and retries are on only under CI=1 (ui/playwright.config.ts). Not a lost artifact."; \
+	    echo "gates-ui-e2e: no trace here — Playwright keeps one only for the outcomes"; \
+	    echo "  ui/playwright.config.ts's 'trace:' asks for. That is the configuration, not a lost file."; \
 	  fi; \
 	  find ui/test-results -name error-context.md 2>/dev/null | head -1 | sed 's|^|gates-ui-e2e: error context: |'; \
 	fi; \
