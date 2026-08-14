@@ -368,6 +368,15 @@ POST /api/auth/reauth/begin {operation, target?}  → 200 {ceremony, options}
      // a user who cannot do the thing is told what to add instead of meeting an empty
      // authenticator prompt. IT IS COPY AND NOT A GUARD: the removal is refused either way, by
      // rule 2, on what proved the request. Deleting this check would weaken nothing.
+     // 409 last_credential for `remove_passkey` WHEN NOTHING BUT THE TARGET WORKS HERE, and on
+     // this operation it is NOT merely copy. A `remove_passkey` ceremony is issued with an
+     // `allowCredentials` list holding every credential at this address EXCEPT the target — an
+     // empty list means ANY credential to WebAuthn, so a ceremony begun with nothing to allow
+     // would offer the very passkey being removed. Refusing here is what makes that state
+     // unreachable. The list is also enforced at `finish` by the library, so the exclusion is a
+     // second, independent refusal of a self-proof rather than a hint to the browser.
+     // Every other operation is issued fully discoverable, with no allow-list: they concern the
+     // credential SET rather than a member of it, so a restriction would exclude nothing.
 POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
      // SESSION REQUIRED, AND IT SETS NO COOKIE. `passkeys/login/finish` sets two and returns
      // {state, csrf_token}; this returns a token and nothing else. Issuing a session here
@@ -384,11 +393,11 @@ POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
      // · 400 no_ceremony · 429 rate_limited · 409 passkey_rp_mismatch.
 ```
 
-**THREE ENDPOINTS CONSUME THE PROOF, and one still does not.** `PUT /api/auth/password`
-(`set_password`), `POST /api/auth/passkeys/register/begin` (`add_passkey`) and `DELETE
-/api/auth/password` (`remove_password`) each demand one; `DELETE /api/auth/passkeys/{id}`
-(`remove_passkey`) is the remaining one, and until it lands a `remove_passkey` proof is spendable
-nowhere.
+**ALL FOUR OPERATIONS NOW HAVE A CONSUMER, one per endpoint:** `PUT /api/auth/password`
+(`set_password`), `POST /api/auth/passkeys/register/begin` (`add_passkey`), `DELETE
+/api/auth/password` (`remove_password`) and `DELETE /api/auth/passkeys/{id}` (`remove_passkey`).
+`ProofOperation`'s set is closed, so this list is exhaustive by construction rather than by
+maintenance — if a fifth operation is ever added, it has no consumer until one is written.
 
 **This paragraph said *"NOTHING CONSUMES THE PROOF YET"* until slice 6a, three slices after that
 stopped being true** — the shape quince#409 named, where the sentence describing the WHOLE is the
@@ -422,22 +431,31 @@ GET    /api/auth/passkeys        → 200 {passkeys: [...], rp_id, supported, has
        // party at all, so the surface can mark rows bound to another address, and refuse to offer
        // a button on a tier that cannot work, WITHOUT re-deriving the domain in the browser.
        // `has_password` is whether an admin password exists at all (quince#855) — see below.
-DELETE /api/auth/passkeys/{id}   → 204
+DELETE /api/auth/passkeys/{id} {current_password?, proof?}  → 204
        // SESSION REQUIRED. 204 WHETHER OR NOT A ROW WENT: removing a credential that is already
        // gone is the state the caller wanted, and a 404 would make a retry, or a second tab, look
        // like a failure the user must act on.
-       // 409 last_credential when the install has NO PASSWORD and this is the last passkey that
-       // works at this rpId — the mirror of DELETE /api/auth/password's refusal, which this
-       // endpoint shipped without (quince#888). Without it, password → passkey emptied the
-       // credential set in two clicks, at which point `configured` is false, `auth/status`
-       // answers `needs_setup`, and POST /api/auth/setup is pre-auth by exact path: anyone who
-       // could reach the address completed first run.
-       // THE SAME CODE AS THE PASSWORD PATH, not a second one: both mean "this removal would
-       // leave you no way in", and a client already knows which endpoint it called. The two
-       // messages differ, because the remedies do — there, add a passkey; here, set a password
-       // or add another.
-       // IT IS A CLAIM ABOUT THE RESULTING STATE, which is what keeps the 204 above intact: an
-       // id matching no row changes nothing, so it cannot be the last credential.
+       // SINCE qn.6n IT DEMANDS A CREDENTIAL OTHER THAN THIS ONE — rule 2. `proof` is a token
+       // minted for `remove_passkey` with THIS id as its target; `current_password` is the
+       // lighter alternative and is accepted, because the password is not the thing being removed.
+       // A BODY ON A DELETE, for D9's reasons and in the same shape as DELETE /api/auth/password:
+       // absent-tolerant, 400 only on a malformed one.
+       // TWO FACTORS QUALIFY HERE AND ONLY ONE DOES ON THE PASSWORD PATH. That asymmetry is the
+       // rule, not a convenience: a passkey may be removed by the password OR by another passkey,
+       // and the password may be removed ONLY by a passkey. It is why this is the one removal
+       // where a client has a choice to make.
+       // 409 wrong_credential when what was presented IS the target.
+       // 409 last_credential from POST /api/auth/reauth/begin — NOT from this endpoint — when no
+       // credential at this address other than the target could prove it. The message distinguishes
+       // the two states it now covers, because they are not both lockouts: with no password it is a
+       // dead end (*set a password first, or add another passkey*), and with one the removal is
+       // possible and the ceremony merely cannot help (*confirm with your password instead*). The
+       // shipped client falls back to the password form on exactly that distinction.
+       // THE SAME CODE AS THE PASSWORD PATH, not a second one: both mean "nothing here can
+       // authorise this", and a client already knows which endpoint it called.
+       // THE 204 SURVIVES RULE 2 WITH NO SPECIAL CASE. An id matching no row still has to be proven
+       // by something other than itself, and a subject that is not the target satisfies that —
+       // so the guard passes and the no-op still succeeds.
 PATCH  /api/auth/passkeys/{id} {name} → 200 {passkey}
        // SESSION REQUIRED. 404 when there is no such credential — UNLIKE delete, because the
        // caller asked for a specific end state that did not happen. 422 name_required.

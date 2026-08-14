@@ -221,6 +221,37 @@ already-ruled *"every mutating endpoint accepts `current_password` as an alterna
 preference: a caller presenting nothing has broken a rule about credentials, not about JSON, so it
 takes the credential refusal, whose sentence names what to present. A malformed body is still a 400.
 
+### D10. The passkey path is the ONE removal with a client-side choice, and the server decides it
+
+Rule 2 leaves `DELETE /api/auth/passkeys/{id}` with **two** qualifying factors — the password, or a
+different passkey — where `DELETE /api/auth/password` has only one. So this is the only surface where
+a client must pick, and the decision is where the picking happens.
+
+**The client tries the passkey and falls back on the server's refusal.** It does not compute which
+factor is available: *"does a non-target credential exist at this rpId"* is an rpId rule, and a second
+implementation of one is what `Passkeys.tsx` already argues against on the removal button. `reauth/begin`
+answers `409 last_credential` when nothing but the target works here, and the client shows the password
+form on that — never before it.
+
+**`ErrLastPasskey` therefore carries `HasPassword`**, because the two states it now covers are not both
+lockouts. Without a password it is a dead end — *set a password first, or add another passkey*. With
+one the removal is perfectly possible and only the **ceremony** cannot help — *confirm with your
+password instead*. A single message would be false in one of the two, and false in the direction that
+tells a user they are locked out when they are not.
+
+**One code, not two.** The client already distinguishes them from `has_password`, which the passkey
+list carries; a second wire code would encode a fact the client holds. That is the same test
+`contracts.md` applies when it refuses a second code for the two lockout paths, applied to a case where
+it comes out the same way — unlike `wrong_credential`, where the remedies genuinely differ.
+
+**The allow-list is NOT copy, and this is where 6b departs from 6a.** 6a's begin-time refusal is purely
+a better message; deleting it would weaken nothing. Here the ceremony is issued with `allowCredentials`
+holding every credential except the target, and **an empty list means ANY credential** to WebAuthn and
+to the library's finish-time check. So the refusal is what keeps the list non-empty, and without it a
+ceremony would offer the very passkey being removed. The library enforces the list at `finish`
+(`login.go:292-301`), which makes the exclusion a second, independent refusal of a self-proof rather
+than a hint to the browser.
+
 ---
 
 ## Stories
@@ -364,8 +395,8 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | quince#928, **merged** |
 | **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **merged** |
 | **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony records WHAT IT WAS BEGUN FOR and the registration finisher refuses the other kind. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, **merged** |
-| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | quince#937, *this PR* |
-| **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | not open |
+| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | quince#937, **merged** |
+| **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | *this PR* |
 | **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
 
 **ROW 5b'S DESCRIPTION WAS STALE THE MOMENT IT MERGED, AND NOT ABOUT ITS STATUS.** It read *"a ceremony
