@@ -2,7 +2,9 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { api, messageFor } from "@/lib/api";
+import { api, APIError, messageFor } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { removePasskey } from "@/lib/auth";
 import { AddPasskeyDialog } from "./AddPasskeyDialog";
 import { forgetPasskey } from "@/lib/passkeyHint";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -88,16 +90,37 @@ export function Passkeys() {
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });
 
+  // THE ROW WAITING FOR A TYPED PASSWORD, or null. Set only AFTER the server has said that no
+  // passkey at this address can prove this removal — never guessed ahead of the refusal, because
+  // deciding client-side which factor is available would be a second implementation of an rpId rule
+  // (qn.6n rule 2; `lib/auth.ts` carries the reasoning).
+  const [passwordFor, setPasswordFor] = React.useState<string | null>(null);
+  const [password, setPassword] = React.useState("");
+
   const remove = useMutation({
-    mutationFn: (id: string) => api.del<void>(`/api/auth/passkeys/${encodeURIComponent(id)}`),
-    onSuccess: (_data, id) => {
+    mutationFn: ({ id, pw }: { id: string; pw?: string }) => removePasskey(id, pw),
+    onSuccess: (_data, { id }) => {
       // REMOVING THE LAST ONE STOPS THE UNPROMPTED SHEET. Otherwise the next visit fires a sheet
       // with nothing to offer — the exact wrong-guess the hint exists to prevent, caused by us.
       //
       // Only when it was the last: with others left, a passkey can still work in this browser, and
       // the removed one may not even have been this device's.
       if (rows.length <= 1 && rows.some((p) => p.id === id)) forgetPasskey();
+      setPasswordFor(null);
+      setPassword("");
       invalidate();
+    },
+    onError: (err, { id, pw }) => {
+      // THE FALLBACK, AND IT IS DRIVEN BY THE SERVER RATHER THAN BY A GUESS. `last_credential` on
+      // this path means *no passkey here can prove this removal*; whether that is a dead end or a
+      // redirection to the password is what `has_password` decides, and the server's own sentence
+      // says the same thing in words.
+      //
+      // NOT AFTER A PASSWORD ATTEMPT (`pw` set) — that would loop the form on a wrong password
+      // instead of showing why it was refused.
+      if (!pw && err instanceof APIError && err.code === "last_credential" && hasPassword) {
+        setPasswordFor(id);
+      }
     },
   });
 
@@ -114,6 +137,9 @@ export function Passkeys() {
   // `supported` absent is treated as NOT supported, so the add button stays disabled rather than
   // offering a ceremony this address may not be able to complete.
   const supported = passkeysSupported(data);
+  // ABSENT IS TREATED AS "NO PASSWORD", which is the conservative direction here: it withholds the
+  // fallback form rather than offering one against an install that may have nothing to type.
+  const hasPassword = data?.has_password === true;
 
   return (
     <div className="mt-8">
@@ -179,7 +205,7 @@ export function Passkeys() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => remove.mutate(p.id)}
+                onClick={() => remove.mutate({ id: p.id })}
                 disabled={remove.isPending}
               >
                 Remove
@@ -198,6 +224,52 @@ export function Passkeys() {
         <p className="mt-3 text-sm text-danger">
           {messageFor(remove.error, "Could not remove the passkey.")}
         </p>
+      ) : null}
+
+      {/* THE PASSWORD FALLBACK — qn.6n rule 2. It appears only after the server has said that no
+          passkey at this address can prove this removal, so it is never offered speculatively and
+          never offered on an install with no password. The message above already says why it is
+          here, in the server's own words, which is why this carries no explanatory copy of its own.
+
+          A `<form>` WITH A REAL SUBMIT, not a bare button: this is a password field, and quince#893
+          pins that shape across every surface that has one — the browser's own credential handling
+          keys off a form that submits. */}
+      {passwordFor ? (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            remove.mutate({ id: passwordFor, pw: password });
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <label className="text-xs text-muted" htmlFor="remove-passkey-password">
+              Your password
+            </label>
+            <Input
+              id="remove-passkey-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={remove.isPending || password === ""}>
+            Confirm
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setPasswordFor(null);
+              setPassword("");
+              remove.reset();
+            }}
+          >
+            Cancel
+          </Button>
+        </form>
       ) : null}
 
       <div className="mt-4">
