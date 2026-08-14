@@ -524,6 +524,11 @@ export interface StorageZFSHostKeyResponse {
   // reason is the daemon's own sentence when there is no key to show — unreachable, refused, no
   // answer. Every one of those is a 200: it is the ANSWER to the question, not a failure to answer.
   reason: string;
+  // trust is what known_hosts ALREADY says about the key just scanned. Absent when there is no key.
+  //
+  // `changed` IS WHY THIS IS NOT A BOOLEAN: the host is offering a different key from the recorded
+  // one, which is a rebuilt machine or an impersonation, and quince cannot tell which.
+  trust?: "unknown" | "trusted" | "changed";
 }
 
 export interface StorageZFSHostKeyTrustResponse {

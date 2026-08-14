@@ -586,6 +586,20 @@ type StorageZFSHostKeyResponse struct {
 	Found   bool               `json:"found"`
 	HostKey *StorageZFSHostKey `json:"host_key"`
 	Reason  string             `json:"reason"`
+	// Trust is what `known_hosts` ALREADY says about the key just scanned: `unknown`, `trusted` or
+	// `changed`. Empty when there is no key to compare against.
+	//
+	// WITHOUT IT THE SCAN TELLS THE OPERATOR NOTHING THEY DO NOT ALREADY KNOW, and the ceremony
+	// reads identically on every press: compare this fingerprint, then confirm it. Pressed on a host
+	// confirmed an hour earlier it asked for the comparison again and offered a button that would do
+	// nothing, since TrustHostKey returns early on an exact match (Operator, 2026-08-14).
+	//
+	// `changed` IS WHY THIS IS THREE VALUES AND NOT A BOOLEAN, and it is the one that matters. A
+	// host offering a DIFFERENT key from the recorded one is either a rebuilt machine or something
+	// impersonating it, and quince cannot tell which. Trust already refuses that; reporting it at
+	// SCAN time moves it to the moment the operator is looking at the fingerprint, which is the
+	// moment they can act on it.
+	Trust string `json:"trust,omitempty"`
 }
 
 // StorageZFSHostKeyTrustRequest records a confirmed key. It carries the LINE the operator was

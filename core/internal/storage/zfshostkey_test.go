@@ -202,3 +202,38 @@ func TestTrustHostKeyRefusesAMultiHostLine(t *testing.T) {
 			"usable, because ssh accepts a match on ANY line:\n%s", n, got)
 	}
 }
+
+// HostKeyTrustState IS WHAT THE SCAN REPORTS, and it must agree with TrustHostKey by construction —
+// both call hostKeyState. A scan answering `trusted` while trust refused would be worse than the
+// silence it replaces.
+func TestHostKeyTrustState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_hosts")
+	line, _ := aHostKeyLine(t, "nas.example:22")
+
+	if got := HostKeyTrustState(path, line); got != HostKeyUnknown {
+		t.Errorf("before recording = %q, want %q", got, HostKeyUnknown)
+	}
+	if err := TrustHostKey(path, line); err != nil {
+		t.Fatal(err)
+	}
+	if got := HostKeyTrustState(path, line); got != HostKeyTrusted {
+		t.Errorf("after recording the same key = %q, want %q", got, HostKeyTrusted)
+	}
+
+	// A DIFFERENT KEY FOR THE SAME HOST — the value this field exists for. Trust refuses it; the
+	// scan has to be able to SAY it, at the moment the operator is looking at the fingerprint.
+	other, _ := aHostKeyLine(t, "nas.example:22")
+	if got := HostKeyTrustState(path, other); got != HostKeyChanged {
+		t.Errorf("a different key for a recorded host = %q, want %q", got, HostKeyChanged)
+	}
+	if err := TrustHostKey(path, other); err == nil {
+		t.Error("trust accepted a changed key — the scan and the trust call disagree")
+	}
+
+	// UNPARSEABLE READS AS `unknown`, NOT AS AN ERROR: this is a read for a screen, and answering
+	// "I cannot tell" as "not recorded" keeps the ceremony's default of asking for a comparison.
+	if got := HostKeyTrustState(path, "not a known_hosts line"); got != HostKeyUnknown {
+		t.Errorf("junk = %q, want %q", got, HostKeyUnknown)
+	}
+}
