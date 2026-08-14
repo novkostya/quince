@@ -136,6 +136,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Muxer == nil { // external/--demo default: quince owns no muxer to restart
 		deps.Muxer = UnmanagedMuxer{}
 	}
+	if deps.ProbeNonces == nil { // holds no configuration, so every router gets a real one
+		deps.ProbeNonces = newProbeNonces()
+	}
 	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
 		deps.Ops = UnavailableDeviceOps{}
 	}
@@ -162,6 +165,11 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
 	apiMux.HandleFunc("GET /api/onboarding/https", deps.handleOnboardingHTTPS())
+	// THE PROBE PAIR (Operator ruling 2026-08-14). The mint is same-origin and never CORS-readable;
+	// the echo is the one endpoint in this product that answers `Access-Control-Allow-Origin`, and
+	// only to a caller presenting a nonce this daemon minted. Both handlers carry the argument.
+	apiMux.HandleFunc("GET /api/onboarding/probe/nonce", deps.handleProbeNonce())
+	apiMux.HandleFunc("GET /api/onboarding/probe", deps.handleProbe())
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())

@@ -66,6 +66,11 @@ type Deps struct {
 	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
 	// "trust nobody", which is the shipping default and today's behaviour.
 	Proxies *auth.TrustedProxies
+	// ProbeNonces backs the two probe endpoints (Operator ruling 2026-08-14). NewRouter fills it
+	// when a caller left it nil, so a test router and `--demo` both get a working probe rather than
+	// a nil dereference — the store holds no configuration and nothing outside this package needs
+	// to build one.
+	ProbeNonces *probeNonces
 	// Store is the app DB, for surfaces that read rows rather than a domain model. Passkey
 	// registration is the first: a credential list is rows, and a service in front of four SQL
 	// statements would be a facade rather than a boundary (qn.6k).
