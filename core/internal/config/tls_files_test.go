@@ -11,10 +11,10 @@ import (
 
 // quince#908 slice 5 — THE NARROW `tls.*` WRITE.
 //
-// Its one claim is the pair of guarantees an unconfirmed apply is built on: the write moves those two
-// keys and no others, and it hands back **the pair it displaced** rather than a pair some later reader
-// would have to go and find. Nothing here is about a route, a timer or a redirect; those are the
-// slices above this one.
+// Its claim is that the write moves those two keys, moves no others, and hands the result to the
+// running daemon. Nothing here is about a route, a trial or a timer — and since 2026-08-14 nothing
+// here is about a revert either: the trial lives in `tlsx.Keeper` and this function runs only once a
+// certificate has proved itself, so `config.yml` is never written for one that did not.
 
 // appliedPair records the last TLS pair an applier saw, so a test can tell "written to the file"
 // from "handed to the running daemon". The production applier is `subscribeTLS`, which calls
@@ -38,61 +38,39 @@ func applied(t *testing.T, svc *Service) *appliedPair {
 	return a
 }
 
-func TestSetTLSFilesMovesThePairAndReturnsWhatItDisplaced(t *testing.T) {
+func TestSetTLSFilesMovesThePairAndHandsItToTheDaemon(t *testing.T) {
 	svc := testService(t)
 	seen := applied(t, svc)
 
-	prev, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate)
-	if err != nil || len(errs) > 0 {
-		t.Fatalf("first apply: err=%v errs=%v", err, errs)
-	}
-	// FIRST RUN HAD NO CERTIFICATE, so the pair to go back to is the empty one — which is exactly
-	// what `Keeper.SetFiles` documents as "turn TLS off", and is why the revert needs no special
-	// case for a user who never had TLS.
-	if prev.CertFile != "" || prev.KeyFile != "" {
-		t.Fatalf("displaced pair on a first apply = %+v, want empty", prev)
+	if errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
+		t.Fatalf("apply: err=%v errs=%v", err, errs)
 	}
 	if got := svc.Current().TLS; got.CertFile != "/etc/quince/one.pem" || got.KeyFile != "/etc/quince/one.key" {
 		t.Fatalf("live config after apply = %+v", got)
 	}
+	// WRITTEN IS NOT SERVED. `replaceLocked` returns before `notify`, so a write that landed without
+	// notifying would leave the file right and the daemon serving whatever it had.
 	if seen.pair == nil {
 		t.Fatal("no applier ran: the pair was written but never handed to the running daemon")
 	}
-
-	// A SECOND APPLY DISPLACES THE FIRST, not the original. This is the ordering the revert depends
-	// on: a user who applies, does not confirm, and applies a different pair must be reverted to the
-	// pair the SECOND call replaced — otherwise the undo restores a certificate that was already
-	// gone.
-	prev2, errs, _, err := svc.SetTLSFiles("/etc/quince/two.pem", "/etc/quince/two.key", SourceApplyCertificate)
-	if err != nil || len(errs) > 0 {
-		t.Fatalf("second apply: err=%v errs=%v", err, errs)
-	}
-	if prev2.CertFile != "/etc/quince/one.pem" || prev2.KeyFile != "/etc/quince/one.key" {
-		t.Fatalf("displaced pair on the second apply = %+v, want the first pair", prev2)
-	}
 }
 
-// THE REVERT IS THE SAME CALL WITH THE PAIR IT WAS GIVEN, and an empty pair is a legal argument
-// rather than a sentinel meaning "do nothing".
+// BOTH PATHS EMPTY IS LEGAL, and it is how an authenticated admin turns TLS off.
 func TestSetTLSFilesAcceptsAnEmptyPairAndTurnsTLSOff(t *testing.T) {
 	svc := testService(t)
-	if _, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
 		t.Fatalf("apply: err=%v errs=%v", err, errs)
 	}
 	seen := applied(t, svc)
 
-	prev, errs, _, err := svc.SetTLSFiles("", "", SourceRevertCertificate)
-	if err != nil || len(errs) > 0 {
-		t.Fatalf("revert: err=%v errs=%v", err, errs)
-	}
-	if prev.CertFile != "/etc/quince/one.pem" {
-		t.Fatalf("displaced pair on revert = %+v", prev)
+	if errs, _, err := svc.SetTLSFiles("", "", SourceApplyCertificate); err != nil || len(errs) > 0 {
+		t.Fatalf("turn off: err=%v errs=%v", err, errs)
 	}
 	if got := svc.Current().TLS; got.Enabled() {
-		t.Fatalf("TLS still enabled after a revert to the empty pair: %+v", got)
+		t.Fatalf("TLS still enabled after writing the empty pair: %+v", got)
 	}
 	if seen.pair == nil || seen.pair.CertFile != "" || seen.pair.KeyFile != "" {
-		t.Fatalf("applier saw %+v, want the empty pair — a revert nobody applies leaves the daemon serving what it just undid", seen.pair)
+		t.Fatalf("applier saw %+v, want the empty pair — the daemon would go on serving what was removed", seen.pair)
 	}
 }
 
@@ -106,7 +84,7 @@ func TestSetTLSFilesAcceptsAnEmptyPairAndTurnsTLSOff(t *testing.T) {
 // already HOLDS a certificate can fail that way.
 func TestSetTLSFilesRefusesHalfAPairAndLeavesTheLIVEPairStanding(t *testing.T) {
 	svc := testService(t)
-	if _, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
 		t.Fatalf("seed: err=%v errs=%v", err, errs)
 	}
 	before := svc.Current()
@@ -115,7 +93,7 @@ func TestSetTLSFilesRefusesHalfAPairAndLeavesTheLIVEPairStanding(t *testing.T) {
 	}
 	seen := applied(t, svc)
 
-	_, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "", SourceApplyCertificate)
+	errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "", SourceApplyCertificate)
 	if err != nil {
 		t.Fatalf("unexpected write error: %v", err)
 	}
@@ -149,7 +127,7 @@ func TestSetTLSFilesLeavesTheRestOfTheDocumentAlone(t *testing.T) {
 		t.Fatal("seed config did not load")
 	}
 
-	if _, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
 		t.Fatalf("apply: err=%v errs=%v", err, errs)
 	}
 
@@ -180,17 +158,11 @@ func TestSetTLSFilesRefusesWhenTheFileOnDiskCouldNotBeRead(t *testing.T) {
 		t.Fatal("the seed did not produce a discarded document, so this proves nothing")
 	}
 
-	prev, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate)
+	errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate)
 	if err != nil {
 		t.Fatalf("unexpected write error: %v", err)
 	}
 	if len(errs) == 0 {
 		t.Fatal("a discarded config accepted a tls write")
-	}
-	// The displaced pair is still meaningful on a refusal: it is what the live document holds, so a
-	// caller who armed a revert against this would restore what is already there rather than
-	// turning off a certificate that is running.
-	if prev != svc.Current().TLS {
-		t.Fatalf("displaced pair %+v is not the live pair %+v", prev, svc.Current().TLS)
 	}
 }
