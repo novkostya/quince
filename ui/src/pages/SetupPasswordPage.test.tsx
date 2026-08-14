@@ -85,7 +85,16 @@ describe("the happy paths", () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }));
     expect(auth.setup).toHaveBeenCalledWith("hunter2");
-    expect(reg).toHaveBeenCalled();
+    // THE PASSWORD IS PRESENTED, AND THIS ASSERTION IS THE ONE THAT WAS MISSING WHILE THE FLOW WAS
+    // BROKEN — quince#930 review. `setup` above has just claimed the install, so `register/begin`
+    // meets rule 1 with a password and no credentials; without this argument the server verifies an
+    // empty string and answers `bad_password` about a field this screen never shows.
+    // `expect(reg).toHaveBeenCalled()` — what stood here — was true of the broken line too.
+    //
+    // MIRRORS THE FIRST-RUN ASSERTION FURTHER DOWN, deliberately. That path pins `{ firstRun: true }`
+    // for the same reason: the options object is the only thing distinguishing which endpoint pair
+    // and which guard this call meets, so it is the part worth pinning rather than the call itself.
+    expect(reg).toHaveBeenCalledWith("This device", { currentPassword: "hunter2" });
   });
 
   // SKIPPING IS NORMAL AND UNREMARKED — story 3. Unchecking must not cost a screen.
