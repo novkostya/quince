@@ -239,17 +239,34 @@ is the whole of the recovery story ruling B leans on (quince#841).
 Passkeys — registration (qn.6k; Operator ruling on quince#657, 2026-08-11):
 
 ```
-POST /api/auth/passkeys/register/begin  → 200 {ceremony, options}
+POST /api/auth/passkeys/register/begin {current_password?, proof?}  → 200 {ceremony, options}
      // SESSION REQUIRED. `options` is the W3C PublicKeyCredentialCreationOptions verbatim, for
      // navigator.credentials.create(). `ceremony` is an opaque SINGLE-USE key with a 2-minute
      // TTL, held in memory and lost on restart — the remedy is to press the button again.
      // 409 passkeys_unsupported_here when this address cannot be a relying party: an rpId must
      // be a DOMAIN, so a bare IP is refused HERE rather than minting a credential that could
      // never be used.
+     // AND SINCE qn.6n IT DEMANDS A PRESENT CREDENTIAL — rule 1, `add_passkey`. Either field
+     // satisfies it, exactly as on PUT /api/auth/password. 401 reauth_required when neither
+     // does · 401 bad_password · 429 rate_limited, the login bucket.
+     // ENFORCED AT **BEGIN**, WHICH IS THE OPPOSITE END FROM THE PASSWORD PATH, and the reason
+     // is the ceremony rather than a preference: a WebAuthn creation challenge is SINGLE-USE,
+     // so a client that learned at `finish` that a proof was needed would have to run
+     // navigator.credentials.create() a second time — another authenticator sheet for a
+     // credential the user already made. Refusing before a ceremony exists costs one round
+     // trip and costs the user nothing.
+     // THE EXEMPTION IS THE SAME ONE: an install with no credentials at all. That state cannot
+     // reach this endpoint anyway (it has no session), so in practice this pair always demands
+     // proof — stated because the exemption is `Configured()` and must not be re-derived here.
 POST /api/auth/passkeys/register/finish?ceremony=<key>&name=<label>  → 201 {passkey}
      // SESSION REQUIRED. THE BODY BELONGS TO THE AUTHENTICATOR — it is the credential response,
      // whose exact bytes are what the signature covers — so these two parameters are in the
      // query rather than alongside it.
+     // NO PROOF FIELD SINCE qn.6n, AND THAT IS A PROPERTY RATHER THAN AN OMISSION. A ceremony
+     // key is only ever produced by `begin` above, so holding one IS the evidence that a proof
+     // was presented. The only other producer is `setup/passkey/begin`, which answers 409
+     // already_configured once `Configured()` is true and so cannot mint one on an install
+     // where rule 1 applies.
      // 400 no_ceremony (expired or already used) · 400 passkey_rejected (failed verification)
      // 409 passkey_rp_mismatch (the ceremony began on a different domain) · 422 name_required
 ```

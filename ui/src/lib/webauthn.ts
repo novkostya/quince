@@ -1,5 +1,16 @@
 import { api, APIError } from "@/lib/api";
 import { forgetPasskey, rememberPasskey } from "@/lib/passkeyHint";
+import { proveWithPasskey } from "@/lib/reauth";
+// RE-EXPORTED so the many existing importers of these helpers keep working — the split in
+// `webauthnWire.ts` is structural and is not worth a rename sweep across the UI.
+export {
+  b64urlToBytes,
+  bytesToB64url,
+  type BeginRegistration,
+  type BeginAssertion,
+} from "@/lib/webauthnWire";
+import { b64urlToBytes, bytesToB64url } from "@/lib/webauthnWire";
+import type { BeginRegistration, BeginAssertion } from "@/lib/webauthnWire";
 
 // The WebAuthn wire helpers and the registration ceremony, in one place — qn.6k follow-up.
 //
@@ -8,25 +19,8 @@ import { forgetPasskey, rememberPasskey } from "@/lib/passkeyHint";
 // names as a defect rather than a convention — two identical strings maintained twice, with nothing
 // connecting them — and it had already reached three. A fourth surface would have copied it again.
 
-/** WebAuthn's JSON shape is base64url; its JS API is ArrayBuffer. */
-export function b64urlToBytes(s: string): Uint8Array {
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
-export function bytesToB64url(b: ArrayBuffer): string {
-  let bin = "";
-  for (const byte of new Uint8Array(b)) bin += String.fromCharCode(byte);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
-type BeginRegistration = {
-  ceremony: string;
-  options: { publicKey: PublicKeyCredentialCreationOptions };
-};
 
 /**
  * registerPasskey runs the full registration ceremony and returns true when a credential was
@@ -48,7 +42,28 @@ export async function registerPasskey(
   opts: { firstRun?: boolean } = {},
 ): Promise<boolean> {
   const base = opts.firstRun ? "/api/auth/setup/passkey" : "/api/auth/passkeys/register";
-  const begin = await api.post<BeginRegistration>(`${base}/begin`, {});
+
+  // RULE 1, AND THE RETRY GOES AROUND **BEGIN** RATHER THAN AROUND THE WRITE — qn.6n slice 5b.
+  // `changePassword` retries the whole call, because nothing was consumed by the refused attempt. A
+  // creation ceremony IS consumed, so learning the requirement after `create()` would mean a second
+  // Face ID sheet for a credential the user has already made.
+  //
+  // The server therefore refuses at `begin`, before a ceremony exists, and this retries there. Same
+  // `reauth_required` code, same one-retry-never-a-loop rule, and equally inert against a server
+  // that does not demand a proof.
+  //
+  // FIRST RUN IS EXEMPT AND MUST NOT PROMPT. The pre-auth pair has no session and nothing to
+  // present, so it never answers `reauth_required` — but the branch is skipped outright rather than
+  // left to that, because a sheet during first-run setup would ask the user to prove possession of a
+  // credential they have not created yet.
+  let begin: BeginRegistration;
+  try {
+    begin = await api.post<BeginRegistration>(`${base}/begin`, {});
+  } catch (err) {
+    if (opts.firstRun || !(err instanceof APIError) || err.code !== "reauth_required") throw err;
+    const proof = await proveWithPasskey("add_passkey");
+    begin = await api.post<BeginRegistration>(`${base}/begin`, { proof });
+  }
   const pk = begin.options.publicKey;
 
   let cred: PublicKeyCredential | null;
@@ -91,10 +106,6 @@ export async function registerPasskey(
   return true;
 }
 
-type BeginAssertion = {
-  ceremony: string;
-  options: { publicKey: PublicKeyCredentialRequestOptions };
-};
 
 /**
  * signInWithPasskey runs the assertion ceremony and resolves the authenticated status.
@@ -163,58 +174,3 @@ export async function signInWithPasskey(opts: {
   }
 }
 
-// RE-AUTHENTICATION — qn.6n slice 6. Proving a PRESENT credential for one credential-changing
-// operation, without signing anybody in.
-//
-// A SEPARATE CEREMONY FROM `signInWithPasskey`, and the reason is the same one D3 gives for the
-// endpoints being separate: the login pair is pre-auth in all three exact-path allowlists, and this
-// one requires a session. Sharing the function would have meant one call site choosing between two
-// endpoint families by a boolean, which is the shape that gets passed the wrong way round.
-//
-// ALWAYS MODAL, never conditional. The user has just pressed a button that changes their
-// credentials; a non-modal request sitting in an autofill dropdown is for a login form nobody has
-// committed to yet.
-export type ProofOperation = "add_passkey" | "remove_passkey" | "remove_password" | "set_password";
-
-export async function proveWithPasskey(
-  operation: ProofOperation,
-  target?: string,
-): Promise<string> {
-  const begin = await api.post<BeginAssertion>("/api/auth/reauth/begin", {
-    operation,
-    ...(target ? { target } : {}),
-  });
-  const pk = begin.options.publicKey;
-
-  const cred = (await navigator.credentials.get({
-    publicKey: {
-      ...pk,
-      challenge: b64urlToBytes(pk.challenge as unknown as string),
-      // DISCOVERABLE, so the authenticator offers whatever it holds for this address — the same
-      // shape login uses, and the reason quince needs no username field anywhere.
-      allowCredentials: [],
-    },
-  })) as PublicKeyCredential | null;
-  if (!cred) throw new Error("no credential");
-
-  const resp = cred.response as AuthenticatorAssertionResponse;
-  const out = await api.post<{ proof: string }>(
-    `/api/auth/reauth/finish?ceremony=${encodeURIComponent(begin.ceremony)}`,
-    {
-      id: cred.id,
-      rawId: bytesToB64url(cred.rawId),
-      type: cred.type,
-      response: {
-        clientDataJSON: bytesToB64url(resp.clientDataJSON),
-        authenticatorData: bytesToB64url(resp.authenticatorData),
-        signature: bytesToB64url(resp.signature),
-        userHandle: resp.userHandle ? bytesToB64url(resp.userHandle) : null,
-      },
-    },
-  );
-  // NO `rememberPasskey()` HERE, unlike the login ceremony. That hint exists to decide whether to
-  // OFFER a passkey at sign-in; someone re-authenticating is already signed in, and recording the
-  // fact would conflate "a passkey works here" with "a passkey signed me in here". They are
-  // different questions and the sign-in surface asks the second.
-  return out.proof;
-}

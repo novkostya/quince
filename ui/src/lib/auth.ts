@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, APIError } from "./api";
-import { proveWithPasskey } from "./webauthn";
+import { proveWithPasskey } from "./reauth";
 import type { AuthStatus } from "./types";
 
 export const authStatusKey = ["auth", "status"] as const;

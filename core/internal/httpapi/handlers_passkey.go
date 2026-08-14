@@ -39,9 +39,40 @@ func (d Deps) writePasskeyError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// POST /api/auth/passkeys/register/begin → {ceremony, options}
+// POST /api/auth/passkeys/register/begin {current_password?, proof?} → {ceremony, options}
+//
+// RULE 1 IS ENFORCED HERE, AT **BEGIN**, AND THAT IS THE OPPOSITE END FROM THE PASSWORD PATH — qn.6n
+// slice 5b. `PUT /api/auth/password` checks the proof where the write happens, and the client can
+// discover the requirement from a 401 and retry, because nothing was consumed by the first attempt.
+//
+// A WEBAUTHN CREATION CEREMONY CANNOT BE REPLAYED. Its challenge is single-use, so a client that
+// learned at `finish` that a proof was needed would have to run `navigator.credentials.create()`
+// again — a second Face ID sheet for a credential the user already made, which on some platforms
+// also mints a second resident key. Refusing before the ceremony exists costs the caller one round
+// trip and costs the user nothing.
+//
+// SO `finish` NEEDS NO CHECK OF ITS OWN, AND THAT IS A PROPERTY RATHER THAN AN OMISSION: a ceremony
+// key is only ever produced here, so a key in hand IS the evidence that a proof was presented. The
+// only other producer is `setup/passkey/begin`, which is first-run-only and answers 409 once
+// `Configured()` is true — so it cannot mint one on an install where this rule applies.
 func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A BODY IS OPTIONAL AND AN ABSENT ONE IS NOT AN ERROR. `RequirePresent` refuses an empty
+		// `Presented` on a claimed install anyway, so decoding failures here would only turn one
+		// refusal into a less useful one.
+		var body struct {
+			CurrentPassword string `json:"current_password"`
+			Proof           string `json:"proof"`
+		}
+		_ = decodeJSON(r, &body)
+
+		if _, err := d.Auth.RequirePresent(d.Proofs,
+			auth.Presented{Password: body.CurrentPassword, Proof: body.Proof},
+			auth.OpAddPasskey, "", sessionCookieValue(r), d.Proxies.ClientIP(r)); err != nil {
+			d.writePresentError(w, err, "could not start passkey setup")
+			return
+		}
+
 		rpID := auth.RPIDFromRequest(r)
 		options, ceremony, err := auth.BeginPasskeyRegistration(d.Store, d.Passkeys, rpID)
 		if err != nil {
@@ -53,6 +84,25 @@ func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 			return
 		}
 		writeJSON(w, d.Log, http.StatusOK, wire.PasskeyRegisterBegin{Ceremony: ceremony, Options: options})
+	}
+}
+
+// writePresentError maps `RequirePresent`'s refusals — qn.6n. Shared so the password path and the
+// registration path cannot answer the same refusal with different codes, which is what a client
+// retrying on `reauth_required` would trip over.
+func (d Deps) writePresentError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, auth.ErrRateLimited):
+		writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+	case errors.Is(err, auth.ErrBadPassword):
+		writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
+	case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
+		// THE CODE THE CLIENT RETRIES ON. It must match `PUT /api/auth/password`'s exactly — a second
+		// spelling here would leave the retry working on one surface and silently not on the other.
+		writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+	default:
+		d.Log.Error("re-authentication check failed", "error", err)
+		writeError(w, d.Log, http.StatusInternalServerError, "internal", fallback)
 	}
 }
 
