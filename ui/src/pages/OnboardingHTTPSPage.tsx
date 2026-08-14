@@ -8,6 +8,7 @@ import { PlainHTTPConfirm } from "@/features/onboarding/PlainHTTPConfirm";
 import { ProxyProbe } from "@/features/onboarding/ProxyProbe";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
 import { useAuthStatus } from "@/lib/auth";
+import type { OnboardingHTTPS } from "@/lib/types";
 
 // The onboarding HTTPS check (qn.6f). Reachable with no session and with no password in
 // existence — see the route in `routes/router.tsx` and rung-ruled decision 6.
@@ -74,7 +75,7 @@ export function OnboardingHTTPSPage() {
         ) : q.data.complete ? (
           <Complete detected={q.data.detected} />
         ) : (
-          <Incomplete firstRun={firstRun} />
+          <Incomplete firstRun={firstRun} code={q.data.unencrypted_code} />
         )}
 
         {showTiers ? <Tiers firstRun={firstRun} /> : null}
@@ -117,7 +118,86 @@ function Complete({ detected }: { detected: "tls" | "forwarded_proto" | "none" }
   );
 }
 
-function Incomplete({ firstRun }: { firstRun: boolean }) {
+// WHAT QUINCE ACTUALLY SAW — quince#940 §2 + quince#939 §7. All four causes rendered as **Not
+// encrypted** and nothing else until the server gained `unencrypted_code`, and two of them sent the
+// user to a remedy that was not merely vaguer but WRONG.
+//
+// `CLAUDE.md`: *a diagnostic that collapses distinguishable causes is a defect even when every word
+// of it is true.* "Not encrypted" is accurate in all four rows and useless in all four.
+//
+// THE WORDING RULE IS §6's — say what quince OBSERVED, never invent the cause. Each branch below
+// states the evidence and then the remedy that follows from it, and the one branch that is an
+// INFERENCE says so in its own sentence rather than in a comment.
+function WhatQuinceSaw({ code }: { code: OnboardingHTTPS["unencrypted_code"] }) {
+  switch (code) {
+    case "proxy_reports_plain":
+      // THE CRUEL ONE, and the reason this whole field exists. The proxy is behaving perfectly and
+      // reporting the truth; the old copy told the operator it was broken. Nothing below points at
+      // quince, and the tiers are the wrong answer here — which is why this says so outright.
+      return (
+        <Note tone="warn">
+          <strong>Your proxy is reaching quince correctly, and says the browser reached IT over
+          plain HTTP.</strong>{" "}
+          quince is not the thing to change: the connection is unencrypted between your browser and
+          the proxy, so it is the proxy's own listener that needs HTTPS. quince is only repeating
+          what it was told.
+        </Note>
+      );
+    case "proxy_untrusted":
+      return (
+        <Note tone="warn">
+          <strong>A proxy told quince this connection was HTTPS, and quince did not believe it.</strong>{" "}
+          <code className="font-mono">QUINCE_TRUSTED_PROXIES</code> is set, and the address this
+          request arrived from is not in it — so the header was ignored on purpose. Add that proxy's
+          address to the list, or unset it to trust any sender.
+        </Note>
+      );
+    case "proxy_not_forwarding_scheme":
+      // A HINT, AND IT IS WORDED AS ONE (quince#939 §7). It is inferred from `X-Forwarded-For` being
+      // present, and nginx does not set that by default either — so a confident sentence here would
+      // tell some correctly-configured operators their proxy is broken. "Looks like" is doing real
+      // work; do not tighten it.
+      return (
+        <Note tone="warn">
+          <strong>It looks like something is in front of quince that is not passing the scheme
+          along.</strong>{" "}
+          quince saw forwarding headers but no{" "}
+          <code className="font-mono">X-Forwarded-Proto</code>, so it cannot tell whether the traffic
+          reached your proxy over HTTPS. For nginx that is one line in the{" "}
+          <code className="font-mono">location</code> block:{" "}
+          <code className="font-mono">proxy_set_header X-Forwarded-Proto $scheme;</code> — Caddy and
+          Traefik set it for you.
+        </Note>
+      );
+    // `no_proxy_seen` RENDERS NOTHING, and that is the right answer rather than a missing one.
+    // quince saw no evidence of any proxy, so the remedy IS the tier list directly below — repeating
+    // it here would be a second copy of the same advice, and stating "there is no proxy" as a fact
+    // would be the same over-claim §7 refuses for the row above.
+    default:
+      return null;
+  }
+}
+
+// Note is the shared shape for the four branches above, so the wording is what differs between them
+// and not the markup.
+function Note({ tone, children }: { tone: "warn"; children: ReactNode }) {
+  return (
+    <div
+      role="status"
+      className={`mt-3 rounded-card border bg-card px-3 py-2 text-sm ${tone === "warn" ? "border-warn" : "border-line"}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Incomplete({
+  firstRun,
+  code,
+}: {
+  firstRun: boolean;
+  code: OnboardingHTTPS["unencrypted_code"];
+}) {
   return (
     <>
       <div className="mt-3 flex items-center gap-2">
@@ -147,6 +227,7 @@ function Incomplete({ firstRun }: { firstRun: boolean }) {
           do about signing in. Pick one of these.
         </p>
       )}
+      <WhatQuinceSaw code={code} />
     </>
   );
 }

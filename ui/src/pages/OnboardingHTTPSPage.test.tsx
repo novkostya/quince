@@ -213,3 +213,72 @@ describe("the two modes", () => {
     expect(screen.queryByText(/quince cannot finish setting up over it/i)).not.toBeInTheDocument();
   });
 });
+
+// quince#940 §2 + quince#939 §7 — THE PAGE SAYS WHICH CAUSE, AND SAYS IT DIFFERENTLY EACH TIME.
+//
+// All four rendered as **Not encrypted** and nothing else before `unencrypted_code` existed. Two of
+// them sent the user to a remedy that was WRONG, not merely vaguer, which is what makes this a
+// defect under `CLAUDE.md`'s rule rather than a copy improvement.
+describe("what quince saw behind `detected: none`", () => {
+  function plain(code?: string) {
+    vi.spyOn(api, "get").mockResolvedValue({
+      complete: false,
+      detected: "none",
+      ...(code ? { unencrypted_code: code } : {}),
+    });
+  }
+
+  // THE CRUEL ONE. quince used to tell an operator their proxy was broken while it was behaving
+  // perfectly and reporting the truth, so the assertion is that the page now says the opposite.
+  it("says the proxy is CORRECT when the proxy reports plain http", async () => {
+    plain("proxy_reports_plain");
+    renderPage();
+
+    expect(await screen.findByText(/reaching quince correctly/i)).toBeInTheDocument();
+    expect(screen.getByText(/quince is not the thing to change/i)).toBeInTheDocument();
+  });
+
+  it("names the trust list when the header was ignored on purpose", async () => {
+    plain("proxy_untrusted");
+    renderPage();
+
+    expect(await screen.findByText(/did not believe it/i)).toBeInTheDocument();
+    expect(screen.getByText("QUINCE_TRUSTED_PROXIES")).toBeInTheDocument();
+  });
+
+  // WORDED AS A HINT AND ASSERTED AS ONE (quince#939 §7). It is inferred from `X-Forwarded-For`,
+  // which nginx does not set by default either — so a correctly-configured deployment can land
+  // here. "Looks like" is load-bearing and this test is what stops somebody tightening it into a
+  // verdict.
+  it("hedges the nginx caveat rather than asserting it", async () => {
+    plain("proxy_not_forwarding_scheme");
+    renderPage();
+
+    expect(await screen.findByText(/it looks like something is in front of quince/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot tell whether/i)).toBeInTheDocument();
+    expect(screen.getByText(/proxy_set_header X-Forwarded-Proto \$scheme;/)).toBeInTheDocument();
+  });
+
+  // NOTHING EXTRA, AND THAT IS THE ANSWER RATHER THAN A MISSING ONE. quince saw no evidence of a
+  // proxy, so the remedy is the tier list the page already renders; a second copy of it here would
+  // be noise, and asserting "you have no proxy" would be the over-claim §7 refuses one row up.
+  it("adds nothing when there is no evidence of a proxy at all", async () => {
+    plain("no_proxy_seen");
+    renderPage();
+
+    expect(await screen.findByText("Not encrypted")).toBeInTheDocument();
+    expect(screen.queryByText(/looks like something is in front/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/QUINCE_TRUSTED_PROXIES/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/reaching quince correctly/i)).not.toBeInTheDocument();
+  });
+
+  // AN OLDER DAEMON SENDS NO CODE AT ALL, and the page must not break or invent one. `omitempty`
+  // means absent is a legal wire state, not only a first-run one.
+  it("renders the plain-http copy unchanged when the field is absent", async () => {
+    plain();
+    renderPage();
+
+    expect(await screen.findByText("Not encrypted")).toBeInTheDocument();
+    expect(screen.queryByText(/looks like something is in front/i)).not.toBeInTheDocument();
+  });
+});

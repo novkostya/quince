@@ -504,11 +504,16 @@ directions — the registration pair must stay OUT of all three.
 Onboarding (qn.6f):
 
 ```
-GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_proto" | "none"}
+GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_proto" | "none",
+                              unencrypted_code?: "no_proxy_seen" | "proxy_not_forwarding_scheme"
+                                               | "proxy_untrusted" | "proxy_reports_plain"}
      // PRE-AUTH, BY EXACT PATH. It was the ONLY onboarding exemption until the probe
      // pair below; the exact-path constraint is what let a second and third be added
      // deliberately rather than by a prefix widening underneath everybody.
      // complete = this origin is already encrypted, so nothing needs doing.
+     // unencrypted_code is present ONLY when detected is `none` and says WHICH of the
+     // four causes quince saw — they have four different remedies and two of them do
+     // not point at quince at all. FROZEN; see the ruling below.
 
 POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → CertificateProbe
      // PRE-AUTH, 409 once auth.Configured() — the same bound and the same argument
@@ -746,62 +751,64 @@ string.** Named for its subject the exemption reads as its own justification —
 pre-auth because you cannot log in without https*. Anchored to an ordinal nobody has fixed, the one
 pre-auth route in the product would be guarded by an accident of ordering.
 
-`https` rather than `tls`, deliberately: `complete` is true for `r.TLS != nil` **or**
-`X-Forwarded-Proto: https`, and the second is not TLS at quince at all. `https` is the one word that
-covers both, and it is the user's word.
+**RULED and IMPLEMENTED: `detected: "none"` is refined by a SECOND FIELD, `unencrypted_code`
+(quince#940 §2 + quince#939 §7).** Architect ruling (delegated), 2026-08-14 — door 2. Cast by the
+architect seat on authority the Operator delegated explicitly: *"I don't fully understand it so I'd go
+with your recommendation."* **Not an Operator ruling and must not be cited as one.**
 
-**This is the FIRST onboarding surface in the product**, and its shape is precedent for steps 2 and
-3 — which is the argument for it being this narrow. `detected` is the **evidence** and `complete`
-the **verdict**; both are sent although one is derivable from the other, so a client deciding
-whether to show the setup options never keeps its own list of which reasons count. That list is
-exactly what goes stale when a fourth reason appears.
+```
+GET /api/onboarding/https → {complete, detected, unencrypted_code?}
+     // unencrypted_code is present ONLY when detected is `none`, and is FROZEN:
+     //   no_proxy_seen                 no XFP and no XFF — no evidence of a proxy
+     //   proxy_not_forwarding_scheme   XFF present, XFP absent — A HINT, see below
+     //   proxy_untrusted               XFP: https, trust list set, peer not on it
+     //   proxy_reports_plain           XFP present and not https — THE PROXY IS RIGHT
+```
 
-**PROPOSED (gap): `detected: "none"` collapses THREE causes with three different remedies, and every
-route to separating them is shut by a prior decision.**
+**WHY A SECOND FIELD AND NOT MORE `detected` VALUES.** `OnboardingProbe.Detected` says at its own
+definition that it *takes the same values as `OnboardingHTTPS.Detected` and comes from the same
+function* — so widening the enum widens the **cross-origin-readable** probe body, silently and without
+anyone editing the probe. The CORS ruling froze that body at `{nonce, detected}` on the argument that
+*it leaks nothing*, and said widening it needs that ruling revisited. Door 1 would revisit it without
+saying so.
 
-<!-- gap-heading-check: ignore — this block cites the quince#939 CORS ruling, the frozen-values note
-     on `HTTPSDetected` and this section's own two-field precedent, all NEIGHBOURING decisions about
-     other questions, as the three doors a ruling on THIS one has to choose between. None of them
-     answers it: how the distinction should be EXPRESSED is open, and the block's span ends at its
-     own last paragraph. -->
+**And the collapsing variant — widen, then map the new values back to `none` on the probe — is
+rejected** for leaving one type whose values are legal on one endpoint and illegal on another, with
+the type definition telling the reader they are the same. That is a trap set for the person who checks.
 
-Raised by the implementer seat 2026-08-14 while taking quince#940 §2; **nothing is built and nothing
-here is decided.** quince#939's ruling already anticipated it: *"a fourth `detected` value is the
-obvious way to distinguish them when the time comes; **deciding that is not owed today**, and shipping
-copy that quietly conflates them is not."* quince#955 shipped the copy half — the probe says plainly
-that it cannot tell them apart. This is the other half.
+**THE PRECEDENT IS SPENT AND BOUNDED.** This section argued `OnboardingHTTPS` was deliberately two
+fields because *"a richer payload here would be a precedent every later step cites."* It is now three.
+The narrowness argument is against enriching step 1 **gratuitously**, and a later step citing this must
+show the same three things: **the daemon already holds the distinction · a user is sent to the WRONG
+remedy without it · no same-origin route already carries it.** Two of three users meeting
+`detected: none` were being told their proxy was broken while it behaved correctly, which is what
+cleared that bar.
 
-**The daemon HAS the information.** `auth.SecureOrigin` reads `r.TLS`, the `X-Forwarded-Proto` value
-and the trusted-proxy list, and returns a **bool**; `detectHTTPS` then reports `none` for all of:
+**`proxy_not_forwarding_scheme` IS A HINT AND ITS COPY MUST STAY HEDGED** (quince#939 §7). It is
+inferred from `X-Forwarded-For` being present, and **nginx does not set that by default either** — so a
+confident sentence would tell some correctly-configured operators their proxy is broken. The page says
+*"it looks like"*, and a test asserts that it does.
 
-| what quince saw | remedy |
-| --- | --- |
-| `X-Forwarded-Proto` **absent** | the nginx caveat — the proxy is not forwarding the scheme |
-| `X-Forwarded-Proto: http` | **the proxy is correct** and is reporting that the client reached *it* over plain http — fix the proxy's listener |
-| `X-Forwarded-Proto: https`, trust list configured, peer not in it | add that peer to `QUINCE_TRUSTED_PROXIES` |
+**`proxy_reports_plain` COVERS ANY NON-`https` VALUE**, not only the literal `http`. A header that does
+not say https is not https whatever else it says, and a fifth code for a value nobody sets would be a
+remedy nobody needs.
 
-**The third is the cruel one:** quince tells a user their proxy is broken while the proxy is behaving
-perfectly and telling the truth. The second is nearly as bad, for the opposite reason.
+**WHAT THIS DELIBERATELY DOES NOT ADD: the peer's address.** §2's table suggests *"add `<peer address>`
+to `QUINCE_TRUSTED_PROXIES`"*, which would be genuinely more useful — through a proxy, the peer is the
+PROXY's address and the operator may not know it. It is not built here because it is a second
+disclosure decision, not a second string: `unencrypted_code` is a closed enum naming a SHAPE, where an
+address is a fact about the network. **Filing it is owed if anyone wants it; inferring the permission
+from this ruling is not.**
 
-**Three doors, and each is closed by something already decided:**
+**`no_proxy_seen` RENDERS NOTHING in the UI**, which is an answer rather than a gap: the remedy is the
+tier list the page already shows, and *"there is no proxy"* stated as fact is the same over-claim §7
+refuses for the row above.
 
-1. **More `HTTPSDetected` values.** The set is frozen at its own definition — *"Values are frozen: a
-   client renders different prose for each, and adding one is a contract change."*
-2. **A second field on `OnboardingHTTPS`.** This section argues the shape is deliberately narrow
-   because it is *"precedent for steps 2 and 3"*, and `wire` says a richer payload here *"would be a
-   precedent every later step cites."*
-3. **A field on the probe body.** The CORS ruling froze it at `{nonce, detected}` and said adding one
-   is a contracts change **and needs that ruling revisited**, because *it leaks nothing* is the whole
-   safety argument for the widening.
-
-**So this is not a question of plumbing — it is a question of which precedent to spend**, which is why
-it is filed rather than built. Door 3 carries an extra consideration the other two do not: the probe
-body is readable **cross-origin**, so anything added there is disclosed to a page holding a nonce,
-where doors 1 and 2 are same-origin only.
-
-**Not urgent, and the reason is worth stating.** `TrustedProxies` is nil today, which believes the
-header from anyone, so the third row **cannot currently occur**. The first two can and do.
-
+**The row the earlier gap block called impossible is now REACHABLE and TESTED.** It said
+`proxy_untrusted` *"cannot currently occur"* because `TrustedProxies` is nil in production and an unset
+list believes the header from anyone. True, and it occurs the moment an operator sets
+`QUINCE_TRUSTED_PROXIES` — which is the configuration the docs recommend — so it is covered rather than
+deferred.
 **Pre-auth is an Operator ruling** (2026-08-02, quince#501), and the chicken-and-egg is the whole
 rung: over plain http to a LAN address the browser discards the session cookie, so the page
 explaining that cannot sit behind the door the defect locks.
