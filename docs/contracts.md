@@ -85,8 +85,18 @@ PUT    /api/auth/password {current_password, new_password}  → 204
        // holding a stolen cookie can do is change the password and keep the owner out.
        // `current_password` IS OMITTED EXACTLY WHEN NO PASSWORD EXISTS — on a passwordless
        // install "change" IS "set", and the server decides which case applies from its own
-       // state, so there is no client flag to get wrong. Where a password DOES exist, an empty
-       // value is simply a wrong one and takes the same 401.
+       // state, so there is no client flag to get wrong.
+       // PRESENTING NOTHING IS `reauth_required`, NOT `bad_password`, even where a password
+       // exists — this said *"an empty value is simply a wrong one and takes the same 401"*
+       // until 2026-08-14. Both are still a 401 and both still refuse; what changed is which
+       // code, and the code is the whole of it: `reauth_required` is the one a client retries
+       // by offering the OTHER factor, and `bad_password` is the one it must not retry, because
+       // re-authenticating cannot fix a typo. Collapsing them meant a surface that presents
+       // nothing — `passkeys/register/begin` from the Add-a-passkey dialog — was told its
+       // password was wrong, on a dialog with no password field, and never ran the ceremony
+       // that would have satisfied the rule. Operator-measured on the stand.
+       // A NON-EMPTY WRONG PASSWORD IS STILL `bad_password`. The distinction is
+       // absent-versus-wrong, the same one an absent request body draws against a malformed one.
        // AND SINCE qn.6n IT TAKES `proof` AS AN EQUAL ALTERNATIVE — a token from
        // POST /api/auth/reauth/finish, minted for operation `set_password`. Either field
        // satisfies rules 1 and 3; the password is the lighter of the two and a passkey is what

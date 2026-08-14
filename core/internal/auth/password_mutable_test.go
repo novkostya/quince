@@ -126,11 +126,21 @@ func TestOnlyAnUnclaimedInstallIsExemptFromPresentingSomething(t *testing.T) {
 }
 
 // The empty-string case must NOT become a way past the check once a password exists.
+//
+// THE ERROR CHANGED ON 2026-08-14 AND THE GUARD DID NOT. It was `ErrBadPassword`, on the reasoning
+// that an empty value is simply a wrong one; it is now `ErrNoProof`, because *presented nothing* and
+// *presented something wrong* want OPPOSITE client behaviour — one is retryable with the other
+// factor and one is not. Both are still a refusal and both are still a 401. What a caller can now do
+// is offer the passkey rather than insist on a field the user may not have.
 func TestChangeRejectsAnEmptyCurrentWhenAPasswordExists(t *testing.T) {
 	svc, _ := configured(t, "old-one")
 
-	if err := svc.ChangePassword(NewProofs(), Presented{}, "new-one", sess, ip); !errors.Is(err, ErrBadPassword) {
-		t.Fatalf("empty current against a set password = %v, want ErrBadPassword", err)
+	if err := svc.ChangePassword(NewProofs(), Presented{}, "new-one", sess, ip); !errors.Is(err, ErrNoProof) {
+		t.Fatalf("empty current against a set password = %v, want ErrNoProof", err)
+	}
+	// AND IT STILL LETS NOBODY THROUGH, which is what this test has always been for.
+	if _, _, err := svc.Login("old-one", ip, ""); err != nil {
+		t.Fatalf("the password changed despite the refusal: %v", err)
 	}
 }
 
@@ -183,8 +193,12 @@ func TestRemoveRefusesTheCorrectPassword(t *testing.T) {
 	}
 }
 
-// PRESENTING NOTHING IS REFUSED TOO, and it takes the ordinary bad-password answer rather than a
-// special one: an absent password IS a wrong password on an install that has one.
+// PRESENTING NOTHING IS REFUSED TOO, and it takes the RETRYABLE answer — `ErrNoProof`, the code a
+// client is meant to respond to by offering the other factor.
+//
+// This said *"an absent password IS a wrong password on an install that has one"* until 2026-08-14.
+// That reading is what stopped the passkey ceremony ever running on a surface that presents nothing,
+// because `bad_password` is precisely the code a client must NOT retry.
 func TestRemoveRefusesAnEmptyPresentation(t *testing.T) {
 	svc, st := newConfiguredService(t)
 	if err := svc.SetPassword("old-one", ip); err != nil {
@@ -192,8 +206,8 @@ func TestRemoveRefusesAnEmptyPresentation(t *testing.T) {
 	}
 	seedPasskey(t, st, "cred-1", here)
 
-	if err := svc.RemovePassword(NewProofs(), Presented{}, here, sess, ip); !errors.Is(err, ErrBadPassword) {
-		t.Fatalf("RemovePassword with nothing presented = %v, want ErrBadPassword", err)
+	if err := svc.RemovePassword(NewProofs(), Presented{}, here, sess, ip); !errors.Is(err, ErrNoProof) {
+		t.Fatalf("RemovePassword with nothing presented = %v, want ErrNoProof", err)
 	}
 	if _, _, err := svc.Login("old-one", ip, ""); err != nil {
 		t.Fatalf("the password went despite the refusal: %v", err)
@@ -317,5 +331,41 @@ func TestTheTwoRPIDRulesAreOpposite(t *testing.T) {
 	// And it is not a blanket refusal: the credential's own address gets its ceremony.
 	if err := svc.provable(OpRemovePassword, elsewhere, ""); err != nil {
 		t.Fatalf("provable at the credential's own address = %v, want nil", err)
+	}
+}
+
+// PRESENTING NOTHING IS NOT PRESENTING A WRONG PASSWORD — Operator-measured on the staging stand,
+// 2026-08-14, and this is the assertion that would have caught it.
+//
+// `RequirePresent` verified `""` against the hash on an install that HAS a password, so a caller
+// presenting nothing was told `ErrBadPassword`. Two costs, and the second is the one that broke a
+// flow: the message names a field the caller never rendered, and **a client cannot tell the two
+// apart**. `reauth_required` is the code every client retries on and `bad_password` is the one it
+// must not retry on, so the passkey ceremony that would have satisfied rule 1 never ran.
+//
+// BOTH DIRECTIONS ARE ASSERTED, because the fix is only correct if the other case still works: an
+// empty presentation is `ErrNoProof`, and a WRONG one is still `ErrBadPassword`.
+func TestPresentingNothingIsNotAWrongPassword(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seedPasskey(t, st, "cred-1", here)
+
+	// Nothing presented → "authenticate again", which is what the client retries on.
+	_, err := svc.RequirePresent(NewProofs(), Presented{}, OpAddPasskey, "", sess, ip)
+	if !errors.Is(err, ErrNoProof) {
+		t.Fatalf("RequirePresent with nothing presented = %v, want ErrNoProof", err)
+	}
+	// A WRONG password is still a wrong password. Retrying a ceremony cannot fix a typo, so this
+	// must NOT become the retryable code.
+	_, err = svc.RequirePresent(NewProofs(), Presented{Password: "not-it"}, OpAddPasskey, "", sess, ip)
+	if !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("RequirePresent with a wrong password = %v, want ErrBadPassword", err)
+	}
+	// And the right one still works, so the guard was narrowed rather than opened.
+	subj, err := svc.RequirePresent(NewProofs(), Presented{Password: "old-one"}, OpAddPasskey, "", sess, ip)
+	if err != nil || !subj.Password {
+		t.Fatalf("RequirePresent with the right password = (%+v, %v), want the password subject", subj, err)
 	}
 }
