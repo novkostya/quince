@@ -81,8 +81,32 @@ type HealthResponse struct {
 	// so a client keying a redirect on THAT fact would send every developer on localhost to
 	// the HTTPS onboarding page. Two questions that agree on most deployments and disagree on
 	// the one a contributor runs.
-	InsecureOrigin bool          `json:"insecure_origin"`
-	Muxers         []MuxerHealth `json:"muxers"`
+	InsecureOrigin bool `json:"insecure_origin"`
+	// InsecureTransportAllowed says `sessions.allow_insecure_transport` is ON — the user's own
+	// opt-in to serving session and CSRF cookies without the Secure flag, so they cross a plain
+	// http network in clear (quince#908 slice 6, Operator ruling 2026-08-14).
+	//
+	// IT EXISTS BECAUSE `insecure_origin` CANNOT DRIVE THE WARNING: the two are INVERSES in the
+	// only case that matters. `insecure_origin` reports "a cookie earned here would be discarded",
+	// and with the opt-in on nothing is discarded — so it reads FALSE on precisely the install
+	// whose login form must carry a warning. A banner keyed on it would be silent exactly when it
+	// is needed and loud when it is not. Two fields that sound alike; read the sentence, not the
+	// name.
+	//
+	// DAEMON-WIDE, unlike `insecure_origin` directly above and like `mode`. The opt-in is a
+	// property of the configuration, so every connection gets the same answer — including an https
+	// one, which is correct: the relaxation is in force for the plain half whether or not the
+	// client asking arrived over it.
+	//
+	// THE SETTING, NOT THE SYMPTOM, in the name. `insecure_transport` alone would sit one letter
+	// from `insecure_origin` in meaning as well as in spelling; `_allowed` says this is a
+	// permission somebody granted rather than a condition being reported.
+	//
+	// NOT `omitempty`, unlike `demo_reset_minutes` above. There an absent key and a zero are the
+	// same fact. Here they are not: `false` is the shipping default AND the answer a banner acts
+	// on, so a client must be able to tell "off" from "this daemon predates the field".
+	InsecureTransportAllowed bool          `json:"insecure_transport_allowed"`
+	Muxers                   []MuxerHealth `json:"muxers"`
 }
 
 // Serving modes reported by GET /api/health (public-demo spec story 5).
@@ -272,7 +296,12 @@ func (d Deps) handleHealth() http.HandlerFunc {
 			DemoResetMinutes: d.DemoResetMinutes,
 			Reconciling:      reconciling,
 			InsecureOrigin:   d.Auth.CookieWillBeDiscarded(r),
-			Muxers:           muxers,
+			// READ LIVE FOR THE SAME REASON `reconciling` IS: the config applier makes this
+			// setting live (quince#900), so a value captured at wiring would describe the file
+			// as it was at startup and a banner would outlive — or miss — the setting it warns
+			// about. Same service, same atomic, as the cookie flag it predicts.
+			InsecureTransportAllowed: d.Auth.AllowsInsecureTransport(),
+			Muxers:                   muxers,
 		})
 	}
 }

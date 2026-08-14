@@ -120,15 +120,58 @@ arriving through another door; and `csrfExempt` is the one that looks harmless a
 these are state-changing requests from an authenticated browser. Asserted by exact path **and by
 method**, in `passkey_allowlist_test.go`.
 
-**PROPOSED (gap): a PRE-AUTH CONFIG WRITE, for the one escape a stranded first-run user can take.**
+**RULED (was `PROPOSED (gap)`): a PRE-AUTH CONFIG WRITE, for the one escape a stranded first-run
+user can take — Operator ruling 2026-08-14, relayed on quince#908. NOT BUILT.**
 
 <!-- gap-heading-check: ignore — the next marker in this file is the qn.6e FIRST-RUN STORAGE ruling
      ("RULED and IMPLEMENTED: the FIRST-RUN SETUP STATE"), a different question about a different
      subsystem, which this block neither cites nor depends on. This block's span ends at its own
-     last paragraph and nothing in it is answered below: the pre-auth config WRITE is open. -->
+     last paragraph. -->
 
-Raised by the implementer seat 2026-08-13 while building quince#908; **nothing is built and nothing
-here is decided.** That issue's slice 6 — the plain-HTTP confirm — is stopped pending a ruling.
+Raised by the implementer seat 2026-08-13 while building quince#908 and answered the next day on all
+three of its questions. **The route does not exist yet** — quince#908 slice 6c builds it, and this
+block says what it must be, so that the diff can be read against a decision rather than against a
+proposal. The heading is narrowed in the same commit that records the ruling, per quince#408.
+
+**What was ruled:**
+
+1. **A pre-auth config write SHOULD exist.** The alternative is a documented dead end whose only exit
+   is a shell on the box, and quince#912 already settled the principle: *a remedy the user cannot
+   follow is the same defect as a silent failure.*
+2. **`auth.Configured()` is the guard** — the same call that makes `POST /api/auth/setup` legal, so
+   the two cannot drift, and the window closes the instant the install is claimed. Not a second
+   predicate.
+3. **NOT under `/api/onboarding/`.** That prefix currently means *step 1, pre-auth, read-only*, and
+   the product's first pre-auth **write** underneath it would invite a future reader to treat the
+   prefix as the exemption. One more literal path costs less than a prefix that means two things;
+   `qn.6f`'s exact-path constraint stands.
+
+**Scope: `sessions.allow_insecure_transport` and nothing else.** Not `PUT /api/config` exempted,
+which would put every key behind a pre-auth door.
+
+**AND A REQUIREMENT THE PROPOSAL DID NOT ASK FOR: the login page must carry a very noticeable
+warning while the opt-in is on.** This is what makes the ruling safe rather than merely bounded. The
+pre-auth write means the setting can be turned on by **somebody who is not the owner** — that is the
+window §3 permits, on the argument that an unclaimed install has nothing to protect yet. The owner
+then arrives at a login form, over plain http, about to type a password that will cross the network
+in clear. The banner is the only thing standing between them and that, which is why quince#539 stops
+being a follow-up and closes with this slice.
+
+**The trap in building it, named here rather than discovered: `insecure_origin` CANNOT drive that
+banner — it is FALSE exactly when the opt-in is ON.** `insecure_transport_allowed` is the field that
+can, and the table under `GET /api/health` in this section sets the two side by side.
+
+**What the ruling does NOT license.** No generalisation to `needs_login`: §3's bound is the whole
+safety argument, and a configured install must never expose this route. No other key. And the bound
+is the **server's** to enforce — a client-side gate is not a control, because an attacker does not
+use the UI. Without the `Configured()` check the route is an unauthenticated *turn off the transport
+requirement* primitive on a configured install: flip it, wait for the admin to sign in over plain
+http, read the cookie. That failure arrives by implementing the ruling carelessly rather than by
+disagreeing with it, which is why the guard is named in the ruling instead of left to the diff.
+
+**The reasoning that was put to the Operator is kept below**, because the ruling turned on it. The
+rest of the proposal — the shape it guessed at, and the three questions it left open — is gone: the
+ruling above says all of it, and two statements of one decision is how they come to disagree.
 
 **The dead end has no unauthenticated exit today.** On plain http at a LAN address
 `refuseInsecureOrigin` refuses `POST /api/auth/setup` **before** examining the password, so no
@@ -139,25 +182,6 @@ authExempt and one-shot, so anyone reaching the port can claim the install outri
 write grants strictly less than that. **That settles the policy and not the mechanism**, and the
 mechanism is a contracts change: the first pre-auth **mutating** endpoint in this product that is not
 about obtaining a credential.
-
-**Why it is more than plumbing: the `needs_setup` bound must be enforced by the SERVER.** An attacker
-does not use the UI, so a client-side gate is not a control. Without a server-side `Configured()`
-guard, the same route on a *configured* install is an unauthenticated *turn off the transport
-requirement* primitive — flip it, wait for the admin to sign in over plain http, read the cookie.
-That is exactly the downgrade quince#908 §3 says must not be generalised, and it would arrive by
-implementing the ruling carelessly rather than by disagreeing with it.
-
-**The shape that seems to follow**, offered as the implementer's reading rather than a decision: a
-narrow route — *not* `PUT /api/config` exempted, which would expose every key — writing only
-`sessions.allow_insecure_transport`, guarded by `auth.Configured()` exactly as `POST /api/auth/setup`
-is, closing the instant the install is claimed. `authExempt` is exact-path with no prefix support,
-which the qn.6f ruling calls a constraint rather than a style, so this would be one more literal path.
-
-**The questions that are the Operator's rather than the implementer's:** whether a pre-auth config
-write should exist at all, when the alternative is telling the user to edit `config.yml` on the box;
-whether `Configured()` is the right guard or the bound should be narrower; and whether such a route
-belongs under `/api/onboarding/`, where the qn.6f ruling deliberately exempted **step 1 only, by
-exact path**, so that no future onboarding step could be exempted by accident.
 
 **THE rpId FILTER ON `DELETE` IS THE OPPOSITE OF `configured`'s, AND BOTH ARE CORRECT.** The two ask
 different questions and the pair now lives in one file, so it is written here rather than left to be
@@ -515,7 +539,7 @@ double-submit check against the readable `quince_csrf` cookie. The session cooki
 
 ```
 GET  /api/health  → {status, version, mode, demo_reset_minutes?, reconciling, insecure_origin,
-                     muxers[]}
+                     insecure_transport_allowed, muxers[]}
 ```
 
 **`/api/health` is deliberately NOT frozen** — it says so at its own definition, and `qn.6` used that
@@ -543,6 +567,35 @@ are easy to conflate.
 **A client must act only on a POSITIVE answer.** An unreachable or still-loading health probe is not
 evidence of a secure origin *or* an insecure one, and the failure that matters is routing somebody
 away from a page that would have worked.
+
+**`insecure_transport_allowed: true` means `sessions.allow_insecure_transport` IS ON** (quince#908
+slice 6, Operator ruling 2026-08-14) — session and CSRF cookies are served without the `Secure` flag,
+so they cross a plain-http network in clear and anyone who can read the path can sign in as the
+admin. It is a **degraded mode**, and quince#446 requires it be surfaced in three channels: the
+startup line, the Settings warning, and a **non-dismissible** banner. This field is what the banner
+renders from.
+
+**IT IS THE INVERSE OF `insecure_origin` IN THE ONE CASE THAT DECIDES, AND THAT IS WHY IT EXISTS.**
+With the opt-in on, no cookie is discarded — so `insecure_origin` is **`false`** on exactly the
+install whose login form must carry a warning. A client that reached for the nearer-sounding field
+would be silent when it matters and loud when it does not. The two are one letter apart in spelling
+and opposite in this case; read the sentences, not the names.
+
+| | `insecure_origin` | `insecure_transport_allowed` |
+| --- | --- | --- |
+| answers | can a credential be established **on this connection**? | is the **relaxation** in force? |
+| scope | the connection | the daemon |
+| plain http, opt-in **off** | `true` | `false` |
+| plain http, opt-in **on** | **`false`** | **`true`** |
+| https | `false` | whatever the setting says |
+
+**DAEMON-WIDE, so an https client is told too**, and that is correct rather than noise: the
+relaxation is in force for the plain half of the mux whether or not the client asking arrived over
+it. The admin reading Settings over https is precisely who should be told the plain door is open.
+
+**A client must act only on `=== true` here as well**, and more strictly: an absent field means a
+daemon that predates it, not a setting that is off, and a banner about a state nobody reported is
+worse than no banner.
 
 **`reconciling: true` means A VERSION LIST MAY BE SHORT** — Operator ruling 2026-08-08 (quince#731,
 blocker 2), built in `qn.6i`. Reconciliation no longer completes before the listener binds, so quince

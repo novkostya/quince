@@ -339,6 +339,19 @@ export interface Health {
   // Optional for the same reason as `reconciling`: a UI newer than its server reads `undefined`
   // rather than a false `false`. Every consumer must therefore act on `=== true` and nothing else.
   insecure_origin?: boolean;
+  // insecure_transport_allowed: `sessions.allow_insecure_transport` is ON, so session and CSRF
+  // cookies are served without the Secure flag and cross a plain http network in clear
+  // (quince#908 slice 6, contracts §1). It is the fact a non-dismissible banner renders from
+  // (quince#539).
+  //
+  // DO NOT REACH FOR `insecure_origin` ABOVE — they are INVERSES on the install that matters.
+  // With this on, no cookie is discarded, so `insecure_origin` reads FALSE on exactly the
+  // deployment whose login form must carry a warning.
+  //
+  // Optional for the same reason as the fields above, and the `=== true` rule matters more here
+  // than anywhere else: `undefined` must not render a warning about a setting the server never
+  // reported on.
+  insecure_transport_allowed?: boolean;
 }
 
 // --- onboarding (qn.6f) ---
