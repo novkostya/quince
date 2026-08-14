@@ -138,7 +138,11 @@ describe("the onboarding HTTPS check", () => {
   // meeting the question it asks: is that endpoint pre-auth? A count would only have said
   // "something changed", which is the same signal for a safe call and an unsafe one.
   it("calls only pre-auth endpoints", async () => {
-    const exempt = ["/api/onboarding/https", "/api/auth/status"];
+    // `/api/health` joined the list when this page took the plain-http banner (quince#539). It is
+    // the FIRST entry in `middleware.go`'s `authExempt` switch and has been pre-auth since qn.1 —
+    // the login screen reads it to learn the serving mode — so the guarantee holds. Written as the
+    // ANSWER to the question this line exists to ask, rather than as a list that quietly grew.
+    const exempt = ["/api/onboarding/https", "/api/auth/status", "/api/health"];
     const get = vi.spyOn(api, "get").mockResolvedValue({ complete: false, detected: "none" });
     renderPage();
     await screen.findByText("Not encrypted");

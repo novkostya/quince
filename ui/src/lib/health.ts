@@ -70,6 +70,25 @@ export function useInsecureOrigin(): boolean {
   return data?.insecure_origin === true;
 }
 
+// useInsecureTransportAllowed is the banner's question: has somebody turned
+// `sessions.allow_insecure_transport` ON, so session and CSRF cookies cross the network in clear
+// (contracts §1, and quince#446's third channel — quince#539)?
+//
+// NOT `!useInsecureOrigin()`, AND THE TWO ARE INVERSES HERE RATHER THAN NEAR-SYNONYMS. With the
+// opt-in on nothing is discarded, so `insecure_origin` reads FALSE on precisely the install this
+// must warn about. Reaching for the neighbouring hook yields a banner that is silent when it counts.
+//
+// False while loading and false on a failed probe, like every hook in this file — and here the
+// direction is the uncomfortable one to state, because what the warning guards is a password about
+// to cross a LAN. It is still right: quince serves this warning from the same daemon that serves the
+// login form, so a probe that cannot answer is a page that is not rendering either — and a banner
+// raised on a guess would appear on every deployment whose health endpoint blipped, which is how a
+// permanent warning turns into furniture people stop reading.
+export function useInsecureTransportAllowed(): boolean {
+  const { data } = useHealth();
+  return data?.insecure_transport_allowed === true;
+}
+
 // useIsPublicDemo is the question every caller actually has. It is false while loading and false on
 // a failed probe, so demo copy appears only on a POSITIVE answer from the server.
 export function useIsPublicDemo(): boolean {

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
+import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
 import { useAuthStatus } from "@/lib/auth";
 
@@ -55,6 +56,11 @@ export function OnboardingHTTPSPage() {
           The heading is `text-xl` — AuthPage's own rule is that a PAGE's heading is `text-xl` and a
           CARD's is `text-base`, and this is a page. That half of the alignment stands. */}
       <div className="mx-auto w-full max-w-2xl">
+        {/* THE THIRD SURFACE. This route sits outside every guard and outside `AuthPage`, so
+            neither of the other two placements reaches it — and it is the page a user lands on
+            precisely when transport is what they are dealing with. Above the wordmark, as on
+            `AuthPage`, so the two first-run screens agree. */}
+        <InsecureTransportBanner />
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Reaching quince securely</h1>
 

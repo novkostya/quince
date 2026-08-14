@@ -2,14 +2,21 @@ import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PasswordForm } from "./PasswordForm";
 import { APIError } from "@/lib/api";
 
+// A QUERY CLIENT, BECAUSE `AuthPage` NOW CARRIES THE PLAIN-HTTP WARNING (quince#539) and this form
+// renders inside it. Nothing in this suite is about the banner, which stays silent with no health
+// answer — the provider is here so the primitive can ask.
 function renderForm(onSubmit: (p: string) => Promise<void>) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
-      <PasswordForm title="Sign in" subtitle="Enter your admin password." cta="Sign in" onSubmit={onSubmit} />
-    </MemoryRouter>,
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <PasswordForm title="Sign in" subtitle="Enter your admin password." cta="Sign in" onSubmit={onSubmit} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
