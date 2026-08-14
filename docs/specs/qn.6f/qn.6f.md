@@ -158,6 +158,25 @@ Not recommended:
 The line between the tiers is *does quince terminate TLS*; the line above the warnings is *is the
 certificate real*. Neither fallback carries a "recommended" badge.
 
+**CORRECTION — the top tier's *"this step completes itself"* is TRUE OF A PROXY THAT FORWARDS THE
+SCHEME AND FALSE OF THE ONE MOST PEOPLE BUILD.** Operator ruling 2026-08-14 on quince#939, reversing
+quince#908 §4's decision that this card gets no affordance. Recorded here rather than only on the
+issue, because the block above is the build target and that is the line which was wrong.
+
+**What it missed.** Caddy and Traefik set `X-Forwarded-Proto` for you; **nginx does not**, and the
+widely-copied `proxy_pass` block sets `X-Forwarded-For` and omits `Proto`. That user has a genuinely
+working HTTPS site, loads quince through it, and sees **Not encrypted** — with nothing saying why, and
+no way to tell it from a broken proxy. **The step does not complete itself. It fails silently, on the
+tier carrying the Recommended badge.**
+
+**So the top tier gets a probe:** a name to check, a nonce-gated cross-origin request proving the
+client can reach *this* quince there, and `detected` reporting what quince saw on that connection.
+`detected: none` behind a working https proxy is the nginx caveat, and the remedy is one line of
+configuration.
+
+**The tier ORDER and the badges are untouched** — this corrects what the top tier *does*, not where it
+sits. quince#446's ruling above stands in every other respect.
+
 ### Detection is the whole of the top tier, and it is a state rather than a button
 
 `r.TLS != nil` **or** `X-Forwarded-Proto: https` → step 1 is **complete**, no buttons. Otherwise the

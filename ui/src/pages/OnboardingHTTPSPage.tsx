@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
 import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
+import { ProxyProbe } from "@/features/onboarding/ProxyProbe";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
 import { useAuthStatus } from "@/lib/auth";
 
@@ -179,7 +180,13 @@ function Tiers({ firstRun }: { firstRun: boolean }) {
                 reverse proxy — Caddy, nginx, Traefik — works too, as long as it sets{" "}
                 <code className="font-mono">X-Forwarded-Proto</code>.
               </p>
-              {firstRun ? null : (
+              {firstRun ? (
+                // THE PROBE REVERSES quince#908 §4 (Operator ruling 2026-08-14, quince#939). §4 gave
+                // this card no affordance because the check "completes itself when the page loads
+                // over HTTPS" — true of a proxy that forwards the scheme, false of the one most
+                // people build. See `ProxyProbe` for the whole argument.
+                <ProxyProbe />
+              ) : (
                 <p className="mt-2">
                   quince needs no configuration for this: load the page over HTTPS and this check
                   completes itself.
