@@ -45,7 +45,7 @@ export function OnboardingHTTPSPage() {
     // the document scrolls. A transient lag during the toolbar animation costs a brief scroll, not
     // reachability. Do not "unify" this with the authed shell's rule without reading that comment.
     <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      {/* `max-w-2xl`, AND IT IS THE OTHER TWO STEPS THAT MOVED TO MATCH IT — Operator direction
+      {/* `max-w-4xl`, AND IT IS THE OTHER TWO STEPS THAT MOVED TO MATCH IT — Operator direction
           2026-08-13. The first attempt at making the three consistent narrowed THIS page instead,
           on the argument that 36rem is the better measure for prose. That was the wrong direction,
           and the storage step is why: it renders the whole `quince-zfs-helper` script, whose lines
@@ -55,7 +55,7 @@ export function OnboardingHTTPSPage() {
 
           The heading is `text-xl` — AuthPage's own rule is that a PAGE's heading is `text-xl` and a
           CARD's is `text-base`, and this is a page. That half of the alignment stands. */}
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-4xl">
         {/* THE THIRD SURFACE. This route sits outside every guard and outside `AuthPage`, so
             neither of the other two placements reaches it — and it is the page a user lands on
             precisely when transport is what they are dealing with. Above the wordmark, as on

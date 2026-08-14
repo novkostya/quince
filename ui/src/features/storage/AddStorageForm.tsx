@@ -26,6 +26,37 @@ import type {
   StorageZFSKey,
 } from "@/lib/types";
 
+// codeBlock is the shared LOOK of every copyable block on this form — and nothing else, because the
+// three want different line behaviour and folding that in here made them fight.
+//
+// THE SCRIPT DOES NOT WRAP; IT SCROLLS (Operator, 2026-08-14). Wrapping a shell script folds `case`
+// bodies and comments into ragged half-lines, which reads worse than the clipping it was meant to
+// cure. The one-liners DO wrap: an `authorized_keys` entry is a single 200-character line with no
+// structure to preserve, and scrolling that is scrolling forever.
+//
+// THE WHITESPACE UTILITY THEREFORE LIVES AT EACH USE, NOT HERE. `whitespace-pre` and
+// `whitespace-pre-wrap` carry the same specificity, so which one wins is decided by their order in
+// Tailwind's OUTPUT rather than in the class string — a per-use override appended after a shared one
+// is a coin toss that looks deterministic.
+//
+// WIDTH IS THE PAGE'S DECISION, NOT THIS FILE'S, and that was learned expensively: a `lg:-mx-20`
+// here widened the block by pushing it out BOTH sides of whatever contains it — fine under the
+// centred onboarding page, and wrong under `AddStoragePage`, where a sidebar occupies the left. The
+// block slid under the sidebar and every line lost its first characters, which is worse than the
+// clipping it replaced: that hid the ends of long lines, this hid the starts of all of them. This
+// component renders inside two pages with different geometry and cannot know either.
+const codeBlock = "rounded bg-elevated p-2 text-xs";
+
+// fieldWidth caps the CONTROLS while the blocks keep the page's full width (Operator, 2026-08-14).
+// The pages had to grow so a 113-character shell script could sit at its natural shape, and dragging
+// every text input out with them made a hostname and a username look like essay fields. The two
+// wants are genuinely different: a path or a dataset name is short and is READ BACK for typos, where
+// a script is long and is COPIED.
+//
+// ON THE CONTROL RATHER THAN A WRAPPER, because `fieldBase` is `w-full` and a max-width on the same
+// element bounds it without adding a layout node between the label and its control.
+const fieldWidth = "max-w-xl";
+
 // serverSentence pulls the daemon's own words out of a 422. Same rule ForgetStorage states: the
 // refusal names the field AND the remedy, and re-wording it client-side drops the half that tells
 // the user what to do.
@@ -424,7 +455,7 @@ export function AddStorageForm({
         <div className="mt-1 flex gap-2">
           <Input
             id="add-storage-path"
-            className="flex-1"
+            className={`flex-1 ${fieldWidth}`}
             value={path}
             placeholder="/backups"
             onChange={(e) => {
@@ -453,7 +484,7 @@ export function AddStorageForm({
             </label>
             <Select
               id="add-storage-backend"
-              className="mt-1"
+              className={`mt-1 ${fieldWidth}`}
               value={backend}
               onChange={(e) => setBackend(e.target.value)}
               data-testid="backend-select"
@@ -495,7 +526,7 @@ export function AddStorageForm({
             </label>
             <Input
               id="zfs-parent"
-              className="mt-1"
+              className={`mt-1 ${fieldWidth}`}
               value={parentDataset}
               placeholder="rpool/quince"
               onChange={(e) => {
@@ -524,7 +555,7 @@ export function AddStorageForm({
             </label>
             <Input
               id="zfs-ssh-host"
-              className="mt-1"
+              className={`mt-1 ${fieldWidth}`}
               value={sshHost}
               placeholder="nas.local"
               onChange={(e) => {
@@ -539,7 +570,7 @@ export function AddStorageForm({
             </label>
             <Input
               id="zfs-ssh-user"
-              className="mt-1"
+              className={`mt-1 ${fieldWidth}`}
               value={sshUser}
               /* THE USER WHOSE `authorized_keys` CARRIES THE FORCED COMMAND — which is the thing
                  that bounds what quince can do on that host, so it is worth naming as itself rather
@@ -568,7 +599,7 @@ export function AddStorageForm({
             ) : null}
 
             {zfsKey !== null ? (
-              <div className="mt-3 rounded-card border border-line bg-card p-3" data-testid="zfs-key">
+              <div className="mt-5" data-testid="zfs-key">
                 <div className="text-sm font-medium">
                   {/* WHICH ONE IT IS MATTERS. An existing key's public half may already be installed
                       on the host, so "quince found" means *you may be done*, where "quince made"
@@ -585,7 +616,7 @@ export function AddStorageForm({
                   restricts the key to the helper, so it cannot be used for anything else.
                 </div>
                 <pre
-                  className="mt-2 overflow-x-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap break-all"
+                  className={`mt-2 whitespace-pre-wrap break-all ${codeBlock}`}
                   data-testid="zfs-authorized-keys"
                 >
                   {zfsKey.authorized_keys}
@@ -628,7 +659,7 @@ export function AddStorageForm({
                     {helperLoading ? "Rendering…" : "Show the helper script"}
                   </Button>
                 ) : (
-                  <div className="rounded-card border border-line bg-card p-3" data-testid="zfs-helper">
+                  <div className="mt-1" data-testid="zfs-helper">
                     <div className="text-sm font-medium">The helper script, ready to install</div>
                     <div className="mt-1 text-sm text-muted">
                       Save this on{" "}
@@ -642,7 +673,7 @@ export function AddStorageForm({
                         the rest of the form on a phone, and this is a thing to COPY rather than to
                         read. */}
                     <pre
-                      className="mt-2 max-h-64 overflow-auto rounded bg-elevated p-2 text-xs"
+                      className={`mt-2 max-h-80 overflow-auto whitespace-pre ${codeBlock}`}
                       data-testid="zfs-helper-script"
                     >
                       {helper.script}
@@ -683,7 +714,7 @@ export function AddStorageForm({
                     {hostKeyBusy ? "Asking…" : "Check this host's key"}
                   </Button>
                 ) : (
-                  <div className="rounded-card border border-line bg-card p-3">
+                  <div className="mt-1">
                     <div className="text-sm font-medium">Is this the right host?</div>
                     <div className="mt-1 text-sm text-muted">
                       <span className="text-fg">{hostKey.host}</span> offered a{" "}
@@ -695,7 +726,7 @@ export function AddStorageForm({
                         compares character by character, and half of it behind a scrollbar is worse
                         than useless. */}
                     <pre
-                      className="mt-2 rounded bg-elevated p-2 text-xs whitespace-pre-wrap break-all"
+                      className={`mt-2 whitespace-pre-wrap break-all ${codeBlock}`}
                       data-testid="hostkey-fingerprint"
                     >
                       {hostKey.fingerprint}
