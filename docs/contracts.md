@@ -103,13 +103,34 @@ PUT    /api/auth/password {current_password, new_password}  → 204
        // server's own sentence · 422 weak_password · 429 rate_limited — THE SAME BUCKET as
        // POST /api/auth/login, because it verifies a password and holding a session must not
        // buy a fresh budget to guess in · 503 unavailable on the demo (below).
-DELETE /api/auth/password                                   → 204
+DELETE /api/auth/password {current_password?, proof?}       → 204
        // SESSION REQUIRED. Makes the install PASSWORDLESS. Ruling B superseded qn.6k's "a
        // passkey is an addition, never a replacement"; `quince auth reset` is what carries the
        // recovery cost, and it needs console access to the box.
+       // SINCE qn.6n IT DEMANDS A PASSKEY — rule 2, and this is the endpoint the rule was
+       // written for. `proof` is a token from POST /api/auth/reauth/finish minted for
+       // `remove_password`; `current_password` is accepted at the wire and REFUSED, because a
+       // credential cannot authorise its own removal.
+       // IT TAKES A BODY, WHICH IS UNUSUAL FOR A DELETE AND IS DELIBERATE. A credential may not
+       // travel in the query — the secrets rule, and a `proof` is a credential-equivalent for
+       // one operation that would land in every access log on the way here — and a header is
+       // the same objection one step weaker, since proxies log those more readily than bodies.
+       // RFC 9110 leaves a DELETE body undefined rather than forbidden; `fetch` sends one; a
+       // proxy that strips it produces a stated 401 rather than a silent success.
+       // AN ABSENT BODY IS NOT A 400. Presenting nothing breaks a rule about credentials, not
+       // about JSON, so it takes the credential refusal. A MALFORMED body is still a 400.
+       // 409 wrong_credential when the password was presented AND a passkey for this rpId
+       // exists — retryable with something the caller already has.
        // 409 last_credential when no passkey exists FOR THIS rpId. The message names the
        // address this request arrived on AND the addresses the credentials it did find belong
        // to — "no passkeys" at a box that visibly has some reads as quince being broken.
+       // TWO CODES, NOT ONE, AND THE TEST IS THE REMEDY. This file refuses a second code for
+       // the two LOCKOUT paths because their remedy is identical; these two differ — one says
+       // *use the passkey you have*, the other says *go and make one* — and a client that
+       // could not tell them apart would offer a retry that cannot succeed.
+       // In practice the UI meets neither: it proves a passkey FIRST, unconditionally, because
+       // nothing cheaper can satisfy this endpoint. Both are what a hand-made request gets.
+       // 401 bad_password · 401 reauth_required · 429 rate_limited, the login bucket (D7).
        // 503 unavailable on the demo (below).
 ```
 
@@ -341,6 +362,11 @@ POST /api/auth/reauth/begin {operation, target?}  → 200 {ceremony, options}
      // 422 bad_operation names what was wrong · 429 rate_limited, THE SAME BUCKET as login,
      // because holding a session must not buy a fresh budget to guess with (D7)
      // 409 passkeys_unsupported_here at an address that cannot be a relying party.
+     // 409 last_credential for `remove_password` AT AN ADDRESS THAT HOLDS NO PASSKEY — the
+     // refusal DELETE /api/auth/password used to give afterwards, moved ahead of the sheet so
+     // a user who cannot do the thing is told what to add instead of meeting an empty
+     // authenticator prompt. IT IS COPY AND NOT A GUARD: the removal is refused either way, by
+     // rule 2, on what proved the request. Deleting this check would weaken nothing.
 POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
      // SESSION REQUIRED, AND IT SETS NO COOKIE. `passkeys/login/finish` sets two and returns
      // {state, csrf_token}; this returns a token and nothing else. Issuing a session here
@@ -357,10 +383,16 @@ POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
      // · 400 no_ceremony · 429 rate_limited · 409 passkey_rp_mismatch.
 ```
 
-**NOTHING CONSUMES THE PROOF YET.** Slices 4 and 5 of `qn.6n` make the mutating endpoints demand
-one; this pair is the way to obtain one, landed first so the two can be reviewed apart. A proof
-minted today is spendable nowhere, which is the same shape `qn.6k` slice 2 shipped `InsertPasskey`
-in and `quince auth reset` before it.
+**THREE ENDPOINTS CONSUME THE PROOF, and one still does not.** `PUT /api/auth/password`
+(`set_password`), `POST /api/auth/passkeys/register/begin` (`add_passkey`) and `DELETE
+/api/auth/password` (`remove_password`) each demand one; `DELETE /api/auth/passkeys/{id}`
+(`remove_passkey`) is the remaining one, and until it lands a `remove_passkey` proof is spendable
+nowhere.
+
+**This paragraph said *"NOTHING CONSUMES THE PROOF YET"* until slice 6a, three slices after that
+stopped being true** — the shape quince#409 named, where the sentence describing the WHOLE is the
+part nobody updates when a part changes. Written as a list rather than a status, so the next slice
+has to edit it to stay accurate.
 
 Passkeys — assertion (qn.6k):
 

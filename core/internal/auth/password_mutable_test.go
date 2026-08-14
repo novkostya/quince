@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -156,12 +157,77 @@ func TestChangeIsRateLimitedOnTheLoginBucket(t *testing.T) {
 
 // ── remove ────────────────────────────────────────────────────────────────────────────────────
 
-// THE LOCKOUT GUARD. Removing the last way in is refused, and the refusal says what is missing
-// rather than failing generically.
-func TestRemoveIsRefusedWithNoPasskeyAtAll(t *testing.T) {
+// RULE 2 — THE PASSWORD CANNOT AUTHORISE ITS OWN REMOVAL, and this is the test the whole slice is
+// for. The password is CORRECT and the removal is still refused, which is what distinguishes rule 2
+// from the lockout check it replaced: that one asked what would be left, this one asks what proved
+// the request.
+func TestRemoveRefusesTheCorrectPassword(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seedPasskey(t, st, "cred-1", here)
+
+	err := svc.RemovePassword(NewProofs(), Presented{Password: "old-one"}, here, sess, ip)
+	var self ErrSelfRemoval
+	if !errors.As(err, &self) {
+		t.Fatalf("RemovePassword with the right password = %v, want ErrSelfRemoval", err)
+	}
+	// THE REMEDY IS IN THE SENTENCE. A refusal that said only "no" would leave a user who typed the
+	// correct password with no way to tell what quince wanted instead.
+	if !strings.Contains(self.Error(), "passkey") {
+		t.Errorf("refusal = %q, want it to name the passkey as the remedy", self.Error())
+	}
+	if _, _, err := svc.Login("old-one", ip, ""); err != nil {
+		t.Fatalf("the password went despite the refusal: %v", err)
+	}
+}
+
+// PRESENTING NOTHING IS REFUSED TOO, and it takes the ordinary bad-password answer rather than a
+// special one: an absent password IS a wrong password on an install that has one.
+func TestRemoveRefusesAnEmptyPresentation(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seedPasskey(t, st, "cred-1", here)
+
+	if err := svc.RemovePassword(NewProofs(), Presented{}, here, sess, ip); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("RemovePassword with nothing presented = %v, want ErrBadPassword", err)
+	}
+	if _, _, err := svc.Login("old-one", ip, ""); err != nil {
+		t.Fatalf("the password went despite the refusal: %v", err)
+	}
+}
+
+// G2's FIRST HALF, AT AN ENDPOINT RATHER THAN AT THE PRIMITIVE. `Proofs.Consume` already refuses a
+// mismatched operation and `proof_test.go` asserts it; what this adds is that the removal path
+// actually ASKS for its own operation. A caller that passed the wrong constant would satisfy every
+// test in `proof_test.go` and accept an `add_passkey` proof here.
+func TestRemoveRefusesAProofForAnotherOperation(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seedPasskey(t, st, "cred-1", here)
+
+	proofs := NewProofs()
+	tok := mustMint(t, proofs, OpAddPasskey, "", ProofSubject{CredentialID: "cred-1"})
+	if err := svc.RemovePassword(proofs, Presented{Proof: tok}, here, sess, ip); !errors.Is(err, ErrProofNotForThis) {
+		t.Fatalf("RemovePassword with an add_passkey proof = %v, want ErrProofNotForThis", err)
+	}
+	if _, _, err := svc.Login("old-one", ip, ""); err != nil {
+		t.Fatalf("the password went despite the refusal: %v", err)
+	}
+}
+
+// THE LOCKOUT MESSAGE SURVIVES AS A MESSAGE — D2. Nothing counts rows to decide the verdict any
+// more; rows decide only WHICH refusal is useful, and with no passkey anywhere the useful one still
+// names what to add.
+func TestRemoveWithNoPasskeyAtAllStillSaysWhatToAdd(t *testing.T) {
 	svc, _ := configured(t, "old-one")
 
-	err := svc.RemovePassword(here, ip)
+	err := svc.RemovePassword(NewProofs(), Presented{Password: "old-one"}, here, sess, ip)
 	var last ErrLastCredential
 	if !errors.As(err, &last) {
 		t.Fatalf("RemovePassword with no passkey = %v, want ErrLastCredential", err)
@@ -171,14 +237,16 @@ func TestRemoveIsRefusedWithNoPasskeyAtAll(t *testing.T) {
 	}
 }
 
-func TestRemoveSucceedsWithAPasskeyForThisAddress(t *testing.T) {
+func TestRemoveSucceedsWithAPasskeyProof(t *testing.T) {
 	svc, st := newConfiguredService(t)
 	if err := svc.SetPassword("old-one", ip); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	seedPasskey(t, st, "cred-1", here)
 
-	if err := svc.RemovePassword(here, ip); err != nil {
+	proofs := NewProofs()
+	tok := mustMint(t, proofs, OpRemovePassword, "", ProofSubject{CredentialID: "cred-1"})
+	if err := svc.RemovePassword(proofs, Presented{Proof: tok}, here, sess, ip); err != nil {
 		t.Fatalf("RemovePassword: %v", err)
 	}
 	if _, _, err := svc.Login("old-one", ip, ""); !errors.Is(err, ErrNoPassword) {
@@ -193,9 +261,12 @@ func TestRemoveSucceedsWithAPasskeyForThisAddress(t *testing.T) {
 	}
 }
 
-// THE rpId FILTER, AND IT IS THE OPPOSITE OF Configured()'s. A credential bound to another domain
-// cannot sign in HERE, so counting it would let somebody remove their password and lock themselves
-// out — with the phone still listing a passkey that cannot help.
+// THE rpId FILTER IS STILL WHAT DECIDES THE MESSAGE, and the reason it mattered has not changed: a
+// credential bound to another domain cannot sign in HERE, so a refusal that ignored the distinction
+// would tell a user with a phone full of passkeys that they have none.
+//
+// WHAT CHANGED IS THAT IT NO LONGER DECIDES THE VERDICT. The removal was refused before this runs,
+// on the subject alone — see TestRemoveRefusesTheCorrectPassword.
 func TestRemoveRefusesWhenEveryPasskeyBelongsElsewhere(t *testing.T) {
 	svc, st := newConfiguredService(t)
 	if err := svc.SetPassword("old-one", ip); err != nil {
@@ -203,7 +274,7 @@ func TestRemoveRefusesWhenEveryPasskeyBelongsElsewhere(t *testing.T) {
 	}
 	seedPasskey(t, st, "cred-elsewhere", elsewhere)
 
-	err := svc.RemovePassword(here, ip)
+	err := svc.RemovePassword(NewProofs(), Presented{Password: "old-one"}, here, sess, ip)
 	var last ErrLastCredential
 	if !errors.As(err, &last) {
 		t.Fatalf("RemovePassword = %v, want ErrLastCredential", err)
@@ -221,8 +292,13 @@ func TestRemoveRefusesWhenEveryPasskeyBelongsElsewhere(t *testing.T) {
 	}
 }
 
-// Configured() must NOT filter and RemovePassword() must — asserted together, on ONE store, because
-// the bug is using the same rule for both and neither test alone catches it.
+// Configured() must NOT filter by rpId and the removal path MUST — asserted together, on ONE store,
+// because the bug is using the same rule for both and neither half alone catches it.
+//
+// THE SECOND HALF MOVED IN qn.6n AND THE PAIRING IS WHY THIS TEST SURVIVED THE MOVE. `RemovePassword`
+// used to hold the filter; now the guard is an assertion, which an off-domain credential cannot
+// produce, and the filter that remains is the ceremony gate. Same two opposite rules, one of them at
+// a new address — so this asserts the rule rather than the function that used to carry it.
 func TestTheTwoRPIDRulesAreOpposite(t *testing.T) {
 	svc, st := newConfiguredService(t)
 	if err := svc.SetPassword("old-one", ip); err != nil {
@@ -234,8 +310,12 @@ func TestTheTwoRPIDRulesAreOpposite(t *testing.T) {
 	if ok, err := svc.Configured(); err != nil || !ok {
 		t.Fatalf("Configured = %v (err=%v), want true — claiming does NOT filter by rpId", ok, err)
 	}
-	// Can sign in here — filtered, so the same credential does NOT permit removal.
-	if err := svc.RemovePassword(here, ip); !errors.As(err, &ErrLastCredential{}) {
-		t.Fatalf("RemovePassword = %v, want ErrLastCredential — signing in DOES filter by rpId", err)
+	// Can prove a removal here — filtered, so the same credential does NOT get a ceremony.
+	if err := svc.provable(OpRemovePassword, here); !errors.As(err, &ErrLastCredential{}) {
+		t.Fatalf("provable = %v, want ErrLastCredential — removal DOES filter by rpId", err)
+	}
+	// And it is not a blanket refusal: the credential's own address gets its ceremony.
+	if err := svc.provable(OpRemovePassword, elsewhere); err != nil {
+		t.Fatalf("provable at the credential's own address = %v, want nil", err)
 	}
 }

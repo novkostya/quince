@@ -298,7 +298,9 @@ type PasswordAdmin interface {
 	// 3 mean a session alone no longer authorises a password change, and the proof must be checked
 	// against the session that minted it.
 	ChangePassword(proofs *auth.Proofs, pres auth.Presented, next, sessionID, clientIP string) error
-	RemovePassword(rpID, clientIP string) error
+	// AND SO DOES REMOVAL, since qn.6n rule 2: the password cannot authorise its own removal, so
+	// this now takes what was presented and refuses everything except a passkey proof.
+	RemovePassword(proofs *auth.Proofs, pres auth.Presented, rpID, sessionID, clientIP string) error
 }
 
 // UnavailablePasswordAdmin is the PasswordAdmin used when none is wired (--demo): both operations
@@ -319,6 +321,6 @@ func (UnavailablePasswordAdmin) ChangePassword(*auth.Proofs, auth.Presented, str
 	return ErrPasswordAdminUnavailable
 }
 
-func (UnavailablePasswordAdmin) RemovePassword(string, string) error {
+func (UnavailablePasswordAdmin) RemovePassword(*auth.Proofs, auth.Presented, string, string, string) error {
 	return ErrPasswordAdminUnavailable
 }

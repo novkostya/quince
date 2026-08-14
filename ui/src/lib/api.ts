@@ -139,5 +139,7 @@ export const api = {
   getText: (path: string) => requestText(path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-  del: <T>(path: string) => request<T>("DELETE", path),
+  // DELETE TAKES A BODY, for the credential-carrying removals (qn.6n rule 2). Optional, so every
+  // existing caller is unchanged: `request` only sets a body when one is passed.
+  del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
 };

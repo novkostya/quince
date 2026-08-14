@@ -203,24 +203,63 @@ func (d Deps) handleChangePassword() http.HandlerFunc {
 //
 // The rpId comes from the REQUEST rather than from the client, exactly as every other passkey
 // surface derives it: what matters is the address this call actually arrived on, and a client-named
-// domain would let a caller talk itself past the lockout guard.
+// domain would let a caller talk itself past the rule.
+//
+// IT TAKES A BODY, WHICH IS UNUSUAL FOR A DELETE AND IS THE ONLY PLACE A CREDENTIAL MAY TRAVEL. The
+// alternatives were a query parameter and a header; the query is closed by the secrets rule, since a
+// `proof` is a credential-equivalent for one operation and would land in every access log between
+// here and the browser, and a header is the same objection one step weaker — proxies log those far
+// more readily than bodies. A body on DELETE is legal (RFC 9110 leaves it undefined, not forbidden),
+// `fetch` sends one, and a proxy that strips it produces a stated refusal rather than a silent
+// success, which is the failure direction the no-silent-fallbacks rule asks for.
 func (d Deps) handleRemovePassword() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := d.PasswordAdmin.RemovePassword(auth.RPIDFromRequest(r), d.Proxies.ClientIP(r))
+		var body removePasswordBody
+		if err := decodeOptionalJSON(r, &body); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
+			return
+		}
+		err := d.PasswordAdmin.RemovePassword(d.Proofs,
+			auth.Presented{Password: body.CurrentPassword, Proof: body.Proof},
+			auth.RPIDFromRequest(r), sessionCookieValue(r), d.Proxies.ClientIP(r))
 		var lastCred auth.ErrLastCredential
+		var self auth.ErrSelfRemoval
 		switch {
 		case err == nil:
 			w.WriteHeader(http.StatusNoContent)
 		case errors.Is(err, ErrPasswordAdminUnavailable):
 			writeError(w, d.Log, http.StatusServiceUnavailable, "unavailable", err.Error())
+		case errors.Is(err, auth.ErrRateLimited):
+			writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+		case errors.As(err, &self):
+			// 409 wrong_credential — RULE 2. A DIFFERENT CODE FROM last_credential BECAUSE THE
+			// REMEDIES DIFFER: this one is retryable with something the user already has, and that
+			// one is not retryable at all until they make a new credential.
+			writeError(w, d.Log, http.StatusConflict, "wrong_credential", self.Error())
 		case errors.As(err, &lastCred):
 			// 409 AND THE ERROR'S OWN SENTENCE. It names the address this request arrived on and the
 			// addresses the credentials it found belong to, which is the difference between a
 			// mystery and an instruction — the same reasoning as passkey_rp_mismatch.
 			writeError(w, d.Log, http.StatusConflict, "last_credential", lastCred.Error())
+		case errors.Is(err, auth.ErrBadPassword):
+			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
+		case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
+			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
 		default:
 			d.Log.Error("remove password failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove password")
 		}
 	}
+}
+
+// removePasswordBody is the optional body of DELETE /api/auth/password.
+//
+// BOTH FIELDS ARE OPTIONAL AT THE WIRE AND NEITHER IS OPTIONAL IN EFFECT: rule 2 refuses the
+// password, so `proof` is the field that works and `current_password` exists to be REFUSED with a
+// sentence naming the remedy. Accepting it and answering properly is better than rejecting it as an
+// unknown field, which is what `DisallowUnknownFields` would otherwise do — a 400 about JSON where
+// the user needs to be told to use their passkey.
+type removePasswordBody struct {
+	CurrentPassword string `json:"current_password"`
+	Proof           string `json:"proof"`
 }

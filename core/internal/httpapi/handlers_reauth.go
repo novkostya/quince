@@ -34,9 +34,15 @@ func (d Deps) handleReauthBegin() http.HandlerFunc {
 			d.Proxies.ClientIP(r), auth.ProofOperation(strings.TrimSpace(body.Operation)),
 			strings.TrimSpace(body.Target), sessionCookieValue(r))
 		if err != nil {
+			var lastCred auth.ErrLastCredential
 			switch {
 			case errors.Is(err, auth.ErrRateLimited):
 				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+			case errors.As(err, &lastCred):
+				// 409 last_credential BEFORE THE SHEET — the same refusal DELETE /api/auth/password
+				// used to give afterwards, moved to the first call the surface makes. The user is
+				// told to add a passkey rather than meeting an empty authenticator prompt.
+				writeError(w, d.Log, http.StatusConflict, "last_credential", lastCred.Error())
 			case d.writePasskeyError(w, err):
 				// already written — the unsupported tier and the rpId mismatch carry their own message
 			default:

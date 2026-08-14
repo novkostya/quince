@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PasswordControls } from "./PasswordControls";
 import { Passkeys } from "./Passkeys";
 import { api, APIError } from "@/lib/api";
+import * as reauth from "@/lib/reauth";
 
 // qn.6m slice 6b — D4 and D7. The change form is ordinary; everything interesting is on the REMOVE
 // side, where the decision is irreversible without console access and the server is the only thing
@@ -116,13 +117,18 @@ describe("what passwordless costs is on the screen", () => {
 describe("removing the password", () => {
   it("takes two deliberate steps", async () => {
     const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+    // SINCE qn.6n RULE 2 THE CONFIRM STEP COSTS A PASSKEY ASSERTION. Stubbed rather than left to
+    // jsdom, which has no `navigator.credentials` — what this test is about is the two clicks.
+    vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
     renderControls();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
     expect(del).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
-    await waitFor(() => expect(del).toHaveBeenCalledWith("/api/auth/password"));
+    await waitFor(() =>
+      expect(del).toHaveBeenCalledWith("/api/auth/password", { proof: "PROOF-TOKEN" }),
+    );
   });
 
   it("can be backed out of", () => {
@@ -136,12 +142,16 @@ describe("removing the password", () => {
     expect(del).not.toHaveBeenCalled();
   });
 
-  // THE WHOLE REASON THE BUTTON IS NOT DISABLED. The server refuses with 409 unless a passkey exists
-  // for THIS address, and its message names the addresses the credentials it found belong to.
-  // Re-deriving that rule client-side would be a second implementation of an rpId check — the shape
+  // THE WHOLE REASON THE BUTTON IS NOT DISABLED. The server refuses unless a passkey exists for THIS
+  // address, and its message names the addresses the credentials it found belong to. Re-deriving
+  // that rule client-side would be a second implementation of an rpId check — the shape
   // `RequireStorage` is commented against — and a disabled button explains nothing.
+  //
+  // THE REFUSAL MOVED IN qn.6n AND THE CLAIM DID NOT. It used to come back from `DELETE`; it now
+  // comes from `reauth/begin`, before the authenticator sheet. Mocked at the ceremony for that
+  // reason — mocking `del` would assert against a path this flow no longer takes.
   it("surfaces the server's refusal verbatim, because it names what this client cannot know", async () => {
-    vi.spyOn(api, "del").mockRejectedValue(
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(
       new APIError(
         409,
         "last_credential",
@@ -161,6 +171,10 @@ describe("removing the password", () => {
   // and explaining itself, so the 503's stated reason has to arrive on screen rather than becoming
   // "something went wrong".
   it("surfaces the demo's 503 reason rather than generic copy", async () => {
+    // The demo refuses at `DELETE`, not at the ceremony — `UnavailablePasswordAdmin` is what
+    // answers, and the reauth pair is wired normally there. So this one still stubs the prove step
+    // as SUCCEEDING and asserts on what the endpoint says.
+    vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
     vi.spyOn(api, "del").mockRejectedValue(
       new APIError(
         503,

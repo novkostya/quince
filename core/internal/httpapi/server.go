@@ -326,6 +326,20 @@ func writeError(w http.ResponseWriter, log *slog.Logger, status int, code, messa
 	writeJSON(w, log, status, wire.APIError{Error: wire.ErrorDetail{Code: code, Message: message}})
 }
 
+// decodeOptionalJSON is decodeJSON for a request whose body may legitimately be ABSENT — today
+// `DELETE /api/auth/password`, which carries a credential when it has one to carry (qn.6n rule 2).
+//
+// AN EMPTY BODY IS NOT A BAD REQUEST HERE, AND MAKING IT ONE WOULD ANSWER THE WRONG QUESTION. A
+// caller that presents nothing has failed a rule about credentials, not about JSON; the 400 it would
+// otherwise get names the body, where the refusal it has actually earned names what to present.
+// Anything that IS there still has to parse, so a malformed body is a 400 exactly as before.
+func decodeOptionalJSON(r *http.Request, v any) error {
+	if err := decodeJSON(r, v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
 // decodeJSON decodes a JSON request body into v, rejecting unknown fields and oversized or
 // malformed input.
 func decodeJSON(r *http.Request, v any) error {
