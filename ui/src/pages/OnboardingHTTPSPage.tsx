@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
 import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
+import { PlainHTTPConfirm } from "@/features/onboarding/PlainHTTPConfirm";
 import { ProxyProbe } from "@/features/onboarding/ProxyProbe";
 import { useOnboardingHTTPS } from "@/lib/onboarding";
 import { useAuthStatus } from "@/lib/auth";
@@ -258,11 +259,18 @@ function Tiers({ firstRun }: { firstRun: boolean }) {
                   content that survives the shortening on its own merits rather than by being
                   short. */}
               {firstRun ? (
-                <p className="mt-2">
-                  It also rules out notifications for good: browsers only allow web push on an
-                  encrypted origin, so quince could never tell you a backup is waiting for your
-                  passcode.
-                </p>
+                <>
+                  <p className="mt-2">
+                    It also rules out notifications for good: browsers only allow web push on an
+                    encrypted origin, so quince could never tell you a backup is waiting for your
+                    passcode.
+                  </p>
+                  {/* §4: one boolean and a warning — a CONFIRM, not a page. The escape hatch for
+                      somebody who cannot otherwise finish setup at all. The route behind it is
+                      `Configured()`-gated, so first-run-only here is presentation and the 409 is
+                      the control. */}
+                  <PlainHTTPConfirm />
+                </>
               ) : (
                 <p className="mt-2">
                   It also rules out notifications. Browsers only allow web push on an encrypted
