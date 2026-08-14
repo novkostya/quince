@@ -1,8 +1,11 @@
 package clonetree
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -175,6 +178,18 @@ func TestCloneReflinkUnsupportedErrors(t *testing.T) {
 	src := buildSrcTree(t)
 	if err := Clone(filepath.Join(t.TempDir(), "out"), src, Reflink); err == nil {
 		t.Fatal("reflink Clone on a non-reflink fs should error (no silent fallback)")
+	}
+}
+
+// TestStrategyLogsTheWord goes through a real slog JSON handler rather than calling LogValue
+// directly, because the defect it guards is the handler's choice: String() exists and is not
+// consulted, so a test asserting the method in isolation would have passed while the log line read
+// `"strategy":0` (quince#992).
+func TestStrategyLogsTheWord(t *testing.T) {
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("seeded", "strategy", Reflink)
+	if got := buf.String(); !strings.Contains(got, `"strategy":"reflink"`) {
+		t.Errorf(`JSON record = %s, want it to carry "strategy":"reflink"`, got)
 	}
 }
 

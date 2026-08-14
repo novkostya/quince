@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -76,6 +77,18 @@ func (s Strategy) String() string {
 		return "unknown"
 	}
 }
+
+// LogValue makes `"strategy", s` log the word rather than the ordinal. String() is NOT enough and
+// the call site cannot show you that: slog's JSON handler marshals a KindAny value with
+// encoding/json, which consults json.Marshaler and encoding.TextMarshaler and never fmt.Stringer —
+// so a named int type logs as its ordinal, and Reflink being iota means the default backend logged
+// `"strategy":0`, which reads as unset (quince#992).
+//
+// slog resolves a LogValuer before the handler sees it, so this is right for the text handler too,
+// where a MarshalText would only fix the JSON one — and it changes nothing about how the type
+// serialises anywhere else. Any other named int type that reaches a log key needs the same method;
+// there are twelve more in core/internal today and none of them is logged.
+func (s Strategy) LogValue() slog.Value { return slog.StringValue(s.String()) }
 
 // ErrReflinkUnsupported is returned by the reflink path when the filesystem refuses FICLONE.
 // The strategy is chosen by a probe before Clone runs, so hitting this mid-clone is a real,
