@@ -329,8 +329,17 @@ func (d Deps) handleStorageZFSHostKey() http.HandlerFunc {
 			})
 			return
 		}
+		// WHAT known_hosts ALREADY SAYS, answered here rather than left for the trust call to
+		// discover. It reads the same file the transport will and makes the same comparison
+		// TrustHostKey makes — storage.HostKeyTrustState shares that code deliberately, so the scan
+		// cannot report `trusted` while the trust call disagrees.
+		knownHosts := d.ZFSKnownHostsPath
+		if knownHosts == "" {
+			knownHosts = config.DefaultZFSKnownHosts
+		}
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHostKeyResponse{
 			Found: true,
+			Trust: storage.HostKeyTrustState(knownHosts, hk.Line),
 			HostKey: &wire.StorageZFSHostKey{
 				Host: hk.Host, Port: hk.Port, KeyType: hk.Type,
 				Fingerprint: hk.Fingerprint, Line: hk.Line,

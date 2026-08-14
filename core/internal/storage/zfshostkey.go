@@ -217,3 +217,48 @@ func hostKeyState(file []byte, host string, key ssh.PublicKey) (same, conflict b
 	}
 	return false, conflict
 }
+
+// HostKeyTrust values. Strings rather than a bool pair because `changed` is a THIRD state that
+// neither "trusted" nor "not trusted" describes, and flattening it is how it would stop being shown.
+const (
+	// HostKeyUnknown — this host is not in known_hosts. The ordinary first-run answer.
+	HostKeyUnknown = "unknown"
+	// HostKeyTrusted — recorded, with exactly this key. Nothing is owed; TrustHostKey would return
+	// early and write nothing.
+	HostKeyTrusted = "trusted"
+	// HostKeyChanged — recorded with a DIFFERENT key. A rebuilt host, or something impersonating
+	// one, and quince cannot tell which. Trust refuses this; the scan reports it so the operator
+	// meets it while looking at the fingerprint rather than after pressing a button.
+	HostKeyChanged = "changed"
+)
+
+// HostKeyTrustState reports what known_hosts already says about `line`.
+//
+// IT REUSES THE COMPARISON TrustHostKey MAKES, deliberately, rather than re-deriving it: two
+// implementations of "is this key already recorded" would let the scan say `trusted` while the trust
+// call disagreed, which is worse than not answering at all. Both call hostKeyState.
+//
+// A LINE THAT DOES NOT PARSE, OR NAMES OTHER THAN ONE HOST, IS `unknown` — not an error. This is a
+// read for a screen: refusing is TrustHostKey's job and it still does it, with the sentence that
+// explains why. Answering "I cannot tell" as "not recorded" keeps the ceremony's default, which is
+// to ask the operator to compare.
+func HostKeyTrustState(knownHostsPath, line string) string {
+	_, hosts, key, _, _, err := ssh.ParseKnownHosts([]byte(strings.TrimSpace(line) + "\n"))
+	if err != nil || key == nil || len(hosts) != 1 {
+		return HostKeyUnknown
+	}
+	existing, err := os.ReadFile(knownHostsPath) //nolint:gosec // a path from config, not a request
+	if err != nil {
+		// Absent is the first-run case and is not a failure. Anything else unreadable is reported
+		// the same way for the reason above: this function must not invent trust it cannot verify.
+		return HostKeyUnknown
+	}
+	switch same, conflict := hostKeyState(existing, hosts[0], key); {
+	case same:
+		return HostKeyTrusted
+	case conflict:
+		return HostKeyChanged
+	default:
+		return HostKeyUnknown
+	}
+}

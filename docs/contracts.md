@@ -969,7 +969,7 @@ POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
 POST /api/storages/zfs/key    (NO BODY — see below)        → 200 {key} | 500
 GET  /api/storages/zfs/helper?parent_dataset=<ds>          → 200 {script, path} | 422 | 500
-POST /api/storages/zfs/hostkey {ssh_host, ssh_port?}     → 200 {found, host_key, reason} | 422
+POST /api/storages/zfs/hostkey {ssh_host, ssh_port?}     → 200 {found, host_key, reason, trust} | 422
 POST /api/storages/zfs/hostkey/trust {line}                → 200 {trusted, path} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
 ```
@@ -2135,7 +2135,8 @@ script and one query parameter, which is why it is a `GET` where the key endpoin
     "fingerprint": "SHA256:…",                  // the form `ssh-keygen -lf` prints
     "line": "nas.local ssh-ed25519 AAAA…"       // the complete known_hosts entry
   },
-  "reason": ""
+  "reason": "",
+  "trust": "unknown"                            // unknown | trusted | changed; omitted with no key
 }
 
 // trust ← {"line": "…"}   → 200
@@ -2151,6 +2152,20 @@ script and one query parameter, which is why it is a `GET` where the key endpoin
 **EVERY ANSWER ABOUT A REAL ADDRESS IS A `200`, including "nothing answered"** — the rule `probe` and `probe/hook` already follow. A host that is not up yet has answered the question. Only a malformed request — no `ssh_host`, or a trust with no `line` — is a `422`.
 
 **Recording the same key twice is a no-op**, not a second line: a `known_hosts` with a hundred identical entries is one nobody reads when it matters.
+
+**`trust` SAYS WHAT `known_hosts` ALREADY HOLDS, so the scan can tell the operator something they do not already know.** Without it the ceremony reads identically on every press — *compare this fingerprint, then confirm it* — including on a host confirmed an hour earlier, where the button it offers would write nothing because trust returns early on an exact match. Three values, not a boolean:
+
+| `trust` | what it means | what the surface should do |
+| --- | --- | --- |
+| `unknown` | not in `known_hosts` | the ceremony: show the fingerprint, ask for a comparison |
+| `trusted` | recorded, **this** key | say so and stop. Nothing is owed |
+| `changed` | recorded, a **different** key | warn BEFORE the comparison — a rebuilt host, or an impersonation |
+
+**`changed` is why it is not a boolean, and it is the value that earns this field.** That case was already refused, but only at *trust* time — after the operator had compared a fingerprint and pressed a button. Reporting it at *scan* time moves it to the moment they are looking at the key, which is the moment they can act on it. Flattening it into `trusted: false` would put it in the same bucket as an ordinary first connect, which is the one thing it is not.
+
+**It shares the comparison with the trust call rather than re-deriving it** (`storage.HostKeyTrustState` and `TrustHostKey` both call `hostKeyState`). Two implementations of *"is this key already recorded"* would eventually let the scan answer `trusted` while trust disagreed, which is worse than not answering.
+
+**A line quince cannot parse, or one naming other than exactly one host, reads as `unknown`** — not as an error. This is a read for a screen; refusing is the trust call's job and it still does it, with the sentence that explains why. Answering *"I cannot tell"* as *"not recorded"* keeps the ceremony's default, which is to ask the operator to compare.
 
 **Nothing here is secret.** A host's public key is handed to every client that connects. The private half of quince's OWN key is a different thing and is never on this or any wire (see `StorageZFSKey`).
 ## 3. WebSocket (`/api/ws`)

@@ -231,6 +231,9 @@ export function AddStorageForm({
   const [hostKeyError, setHostKeyError] = useState("");
   const [hostKeyBusy, setHostKeyBusy] = useState(false);
   const [hostKeyTrusted, setHostKeyTrusted] = useState("");
+  // What known_hosts said at scan time. `trusted` ends the ceremony with a tick instead of asking
+  // for a comparison the operator already made; `changed` is the one worth a warning.
+  const [hostKeyTrust, setHostKeyTrust] = useState("");
 
   async function scanHostKey() {
     setHostKeyBusy(true);
@@ -238,8 +241,12 @@ export function AddStorageForm({
     setHostKeyTrusted("");
     try {
       const res = await scanZFSHostKey(sshHost.trim());
-      if (res.found && res.host_key) setHostKey(res.host_key);
-      else setHostKeyError(res.reason);
+      if (res.found && res.host_key) {
+        setHostKey(res.host_key);
+        // `?? "unknown"` so an older daemon, which omits the field, gets the ceremony rather than a
+        // tick it did not earn. Defaulting the other way would claim trust nobody checked.
+        setHostKeyTrust(res.trust ?? "unknown");
+      } else setHostKeyError(res.reason);
     } catch (e) {
       setHostKeyError(serverSentence(e, "could not ask that host for its key"));
     } finally {
@@ -713,9 +720,40 @@ export function AddStorageForm({
                   >
                     {hostKeyBusy ? "Asking…" : "Check this host's key"}
                   </Button>
+                ) : hostKeyTrust === "trusted" ? (
+                  /* ALREADY TRUSTED ENDS THE CEREMONY RATHER THAN REPEATING IT (Operator,
+                     2026-08-14). Pressed on a host confirmed earlier, this asked for the same
+                     fingerprint comparison again and offered a Trust button that would have written
+                     nothing — TrustHostKey returns early on an exact match. "Nothing to do" is the
+                     honest result, and it earns the same green tick as the helper check for the
+                     same reason: a check that passed should look like one. */
+                  <div className="mt-1 flex items-start gap-2 text-sm" data-testid="hostkey-trusted">
+                    <Check className="mt-0.5 size-4 shrink-0 text-ok" aria-hidden />
+                    <div>
+                      <span className="text-fg">{hostKey.host}</span> is already trusted — its{" "}
+                      {hostKey.key_type} key matches the one quince recorded. Nothing to do.
+                    </div>
+                  </div>
                 ) : (
                   <div className="mt-1">
-                    <div className="text-sm font-medium">Is this the right host?</div>
+                    {/* THE HEADING CHANGES ON A CHANGED KEY, because it is not the same question.
+                        First contact asks *is this the right host*; a key differing from the
+                        recorded one is a statement, and the operator needs to know BEFORE they
+                        compare fingerprints that something has already gone wrong. Trust refuses
+                        this case regardless — this is only about meeting it earlier. */}
+                    {hostKeyTrust === "changed" ? (
+                      <div
+                        className="flex items-start gap-2 text-sm font-medium"
+                        data-testid="hostkey-changed"
+                      >
+                        <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
+                        <span>
+                          This host is offering a DIFFERENT key from the one quince recorded
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-sm font-medium">Is this the right host?</div>
+                    )}
                     <div className="mt-1 text-sm text-muted">
                       <span className="text-fg">{hostKey.host}</span> offered a{" "}
                       <span className="text-fg">{hostKey.key_type}</span> key. Check it against the
