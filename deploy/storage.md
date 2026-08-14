@@ -163,9 +163,12 @@ why three lines that look wrong are not.
 - **`rollback` takes no `-r`, and none can reach it** — the parse drops every flag. Without `-r`,
   `zfs rollback` refuses any snapshot but the most recent, and `-r`/`-R` are what destroy *newer*
   snapshots, i.e. committed versions. So the verb structurally cannot lose one.
-- **`capacity` takes no caller argument at all**, which makes it *tighter* than the pattern-guarded
-  arms — it is why the helper check fires it first: a failure there is unambiguously about
-  reachability.
+- **`capacity` takes no caller argument at all, and REFUSES one rather than ignoring it**
+  (quince#984). That makes it *tighter* than the pattern-guarded arms, and it is why the helper check
+  fires it first: a failure there is unambiguously about reachability. The refusal is what makes
+  *every verb is confined* true by inspection — until it landed, this arm read `$PARENT` and dropped
+  whatever the caller sent, so a client asking about someone else's dataset got the right answer for
+  the wrong reason, and a later edit teaching it to honour an argument would have inherited no guard.
 - **Verbs that changed, for an operator upgrading an existing helper:** `seed)` was **deleted**
   (qn.5b's clone of `latest/` → `working/<udid>`; quince no longer seeds on this backend) and
   `rollback)` was **added** (what Reset uses). Backups keep working across that gap — only reset

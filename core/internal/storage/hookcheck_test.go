@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -271,6 +272,80 @@ esac`
 	if strings.Contains(got, "used,available") {
 		t.Fatalf("THE HELPER FORWARDED CALLER FLAGS — quince#593's defect is back. zfs saw %q", got)
 	}
+}
+
+// quince#984 — `capacity` is confined by a GUARD, not by having nothing to confine.
+//
+// Every other verb checks its target against `$PARENT`. `capacity` did not, because it had no
+// target: it ignored whatever the caller sent and read `$PARENT`. The answer was right and the
+// reason was wrong — measured on a rig, a client sending `capacity <someone-else's-dataset>` got its
+// OWN parent's figures back — so the rule an auditor reads off the file ("every verb checks its
+// target") was false for one arm, and would stay false the moment someone taught that arm to honour
+// an argument.
+//
+// Driven through the ssh shim rather than through `zfsCLI`, because quince never sends this: the
+// caller here is an operator at a terminal, or a client with the key and an idea. There is no Go
+// surface to go through.
+func TestTheRealHelperRefusesCapacityWithAnArgument(t *testing.T) {
+	requireSh(t)
+	const parent = "tank/backups"
+
+	// Returns what `zfs` was asked for (empty if it was never reached), the helper's stderr, and the
+	// exit error. The stub answers a plausible capacity so a refusal cannot be confused with a
+	// broken fixture.
+	run := func(t *testing.T, args ...string) (zfsSaw, stderr string, err error) {
+		t.Helper()
+		rec := filepath.Join(t.TempDir(), "argv")
+		hook := hookHarness(t, parent, `echo "$*" >> `+rec+"\necho \"10\t20\"\nexit 0", helperSource(t))
+		cmd := exec.Command(hook[0], args...) //nolint:gosec // the shim is written by this test
+		var errb bytes.Buffer
+		cmd.Stderr = &errb
+		err = cmd.Run()
+		b, readErr := os.ReadFile(rec)
+		if readErr != nil {
+			return "", errb.String(), err
+		}
+		return string(b), errb.String(), err
+	}
+
+	// The guard must not cost the verb its actual job — which is also what `CheckHook` fires first.
+	t.Run("the bare verb still answers", func(t *testing.T) {
+		saw, stderr, err := run(t, "capacity")
+		if err != nil {
+			t.Fatalf("the helper refused a bare `capacity`: %v\nstderr: %s", err, stderr)
+		}
+		if !strings.Contains(saw, "used,available") || !strings.Contains(saw, parent) {
+			t.Errorf("zfs saw %q, want a used,available read of %q", strings.TrimSpace(saw), parent)
+		}
+	})
+
+	// The case the issue was filed on: a client asking about a dataset that is not its own used to be
+	// answered — correctly, by accident — instead of refused.
+	t.Run("SOMEBODY ELSE'S dataset is refused, not silently answered for ours", func(t *testing.T) {
+		saw, stderr, err := run(t, "capacity", "rpool/somebody-else")
+		if err == nil {
+			t.Fatalf("the helper ACCEPTED `capacity <foreign dataset>`; it must refuse rather than "+
+				"answer for $PARENT. zfs saw %q", strings.TrimSpace(saw))
+		}
+		if saw != "" {
+			t.Errorf("zfs was invoked for a refused call: %q", strings.TrimSpace(saw))
+		}
+		// The refusal has to say WHICH rule bit. "refused: capacity rpool/somebody-else" reads as a
+		// confinement failure and would send an operator to check their $PARENT line.
+		if !strings.Contains(stderr, "capacity takes no argument") {
+			t.Errorf("the refusal does not name the rule; stderr = %q", stderr)
+		}
+	})
+
+	// $PARENT itself is still an argument. Accepting it would make the guard depend on the value
+	// rather than on the shape, which is the coincidence being removed.
+	t.Run("even OUR OWN dataset is refused", func(t *testing.T) {
+		saw, _, err := run(t, "capacity", parent)
+		if err == nil {
+			t.Errorf("the helper accepted `capacity $PARENT` — the verb takes no argument at all. "+
+				"zfs saw %q", strings.TrimSpace(saw))
+		}
+	})
 }
 
 func requireSh(t *testing.T) {

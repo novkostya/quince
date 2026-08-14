@@ -25,7 +25,9 @@ case "$op" in
             # No -r, and the parse drops flags, so rollback cannot reach anything but the newest snapshot.
   rollback) case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-  capacity) exec zfs list -H -p -o used,available "$PARENT" ;;
+            # Confined by a guard rather than by having no target: an argument is REFUSED, not ignored.
+  capacity) [ -z "${2:-}" ] || { echo "quince-zfs-helper: capacity takes no argument" >&2; exit 1; }
+            exec zfs list -H -p -o used,available "$PARENT" ;;
 esac
 echo "quince-zfs-helper: refused: $SSH_ORIGINAL_COMMAND" >&2
 exit 1
