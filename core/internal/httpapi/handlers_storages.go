@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 
@@ -223,9 +224,58 @@ func hookCheck422(w http.ResponseWriter, d Deps, path, msg string) {
 func (d Deps) handleStorageZFSHelper() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageZFSHelperResponse{
-			Script: storage.ZFSHelperScript(),
-			Path:   storage.ZFSHelperPath,
+			Script:     storage.ZFSHelperScript(),
+			Path:       storage.ZFSHelperPath,
+			SourcePath: ZFSHelperRoute,
 		})
+	}
+}
+
+// handleZFSHelperPlain serves GET /zfs/helper → 200 text/plain, the helper script and nothing else.
+//
+// IT EXISTS SO THE HOST THAT NEEDS THE FILE CAN FETCH IT. The browser reading the add-storage form
+// is not the machine the helper is installed on; the ZFS host is, and it has no session, no cookie
+// jar and frequently no browser. `GET /api/storages/zfs/helper` answers `401` to it, correctly, and
+// that is why this second door exists rather than the first being opened.
+//
+// UNAUTHENTICATED, AND HERE IS EXACTLY WHAT THAT COSTS. The response is a compile-time constant —
+// the same bytes for every install of a version since quince#985, when the operator's dataset moved
+// into the `authorized_keys` forced command. It reads no config, touches no `/data`, and names no
+// dataset, host, user or key. The same file is public in the repository. So what a stranger who can
+// reach this port learns is *"a quince of about this version is here"*, which the login page already
+// tells them.
+//
+// THAT IS A PROPERTY OF THE SCRIPT, NOT OF THIS HANDLER, and it is the thing to re-check before
+// anyone makes the script per-install again: the day it carries one operator's dataset, this route
+// is a disclosure and must move behind the session with it. `TestZFSHelperPlainServesAConstant` is
+// the guard, and it fails rather than warns.
+//
+// OUTSIDE THE `/api/` CHAIN, so it has no `authGuard`, no `csrfGuard` (a GET carries no CSRF risk)
+// and no `setupGuard` — the last one matters: installing the helper is something an operator does
+// BEFORE the first storage exists, so a readiness gate here would 503 the one moment it is wanted.
+//
+// `text/plain`, NOT AN ATTACHMENT. `curl <url>` should print the script, because the whole argument
+// for offering this at all is that a file you are about to run as root is one you can read first. A
+// `Content-Disposition` would make the default action *download silently*, which is the shape the
+// Operator declined.
+// ZFSHelperRoute is where the plain-text helper is served, and it is a constant because THREE places
+// have to agree about it: the route registration, the `source_path` on the JSON response, and the
+// address the form renders into a `curl` line. The form takes it off the wire rather than hardcoding
+// it, so moving the route cannot leave a link pointing at a 404 that nobody notices until an
+// operator tries to install a helper.
+const ZFSHelperRoute = "/zfs/helper"
+
+func (d Deps) handleZFSHelperPlain() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		// A shell script is exactly the sort of body a browser might be talked into sniffing as
+		// something else; `securityHeaders` already sets this globally, and it is restated here
+		// because this is the one route whose body is a program.
+		h.Set("X-Content-Type-Options", "nosniff")
+		if _, err := io.WriteString(w, storage.ZFSHelperScript()); err != nil {
+			d.Log.Warn("zfs helper: writing the plain-text helper", "error", err)
+		}
 	}
 }
 

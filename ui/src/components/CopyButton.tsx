@@ -30,7 +30,29 @@ import { Button } from "@/components/ui/button";
 // stops being a report about the last press.
 type CopyState = "idle" | "copied" | "failed";
 
-export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+// `inline` is the icon-only form that sits in a code block's corner (`CodeBlock`), for screens with
+// several copyable blocks where a labelled button per block becomes the page.
+//
+// RUNG 3 KEEPS ITS WORDS EVEN THERE, and that is the one thing this mode may not economise on. A
+// failed copy has to SAY so — an icon that silently stays an icon is the "reports success it did not
+// achieve" failure wearing a quieter coat. So `failed` renders its sentence in both modes and the
+// block simply gets wider for a moment; `copied` is a state a reader can see from the icon.
+// `testId` EXISTS BECAUSE THERE IS MORE THAN ONE OF THESE ON A SCREEN NOW. `CodeBlock` puts a copy
+// control in every block, so the add-storage zfs branch has three, and a bare `getByTestId(
+// "copy-button")` resolves to all of them — a strict-mode violation in Playwright, and worse than
+// that a test that could have silently asserted against whichever one came first. It defaults to the
+// old value so single-button screens are untouched.
+export function CopyButton({
+  value,
+  label = "Copy",
+  inline = false,
+  testId = "copy-button",
+}: {
+  value: string;
+  label?: string;
+  inline?: boolean;
+  testId?: string;
+}) {
   const [state, setState] = useState<CopyState>("idle");
   // The timer is cleared on unmount: this button lives on a form that navigates away on success, and
   // a setState after that is a React warning nobody can act on.
@@ -80,19 +102,25 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
     }
   }
 
+  // THE ACCESSIBLE NAME CARRIES THE STATE IN BOTH MODES, because in `inline` there is no visible text
+  // to read for `idle` and `copied` — so a screen reader, and a test, get the answer from here.
+  const name = state === "copied" ? "Copied" : state === "failed" ? "Copy it by hand" : label;
+
   return (
     <Button
       type="button"
-      variant="outline"
+      variant={inline ? "ghost" : "outline"}
       size="sm"
       onClick={() => void copy()}
-      data-testid="copy-button"
+      data-testid={testId}
       data-state={state}
       // THE LABEL IS THE STATE. A tooltip would be invisible on the phone this screen is used from.
-      aria-label={label}
+      aria-label={name}
+      className={inline ? "h-7 px-2 text-muted hover:text-fg" : undefined}
     >
       {state === "copied" ? <Check size={14} /> : <Copy size={14} />}
-      {state === "copied" ? "Copied" : state === "failed" ? "Copy it by hand" : label}
+      {/* In `inline`, only the failure speaks — see the note on the prop. */}
+      {inline ? (state === "failed" ? name : null) : name}
     </Button>
   );
 }

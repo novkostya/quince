@@ -636,6 +636,19 @@ type StorageZFSHelperResponse struct {
 	// Path is where it goes. On the wire because it is half the instruction — a script with no
 	// destination is a thing the operator still has to look up, which is what piece C exists to end.
 	Path string `json:"path"`
+	// SourcePath is where this same script is served as plain text, for the machine that has to
+	// install it — `/zfs/helper`, unauthenticated, no parameters.
+	//
+	// A PATH AND NOT A URL, because quince does not know its own address. What reaches an operator's
+	// storage host has to be an address that works from there, and the only one quince can be sure
+	// of is the one the client is already using — so the client joins this to its own origin. A
+	// daemon-side guess would be config quince cannot verify, on a screen where a wrong address
+	// looks exactly like a right one until somebody runs it.
+	//
+	// ON THE WIRE RATHER THAN HARDCODED IN THE UI so the route and the link cannot drift. Moving the
+	// route would otherwise leave a `curl` line pointing at a 404 that nobody meets until they are
+	// on the storage host with a terminal open.
+	SourcePath string `json:"source_path"`
 }
 
 // StorageZFSHostKeyRequest asks what host key an address offers (quince#912).

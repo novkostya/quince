@@ -584,7 +584,7 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   // AND IT SAYS WHERE THE PRIVATE HALF STAYS, which is the sentence that stops somebody hunting for
   // a file to copy off the box.
   await expect(panel).toContainText("/data/keys/zfs");
-  await expect(panel).toContainText(/never leaves this machine/i);
+  await expect(panel).toContainText(/private key stays on this machine/i);
 
   // THE COPY BUTTON WORKS HERE, AND *HERE* IS THE WHOLE ASSERTION.
   //
@@ -596,14 +596,21 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
   expect(await page.evaluate(() => navigator.clipboard === undefined)).toBe(true);
 
-  // So a `copied` here can only have come from the `execCommand` rung. A button that reported
-  // success it did not achieve would be worse than no button: the operator walks away believing
-  // they hold the constrained line, and pastes whatever was on the clipboard before.
-  const copy = page.getByTestId("copy-button");
+  // So a `copied` here can only have come from the `execCommand` rung. A control that reported
+  // success it did not achieve would be worse than none: the operator walks away believing they hold
+  // the constrained line, and pastes whatever was on the clipboard before.
+  //
+  // SCOPED TO THIS BLOCK'S CONTROL. There are three copyable blocks on this branch now — the line,
+  // the fetch command and the script — so a bare `copy-button` matches all three. Playwright refuses
+  // that in strict mode, which is the good outcome; the bad one would have been a locator that
+  // silently took whichever came first.
+  const copy = page.getByTestId("copy-zfs-authorized-keys");
   await expect(copy).toBeVisible();
   await copy.click();
   await expect(copy).toHaveAttribute("data-state", "copied");
-  await expect(copy).toContainText("Copied");
+  // THE STATE IS ON THE ACCESSIBLE NAME, NOT IN VISIBLE TEXT. The control is an icon in the block's
+  // corner now, so `Copied` has nowhere to be rendered — and a screen reader needs it anyway.
+  await expect(copy).toHaveAttribute("aria-label", "Copied");
 
   // AND THE CLIPBOARD ACTUALLY HOLDS THE LINE — which is a different claim from the one above, and
   // the gap is exactly what this component exists to close. `data-state="copied"` means
@@ -655,15 +662,27 @@ test("the zfs branch shows the helper script, which names no dataset", async ({ 
   await page.getByTestId("backend-select").selectOption("zfs");
   await expect(page.getByTestId("zfs-fields")).toBeVisible();
 
-  // OFFERED IMMEDIATELY, WITH NO DATASET TYPED. It used to be gated on that field, because a script
-  // rendered with an empty `PARENT=` is not a useful artifact. There is nothing left to render, so
-  // reading the file before committing to anything is no longer something to earn.
-  await page.getByTestId("show-helper").click();
-
+  // IT ARRIVES WITH THE BRANCH, WITH NO DATASET TYPED AND NO BUTTON PRESSED. It was gated on that
+  // field — a script rendered with an empty `PARENT=` is not a useful artifact — and then behind a
+  // *Show the helper script* button. Neither survives a constant answer: there is nothing to render,
+  // so a control whose only job is to spend a click is one more control on a crowded screen.
   const panel = page.getByTestId("zfs-helper");
   await expect(panel).toBeVisible();
 
+  // THE COMMAND LEADS AND THE SCRIPT IS UNDER A CUT (Operator, 2026-08-14). The reverse arrangement
+  // put ~50 lines of shell between the operator and the two controls that do something.
+  await expect(page.getByTestId("zfs-helper-curl")).toBeVisible();
+
+  // THE SCRIPT IS STILL HERE, WHICH IS THE CONSTRAINT. *Not the only option* is what was ruled, not
+  // *not first* — so the cut may hide it and must not omit it, and it must open to the real bytes
+  // rather than to a fetch.
+  const details = page.getByTestId("zfs-helper-details");
+  await expect(details).toBeVisible();
+  await expect(page.getByTestId("zfs-helper-script")).toBeHidden();
+  await details.locator("summary").click();
+
   const script = page.getByTestId("zfs-helper-script");
+  await expect(script).toBeVisible();
   // THE ASSERTION WITH TEETH, AND IT HAS INVERTED. It used to be that the placeholder must be gone;
   // now NO dataset may appear at all. A script carrying one is a valid file that installs cleanly
   // and silently sends backups somewhere that is not theirs — and, at one install path, replaces the
@@ -681,6 +700,32 @@ test("the zfs branch shows the helper script, which names no dataset", async ({ 
   // AND IT SAYS WHERE TO PUT IT. The path is half the instruction, and it is the same path the
   // `authorized_keys` line above pins as its forced command — a helper saved elsewhere is never run.
   await expect(panel).toContainText("/usr/local/sbin/quince-zfs-helper");
+
+  // THE LINK POINTS AT THE ORIGIN THIS PAGE IS ON, not at one quince guessed — that is the only
+  // address known to work from somewhere, and the path comes off the wire so moving the route cannot
+  // leave this at a 404.
+  const href = await page.getByTestId("zfs-helper-link").getAttribute("href");
+  expect(href).toBe(new URL("/zfs/helper", page.url()).toString());
+
+  // AND IT ACTUALLY SERVES THE SCRIPT, ANONYMOUSLY. `request` here carries no session, which is the
+  // whole point: the machine that installs the helper has no browser. A link that 404s or bounces to
+  // the login page would look identical on this screen.
+  const served = await page.request.get(href ?? "");
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toContain("text/plain");
+  expect(await served.text()).toBe(await script.textContent());
+
+  // A NEAR MISS IS A REFUSAL. Measured on the rig before this existed: the SPA catch-all answered
+  // 200 with index.html, so `curl -f` had no error to fail on and the one-liner below installed the
+  // app's HTML and made it executable.
+  expect((await page.request.get(`${href ?? ""}r`)).status()).toBe(404);
+
+  // THE COMMAND WRITES A FILE AND RUNS NOTHING. Piping to a shell is the shape that earns the
+  // suspicion this panel is arranged to avoid, and it would make the readable copy above decorative.
+  const cmd = (await page.getByTestId("zfs-helper-curl").textContent()) ?? "";
+  expect(cmd).toContain(`${href ?? ""} -o /usr/local/sbin/quince-zfs-helper`);
+  expect(cmd).toMatch(/curl\s+-[a-zA-Z]*f/);
+  expect(cmd).not.toMatch(/\|\s*(sudo\s+)?(sh|bash)/);
 
   // THE SCRIPT SURVIVES A DATASET CHANGE, WHICH IS THE OPPOSITE OF WHAT IT USED TO DO. It was
   // dropped here, correctly, while it carried that field's value. Re-fetching now would be a request

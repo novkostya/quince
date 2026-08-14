@@ -1117,7 +1117,8 @@ POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,
                                ssh_port?, ssh_key?}        → 200 {check} | 422
 POST /api/storages/zfs/key {parent_dataset}                → 200 {key} | 422 | 500
-GET  /api/storages/zfs/helper  (NO PARAMETER — see below)  → 200 {script, path}
+GET  /api/storages/zfs/helper  (NO PARAMETER — see below)  → 200 {script, path, source_path}
+GET  /zfs/helper       (NOT /api; NO SESSION — see below)  → 200 text/plain — the same script
 POST /api/storages/zfs/hostkey {ssh_host, ssh_port?}     → 200 {found, host_key, reason, trust} | 422
 POST /api/storages/zfs/hostkey/trust {line}                → 200 {trusted, path} | 422
 POST /api/jobs {udid, transport, storage_id?, retry_of?}  → 202 Job
@@ -2261,10 +2262,40 @@ quince on the host, so the two are one string rather than a key plus a suggestio
 
 ```jsonc
 {
-  "script": "#!/bin/sh\n… PARENT=\"${1:-}\" …",   // the WHOLE file, saveable as-is
-  "path":   "/usr/local/sbin/quince-zfs-helper"  // where it goes
+  "script":      "#!/bin/sh\n… PARENT=\"${1:-}\" …",   // the WHOLE file, saveable as-is
+  "path":        "/usr/local/sbin/quince-zfs-helper",  // where it goes
+  "source_path": "/zfs/helper"                         // where the same bytes are served as text
 }
 ```
+
+**`GET /zfs/helper` — THE SAME SCRIPT, AS `text/plain`, WITH NO SESSION.** The machine that installs
+the helper is the ZFS host, not the browser: it has no cookie jar and frequently no browser, and the
+authenticated endpoint above answers `401` to a `curl` from it — measured. So there is a second door,
+outside `/api/`, at an address short enough to read off one screen and type into another.
+
+**WHAT THE EXEMPTION COSTS, stated rather than implied.** The response is a compile-time constant: it
+reads no config, touches no `/data`, and names no dataset, host, user or key, and the same file is
+public in this repository. What a stranger who can reach the port learns is *"a quince of about this
+version is here"*, which the login page already tells them. **That is a property of the script, not
+of the route** — the day it carries one operator's dataset again this becomes a disclosure and must
+move behind the session with it, which is why `TestZFSHelperPlainServesAConstant` fails rather than
+warns.
+
+**`text/plain` AND NO `Content-Disposition`, deliberately.** `curl <url>` must PRINT the script,
+because the argument for offering a fetch at all is that a file you are about to run as root is one
+you can read first. An attachment would make the browser's default action a silent download.
+
+**GET AND HEAD ONLY.** The path is registered twice — with a method and without — because the SPA
+below is a catch-all and would otherwise answer `200` with the app's HTML to a `POST /zfs/helper`.
+The route has no auth guard above it, so *one method, one path, writes nothing* has to be true rather
+than nearly true.
+
+**`source_path` IS A PATH AND NOT A URL, because quince does not know its own address.** What reaches
+an operator's storage host has to work *from there*, and the only address quince can be sure of is
+the one the client is already using — so the client joins this to its own origin. A daemon-side guess
+would be unverifiable config on a screen where a wrong address looks exactly like a right one until
+somebody runs it. It is on the wire rather than hardcoded in the UI so that moving the route cannot
+leave a `curl` line pointing at a `404` nobody meets until they are on the storage host.
 
 **THE ANSWER IS A CONSTANT, AND `parent_dataset` IS GONE** (quince#985). The script used to arrive
 with the operator's dataset substituted into a `PARENT=` line. That made every install's file

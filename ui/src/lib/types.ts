@@ -539,7 +539,7 @@ export interface StorageZFSKeyResponse {
 }
 
 // StorageZFSHelperResponse is GET /api/storages/zfs/helper (contracts §1, quince#818 piece C) — the
-// constrained helper with the operator's own `parent_dataset` already in it.
+// constrained helper, and since quince#985 the same bytes for every install.
 export interface StorageZFSHelperResponse {
   // script is the WHOLE file, ready to save. Not an excerpt: the operator saves this and nothing
   // else, which is the difference between an instruction and a reference.
@@ -547,6 +547,10 @@ export interface StorageZFSHelperResponse {
   // path is where it goes — the same constant the `authorized_keys` line pins as its forced command,
   // so a helper saved anywhere else is simply never reached.
   path: string;
+  // source_path is where the same script is served as plain text, for the host that has to install
+  // it. A PATH, not a URL: quince does not know its own address, so the client joins this to the
+  // origin it is already talking to — the one address known to work from somewhere.
+  source_path: string;
 }
 
 // The host-key ceremony (contracts §1, quince#912). quince composes StrictHostKeyChecking=yes, so
