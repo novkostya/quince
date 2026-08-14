@@ -53,12 +53,59 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ "$PORT" = "0" ]; then
-	# A FREE PORT, not a fixed one: two runners share this box, and a fixed port makes one smoke
-	# fail as though the product were broken — the most expensive possible disguise.
-	PORT=$(awk 'BEGIN{srand();print 20000+int(rand()*20000)}')
-fi
-PORT2=$((PORT + 1))
+# A FREE PORT IS ONE THE KERNEL ACCEPTED, NOT ONE WE DREW (quince#913).
+#
+# This drew a random port and never checked it, then took `PORT + 1` for the second container on the
+# assumption that the next one was free too. Both are guesses. A drawn port can be in use — the range
+# overlaps the ephemeral range every outbound connection on the box allocates from — and the
+# neighbour assumption fails outright whenever two runners draw four ports between them.
+#
+# `make demo` had the mirror defect: a FIXED base of 8968 and a scan of only ten, which on a box
+# running several runners' demos exhausts the whole window (measured 2026-08-14: twelve containers
+# held 8968-8977 and `make demo` refused outright). Same bug, opposite guess.
+#
+# THE ONLY THING THAT ASKS THE KERNEL IS ATTEMPTING THE BIND, and letting the RUNTIME do it makes the
+# allocator and the binder the same actor, so there is no window for somebody to take the port in
+# between. That is the Makefile's `demo` reasoning and it is repeated here because this script had the
+# other half of the same bug.
+#
+# `-p 0:8968` WOULD BE BETTER AND DOES NOT WORK: nerdctl 2.2.1 exits 1 rather than allocating —
+# measured for the Makefile and re-measured here on 2026-08-14 (`run-exit=1`, no published port, no
+# listening socket). Worth stating because the first attempt at this fix believed it HAD worked: the
+# run was wrapped in `>/dev/null 2>&1` and its exit code never read, and `nerdctl port` then printed
+# `0.0.0.0:0` for a container that had failed to start. Reading the artifact rather than the tool's
+# silence is what settled it.
+#
+# So the port is drawn, the container is started, and a failure REDRAWS rather than incrementing.
+#
+# WHY IT MATTERS MORE THAN AN OCCASIONAL RETRY: a collision does not present as "the port was taken",
+# it presents as a smoke test failing against a healthy product — a flake, which is the most expensive
+# possible disguise on a project that has spent days chasing real ones.
+draw_port() { awk 'BEGIN{srand('"$1"');print 20000+int(rand()*20000)}'; }
+
+# start_free runs a container on a port the kernel accepted, redrawing on refusal, and echoes the
+# port. Every argument after the name is passed to `run` verbatim.
+#
+# `$PORT` STILL OVERRIDES, and only for the first container — a caller pinning a port wants that one
+# reachable, and the second is an implementation detail of the invalid-config arm.
+start_free() {
+	_name=$1
+	shift
+	_i=0
+	while [ "$_i" -lt 20 ]; do
+		# A DIFFERENT SEED EACH ATTEMPT. `srand()` with no argument seeds from the clock in whole
+		# seconds on BusyBox awk, so a retry inside the same second redraws the SAME port and the
+		# loop spins twenty times on one number. Found by reading rather than by hitting it.
+		_port=$(draw_port "$_i$$")
+		if "$RUNTIME" run -d --name "$_name" -p "$_port":8968 "$@" >/dev/null 2>&1; then
+			echo "$_port"
+			return 0
+		fi
+		"$RUNTIME" rm -f "$_name" >/dev/null 2>&1 || true
+		_i=$((_i + 1))
+	done
+	return 1
+}
 
 mkdir -p "$WORK/data" "$WORK/cache" "$WORK/invalid-data" "$WORK/invalid-cache"
 
@@ -80,13 +127,23 @@ status() {
 	if [ -n "${3:-}" ]; then curl -s -b "$3" -o "$2" -w "%{http_code}" "$1"; else curl -s -o "$2" -w "%{http_code}" "$1"; fi
 }
 
-echo "storageless-smoke: image=$IMAGE port=$PORT data=$WORK/data (EMPTY — no config.yml)"
-
 # NO config.yml, WHICH IS THE POINT. A fresh install has none, and quince used to refuse to start.
-"$RUNTIME" run -d --name "$NAME" -p "$PORT":8968 \
-	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
-	-v "$WORK/data":/data -v "$WORK/cache":/cache \
-	"$IMAGE" serve >/dev/null || fail "could not start the container"
+if [ "$PORT" != "0" ]; then
+	"$RUNTIME" run -d --name "$NAME" -p "$PORT":8968 \
+		-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
+		-v "$WORK/data":/data -v "$WORK/cache":/cache \
+		"$IMAGE" serve >/dev/null || fail "could not start the container on the requested PORT=$PORT"
+else
+	PORT=$(start_free "$NAME" \
+		-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
+		-v "$WORK/data":/data -v "$WORK/cache":/cache \
+		"$IMAGE" serve) || fail "could not bind a free port in 20 tries — say so, never treat it as a product failure"
+fi
+
+# AFTER THE START, NOT BEFORE. This line stood above the `run` and printed `port=0` for every default
+# invocation, because the port is now chosen by the bind rather than before it — a banner reporting a
+# port nothing is listening on, in the one line a reader copies when a smoke fails.
+echo "storageless-smoke: image=$IMAGE port=$PORT data=$WORK/data (EMPTY — no config.yml)"
 
 # Wait for the port rather than sleeping a guess: a slow box must not read as a broken daemon.
 i=0
@@ -205,10 +262,13 @@ storage:
 YML
 
 LOGFROM="$NAME2"
-"$RUNTIME" run -d --name "$NAME2" -p "$PORT2":8968 \
+# DRAWN INDEPENDENTLY, never `PORT + 1`. The neighbour of a free port is not a free port, and this
+# arm inherited that assumption from the first (quince#913). It is also the arm most likely to be hit
+# by it: the first container is already running and holding one of the two.
+PORT2=$(start_free "$NAME2" \
 	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 	-v "$WORK/invalid-data":/data -v "$WORK/invalid-cache":/cache \
-	"$IMAGE" serve >/dev/null || fail "could not start the container with an invalid config"
+	"$IMAGE" serve) || fail "could not bind a free port for the invalid-config arm in 20 tries"
 
 i=0
 while [ "$i" -lt 60 ]; do
@@ -308,15 +368,18 @@ echo "  ok  config.yml is untouched — the declaration survives the refusal"
 # and it is the guard that has to hold on the paths where the write WOULD have succeeded.
 echo "storageless-smoke: third arm — a config that cannot be read at all (warnings, no \`Errors\`)"
 
-PORT3=$((PORT + 2))
 # A DIRECTORY where the config file goes — `os.Stat` succeeds, `os.ReadFile` fails.
 mkdir -p "$WORK/unread-data/config.yml" "$WORK/unread-cache"
 
 LOGFROM="$NAME3"
-"$RUNTIME" run -d --name "$NAME3" -p "$PORT3":8968 \
+# THE THIRD GUESS, AND THE EASIEST ONE TO MISS. This was `PORT + 2` — the same neighbour assumption
+# the other two arms carried, one step further out, and it survived the first run of this fix because
+# `PORT + 2` happened to be free. Found by re-reading the file rather than by trusting a green run,
+# which is the only way a guess that usually works ever gets found.
+PORT3=$(start_free "$NAME3" \
 	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 	-v "$WORK/unread-data":/data -v "$WORK/unread-cache":/cache \
-	"$IMAGE" serve >/dev/null || fail "could not start the container with an unreadable config"
+	"$IMAGE" serve) || fail "could not bind a free port for the unreadable-config arm in 20 tries"
 
 i=0
 while [ "$i" -lt 60 ]; do
