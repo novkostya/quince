@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,10 +239,14 @@ func TestListenResultRefused(t *testing.T) {
 
 // TestListenSkipsUnknownType: an unknown MessageType is logged and skipped (story 5), and valid
 // messages before and after it still land.
+//
+// The fixture was `Paired` until quince#934, which is a type usbmuxd sends on every pairing — so
+// this test's own example of "unknown" was the bug. It takes an invented type now; `Paired` is
+// covered as a KNOWN-ignored type below.
 func TestListenSkipsUnknownType(t *testing.T) {
 	events := runListen(t, func(mux net.Conn) {
 		_ = writePlist(mux, 0, attachedMsg(1, udidA, "USB"))
-		_ = writePlist(mux, 0, map[string]any{"MessageType": "Paired", "DeviceID": 9}) // unknown → skip
+		_ = writePlist(mux, 0, map[string]any{"MessageType": "QuinceNoSuchType", "DeviceID": 9}) // unknown → skip
 		_ = writePlist(mux, 0, attachedMsg(2, udidB, "Network"))
 	})
 	if a := recvEvent(t, events); a.UDID != udidA {
@@ -249,6 +254,45 @@ func TestListenSkipsUnknownType(t *testing.T) {
 	}
 	if b := recvEvent(t, events); b.UDID != udidB || b.Transport != TransportWiFi {
 		t.Fatalf("event after unknown type = %+v (unknown type not tolerated?)", b)
+	}
+}
+
+// TestListenKnownIgnoredTypeIsNotWarned: `Paired` is a type usbmuxd sends on every pairing and
+// quince has nothing to do with, so it must not claim the user's attention. Asserted on the LEVEL
+// rather than on the text, because the pre-quince#934 code also "handled" it — by warning about it
+// twice during first-run onboarding.
+func TestListenKnownIgnoredTypeIsNotWarned(t *testing.T) {
+	log, buf := capturingLog()
+	events := runListenWithLog(t, log, func(mux net.Conn) {
+		_ = writePlist(mux, 0, map[string]any{"MessageType": "Paired", "DeviceID": 9})
+		_ = writePlist(mux, 0, attachedMsg(1, udidA, "USB"))
+	})
+	if a := recvEvent(t, events); a.UDID != udidA { // the stream survives it, as before
+		t.Fatalf("event after Paired = %+v", a)
+	}
+	got := buf.String()
+	if strings.Contains(got, "level=WARN") {
+		t.Errorf("Paired produced a WARN: %s", got)
+	}
+	if !strings.Contains(got, "level=DEBUG") || !strings.Contains(got, "type=Paired") {
+		t.Errorf("Paired was not logged at DEBUG: %s", got)
+	}
+}
+
+// TestListenUnknownTypeStillWarns is the other half, and the one that keeps the first honest: a
+// later tidy-up that demotes the whole default arm to Debug would silence a muxer saying something
+// this code has no model for — which is the signal the WARN exists to carry (no silent fallbacks).
+func TestListenUnknownTypeStillWarns(t *testing.T) {
+	log, buf := capturingLog()
+	events := runListenWithLog(t, log, func(mux net.Conn) {
+		_ = writePlist(mux, 0, map[string]any{"MessageType": "QuinceNoSuchType", "DeviceID": 9})
+		_ = writePlist(mux, 0, attachedMsg(1, udidA, "USB"))
+	})
+	if a := recvEvent(t, events); a.UDID != udidA {
+		t.Fatalf("event after an unknown type = %+v", a)
+	}
+	if got := buf.String(); !strings.Contains(got, "level=WARN") || !strings.Contains(got, "type=QuinceNoSuchType") {
+		t.Errorf("an unknown type did not WARN: %s", got)
 	}
 }
 

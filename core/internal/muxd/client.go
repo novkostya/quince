@@ -51,6 +51,32 @@ type Sink interface {
 	Apply(ev Event)
 }
 
+// knownIgnoredTypes are listen-stream messages quince has a model for and deliberately does not
+// act on. They are the middle of three cases, and the middle one is what makes the other two mean
+// something: a WARN on this stream is now the claim *the muxer said a word this code has never
+// heard*, which is worth a look on the managed-muxer profile. Before this list, `Paired` — which
+// usbmuxd emits on every pairing — produced two WARNs during first-run onboarding, in the log the
+// new user is most likely reading (quince#934).
+//
+// MEASURED at the pinned muxers rather than remembered, because it is a claim about another
+// program (hard rule: interface facts are looked up live):
+//
+//   - usbmuxd 1.1.1_git20250201-r11, the Alpine 3.24 community package deploy/Dockerfile installs:
+//     strings on the shipped binary gives exactly Attached, Detached, Paired, Result — and
+//     src/client.c constructs the four in send_result, create_device_attached_plist,
+//     send_device_remove and send_device_paired. There is no fifth.
+//   - netmuxd v0.4.3 (NETMUXD_REF), which quince Listens to for Wi-Fi: Attached and Detached only.
+//     It never sends Paired.
+//
+// So the set is closed at one entry today. Adding to it is the right move for a type a muxer
+// documents and quince has nothing to do with; a type nobody can find in a muxer's source belongs
+// in the WARN arm, where it will be noticed.
+var knownIgnoredTypes = map[string]bool{
+	// usbmuxd announces a successful pairing. quince carries no pairing state on this stream —
+	// pairing is observed through lockdown, and the Attached that follows is what it acts on.
+	"Paired": true,
+}
+
 // listen performs the Listen handshake on conn, then reads attach/detach messages until the
 // connection errors, resolving each to an Event. Detached carries ONLY a DeviceID (a
 // per-connection integer, reassigned across reconnects — stack D2 / qn.2 spec), so a
@@ -101,6 +127,10 @@ func listen(ctx context.Context, conn io.ReadWriter, log *slog.Logger, emit func
 				emit(Event{Kind: Detached, UDID: ev.UDID, Transport: ev.Transport})
 			}
 		default:
+			if knownIgnoredTypes[msg.MessageType] {
+				log.Debug("muxd: known message type, nothing to do", "type", msg.MessageType)
+				continue
+			}
 			log.Warn("muxd: unknown message type, skipping", "type", msg.MessageType)
 		}
 	}
