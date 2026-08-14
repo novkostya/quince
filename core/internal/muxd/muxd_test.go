@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,6 +20,33 @@ const (
 )
 
 func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// syncBuffer is a bytes.Buffer safe to read while listen() is still writing to it from its own
+// goroutine — the log tests below assert on records the client emits mid-stream, and -race
+// otherwise reports the read against the write.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// capturingLog logs at Debug so a test can assert on the level a record was emitted AT, which is
+// the whole of quince#934: the same message at Warn and at Debug are different claims.
+func capturingLog() (*slog.Logger, *syncBuffer) {
+	var buf syncBuffer
+	return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})), &buf
+}
 
 func attachedMsg(deviceID int, udid, connType string) map[string]any {
 	return map[string]any{
@@ -48,6 +76,13 @@ func writeRawFrame(t *testing.T, w io.Writer, body []byte) {
 // listen() against it, and returns the channel of emitted events.
 func runListen(t *testing.T, script func(mux net.Conn)) <-chan Event {
 	t.Helper()
+	return runListenWithLog(t, testLog(), script)
+}
+
+// runListenWithLog is runListen with the logger supplied, for the tests that assert on what the
+// client logged and at which level.
+func runListenWithLog(t *testing.T, log *slog.Logger, script func(mux net.Conn)) <-chan Event {
+	t.Helper()
 	cli, mux := net.Pipe()
 	events := make(chan Event, 16)
 
@@ -69,7 +104,7 @@ func runListen(t *testing.T, script func(mux net.Conn)) <-chan Event {
 	go func() {
 		defer cancel()
 		defer func() { _ = cli.Close() }()
-		_ = listen(ctx, cli, testLog(), func(e Event) { events <- e })
+		_ = listen(ctx, cli, log, func(e Event) { events <- e })
 	}()
 	return events
 }
