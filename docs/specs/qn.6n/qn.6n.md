@@ -363,10 +363,17 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922, **merged** |
 | **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | quince#928, **merged** |
 | **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **merged** |
-| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony key is only ever produced by a guarded begin. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, approved |
-| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | *this PR* |
+| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony records WHAT IT WAS BEGUN FOR and the registration finisher refuses the other kind. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, **merged** |
+| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | quince#937, *this PR* |
 | **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | not open |
 | **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
+
+**ROW 5b'S DESCRIPTION WAS STALE THE MOMENT IT MERGED, AND NOT ABOUT ITS STATUS.** It read *"a ceremony
+key is only ever produced by a guarded begin"* — the sentence quince#930's review found short by the
+**pre-auth** producer, `passkeys/login/begin`. The PR corrected `contracts.md` and the handler comment
+and left the row asserting the uncorrected claim. **A row is a third part describing the whole**,
+after quince#409's heading and this table's own status column, and it goes stale on CONTENT as
+readily as on state.
 
 **ROW 6 SPLIT IN TWO, for 5a/5b's reason and not merely by analogy with it.** quince#927 claimed two
 paths and covered one, and the split that fixed it is the same shape here: two removal endpoints,
