@@ -862,6 +862,12 @@ endif
 #
 # DEMO_PORT STILL PINS, AND NOW MEANS IT: a caller naming a port wants THAT port, so a refusal is
 # reported rather than silently walked away from.
+#
+# AND THE REFUSAL CARRIES THE RUNTIME'S OWN SENTENCE (quince#946 review). Both loops discarded stderr
+# and then asserted a cause: a missing image, an unwritable volume or a broken runtime all reported
+# "could not bind a port". The words were not merely unhelpful, they were FALSE, and they pointed the
+# reader at the one thing that was fine. `2>&1 >/dev/null` keeps the message and drops the container
+# id — the ORDER matters, since the reverse discards both.
 .PHONY: demo
 demo: image ## Build this branch and serve it in --demo mode on this box; prints a fetched URL
 	@set -e; \
@@ -871,9 +877,9 @@ demo: image ## Build this branch and serve it in --demo mode on this box; prints
 	while [ $$try -lt 20 ]; do \
 	  port=$$pinned; \
 	  [ -n "$$port" ] || port=$$(awk 'BEGIN{srand('$$try'+'$$$$');print 20000+int(rand()*20000)}'); \
-	  if $(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8968 \
+	  if err=$$($(RUNTIME) run -d --name $(DEMO_APP) -p $$port:8968 \
 	       -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
-	       $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null 2>&1; then started=yes; break; fi; \
+	       $(IMAGE_NAME):$(APP_TAG) serve --demo 2>&1 >/dev/null); then started=yes; break; fi; \
 	  $(RUNTIME) rm -f $(DEMO_APP) >/dev/null 2>&1 || true; \
 	  [ -z "$$pinned" ] || break; \
 	  try=$$((try + 1)); \
@@ -882,8 +888,9 @@ demo: image ## Build this branch and serve it in --demo mode on this box; prints
 	  if [ -n "$$pinned" ]; then \
 	    echo "demo: DEMO_PORT=$$pinned could not be bound — say so as 'deploy: unavailable', never as silence"; \
 	  else \
-	    echo "demo: could not bind a free port in 20 tries — say so as 'deploy: unavailable', never as silence"; \
+	    echo "demo: could not start the container in 20 attempts on different ports — say so as 'deploy: unavailable', never as silence"; \
 	  fi; \
+	  echo "demo: the runtime last said: $$err"; \
 	  exit 1; \
 	fi; \
 	ok=no; \
