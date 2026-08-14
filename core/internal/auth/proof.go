@@ -271,6 +271,24 @@ func (s *Service) RequirePresent(proofs *Proofs, pres Presented, op ProofOperati
 		return proofs.Consume(pres.Proof, op, target, sessionID)
 	}
 
+	// PRESENTING NOTHING IS NOT PRESENTING A WRONG PASSWORD, and collapsing the two broke a shipping
+	// flow — Operator-measured on the staging stand, 2026-08-14.
+	//
+	// This used to fall through to `verifyPassword("")` on an install that HAS a password, which is
+	// false and returns `ErrBadPassword`. So a client that presented nothing at all was told **"current
+	// password is incorrect"** about a field it never rendered, and — worse — could not tell that
+	// refusal apart from a genuinely wrong password. `reauth_required` is the code every client retries
+	// on; `bad_password` is the one it must NOT retry on, because re-authenticating cannot fix a typo.
+	// So the retry that would have run the passkey ceremony never fired, on any surface that presents
+	// nothing and expects to be told what to present.
+	//
+	// THE DISTINCTION IS ABSENT-VERSUS-WRONG, and it is the same one `decodeOptionalJSON` draws one
+	// layer out: an empty body is a credential refusal, not a malformed request. A caller who typed a
+	// wrong password still gets `ErrBadPassword` below, because they presented something.
+	if pres.Password == "" {
+		return ProofSubject{}, ErrNoProof
+	}
+
 	hash, hasPassword, err := s.store.GetSetting(settingPasswordHash)
 	if err != nil {
 		return ProofSubject{}, err
