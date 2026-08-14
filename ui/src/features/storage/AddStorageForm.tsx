@@ -26,6 +26,34 @@ import type {
   StorageZFSKey,
 } from "@/lib/types";
 
+// needsZFSConfig decides whether this form must collect the zfs transport — the parent dataset, the
+// ssh user and host, the key, the helper and the host-key ceremony.
+//
+// AN ADOPT NEEDS IT TOO, AND USED TO BE EXCLUDED. The test was `isNew && backend === "zfs"`, so on an
+// adopt every zfs field disappeared — along with the backend selector, which is hidden there for a
+// good reason that does not extend to the rest. **The backend is immutable and comes from the
+// marker; `parent_dataset` and the transport are CONFIG and live in `config.yml`**, which is exactly
+// what an adopting install does not have. One flag gated both.
+//
+// FORGET-THEN-RE-ADD IS HOW ANYONE REACHES IT (Operator, 2026-08-14) — a supported workflow, not a
+// fault upstream. Forgetting a zfs storage removes its declaration and leaves its marker on disk, so
+// every re-add probes as `adopt`, and the form asked for nothing while `canSave`'s `!needsZFS` arm
+// went vacuous: the button was enabled for a save the daemon must refuse, naming a `zfs:` block the
+// screen never offered.
+//
+// THE SERVER WAS ALREADY CORRECT. `POST /api/config/storage` decodes a whole `config.StorageEntry`,
+// `zfs:` included, and neither it nor `AddStorage` cares which outcome the probe reported. Only the
+// form withheld the fields, which is why this is a UI change and not a contract one.
+//
+// PURE, so the rule is a table test rather than a claim about a component with no test harness.
+export function needsZFSConfig(outcome: string | undefined, backend: string): boolean {
+  // A REFUSAL DECLARES NOTHING, so it needs no config — `unreadable` and `backend_mismatch` carry a
+  // backend field too, and gating on the backend alone would light the whole ceremony up under an
+  // error the operator has to fix first.
+  if (outcome !== "new" && outcome !== "adopt") return false;
+  return backend === "zfs";
+}
+
 // codeBlock is the shared LOOK of every copyable block on this form — and nothing else, because the
 // three want different line behaviour and folding that in here made them fight.
 //
@@ -401,7 +429,7 @@ export function AddStorageForm({
 
   const canAdopt = probe?.outcome === "adopt";
   const isNew = probe?.outcome === "new";
-  const needsZFS = isNew && backend === "zfs";
+  const needsZFS = needsZFSConfig(probe?.outcome, backend);
 
   // THE BUTTONS' `disabled` AND THE ENTER KEY READ THE SAME EXPRESSION. Written once here so a
   // later edit to one cannot leave the keyboard reaching an action the mouse cannot — see onEnter.
