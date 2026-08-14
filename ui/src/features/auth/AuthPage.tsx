@@ -1,4 +1,5 @@
 import type { FormEvent, ReactNode } from "react";
+import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
 
 // The auth surfaces' shared LAYOUT PRIMITIVE — qn.6m slice 3, D1 and D2.
 //
@@ -91,6 +92,23 @@ export function AuthPage({
 
   const inner = (
     <>
+      {/*
+        ABOVE THE WORDMARK, so it is the first thing read on the screen where it matters most: a
+        login form served over plain http, about to take a password that will cross the network in
+        clear (quince#446, quince#539, Operator ruling on quince#908 slice 6).
+
+        HERE RATHER THAN IN `LoginPage` AND `SetupPasswordPage`, because those are two files and this
+        is one. A warning the ruling calls the only thing standing between an owner and a cleartext
+        password must not be able to drift off one of the two screens that show it.
+
+        AND IT DOES NOT BREAK THIS FILE'S RULE, which is worth saying because the paragraph at the
+        top forbids something this resembles. That rule bars a CONDITION here that reads auth status,
+        permissions or a capability — the thing that would give one component two sets of affordances
+        behind a boolean. This renders a self-gating component unconditionally: the primitive still
+        knows nothing about auth state, `variant` is still the only switch, and there is no branch in
+        this file for a second one to grow from.
+      */}
+      <InsecureTransportBanner />
       <div className="text-lg font-semibold tracking-tight">quince</div>
       {/* A page's heading is `text-xl`, a card's is `text-base` — the same step `OnboardingStorage`
           takes. A card is a component on a screen; a page IS the screen, and a heading that does not

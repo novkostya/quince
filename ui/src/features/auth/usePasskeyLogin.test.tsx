@@ -1,9 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 
 import { usePasskeyLogin } from "./usePasskeyLogin";
 import { PasswordForm } from "./PasswordForm";
+
+// A QUERY CLIENT, BECAUSE `AuthPage` NOW CARRIES THE PLAIN-HTTP WARNING (quince#539). Nothing in
+// this suite is about that banner; the form it renders simply sits inside the shared auth primitive,
+// and that primitive reads `GET /api/health`. Wrapping here rather than at each call site keeps the
+// diff to the harness — and the app has always mounted these components inside a provider, so a
+// test that omitted one was exercising a configuration that does not ship.
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 // REWRITTEN for the on-load sheet. The earlier suite asserted CONDITIONAL mediation — a non-modal
 // call armed on mount, offered inside the browser's autofill dropdown. That shape was replaced after

@@ -31,6 +31,20 @@ that matters. Concretely —
    card with progress and a sparkline of throughput; everything else stays quiet.
    Failures are explicit and plain-language, never toast-and-forget for jobs (toasts for
    acknowledgements, inline persistent state for anything a user must act on).
+
+   **A DEGRADED MODE IS THE LOUD CASE, AND IT IS NON-DISMISSIBLE** (Operator ruling
+   quince#446): no close button, no `localStorage` "don't show again", no timeout. It goes
+   away when the state does and not before — a degraded mode that can be hidden stops being
+   surfaced, which is the hard rule *no silent caps or fallbacks* read as a UI instruction.
+   It names **what** is unprotected or incomplete rather than merely that something is: a
+   status is a word about the daemon, a consequence is something a user can weigh.
+
+   **THERE ARE THREE SHELLS, NOT ONE, AND A WARNING THAT MUST BE UNIVERSAL GOES IN ALL
+   THREE** — `AppLayout` (authed), `AuthPage` (login and setup), and `OnboardingHTTPSPage`,
+   which sits outside every guard. Above the shell is wrong: the top bar is `position: fixed`
+   on a phone and would cover it. `InsecureTransportBanner` and `ReconcilingNotice` are the
+   two instances, and `insecureTransportSurfaces.test.tsx` is what keeps the universal one
+   from drifting off a surface nobody was looking at.
 2. **Real-time is table stakes.** Device appears → it's on screen within a second, no
    refresh. Progress, logs, snapshot list — all WS-driven. No spinners longer than 300 ms
    without a label saying what's happening (the lab showed Apple's protocol goes silent

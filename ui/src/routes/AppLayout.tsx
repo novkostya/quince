@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
+import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
 import { ReconcilingNotice } from "@/components/ReconcilingNotice";
 import { Sidebar } from "@/components/Sidebar";
 import { close, connect } from "@/ws/client";
@@ -81,6 +82,20 @@ export function AppLayout() {
           so one notice above the outlet covers them all and cannot drift page by page. It renders
           nothing when false, which is almost always.
         */}
+        {/*
+          THE SAME PLACEMENT ARGUMENT AS THE NOTICE BELOW, for a condition that is also daemon-wide
+          — but this one persists rather than clearing itself, and it is FIRST because it is the
+          more serious of the two (quince#539).
+
+          INSIDE `<main>`, NOT ABOVE THE SHELL. The top bar is `position: fixed` on a phone, so a
+          banner rendered at document top would sit underneath it — which is the whole failure mode
+          for a warning that must be impossible to miss.
+
+          THE AUTHED HALF ONLY. `AuthPage` carries login and setup, and `OnboardingHTTPSPage` its
+          own, because it sits outside every guard. Three surfaces, because this product has three
+          shells rather than one.
+        */}
+        <InsecureTransportBanner />
         <ReconcilingNotice />
         <Outlet />
       </main>

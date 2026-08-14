@@ -1,11 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 
 import { AuthPage } from "./AuthPage";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { LoginPage } from "@/pages/LoginPage";
+
+// A QUERY CLIENT AROUND EVERY RENDER, BECAUSE THIS PRIMITIVE NOW CARRIES THE PLAIN-HTTP WARNING
+// (quince#539). The second describe below already built one for the two PAGES it mounts; the shape
+// assertions above it rendered `AuthPage` bare, which stopped being a configuration that ships.
+//
+// It changes nothing these tests assert: with no health answer the banner renders `null`, so `box()`
+// still finds the wordmark's parent and the class assertions are untouched.
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 // qn.6m slice 3 — ruling A on quince#841: the auth surface is a plain PAGE, not a card. D1 narrows
 // it: the SETUP surface takes the page shape, and `/login` deliberately keeps its card because it is
@@ -97,13 +109,10 @@ describe("the box is a form only when there is something to submit", () => {
 describe("which surface gets which shape", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  function renderPage(el: React.ReactElement) {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter>{el}</MemoryRouter>
-      </QueryClientProvider>,
-    );
+  // The provider moved to the shared `render` above, which every case in this file now goes
+  // through; this keeps only the router these two pages need.
+  function renderPage(el: ReactElement) {
+    return render(<MemoryRouter>{el}</MemoryRouter>);
   }
 
   it("setup is a PAGE — ruling A", () => {

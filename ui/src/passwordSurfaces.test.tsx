@@ -58,10 +58,16 @@ const surfaces: Surface[] = [
     anchorLabel: "Username",
     mount: () => {
       const onSubmit = vi.fn().mockResolvedValue(undefined);
+      // A QUERY CLIENT, as the other two surfaces already build: `AuthPage` now carries the
+      // plain-http warning (quince#539) and this form renders inside it. The banner is silent with
+      // no health answer, so nothing this file asserts changes.
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       render(
-        <MemoryRouter>
-          <PasswordForm title="Sign in" subtitle="Enter your admin password." cta="Sign in" onSubmit={onSubmit} />
-        </MemoryRouter>,
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <PasswordForm title="Sign in" subtitle="Enter your admin password." cta="Sign in" onSubmit={onSubmit} />
+          </MemoryRouter>
+        </QueryClientProvider>,
       );
       return { handler: onSubmit };
     },
