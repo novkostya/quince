@@ -51,10 +51,20 @@ func (d Deps) writePasskeyError(w http.ResponseWriter, err error) bool {
 // also mints a second resident key. Refusing before the ceremony exists costs the caller one round
 // trip and costs the user nothing.
 //
-// SO `finish` NEEDS NO CHECK OF ITS OWN, AND THAT IS A PROPERTY RATHER THAN AN OMISSION: a ceremony
-// key is only ever produced here, so a key in hand IS the evidence that a proof was presented. The
-// only other producer is `setup/passkey/begin`, which is first-run-only and answers 409 once
-// `Configured()` is true — so it cannot mint one on an install where this rule applies.
+// SO `finish` NEEDS NO CHECK OF ITS OWN, AND THAT IS A PROPERTY RATHER THAN AN OMISSION: a
+// REGISTRATION ceremony key is only ever produced by a guarded begin, so a key in hand IS the
+// evidence that a proof was presented.
+//
+// THERE ARE THREE PRODUCERS INTO THAT STORE, NOT TWO, AND THE THIRD IS PRE-AUTH — quince#930 review,
+// and this comment claimed two until it. `setup/passkey/begin` is first-run-only and answers 409
+// once `Configured()` is true, so it cannot mint one where this rule applies. **`passkeys/login/begin`
+// is in all three exact-path allowlists** and can be called by anyone who reaches the address.
+//
+// WHAT MAKES THE SENTENCE TRUE IS THE CEREMONY KIND, not the count. `PasskeyCeremonies.take` compares
+// what the ceremony was begun for against what the finisher expects, so a login key presented here
+// is refused by this package. Before that tag the property held only because `go-webauthn` v0.17.4
+// happens to refuse the cross-use on session shape — an upstream invariant nothing here tested, and
+// a bump could have changed it silently.
 func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A BODY IS OPTIONAL AND AN ABSENT ONE IS NOT AN ERROR. `RequirePresent` refuses an empty

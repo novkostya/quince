@@ -98,15 +98,15 @@ func TestUserHandleSurvivesAPasswordChange(t *testing.T) {
 // could be replayed against a second attempt.
 func TestCeremonyIsSingleUse(t *testing.T) {
 	cer := NewPasskeyCeremonies()
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	if _, ok := cer.take(key); !ok {
+	if _, ok := cer.take(key, ceremonyRegister); !ok {
 		t.Fatal("first take failed")
 	}
-	if _, ok := cer.take(key); ok {
+	if _, ok := cer.take(key, ceremonyRegister); ok {
 		t.Error("second take succeeded — the challenge is replayable")
 	}
 }
@@ -118,13 +118,13 @@ func TestCeremonyExpires(t *testing.T) {
 	now := time.Now().UTC()
 	cer.now = func() time.Time { return now }
 
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
 	now = now.Add(challengeTTL + time.Second)
-	if _, ok := cer.take(key); ok {
+	if _, ok := cer.take(key, ceremonyRegister); ok {
 		t.Error("an expired ceremony was accepted")
 	}
 }
@@ -133,16 +133,46 @@ func TestCeremonyExpires(t *testing.T) {
 // rather than storing a credential the authenticator signed for another domain.
 func TestCeremonyCarriesItsRPID(t *testing.T) {
 	cer := NewPasskeyCeremonies()
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	got, ok := cer.take(key)
+	got, ok := cer.take(key, ceremonyRegister)
 	if !ok {
 		t.Fatal("take failed")
 	}
 	if got.rpID != rpHome {
 		t.Errorf("ceremony rpID = %q, want %q", got.rpID, rpHome)
+	}
+}
+
+// A CEREMONY BEGUN FOR ONE PURPOSE CANNOT BE FINISHED AS THE OTHER — quince#930 review.
+//
+// THE PRODUCER THAT MAKES THIS WORTH A TEST IS THE PRE-AUTH ONE. `passkeys/login/begin` is in all
+// three exact-path allowlists, so anyone who can reach the address can put a key into this store;
+// rule 1 rests on *"a key in hand is evidence a proof was presented"*, which was true of the two
+// guarded producers and not of that third one.
+//
+// IT PINS A LOCAL PROPERTY, WHICH IS THE POINT. `go-webauthn` v0.17.4 already refuses both
+// cross-uses on session shape — a login session's `UserID` is nil and a registration session's is
+// not — so nothing was reachable. But that is an invariant in a DEPENDENCY, and a bump could change
+// it with nothing here to notice. This test fails if the tag is dropped; nothing would have failed
+// before the tag existed.
+//
+// AND THE ENTRY IS STILL SPENT. A mismatched take must not leave the ceremony alive, or the store
+// becomes an oracle for probing which kind a key is.
+func TestACeremonyCannotBeFinishedAsTheOtherKind(t *testing.T) {
+	cer := NewPasskeyCeremonies()
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyAssert)
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	if _, ok := cer.take(key, ceremonyRegister); ok {
+		t.Fatal("a login ceremony was accepted by the registration finisher")
+	}
+	if _, ok := cer.take(key, ceremonyAssert); ok {
+		t.Error("the ceremony survived a mismatched take — that is a probing oracle")
 	}
 }
 
@@ -173,7 +203,7 @@ func TestBeginRegistrationOnAFreshBox(t *testing.T) {
 	if key == "" {
 		t.Error("no ceremony key returned")
 	}
-	if _, ok := cer.take(key); !ok {
+	if _, ok := cer.take(key, ceremonyRegister); !ok {
 		t.Error("the returned key does not resolve to a stored ceremony")
 	}
 }

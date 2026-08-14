@@ -36,7 +36,7 @@ func (s *Service) BeginPasskeyAssertion(cer *PasskeyCeremonies, rpID, clientIP s
 	if err != nil {
 		return nil, "", err
 	}
-	key, err := cer.put(session, rpID)
+	key, err := cer.put(session, rpID, ceremonyAssert)
 	if err != nil {
 		return nil, "", err
 	}
@@ -54,7 +54,7 @@ func (s *Service) FinishPasskeyAssertion(cer *PasskeyCeremonies, key, rpID, clie
 	if !s.limiter.allow(clientIP, now) {
 		return store.AuthSession{}, "", ErrRateLimited
 	}
-	pending, ok := cer.take(key)
+	pending, ok := cer.take(key, ceremonyAssert)
 	if !ok {
 		return store.AuthSession{}, "", ErrNoChallenge
 	}

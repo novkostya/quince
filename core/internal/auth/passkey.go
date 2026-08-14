@@ -68,9 +68,32 @@ type PasskeyCeremonies struct {
 	in  map[string]pendingCeremony
 }
 
+// ceremonyKind is WHAT a ceremony was begun for, and it exists because THREE endpoints produce keys
+// into this one store — quince#930 review.
+//
+// `passkeys/register/begin` and `setup/passkey/begin` are the two guarded producers. The third is
+// `passkeys/login/begin`, which is PRE-AUTH by exact path in all three allowlists and callable by
+// anyone. `put`/`take` were keyed on an opaque string with no notion of purpose, so *"a key in hand
+// is evidence that a proof was presented"* — the sentence qn.6n slice 5b rests rule 1 on — was
+// short by that entry.
+//
+// NOTHING WAS EXPLOITABLE, AND THAT IS THE POINT OF FIXING IT. Measured against `go-webauthn`
+// v0.17.4: a login session has a nil `UserID`, so `CreateCredential` refuses it on *"ID mismatch for
+// User and Session"*, and a registration session has a non-empty one, so `login.go:254` refuses the
+// reverse as *"not initiated as a client-side discoverable login"*. Both hold — but they are an
+// UPSTREAM INVARIANT in a dependency, not a property of this package, and a version bump could
+// change them with nothing here to notice. Tagging makes the stated property locally true.
+type ceremonyKind string
+
+const (
+	ceremonyRegister ceremonyKind = "register"
+	ceremonyAssert   ceremonyKind = "assert"
+)
+
 type pendingCeremony struct {
 	session webauthn.SessionData
 	rpID    string
+	kind    ceremonyKind
 	expires time.Time
 }
 
@@ -84,7 +107,7 @@ func NewPasskeyCeremonies() *PasskeyCeremonies {
 // The sweep is here rather than on a timer because this map is bounded by how often a human taps
 // "add a passkey": a goroutine to collect at most a handful of two-minute entries would be more
 // machinery than the thing it manages.
-func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string) (string, error) {
+func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind ceremonyKind) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -99,18 +122,22 @@ func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string) (str
 			delete(p.in, k)
 		}
 	}
-	p.in[key] = pendingCeremony{session: *session, rpID: rpID, expires: now.Add(challengeTTL)}
+	p.in[key] = pendingCeremony{session: *session, rpID: rpID, kind: kind, expires: now.Add(challengeTTL)}
 	return key, nil
 }
 
-// take consumes a ceremony. SINGLE USE: the entry is removed whether or not what follows succeeds,
-// so a challenge cannot be replayed against a second attempt.
-func (p *PasskeyCeremonies) take(key string) (pendingCeremony, bool) {
+// take consumes a ceremony of the kind the caller expects. SINGLE USE: the entry is removed whether
+// or not what follows succeeds — and whether or not the KIND matched — so a challenge cannot be
+// replayed against a second attempt, nor probed against the other finisher.
+//
+// THE KIND IS COMPARED HERE RATHER THAN BY THE CALLER, so no finisher can forget to. A `want` that
+// the caller passes and this function ignores would be the same defect one layer up.
+func (p *PasskeyCeremonies) take(key string, want ceremonyKind) (pendingCeremony, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	c, ok := p.in[key]
 	delete(p.in, key)
-	if !ok || p.now().After(c.expires) {
+	if !ok || p.now().After(c.expires) || c.kind != want {
 		return pendingCeremony{}, false
 	}
 	return c, true
@@ -236,7 +263,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	if err != nil {
 		return nil, "", err
 	}
-	key, err := cer.put(session, rpID)
+	key, err := cer.put(session, rpID, ceremonyRegister)
 	if err != nil {
 		return nil, "", err
 	}
@@ -246,7 +273,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 // FinishPasskeyRegistration verifies the authenticator's response and stores the credential.
 func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, name, rpID string,
 	r *http.Request, now time.Time) (store.Passkey, error) {
-	pending, ok := cer.take(key)
+	pending, ok := cer.take(key, ceremonyRegister)
 	if !ok {
 		return store.Passkey{}, ErrNoChallenge
 	}

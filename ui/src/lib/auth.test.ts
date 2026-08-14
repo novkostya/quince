@@ -143,3 +143,60 @@ describe("adding a passkey", () => {
     expect(prove).not.toHaveBeenCalled();
   });
 });
+
+// THE FLOW THAT ACTUALLY SHIPS, AGAINST THE ANSWER THE SERVER ACTUALLY GIVES — quince#930 review,
+// finding 3. Every test above mocks the first `begin` as `reauth_required`, which is what a
+// PASSWORDLESS install answers. The install this flow has just created has a password and no
+// credentials, so `RequirePresent` verifies an empty string against the hash and answers
+// `bad_password` — and the retry, which fires only on `reauth_required`, rethrows it.
+//
+// The defect was invisible to CI because all three layers mocked past it: this file assumed the
+// server's answer, `SetupPasswordPage.test.tsx` spies on `registerPasskey` wholesale, and the e2e
+// runs over http where the passkey offer is absent. One test driving the real first response is
+// worth more than three more mocks.
+describe("adding the first passkey right after setting a password", () => {
+  it("presents the password, so the server never answers bad_password", async () => {
+    const post = vi
+      .spyOn(api, "post")
+      // Fails later, at the browser call — what is asserted here is the body of `begin`.
+      .mockResolvedValueOnce({ ceremony: "C", options: { publicKey: {} } });
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
+
+    await expect(webauthn.registerPasskey("phone", { currentPassword: "hunter2" })).rejects.toBeDefined();
+
+    expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {
+      current_password: "hunter2",
+    });
+    // NO CEREMONY. The password satisfied rule 1, so nothing should have asked for a passkey the
+    // user does not have yet — which is the state this whole flow exists to leave.
+    expect(prove).not.toHaveBeenCalled();
+  });
+
+  // THE REGRESSION ITSELF. Without the password the server answers `bad_password`, and this asserts
+  // the client does NOT paper over it with a ceremony — the fix is to send the password, not to
+  // widen the retry.
+  it("does not re-authenticate on bad_password", async () => {
+    vi.spyOn(api, "post").mockRejectedValue(
+      new APIError(401, "bad_password", "current password is incorrect"),
+    );
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
+
+    await expect(webauthn.registerPasskey("phone")).rejects.toMatchObject({
+      code: "bad_password",
+    });
+    expect(prove).not.toHaveBeenCalled();
+  });
+
+  // AN EMPTY PASSWORD IS OMITTED, NOT SENT. On a passwordless install an empty string is a WRONG
+  // password; an absent field is the case the server decides for itself, which is what lets the
+  // passkey-first install still reach `reauth_required` and prompt.
+  it("omits the field entirely when there is no password", async () => {
+    const post = vi
+      .spyOn(api, "post")
+      .mockResolvedValueOnce({ ceremony: "C", options: { publicKey: {} } });
+
+    await expect(webauthn.registerPasskey("phone", { currentPassword: "" })).rejects.toBeDefined();
+
+    expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {});
+  });
+});
