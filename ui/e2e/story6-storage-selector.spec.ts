@@ -17,7 +17,9 @@ async function authenticate(page: Page): Promise<void> {
 }
 
 // G8 (spec qn.6c story 9): the selector renders both storages, disables the unreachable one with
-// its reason, and shows the full-transfer warning on the storage that has no prior version.
+// its reason, and does not cry full transfer over a storage that already holds this device's
+// backups. (This line said the test "shows the full-transfer warning"; it asserts the absence of
+// one, and has since it was written.)
 //
 // This drives UI → API → provider, which the unit tests deliberately do not: they render the
 // component against props I wrote, so they cannot catch a field the server names differently or a
@@ -28,7 +30,32 @@ test("the storage selector shows both storages, the unreachable one disabled, an
 }) => {
   await authenticate(page);
 
-  await page.getByRole("link", { name: "spare-iphone" }).click();
+  // attic-ipad, AND THE CHOICE OF DEVICE IS THE ASSERTION AT THE BOTTOM (quince#505).
+  //
+  // This read `spare-iphone`, which the fixture seeds with a failed job and NO version — so on a
+  // fresh instance the default storage does claim a full transfer, and the last assertion in this
+  // test failed. It passed in CI only because one worker runs every spec against one shared demo in
+  // file order, and story4/story5 back up spare-iphone first. The test was pinning *"some earlier
+  // spec has by now created a version"* while its comment claimed *"this device already holds
+  // backups"* — the second is what a reader trusts, and only the first was true.
+  //
+  // attic-ipad is seeded with a LIVE version on `internal` (plus a dead one, which `hasVersion`
+  // correctly excludes), so the claim holds on a fresh instance and holds on its own. Nothing in
+  // the suite changes that: story5 and story12 only read this device, and story5's Remove is
+  // asserted visible rather than pressed.
+  //
+  // NOT family-iphone, which looks like the better candidate and is not: the demo runs a scripted
+  // backup on it, and `BackupControls` renders the cancel row instead of the selector while a job
+  // is active, so `storage-select` is simply absent. Measured, not reasoned — it is what the first
+  // attempt at this fix did.
+  //
+  // Being OFFLINE is not a problem here and is worth saying, because it looks like one: the control
+  // block still renders for a device with no transport, with the button disabled and a reason. That
+  // is the state qn.6a put there deliberately.
+  //
+  // Everything above the last assertion is device-independent — the storage list is the same for
+  // any device — so this costs no coverage.
+  await page.getByRole("link", { name: "attic-ipad" }).click();
   await expect(page).toHaveURL(/\/devices\//);
 
   const select = page.getByTestId("storage-select");
@@ -63,8 +90,14 @@ test("the storage selector shows both storages, the unreachable one disabled, an
   await expect(page.getByTestId("storage-recheck")).toHaveCount(0);
   await expect(page.getByText(/carries no quince storage marker/)).toHaveCount(0);
 
-  // And the default — reachable, and already holding this device's backups in the demo — does NOT
-  // claim a full transfer. A warning that is always on trains the user to ignore it.
+  // And the default — reachable, and genuinely holding this device's backups in the fixture — does
+  // NOT claim a full transfer. A warning that is always on trains the user to ignore it.
+  //
+  // THE OPPOSITE DIRECTION IS NOT ASSERTED HERE and is not missing: `will_be_full: true` rendering
+  // the line is pinned by StorageSelect.test.tsx, so this cannot pass merely because the testid was
+  // renamed away. What only this test can prove is the integration — that the server computes the
+  // field per (storage, device) and names it what the client reads — and a device with a real
+  // history is the honest way to prove the `false` half of that.
   await expect(page.getByTestId("storage-will-be-full")).toHaveCount(0);
 });
 
