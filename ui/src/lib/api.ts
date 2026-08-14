@@ -101,6 +101,45 @@ async function unauthorized(resp: Response, path: string): Promise<UnauthorizedE
   return new UnauthorizedError(code, message, details);
 }
 
+// UnreachableError is a request that never reached the daemon: the network is down, the host is
+// gone, or nothing answered before REQUEST_TIMEOUT_MS.
+//
+// IT IS A SEPARATE TYPE BECAUSE THE REMEDY IS DIFFERENT AND CALLERS WERE BLAMING THE INPUT. Pressing
+// *Check* with the server unreachable reported "could not check that path", which points the
+// operator at the one thing that is fine — they read it as a bad path and edit a correct value
+// (Operator, 2026-08-14). A failure to reach quince is not a statement about what was typed.
+export class UnreachableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnreachableError";
+  }
+}
+
+// REQUEST_TIMEOUT_MS bounds every request, because an unreachable host does not fail — IT HANGS.
+//
+// `fetch` has no default timeout, so a dropped network or a paused container leaves the promise
+// pending indefinitely: the button stays disabled, no error is ever set, and the surface is
+// "silently unresponsive" forever rather than for a moment. A connection REFUSED fails fast and was
+// always visible; a connection that is merely unanswered was not, and that is the case a laptop
+// sleeping or a phone leaving wifi produces.
+//
+// 30s IS CHOSEN AGAINST THE LONGEST SERVER-SIDE OPERATION, not picked round: `storage.CheckHook`
+// bounds one *Test helper* press at 20s, which is the slowest thing any of these calls waits on.
+// Anything longer than this is a job, and jobs are polled rather than awaited.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+// asUnreachable converts fetch's own rejection into a sentence naming the actual problem. `fetch`
+// rejects with a bare `TypeError` for every network-level failure, and an abort with
+// `TimeoutError` — neither of which says anything a user can act on.
+function asUnreachable(err: unknown): UnreachableError {
+  const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+  return new UnreachableError(
+    timedOut
+      ? "quince did not answer within 30 seconds — the server may be busy, or this device may have lost the connection"
+      : "could not reach quince — the server may be down, or this device may be offline",
+  );
+}
+
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const init: RequestInit = { method, headers, credentials: "same-origin" };
@@ -113,7 +152,12 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     if (token) headers["X-CSRF-Token"] = token;
   }
 
-  const resp = await fetch(path, init);
+  let resp: Response;
+  try {
+    resp = await fetch(path, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (e) {
+    throw asUnreachable(e);
+  }
   if (resp.status === 401) throw await unauthorized(resp, path);
   if (resp.status === 204) return undefined as T;
 
@@ -128,7 +172,16 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 // requestText fetches a text/plain body (e.g. GET /api/jobs/{id}/log). Same 401/error
 // handling as request<T>, but returns the raw text rather than parsing JSON.
 async function requestText(path: string): Promise<string> {
-  const resp = await fetch(path, { method: "GET", credentials: "same-origin" });
+  let resp: Response;
+  try {
+    resp = await fetch(path, {
+      method: "GET",
+      credentials: "same-origin",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw asUnreachable(e);
+  }
   if (resp.status === 401) throw await unauthorized(resp, path);
   if (!resp.ok) throw new APIError(resp.status, "error", `HTTP ${resp.status}`);
   return resp.text();
