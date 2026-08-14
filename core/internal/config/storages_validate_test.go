@@ -52,6 +52,19 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// SEEDED, BECAUSE THE REFUSAL IS NOW A TRANSITION (Operator ruling 2026-08-14, quince#908, filed
+	// as a gap by quince#935). This test's claim — *Replace refuses what Validate permits* — is
+	// unchanged and still true. What changed is that the refusal is a REMOVAL, so it needs a previous
+	// document holding a storage. Unseeded, these two cases are 0 → 0, which the ruling permits, and
+	// the test would assert the behaviour that was corrected rather than the one that survives.
+	if errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "seed", Path: "/backups", Default: true})); err != nil || len(errs) > 0 {
+		t.Fatalf("seed: errs=%+v err=%v", errs, err)
+	}
+	seeded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the seed must have written a file: %v", err)
+	}
+
 	for _, tc := range []struct {
 		name string
 		cfg  Config
@@ -68,10 +81,18 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 				t.Fatalf("Replace: %v", err)
 			}
 			if len(errs) != 1 || errs[0].Path != "storage" {
-				t.Fatalf("saving a config with no storage must be a 422 at storage:, got %+v", errs)
+				t.Fatalf("removing the last storage must be a 422 at storage:, got %+v", errs)
 			}
-			if _, statErr := os.Stat(path); statErr == nil {
-				t.Error("a refused save must write NOTHING; config.yml exists")
+			// "A REFUSED SAVE WRITES NOTHING" asserted as UNCHANGED rather than as ABSENT. It read
+			// `os.Stat(path) == nil → fail`, which only worked while nothing had ever been saved;
+			// with a seed on disk the same guarantee is that the bytes did not move, which is also
+			// the stronger statement — an absent file cannot catch a partial overwrite.
+			after, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatalf("a refused save must leave the file readable: %v", readErr)
+			}
+			if string(after) != string(seeded) {
+				t.Errorf("a refused save changed config.yml\n before %q\n after  %q", seeded, after)
 			}
 		})
 	}

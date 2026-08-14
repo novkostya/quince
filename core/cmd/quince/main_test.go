@@ -411,9 +411,24 @@ func TestDemoStateLivesInTheCacheDir(t *testing.T) {
 // got a 422 having changed nothing, because `config.storage` was null in demo mode and `Replace`
 // requires a declared storage.
 //
-// BOTH HALVES RUN, and the unseeded one is what makes this a regression test rather than an
-// assertion that today works. It reproduces the original defect exactly — remove the seeding call
-// from serve() and the first subtest fails while the second still passes.
+// THE DEFECT IS NOW UNREACHABLE BY ITS ORIGINAL MECHANISM, AND THIS TEST SAYS SO RATHER THAN
+// PRETENDING OTHERWISE (Operator ruling 2026-08-14, quince#908, following quince#935's gap).
+//
+// quince#574 was: `config.storage` is null in demo mode, `Replace` refuses any document declaring no
+// storage, so pressing Save having changed nothing returned 422. The fix was to SEED demo storages in
+// `serve()` — a workaround for a check that refused a STATE. That check now refuses a TRANSITION, and
+// a demo that never declared a storage is 0 → 0, which is permitted.
+//
+// SO THE UNSEEDED HALF FLIPPED FROM `refused` TO `saved`, and that is the ruling working rather than
+// a guard being lost: the defect cannot occur by its original mechanism on a seeded or an unseeded
+// demo. What this test no longer does is DISTINGUISH the two — deleting the seed from `serve()` would
+// now leave both subtests green — so it has stopped being quince#574's regression guard, and saying
+// so is the point of this paragraph.
+//
+// THE SEEDING IS NOT REMOVED, DELIBERATELY. It exists for a second reason the ruling does not touch,
+// asserted by the test directly below: the demo must DECLARE the storages it SERVES, or Settings
+// shows one thing and the cards show another. That test is now the only thing holding the seed in
+// place, which is worth knowing before anybody tidies it.
 //
 // Asserted through Replace rather than over HTTP because Replace IS the save path: the handler
 // decodes and delegates. The ruling turns on Replace staying mode-blind, so the test drives the
@@ -425,7 +440,10 @@ func TestDemoConfigRoundTripsThroughSave(t *testing.T) {
 		wantSave bool
 	}{
 		{"seeded, as serve() does it", true, true},
-		{"UNSEEDED — the quince#574 defect", false, false},
+		// WAS `false` UNTIL 2026-08-14 — this subtest reproduced quince#574 exactly. It now saves,
+		// because 0 → 0 is permitted, which is the ruling reaching the defect's root rather than its
+		// workaround.
+		{"UNSEEDED — quince#574's mechanism, now permitted", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfgSvc := config.NewService(filepath.Join(t.TempDir(), "demo-config.yml"), discardLog())
@@ -447,10 +465,10 @@ func TestDemoConfigRoundTripsThroughSave(t *testing.T) {
 					"demo whose own config cannot be saved breaks the surface quince#444 calls the "+
 					"reason a live demo beats screenshots", saved, tc.wantSave, errs)
 			}
-			if !tc.wantSave && (len(errs) == 0 || errs[0].Path != "storage") {
-				t.Fatalf("the unseeded refusal should name `storage`, got %+v — if that changed, the "+
-					"seeded half may now be passing for a different reason", errs)
-			}
+			// The `errs[0].Path == "storage"` assertion that stood here belonged to the refusal, and
+			// there is no refusal left on either half. Nothing replaces it: what it guarded — that
+			// the seeded half was not passing for some unrelated reason — is now covered by both
+			// halves passing for the SAME reason, which is the state the ruling puts them in.
 		})
 	}
 }

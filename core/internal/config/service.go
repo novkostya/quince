@@ -503,6 +503,20 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	if errs := Validate(c); len(errs) > 0 {
 		return errs, nil, nil
 	}
+	// THE DOCUMENT AS IT STANDS, READ ONCE, BEFORE ANYTHING JUDGES THE NEW ONE.
+	//
+	// It was bound thirty lines below, immediately before the marshal, and it moved here because the
+	// storage check became a comparison rather than a predicate (Operator ruling 2026-08-14) and a
+	// comparison needs the other side. Its original comment is preserved at the marshal, where its
+	// other reader is.
+	//
+	// THE MOVE IS SAFE AND THAT IS A PROPERTY OF `writeMu`, not of luck: the whole read-modify-write
+	// is serialised by it, so `s.cfg` cannot change between here and the swap. Binding it earlier
+	// therefore yields the same values the marshal would have read — which is precisely why the
+	// original comment said reading under `mu` here was equivalent to reading at the swap.
+	s.mu.RLock()
+	prev, wasDeclared := s.cfg, s.declared
+	s.mu.RUnlock()
 	// qn.6c: a SAVE must also satisfy the storage requirement, and this check lives here rather
 	// than in Validate for a reason that is easy to get backwards (quince#394 review).
 	//
@@ -517,7 +531,33 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// user would discover backups were disabled at the next restart — an acceptance that is
 	// silent, which is what `no silent caps or fallbacks` forbids and what D12 makes reachable by
 	// making the UI the editing surface.
-	if req := CheckStorages(c, nil, nil); !req.OK() {
+	// IT REFUSES A TRANSITION, NOT A STATE — Operator ruling 2026-08-14, relayed on quince#908 and
+	// filed as a gap by quince#935. Read the paragraph above again with that in mind: it justifies
+	// the check by describing a MOVE — *"the UI could REMOVE the last storage"* — and the code
+	// implemented a state, refusing every write to a document declaring none, whether or not the
+	// write was what emptied it. The comment described a transition; the code enforced a condition.
+	//
+	// WHAT THAT COST, measured rather than argued. quince#908's pre-auth transport route exists so a
+	// first-run user stranded on plain http can turn on `sessions.allow_insecure_transport` without
+	// a shell on the box — and a first-run install has declared no storage, so the escape hatch was
+	// refused by this line on precisely the install it exists for. The remedy the message implies —
+	// *declare a storage first* — is unreachable too: storage onboarding sits behind `RequireAuth`
+	// and the whole premise is that no session can be obtained. A circular refusal.
+	//
+	// IT PERMITS NOTHING THAT IS NOT ALREADY THE LIVE STATE. `qn.6e` ruled that a zero-storage start
+	// IS the onboarding state and that the daemon serves in it. A 0 → 0 write therefore does not
+	// create an unstartable file; it declines to record a state already in force.
+	//
+	// SCOPED TO THIS DOOR, WHICH IS PART OF THE RULING RATHER THAN A CHOICE MADE HERE. `CheckStorages`
+	// itself stays a static predicate — its other caller asks *may this daemon SERVE?*, at startup,
+	// where there is no previous document to compare against, and folding the comparison into the
+	// predicate would silently delete the refusal `qn.6e` and quince#508 both rest on. The function
+	// carries that half of the ruling at its own definition.
+	//
+	// `prev` RATHER THAN A RE-READ. It is bound above, under `mu`, before anything inspects the
+	// document — the same snapshot the swap below uses, so the check and the write cannot disagree
+	// about what the file said a moment ago.
+	if req := CheckStorages(c, nil, nil); !req.OK() && declaredStorage(prev) > 0 {
 		msg := "at least one storage must be declared — saving this would leave quince unable to back anything up, and it would refuse to start"
 		if req.Empty {
 			msg = "the storage list is empty — " + msg
@@ -544,16 +584,17 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 		return errs, nil, nil
 	}
 	// THE FILE NOW CARRIES ONLY WHAT WAS SET (qn.6j, quince#728; Operator ruling 2026-08-08, canon
-	// in `docs/quince.stack.md` D12). Read under `mu` here rather than at the swap below: the whole
-	// write is serialised by `writeMu`, so this is the same `old` the swap would have seen, and the
+	// in `docs/quince.stack.md` D12). Read under `mu` rather than at the swap below: the whole write
+	// is serialised by `writeMu`, so `prev` is the same document the swap would have seen, and the
 	// marshaller needs it BEFORE the write rather than after.
-	s.mu.RLock()
-	old, wasDeclared := s.cfg, s.declared
-	s.mu.RUnlock()
+	//
+	// THE BINDING ITSELF NOW SITS ABOVE THE STORAGE CHECK, because that check became a comparison
+	// (Operator ruling 2026-08-14) and needed the same snapshot. Nothing about the reasoning here
+	// changes — it is the identical pair of values, read at a point the same mutex already pins.
 
 	// Clause 1 ∪ clause 2 of the write rule: what the file already said, plus what this write
 	// changes. See changedKeys for why the second half is not optional.
-	changed, err := changedKeys(old, c)
+	changed, err := changedKeys(prev, c)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -657,7 +698,7 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// The guard's warning rides out with the appliers' — both describe the gap between what was
 	// asked for and what the running system has, which is a property of THIS response rather than of
 	// the stored state. Same reason the applier warnings are never stored.
-	return nil, append(guardWarnings, s.notify(old, c)...), nil
+	return nil, append(guardWarnings, s.notify(prev, c)...), nil
 }
 
 // FileText returns the bytes currently on disk, for the Settings panel's "Current configuration"

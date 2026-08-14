@@ -359,8 +359,21 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 // an edit that disables backups entirely and stops the daemon starting. Silent acceptance is what
 // `no silent caps or fallbacks` forbids, and it is the defect this test exists to prevent
 // returning (quince#394 review).
+// IT SEEDS A STORAGE FIRST, AND IT DID NOT UNTIL 2026-08-14. `testDeps` builds a config service on a
+// fresh temp path, so this asserted a 422 against a document that had never held a storage — the
+// transition its own name describes was never exercised. It passed because the check was a static
+// predicate over the NEW document: it would have passed identically against `return 422`, and could
+// not have caught a genuine 1 → 0 regression.
+//
+// That is the same defect the Operator's ruling of 2026-08-14 corrects one layer down — a name
+// describing a MOVE above code enforcing a STATE. Found by making the code match its own comment and
+// watching this test go green in the wrong direction.
 func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
-	srv := httptest.NewServer(NewRouter(testDeps(t)))
+	deps := testDeps(t)
+	if errs, _, err := deps.Config.Replace(configWithOneStorage()); err != nil || len(errs) > 0 {
+		t.Fatalf("seed a storage to remove: errs=%+v err=%v", errs, err)
+	}
+	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 	c := authedClient(t, srv)
 
@@ -374,6 +387,41 @@ func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
 	req.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
 	if code := doStatus(t, c, req); code != http.StatusUnprocessableEntity {
 		t.Fatalf("PUT removing the last storage = %d, want 422", code)
+	}
+}
+
+// configWithOneStorage is the seed for the transition tests: the minimal declaration quince's own
+// startup refusal teaches, resolved by the write path into a lone default.
+func configWithOneStorage() config.Config {
+	list := []config.StorageEntry{{Name: "seed", Path: "/backups", Default: true}}
+	c := config.Default()
+	c.Storage = &list
+	return c
+}
+
+// THE OTHER HALF OF THE RULING, AT THE SAME DOOR (Operator, 2026-08-14, quince#908). A write that
+// leaves an already-storageless document storageless is PERMITTED — it records the state quince is
+// already running in, which `qn.6e` ruled is the onboarding state.
+//
+// AT THE API BOUNDARY rather than only in the service, for the reason the test above gives: this is
+// the door quince#935's circular refusal was reached through, and a service-level test alone would
+// not have caught it either.
+func TestConfigPutAcceptsAStoragelessDocumentThatWasAlreadyStorageless(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(testDeps(t)))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
+		`"storage":[],` + // nothing was declared before this write either
+		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"sessions":{"allow_insecure_transport":true},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
+		`"ui":{"theme":"system"}}`
+
+	req := newReq(t, http.MethodPut, srv.URL+"/api/config", body)
+	req.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
+	if code := doStatus(t, c, req); code != http.StatusOK {
+		t.Fatalf("PUT leaving a storageless config storageless = %d, want 200 — this is the "+
+			"circular refusal quince#935 filed, reached through the authenticated door", code)
 	}
 }
 
