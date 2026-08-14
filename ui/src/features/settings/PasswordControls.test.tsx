@@ -283,16 +283,34 @@ describe("passwordless is not the only reading of has_password: false", () => {
     expect(screen.queryByText(/you sign in with a passkey/i)).not.toBeInTheDocument();
   });
 
-  // THE RECOVERY ADVICE INVERTS, WHICH IS THE PART THAT COULD SEND SOMEBODY TO A CONSOLE FOR
-  // NOTHING. In the passwordless state `quince auth reset` genuinely is the way back if the device
-  // is lost. In these two there is already no working credential here, so a reset clears what
-  // exists and leaves first-run — while the form on screen fixes it without a shell.
+  // THE RECOVERY ADVICE INVERTS ON `unconfigured`, and this is the state where a console would be a
+  // wasted trip: there is nothing to prove, so rule 1 exempts the install and the form really does
+  // fix it. A reset would clear nothing and land in the same place.
   it("does not send the user to a console when the fix is the form above", async () => {
+    renderControls(false, []);
+
+    await screen.findByText(/no password and no passkeys/i);
+    expect(screen.getByText(/is not the way back from here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/console or SSH access/i)).not.toBeInTheDocument();
+  });
+
+  // AND IT INVERTS BACK ON `elsewhere-only` — qn.6n D8, slice 7, quince#903. These two shared one
+  // sentence because rule 1 did not exist; `Configured()` is what separates them. Credentials EXIST
+  // here, so the form is refused, and *"use the form above"* would now be the wasted trip.
+  //
+  // THE CHEAPER REMEDY IS NAMED BEFORE THE CONSOLE. A passkey registered elsewhere still works
+  // THERE, and a password set from that address works everywhere — so the console is a fallback
+  // rather than the answer, which is one step better than D8's own analysis reached.
+  it("sends an elsewhere-only install to the address its passkey works at, before the console", async () => {
     renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
 
     await screen.findByText(/none of its passkeys works at this address/i);
-    expect(screen.getByText(/is not the way back from here/i)).toBeInTheDocument();
-    expect(screen.queryByText(/console or SSH access/i)).not.toBeInTheDocument();
+    const offer = await screen.findByText(/if you can still reach quince at/i);
+    expect(offer.textContent).toContain(ELSEWHERE);
+    // THE FORM IS NO LONGER OFFERED AS THE FIX — the whole correction quince#903 asked for.
+    expect(screen.queryByText(/is not the way back from here/i)).not.toBeInTheDocument();
+    // And the console is still named, because reachability is the user's fact and not ours.
+    expect(screen.getByText(/clears every credential and every session/i)).toBeInTheDocument();
   });
 
   // AN UNKNOWN rpId IS NOT AN ACCUSATION. Without `rp_id` the client cannot judge which credentials
@@ -358,23 +376,34 @@ describe("the two sections of /settings/auth cannot contradict each other", () =
     );
   }
 
+  // THE CONTRADICTION THIS DESCRIBE BLOCK EXISTS FOR IS NOW UNREACHABLE BY CONSTRUCTION — qn.6n
+  // slice 7. quince#888 item 2's review found one section saying *"or add a passkey for this
+  // address"* while the other said the address cannot hold one, and fixed it with a shared
+  // `passkeysSupported` condition. Rule 1 removed that remedy from this state for EVERY address, so
+  // there is no longer a sentence that could contradict the tier refusal.
+  //
+  // KEPT AND REWRITTEN RATHER THAN DELETED, because the two surfaces still answer about one address
+  // and the next remedy added here could reintroduce exactly this. What it asserts now is the
+  // invariant rather than the old wording: at an unsupported tier the refusal is on screen, no
+  // sentence offers a passkey, and the STATE is still reported — the omission was ever of the
+  // remedy, never of the warning.
   it("does not offer a passkey at an address that cannot hold one", async () => {
     renderBoth("192.0.2.10", false);
 
-    // The tier refusal is on screen…
     expect(await screen.findByText(/cannot hold a passkey/i)).toBeInTheDocument();
-    // …so the remedy that depends on it must not be.
     expect(screen.queryByText(/add a passkey for this address/i)).not.toBeInTheDocument();
-    // And the state is still reported: the omission is of the REMEDY, not of the warning.
     expect(screen.getByText(/none of its passkeys works at this address/i)).toBeInTheDocument();
-    // Setting a password is still offered, because it is the remedy that works here.
-    expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
   });
 
-  it("still offers it where the address CAN hold one", async () => {
+  // AND IT OFFERS NO PASSKEY WHERE THE ADDRESS *CAN* HOLD ONE EITHER, which is the assertion that
+  // inverted: this used to require the remedy be present. Rule 1 refuses `add_passkey` in this state
+  // exactly as it refuses `set_password`, so offering it on a supported tier would be the same
+  // defect the tier condition was written to prevent — a remedy the user cannot follow.
+  it("offers no passkey remedy even where the address CAN hold one", async () => {
     renderBoth(HERE, true);
 
-    expect(await screen.findByText(/add a passkey for this address/i)).toBeInTheDocument();
+    await screen.findByText(/none of its passkeys works at this address/i);
+    expect(screen.queryByText(/add a passkey for this address/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot hold a passkey/i)).not.toBeInTheDocument();
   });
 });

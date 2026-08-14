@@ -202,6 +202,22 @@ What the surface must then say, from quince#903's own analysis:
   quince#895's review handles the bare-IP case and does nothing for this one.
 - What is genuinely true there is `quince auth reset`, which today's copy explicitly rules out.
 
+**D8's LAST BULLET IS ONE REMEDY SHORT, found while writing slice 7 rather than while writing the
+spec.** `quince auth reset` is true and it is not the only thing true: **a passkey registered for
+another address still works AT that address.** Reaching quince there and setting a password satisfies
+rule 1 with the credential the user already holds, and a password is not rpId-bound — so it then works
+everywhere, including the address they were locked out of.
+
+Verified before the copy was written rather than reasoned about: `provable` imposes no restriction on
+`set_password`, and `FinishReauth` resolves the credential against the **ceremony's own** rpId, so an
+assertion at the address the passkey belongs to mints a usable proof.
+
+**So slice 7 names that first and the console second**, conditional on there being an address to name,
+because reachability is the user's fact and not ours — a name in the credential list may be a tunnel
+they no longer run. Sending somebody to a console to clear every credential they own, when a different
+URL would have fixed it, is the same *"more expensive direction"* this very decision was written to
+avoid, one level down.
+
 ### D9. The credential travels in a DELETE body, and the alternatives are worse
 
 Rule 2 needs `DELETE /api/auth/password` to carry a `proof`, and a `DELETE` with a body is unusual
@@ -397,7 +413,7 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony records WHAT IT WAS BEGUN FOR and the registration finisher refuses the other kind. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, **merged** |
 | **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | quince#937, **merged** |
 | **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | *this PR* |
-| **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
+| **7** | **D8's copy** — lands with or after rule 1, never before. Splits `elsewhere-only` from `unconfigured`, and names the cheaper remedy D8 missed. | no | *this PR* |
 
 **ROW 5b'S DESCRIPTION WAS STALE THE MOMENT IT MERGED, AND NOT ABOUT ITS STATUS.** It read *"a ceremony
 key is only ever produced by a guarded begin"* — the sentence quince#930's review found short by the
