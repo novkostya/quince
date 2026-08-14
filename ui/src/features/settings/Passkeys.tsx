@@ -248,34 +248,26 @@ export function Passkeys() {
           enforces rule 2, for this target at this address. The dead end keeps its own shape: that is
           `last_credential`, and it renders as the message above rather than as a prompt. */}
       {challenge ? (
-        <div className="mt-3">
-          <ReauthChallenge
-            operation="remove_passkey"
-            target={challenge.id}
-            accepts={challenge.accepts}
-            title="Confirm it is you"
-            subtitle="Removing a passkey changes how you sign in, so quince needs a different credential you have right now."
-            onProved={async (present) => {
+        <ReauthChallenge
+          operation="remove_passkey"
+          target={challenge.id}
+          accepts={challenge.accepts}
+          title="Confirm it is you"
+          subtitle="Removing a passkey changes how you sign in, so quince needs a different credential you have right now."
+          // THE DIALOG'S OWN DISMISSAL REPLACED A HAND-ROLLED Cancel BUTTON that sat beside the
+          // inline challenge. Escape and the backdrop reach this too, which the button never did.
+          onCancel={() => {
+            setChallenge(null);
+            remove.reset();
+          }}
+          onProved={async (present) => {
               // STRAIGHT THROUGH, UNLIKE THE ADD PATH. A removal ends in a `DELETE` — an ordinary
               // request needing no user activation — so there is no gesture to preserve and no
               // fresh click to wait for. `AddPasskeyRow` parks here instead, because its ceremony
               // ends in `credentials.create()`, which does need one (D1, quince#988).
-              await remove.mutateAsync({ id: challenge.id, present });
-            }}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onClick={() => {
-              setChallenge(null);
-              remove.reset();
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
+            await remove.mutateAsync({ id: challenge.id, present });
+          }}
+        />
       ) : null}
 
       {/* D6: THE ADD ROW SITS BELOW THE LIST — the list is what the user came to read, the action is

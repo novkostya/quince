@@ -103,21 +103,42 @@ describe("the passkey path waits for a fresh click before creating", () => {
   });
 });
 
-// STORY 6 — ONLY ONE DIALOG APPEARS IN THE ADD FLOW, EVER. Operator ruling: *"I don't want 2
-// dialogs in a row."*
+// STORY 6 — NEVER TWO DIALOGS IN A ROW. Operator ruling: *"I don't want 2 dialogs in a row."*
 //
-// ASSERTED AS ZERO, which is stronger than the ruling and is what the design actually delivers: the
-// name is a field on the page and the challenge replaces the row in place, so no `role="dialog"`
-// exists at any point in the flow.
-describe("story 6 — no dialogs", () => {
-  it("shows none, before or after the refusal", async () => {
+// THIS ASSERTED **ZERO** AND THAT WAS WRONG — Operator-reported 2026-08-14, from a screenshot. I
+// read the ruling as stronger than it is, the challenge shipped INLINE, and it dragged the sign-in
+// screen's shell into a Settings page with it. The test passed the whole time, because asserting a
+// stronger claim than the rule is still asserting something the code does.
+//
+// WHAT THE RULING ACTUALLY CONSTRAINS IS THE COUNT IN SEQUENCE. The name is a field on the PAGE
+// (D6), so the challenge is the ONLY dialog in the flow — one, not two — which is what these two
+// assertions now say: nothing modal before the refusal, exactly one after it.
+describe("story 6 — one dialog, never two in a row", () => {
+  it("shows none before the refusal and exactly one after", async () => {
     vi.spyOn(webauthn, "registerPasskey").mockRejectedValueOnce(refusal(["password"]));
     renderRow();
 
+    // THE NAME IS NOT MODAL. This is the half of the ruling that survives unchanged — the field is
+    // on the page, which is why a second dialog cannot follow the first.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
     typeNameAndAdd();
     await screen.findByLabelText("Password");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  // AND THE ROW IS STILL THERE BEHIND IT. The challenge used to replace the row outright, which is
+  // defensible inline and wrong for a dialog: the backdrop exists to dim the thing being confirmed,
+  // so removing that thing leaves the dialog floating over the gap it left.
+  it("leaves the row it is confirming on the page", async () => {
+    vi.spyOn(webauthn, "registerPasskey").mockRejectedValueOnce(refusal(["password"]));
+    renderRow();
+
+    typeNameAndAdd();
+    await screen.findByLabelText("Password");
+
+    expect(screen.getByLabelText("Passkey name")).toHaveValue("my iPhone");
   });
 });
 

@@ -22,17 +22,19 @@ function wrap(node: React.ReactNode) {
 
 function renderChallenge(props: Partial<Parameters<typeof ReauthChallenge>[0]> = {}) {
   const onProved = vi.fn().mockResolvedValue(undefined);
+  const onCancel = vi.fn();
   render(
     wrap(
       <ReauthChallenge
         operation="add_passkey"
         accepts={["password", "passkey"]}
         onProved={onProved}
+        onCancel={onCancel}
         {...props}
       />,
     ),
   );
-  return { onProved };
+  return { onProved, onCancel };
 }
 
 beforeEach(() => {
@@ -128,5 +130,54 @@ describe("what the two controls actually do", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => expect(onProved).toHaveBeenCalledWith({ current_password: "old-one" }));
+  });
+});
+
+// THE DEFECT THE OPERATOR CAUGHT IN A SCREENSHOT, PINNED — 2026-08-14.
+//
+// The challenge reused `PasswordForm`, which wraps itself in `AuthPage` — the SIGN-IN SCREEN's
+// shell. So a Settings page rendered the quince wordmark and a `min-h-dvh` wrapper mid-scroll. Every
+// test passed while the screen was wrong, because jsdom computes no layout and nothing here looked
+// at what the shell contributed.
+//
+// ASSERTED ON THE WORDMARK AND THE WRAPPER rather than on a screenshot, because those are the two
+// things the shell actually adds and both are visible to a DOM query. This is the cheap check that
+// existed all along and that nobody wrote.
+describe("it does not drag the sign-in shell into the page", () => {
+  it("renders no wordmark and no full-viewport wrapper", () => {
+    const { baseElement } = render(
+      wrap(
+        <ReauthChallenge
+          operation="add_passkey"
+          accepts={["password", "passkey"]}
+          onProved={async () => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+
+    // The wordmark is the login screen announcing itself. Inside a dialog it is somebody else's
+    // branding on a confirmation.
+    expect(screen.queryByText("quince")).not.toBeInTheDocument();
+    // And nothing claims the viewport — the dialog owns that.
+    expect(baseElement.querySelectorAll(".min-h-dvh")).toHaveLength(0);
+  });
+
+  // IT IS A REAL DIALOG, consistent with every other confirmation in the product — which is what the
+  // Operator asked for, and what `role="dialog"` is the machine-checkable half of.
+  it("is a dialog", () => {
+    renderChallenge();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  // DISMISSAL REACHES THE CALLER. Escape is a path the old inline Cancel button did not have, so a
+  // caller that only handled its own button would have been left holding a challenge the user
+  // believed they had closed.
+  it("cancels on Escape", async () => {
+    const { onCancel } = renderChallenge();
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape", code: "Escape" });
+
+    await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });
 });

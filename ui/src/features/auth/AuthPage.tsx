@@ -9,10 +9,29 @@ import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
 // AFFORDANCES. It is not about the box they sit in — D2 says in as many words that they "share the
 // LAYOUT primitive and nothing else", and this is that primitive.
 //
-// So the `variant` below is deliberately the ONLY switch here, it decides nothing but CSS, and
-// nothing in this file knows what an auth state is. If a condition ever appears in here that reads
-// auth status, permissions or a capability, it is in the wrong file.
-export type AuthVariant = "card" | "page";
+// So the `variant` below is deliberately the ONLY switch here, and nothing in this file knows what
+// an auth state is. If a condition ever appears in here that reads auth status, permissions or a
+// capability, it is in the wrong file.
+//
+// IT SELECTS A CHROME LEVEL, NOT ONLY A STYLESHEET, and this sentence said "it decides nothing but
+// CSS" until `bare` arrived. Corrected rather than left to be discovered as false — but what the
+// rule PROTECTS is unchanged, and that is the part worth keeping: one switch, no auth knowledge, no
+// branch for a second one to grow from.
+//
+// `bare` OMITS CHROME RATHER THAN RESTYLING IT — Operator-reported 2026-08-14, from a screenshot.
+// The re-authentication challenge (qn.6o) reused `PasswordForm` and therefore this shell, so a
+// Settings surface rendered the WORDMARK and a `min-h-dvh` wrapper in the middle of a page. It
+// looked like the sign-in screen pasted into Settings because structurally it was.
+//
+// IT IS FOR WHEN SOMETHING ELSE SUPPLIES THE BOX — today a `DialogContent`, which already draws the
+// card, the backdrop and the blur, and owns the accessible name through `DialogTitle`. So `bare`
+// drops the outer wrapper, the card, the wordmark and the heading pair, and keeps what is actually
+// `PasswordForm`'s: the fields, the real `<form>` submit, and the transport banner.
+//
+// THE BANNER STAYS, deliberately. Its own comment calls it *"the only thing standing between an
+// owner and a cleartext password"* — a password is typed in that dialog too, so the surface that
+// dropped it would be the surface that needed it.
+export type AuthVariant = "card" | "page" | "bare";
 
 export function AuthPage({
   variant = "card",
@@ -37,6 +56,7 @@ export function AuthPage({
   children: ReactNode;
 }) {
   const isPage = variant === "page";
+  const isBare = variant === "bare";
 
   // `min-h-dvh` (not 100vh, and NOT `svh`), AND THE UNIT IS NOT THE THING TO CHANGE (quince#659).
   // An issue was filed saying the opposite — that `dvh` with the toolbars hidden is "larger than the
@@ -86,9 +106,16 @@ export function AuthPage({
       // (dead-centring looks unbalanced once the sheet slides up), and centres on desktop.
       "flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6";
 
+  // `bare` OVERRIDES BOTH, and does so here rather than in the ternaries above so the two shapes
+  // that existed first stay readable as a pair. The dialog owns the viewport, the padding and the
+  // safe-area insets; a `min-h-dvh` inside one would push its own content off the bottom.
+  const outerClass = isBare ? "" : outer;
+
   const box = isPage
     ? "mx-auto w-full max-w-4xl"
-    : "w-full max-w-sm rounded-card border border-line bg-card p-6";
+    : isBare
+      ? "w-full"
+      : "w-full max-w-sm rounded-card border border-line bg-card p-6";
 
   const inner = (
     <>
@@ -109,21 +136,28 @@ export function AuthPage({
         this file for a second one to grow from.
       */}
       <InsecureTransportBanner />
-      <div className="text-lg font-semibold tracking-tight">quince</div>
+      {/* THE WORDMARK AND THE HEADING PAIR ARE THE DIALOG'S JOB IN `bare` — `DialogTitle` supplies
+          the accessible name, and a second `<h1>` inside a dialog would compete with it. See the
+          variant's own note at the top of this file for why the omission is the point. */}
+      {isBare ? null : <div className="text-lg font-semibold tracking-tight">quince</div>}
       {/* A page's heading is `text-xl`, a card's is `text-base` — the same step `OnboardingStorage`
           takes. A card is a component on a screen; a page IS the screen, and a heading that does not
           grow with the box reads as a card someone forgot to draw a border around. */}
-      <h1 className={(isPage ? "text-xl" : "text-base") + " mt-4 font-semibold tracking-tight"}>
-        {title}
-      </h1>
-      <p className="mt-1 text-sm text-muted">{subtitle}</p>
+      {isBare ? null : (
+        <>
+          <h1 className={(isPage ? "text-xl" : "text-base") + " mt-4 font-semibold tracking-tight"}>
+            {title}
+          </h1>
+          <p className="mt-1 text-sm text-muted">{subtitle}</p>
+        </>
+      )}
       {notice}
       {children}
     </>
   );
 
   return (
-    <div className={outer}>
+    <div className={outerClass}>
       {onSubmit ? (
         <form onSubmit={onSubmit} className={box}>
           {inner}

@@ -119,13 +119,21 @@ export function AddPasskeyRow({
     }
   }
 
-  if (stage.at === "challenge") {
-    return (
+  // THE CHALLENGE RENDERS BESIDE THE ROW, NOT INSTEAD OF IT. It used to be an early `return`, which
+  // was right while it was inline and is wrong now that it is a dialog: the row is what the backdrop
+  // is meant to blur, and swapping it out would leave the dialog floating over the gap where the
+  // thing being confirmed used to be.
+  const challenge =
+    stage.at === "challenge" ? (
       <ReauthChallenge
         operation="add_passkey"
         accepts={stage.accepts}
         title="Confirm it is you"
         subtitle="Adding a passkey changes how you sign in, so quince needs a credential you have right now."
+        // BACK TO THE ROW, KEEPING THE TYPED NAME. Dismissing the challenge abandons the
+        // confirmation, not the whole action — the name was typed before any of this and making the
+        // user retype it would be the dialog charging for its own dismissal.
+        onCancel={() => setStage({ at: "idle" })}
         onProved={async (present) => {
           // THE PASSWORD PATH GOES STRAIGHT THROUGH, and it is correct to: the user's click on the
           // challenge's own Confirm button is fresh activation, and `register/begin` is the single
@@ -140,11 +148,11 @@ export function AddPasskeyRow({
           setStage({ at: "proved", present });
         }}
       />
-    );
-  }
+    ) : null;
 
   return (
     <div className="mt-4">
+      {challenge}
       {/* D7: THE SAME GEOMETRY AS A LIST ITEM, AND NO `border-dashed`. In this product a dashed
           border means ABSENT or BROKEN — consistently, across five sites — so a dashed add-row here
           would read as *a passkey that is broken*, on the one screen that warns when a credential
