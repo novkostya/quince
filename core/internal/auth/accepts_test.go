@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -241,4 +242,41 @@ func sameFactors(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// A DEAD END IS REFUSED AS A DEAD END, NOT AS A MISSING PROOF — D4, and the ordering inside
+// `RemovePasskey` is the whole of it. Operator-reported 2026-08-14 from the running stand: one
+// passkey, no password, press Remove, and the answer was `reauth_required` — *"authenticate again"*
+// — for an operation nothing on the install could ever authorise.
+//
+// `RequirePresent` RAN FIRST AND WON, returning `ErrNoProof` before anything asked whether a proof
+// was possible. This asserts the order rather than the message, because the message is a symptom:
+// what the client needs is the refusal that names a remedy, and `accepts` must never reach the wire
+// empty.
+func TestRemovingTheOnlyCredentialIsADeadEndNotAProofDemand(t *testing.T) {
+	svc, st := newConfiguredService(t)
+	seedPasskey(t, st, "cre1", here)
+
+	_, err := svc.RemovePasskey(NewProofs(), Presented{}, "cre1", here, sess, ip)
+
+	var last ErrLastPasskey
+	if !errors.As(err, &last) {
+		t.Fatalf("removing the only credential = %v, want ErrLastPasskey", err)
+	}
+	if errors.Is(err, ErrNoProof) {
+		t.Fatal("answered ErrNoProof — the proof demand won the ordering again")
+	}
+	// AND THE SENTENCE NAMES THE REMEDY, which is what makes it a different refusal rather than a
+	// differently-spelled one.
+	if !strings.Contains(err.Error(), "password") {
+		t.Fatalf("the dead-end message names no remedy: %q", err.Error())
+	}
+
+	// THE OTHER DIRECTION, so the guard is known to be narrow: with a second credential at this
+	// address there IS something to present, and the ordinary proof demand is correct again.
+	seedPasskey(t, st, "cre2", here)
+	_, err = svc.RemovePasskey(NewProofs(), Presented{}, "cre1", here, sess, ip)
+	if !errors.Is(err, ErrNoProof) {
+		t.Fatalf("with another credential present = %v, want ErrNoProof", err)
+	}
 }

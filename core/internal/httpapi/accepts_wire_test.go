@@ -143,3 +143,35 @@ func TestADeadEndOmitsAcceptsFromTheJSON(t *testing.T) {
 		t.Fatalf("a dead-end refusal carried the field: %s", body)
 	}
 }
+
+// NO Go ERROR STRING REACHES A SCREEN — Operator, 2026-08-14, from a screenshot of the running
+// stand showing `auth: no proof for this operation — authenticate again` in red on the passkey card.
+//
+// The call sites pass `err.Error()` as the wire `message`, and the UI renders it verbatim. Every
+// other refusal on this surface already writes copy — `bad_password` says *"current password is
+// incorrect"* — so this was the one exception and therefore the one that leaked.
+//
+// ASSERTED ON THE ABSENCE OF OUR VOCABULARY rather than on the exact sentence, so rewording the copy
+// does not fail the test but reintroducing an error string does.
+func TestReauthRefusalSaysSomethingAUserCanRead(t *testing.T) {
+	h, st := acceptsRouter(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/auth/passkeys/register/begin", strings.NewReader(`{}`))
+	h.ServeHTTP(rec, authed(t, st, req))
+
+	got := decodeRefusal(t, rec)
+	if got.Code != "reauth_required" {
+		t.Fatalf("code = %q, want reauth_required", got.Code)
+	}
+	for _, ours := range []string{"auth:", "proof", "ErrNoProof"} {
+		if strings.Contains(strings.ToLower(got.Message), strings.ToLower(ours)) {
+			t.Fatalf("the message speaks our vocabulary, not the reader's: %q (contains %q)",
+				got.Message, ours)
+		}
+	}
+	// AND IT IS NOT EMPTY, because "say nothing" is the other way to fail this.
+	if strings.TrimSpace(got.Message) == "" {
+		t.Fatal("the refusal carries no message at all")
+	}
+}

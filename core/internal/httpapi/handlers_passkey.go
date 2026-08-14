@@ -136,7 +136,27 @@ func (d Deps) writeReauthRequired(w http.ResponseWriter, message string,
 		d.Log.Error("could not compute the acceptable factors", "error", err, "operation", op)
 		accepts = nil
 	}
-	writeReauthRequired(w, d.Log, message, accepts)
+	// THE CALLER'S `message` IS A Go ERROR STRING AND IT IS NOT FIT TO SHOW ANYONE — Operator,
+	// 2026-08-14, from a screenshot of the running stand:
+	//
+	//	auth: no proof for this operation — authenticate again
+	//
+	// Every word of that is ours rather than the reader's. `auth:` is a package prefix; a *proof* is
+	// an internal mechanism nobody outside this codebase has heard of; *"authenticate again"* names
+	// no button on the screen. It reached a user because the call sites pass `err.Error()` as the
+	// wire `message`, and the UI renders that verbatim.
+	//
+	// EVERY OTHER REFUSAL HERE ALREADY WRITES COPY — `bad_password` says *"current password is
+	// incorrect"* rather than `ErrBadPassword.Error()`. This one was the exception, so it is the one
+	// that leaked.
+	//
+	// THE ARGUMENT IS IGNORED RATHER THAN CLEANED UP AT EACH SITE, deliberately: a parameter every
+	// caller must remember to make human is a parameter that drifts back to a Go string. There is
+	// nothing per-site to say, because the answer is the same wherever it is asked.
+	//
+	// THE ERROR STILL REACHES THE LOG, where `auth: no proof for this operation` is exactly right.
+	d.Log.Info("re-authentication required", "operation", op, "reason", message)
+	writeReauthRequired(w, d.Log, "Confirm it is you before changing how you sign in.", accepts)
 }
 
 // POST /api/auth/passkeys/register/finish {ceremony, name} → 201 {passkey}
