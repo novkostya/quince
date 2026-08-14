@@ -325,9 +325,26 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4, **G4b's session half**. | no | quince#920, **merged** |
 | **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922 |
 | **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | *this PR* |
-| **5** | **rule 1 and rule 3** — `PUT /api/auth/password` and passkey registration demand proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **held for this one** |
+| **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927 |
+| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin\|finish` demand proof. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | not open |
 | **6** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** — `contracts.md` | not open |
 | **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
+
+**ROW 5 SPLIT BECAUSE IT CLAIMED TWO PATHS AND ITS PR DID ONE** — self-reported on quince#927 after
+that PR had been approved twice, and the split is what the row needs rather than what the PR needs.
+Scoping the diff to the password path was deliberate and right; leaving the row saying *"and passkey
+registration"* was not.
+
+**THE UNBUILT HALF IS THE EXPENSIVE ONE**, which is why this is a split rather than a footnote.
+quince#888 item 3's own table: *"Adding is worse than removing. A lockout is recoverable at the
+console; a passkey the attacker controls is persistence"* — the owner changes the password and the
+attacker still holds a credential. So a table asserting rule 1 is enforced, while `register/*` still
+takes a session and nothing else, would be claiming the harder half is done.
+
+**Third time on this rung that the TABLE was the thing that was wrong rather than the code** —
+quince#409's heading, quince#922's unassigned G4b, and now this. The check that finds them is
+mechanical and neither seat was running it: **read every row against the diff that claims it**, at
+review and again before merge.
 
 **NO SLICE MAY LEAVE `main` WITH A DEMAND NO SHIPPED CLIENT CAN SATISFY.** The rule this table was
 missing, written out because it generalises past this rung — architect ruling on quince#927, from a
