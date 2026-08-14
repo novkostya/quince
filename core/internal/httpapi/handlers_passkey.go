@@ -298,16 +298,40 @@ func (d Deps) handlePasskeyList() http.HandlerFunc {
 // handler called d.Store.DeletePasskey directly, so there was no layer for the check to live in.
 func (d Deps) handlePasskeyDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, err := d.Auth.RemovePasskey(r.PathValue("id"), auth.RPIDFromRequest(r))
+		// A BODY, OPTIONAL AND ABSENT-TOLERANT — the same shape and the same reasoning as
+		// DELETE /api/auth/password (spec D9): a credential may not travel in the query, and
+		// presenting nothing is a credential refusal rather than a malformed request.
+		var body struct {
+			CurrentPassword string `json:"current_password"`
+			Proof           string `json:"proof"`
+		}
+		if err := decodeOptionalJSON(r, &body); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body")
+			return
+		}
+		_, err := d.Auth.RemovePasskey(d.Proofs,
+			auth.Presented{Password: body.CurrentPassword, Proof: body.Proof},
+			r.PathValue("id"), auth.RPIDFromRequest(r), sessionCookieValue(r), d.Proxies.ClientIP(r))
 		var lastKey auth.ErrLastPasskey
+		var self auth.ErrSelfRemoval
 		switch {
 		case err == nil:
 			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, auth.ErrRateLimited):
+			writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+		case errors.As(err, &self):
+			// 409 wrong_credential — RULE 2, the same code and the same distinction the password
+			// path draws: retryable with something the caller has, versus nothing to retry with.
+			writeError(w, d.Log, http.StatusConflict, "wrong_credential", self.Error())
 		case errors.As(err, &lastKey):
 			// 409 AND THE ERROR'S OWN SENTENCE, exactly as DELETE /api/auth/password does — it names
 			// this address and the addresses the remaining credentials belong to, which is the
 			// difference between a mystery and an instruction.
 			writeError(w, d.Log, http.StatusConflict, "last_credential", lastKey.Error())
+		case errors.Is(err, auth.ErrBadPassword):
+			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
+		case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
+			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
 		default:
 			d.Log.Error("passkey delete failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove the passkey")

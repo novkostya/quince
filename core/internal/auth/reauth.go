@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/novkostya/quince/core/internal/store"
@@ -119,11 +120,14 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 	}
 	// REFUSE BEFORE THE SHEET when this address holds nothing that could produce a usable proof.
 	//
-	// THIS IS COPY, NOT A GUARD, and the distinction is D2's. The guard is the assertion itself,
-	// which no row can fake; what this buys is that a user who cannot do the thing is told why, in
-	// the sentence ErrLastCredential has always carried, instead of meeting an empty passkey sheet
-	// and a browser error about no credentials being available. Removing it would weaken nothing.
-	if err := s.provable(op, rpID); err != nil {
+	// FOR `remove_password` THIS IS COPY, NOT A GUARD, and the distinction is D2's: the guard is the
+	// assertion itself, which no row can fake, and what this buys is that a user who cannot do the
+	// thing is told why instead of meeting an empty passkey sheet.
+	//
+	// FOR `remove_passkey` IT IS ALSO WHAT KEEPS THE ALLOW-LIST BELOW NON-EMPTY, which is load-bearing:
+	// an empty `allowCredentials` means ANY credential, so a ceremony begun with nothing to allow
+	// would offer the very passkey being removed. Refusing here is what makes that state unreachable.
+	if err := s.provable(op, rpID, target); err != nil {
 		return nil, "", err
 	}
 	if !s.limiter.allow(clientIP, s.now()) {
@@ -134,7 +138,24 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 	if err != nil {
 		return nil, "", err
 	}
-	assertion, session, err := wa.BeginDiscoverableLogin()
+
+	// THE TARGET IS EXCLUDED FROM THE CEREMONY ITSELF for a removal — rule 2, one layer earlier than
+	// the subject comparison in `RemovePasskey`. Two independent refusals of a self-proof: the
+	// browser is not offered the credential, and `go-webauthn` checks the asserted id against
+	// `session.AllowedCredentialIDs` at finish when that list is non-empty (`login.go:292-301`).
+	//
+	// EVERY OTHER OPERATION STAYS DISCOVERABLE, with no allow-list at all. `add_passkey` and
+	// `set_password` are about the credential SET rather than a member of it, so restricting them
+	// would exclude nothing and cost the usernameless flow qn.6k exists for.
+	var opts []webauthn.LoginOption
+	if op == OpRemovePasskey {
+		allowed, err := allowedForRemoval(s.store, rpID, target)
+		if err != nil {
+			return nil, "", err
+		}
+		opts = append(opts, webauthn.WithAllowedCredentials(allowed))
+	}
+	assertion, session, err := wa.BeginDiscoverableLogin(opts...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -154,14 +175,21 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 // provable reports whether a ceremony for this operation could produce a proof this install would
 // accept, refusing with the sentence that names what to do about it.
 //
-// ONLY `remove_password` IS CHECKED HERE. Every other operation can be proven by any passkey this
-// address holds, and a caller with none of those has other routes: `set_password` and `add_passkey`
-// take the password, and `remove_passkey` is quince#888's mirror, which slice 6b adds with the
-// target exclusion it needs. An operation nothing can prove is a dead end worth naming; an operation
-// this particular client cannot prove is not, and refusing on the second would be D5's rejected
-// carve-out wearing a helpful face.
-func (s *Service) provable(op ProofOperation, rpID string) error {
-	if op != OpRemovePassword {
+// ONLY THE TWO REMOVALS ARE CHECKED HERE. `set_password` and `add_passkey` take the password as
+// their lighter factor, so a caller with no passkey at this address still has a route and refusing
+// would close it — that would be D5's rejected carve-out wearing a helpful face. An operation
+// NOTHING can prove is a dead end worth naming; an operation this particular client cannot prove
+// is not.
+func (s *Service) provable(op ProofOperation, rpID, target string) error {
+	switch op {
+	case OpRemovePasskey:
+		// RULE 2's OWN CASE: the target cannot prove its own removal, so the question is whether
+		// anything ELSE at this address can. The message distinguishes a dead end from a
+		// redirection to the password — see ErrLastPasskey.
+		return s.passkeyRemovalRefusal(target, rpID)
+	case OpRemovePassword:
+		// falls through to the scan below
+	default:
 		return nil
 	}
 	rows, err := s.store.ListPasskeys()
@@ -260,4 +288,29 @@ func (s *Service) FinishReauth(cer *ReauthCeremonies, proofs *Proofs, key, rpID,
 	// would be missing the entries that matter most.
 	s.audit("reauth_passkey", clientIP)
 	return token, nil
+}
+
+// allowedForRemoval lists the credentials at this address that MAY prove a `remove_passkey` — every
+// one except the target.
+//
+// AN EMPTY LIST MUST NEVER REACH THE CEREMONY: to WebAuthn, and to the library's finish-time check,
+// an empty `allowCredentials` means ANY credential. A ceremony begun with nothing to allow would
+// therefore offer the exact passkey being removed, which is the opposite of what this function is
+// for. `provable` refuses that state before this runs, so the emptiness is unreachable rather than
+// merely unlikely — stated here because the failure would be silent and would look like a working
+// prompt.
+func allowedForRemoval(st *store.Store, rpID, target string) ([]protocol.CredentialDescriptor, error) {
+	creds, err := existingCredentials(st, rpID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.CredentialDescriptor, 0, len(creds))
+	for _, c := range creds {
+		// The stored id is base64url; `webauthn.Credential.ID` is the raw bytes.
+		if base64.RawURLEncoding.EncodeToString(c.ID) == target {
+			continue
+		}
+		out = append(out, c.Descriptor())
+	}
+	return out, nil
 }

@@ -437,19 +437,42 @@ func (s *Service) passwordRemovalRefusal(rpID string) error {
 	return ErrLastCredential{Presented: rpID, Elsewhere: elsewhere}
 }
 
-// ErrLastPasskey — removing THIS passkey would leave no way to sign in at THIS address.
+// ErrLastPasskey — no credential at this address can authorise removing THIS passkey.
 //
 // A separate type from ErrLastCredential, carrying the same wire code, because the two differ only
 // in the remedy they can offer: there, add a passkey; here, set a password OR add another passkey.
 // Both mean "this removal would leave you locked out", which is why `last_credential` is the honest
 // code for both — quince#888 proposed a second one, and a client already knows which endpoint it
 // called, so the code would distinguish nothing the caller does not have.
+//
+// SINCE qn.6n IT IS A MESSAGE RATHER THAN A GUARD (D2), and `HasPassword` is what the message turns
+// on. The two states it distinguishes are not both lockouts:
+//
+//	no password  → nothing can remove this passkey. A genuine dead end: set a password or add one.
+//	a password   → the PASSWORD can remove it. Not a lockout at all; the ceremony just cannot help.
+//
+// THE FIELD EXISTS BECAUSE THE CLIENT FALLS BACK ON IT. `Passkeys.tsx` tries the assertion first and
+// drops to the password form on this refusal, so a message saying *"this quince has no password"* to
+// somebody who has one would be both false and the opposite of the instruction they need.
 type ErrLastPasskey struct {
 	Presented string   // the rpId this request arrived on
 	Elsewhere []string // rpIds of the passkeys that WOULD REMAIN, none of which works here
+	// HasPassword is whether the admin password exists — the difference between a dead end and a
+	// redirection to the other factor.
+	HasPassword bool
 }
 
 func (e ErrLastPasskey) Error() string {
+	if e.HasPassword {
+		// NOT A LOCKOUT. The removal is possible; this ceremony is not the way to it.
+		if len(e.Elsewhere) == 0 {
+			return fmt.Sprintf("a passkey cannot authorise its own removal, and this quince holds no "+
+				"other passkey for %q. Confirm with your password instead.", e.Presented)
+		}
+		return fmt.Sprintf("a passkey cannot authorise its own removal, and the other passkeys this "+
+			"quince holds are registered for %s — a passkey only works at the address it was created "+
+			"on. Confirm with your password instead.", strings.Join(e.Elsewhere, ", "))
+	}
 	if len(e.Elsewhere) == 0 {
 		return fmt.Sprintf("removing this passkey would leave no way to sign in: this quince has no "+
 			"password, and no other passkey for %q. Set a password first, or add another passkey.",
@@ -461,59 +484,71 @@ func (e ErrLastPasskey) Error() string {
 		e.Presented, strings.Join(e.Elsewhere, ", "), e.Presented)
 }
 
-// RemovePasskey deletes one credential, REFUSING WHEN THAT WOULD EMPTY THE INSTALL — quince#888
-// item 1, the mirror `RemovePassword` never had.
+// RemovePasskey deletes one credential, DEMANDING A DIFFERENT ONE — rule 2, qn.6n slice 6b.
 //
-// Without it the two removal paths asked different questions: one asked "will anything be left?"
-// and the other asked nothing. So password → passkey, in two clicks from Settings, emptied the
-// credential set; Configured() then answered false, GET /api/auth/status answered `needs_setup`,
-// and POST /api/auth/setup is pre-auth by exact path. Anyone who could reach the address completed
-// first run and owned the install. Measured on a stand, not inferred.
+// THE COMPARISON IS THE WHOLE RULE, AND IT IS ONE LINE: refuse when the subject that proved this
+// request IS the credential being removed. `ProofSubject.IsCredential` owns the comparison so there
+// is exactly one spelling of it.
 //
-// IT IS PHRASED AS A CLAIM ABOUT THE RESULTING STATE, and that is load-bearing rather than stylistic:
+// IT REPLACES THE LOCKOUT COUNT quince#888 ADDED, and the replacement is strictly stronger for D2's
+// reason — **a dead row cannot produce an assertion**. The old guard counted rows that would REMAIN
+// usable at this rpId, which a wiped device or a deleted keychain entry satisfies while signing
+// nobody in. Rule 2 asks the credential itself.
 //
-//   - It is what makes the guard STRICTLY STRONGER than "the set must not empty". A passkey bound
-//     to another address cannot sign in here, so a set that is non-empty can still be a lockout —
-//     RemovePassword has filtered by rpId since qn.6m for exactly that reason, and a mirror that
-//     did not would guard the takeover while leaving the lockout open on the same handler.
-//   - It KEEPS THE 204 FOR "already gone" with no special case. Deleting an id that matches no row
-//     leaves the state unchanged, so the resulting state is the current one, so the guard passes.
-//     The endpoint's documented indifference to whether a row went (see the handler) and this
-//     refusal therefore do not meet: one is about the row, this is about what remains.
+// SO THE quince#888 TAKEOVER STAYS CLOSED, BY CONSTRUCTION RATHER THAN BY A COUNT. Emptying the
+// credential set needs a last removal, a last removal needs a different credential presented, and on
+// a one-credential install there is none. The two-click password → passkey path cannot reach
+// `Configured() == false`.
 //
-// The password is checked FIRST and short-circuits: on an install that has one, no removal can lock
-// anybody out, and the credentials table is not read at all.
-func (s *Service) RemovePasskey(credentialID, rpID string) (bool, error) {
-	has, err := s.HasPassword()
+// THE 204 FOR "already gone" SURVIVES WITH NO SPECIAL CASE, as it did before: an id matching no row
+// still has to be proven by something other than itself, and `IsCredential` is false for a subject
+// that is not it — so the guard passes and `DeletePasskey` reports the row was already absent.
+func (s *Service) RemovePasskey(proofs *Proofs, pres Presented, credentialID, rpID, sessionID,
+	clientIP string) (bool, error) {
+	subject, err := s.RequirePresent(proofs, pres, OpRemovePasskey, credentialID, sessionID, clientIP)
 	if err != nil {
 		return false, err
 	}
-	if !has {
-		rows, err := s.store.ListPasskeys()
-		if err != nil {
-			return false, err
-		}
-		seen := make(map[string]bool, len(rows))
-		elsewhere := make([]string, 0, len(rows))
-		usableHere := 0
-		for _, p := range rows {
-			if p.CredentialID == credentialID {
-				continue // the one on its way out — it is not part of the resulting state
-			}
-			if p.RPID == rpID {
-				usableHere++
-				continue
-			}
-			if !seen[p.RPID] {
-				seen[p.RPID] = true
-				elsewhere = append(elsewhere, p.RPID)
-			}
-		}
-		if usableHere == 0 {
-			return false, ErrLastPasskey{Presented: rpID, Elsewhere: elsewhere}
-		}
+	// RULE 2. The zero subject — an unclaimed install — is not this credential, so first run falls
+	// through exactly as it does on the password path, and removes nothing that exists.
+	if subject.IsCredential(credentialID) {
+		return false, ErrSelfRemoval{Detail: "a passkey cannot authorise its own removal — " +
+			"use your password, or a different passkey."}
 	}
 	return s.store.DeletePasskey(credentialID)
+}
+
+// passkeyRemovalRefusal builds the message for a `remove_passkey` ceremony that cannot produce a
+// usable proof — no credential at this address other than the target.
+//
+// IT READS ROWS AND IT IS NOT THE GUARD. The guard is `IsCredential` above, on the subject. This
+// decides only what to SAY when the ceremony is refused before it starts, which is the message-carrier
+// role D2 keeps `ErrLastPasskey` for.
+func (s *Service) passkeyRemovalRefusal(credentialID, rpID string) error {
+	hasPassword, err := s.HasPassword()
+	if err != nil {
+		return err
+	}
+	rows, err := s.store.ListPasskeys()
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(rows))
+	elsewhere := make([]string, 0, len(rows))
+	for _, p := range rows {
+		if p.CredentialID == credentialID {
+			continue // the one on its way out — it cannot prove its own removal
+		}
+		if p.RPID == rpID {
+			// SOMETHING HERE CAN PROVE IT, so there is nothing to refuse.
+			return nil
+		}
+		if !seen[p.RPID] {
+			seen[p.RPID] = true
+			elsewhere = append(elsewhere, p.RPID)
+		}
+	}
+	return ErrLastPasskey{Presented: rpID, Elsewhere: elsewhere, HasPassword: hasPassword}
 }
 
 // Login verifies the password (rate-limited first) and, on success, rotates to a fresh
