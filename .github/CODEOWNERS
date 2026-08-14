@@ -77,10 +77,8 @@
 # Canon. THREE of the four documents CLAUDE.md names as canon, plus CLAUDE.md itself, which is the
 # entry point every agent reads first and therefore the highest-leverage file in the repository.
 #
-# docs/contracts.md IS ABSENT ON PURPOSE — Operator ruling 2026-08-14. Across 14 merged PRs that
-# touched it the code-owner review was APPROVED 14 times and CHANGES_REQUESTED 0, none of the 10
-# sampled carrying any body: the gate had never altered a contracts PR and cost a round trip on the
-# most-touched document here. Do not "restore" it as a missing line; CLAUDE.md carries the reasoning.
+# docs/contracts.md IS ABSENT ON PURPOSE — Operator ruling 2026-08-14, quince#953.
+# Do not "restore" it as a missing line. CLAUDE.md carries the reasoning; the PR carries the numbers.
 /CLAUDE.md              @novkostya
 /docs/quince.design.md  @novkostya
 /docs/quince.stack.md   @novkostya
