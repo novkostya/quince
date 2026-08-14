@@ -111,6 +111,23 @@ this surface (`AddPasskeyDialog`'s own header records it). Under D1 the challeng
 fresh gesture, so `create()` is one round trip from a real user action. Reactive stops costing
 anything.
 
+**AND THAT IS A CONSTRAINT ON SLICE 4, NOT A PROPERTY IT GETS FOR FREE** — architect, reviewing this
+spec. A new click grants new transient activation, so the argument holds **only while the challenge's
+submit reaches `create()` with at most the one `begin` round trip between them.** Verify the password
+somewhere first, then `begin`, then `create()`, and the fresh gesture has already been spent on the
+way — the identical failure one level in, and the one `AddPasskeyDialog`'s header records having been
+bitten by.
+
+**One await IS measured, which is what makes the shape viable rather than hopeful.** `registerPasskey`
+does `begin` → `create()` inside a single handler, and `SetupPasswordPage` records that as working on
+hardware: *"`registerPasskey` already issues `register/begin` in the same gap, and that ships and
+works on hardware."* So slice 4's flow — challenge submit → `begin{factor}` → `create()` — is the
+measured shape, not a new one.
+
+**What slice 4 must not do is add a SECOND await.** Written down here rather than left to be
+rediscovered on a device, because the failure is silent from the client's side: `NotAllowedError`,
+indistinguishable from a user dismissing the sheet, which is exactly how it hid the first time.
+
 ### D2. It is guidance, and never a control
 
 **The rules are enforced where the credential is presented.** A client that ignores `accepts` and
