@@ -67,12 +67,12 @@ func TestTheStorageRequirementRefusesATransitionNotAState(t *testing.T) {
 			svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 			if tc.seed != nil {
-				if errs, _, err := svc.Replace(withStorages(*tc.seed...)); err != nil || len(errs) > 0 {
+				if errs, _, err := svc.Replace(withStorages(*tc.seed...), "test"); err != nil || len(errs) > 0 {
 					t.Fatalf("seed: errs=%+v err=%v", errs, err)
 				}
 			}
 
-			errs, _, err := svc.Replace(tc.write)
+			errs, _, err := svc.Replace(tc.write, "test")
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}
@@ -98,7 +98,7 @@ func TestARefusedTransitionLeavesTheFileAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	if errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true})); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}), "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("seed: errs=%+v err=%v", errs, err)
 	}
 	before, err := os.ReadFile(path)
@@ -106,7 +106,7 @@ func TestARefusedTransitionLeavesTheFileAlone(t *testing.T) {
 		t.Fatalf("read seeded file: %v", err)
 	}
 
-	if errs, _, err := svc.Replace(withStorages()); err != nil || len(errs) == 0 {
+	if errs, _, err := svc.Replace(withStorages(), "test"); err != nil || len(errs) == 0 {
 		t.Fatalf("precondition: 1 → 0 must be refused; errs=%+v err=%v", errs, err)
 	}
 
@@ -143,10 +143,10 @@ func TestTheRefusalStillDistinguishesAbsentFromEmpty(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewService(filepath.Join(t.TempDir(), "config.yml"), slog.New(slog.NewTextHandler(io.Discard, nil)))
-			if errs, _, err := svc.Replace(withStorages(one)); err != nil || len(errs) > 0 {
+			if errs, _, err := svc.Replace(withStorages(one), "test"); err != nil || len(errs) > 0 {
 				t.Fatalf("seed: errs=%+v err=%v", errs, err)
 			}
-			errs, _, err := svc.Replace(tc.write)
+			errs, _, err := svc.Replace(tc.write, "test")
 			if err != nil || len(errs) != 1 {
 				t.Fatalf("want one refusal, got errs=%+v err=%v", errs, err)
 			}

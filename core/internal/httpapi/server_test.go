@@ -370,7 +370,7 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 // watching this test go green in the wrong direction.
 func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
 	deps := testDeps(t)
-	if errs, _, err := deps.Config.Replace(configWithOneStorage()); err != nil || len(errs) > 0 {
+	if errs, _, err := deps.Config.Replace(configWithOneStorage(), "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("seed a storage to remove: errs=%+v err=%v", errs, err)
 	}
 	srv := httptest.NewServer(NewRouter(deps))

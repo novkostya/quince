@@ -106,7 +106,7 @@ func replaceStorage(t *testing.T, svc *config.Service, entries []config.StorageE
 	t.Helper()
 	cfg := svc.Current()
 	cfg.Storage = &entries
-	errs, _, err := svc.Replace(cfg)
+	errs, _, err := svc.Replace(cfg, "test")
 	if err != nil {
 		t.Fatalf("Replace: %v", err)
 	}

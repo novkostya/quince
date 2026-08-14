@@ -28,7 +28,7 @@ func TestASaveKeepsTheFileTheUserWrote(t *testing.T) {
 
 	next := svc.Current()
 	next.UI.Theme = "dark"
-	if errs, _, err := svc.Replace(next); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(next, "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("replace: errs=%+v err=%v", errs, err)
 	}
 
@@ -52,7 +52,7 @@ func TestASecondSaveDoesNotReInflate(t *testing.T) {
 	for i, theme := range []string{"dark", "light"} {
 		next := svc.Current()
 		next.UI.Theme = theme
-		if errs, _, err := svc.Replace(next); err != nil || len(errs) > 0 {
+		if errs, _, err := svc.Replace(next, "test"); err != nil || len(errs) > 0 {
 			t.Fatalf("replace %d: errs=%+v err=%v", i, errs, err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestAChangedKeyIsWrittenEvenIfTheFileNeverHadIt(t *testing.T) {
 
 	next := svc.Current()
 	next.Backup.RequireEncryption = false // the default is TRUE, so this is a real choice
-	if errs, _, err := svc.Replace(next); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(next, "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("replace: errs=%+v err=%v", errs, err)
 	}
 
@@ -92,7 +92,7 @@ func TestWhatIsSavedStillLoads(t *testing.T) {
 
 	next := svc.Current()
 	next.UI.Theme = "dark"
-	if errs, _, err := svc.Replace(next); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(next, "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("replace: errs=%+v err=%v", errs, err)
 	}
 
@@ -113,7 +113,7 @@ func TestTheRoundTripGuardDoesNotFireOnAnOrdinarySave(t *testing.T) {
 
 	next := svc.Current()
 	next.UI.Theme = "dark"
-	_, warns, err := svc.Replace(next)
+	_, warns, err := svc.Replace(next, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,7 +42,7 @@ func wireDoc(storages ...StorageEntry) Config {
 func TestAPutMayOmitTheKeysTheFileMayOmit(t *testing.T) {
 	svc, _ := newServiceOn(t, "storage:\n  - path: /backups\n    backend: hardlink\n")
 
-	errs, _, err := svc.Replace(wireDoc(StorageEntry{Path: "/backups", Backend: "hardlink"}))
+	errs, _, err := svc.Replace(wireDoc(StorageEntry{Path: "/backups", Backend: "hardlink"}), "test")
 	if err != nil {
 		t.Fatalf("replace: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestAPutMayOmitTheKeysTheFileMayOmit(t *testing.T) {
 func TestAPutMayCarryTheShortFormTheStartupRefusalTeaches(t *testing.T) {
 	svc, _ := newServiceOn(t, "storage:\n  - path: /backups\n")
 
-	errs, _, err := svc.Replace(wireDoc(StorageEntry{Path: "/backups"}))
+	errs, _, err := svc.Replace(wireDoc(StorageEntry{Path: "/backups"}), "test")
 	if err != nil {
 		t.Fatalf("replace: %v", err)
 	}
@@ -74,7 +74,8 @@ func TestAPutLeavesNoEmptyNameInTheLiveSnapshot(t *testing.T) {
 	errs, _, err := svc.Replace(wireDoc(StorageEntry{
 		Path: "/backups", Backend: "hardlink", Default: true,
 		ZFS: ZFSConfig{Mode: "hook", Seed: "auto"},
-	}))
+	}), "test")
+
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("replace: err=%v errs=%+v", err, errs)
 	}
@@ -161,7 +162,8 @@ func TestAPutWithTwoStoragesAndNoDefaultIsStillRefused(t *testing.T) {
 	errs, _, err := svc.Replace(wireDoc(
 		StorageEntry{Path: "/backups", Backend: "hardlink"},
 		StorageEntry{Path: "/backups2", Backend: "hardlink"},
-	))
+	), "test")
+
 	if err != nil {
 		t.Fatalf("replace: %v", err)
 	}

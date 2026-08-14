@@ -449,15 +449,40 @@ func (s *Service) Current() Config {
 	return s.cfg
 }
 
+// Write sources, named so a log line says WHICH DOOR rewrote `config.yml` (quince#967).
+//
+// THEY ARE ROUTES, NOT ACTORS, and that is the honest limit of what this package can say. A
+// `config.Service` never sees a request: it does not know the caller's address, whether a session
+// was presented, or which browser tab is stale. `PUT /api/config` is the whole answer to *who* that
+// exists at this layer — and naming the route is enough to tell a full-document replace from an add,
+// a forget or the transport toggle, which is what quince#967 could not do at all.
+//
+// A REQUEST-LEVEL ACTOR WOULD BE A DIFFERENT CHANGE: there is no request logging in this product
+// (`grep` for one finds only the panic handler), so it is a middleware and a decision about what to
+// record, not a parameter on this call.
+const (
+	SourcePutConfig         = "PUT /api/config"
+	SourceAddStorage        = "POST /api/config/storage"
+	SourceForgetStorage     = "DELETE /api/config/storage/{name}"
+	SourceInsecureTransport = "POST /api/config/insecure-transport"
+	// SourceDemoSeed is `serve --demo` filling a throwaway config at startup. It is the reason
+	// `Replace` takes a source where the three narrow writes carry a constant: it genuinely has two
+	// callers, and a line reading `PUT /api/config` for a demo seed would be the exact class of
+	// wrong attribution this change exists to prevent.
+	SourceDemoSeed = "demo seed"
+)
+
 // Replace validates a full-document config, writes it canonically, updates the live snapshot, and
 // then tells every registered Applier (qn.6g).
 //
+// `source` NAMES THE DOOR for the write log (quince#967) — one of the Source* constants above.
+//
 // Returns validation errors (→ 422), the Appliers' warnings, and a write error. The warnings are
 // per-response and are never stored — see the notify call at the end for why.
-func (s *Service) Replace(c Config) ([]wire.ConfigError, []Warning, error) {
+func (s *Service) Replace(c Config, source string) ([]wire.ConfigError, []Warning, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	return s.replaceLocked(c)
+	return s.replaceLocked(c, source)
 }
 
 // replaceLocked is Replace's body. CALLER MUST HOLD writeMu.
@@ -466,7 +491,7 @@ func (s *Service) Replace(c Config) ([]wire.ConfigError, []Warning, error) {
 // race the split closes and the review did not name: Forget reads the storage list, splices one
 // entry out, and writes the result — so two concurrent forgets both read the same list and the
 // second write silently restores the entry the first removed.
-func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error) {
+func (s *Service) replaceLocked(c Config, source string) ([]wire.ConfigError, []Warning, error) {
 	// RESOLVE FIRST, BEFORE ANYTHING LOOKS AT THE DOCUMENT (quince#754).
 	//
 	// Parse resolves (`cfg.Storage = ResolveStorages(...)`) and AddStorage resolves. This door did
@@ -698,6 +723,34 @@ func (s *Service) replaceLocked(c Config) ([]wire.ConfigError, []Warning, error)
 	// The guard's warning rides out with the appliers' — both describe the gap between what was
 	// asked for and what the running system has, which is a property of THIS response rather than of
 	// the stored state. Same reason the applier warnings are never stored.
+	// THE WRITE SAYS THAT IT HAPPENED, AND WHAT IT CHANGED (quince#967).
+	//
+	// Until this line, quince rewrote its own headline artifact and logged NOTHING about it: `grep
+	// 'log\.'` across this file found error paths only — an applier panic and a tidy-write that fails
+	// to round-trip. A storage's declaration vanished on a lab rig and the only trace was the APPLIER
+	// reacting to the consequence, forty-four seconds after a restart. *What* changed was
+	// unrecoverable, and *who* changed it was never recorded at all.
+	//
+	// IT MATTERS MORE HERE THAN IN MOST PRODUCTS because `config.yml` is not an implementation
+	// detail: D12 makes it the headline promise, quince#728 made it carry only what the user set, and
+	// it has at least five writers — the config editor, the add form, Forget, the transport toggle,
+	// and the operator's own text editor. A file with that many writers and no write record cannot
+	// be reasoned about afterwards.
+	//
+	// `changed` IS FREE, and that is why the "what" is this specific: it is already computed above
+	// for the declared-keys write rule, so naming the exact key paths costs a format verb rather
+	// than a diff.
+	//
+	// THE STORAGE COUNT IS CALLED OUT SEPARATELY from the key list, because a disappearing storage is
+	// the incident this was filed for and `storage` in a list of changed paths does not distinguish
+	// an edit from a deletion.
+	s.log.Info("config written",
+		"source", source,
+		"changed", changed.String(),
+		"storages_before", declaredStorage(prev),
+		"storages_after", declaredStorage(c),
+	)
+
 	return nil, append(guardWarnings, s.notify(prev, c)...), nil
 }
 

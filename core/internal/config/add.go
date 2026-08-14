@@ -91,7 +91,10 @@ func (s *Service) AddStorage(entry StorageEntry) (AddOutcome, []wire.ConfigError
 	// reason it did not ship (qn.6e).
 	next.Storage = ResolveStorages(&list)
 
-	errs, warns, err := s.replaceLocked(next)
+	// THE ROUTE NAMES ITSELF, and that holds because this method has exactly ONE caller
+	// (quince#967). A second caller would make this constant a lie; it should take a `source`
+	// parameter at that point rather than keep a name that used to be true.
+	errs, warns, err := s.replaceLocked(next, SourceAddStorage)
 	switch {
 	case err != nil:
 		return AddRefused, nil, nil, err

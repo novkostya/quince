@@ -15,7 +15,7 @@ func forgetSvc(t *testing.T, entries ...StorageEntry) (*Service, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if errs, _, err := svc.Replace(withStorages(entries...)); err != nil || len(errs) != 0 {
+	if errs, _, err := svc.Replace(withStorages(entries...), "test"); err != nil || len(errs) != 0 {
 		t.Fatalf("precondition: seeding the config must succeed; errs=%+v err=%v", errs, err)
 	}
 	return svc, path
@@ -157,7 +157,7 @@ func TestForgetStoragePreservesSurvivorsWherePutWouldNot(t *testing.T) {
 		Name: "pool", Path: "/backups", Default: true, Backend: "zfs",
 		ZFS: pool.ZFS, // fetched and echoed back; it is the retention key that goes missing
 	}}
-	errs, _, err := svc.Replace(naive)
+	errs, _, err := svc.Replace(naive, "test")
 	if err != nil {
 		t.Fatalf("Replace: %v", err)
 	}

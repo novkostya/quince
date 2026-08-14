@@ -456,7 +456,7 @@ func TestDemoConfigRoundTripsThroughSave(t *testing.T) {
 			}
 
 			// Exactly what the UI does on Save: PUT back the document it was served, unmodified.
-			errs, _, err := cfgSvc.Replace(cfgSvc.Current())
+			errs, _, err := cfgSvc.Replace(cfgSvc.Current(), "test")
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}
@@ -863,7 +863,7 @@ func TestInsecureTransportOptInAppliesLiveInBothDirections(t *testing.T) {
 
 	on := base
 	on.Sessions.AllowInsecureTransport = true
-	errs, warns, err := cfgSvc.Replace(on)
+	errs, warns, err := cfgSvc.Replace(on, "test")
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("turning the opt-in on: errs=%v err=%v", errs, err)
 	}
@@ -883,7 +883,7 @@ func TestInsecureTransportOptInAppliesLiveInBothDirections(t *testing.T) {
 
 	off := base
 	off.Sessions.AllowInsecureTransport = false
-	if _, warns, err = cfgSvc.Replace(off); err != nil {
+	if _, warns, err = cfgSvc.Replace(off, "test"); err != nil {
 		t.Fatalf("turning the opt-in off: %v", err)
 	}
 	if !authSvc.Secure(lan) {
@@ -921,7 +921,7 @@ func TestTLSPathsApplyLive(t *testing.T) {
 	// ON — the transition the whole issue exists for.
 	on := base
 	on.TLS.CertFile, on.TLS.KeyFile = certFile, keyFile
-	errs, warns, err := cfgSvc.Replace(on)
+	errs, warns, err := cfgSvc.Replace(on, "test")
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("turning TLS on: errs=%v err=%v", errs, err)
 	}
@@ -936,7 +936,7 @@ func TestTLSPathsApplyLive(t *testing.T) {
 	// the file is already on disk — so the warning is the whole of the honesty here.
 	bad := base
 	bad.TLS.CertFile, bad.TLS.KeyFile = filepath.Join(dir, "gone.pem"), filepath.Join(dir, "gone.key")
-	if _, warns, err = cfgSvc.Replace(bad); err != nil {
+	if _, warns, err = cfgSvc.Replace(bad, "test"); err != nil {
 		t.Fatalf("writing an unusable pair: %v", err)
 	}
 	if !keeper.HasCertificate() {
@@ -955,7 +955,7 @@ func TestTLSPathsApplyLive(t *testing.T) {
 
 	// OFF — clearing both keys drops the certificate, which is the revert direction.
 	off := base
-	if _, _, err = cfgSvc.Replace(off); err != nil {
+	if _, _, err = cfgSvc.Replace(off, "test"); err != nil {
 		t.Fatalf("turning TLS off: %v", err)
 	}
 	if keeper.HasCertificate() {
@@ -994,7 +994,7 @@ func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
 	// cookie survives plain http.
 	start := base
 	start.Sessions.AllowInsecureTransport = true
-	if _, _, err := cfgSvc.Replace(start); err != nil {
+	if _, _, err := cfgSvc.Replace(start, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if got := code(); got != http.StatusOK {
@@ -1007,7 +1007,7 @@ func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
 	// Apply the certificate. The opt-in still beats the redirect, per the Operator's ruling.
 	withCert := start
 	withCert.TLS.CertFile, withCert.TLS.KeyFile = certFile, keyFile
-	if _, _, err := cfgSvc.Replace(withCert); err != nil {
+	if _, _, err := cfgSvc.Replace(withCert, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if got := code(); got != http.StatusOK {
@@ -1019,7 +1019,7 @@ func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
 	// impossible in a running process before quince#900.
 	final := withCert
 	final.Sessions.AllowInsecureTransport = false
-	if _, _, err := cfgSvc.Replace(final); err != nil {
+	if _, _, err := cfgSvc.Replace(final, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if got := code(); got != http.StatusMovedPermanently {
@@ -1052,7 +1052,7 @@ func TestTLSNotAppliedWarningDoesNotInventAnIncumbent(t *testing.T) {
 	// FIRST configuration, and it is wrong. Nothing has ever been loaded.
 	first := base
 	first.TLS.CertFile, first.TLS.KeyFile = filepath.Join(dir, "typo.pem"), filepath.Join(dir, "typo.key")
-	_, warns, err := cfgSvc.Replace(first)
+	_, warns, err := cfgSvc.Replace(first, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +1078,7 @@ func TestTLSNotAppliedWarningDoesNotInventAnIncumbent(t *testing.T) {
 	// test would pass against a message that had simply lost the incumbent sentence entirely.
 	good := base
 	good.TLS.CertFile, good.TLS.KeyFile = writeTestPair(t, dir, "incumbent")
-	if _, _, err := cfgSvc.Replace(good); err != nil {
+	if _, _, err := cfgSvc.Replace(good, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if !keeper.HasCertificate() {
@@ -1086,7 +1086,7 @@ func TestTLSNotAppliedWarningDoesNotInventAnIncumbent(t *testing.T) {
 	}
 	broken := base
 	broken.TLS.CertFile, broken.TLS.KeyFile = filepath.Join(dir, "gone.pem"), filepath.Join(dir, "gone.key")
-	if _, warns, err = cfgSvc.Replace(broken); err != nil {
+	if _, warns, err = cfgSvc.Replace(broken, "test"); err != nil {
 		t.Fatal(err)
 	}
 	msg = tlsWarning(t, warns)
