@@ -175,6 +175,17 @@ type APIError struct {
 type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Accepts names the factors that would satisfy a `reauth_required` refusal — qn.6o D1.
+	//
+	// `omitempty` IS THE D4 RULE IN THE TAG. The field is present-and-non-empty or absent; there is
+	// no `accepts: []` on the wire, because an empty list would make the client responsible for
+	// turning emptiness back into an explanation. A dead end is `last_credential`, which carries a
+	// sentence naming the remedy.
+	//
+	// ON THE SHARED ENVELOPE rather than on a `reauth_required`-specific body, because every error
+	// in the product goes through this one type. Only the five re-authentication emitters set it
+	// today; whether it should appear on other refusals is left open by the rung.
+	Accepts []string `json:"accepts,omitempty"`
 }
 
 // ConfigError is one PUT /api/config validation failure (contracts §1: 422

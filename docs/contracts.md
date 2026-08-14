@@ -838,6 +838,32 @@ double-submit check against the readable `quince_csrf` cookie. The session cooki
 `--demo`, so local/e2e over plain http still works — never in production). Errors are
 `{error: {code, message}}` with sensible HTTP statuses.
 
+**One refusal carries a third field: `401 reauth_required` carries `accepts`** — `qn.6o` D1,
+Operator ruling 2026-08-14.
+
+```json
+{"error": {"code": "reauth_required", "message": "…", "accepts": ["password", "passkey"]}}
+```
+
+It names the factors that would satisfy **this** operation, at **this** address, on the credentials
+this install **actually holds** — not what the operation permits in principle. `password` appears
+only where a password exists; `passkey` only where a credential exists that can assert at this rpId.
+Rule 2's two exclusions are applied: the password never appears for `remove_password`, and a target
+passkey never counts as proof of its own removal.
+
+**IT IS GUIDANCE, AND NEVER A CONTROL.** Every rule is still enforced where the credential is
+presented. A client that ignores this list and offers the password for `remove_password` is refused
+exactly as before. If acceptability were *decided* by the list, the guard would have moved to the
+client — which is the whole reason the server computes it.
+
+**IT IS PRESENT-AND-NON-EMPTY, OR ABSENT — never `[]`.** *"Nothing this install holds can authorise
+this at this address"* is a different refusal with its own shape (`409 last_credential`), carrying a
+sentence that names the remedy. So no client ever meets an empty challenge, and none has to turn
+emptiness back into an explanation.
+
+It discloses nothing new: `GET /api/auth/passkeys` already gives the same session `has_password` and
+the whole credential list, and the caller is the admin.
+
 ### Health — and `reconciling`, the one field with a promise attached
 
 ```

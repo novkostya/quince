@@ -94,7 +94,15 @@ func (d Deps) handleAuthSetup() http.HandlerFunc {
 				// 401 — NOTHING USABLE WAS PRESENTED, which is the same class of refusal as a wrong
 				// password and takes the same status. The server's own sentence carries the remedy:
 				// re-authenticate, or present the right proof.
-				writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+				//
+				// THIS BRANCH CANNOT FIRE TODAY, and it is carried rather than deleted because
+				// deleting it is a different claim from this PR's. `SetPassword` takes no `*Proofs`
+				// and never calls `RequirePresent` — setup is exempt by `Configured()`, which is the
+				// one exemption qn.6n allows — so neither error can reach here. It is wired for
+				// `accepts` regardless, so that "every `reauth_required` carries the field" stays a
+				// property you can check by grepping for the code rather than by reasoning about
+				// which emitters are live.
+				d.writeReauthRequired(w, err.Error(), auth.OpSetPassword, auth.RPIDFromRequest(r), "")
 			case errors.Is(err, auth.ErrWeakPassword):
 				writeError(w, d.Log, http.StatusUnprocessableEntity, "weak_password", "password does not meet requirements")
 			default:
@@ -208,7 +216,7 @@ func (d Deps) handleChangePassword() http.HandlerFunc {
 			// 401 — NOTHING USABLE WAS PRESENTED, which is the same class of refusal as a wrong
 			// password and takes the same status. The server's own sentence carries the remedy:
 			// re-authenticate, or present the right proof.
-			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+			d.writeReauthRequired(w, err.Error(), auth.OpSetPassword, auth.RPIDFromRequest(r), "")
 		case errors.Is(err, auth.ErrWeakPassword):
 			writeError(w, d.Log, http.StatusUnprocessableEntity, "weak_password", "password does not meet requirements")
 		default:
@@ -263,7 +271,10 @@ func (d Deps) handleRemovePassword() http.HandlerFunc {
 		case errors.Is(err, auth.ErrBadPassword):
 			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
 		case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
-			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+			// `accepts` HERE NEVER LISTS `password` — rule 2's first exclusion, applied in
+			// `Service.Accepts`. The password cannot authorise its own removal, so offering it would
+			// send a user to type a value the subject comparison is guaranteed to reject.
+			d.writeReauthRequired(w, err.Error(), auth.OpRemovePassword, auth.RPIDFromRequest(r), "")
 		default:
 			d.Log.Error("remove password failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove password")

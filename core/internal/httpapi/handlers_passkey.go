@@ -79,7 +79,8 @@ func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 		if _, err := d.Auth.RequirePresent(d.Proofs,
 			auth.Presented{Password: body.CurrentPassword, Proof: body.Proof},
 			auth.OpAddPasskey, "", sessionCookieValue(r), d.Proxies.ClientIP(r)); err != nil {
-			d.writePresentError(w, err, "could not start passkey setup")
+			d.writePresentError(w, err, "could not start passkey setup",
+				auth.OpAddPasskey, auth.RPIDFromRequest(r), "")
 			return
 		}
 
@@ -100,7 +101,12 @@ func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 // writePresentError maps `RequirePresent`'s refusals — qn.6n. Shared so the password path and the
 // registration path cannot answer the same refusal with different codes, which is what a client
 // retrying on `reauth_required` would trip over.
-func (d Deps) writePresentError(w http.ResponseWriter, err error, fallback string) {
+//
+// IT NOW TAKES THE OPERATION, so the refusal it writes can carry `accepts` (qn.6o D1). The three
+// arguments are exactly what `Service.Accepts` needs, and requiring them here is what stops a sixth
+// caller emitting this code with the field silently absent.
+func (d Deps) writePresentError(w http.ResponseWriter, err error, fallback string,
+	op auth.ProofOperation, rpID, target string) {
 	switch {
 	case errors.Is(err, auth.ErrRateLimited):
 		writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
@@ -109,11 +115,28 @@ func (d Deps) writePresentError(w http.ResponseWriter, err error, fallback strin
 	case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
 		// THE CODE THE CLIENT RETRIES ON. It must match `PUT /api/auth/password`'s exactly — a second
 		// spelling here would leave the retry working on one surface and silently not on the other.
-		writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+		d.writeReauthRequired(w, err.Error(), op, rpID, target)
 	default:
 		d.Log.Error("re-authentication check failed", "error", err)
 		writeError(w, d.Log, http.StatusInternalServerError, "internal", fallback)
 	}
+}
+
+// writeReauthRequired computes `accepts` and writes the refusal — qn.6o slice 2, D1.
+//
+// A COMPUTATION FAILURE COSTS THE FIELD, NOT THE REFUSAL. `accepts` is advisory copy on a 401 that
+// has already been decided, so turning a store error here into a 500 would replace a correct,
+// actionable refusal with an opaque one — and the client's fallback for a missing field is exactly
+// today's behaviour. Logged rather than swallowed, because a store that cannot answer this is a
+// problem even when it is not this request's problem.
+func (d Deps) writeReauthRequired(w http.ResponseWriter, message string,
+	op auth.ProofOperation, rpID, target string) {
+	accepts, err := d.Auth.Accepts(op, rpID, target)
+	if err != nil {
+		d.Log.Error("could not compute the acceptable factors", "error", err, "operation", op)
+		accepts = nil
+	}
+	writeReauthRequired(w, d.Log, message, accepts)
 }
 
 // POST /api/auth/passkeys/register/finish {ceremony, name} → 201 {passkey}
@@ -331,7 +354,11 @@ func (d Deps) handlePasskeyDelete() http.HandlerFunc {
 		case errors.Is(err, auth.ErrBadPassword):
 			writeError(w, d.Log, http.StatusUnauthorized, "bad_password", "current password is incorrect")
 		case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
-			writeError(w, d.Log, http.StatusUnauthorized, "reauth_required", err.Error())
+			// THE TARGET IS PASSED, and it is what makes rule 2's second exclusion expressible: a
+			// passkey does not count as a factor that could authorise its own removal, so `accepts`
+			// lists `passkey` only when some OTHER credential can assert at this address.
+			d.writeReauthRequired(w, err.Error(), auth.OpRemovePasskey,
+				auth.RPIDFromRequest(r), r.PathValue("id"))
 		default:
 			d.Log.Error("passkey delete failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not remove the passkey")
