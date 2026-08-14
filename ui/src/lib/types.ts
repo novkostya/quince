@@ -365,6 +365,26 @@ export interface OnboardingHTTPS {
   detected: "tls" | "forwarded_proto" | "none";
 }
 
+// ProbeNonce is GET /api/onboarding/probe/nonce — obtained SAME-ORIGIN, then presented to a name the
+// user is considering. The mint is never CORS-readable, and that asymmetry is the gate (contracts §1).
+export interface ProbeNonce {
+  nonce: string;
+}
+
+// ProbeResult is GET /api/onboarding/probe?nonce= — the cross-origin half.
+//
+// `nonce` echoed proves the caller reached THIS quince rather than another one answering at that
+// name. `detected` describes THAT request's own connection, which is what a proxy check needs and
+// what no same-origin call can tell you.
+//
+// TWO FIELDS, AND THE LIMIT IS THE SAFETY ARGUMENT: the widening was permitted because the body gives
+// up nothing a successful connection has not already revealed. Adding a field is a contracts change
+// AND needs that ruling revisited (contracts §1).
+export interface ProbeResult {
+  nonce: string;
+  detected: "tls" | "forwarded_proto" | "none";
+}
+
 // StorageProbe is POST /api/storages/probe (contracts §2, qn.6e) — what IS this path?
 //
 // NOT A `Storage`, deliberately: a Storage is declared, has an identity and is being served, where
