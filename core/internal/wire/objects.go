@@ -372,6 +372,56 @@ type OnboardingHTTPS struct {
 	Detected string `json:"detected"` // tls | forwarded_proto | none
 }
 
+// CertificateProbeRequest is POST /api/onboarding/certificate (quince#908 §5, slice 4).
+//
+// `Hostname` MAY BE EMPTY and that is not a refusal — the field starts empty by ruling (do not
+// pre-fill it from the `Host` header: that is the name they are leaving), so somebody checking a pair
+// before choosing a name gets every answer except the coverage one.
+type CertificateProbeRequest struct {
+	CertFile string `json:"cert_file"`
+	KeyFile  string `json:"key_file"`
+	Hostname string `json:"hostname"`
+}
+
+// CertificateProbe answers it — the OFFLINE half, no network.
+//
+// IT IS `StorageProbe`'s SHAPE, deliberately, because it answers the same kind of question: *what is
+// this thing I am about to declare?* Every refusal is carried IN this object rather than as an HTTP
+// status, because "that certificate expired last week" is the ANSWER, not a failure to answer it.
+// Only a malformed question — a missing or relative path — is a 422.
+type CertificateProbe struct {
+	// Echoed, so a form can show the user their own typing beside the verdict.
+	CertFile string `json:"cert_file"`
+	KeyFile  string `json:"key_file"`
+	Hostname string `json:"hostname"`
+
+	// Outcome is the verdict: usable | unreadable | malformed | mismatched | not_yet_valid |
+	// expired | wrong_host. FROZEN, for StorageProbe.Outcome's reason — a client renders different
+	// prose and a different next action for each, so adding one is a contract change.
+	Outcome string `json:"outcome"`
+	// Reason is the daemon's own sentence and ALWAYS NAMES THE FILE OR THE HOST (quince#514). A
+	// client shows it rather than composing its own: quince knows which of the two files failed and
+	// which names the certificate carries, where a client's copy of an enum cannot.
+	Reason string `json:"reason"`
+
+	// Names is every DNS name and IP the leaf covers — populated even on `wrong_host`, ESPECIALLY
+	// then: "does not cover quince.example" is a status, "covers quince.lan, not quince.example" is
+	// something a person can act on. The legacy CN is deliberately absent; no browser has honoured
+	// it since 2017, so listing it would show a name that does not work.
+	Names []string `json:"names"`
+
+	// NotBefore/NotAfter are RFC3339 UTC, empty when the leaf never parsed. Sent on `usable` too — a
+	// certificate that works today and expires in nine days is not a refusal and is worth seeing.
+	NotBefore string `json:"not_before"`
+	NotAfter  string `json:"not_after"`
+
+	// ChainLength is how many certificates the file held. ONE IS NOT AN ERROR AND IS OFTEN A PROBLEM:
+	// a leaf without its intermediate validates on a machine that caches the issuer and fails on a
+	// phone that does not. Reported rather than judged, because whether it matters depends on the
+	// issuer.
+	ChainLength int `json:"chain_length"`
+}
+
 // ProbeNonce is GET /api/onboarding/probe/nonce — the token a page obtains SAME-ORIGIN before probing
 // a name it is about to be redirected to (Operator ruling 2026-08-14, for quince#908 slice 4 and
 // quince#939).

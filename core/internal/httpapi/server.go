@@ -170,6 +170,9 @@ func NewRouter(deps Deps) http.Handler {
 	// only to a caller presenting a nonce this daemon minted. Both handlers carry the argument.
 	apiMux.HandleFunc("GET /api/onboarding/probe/nonce", deps.handleProbeNonce())
 	apiMux.HandleFunc("GET /api/onboarding/probe", deps.handleProbe())
+	// THE OFFLINE HALF of the certificate probe — no network, Configured()-gated. The handler carries
+	// the argument for why a pre-auth caller may name a path.
+	apiMux.HandleFunc("POST /api/onboarding/certificate", deps.handleCertificateProbe())
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
