@@ -106,17 +106,36 @@ describe("the certificate step", () => {
     expect(screen.getByText(/phones reject it while this computer accepts it/i)).toBeInTheDocument();
   });
 
-  // NOTHING IS SAVED, AND THE PAGE SAYS SO. Slice 5 adds apply-live with a server-side revert timer;
-  // until then a page that LOOKED like it had configured something would be the worst half-step —
-  // the user restarts expecting HTTPS and gets whatever was already there.
-  it("says plainly that nothing has been saved", async () => {
+  // THE TRIAL IS OFFERED ONLY FOR A PAIR THE SERVER CALLED `usable`.
+  //
+  // This test said *"says plainly that nothing has been saved"* until slice 5, which is what the
+  // page had to say while there was nothing to press. The half that was load-bearing survives as the
+  // case below: a pair that FAILED the check still gets that sentence, because the server refuses to
+  // serve one and a button leading to a refusal would be a promise the product does not keep.
+  it("offers the trial once the files check out", async () => {
     vi.spyOn(api, "post").mockResolvedValue(USABLE);
 
     renderPage();
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
+    expect(await screen.findByRole("button", { name: /Try it now/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing has been saved/i)).not.toBeInTheDocument();
+  });
+
+  it("does not offer the trial for a pair the check refused", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      outcome: "expired",
+      reason: "/tls/fullchain.pem expired on 2026-08-01",
+    });
+
+    renderPage();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
     expect(await screen.findByText(/Nothing has been saved/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Try it now/i })).not.toBeInTheDocument();
   });
 
   // THE REACHABILITY HALF IS SKIPPED WHEN THE PAIR IS ALREADY UNUSABLE. Probing a name whose

@@ -1,0 +1,112 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+
+// THE CONFIRMATION PAGE — quince#908 §5, slice 5. It exists to be opened at the https origin the
+// apply named, and its whole job is to let the daemon observe a request arriving on its own TLS half.
+// That request is what writes `config.yml`; nothing before it does.
+//
+// IT DOES NOT CONFIRM ON LOAD, and that is the decision worth defending. A page that posted
+// automatically would confirm a certificate the moment it rendered — including in a preloading tab,
+// or after somebody clicked through a browser warning they did not read. The button is what makes
+// this a statement by a person: *I can see quince at this address.*
+//
+// THE TOKEN ARRIVES IN THE FRAGMENT, and it is read here rather than from a query parameter
+// (quince#979 review). A fragment never reaches a server, so it stays out of access logs and out of
+// any `Referer` a later navigation sends; a query parameter lands in both. It has to travel in the
+// URL at all because this page is on a DIFFERENT ORIGIN from the one that applied — different
+// scheme, usually a different host — so nothing in `sessionStorage` reaches it.
+//
+// IT IS NOT A CREDENTIAL either way: it cancels a trial on an install nobody has claimed, in the
+// window where anyone reaching the port could claim the whole thing outright (contracts §1).
+export function OnboardingCertificateConfirmPage() {
+  const [token, setToken] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "busy" | "done">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [secure, setSecure] = useState<boolean | null>(null);
+
+  // BOTH READS HAPPEN IN AN EFFECT because both touch `window` — `location.hash` is not available
+  // during a server render and `react-router` does not parse the fragment for us.
+  useEffect(() => {
+    setSecure(window.location.protocol === "https:");
+    setToken(new URLSearchParams(window.location.hash.replace(/^#/, "")).get("t") ?? "");
+  }, []);
+
+  async function confirm() {
+    setState("busy");
+    setError(null);
+    try {
+      await api.post("/api/onboarding/certificate/confirm", { token });
+      setState("done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setState("idle");
+    }
+  }
+
+  return (
+    <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
+      <div className="mx-auto w-full max-w-2xl">
+        <div className="text-lg font-semibold tracking-tight">quince</div>
+        <h1 className="mt-4 text-xl font-semibold tracking-tight">Keep this certificate?</h1>
+
+        {token === "" ? (
+          <p className="mt-4 text-sm" role="alert">
+            This link has no confirmation token, so there is nothing for it to confirm. Go back to the
+            certificate step and try again — the link it gives you carries one.
+          </p>
+        ) : state === "done" ? (
+          <div role="status" className="mt-4 rounded-card border border-ok bg-card px-3 py-3 text-sm">
+            <p>
+              <strong>Kept.</strong> quince has written this pair into{" "}
+              <code className="font-mono">config.yml</code> and will go on serving it, including after
+              a restart.
+            </p>
+            <p className="mt-2 text-muted">
+              You are reading this over https at this address, which is the proof it needed — and the
+              first thing in this whole step that changed a file.
+            </p>
+          </div>
+        ) : token === null ? null : (
+          <>
+            <p className="mt-2 text-sm text-muted">
+              You are seeing this page, so this browser reached quince over https at this address.
+              That is the whole test. Nothing has been saved yet.
+            </p>
+            {secure === false ? (
+              // THE HONEST REFUSAL BEFORE THE ROUND TRIP. The server answers 426 here regardless —
+              // `X-Forwarded-Proto` is not evidence for this one question — but a user who followed
+              // the wrong link deserves the reason rather than a status code.
+              <div role="alert" className="mt-4 rounded-card border border-danger bg-card px-3 py-2 text-sm">
+                <strong>This page is not on https.</strong> Confirming from here would prove nothing
+                about the certificate, and quince refuses it. Open the exact link the previous step
+                gave you — it begins <code className="font-mono">https://</code>.
+              </div>
+            ) : null}
+            <div className="mt-4">
+              <Button onClick={() => void confirm()} disabled={state === "busy" || secure === false}>
+                {state === "busy" ? "Confirming…" : "Yes, keep it"}
+              </Button>
+            </div>
+            {error ? (
+              <div role="alert" className="mt-4 rounded-card border border-danger bg-card px-3 py-2 text-sm">
+                {error}
+              </div>
+            ) : null}
+            <p className="mt-4 text-sm text-muted">
+              Doing nothing is also an answer: quince goes back to what it was serving when the window
+              closes, and since nothing was written, nothing is lost.
+            </p>
+          </>
+        )}
+
+        <p className="mt-6 text-sm">
+          <Link className="underline" to="/onboarding/https/certificate">
+            Back to the certificate step
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
