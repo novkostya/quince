@@ -1,5 +1,5 @@
 import { PasswordForm } from "./PasswordForm";
-import { proveWithPasskey, type ProofOperation } from "@/lib/reauth";
+import { proveWithPasskey, type ProofOperation, type Factor } from "@/lib/reauth";
 
 // THE ONE CHALLENGE — qn.6o slice 3, D5. When a credential-changing operation is refused for want
 // of a present credential, this is what asks for one, everywhere.
@@ -14,13 +14,14 @@ import { proveWithPasskey, type ProofOperation } from "@/lib/reauth";
 // way of asking one question, which is quince#908 §4's *"four different kinds of thing wearing one
 // costume"*, arrived at one surface at a time.
 //
-// NO CALLER YET. Slice 4 is the first, and landing this alone is the ordering `qn.6n` wrote for
-// itself after shipping a server demand ahead of any client that could satisfy it.
+// TWO CALLERS SINCE SLICE 5 — the add row and the passkey list's removal. It landed with none, on
+// the ordering `qn.6n` wrote for itself after shipping a server demand ahead of any client that
+// could satisfy it.
 
-// A factor the server says would work. Mirrors the wire, which is why it is a union of the two
-// strings rather than a boolean pair: a third factor should widen this and fail the build at every
-// place that switches on it.
-export type Factor = "password" | "passkey";
+// `Factor` and `Present` MOVED TO `lib/reauth.ts` when the second caller arrived. Re-exported here
+// so existing importers keep working and this file still reads as where the challenge's vocabulary
+// is defined.
+export type { Factor, Present } from "@/lib/reauth";
 
 export function ReauthChallenge({
   operation,

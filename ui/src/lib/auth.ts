@@ -85,17 +85,34 @@ export async function removePassword(): Promise<void> {
 // credential being removed is excluded. `removePassword` had no such choice — nothing but a passkey
 // can prove it — which is why that one prompts unconditionally and this one does not.
 //
-// THE PASSKEY IS TRIED FIRST AND THE CALLER SUPPLIES THE PASSWORD ONLY ON THE FALLBACK. The server
-// refuses `reauth/begin` when no non-target credential exists at this address, and its sentence says
-// which of the two states that is — a dead end, or *confirm with your password instead*. Deciding
-// client-side which factor is available would be a second implementation of an rpId rule, which is
-// the shape this file already refuses on the removal path above.
-export async function removePasskey(id: string, currentPassword?: string): Promise<void> {
+// IT PRESENTS WHAT THE CALLER GIVES IT AND RUNS NO CEREMONY OF ITS OWN — qn.6o slice 5.
+//
+// IT USED TO FIRE A PASSKEY SHEET WHENEVER NO PASSWORD WAS PASSED: press Remove, meet a modal
+// authenticator prompt, and only on ITS refusal learn that the password was the way. Two costs, and
+// the second is the one that made this a slice rather than a tidy-up.
+//
+// A SHEET BEFORE THE SERVER HAS SAID ANYTHING is a guess about which factor applies, made on the
+// client — the exact thing the comment above correctly refuses to do with the rpId rule, arrived at
+// from the other direction. The server now answers `reauth_required` with `accepts`, computed for
+// THIS target at THIS address with rule 2's exclusions already applied, so the caller renders the
+// challenge from that and the guess disappears.
+//
+// AND IT COST THE USER A PROMPT THEY COULD NOT ANSWER: on an install whose only credential at this
+// address is the one being removed, `accepts` omits `passkey`, and the old path opened a sheet with
+// nothing in it before falling back.
+//
+// NO FRESH-CLICK PROBLEM HERE, UNLIKE `registerPasskey` (D1, quince#988). That one ends in
+// `navigator.credentials.create()`, which needs transient activation the proof's own sheet has
+// already spent. A removal ends in a `DELETE` — an ordinary request, needing no activation at all —
+// so the challenge may hand its proof straight through, and this asymmetry is why the two paths
+// look different rather than one of them being stale.
+export async function removePasskey(
+  id: string,
+  present: { current_password: string } | { proof: string } | undefined = undefined,
+): Promise<void> {
   const path = `/api/auth/passkeys/${encodeURIComponent(id)}`;
-  if (currentPassword) return api.del<void>(path, { current_password: currentPassword });
-  // THE TARGET TRAVELS WITH THE CEREMONY. `remove_passkey` is the one operation that carries one,
-  // and the server both excludes it from `allowCredentials` and refuses a proof whose subject IS it
-  // — so passing the wrong id here does not weaken the rule, it removes the wrong credential.
-  const proof = await proveWithPasskey("remove_passkey", id);
-  return api.del<void>(path, { proof });
+  // Presenting NOTHING is deliberate and is the first call: it is what earns the `reauth_required`
+  // that names the acceptable factors. Since quince#978 the server answers that rather than
+  // "current password is incorrect".
+  return api.del<void>(path, present ?? {});
 }

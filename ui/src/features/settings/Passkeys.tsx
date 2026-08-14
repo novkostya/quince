@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { api, APIError, messageFor } from "@/lib/api";
-import { Input } from "@/components/ui/input";
 import { removePasskey } from "@/lib/auth";
+import { acceptsOf, type Factor, type Present } from "@/lib/reauth";
+import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
 import { AddPasskeyRow } from "./AddPasskeyRow";
 import { forgetPasskey } from "@/lib/passkeyHint";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -89,15 +90,16 @@ export function Passkeys() {
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });
 
-  // THE ROW WAITING FOR A TYPED PASSWORD, or null. Set only AFTER the server has said that no
-  // passkey at this address can prove this removal — never guessed ahead of the refusal, because
-  // deciding client-side which factor is available would be a second implementation of an rpId rule
-  // (qn.6n rule 2; `lib/auth.ts` carries the reasoning).
-  const [passwordFor, setPasswordFor] = React.useState<string | null>(null);
-  const [password, setPassword] = React.useState("");
+  // THE ROW BEING CHALLENGED, with what the server said would satisfy it — qn.6o slice 5.
+  //
+  // SET ONLY FROM THE REFUSAL, never guessed ahead of it. That rule is `qn.6n`'s and is unchanged;
+  // what changed is that the server now NAMES the acceptable factors instead of the client inferring
+  // them from `last_credential` + `has_password`. Those two are still the DEAD-END signal and are
+  // still handled below — they just no longer stand in for a list the server can send.
+  const [challenge, setChallenge] = React.useState<{ id: string; accepts: Factor[] } | null>(null);
 
   const remove = useMutation({
-    mutationFn: ({ id, pw }: { id: string; pw?: string }) => removePasskey(id, pw),
+    mutationFn: ({ id, present }: { id: string; present?: Present }) => removePasskey(id, present),
     onSuccess: (_data, { id }) => {
       // REMOVING THE LAST ONE STOPS THE UNPROMPTED SHEET. Otherwise the next visit fires a sheet
       // with nothing to offer — the exact wrong-guess the hint exists to prevent, caused by us.
@@ -105,21 +107,24 @@ export function Passkeys() {
       // Only when it was the last: with others left, a passkey can still work in this browser, and
       // the removed one may not even have been this device's.
       if (rows.length <= 1 && rows.some((p) => p.id === id)) forgetPasskey();
-      setPasswordFor(null);
-      setPassword("");
+      setChallenge(null);
       invalidate();
     },
-    onError: (err, { id, pw }) => {
-      // THE FALLBACK, AND IT IS DRIVEN BY THE SERVER RATHER THAN BY A GUESS. `last_credential` on
-      // this path means *no passkey here can prove this removal*; whether that is a dead end or a
-      // redirection to the password is what `has_password` decides, and the server's own sentence
-      // says the same thing in words.
+    onError: (err, { id, present }) => {
+      // THE CHALLENGE, DRIVEN BY THE SERVER'S OWN LIST. `reauth_required` here means *present
+      // something*, and `accepts` says what would work — with rule 2's exclusions already applied,
+      // so the credential being removed is never offered as proof of its own removal.
       //
-      // NOT AFTER A PASSWORD ATTEMPT (`pw` set) — that would loop the form on a wrong password
+      // NOT AFTER AN ATTEMPT (`present` set) — that would loop the challenge on a wrong password
       // instead of showing why it was refused.
-      if (!pw && err instanceof APIError && err.code === "last_credential" && hasPassword) {
-        setPasswordFor(id);
-      }
+      //
+      // `last_credential` IS A DIFFERENT REFUSAL AND KEEPS ITS OWN BEHAVIOUR: it is the dead end,
+      // it carries the server's sentence naming which addresses hold credentials, and it renders as
+      // the message below rather than as a prompt. D4's rule — a dead end is never an empty
+      // challenge — is the server's here, and this is the client half of it.
+      if (present || !(err instanceof APIError) || err.code !== "reauth_required") return;
+      const accepts = acceptsOf(err);
+      if (accepts) setChallenge({ id, accepts });
     },
   });
 
@@ -136,9 +141,14 @@ export function Passkeys() {
   // `supported` absent is treated as NOT supported, so the add button stays disabled rather than
   // offering a ceremony this address may not be able to complete.
   const supported = passkeysSupported(data);
-  // ABSENT IS TREATED AS "NO PASSWORD", which is the conservative direction here: it withholds the
-  // fallback form rather than offering one against an install that may have nothing to type.
-  const hasPassword = data?.has_password === true;
+  // `has_password` IS NO LONGER READ HERE, AND THAT IS THE SLICE — qn.6o slice 5. It decided whether
+  // to offer the removal fallback: *"absent is treated as NO PASSWORD … it withholds the fallback
+  // form rather than offering one against an install that may have nothing to type."* Careful, and
+  // still an inference drawn on the client about which factor applies. `accepts` is that answer
+  // computed by the side that enforces the rule, so the flag has nothing left to decide.
+  //
+  // IT REMAINS ON THE PAYLOAD and `PasswordControls` still reads it from the same query — this is
+  // one consumer going away, not the field.
 
   return (
     <div className="mt-8">
@@ -225,50 +235,47 @@ export function Passkeys() {
         </p>
       ) : null}
 
-      {/* THE PASSWORD FALLBACK — qn.6n rule 2. It appears only after the server has said that no
-          passkey at this address can prove this removal, so it is never offered speculatively and
-          never offered on an install with no password. The message above already says why it is
-          here, in the server's own words, which is why this carries no explanatory copy of its own.
+      {/* THE CHALLENGE, REPLACING THE BESPOKE PASSWORD FALLBACK — qn.6o slice 5. What stood here was
+          a hand-rolled form: a label, a password input, Confirm and Cancel, offered when the client
+          inferred from `last_credential` + `has_password` that the password was the way.
 
-          A `<form>` WITH A REAL SUBMIT, not a bare button: this is a password field, and quince#893
-          pins that shape across every surface that has one — the browser's own credential handling
-          keys off a form that submits. */}
-      {passwordFor ? (
-        <form
-          className="mt-3 flex flex-wrap items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            remove.mutate({ id: passwordFor, pw: password });
-          }}
-        >
-          <div className="min-w-0 flex-1">
-            <label className="text-xs text-muted" htmlFor="remove-passkey-password">
-              Your password
-            </label>
-            <Input
-              id="remove-passkey-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <Button type="submit" size="sm" disabled={remove.isPending || password === ""}>
-            Confirm
-          </Button>
+          IT WAS CORRECT AND IT WAS THE THIRD SPELLING of one question. `qn.6o`'s whole point is that
+          no surface invents its own affordance for asking, and this one predates the shared surface
+          rather than disagreeing with it. Deleting it is the consolidation the rung ends on.
+
+          IT ALSO STOPS INFERRING. The old form appeared on a rule this client evaluated —
+          `last_credential` plus a `has_password` flag — where `accepts` is computed by the side that
+          enforces rule 2, for this target at this address. The dead end keeps its own shape: that is
+          `last_credential`, and it renders as the message above rather than as a prompt. */}
+      {challenge ? (
+        <div className="mt-3">
+          <ReauthChallenge
+            operation="remove_passkey"
+            target={challenge.id}
+            accepts={challenge.accepts}
+            title="Confirm it is you"
+            subtitle="Removing a passkey changes how you sign in, so quince needs a different credential you have right now."
+            onProved={async (present) => {
+              // STRAIGHT THROUGH, UNLIKE THE ADD PATH. A removal ends in a `DELETE` — an ordinary
+              // request needing no user activation — so there is no gesture to preserve and no
+              // fresh click to wait for. `AddPasskeyRow` parks here instead, because its ceremony
+              // ends in `credentials.create()`, which does need one (D1, quince#988).
+              await remove.mutateAsync({ id: challenge.id, present });
+            }}
+          />
           <Button
             type="button"
             size="sm"
             variant="outline"
+            className="mt-2"
             onClick={() => {
-              setPasswordFor(null);
-              setPassword("");
+              setChallenge(null);
               remove.reset();
             }}
           >
             Cancel
           </Button>
-        </form>
+        </div>
       ) : null}
 
       {/* D6: THE ADD ROW SITS BELOW THE LIST — the list is what the user came to read, the action is
