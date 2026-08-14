@@ -15,7 +15,7 @@ import {
   probeStorage,
 } from "@/lib/config";
 import { DocLink } from "@/components/DocLink";
-import { CopyButton } from "@/components/CopyButton";
+import { CodeBlock } from "@/components/CodeBlock";
 import { APIError, UnreachableError } from "@/lib/api";
 import type {
   ConfigFieldError,
@@ -52,6 +52,43 @@ export function needsZFSConfig(outcome: string | undefined, backend: string): bo
   // error the operator has to fix first.
   if (outcome !== "new" && outcome !== "adopt") return false;
   return backend === "zfs";
+}
+
+// helperFetchCommand is the one-line alternative to copying the script out of the box above it.
+//
+// IT IS THE THIRD OF THREE OFFERS AND MUST STAY THE THIRD (Operator, 2026-08-14). A page whose only
+// instruction is *fetch this into a root path and make it executable* reads as suspicious, and
+// reasonably so — it asks somebody to run a file they have not seen, on the machine holding their
+// backups. The script itself is rendered in full above, and the address is a link they can open, so
+// this is a shortcut for a reader who has already done both.
+//
+// `-fsSL`, EACH LETTER EARNING ITS PLACE: `-f` makes an HTTP error a non-zero exit instead of an
+// error page written to the destination. `-sS` drops the progress meter but keeps errors. `-L`
+// follows a redirect, which a reverse proxy in front of quince may well add.
+//
+// `-f` NEEDED HELP FROM THE SERVER TO MEAN ANYTHING HERE, AND THAT WAS MEASURED RATHER THAN ASSUMED.
+// A mistyped path used to reach the SPA catch-all, which answers `200 text/html` to any unrouted
+// address — so on the rig `curl -fsSL …/zfs/helperr -o …` exited **0** and wrote the app's
+// `index.html`, which the `&& chmod` then made executable. There was no HTTP error for `-f` to
+// fail on. `NewRouter` now 404s the whole `/zfs/` prefix, which is what turns that into a refusal;
+// a typo outside the prefix still lands on the SPA, and the link above it is what covers that.
+//
+// `&&`, NOT `;`, so a failed fetch does not go on to chmod whatever was there before.
+//
+// `0755`, NOT `+x` (Operator, 2026-08-14). `+x` ADDS execute to whatever mode the file already has,
+// and `curl -o` creates it with `0666 & ~umask` — so on a permissive umask the result is `0777`: a
+// world-writable script that root executes on every backup, which any local user could rewrite. An
+// absolute mode cannot inherit that, and it says on the screen exactly what the file will end up as.
+//
+// NO `sudo`, NO PIPE TO A SHELL. The destination is under `/usr/local/sbin`, so this needs root and
+// the operator is expected to already be it — printing `sudo` would guess at their setup. And
+// nothing here executes the download: it is written to a file they can read, which is the whole
+// difference between this and the shape that deserves suspicion.
+//
+// PURE AND EXPORTED so the composition is a table test rather than a claim about a component with no
+// render harness — the same reason `needsZFSConfig` above is.
+export function helperFetchCommand(origin: string, sourcePath: string, installPath: string): string {
+  return `curl -fsSL ${origin}${sourcePath} -o ${installPath} && chmod 0755 ${installPath}`;
 }
 
 // codeBlock is the shared LOOK of every copyable block on this form — and nothing else, because the
@@ -244,7 +281,6 @@ export function AddStorageForm({
   // also the honest moment: the operator is telling us they are ready to install it.
   const [helper, setHelper] = useState<StorageZFSHelperResponse | null>(null);
   const [helperError, setHelperError] = useState("");
-  const [helperLoading, setHelperLoading] = useState(false);
 
   // THE HOST KEY, WHICH IS THE LAST THING BETWEEN A CORRECT SETUP AND A WORKING ONE (quince#912).
   // quince composes `StrictHostKeyChecking=yes` — the right choice, argued in `config/zfsssh.go` —
@@ -300,22 +336,6 @@ export function AddStorageForm({
     }
   }
 
-  async function showHelper() {
-    setHelperLoading(true);
-    setHelperError("");
-    try {
-      setHelper(await fetchZFSHelper());
-    } catch (e) {
-      // THE DAEMON'S OWN SENTENCE, through the same extractor every other refusal on this form uses.
-      // Since quince#985 this answer is a constant, so the only way here is a daemon that could not
-      // answer at all — but a swallowed failure would leave a button that does nothing when pressed,
-      // which is the shape quince#949 was filed on.
-      setHelperError(serverSentence(e, "could not fetch the helper"));
-      setHelper(null);
-    } finally {
-      setHelperLoading(false);
-    }
-  }
 
   function reset() {
     setPath("");
@@ -500,6 +520,41 @@ export function AddStorageForm({
   //
   // `parent_mismatch` and `unreachable` block, because both mean the storage would fail at commit
   // time — the exact failure this button exists to move forward from a multi-hour transfer to now.
+  // THE ADDRESS THEY ARE ALREADY USING, not one quince guessed. `window.location.origin` is whatever
+  // they typed to reach this screen, so it is reachable by construction — where a daemon-side guess
+  // would be config quince cannot verify, and a wrong address on this panel looks exactly like a
+  // right one until somebody runs it on the storage host. The path comes off the wire (`source_path`)
+  // so moving the route cannot leave this pointing at a 404.
+  const helperURL = helper === null ? "" : window.location.origin + helper.source_path;
+  const helperCurl =
+    helper === null ? "" : helperFetchCommand(window.location.origin, helper.source_path, helper.path);
+
+  // FETCHED WITH THE BRANCH, NOT BEHIND A BUTTON. It was revealed by *Show the helper script*, which
+  // made sense while the answer depended on the dataset field; the answer is now a constant, so the
+  // button was a control whose only job was to spend a click. Once, like the key: `helper !== null`
+  // means the branch has already asked.
+  useEffect(() => {
+    if (!needsZFS || helper !== null) return;
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetchZFSHelper();
+        if (live) {
+          setHelper(res);
+          setHelperError("");
+        }
+      } catch (e) {
+        // SURFACED, NEVER SWALLOWED. The answer is a constant, so the only way here is a daemon that
+        // could not answer at all — and an empty space where the install instructions belong reads
+        // as "there is nothing to install", which is the failure quince#949 was filed on.
+        if (live) setHelperError(serverSentence(e, "could not fetch the helper script"));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [needsZFS, helper]);
+
   const helperUsable = hookCheck?.outcome === "ok" || hookCheck?.outcome === "not_migrated";
   const zfsReady =
     parentDataset.trim() !== "" && sshUser.trim() !== "" && sshHost.trim() !== "" && helperUsable;
@@ -672,30 +727,33 @@ export function AddStorageForm({
                     : "quince found an ssh key it made earlier"}
                 </div>
                 <div className="mt-1 text-sm text-muted">
-                  Add this one line to <code className="font-mono text-xs">~{"/"}.ssh/authorized_keys</code>{" "}
-                  for <span className="text-fg">{sshUser.trim() === "" ? "the remote user" : sshUser.trim()}</span> on{" "}
-                  <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> — it
-                  restricts the key to the helper, and to{" "}
-                  <span className="text-fg">{parentDataset.trim()}</span> within it, so it cannot be
-                  used for anything else.
+                  Add this line to{" "}
+                  <code className="font-mono text-xs">~{"/"}.ssh/authorized_keys</code> for{" "}
+                  <span className="text-fg">
+                    {sshUser.trim() === "" ? "the remote user" : sshUser.trim()}
+                  </span>{" "}
+                  on{" "}
+                  <span className="text-fg">
+                    {sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}
+                  </span>
+                  . It limits the key to <span className="text-fg">{parentDataset.trim()}</span> and
+                  nothing else.
                 </div>
-                <pre
-                  className={`mt-2 whitespace-pre-wrap break-all ${codeBlock}`}
-                  data-testid="zfs-authorized-keys"
-                >
-                  {zfsKey.authorized_keys}
-                </pre>
                 {/* COPYING THIS BY HAND IS THE STEP MOST LIKELY TO GO WRONG. It is one line, it
                     wraps across three on a phone, and a selection that clips the leading
                     `command="…"` leaves a WORKING key with no constraint — an unrestricted shell
-                    login on the storage host rather than a helper pinned to one dataset. The button
+                    login on the storage host rather than a helper pinned to one dataset. The control
                     copies the whole line or says it could not. */}
-                <div className="mt-2">
-                  <CopyButton value={zfsKey.authorized_keys} label="Copy the line" />
-                </div>
+                <CodeBlock
+                  className="mt-2"
+                  value={zfsKey.authorized_keys}
+                  label="Copy the line"
+                  wrap="anywhere"
+                  testId="zfs-authorized-keys"
+                />
                 <div className="mt-2 text-xs text-muted">
-                  The private half stays in{" "}
-                  <code className="font-mono">{zfsKey.path}</code> and never leaves this machine.
+                  The private key stays on this machine, in{" "}
+                  <code className="font-mono">{zfsKey.path}</code>.
                 </div>
               </div>
             ) : null}
@@ -711,55 +769,100 @@ export function AddStorageForm({
                 place to put it — so a second zfs storage overwrote the first's helper and the first
                 broke at its next commit. The dataset lives in the `authorized_keys` line above
                 instead, which is per key, and this script no longer names one at all. */}
-            {/* NO LONGER GATED ON THE DATASET FIELD, and dropping that gate is part of quince#985
-                rather than tidying beside it. The gate existed because the script was RENDERED for
-                one dataset, so offering it before the field was filled in would have produced an
-                artifact with an empty `PARENT=`. There is nothing left to render: the same bytes
-                answer for every install, so the button is available as soon as the zfs branch is,
-                and reading the script is no longer something the operator has to earn. */}
-            <div className="mt-3">
-              {helper === null ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void showHelper()}
-                    disabled={helperLoading}
-                    data-testid="show-helper"
-                  >
-                    {helperLoading ? "Fetching…" : "Show the helper script"}
-                  </Button>
-                ) : (
-                  <div className="mt-1" data-testid="zfs-helper">
-                    <div className="text-sm font-medium">The helper script, ready to install</div>
-                    <div className="mt-1 text-sm text-muted">
-                      Save this on{" "}
-                      <span className="text-fg">{sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}</span> as{" "}
-                      <code className="font-mono text-xs">{helper.path}</code> and make it
-                      executable. Nothing in it needs editing, and it is the same file for every
-                      storage — the dataset comes from the line above, so a second one on this host
-                      shares this script rather than replacing it.
-                    </div>
-                    {/* CAPPED AND SCROLLABLE. It is ~70 lines: rendered full-height it would bury
-                        the rest of the form on a phone, and this is a thing to COPY rather than to
-                        read. */}
-                    <pre
-                      className={`mt-2 max-h-80 overflow-auto whitespace-pre ${codeBlock}`}
-                      data-testid="zfs-helper-script"
-                    >
-                      {helper.script}
-                    </pre>
-                    <div className="mt-2">
-                      <CopyButton value={helper.script} label="Copy the script" />
-                    </div>
-                  </div>
-                )}
-                {helperError !== "" ? (
-                  <div className="mt-2 text-sm" data-testid="zfs-helper-error">
-                    {helperError}
-                  </div>
-                ) : null}
+            {/* THE COMMAND LEADS AND THE SCRIPT IS UNDER A CUT (Operator, 2026-08-14). The first
+                arrangement put the whole ~50-line script on the page and the fetch command below it,
+                on the argument that a reader should meet the file before being told to fetch it. It
+                was right about the principle and wrong about the screen: the script pushed the two
+                real actions — the host-key check and `Test helper` — off the bottom, and the panel
+                read as a wall.
 
-            </div>
+                THE CONSTRAINT IS *NOT THE ONLY OPTION*, NOT *NOT FIRST*, which is what makes this
+                arrangement legal. The script is still here, in full, one click away and never
+                fetched from anywhere — so a reader who wants to see what they are about to run as
+                root can, and the summary says so rather than hiding behind a chevron.
+
+                NOT GATED ON THE DATASET FIELD, and no longer behind a button either. The gate
+                existed because the script was RENDERED for one dataset; there is nothing left to
+                render, so it is fetched with the branch and the button that revealed it is gone —
+                one fewer control on a screen that had too many. */}
+            {helper !== null ? (
+              <div className="mt-5" data-testid="zfs-helper">
+                <div className="text-sm font-medium">Install the helper script</div>
+                {/* WHAT TO DO, NOT WHY IT IS SHAPED THIS WAY (Operator, 2026-08-14). This carried
+                    "…and it is the same file for every storage — the dataset comes from the line
+                    above, so a second storage on this host shares this script rather than replacing
+                    it": the reasoning behind quince#985, printed on a screen. Somebody installing
+                    their FIRST storage has no second one to think about, and that sentence made them
+                    consider one on the way to the instruction. The reasoning belongs in the code and
+                    in `deploy/storage.md`; the screen gets the instruction. */}
+                <div className="mt-1 text-sm text-muted">
+                  Run this on{" "}
+                  <span className="text-fg">
+                    {sshHost.trim() === "" ? "the ZFS host" : sshHost.trim()}
+                  </span>
+                  :
+                </div>
+
+                {/* THE ADDRESS IS THE ONE THEY ARE ALREADY USING. `window.location.origin` is
+                    whatever they typed to reach this page, so it is reachable by construction rather
+                    than guessed from config — and on the common shape, quince in a container beside
+                    the pool, it is the host's own name. */}
+                <CodeBlock
+                  className="mt-2"
+                  value={helperCurl}
+                  label="Copy the command"
+                  wrap="anywhere"
+                  testId="zfs-helper-curl"
+                />
+
+                {/* THE LINK IS SEPARATE FROM THE FETCH ON PURPOSE. It opens the same bytes in a tab,
+                    which is how somebody checks that the address in the command actually serves the
+                    script under the cut — and it is why the route answers `text/plain` with no
+                    `Content-Disposition`: it must be readable, not only downloadable. */}
+                {/* SAME CUT. This read "No login needed — the file is the same for every quince of
+                    this version and says nothing about this one", which answers a question nobody
+                    asked: it is the argument for the route being unauthenticated, aimed at a
+                    reviewer rather than at the person installing a helper. What they need is the two
+                    other ways to get the file. */}
+                <div className="mt-2 text-xs text-muted">
+                  You can read it at{" "}
+                  <a
+                    className="underline"
+                    href={helperURL}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="zfs-helper-link"
+                  >
+                    {helperURL}
+                  </a>{" "}
+                  first, or copy it from below.
+                </div>
+
+                <details className="mt-3" data-testid="zfs-helper-details">
+                  <summary className="cursor-pointer text-sm text-muted hover:text-fg">
+                    Show the script
+                  </summary>
+                  {/* IN FULL, WITH NO VERTICAL SCROLL (Operator, 2026-08-14). It was capped at
+                      `max-h-80`, which put a second scrollbar inside a page that already scrolls —
+                      so reading the whole file meant scrolling a box while the page stayed still.
+                      Behind a cut it costs nothing to be its own length. It still scrolls
+                      HORIZONTALLY: wrapping a shell script folds `case` bodies into ragged
+                      half-lines, and on a phone that reads worse than the clipping it replaced. */}
+                  <CodeBlock
+                    className="mt-2"
+                    value={helper.script}
+                    label="Copy the script"
+                    wrap="none"
+                    testId="zfs-helper-script"
+                  />
+                </details>
+              </div>
+            ) : null}
+            {helperError !== "" ? (
+              <div className="mt-2 text-sm" data-testid="zfs-helper-error">
+                {helperError}
+              </div>
+            ) : null}
 
 
             {/* THE HOST KEY, ABOVE `Test helper` BECAUSE IT GATES IT (quince#912). Until an entry
@@ -819,9 +922,8 @@ export function AddStorageForm({
                     )}
                     <div className="mt-1 text-sm text-muted">
                       <span className="text-fg">{hostKey.host}</span> offered a{" "}
-                      <span className="text-fg">{hostKey.key_type}</span> key. Check it against the
-                      host itself before trusting it — quince cannot tell a rebuilt machine from
-                      something impersonating one.
+                      <span className="text-fg">{hostKey.key_type}</span> key. Compare it on the host
+                      before trusting it — quince cannot tell a rebuilt machine from an impostor.
                     </div>
                     {/* IT WRAPS RATHER THAN SCROLLING. This is a single unbroken token the operator
                         compares character by character, and half of it behind a scrollbar is worse
@@ -972,9 +1074,12 @@ export function AddStorageForm({
               </div>
             ) : (
               <div className="mt-3 text-sm text-muted">
-                Test the helper before saving. quince only sends two read-only commands, and it is
-                the only way to find out that the key, the forced command and the dataset all agree
-                — before a backup does.
+                {/* USER-FIRST (Operator, 2026-08-14). This explained WHY the check is the only way
+                    to learn that the key, the forced command and the dataset agree — an argument for
+                    the button's existence, aimed at whoever reviewed it. What the user needs is when
+                    to press it and what it costs them. */}
+                Test the helper before saving — two read-only commands, and it finds a mistake now
+                rather than at your first backup.
               </div>
             )}
           </div>

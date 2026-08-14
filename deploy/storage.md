@@ -148,9 +148,18 @@ produced the `SC2086` question the next section answers.
 quince#887. The script is displayed verbatim in the UI and then installed on somebody's storage host,
 so it is read there as an *artifact*, not as our notebook: a reader deciding whether to trust a file
 they are about to run as root should not have to page through this project's reasoning to find the
-code. It was **90 lines, 65 of them comment**; it is now 49, with the code byte-identical. The
-comments that survive are the ones an operator needs *at that moment* — what the script allows, and
-why three lines that look wrong are not.
+code. It was **90 lines, 65 of them comment**; it is now 41, with the code byte-identical apart from
+what quince#984 and quince#985 changed. The comments that survive are the ones an operator needs *at
+that moment* — what the script allows, and why three lines that look wrong are not.
+
+**THE RULING BINDS EVERY LATER EDIT, AND quince#985 BROKE IT BEFORE THIS SENTENCE EXISTED.** That PR
+added ten lines of block-capital rationale to the header — *"ONE FILE PER HOST, IDENTICAL BYTES FOR
+EVERY INSTALL"*, *"$1 IS THE OPERATOR'S AND $SSH_ORIGINAL_COMMAND IS THE CLIENT'S"* — which is this
+project's house style for canon and exactly what a file rendered on a screen must not carry
+(Operator, 2026-08-14: *"EVERY BYTE IN THIS FILE HAS TO HAVE BULLET PROOF REASONING WHY IT'S HERE"*).
+The reasoning lives here and in `zfshelper.go`; **the test for a line in the script is whether a
+stranger about to run it as root needs it to decide.** Stated as a rule rather than left as a
+one-time cleanup, because the ruling was already in this section and got added to anyway.
 
 **What moved here, so nothing is lost:**
 

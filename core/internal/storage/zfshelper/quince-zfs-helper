@@ -1,23 +1,18 @@
 #!/bin/sh
-# quince-zfs-helper — the only command quince may run here. It cannot destroy a dataset.
+# quince-zfs-helper — everything quince is allowed to do on this host.
 #
-# ONE FILE PER HOST, IDENTICAL BYTES FOR EVERY INSTALL. The dataset it is confined to arrives from
-# the forced command, so two quince storages on one machine share this file rather than overwriting
-# each other's copy of it:
-#
-#   command="/usr/local/sbin/quince-zfs-helper <pool>/<dataset>",no-port-forwarding,… ssh-ed25519 AAAA… quince
+# Under one parent dataset, named in the authorized_keys forced command: create child datasets,
+# and take, destroy or roll back @quince-* snapshots. It cannot destroy a dataset, cannot touch
+# anything outside that parent, and runs no command that is not below.
 set -eu
 
-# $1 IS THE OPERATOR'S AND $SSH_ORIGINAL_COMMAND IS THE CLIENT'S. That is the whole security split,
-# and it is why this line comes BEFORE the `set --` below overwrites the positional parameters: ssh
-# puts the forced command's own words in "$@", and the client's request never reaches them.
+# The parent comes from the forced command, so it is read before the client's request replaces "$@".
 PARENT="${1:-}"
 [ -n "$PARENT" ] || {
-  echo "quince-zfs-helper: no parent dataset. The authorized_keys line must name it:" >&2
-  echo "  command=\"$0 <pool>/<dataset>\",no-port-forwarding,… ssh-ed25519 AAAA… quince" >&2
+  echo "quince-zfs-helper: no parent dataset — authorized_keys must read command=\"$0 <pool>/<dataset>\"" >&2
   exit 1; }
 
-# Unquoted on purpose: ssh delivers the request as one string, so this split IS the arg parsing.
+# Unquoted on purpose: ssh delivers the request as one string, so this split is the arg parsing.
 # shellcheck disable=SC2086
 set -- $SSH_ORIGINAL_COMMAND
 op="${1:-}"
@@ -27,7 +22,7 @@ case "$op" in
               # Checked first: `zfs create -p` silently builds a whole tree from a typo in PARENT.
               pmp=$(zfs get -H -o value mountpoint "$PARENT" 2>/dev/null) || pmp=""
               [ -n "$pmp" ] && [ -d "$pmp" ] || {
-                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the dataset in the authorized_keys forced command" >&2
+                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the forced command in authorized_keys" >&2
                 exit 1; }
               zfs create -p "$target" || exit 1
               # A new dataset is host-root-owned; quince may be a userns-mapped root that cannot write it.
@@ -39,7 +34,6 @@ case "$op" in
             # No -r, and the parse drops flags, so rollback cannot reach anything but the newest snapshot.
   rollback) case "$target" in "$PARENT"/*@quince-*) exec zfs rollback "$target" ;; esac ;;
   list)     case "$target" in "$PARENT"|"$PARENT"/*) exec zfs list -t snapshot -H -o name -r "$target" ;; esac ;;
-            # Confined by a guard rather than by having no target: an argument is REFUSED, not ignored.
   capacity) [ -z "${2:-}" ] || { echo "quince-zfs-helper: capacity takes no argument" >&2; exit 1; }
             exec zfs list -H -p -o used,available "$PARENT" ;;
 esac

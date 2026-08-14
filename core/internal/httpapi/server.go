@@ -308,6 +308,38 @@ func NewRouter(deps Deps) http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/ws", wsHandler) // self-guarding; bypasses the JSON API chain
 	root.Handle("/api/", apiHandler)
+	// THE HELPER AS A FILE, AT AN ADDRESS SOMEBODY CAN TYPE — outside `/api/` on purpose, because
+	// the machine that needs it is the ZFS host rather than the browser, and the address has to
+	// survive being read off one screen and typed into another. See handleZFSHelperPlain for why it
+	// is unauthenticated and what that does and does not disclose.
+	root.HandleFunc("GET "+ZFSHelperRoute, deps.handleZFSHelperPlain())
+	// AND THE SAME PATH WITHOUT A METHOD, WHICH IS NOT REDUNDANT. The SPA below is a catch-all: with
+	// only the `GET` pattern registered, a `POST /zfs/helper` falls through to it and answers `200`
+	// with the app's HTML. That is ordinary for a client-routed path and wrong for this one, whose
+	// narrowness — one method, one path, writes nothing — is the argument for it having no auth guard
+	// above it. Go's mux prefers the more specific pattern, so `GET` (and `HEAD`) still reach the
+	// handler and everything else lands here.
+	root.HandleFunc(ZFSHelperRoute, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+	// AND THE PREFIX 404s, WHICH IS THE PART THAT PROTECTS THE `curl`. Measured on the rig: with only
+	// the two patterns above, `curl -fsSL <origin>/zfs/helperr -o …` **exits 0 and writes the SPA's
+	// index.html to the destination**, where it is then chmod'd +x. `-f` cannot help, because there is
+	// no HTTP error to fail on — the catch-all below answers `200 text/html` to every unrouted path,
+	// correctly, since it serves a client-routed app.
+	//
+	// That is exactly the silent wrong install the fetch command's `-f` is there to prevent, so the
+	// near miss has to be a real error rather than a page. A one-character slip on this URL is the
+	// likely typo, and it now lands here.
+	//
+	// IT DOES NOT COVER EVERY TYPO — `/zfs-helper` is outside this prefix and still reaches the SPA.
+	// Stated rather than implied: what is closed is the neighbourhood of the address quince prints,
+	// and the page's own instruction — open the link and compare it with the script above — is what
+	// covers the rest.
+	root.HandleFunc("/zfs/", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
 	root.Handle("/", webui.Handler())
 
 	return chain(root, recoverMW(deps.Log), securityHeaders)
