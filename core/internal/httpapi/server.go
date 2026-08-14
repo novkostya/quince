@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/webui"
@@ -105,8 +106,35 @@ type HealthResponse struct {
 	// NOT `omitempty`, unlike `demo_reset_minutes` above. There an absent key and a zero are the
 	// same fact. Here they are not: `false` is the shipping default AND the answer a banner acts
 	// on, so a client must be able to tell "off" from "this daemon predates the field".
-	InsecureTransportAllowed bool          `json:"insecure_transport_allowed"`
-	Muxers                   []MuxerHealth `json:"muxers"`
+	InsecureTransportAllowed bool `json:"insecure_transport_allowed"`
+	// TLSTrialExpiresAt is set while quince is serving a certificate `config.yml` DOES NOT NAME —
+	// the trial in quince#908 slice 5 — and is the instant it goes back, RFC3339 UTC.
+	//
+	// IT IS HOW THE ONE DIVERGENCE IN THIS DESIGN STAYS VISIBLE. Not writing the file until the
+	// certificate has proved itself is what keeps an abandoned attempt out of a hand-edited config
+	// (D12), and the price is that for up to ten minutes what is configured and what is running
+	// disagree. `no silent caps or fallbacks` is what makes stating it mandatory rather than tidy,
+	// and `GET /api/config` cannot state it, because the config is not what changed.
+	//
+	// `omitempty`, so the ordinary case adds no key at all — unlike `insecure_transport_allowed`
+	// above, where `false` is a fact a banner acts on. Here absence IS the ordinary state.
+	TLSTrialExpiresAt string        `json:"tls_trial_expires_at,omitempty"`
+	Muxers            []MuxerHealth `json:"muxers"`
+}
+
+// trialExpiry renders a live trial's deadline for GET /api/health, or "" when none is running.
+//
+// THE DEADLINE IS CHECKED, NOT THE TIMER — see certTrial.pending. A trial whose window has closed
+// reports nothing here even if the goroutine that puts the Keeper back has not run yet.
+func trialExpiry(t *certTrial) string {
+	if t == nil {
+		return ""
+	}
+	deadline, live := t.pending()
+	if !live {
+		return ""
+	}
+	return deadline.UTC().Format(time.RFC3339)
 }
 
 // Serving modes reported by GET /api/health (public-demo spec story 5).
@@ -138,6 +166,12 @@ func NewRouter(deps Deps) http.Handler {
 	}
 	if deps.ProbeNonces == nil { // holds no configuration, so every router gets a real one
 		deps.ProbeNonces = newProbeNonces()
+	}
+	if deps.Keeper == nil { // no TLS listener wired → the apply route refuses honestly (503)
+		deps.Keeper = unavailableKeeper{}
+	}
+	if deps.CertTrial == nil {
+		deps.CertTrial = newCertTrial(deps.Log, deps.Keeper)
 	}
 	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
 		deps.Ops = UnavailableDeviceOps{}
@@ -173,6 +207,12 @@ func NewRouter(deps Deps) http.Handler {
 	// THE OFFLINE HALF of the certificate probe — no network, Configured()-gated. The handler carries
 	// the argument for why a pre-auth caller may name a path.
 	apiMux.HandleFunc("POST /api/onboarding/certificate", deps.handleCertificateProbe())
+	// APPLY AND CONFIRM (quince#908 §5, slice 5). The apply hands the pair to the running daemon and
+	// writes NOTHING; the confirm — reachable only over the TLS half — is what writes `config.yml`.
+	// Both handlers carry the ruling that lets a pre-auth caller write `tls.*`, and the reason the
+	// confirm cannot accept `X-Forwarded-Proto` as evidence.
+	apiMux.HandleFunc("POST /api/onboarding/certificate/apply", deps.handleCertificateApply())
+	apiMux.HandleFunc("POST /api/onboarding/certificate/confirm", deps.handleCertificateConfirm())
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())
@@ -315,7 +355,18 @@ func (d Deps) handleHealth() http.HandlerFunc {
 			// as it was at startup and a banner would outlive — or miss — the setting it warns
 			// about. Same service, same atomic, as the cookie flag it predicts.
 			InsecureTransportAllowed: d.Auth.AllowsInsecureTransport(),
-			Muxers:                   muxers,
+			// THE TRIAL CERTIFICATE, AND THIS FIELD IS WHY IT IS NOT HIDDEN STATE (quince#908
+			// slice 5). While it is set, the daemon is serving a certificate `config.yml` does
+			// NOT name — the deliberate cost of not writing the file until the certificate has
+			// proved itself. `no silent caps or fallbacks` covers exactly this: a divergence
+			// between what is configured and what is running has to be visible somewhere, and
+			// `GET /api/config` cannot say it because the config is not what changed.
+			//
+			// `omitempty`, so the ordinary case adds no key. Pre-auth, like the rest of this
+			// body, and that discloses nothing: a trial can only exist on an install nobody has
+			// claimed, where every one of these routes is already open.
+			TLSTrialExpiresAt: trialExpiry(d.CertTrial),
+			Muxers:            muxers,
 		})
 	}
 }

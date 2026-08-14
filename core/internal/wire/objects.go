@@ -422,6 +422,15 @@ type CertificateProbe struct {
 	ChainLength int `json:"chain_length"`
 }
 
+// CertificateConfirmRequest is POST /api/onboarding/certificate/confirm (quince#908 §5, slice 5).
+//
+// ONE FIELD, AND THE OTHER HALF OF THE PROOF IS NOT IN THE BODY AT ALL: the request must have
+// arrived on quince's own TLS half (`r.TLS != nil`). That is the whole ceremony — the token says
+// WHICH trial, the connection says THAT IT WORKS — and only then is `config.yml` written.
+type CertificateConfirmRequest struct {
+	Token string `json:"token"`
+}
+
 // ProbeNonce is GET /api/onboarding/probe/nonce — the token a page obtains SAME-ORIGIN before probing
 // a name it is about to be redirected to (Operator ruling 2026-08-14, for quince#908 slice 4 and
 // quince#939).
