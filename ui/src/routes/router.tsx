@@ -3,6 +3,7 @@ import { AppLayout } from "./AppLayout";
 import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
+import { OnboardingCertificatePage } from "@/pages/OnboardingCertificatePage";
 import { OnboardingStoragePage } from "@/pages/OnboardingStoragePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -27,6 +28,13 @@ export const router = createBrowserRouter([
   // TOP LEVEL, not a child: the catch-all below `Navigate`s to `/`, which is itself behind
   // `RequireAuth`, so a route nested anywhere would bounce an unauthenticated visitor to /login.
   { path: "/onboarding/https", element: <OnboardingHTTPSPage /> },
+  // THE CERTIFICATE STEP'S OWN ROUTE (quince#908 §5, slice 4), outside every guard for the identical
+  // reason its parent is: it is reached by somebody who cannot log in yet.
+  //
+  // A ROUTE RATHER THAN AN ACCORDION ON THE CARD, ruled in §4 and not a matter of taste: the flow is
+  // multi-step and stateful, and an accordion is application state with no URL — fill three fields,
+  // navigate away, come back to an empty collapsed box. A route is state the browser understands.
+  { path: "/onboarding/https/certificate", element: <OnboardingCertificatePage /> },
   {
     path: "/setup",
     element: (

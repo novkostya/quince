@@ -1,14 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OnboardingHTTPSPage } from "./OnboardingHTTPSPage";
 import { api } from "@/lib/api";
 
+// A ROUTER, BECAUSE THE CHOOSER NOW LINKS TO THE CERTIFICATE STEP'S OWN ROUTE (quince#908 §5). Without
+// it `<Link>` throws and the page renders NOTHING — which is how this presented: three unrelated
+// assertions failing against an empty `<body><div /></body>` rather than one failing about a link.
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <OnboardingHTTPSPage />
+      <MemoryRouter>
+        <OnboardingHTTPSPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
