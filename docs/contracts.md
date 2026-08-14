@@ -505,6 +505,24 @@ POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → Certif
      // as POST /api/config/insecure-transport. The OFFLINE half: NO NETWORK, EVER.
      // Every refusal is carried IN the body; only a missing or relative path is a
      // 422. NOT csrfExempt — a pre-auth page already holds a token.
+
+POST /api/onboarding/certificate/apply   → {cert_file, key_file, hostname}
+     → 200 {confirm_origin, confirm_token, expires_at, expires_seconds,
+            config_written: false}
+     // PRE-AUTH, 409 once auth.Configured() — decided BEFORE the body is read.
+     // IT WRITES NO CONFIGURATION. It points the running tlsx.Keeper at the pair,
+     // so TLS is live immediately, and schedules a return to the pair config.yml
+     // still names. Refuses anything tlsx.Inspect does not call `usable`,
+     // re-checked here and never trusted from the client.
+     // NOT csrfExempt: same-origin with the page that sends it.
+     // 503 when this quince has no TLS listener (--demo, a test router).
+POST /api/onboarding/certificate/confirm → {token}
+     → 200 {confirmed, config_written: true, warnings}
+     // PRE-AUTH, and REFUSED WITH 426 UNLESS r.TLS != nil. X-Forwarded-Proto is
+     // NOT evidence here. THIS is the write: tls.cert_file + tls.key_file and
+     // nothing else. csrfExempt, because it arrives on a DIFFERENT ORIGIN from
+     // the page that applied. 409 not_armed covers all of: nothing running, the
+     // window closed, superseded by a later apply.
 GET  /api/onboarding/probe/nonce  → {nonce}
      // PRE-AUTH, SAME-ORIGIN, and NEVER CORS-readable. The asymmetry IS the gate.
 GET  /api/onboarding/probe?nonce= → {nonce, detected}
@@ -514,57 +532,71 @@ GET  /api/onboarding/probe?nonce= → {nonce, detected}
      // indistinguishable from a network error to the page that sent it.
 ```
 
-**PROPOSED (gap): APPLYING a certificate needs a SECOND pre-auth config write, and §5's own
-confirm mechanism does not fire for the user most likely to need it.**
+**RULED and IMPLEMENTED: APPLYING a certificate — `POST /api/onboarding/certificate/apply` and
+`POST /api/onboarding/certificate/confirm` (quince#908 §5, slice 5).** Operator ruling 2026-08-14,
+amended the same day on quince#977.
 
-<!-- gap-heading-check: ignore — this block cites the 2026-08-14 pre-auth-write ruling and the
-     offline-check block directly below, both NEIGHBOURING decisions about other routes, as the
-     scope this one falls outside of. Neither answers it: whether a pre-auth route may write `tls.*`
-     is open, and so is what to do about the interaction named in its second half. The block's span
-     ends at its own last paragraph. -->
+**ONE — THE PRE-AUTH WRITE EXTENDS TO `tls.cert_file` AND `tls.key_file`.** quince#908 §3's argument
+carries unchanged: in the unclaimed window `POST /api/auth/setup` is itself authExempt and one-shot,
+so anyone reaching the port can claim the install outright, and writing two paths grants strictly
+less. **THE LINE MOVES ONCE, EXPLICITLY** — two settings, not a general pre-auth config write.
 
-Raised by the implementer seat 2026-08-14 while taking quince#908 slice 5; **nothing is built and
-nothing here is decided.** Two separate things are wrong, and the second is the one that changes the
-design rather than the permissions.
+**TWO — NOTHING IS WRITTEN UNTIL THE CERTIFICATE HAS PROVED ITSELF, and this AMENDS the shape the
+ruling was first built in.** Operator, 2026-08-14: *"we're not going to actually write tls setting
+entry to config.yml for that 30 seconds and only write config once probe has succeeded?"* The first
+implementation wrote the pair at APPLY and wrote the file a second time to undo it — leaving a
+certificate that never worked visible in a hand-edited file for ten minutes. **D12 says `config.yml`
+holds only what the user set, and a certificate somebody tried and abandoned was never something they
+set.**
 
-**ONE — THE RULED PRE-AUTH WRITE IS SCOPED TO ONE KEY.** The Operator's ruling of 2026-08-14 says of
-`POST /api/config/insecure-transport`: *"it writes `sessions.allow_insecure_transport` and nothing
-else. Not `PUT /api/config` exempted, which would expose every key."* Applying a certificate writes
-`tls.cert_file` and `tls.key_file` — a **second** pre-auth write, of different keys. quince#908 §3's
-argument extends to it unchanged (in the unclaimed window anyone reaching the port can claim the
-install outright, so a config write grants strictly less), but the ruling drew its scope line
-explicitly, so extending it is a decision rather than an inference.
+So the trial lives in `tlsx.Keeper`, which is what actually serves TLS and needs no file to do it.
+The apply points the daemon at the pair and writes **nothing**; the confirm writes. Three
+consequences, all improvements rather than consolations:
 
-**TWO — `sessions.allow_insecure_transport` SUPPRESSES THE REDIRECT THAT §5 USES AS ITS PROOF.**
-This is measured from the code rather than reasoned about. §5's mechanism is: *"the plain half starts
-redirecting, so the page's next ordinary fetch is redirected to HTTPS by quince itself — turning it
-on IS the test."* But `plainHalf` redirects only when `keeper.HasCertificate() && !allowInsecure()`.
+- **A restart mid-window is fail-SAFE.** The trial evaporates and the daemon comes up on the pair
+  `config.yml` still names. The write-first shape came up serving an unconfirmed certificate with no
+  timer watching it — a limitation that had to be declared and no longer exists.
+- **The undo cannot fail.** Dropping the Keeper back is not a file write, so there is no *revert
+  failed, the bad pair is still configured* branch.
+- **The ruling's own hazard dissolves** — *"the revert must restore BOTH settings atomically"* has
+  nothing to restore.
 
-**So for a user who took the plain-http escape hatch — precisely the user who could not reach quince
-securely, and therefore the one most likely to be configuring a certificate — applying it produces no
-redirect, no confirmation, and a revert timer that fires and undoes a certificate that was working.**
-The failure is silent and its remedy is invisible: the certificate they correctly configured is
-removed, and nothing says why.
+**THREE — THE CONFIRMATION COMES OVER THE HTTPS HALF DIRECTLY.** The client navigates to
+`confirm_origin` and confirms there. The apply does **not** turn `sessions.allow_insecure_transport`
+off, and does **not** refuse while it is on. Turning it off would couple the escape hatch to the
+riskiest operation in the product; refusing may be unfollowable, since a new session over plain http
+gets cookies without `Secure` — quince#912's defect. **What is given up is *"turning it on IS the
+test"***, and it is smaller than it sounds: a direct navigation and a redirect establish the
+IDENTICAL fact — a request arrived with `r.TLS != nil` carrying this trial's token.
 
-**Three ways out, none obviously right:** turn the opt-in **off** as part of applying (which is a
-second key written, and changes a setting the user chose); confirm over the **https half directly**
-rather than by being redirected (the client would have to navigate deliberately, which is buildable
-but is no longer *"turning it on IS the test"*); or refuse to apply while the opt-in is on and say
-why (honest, and leaves the stranded user where they started).
+**`auth.SecureOrigin` IS NOT EVIDENCE HERE, and it is the obvious wrong choice** because every other
+*is this connection secure* question in this product uses it. It believes `X-Forwarded-Proto` from a
+trusted proxy, which proves SOMETHING terminated TLS — not that the trial pair works.
 
-**What is NOT in doubt: the revert timer must be SERVER-side.** §5 settles that structurally — once
-the redirect is live, a failed handshake redirects every http request into that failure, so the client
-has no working channel left to ask for a revert. A client-driven rollback is unbuildable here by
-construction. The timeout is *"room for a human reading a warning: thirty seconds of silence is a
-failure, three is someone reading"*, which reads as **~30s**; that number is worth confirming rather
-than inferring from a parenthesis.
+**FOUR — THE DEADLINE IS THE AUTHORITY; THE TIMER IS A NUDGE.** Operator, 2026-08-14: *"make revert
+passive, not active, i.e. store expiration timestamp."* That question found a live defect — the first
+implementation's `confirm` checked only *is a trial live*, so a **late** timer (GC pause, loaded box,
+suspended VM) left a window in which a confirmation arriving AFTER the deadline succeeded, writing an
+expired trial's certificate into `config.yml`. Expiry is now a fact every read evaluates. The timer
+survives only to put the Keeper back promptly and write the log line; nothing trusts it.
 
-**A narrower slice exists and is worth considering instead.** An **authenticated** apply — TLS
-configured from Settings by an admin, which the CORS ruling already names as a real case — needs no
-new pre-auth permission and hits neither problem above, because a signed-in admin is not stranded and
-can be told to navigate. It would leave the first-run path for a later slice rather than blocking
-both on one ruling.
+**BOTH CLOCKS ARE CHECKED AND THE EARLIER VERDICT WINS.** Go's monotonic reading survives an NTP step
+but stops while a machine is SUSPENDED; the wall clock is the reverse. The single primitive that does
+both is `CLOCK_BOOTTIME` (`mach_continuous_time` on Darwin), which Go does not expose — so the OR of
+the two is the same guarantee from clocks the standard library has. It fails in the safe direction:
+expiring early costs one retry, expiring late leaves a certificate the browser rejects.
 
+**TEN MINUTES, measured rather than inherited from §5's parenthesis.** Junos `commit confirmed`
+defaults to 10 minutes for the same *do not lock yourself out* problem; NetworkManager's `nmcli`
+checkpoint to 15 seconds — **the default tracks who confirms**, a script or a human, and ours is a
+human opening a browser. The mechanism contributes nothing: the apply → https-confirm round trip
+measured 11.5–19.8 ms.
+
+**WHAT IT COSTS, AND WHERE THAT IS VISIBLE.** For up to ten minutes the daemon serves a certificate
+`config.yml` does not name. That is a divergence between configured and running, which `no silent
+caps or fallbacks` forbids leaving unstated — so `GET /api/health` carries
+**`tls_trial_expires_at`** while it holds. `GET /api/config` cannot say it, because the config is not
+what changed.
 **RULED and IMPLEMENTED: the OFFLINE CERTIFICATE CHECK — `POST /api/onboarding/certificate`
 (quince#908 §5, slice 4).** It answers *what is this pair I am about to declare?*, and **nothing else
 in quince performs that check before the pair goes live**: `validateTLS` says at its own definition

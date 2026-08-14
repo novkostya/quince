@@ -71,6 +71,17 @@ type Deps struct {
 	// a nil dereference — the store holds no configuration and nothing outside this package needs
 	// to build one.
 	ProbeNonces *probeNonces
+	// Keeper is what serves TLS, and the certificate trial points it at a pair WITHOUT writing
+	// `config.yml` (quince#908 slice 5). `*tlsx.Keeper` satisfies it; nil means this quince has no
+	// TLS listener, and `NewRouter` substitutes a stand-in that refuses with a stated reason so the
+	// apply route answers 503 rather than pretending.
+	//
+	// AN INTERFACE SO `httpapi` DOES NOT IMPORT `tlsx` for one method, and so a test can drive the
+	// trial without minting a real certificate for the daemon to load.
+	Keeper certKeeper
+	// CertTrial holds the one certificate being tried out (quince#908 slice 5). NewRouter fills it
+	// from `Keeper` when a caller left it nil, for `ProbeNonces`' reason.
+	CertTrial *certTrial
 	// Store is the app DB, for surfaces that read rows rather than a domain model. Passkey
 	// registration is the first: a credential list is rows, and a service in front of four SQL
 	// statements would be a facade rather than a boundary (qn.6k).

@@ -80,14 +80,28 @@ func authExempt(r *http.Request) bool {
 		// THE PROBE PAIR (Operator ruling 2026-08-14). Pre-auth for step 1's own reason: the page
 		// that runs the probe is the page explaining why you cannot log in yet, so it sits outside
 		// every guard and so must what it calls. Both are READS — the mint creates ceremony state,
-		// not configuration — so the qn.6f constraint this list carries is unmoved: `/api/onboarding/`
-		// still means pre-auth and read-only, and quince#908's pre-auth WRITE went elsewhere for
-		// exactly that reason.
+		// not configuration.
+		//
+		// `/api/onboarding/` MEANT PRE-AUTH AND READ-ONLY WHEN THESE TWO WERE ADDED, and it stopped
+		// meaning read-only on 2026-08-14 when the certificate CONFIRM landed under it (below). The
+		// clause that was ever load-bearing survives: the prefix is not the exemption, every entry
+		// here is an exact path, and this switch has no prefix support to widen by accident.
 		"GET /api/onboarding/probe/nonce", "GET /api/onboarding/probe",
 		// The offline certificate check, pre-auth for the same reason and Configured()-gated in the
 		// handler. A READ of two files the caller names — see handlers_certprobe.go for why that is
 		// bounded by the same argument as the pre-auth config write.
 		"POST /api/onboarding/certificate",
+		// THE TRIAL AND ITS PROOF (Operator ruling 2026-08-14, quince#908 slice 5).
+		//
+		// `apply` WRITES NO CONFIGURATION — it points the running Keeper at a pair and schedules a
+		// return to the one `config.yml` names. So the one pre-auth WRITE in this product's
+		// onboarding prefix is `confirm`, and only after a request has arrived on the TLS half
+		// carrying the trial's token. Deferring the write is what keeps a certificate somebody tried
+		// and abandoned out of a file D12 says holds only what the user set.
+		//
+		// BOTH ARE Configured()-GATED IN THE HANDLERS. Being exempt is what makes them reachable;
+		// being one-shot is what makes them safe — an exemption here is only ever half of a decision.
+		"POST /api/onboarding/certificate/apply", "POST /api/onboarding/certificate/confirm",
 		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
 		// Registration is deliberately NOT here: it needs a session, which is what makes it the
 		// half that touches none of these lists.
@@ -171,7 +185,18 @@ func csrfExempt(r *http.Request) bool {
 		// achieves what any visitor could achieve directly, and on a claimed one the route answers
 		// 409 before reading the body. That is why the guard has to be the FIRST thing the handler
 		// does rather than a check somewhere in the middle.
-		"/api/config/insecure-transport":
+		"/api/config/insecure-transport",
+		// THE CERTIFICATE CONFIRM, AND ONLY THE CONFIRM (quince#908 slice 5). It is reached on a
+		// DIFFERENT ORIGIN from the page that applied — `https://name:port` where the apply happened
+		// on `http://host:port` — so the CSRF cookie set on the plain origin is not sent with it, and
+		// requiring a double-submit would refuse the one request the whole ceremony exists to receive.
+		//
+		// ITS APPLY IS DELIBERATELY NOT HERE, which is why these are two entries rather than a prefix.
+		// The apply is same-origin with the page that sends it, so it holds a token and can
+		// double-submit — `ensureCSRF` mints the cookie on every request including exempt ones, which
+		// is why being pre-auth never implied being unable to (handlers_certprobe.go makes the same
+		// argument for the offline check).
+		"/api/onboarding/certificate/confirm":
 		return true
 	}
 	return false
@@ -226,6 +251,12 @@ func setupAllowed(r *http.Request) bool {
 		// handler. A READ of two files the caller names — see handlers_certprobe.go for why that is
 		// bounded by the same argument as the pre-auth config write.
 		"POST /api/onboarding/certificate",
+		// AND THE TRIAL PAIR (quince#908 slice 5), for the reason the transport opt-in gives below: a
+		// zero-storage first run is exactly the install where somebody is working out how to reach
+		// quince securely, and 503ing the apply would leave the https step able to CHECK a certificate
+		// and unable to use it. Leaving out the confirm would be worse than leaving out both — the
+		// trial would start and could never be kept.
+		"POST /api/onboarding/certificate/apply", "POST /api/onboarding/certificate/confirm",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
 		// The pre-auth transport opt-in (quince#908 slice 6). A zero-storage first run is exactly
 		// the install it exists for — the user has declared nothing yet and cannot even set a

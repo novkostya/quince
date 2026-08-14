@@ -286,6 +286,15 @@ func serve(args []string) error {
 		}
 	}
 
+	// CONSTRUCTED HERE, ABOVE THE ROUTER, BECAUSE THE ROUTER NOW NEEDS IT (quince#908 slice 5). It
+	// used to be built just before `runHTTP`, which was fine while `subscribeTLS` was its only
+	// consumer; the certificate trial is a second one, and it lives in `httpapi`.
+	//
+	// `NewEmptyKeeper` CANNOT FAIL, which is what makes moving it safe: the startup REFUSAL is
+	// `config.CheckTLS` below, and that stays exactly where it was, so a configured-but-unusable pair
+	// still stops the process before anything serves.
+	keeper := tlsx.NewEmptyKeeper()
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Log: log, Version: version.String(), Mode: serveMode(demoMode, *publicDemo),
 		DemoResetMinutes: reportableResetMinutes(bootstrap.DemoResetMinutes, *publicDemo, log),
@@ -293,6 +302,12 @@ func serve(args []string) error {
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		Storages: storages, Reconcile: reconcileReporter,
+		// THE SAME Keeper `subscribeTLS` FEEDS, and the certificate trial points it at a pair
+		// WITHOUT writing `config.yml` (quince#908 slice 5). One Keeper, two ways in: the applier,
+		// for a config edit, and the trial, for a certificate nobody has proved yet. The second
+		// writes nothing, which is the whole design — an abandoned trial leaves no trace in a file
+		// the user hand-edits.
+		Keeper: keeper,
 		// READ LIVE, NOT CAPTURED. `storageless` above is the state at STARTUP; this closure is the
 		// state NOW, and they stop agreeing the instant setup succeeds. Capturing the boolean would
 		// leave a freshly-configured daemon refusing its own API until someone restarted it — the
@@ -322,7 +337,8 @@ func serve(args []string) error {
 	// CheckTLS's contract is unchanged — it calls this only when the config asks for TLS, so a
 	// configured-but-unusable pair still REFUSES TO START, which is the whole point of the
 	// check being here rather than in Validate.
-	keeper := tlsx.NewEmptyKeeper()
+	// The Keeper itself is built above, before the router, which needs it. This is still where the
+	// REFUSAL happens, and that is the part the comment above is about.
 	if req := config.CheckTLS(cfgSvc.Current(), keeper.SetFiles); !req.OK() {
 		return req.Explain(os.Stderr, cfgPath)
 	}
