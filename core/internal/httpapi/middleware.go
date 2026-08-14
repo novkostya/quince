@@ -84,7 +84,22 @@ func authExempt(r *http.Request) bool {
 		// FIRST-RUN PASSKEY REGISTRATION IS PRE-AUTH BY THE SAME LOGIC AS `POST /api/auth/setup`
 		// (qn.6m D5): first run has no session, and creating one is what it does. One-shot — 409 once
 		// `Configured()` is true — so it closes the instant the install is claimed.
-		"POST /api/auth/setup/passkey/begin", "POST /api/auth/setup/passkey/finish":
+		"POST /api/auth/setup/passkey/begin", "POST /api/auth/setup/passkey/finish",
+		// THE FIRST PRE-AUTH MUTATION IN THIS LIST THAT IS NOT ABOUT OBTAINING A CREDENTIAL
+		// (Operator ruling 2026-08-14, quince#908 slice 6). It writes
+		// `sessions.allow_insecure_transport` and nothing else, so a first-run user stranded on
+		// plain http has an exit that is not a shell on the box.
+		//
+		// ITS BOUND IS `Configured()`, IN THE HANDLER, NOT IN THIS LIST. Being exempt is what makes
+		// it reachable; being one-shot is what makes it safe, and on a claimed install it answers
+		// 409 — the same guard the two routes above already carry. Read them together: an exemption
+		// here is only ever half of a decision.
+		//
+		// UNDER `/api/config/` RATHER THAN `/api/onboarding/`, ruled. That prefix means pre-auth
+		// and READ-ONLY, and the product's first pre-auth write beneath it would invite the prefix
+		// to be read as the exemption. This one means AUTHENTICATED, so the exception is visible as
+		// an exception — and this switch still has no prefix support to widen by accident.
+		"POST /api/config/insecure-transport":
 		return true
 	}
 	return false
@@ -134,7 +149,18 @@ func csrfExempt(r *http.Request) bool {
 		// message about CSRF rather than about anything the user did.
 		"/api/auth/passkeys/login/begin", "/api/auth/passkeys/login/finish",
 		// First-run passkey registration (qn.6m D5): no CSRF cookie exists before a session does.
-		"/api/auth/setup/passkey/begin", "/api/auth/setup/passkey/finish":
+		"/api/auth/setup/passkey/begin", "/api/auth/setup/passkey/finish",
+		// The pre-auth transport opt-in, for the same reason as everything else here: it is
+		// reachable before a session exists, so there is no CSRF cookie to double-submit.
+		//
+		// WHAT PROTECTS IT INSTEAD IS NOT SameSite. The comment above this switch names
+		// `SameSite=Strict` plus the login rate limit as what stands in for CSRF on the auth
+		// POSTs; neither applies here — there is no cookie to be strict about and no limiter on
+		// this path. The bound is `Configured()`: on an unclaimed install a cross-site forgery
+		// achieves what any visitor could achieve directly, and on a claimed one the route answers
+		// 409 before reading the body. That is why the guard has to be the FIRST thing the handler
+		// does rather than a check somewhere in the middle.
+		"/api/config/insecure-transport":
 		return true
 	}
 	return false
@@ -182,6 +208,11 @@ func setupAllowed(r *http.Request) bool {
 		"GET /api/auth/status", "POST /api/auth/login", "POST /api/auth/setup", "POST /api/auth/logout",
 		"GET /api/onboarding/https",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
+		// The pre-auth transport opt-in (quince#908 slice 6). A zero-storage first run is exactly
+		// the install it exists for — the user has declared nothing yet and cannot even set a
+		// password — so leaving it out would 503 the one escape from the dead end, which is
+		// quince#898 and quince#912's shape a third time.
+		"POST /api/config/insecure-transport",
 		"POST /api/storages/probe", "POST /api/storages/probe/hook",
 		// THE ZFS BRANCH OF THAT SAME FORM (quince#818 pieces B and C). `probe` and `probe/hook`
 		// were exempted and these two were not, which made the zfs path of the first-run screen

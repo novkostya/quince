@@ -1109,6 +1109,13 @@ POST /api/config/storage
                     Splices SERVER-SIDE, for the identical reason the DELETE does.
                     REFUSED 422 while the file on disk was DISCARDED at load — the
                     splice would replace a config quince could not read. See below.
+POST /api/config/insecure-transport
+                  → {allow} writes sessions.allow_insecure_transport AND NOTHING
+                    ELSE: 200 {config, warnings, source} | 400 | 409 | 422.
+                    PRE-AUTH, and the only mutating route in this product that is
+                    exempt without being about obtaining a credential.
+                    409 once auth.Configured() — the SAME call POST /api/auth/setup
+                    makes — and the 409 is decided BEFORE the body is read.
 DELETE /api/config/storage/{name}
                   → forget one storage: 200 {config, warnings, source} | 404 | 422.
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
@@ -1244,6 +1251,44 @@ is not in `authExempt`, so an unauthenticated `PUT` on a storageless install is 
 *authenticated* admin would meet the same refusal, but `RequireStorage` routes them to
 `/onboarding/storage` before Settings renders — so the pre-auth route was the only surface where it
 bit, and it bit there the day that route was first written.
+
+**RULED and IMPLEMENTED: `POST /api/config/insecure-transport` — the pre-auth transport opt-in
+(quince#908 slice 6, Operator ruling 2026-08-14).** The ruling is in §1 above, at the block that used
+to be `PROPOSED (gap)`; this is what got built against it.
+
+**`Configured()` IS THE WHOLE BOUND, AND IT IS THE FIRST THING THE HANDLER DOES.** The 409 is decided
+before the body is decoded, so a claimed install answers identically to a malformed request and a
+well-formed one — a caller who should not be here learns nothing from the shape of the refusal, and no
+code path can reach the write behind a guard that ran "somewhere above".
+
+**It is in THREE exact-path lists and each is a separate decision.** `authExempt` makes it reachable.
+`csrfExempt` is needed because no CSRF cookie exists before a session — and note the stand-in the other
+pre-auth POSTs rely on does **not** apply here: `SameSite=Strict` protects nothing when there is no
+cookie, and no rate limiter sits on this path. `setupAllowed` is needed because a zero-storage first
+run is precisely the install it exists for, and 503ing it would reproduce quince#898 one endpoint over.
+
+**What stops a cross-site forgery is the bound, not a token.** On an unclaimed install a forged request
+achieves what any visitor could achieve by asking directly; on a claimed one the route is shut in both
+directions. That is why the guard's POSITION is load-bearing rather than incidental.
+
+**A narrow write, and here that is a SECURITY property rather than a tidiness one.** Elsewhere in this
+section splicing server-side is about not dropping a sibling key. Behind an unauthenticated door it is
+also about not letting a stranger blank the storage declarations while flipping a boolean:
+`config.SetAllowInsecureTransport` writes one key, and `PUT /api/config` stays authenticated.
+
+**It accepts `false`.** A control that only turns the relaxation on is a second dead end — relax the
+transport to finish setup, then need a shell on the box to put it back. quince#900 made the setting
+live in both directions.
+
+**It needed the storage check to become a transition first**, which is the ruling directly above in §1:
+a first-run install declares no storage, so every write to it was refused, and this route met that on
+the only install it serves.
+
+**The warning is not optional and does not live here.** quince#446 requires three channels, and the
+non-dismissible banner (quince#539, slice 6b) is what makes this route's window safe rather than merely
+bounded: the setting can be turned on by somebody who is not the owner, and the owner then meets a
+login form over plain http. `GET /api/health`'s `insecure_transport_allowed` is what that banner reads
+— **not** `insecure_origin`, which is `false` exactly here.
 
 **RULED and IMPLEMENTED: `POST /api/config/storage` — the add (`qn.6e`, quince#502).**
 

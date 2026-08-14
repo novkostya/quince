@@ -196,6 +196,9 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
 	apiMux.HandleFunc("POST /api/config/storage", deps.handleConfigStorageAdd())
+	// PRE-AUTH BY RULING, one-shot by `Configured()` — see the handler, which carries the whole
+	// argument, and `authExempt`, which is the other half of it.
+	apiMux.HandleFunc("POST /api/config/insecure-transport", deps.handleInsecureTransportSet())
 	apiMux.HandleFunc("DELETE /api/config/storage/{name}", deps.handleConfigStorageDelete())
 	apiMux.HandleFunc("GET /api/devices", deps.handleDevices())
 	apiMux.HandleFunc("POST /api/devices/rescan", deps.handleRescan())

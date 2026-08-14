@@ -48,8 +48,27 @@ func (d Deps) refuseInsecureOrigin(w http.ResponseWriter, r *http.Request) bool 
 		return false
 	}
 	w.Header().Set("Upgrade", "TLS/1.3, HTTP/1.1")
+	// THE THIRD REMEDY IS NEW, AND IT IS THE ONLY ONE THE STRANDED USER CAN TAKE (quince#940 §3,
+	// Operator sweep 2026-08-14: *if something doesn't work the user should understand what exactly,
+	// and how it can be fixed*).
+	//
+	// This offered two — *reach quince over https, or over localhost* — and for a first-run user on a
+	// LAN address neither is available: they have no certificate yet, and localhost is not where their
+	// phone is. That is quince#908's dead end, and the message was describing an exit nobody in it
+	// could use.
+	//
+	// IT NAMES THE SETTING RATHER THAN THE BUTTON, deliberately. This string is served to `POST
+	// /api/auth/login` as well as to setup, and on a CONFIGURED install the pre-auth route is closed
+	// (409) — so pointing at a control that answers 409 would be a second wrong remedy. The setting is
+	// true in both cases: it is the thing to change, whether the user reaches it through the HTTPS
+	// page's confirm on first run or by editing `config.yml`.
+	//
+	// It arrives in the SAME PR as the route that makes it followable — quince#940's own point is that
+	// a message a rung behind its affordance is the defect, not a step toward fixing it.
 	writeError(w, d.Log, http.StatusUpgradeRequired, "insecure_origin",
-		"this connection is not encrypted, so your browser would discard the session cookie and you would land back here — reach quince over https, or over localhost")
+		"this connection is not encrypted, so your browser would discard the session cookie and you "+
+			"would land back here — reach quince over https, or over localhost, or allow plain http "+
+			"on a network you trust by turning on sessions.allow_insecure_transport")
 	return true
 }
 
