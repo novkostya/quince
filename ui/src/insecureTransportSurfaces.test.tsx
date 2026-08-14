@@ -80,9 +80,19 @@ describe("the plain-http warning reaches every shell", () => {
       vi.spyOn(api, "get").mockResolvedValue({ ...OK, insecure_transport_allowed: false });
       surface.render();
 
-      // Let the health query settle before concluding nothing rendered, so this cannot pass merely
-      // by asserting during the loading frame — which would make it green against a surface that
-      // never mounts the banner at all.
+      // A yield before asserting the absence.
+      //
+      // THIS DOES NOT WAIT FOR THE HEALTH QUERY, AND AN EARLIER VERSION OF THIS COMMENT CLAIMED IT
+      // DID (caught in review, quince#933). `findByText(/./)` resolves on the first rendered text,
+      // which every one of these surfaces produces before the query lands — so it is a yield, not a
+      // barrier, and by itself it cannot tell "the banner decided not to render" from "the banner
+      // has not decided yet".
+      //
+      // WHAT ACTUALLY PINS THESE CASES IS THE `=== true` IN THE HOOK, verified by mutation rather
+      // than by this line: relaxing it to `!== false` turns six tests red across both suites,
+      // including every negative here. The comment was wrong; the guard was not. Corrected rather
+      // than deleted, because the wrong version is exactly the reasoning somebody would repeat when
+      // adding the next negative case.
       await screen.findByText(/./, {}, { timeout: 1 }).catch(() => undefined);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
