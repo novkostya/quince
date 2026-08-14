@@ -101,6 +101,22 @@ func (s *Service) SetInsecureCookies(v bool) { s.insecureCookies = v }
 // plaintext relaxation back. The config applier now calls this with whatever the file says.
 func (s *Service) SetAllowInsecureTransport(v bool) { s.allowInsecureTransport.Store(v) }
 
+// AllowsInsecureTransport reports the opt-in's current state, so GET /api/health can surface it
+// and the UI can warn about it (quince#908 slice 6, Operator ruling 2026-08-14).
+//
+// FROM HERE RATHER THAN FROM THE CONFIG SNAPSHOT, which is the point of the method existing.
+// `cfgSvc.Current().Sessions.AllowInsecureTransport` is the same fact read from the file's side,
+// and reading it there would be a second implementation of one predicate — the hazard
+// `RequireStorage` carries a paragraph about, from having been bitten by it. This returns the
+// value `Secure` itself reads, so the warning and the behaviour it warns about cannot drift.
+//
+// NOT `Secure(r)` INVERTED, AND NOT `CookieWillBeDiscarded(r)`. Both answer a question about a
+// REQUEST; this answers one about the DAEMON, and on the install that matters they disagree —
+// with the opt-in on nothing is discarded, so the per-request predicate returns the reassuring
+// answer on exactly the install a user must be warned about. HealthResponse says it again at
+// the field, because that is where somebody will reach for the wrong one.
+func (s *Service) AllowsInsecureTransport() bool { return s.allowInsecureTransport.Load() }
+
 // Secure decides the Secure cookie flag for this request: the loopback-vs-https rule
 // (cookie.go) relaxed by the user's own opt-in, and overridden off entirely in demo mode.
 func (s *Service) Secure(r *http.Request) bool {
