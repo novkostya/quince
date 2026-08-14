@@ -209,7 +209,23 @@ export function PasswordControls() {
       //
       // ONLY ON SUCCESS. A failed change has nothing to save, and prompting after one would offer to
       // store a password the server rejected.
-      window.history.replaceState({}, "", window.location.href);
+      // THE EXISTING STATE IS PASSED THROUGH, AND `{}` WOULD HAVE CLOBBERED THE ROUTER — architect,
+      // reviewing quince#999 against `react-router-dom`'s source rather than from memory.
+      //
+      // React Router keeps its bookkeeping in `history.state` — `{usr, key, idx, masked}`. `idx` is
+      // the one that bites: `push()` computes `getIndex() + 1`, and `getIndex` reads
+      // `globalHistory.state || {idx: null}`, so a wiped state makes the NEXT navigation land at
+      // `null + 1` = **1**, whatever the real depth was. Every POP delta afterwards is computed
+      // against a wrong number.
+      //
+      // `key` IS THE SECOND ONE, and it is what per-location data is keyed on — including scroll
+      // restoration, with quince#974 and quince#975 open and unexplained. No connection is claimed;
+      // adding a state-clobbering call next to two unexplained scroll flakes is simply not worth one
+      // word.
+      //
+      // THE PAYLOAD IS NOT WHAT SAFARI WATCHES. The measurement established that a same-document
+      // history NAVIGATION fires the prompt; nothing in it depended on the state being empty.
+      window.history.replaceState(window.history.state, "", window.location.href);
     } catch (err) {
       setChangeMsg({ ok: false, text: messageFor(err, "Could not change the password.") });
     } finally {
