@@ -82,6 +82,22 @@ func (s Strategy) String() string {
 // surfaced error (never a silent fallback — hard rule).
 var ErrReflinkUnsupported = errors.New("clonetree: reflink (FICLONE) unsupported on this filesystem")
 
+// ErrReflinkUnavailable is FICLONE declining THIS CLONE, RIGHT NOW, on a filesystem that supports
+// reflinks. ZFS block cloning refuses a source whose data is not yet in a synced txg and reports
+// EAGAIN — measured on the lab rig, ZFS 2.3.2 with `feature@block_cloning` enabled, where the same
+// file clones fine once it has settled (quince#790).
+//
+// IT IS A SEPARATE SENTINEL BECAUSE THE OLD MESSAGE CONTRADICTED ITSELF: every ioctl failure became
+// ErrReflinkUnsupported, so a transient refusal read `reflink (FICLONE) unsupported on this
+// filesystem: resource temporarily unavailable` — a permanent claim and a transient errno in one
+// sentence, about a filesystem that does support reflinks. Neither an operator nor quince can act
+// on that.
+//
+// IT DOES NOT CHANGE WHICH BACKEND IS SELECTED. Whether the probe should settle its source before
+// cloning — which would move ZFS-as-namespace-storage from hardlink to reflink — is the open ruling
+// on quince#790 and is deliberately untouched here.
+var ErrReflinkUnavailable = errors.New("clonetree: reflink (FICLONE) declined this clone right now — the filesystem supports it")
+
 // Clone recreates the tree rooted at src under dst using strategy for regular files.
 // Directories are created with their source mode, symlinks recreated, regular files cloned.
 // dst is created if absent; it should be empty (a fresh work/ or mirror dir).
@@ -191,9 +207,9 @@ func copyFile(dst, src string) error {
 // removed — and that the residual risk it could never have covered is `DLMessageCopyItem`, which is
 // upstream. Delete this comment once that call is patched or the concern is ruled dead.
 
-// ReflinkResult is what ReflinkProbeDetail found. The three values exist because the two
-// questions the probe asks have different answers on different filesystems, and quince#747 is
-// the record of what collapsing them into a bool costs.
+// ReflinkResult is what ReflinkProbeDetail found. The four values exist because the questions the
+// probe asks have different answers on different filesystems, and quince#747 is the record of what
+// collapsing them into a bool costs.
 type ReflinkResult int
 
 const (
@@ -208,6 +224,15 @@ const (
 	// filesystem cannot report extent sharing, so the space claim is unproven here. Measured on
 	// the lab rig: ZFS with block cloning enabled accepts FICLONE and implements no FIEMAP.
 	ReflinkSharingUnverifiable
+	// ReflinkUnavailable — FICLONE declined THIS clone on a filesystem that supports reflinks
+	// (EAGAIN; see ErrReflinkUnavailable). Do not use the reflink strategy on this evidence — the
+	// probe has not shown a clone working here — but do not report the filesystem as incapable
+	// either, because it is not.
+	//
+	// SEPARATE FROM ReflinkUnsupported RATHER THAN FOLDED INTO IT, so the sentence an operator
+	// reads matches what happened. Both lead to the same backend today; quince#790 is the open
+	// ruling on whether this one should instead settle the source and retry.
+	ReflinkUnavailable
 )
 
 // reflinkProbeSize is how large the probe's source file is, and it is load-bearing rather than
@@ -222,9 +247,19 @@ const reflinkProbeSize = 1 << 20
 // bool form of ReflinkProbeDetail and deliberately treats "sharing unverifiable" as supported —
 // callers that care about the distinction (and the storage auto-selection probe does, because
 // the distinction is the whole of quince#747) must use ReflinkProbeDetail.
+// IT NAMES THE SUPPORTED RESULTS RATHER THAN EXCLUDING THE UNSUPPORTED ONE. `!= ReflinkUnsupported`
+// was equivalent while there were three values and silently inverted the moment ReflinkUnavailable
+// was added — a transient refusal would have read as reflink support, in the one helper whose whole
+// job is to answer that question.
 func ReflinkProbe(dir string) bool {
 	res, _ := ReflinkProbeDetail(dir)
-	return res != ReflinkUnsupported
+	return reflinkUsable(res)
+}
+
+// reflinkUsable is ReflinkProbe's verdict, split out so it is a table test rather than a claim
+// about a filesystem CI does not have.
+func reflinkUsable(res ReflinkResult) bool {
+	return res == ReflinkSharing || res == ReflinkSharingUnverifiable
 }
 
 // ReflinkProbeDetail probes dir's filesystem for reflink support and returns the result plus a
@@ -251,6 +286,12 @@ func ReflinkProbeDetail(dir string) (ReflinkResult, string) {
 		return ReflinkUnsupported, fmt.Sprintf("cannot write a probe file: %v", err)
 	}
 	if err := reflinkFile(dst, src); err != nil {
+		if errors.Is(err, ErrReflinkUnavailable) {
+			// The probe writes its source and clones it immediately, which is precisely the race
+			// ZFS block cloning loses. Reported as declined rather than unsupported; whether to
+			// settle and retry is quince#790's open ruling.
+			return ReflinkUnavailable, fmt.Sprintf("FICLONE declined this clone: %v", err)
+		}
 		return ReflinkUnsupported, fmt.Sprintf("FICLONE refused: %v", err)
 	}
 

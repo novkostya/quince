@@ -104,16 +104,36 @@ func probeNamespaceDetail(backups string) (string, string, bool) {
 	if err := os.MkdirAll(backups, 0o755); err != nil {
 		return BackendCopy, fmt.Sprintf("cannot create probe dir at %s: %v", backups, err), true
 	}
-	switch res, detail := clonetree.ReflinkProbeDetail(backups); res {
+	res, detail := clonetree.ReflinkProbeDetail(backups)
+	switch res {
 	case clonetree.ReflinkSharing:
 		return BackendReflink, fmt.Sprintf("FICLONE clone-sharing probe passed on %s: %s", backups, detail), false
 	case clonetree.ReflinkSharingUnverifiable:
 		return BackendReflink, fmt.Sprintf("FICLONE probe passed on %s but SHARING IS UNVERIFIED: %s", backups, detail), true
 	}
+
+	// WHICH REFUSAL IT WAS IS PART OF THE ANSWER (quince#790). Both refusals lead to the same
+	// backend, so this sentence is the only place the difference survives to the operator — and
+	// "reflink unsupported" said about a ZFS dataset with block cloning enabled is a claim they
+	// cannot act on, because it is false. What they can act on is "declined right now".
+	rejected := rejectedReason(res, detail)
 	if hardlinkProbe(backups) {
-		return BackendHardlink, fmt.Sprintf("reflink unsupported; link()+inode-identity probe passed on %s", backups), false
+		return BackendHardlink, fmt.Sprintf("%s; link()+inode-identity probe passed on %s", rejected, backups), false
 	}
-	return BackendCopy, fmt.Sprintf("neither reflink nor hardlinks supported on %s", backups), true
+	return BackendCopy, fmt.Sprintf("%s; hardlinks unsupported too on %s", rejected, backups), true
+}
+
+// rejectedReason names WHICH refusal sent the probe past reflink.
+//
+// PURE, FOR THE REASON reflinkVerdict IS (quince#747): ReflinkUnavailable cannot be produced on
+// demand — it needs a filesystem that accepts FICLONE and declines a just-written source, which is
+// ZFS with block cloning and nothing a CI runner has. Left inside probeNamespaceDetail, the branch
+// this change exists for would be covered by nothing, in CI and on hardware alike.
+func rejectedReason(res clonetree.ReflinkResult, detail string) string {
+	if res == clonetree.ReflinkUnavailable {
+		return "reflink DECLINED rather than unsupported — " + detail
+	}
+	return "reflink unsupported"
 }
 
 // hardlinkProbe creates a file, hardlinks it, and confirms both names share one inode.
