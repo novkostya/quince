@@ -221,9 +221,16 @@ func (d Deps) handleCertificateConfirm() http.HandlerFunc {
 		certFile, keyFile, ok := d.CertTrial.confirm(body.Token)
 		if !ok {
 			// ONE ANSWER FOR THREE CAUSES — no trial is running, the window closed, or this token
-			// names a superseded trial — because from the client's side they call for the same
-			// thing: apply again. Distinguishing them would mean holding spent tokens to say which,
-			// which is state kept solely to phrase a sentence.
+			// names a superseded trial — because from the client's side the remedy is identical:
+			// apply again. The message names both likely causes, so nobody is left stuck.
+			//
+			// AND QUINCE CAN TELL TWO OF THE THREE APART (quince#979 review). This comment said
+			// distinguishing them "would mean holding spent tokens", which is true only of
+			// SUPERSEDED: *nothing running* is `live == nil` and *the window closed* is
+			// `live != nil && expired()`, both known at the check with no retained state. The
+			// collapse is a choice about wording, not a limit on what quince knows — and
+			// `CLAUDE.md`'s troubleshooting rule says *"quince cannot tell"* is legitimate only
+			// when it genuinely cannot, which is a claim to CHECK rather than assume.
 			writeError(w, d.Log, http.StatusConflict, "not_armed",
 				"nothing is waiting to be confirmed — the window may have closed and the previous "+
 					"certificate come back, or a later apply replaced this one. Apply again.")

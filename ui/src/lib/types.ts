@@ -393,6 +393,25 @@ export interface CertificateProbe {
   chain_length: number;
 }
 
+// CertificateApplied is POST /api/onboarding/certificate/apply (quince#908 §5, slice 5). The pair is
+// being SERVED the moment this arrives — and `config.yml` has NOT been written. That only happens
+// when a confirmation reaches the daemon over its own https half carrying `confirm_token`; until
+// then, and if nobody does, quince goes back to what the file names and nothing was saved.
+//
+// `config_written` IS ALWAYS FALSE HERE, and it is sent rather than implied: a client that could not
+// see the distinction would tell the user their certificate had been saved.
+//
+// `confirm_origin` is an ORIGIN and not a URL — the path belongs to whoever renders the page. It
+// ALWAYS carries a port, including `:80`, because quince serves both protocols on ONE listener and a
+// bare scheme swap would aim the browser at 443 where nothing is listening.
+export interface CertificateApplied {
+  confirm_origin: string;
+  confirm_token: string;
+  expires_at: string;
+  expires_seconds: number;
+  config_written: boolean;
+}
+
 // ProbeNonce is GET /api/onboarding/probe/nonce — obtained SAME-ORIGIN, then presented to a name the
 // user is considering. The mint is never CORS-readable, and that asymmetry is the gate (contracts §1).
 export interface ProbeNonce {

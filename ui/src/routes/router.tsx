@@ -4,6 +4,7 @@ import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
 import { OnboardingCertificatePage } from "@/pages/OnboardingCertificatePage";
+import { OnboardingCertificateConfirmPage } from "@/pages/OnboardingCertificateConfirmPage";
 import { OnboardingStoragePage } from "@/pages/OnboardingStoragePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -35,6 +36,14 @@ export const router = createBrowserRouter([
   // multi-step and stateful, and an accordion is application state with no URL — fill three fields,
   // navigate away, come back to an empty collapsed box. A route is state the browser understands.
   { path: "/onboarding/https/certificate", element: <OnboardingCertificatePage /> },
+  // THE CONFIRMATION (quince#908 §5, slice 5), opened at a DIFFERENT ORIGIN from every other route
+  // in this file: `https://<the certificate name>:<same port>`. Same app, same daemon, same
+  // listener — the TLS half rather than the plain one — so it needs nothing beyond being outside
+  // every guard, for its parent's reason.
+  {
+    path: "/onboarding/https/certificate/confirm",
+    element: <OnboardingCertificateConfirmPage />,
+  },
   {
     path: "/setup",
     element: (

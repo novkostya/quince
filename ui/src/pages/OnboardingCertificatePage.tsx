@@ -3,13 +3,16 @@ import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
+import { CertificateApply } from "@/features/onboarding/CertificateApply";
 import { api } from "@/lib/api";
 import { probeTargetURL, runProbe, type ProbeOutcome } from "@/lib/probe";
 import type { CertificateProbe } from "@/lib/types";
 
-// THE CERTIFICATE STEP — quince#908 §5, slice 4. Both halves of the check, and NO WRITING: applying
-// the pair live is slice 5, and keeping the two apart is what lets this one be reviewed on whether it
-// tells the truth rather than on whether it is safe to turn on.
+// THE CERTIFICATE STEP — quince#908 §5. Slice 4 built both halves of the CHECK; slice 5 added the
+// trial, which lives in `CertificateApply` rather than here. Keeping them apart is what let the
+// check be reviewed on whether it tells the truth rather than on whether it is safe to turn on —
+// and it is worth keeping, because this file is about describing two files and that one is about
+// the ten-minute window in which a certificate can lock somebody out.
 //
 // A ROUTE RATHER THAN AN ACCORDION, and the reason is not taste (§4). This flow is multi-step and
 // stateful — paths, a name, two verdicts — and **an accordion is application state with no URL**: a
@@ -75,7 +78,8 @@ export function OnboardingCertificatePage() {
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Give quince your own certificate</h1>
         <p className="mt-1 text-sm text-muted">
-          quince checks the files before anything changes. Nothing here is saved yet.
+          quince checks the files before anything changes, and nothing is written to configuration
+          until a certificate has proved itself over https.
         </p>
 
         <div className="mt-6 space-y-4">
@@ -129,13 +133,16 @@ export function OnboardingCertificatePage() {
         {offline ? <OfflineResult probe={offline} /> : null}
         {reach ? <ReachResult outcome={reach} /> : null}
 
-        {offline ? (
+        {/* THE TRIAL IS OFFERED ONLY FOR A PAIR THE SERVER CALLED `usable`, and the server refuses
+            anything else anyway — it re-runs the same check rather than trusting this page, because
+            the files can move between the two calls. Offering the button for a pair that will be
+            refused would be a promise the product does not keep. */}
+        {offline?.outcome === "usable" ? (
+          <CertificateApply certFile={certFile.trim()} keyFile={keyFile.trim()} hostname={hostname.trim()} />
+        ) : offline ? (
           <p className="mt-6 text-sm text-muted">
-            {/* NOTHING IS SAVED, AND THE PAGE SAYS SO TWICE — here and in the lead. Slice 5 adds
-                apply-live with a server-side revert timer; until it exists, a page that looked like
-                it had configured something would be the worst possible half-step. */}
-            Nothing has been saved. Writing these paths into <code className="font-mono">config.yml</code>{" "}
-            and switching quince over is the next step, and it is not built yet.
+            Nothing has been saved. Fix what the check reported and run it again — quince serves a
+            certificate only once these files pass.
           </p>
         ) : null}
 
