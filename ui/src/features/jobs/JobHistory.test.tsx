@@ -149,3 +149,43 @@ describe("JobHistory", () => {
     expect(screen.getByTestId("history-toggle").textContent).toMatch(/show less/i);
   });
 });
+
+// quince#889 item 3: `Retry` on a backup the daemon refused for encryption is an affordance for a
+// fix that is not the fix — nothing about pressing it again changes the device's encryption state.
+describe("a failure a retry cannot change", () => {
+  const encryptionRefused = job({
+    id: "E1",
+    state: "failed",
+    intent_id: "E1",
+    started_at: "2026-07-20T10:00:00Z",
+    finished_at: "2026-07-20T10:00:02Z",
+    error: { code: "encryption_required", message: "encrypted backups are required" },
+  });
+
+  it("offers the remedy instead of Retry", () => {
+    render(<JobHistory jobs={[encryptionRefused]} onRetry={vi.fn()} />);
+    expect(screen.queryByTestId("retry-backup")).toBeNull();
+    expect(screen.getByTestId("retry-futile")).toHaveTextContent(/encryption/i);
+  });
+
+  // The half that keeps the first honest: every OTHER terminal failure still gets its Retry, which
+  // is the whole affordance this rung is not allowed to damage.
+  it("still offers Retry for a failure that could go the other way next time", () => {
+    const other = job({
+      ...encryptionRefused,
+      id: "E2",
+      intent_id: "E2",
+      error: { code: "storage_unreachable", message: "the disk went away" },
+    });
+    render(<JobHistory jobs={[other]} onRetry={vi.fn()} />);
+    expect(screen.getByTestId("retry-backup")).toBeTruthy();
+    expect(screen.queryByTestId("retry-futile")).toBeNull();
+  });
+
+  // A pre-qn.6 row carries no error object at all. It must not lose its Retry to an undefined read.
+  it("still offers Retry when the failure carries no error object", () => {
+    const noError = job({ ...encryptionRefused, id: "E3", intent_id: "E3", error: null });
+    render(<JobHistory jobs={[noError]} onRetry={vi.fn()} />);
+    expect(screen.getByTestId("retry-backup")).toBeTruthy();
+  });
+});

@@ -18,6 +18,21 @@ function needsAttention(latest: Job): boolean {
   return latest.state === "failed" || latest.state === "connection_lost";
 }
 
+// RETRY IS FOR FAILURES A RETRY CAN CHANGE, and this one cannot: the device's encryption is off, so
+// pressing again asks the same question of the same device (quince#889). The remedy is the
+// `Enable encryption` button on the same page, so the row names it instead of offering a button
+// aimed at a refusal — the rule the disabled `Back up now` already follows.
+//
+// A CODE, NOT A MESSAGE. `JobError.message` is prose the daemon may reword; `code` is the wire
+// contract, and `encryption_required` is the constant the engine sets (backup/backup.go:67).
+//
+// ONE CODE RATHER THAN A CLASS, deliberately. Every other terminal failure here — a storage that
+// went away, a device unplugged mid-transfer, a passcode never entered — is worth pressing again,
+// and a list guessing which ones are futile would take the button away from cases that need it.
+export function retryCannotHelp(latest: Job): boolean {
+  return latest.error?.code === "encryption_required";
+}
+
 // latestIntentId names the intent that owns the Retry: the one whose latest attempt STARTED most
 // recently. Deliberately NOT "the first row" (quince#813). The rows are now ordered by the instant
 // each one displays, which for a terminal group is its finish — and DeviceCard.tsx:70 picks its
@@ -62,9 +77,17 @@ export function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry?: (latest: 
                 <RelativeTime iso={g.at} />
               </span>
               {g.intentId === retryable && onRetry && needsAttention(g.latest) ? (
-                <Button size="sm" variant="outline" onClick={() => onRetry(g.latest)} data-testid="retry-backup">
-                  Retry
-                </Button>
+                retryCannotHelp(g.latest) ? (
+                  // Not a mute row: the button is replaced by the thing to do instead, in the same
+                  // place the eye is already going.
+                  <span className="text-xs text-muted" data-testid="retry-futile">
+                    Turn on encryption to back up
+                  </span>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => onRetry(g.latest)} data-testid="retry-backup">
+                    Retry
+                  </Button>
+                )
               ) : null}
             </div>
           </div>
