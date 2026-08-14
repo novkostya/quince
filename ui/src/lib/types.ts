@@ -363,6 +363,20 @@ export interface Health {
 export interface OnboardingHTTPS {
   complete: boolean;
   detected: "tls" | "forwarded_proto" | "none";
+  // WHICH of the four shapes of evidence produced `detected: "none"` (quince#940 §2 + quince#939 §7).
+  // Present only then — there is nothing to explain when the origin IS encrypted.
+  //
+  // A SECOND FIELD RATHER THAN MORE `detected` VALUES, because `detected` is shared with the
+  // CROSS-ORIGIN probe body and widening it would have widened that too, silently.
+  //
+  // `proxy_not_forwarding_scheme` IS A HINT AND MUST BE RENDERED AS ONE. It is inferred from
+  // `X-Forwarded-For` being present, and nginx does not set that by default either — so a confident
+  // sentence would tell some correctly-configured operators their proxy is broken.
+  unencrypted_code?:
+    | "no_proxy_seen"
+    | "proxy_not_forwarding_scheme"
+    | "proxy_untrusted"
+    | "proxy_reports_plain";
 }
 
 // CertificateProbe is POST /api/onboarding/certificate — the OFFLINE half of the certificate step

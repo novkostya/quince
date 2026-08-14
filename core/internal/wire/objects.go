@@ -370,17 +370,75 @@ const (
 	HTTPSDetectedNone = "none"
 )
 
+// UnencryptedCode refines `HTTPSDetectedNone` — WHICH of the four shapes of evidence quince saw
+// when it concluded this origin was not encrypted (quince#940 §2 + quince#939 §7).
+//
+// A SECOND FIELD RATHER THAN MORE `HTTPSDetected` VALUES — architect ruling (delegated), door 2,
+// 2026-08-14. The two obvious alternatives are both closed:
+//
+//   - Widening `HTTPSDetected` also widens the CROSS-ORIGIN probe, silently: `OnboardingProbe.Detected`
+//     says at its own definition that it takes the same values and comes from the same function. The
+//     CORS ruling froze that body at `{nonce, detected}` on the argument that it leaks nothing, and
+//     said widening it needs that ruling revisited. Adding a value here would revisit it without
+//     anybody saying so.
+//   - Widening it and having the probe map the new values back to `none` leaves one type whose values
+//     are legal on one endpoint and illegal on another, with the type definition telling the reader
+//     they are the same — a trap set for the person who checks.
+//
+// FROZEN, for `HTTPSDetected`'s reason: a client renders a different remedy for each, so adding one
+// is a contract change.
+const (
+	// UnencryptedNoProxySeen — no `X-Forwarded-Proto` and no `X-Forwarded-For`, so quince has no
+	// evidence that any proxy is involved. Probably a browser talking to quince directly over plain
+	// http, and the remedy is a proxy in front or quince's own certificate.
+	UnencryptedNoProxySeen = "no_proxy_seen"
+	// UnencryptedProxyNotForwardingScheme — no `X-Forwarded-Proto`, but `X-Forwarded-For` IS present,
+	// so something in front is adding forwarding headers and not the one that matters. The remedy is
+	// one line of proxy config (`proxy_set_header X-Forwarded-Proto $scheme;`).
+	//
+	// A HINT, NOT A VERDICT, and the distinction is the whole reason this value is separate from the
+	// one above (quince#939 §7). nginx does not set `X-Forwarded-For` by default either, so a client
+	// stating this as fact would tell some correctly-configured operators their proxy is broken.
+	UnencryptedProxyNotForwardingScheme = "proxy_not_forwarding_scheme"
+	// UnencryptedProxyUntrusted — `X-Forwarded-Proto: https` arrived, a trusted-proxy list IS
+	// configured, and the peer is not in it. The proxy is doing its job and quince is declining to
+	// believe it; the remedy is to add that peer to `QUINCE_TRUSTED_PROXIES`.
+	UnencryptedProxyUntrusted = "proxy_untrusted"
+	// UnencryptedProxyReportsPlain — `X-Forwarded-Proto` is present and does not say `https`. THE
+	// PROXY IS CORRECT and is reporting that the client reached IT over plain http; the remedy is the
+	// proxy's own listener, not quince.
+	//
+	// IT COVERS ANY NON-`https` VALUE, not only the literal `http`. A header that does not say https
+	// is not https whatever else it says, and inventing a fifth code for a value nobody sets would be
+	// a remedy nobody needs.
+	UnencryptedProxyReportsPlain = "proxy_reports_plain"
+)
+
 // OnboardingHTTPS is GET /api/onboarding/https — the FIRST onboarding surface in the product
-// (qn.6f, design §9). Deliberately two fields: it sets the shape steps 2 and 3 inherit, and a
-// richer payload here would be a precedent every later step cites.
+// (qn.6f, design §9).
 //
 // Complete is derivable from Detected today, and both are sent anyway. Detected is the
 // EVIDENCE and Complete is the VERDICT: a client that only wants to know whether to show the
 // tiers should not have to keep a list of which reasons count, because that list is exactly
 // the thing that goes stale when a fourth reason is added.
+//
+// IT WAS DELIBERATELY TWO FIELDS AND IS NOW THREE, which spends a precedent this comment used to
+// argue against — *"a richer payload here would be a precedent every later step cites."* The
+// architect's ruling accepts that and BOUNDS it: the narrowness argument is against enriching step 1
+// GRATUITOUSLY, and a later step citing this must show the same three things —
+//
+//	the daemon ALREADY HOLDS the distinction;
+//	without it a user is sent to the WRONG remedy, not merely a vaguer one;
+//	and no same-origin route already carries it.
+//
+// Two of three users meeting `detected: none` were being told their proxy was broken while it was
+// behaving correctly, which is what cleared that bar.
 type OnboardingHTTPS struct {
 	Complete bool   `json:"complete"`
 	Detected string `json:"detected"` // tls | forwarded_proto | none
+	// UnencryptedCode is set ONLY when Detected is `none`, and omitted otherwise — there is no
+	// question to answer when the origin IS encrypted. See the Unencrypted* constants.
+	UnencryptedCode string `json:"unencrypted_code,omitempty"`
 }
 
 // CertificateProbeRequest is POST /api/onboarding/certificate (quince#908 §5, slice 4).

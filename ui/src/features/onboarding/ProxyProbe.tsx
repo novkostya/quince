@@ -108,15 +108,21 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
             proxy_set_header X-Forwarded-Proto $scheme;
           </pre>
           <p className="mt-2">Caddy and Traefik set it for you. Then check again.</p>
-          {/* THE HONEST LIMIT, AND THE RULING REQUIRES IT (quince#939, quince#940 §2): once a trusted
-              proxy list is configured, "the header is missing" and "the header is set but the sender
-              is not trusted" both arrive here as `detected: none` — the same symptom, entirely
-              different fixes. quince cannot currently tell them apart, so this says so rather than
-              asserting the likelier one. */}
+          {/* THE HONEST LIMIT, AND IT SURVIVES quince#940 §2 — READ THIS BEFORE "FIXING" IT.
+              §2's ruling required the PR adding `unencrypted_code` to retire the copy saying quince
+              cannot tell these apart, on the grounds that it stops being true. **It stops being true
+              on the SAME-ORIGIN page and stays true HERE**, and the same ruling is why: door 2 puts
+              the new field on `OnboardingHTTPS` and explicitly does NOT touch the probe body, which
+              the CORS ruling froze at `{nonce, detected}`.
+
+              This card renders the answer from a CROSS-ORIGIN probe of a DIFFERENT name, so all it
+              receives is `detected: none` — exactly as before. Retiring the sentence here would ship
+              a claim the mechanism does not support. The page that CAN say which cause now does;
+              see `WhatQuinceSaw` in OnboardingHTTPSPage. */}
           <p className="mt-2 text-xs">
             If you have set <code className="font-mono">QUINCE_TRUSTED_PROXIES</code>, quince may be
-            ignoring the header instead — it cannot tell the two apart, so check that your proxy's
-            address is in that list too.
+            ignoring the header instead — from here it cannot tell the two apart, so check that your
+            proxy's address is in that list too. Opening that address directly says which.
           </p>
         </Box>
       );
