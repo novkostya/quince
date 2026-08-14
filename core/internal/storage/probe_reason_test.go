@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/novkostya/quince/core/internal/storage/clonetree"
 )
 
 // EVERY PROBE REASON NAMES THE PATH IT PROBED (quince#514).
@@ -89,6 +91,32 @@ func TestNoProbeReasonHardcodesAPath(t *testing.T) {
 		if strings.Contains(code, "/backups") {
 			t.Errorf("probe.go:%d hardcodes a path in a string literal — a reason must name the root "+
 				"it was passed (quince#514):\n  %s", i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// AND IT SAYS WHICH REFUSAL IT WAS (quince#790).
+//
+// A ZFS dataset with block cloning enabled declines a just-written source with EAGAIN, and every
+// refusal used to be reported as `reflink unsupported` — false about that filesystem, and the only
+// place the difference could have reached the operator, since both refusals select the same
+// backend.
+func TestRejectedReasonDistinguishesDeclinedFromUnsupported(t *testing.T) {
+	const detail = "FICLONE declined this clone: resource temporarily unavailable"
+
+	declined := rejectedReason(clonetree.ReflinkUnavailable, detail)
+	if strings.Contains(declined, "reflink unsupported") {
+		t.Errorf("a transient refusal still claims the filesystem cannot reflink: %s", declined)
+	}
+	if !strings.Contains(declined, detail) {
+		t.Errorf("the declined reason drops what the probe observed: %s", declined)
+	}
+
+	// The settled refusals keep the sentence they had — this change is about the fourth result,
+	// not about rewording the other three.
+	for _, res := range []clonetree.ReflinkResult{clonetree.ReflinkUnsupported, clonetree.ReflinkSharing, clonetree.ReflinkSharingUnverifiable} {
+		if got := rejectedReason(res, detail); got != "reflink unsupported" {
+			t.Errorf("rejectedReason(%d) = %q, want the unchanged sentence", res, got)
 		}
 	}
 }
