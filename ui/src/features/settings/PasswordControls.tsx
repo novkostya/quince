@@ -166,6 +166,50 @@ export function PasswordControls() {
       // The list carries `has_password`, and SETTING one changes it — so the surface that just
       // said "Set a password" must stop saying it. Invalidated for the same reason removal is.
       await qc.invalidateQueries({ queryKey: passkeysKey });
+
+      // THE KEYCHAIN SAVE PROMPT — quince#929, and this one line is the whole fix.
+      //
+      // THE BUG WAS THAT NOTHING HERE NAVIGATED. Safari offers to save or update a password when a
+      // credential form is submitted AND the page navigates; quince#929's own title says it —
+      // *"sign-in is the only surface that navigates"*. Sign-in routes to Home afterwards and gets
+      // the prompt for free; changing a password stays exactly where it is, so the browser never
+      // concluded anything had been submitted, and the user's saved password silently went stale.
+      //
+      // MEASURED, IN THREE STEPS, ON HARDWARE — Operator, 2026-08-14, Safari:
+      //
+      //   location.reload()        prompt fires. Works, and "looks a bit unpleasant" — a full
+      //                            re-fetch, a visible flash, and the success message below is
+      //                            destroyed before anyone reads it.
+      //   history.pushState        prompt fires, nothing moves, message survives — AND BACK BREAKS,
+      //                            because it adds an entry, so Back returns to this same page.
+      //   history.replaceState     prompt fires, nothing moves, message survives, back stack intact.
+      //
+      // So a SAME-DOCUMENT history navigation is enough; the document swap was never the point.
+      //
+      // IT SIMULATES A SIGNAL RATHER THAN PRODUCING ONE, AND IT IS A STOPGAP ON PURPOSE.
+      //
+      // THE STRUCTURAL FIX IS THAT THIS WOULD NOT BE A FORM ON A SETTINGS PAGE — Operator,
+      // 2026-08-14: *"if change password was a separate page, it would just work."* Right, and not
+      // by luck. The browser's rule predates single-page apps: a form is submitted and the page GOES
+      // SOMEWHERE. Sign-in satisfies it by being a page that routes away when it is done; this form
+      // satisfies nothing, because submitting it leaves you exactly where you were. A
+      // change-password PAGE would fire the prompt as an ordinary consequence of navigating back,
+      // with no line like this one in it.
+      //
+      // THAT IS quince#931's TERRITORY — the panels-versus-pages thread, where the encryption dialog
+      // has already been ruled into a page. WHEN IT REACHES THIS SURFACE, DELETE THIS LINE: it exists
+      // only because the structure does not yet produce the signal by itself.
+      //
+      // AND THERE IS NO API TO REACH FOR INSTEAD, which is why the stopgap has to be a heuristic. The
+      // designed mechanism is `navigator.credentials.store()` with a `PasswordCredential`, and MDN
+      // marks it *"Limited availability — not Baseline because it does not work in some of the most
+      // widely-used browsers"*: WebKit does not implement the password credential type. So if a
+      // future WebKit tightens what counts as a navigation, this line stops working and the answer is
+      // the structural one above rather than a cleverer trick.
+      //
+      // ONLY ON SUCCESS. A failed change has nothing to save, and prompting after one would offer to
+      // store a password the server rejected.
+      window.history.replaceState({}, "", window.location.href);
     } catch (err) {
       setChangeMsg({ ok: false, text: messageFor(err, "Could not change the password.") });
     } finally {

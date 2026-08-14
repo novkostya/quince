@@ -442,3 +442,65 @@ describe("what passwordless costs names BOTH ways to lose the credential", () =>
     expect(clears.parentElement?.textContent).toMatch(/quince auth reset/);
   });
 });
+
+// THE KEYCHAIN SAVE PROMPT — quince#929, and the surface that had no test for its success path at
+// all. That absence is why the defect could sit here: nothing asserted what happens after a change,
+// so nothing noticed that what happens is *nothing the browser can see*.
+//
+// ASSERTED ON `history.replaceState`, which is as close to the real thing as jsdom reaches. The
+// prompt itself is Safari's and cannot be observed here; the navigation that triggers it can.
+// Measured on hardware 2026-08-14 — reload, pushState and replaceState all fire it, and replaceState
+// is the one that costs neither a flash nor the back stack.
+describe("quince#929 — a successful change tells the browser something happened", () => {
+  it("replaces the history entry, so the keychain offers to update", async () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    vi.spyOn(api, "put").mockResolvedValue(undefined);
+    renderControls(true);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), {
+      target: { value: "old-one" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await waitFor(() => expect(replaceState).toHaveBeenCalled());
+  });
+
+  // NOT ON A FAILURE. A rejected change has nothing to save, and prompting after one would offer to
+  // store a password the server refused.
+  it("does not, when the change was refused", async () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    vi.spyOn(api, "put").mockRejectedValue(
+      new APIError(401, "bad_password", "current password is incorrect"),
+    );
+    renderControls(true);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), {
+      target: { value: "wrong" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await screen.findByText(/current password is incorrect/i);
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  // AND THE SUCCESS MESSAGE, WHICH NOTHING ASSERTED UNTIL NOW. It exists because "a password change
+  // that looks like nothing happened invites a second attempt with the OLD current password" — a
+  // documented reason with no test holding it in place, which the reload probe exposed by deleting
+  // it and breaking nothing.
+  it("says so, and clears both fields", async () => {
+    vi.spyOn(api, "put").mockResolvedValue(undefined);
+    renderControls(true);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), {
+      target: { value: "old-one" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByText(/password changed/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+    expect(screen.getByLabelText("New password")).toHaveValue("");
+  });
+});
