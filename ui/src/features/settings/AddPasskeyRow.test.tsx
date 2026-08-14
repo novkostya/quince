@@ -77,26 +77,55 @@ describe("story 1 — a password-only install can add its first passkey", () => 
 // completing a sheet grants no new activation. So the proof must NOT chain into `create()`; a fresh
 // click has to come between them. This is quince#976's mechanism, and the test is what stops the
 // obvious "helpful" refactor from reintroducing it.
-describe("the passkey path waits for a fresh click before creating", () => {
-  it("parks the proof and asks for one more press", async () => {
-    const register = vi.spyOn(webauthn, "registerPasskey").mockRejectedValueOnce(refusal(["passkey"]));
+describe("the passkey path creates without a second press", () => {
+  // MEASURED 2026-08-14 ON HARDWARE, and it overturned a prediction. D1 (quince#988) reasoned that
+  // chaining `create()` off a passkey proof MUST fail for want of transient activation, and said so
+  // while labelling itself UNMEASURED. It was then run: passwordless install, Mac signed in by QR,
+  // passkey added, confirmed with the iPhone by QR — and the creation prompt appeared BY ITSELF.
+  //
+  // So this test asserted the opposite until today. The mandatory button is gone.
+  it("goes straight through, carrying the proof", async () => {
+    const register = vi
+      .spyOn(webauthn, "registerPasskey")
+      .mockRejectedValueOnce(refusal(["passkey"]))
+      .mockResolvedValueOnce(true);
     const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
-    renderRow();
+    const { onAdded } = renderRow();
 
     typeNameAndAdd();
 
     fireEvent.click(await screen.findByRole("button", { name: "Use a passkey" }));
     await waitFor(() => expect(prove).toHaveBeenCalledWith("add_passkey", undefined));
 
-    // THE ASSERTION THAT MATTERS: the proof is in hand and NOTHING has been created. One
-    // `registerPasskey` call — the refused one — and no second.
-    await screen.findByRole("button", { name: "Create the passkey" });
-    expect(register).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(register).toHaveBeenLastCalledWith("my iPhone", { proof: "PROOF-TOKEN" }),
+    );
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    // NO INTERMEDIATE BUTTON on the path the measurement covers.
+    expect(screen.queryByRole("button", { name: "Create the passkey" })).not.toBeInTheDocument();
+  });
 
-    // And the fresh click is what runs the ceremony, carrying the proof.
+  // THE FALLBACK, WHICH IS WHY THE BUTTON STILL EXISTS. One engine and one transport were measured;
+  // a stricter one could still refuse, and `registerPasskey` answers `false` for that exactly as it
+  // does for a dismissed sheet. The caller knows nobody clicked, so it offers the real click rather
+  // than resetting the row and showing nothing — which is what it used to do.
+  it("offers a real click when the chained attempt is refused", async () => {
+    const register = vi
+      .spyOn(webauthn, "registerPasskey")
+      .mockRejectedValueOnce(refusal(["passkey"]))
+      // `false` — the shape a lost activation and a dismissed sheet share.
+      .mockResolvedValueOnce(false);
+    vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+    renderRow();
+
+    typeNameAndAdd();
+    fireEvent.click(await screen.findByRole("button", { name: "Use a passkey" }));
+
+    const retry = await screen.findByRole("button", { name: "Create the passkey" });
+
+    // AND IT STILL CARRIES THE PROOF, so the fallback costs a click and not the ceremony.
     register.mockResolvedValueOnce(true);
-    fireEvent.click(screen.getByRole("button", { name: "Create the passkey" }));
-
+    fireEvent.click(retry);
     await waitFor(() =>
       expect(register).toHaveBeenLastCalledWith("my iPhone", { proof: "PROOF-TOKEN" }),
     );
