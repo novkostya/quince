@@ -35,13 +35,23 @@ lighter factor and the server honours it — **and no client has ever sent it.**
 
 | install | adding a passkey today |
 | --- | --- |
-| password **and** a passkey | works — the client retries with an assertion |
+| password **and** a passkey | **believed to work, UNMEASURED** — the client retries with an assertion |
 | **password only** | **impossible** — nothing to assert with, and no field to type the password into |
-| passwordless with a passkey | works |
+| passwordless with a passkey | **believed to work, UNMEASURED** — same chain as row 1 |
 | unclaimed (first run) | works — exempt by `Configured()` |
 
 The middle row is the common one for anybody who has not yet made a passkey, which is everybody at
 the moment they try to make their first.
+
+**ROWS 1 AND 3 SAID A FLAT `works` AND THAT WAS AN INFERENCE, NOT A MEASUREMENT.** Both describe the
+chain D1 now flags: an assertion, then `create()` — so they spend the user's gesture on the proof's
+own sheet and reach `create()` without one. **G8 is the gate that would settle it and it has never
+been run.** Corrected because a reader consults this table to decide which installs are already
+fine, and *"works"* is exactly the word that stops anybody checking.
+
+**It does not change what this rung builds.** Row 2 is still the regression and still the reason to
+start; rows 1 and 3 get D1's remedy for free, since slice 4's fresh-click control is on the path all
+three share.
 
 **The cause is a pattern this project has now paid for three times**, and it is worth naming in a
 spec rather than in a third commit message. Each time, a guard was verified where it was written and
@@ -127,6 +137,44 @@ measured shape, not a new one.
 **What slice 4 must not do is add a SECOND await.** Written down here rather than left to be
 rediscovered on a device, because the failure is silent from the client's side: `NotAllowedError`,
 indistinguishable from a user dismissing the sheet, which is exactly how it hid the first time.
+
+**THAT CONSTRAINT IS UNSATISFIABLE AS WRITTEN ON THE PASSKEY-PROOF PATH, AND THE CORRECT ONE IS
+NARROWER** — architect, reviewing slice 3 (quince#986). Restated:
+
+> **Do not chain `create()` off a passkey proof without a fresh click.**
+
+**Proving with a passkey in order to create a passkey spends the gesture on the first ceremony.**
+Counting awaits the way the paragraph above does, but one step further into slice 4:
+
+```
+click "Use a passkey"        ← the last user gesture
+  reauth/begin               await
+  credentials.get()          ← the gesture is SPENT here, on the proof's own sheet
+  reauth/finish              await
+onProved({proof})
+  register/begin(proof)      await
+  credentials.create()       ← needs an activation three awaits and one sheet old
+```
+
+**Completing an authenticator sheet grants no new activation** — it is browser UI, not a DOM
+activation-triggering event. So this is quince#976's mechanism arriving inside the design meant to
+replace it.
+
+**The password path is unaffected** — type, click Confirm, one `register/begin`, then `create()`,
+which is the measured shape. **The hazard is exactly the both-factors install**: someone who already
+has a passkey, adding another, choosing *"Use a passkey"*. On a password-only install — the
+regression's own row — `accepts` omits the passkey and the path does not exist.
+
+**The remedy is one control, and it does not depend on which way the measurement goes.** After the
+proof succeeds, slice 4 renders a distinct *"Create the passkey"* button whose click is fresh
+activation, with `register/begin(proof)` the single await before `create()`. One extra tap, on a
+path that has already shown one sheet.
+
+**UNMEASURED, and stated as such.** Chrome is lenient about activation for `create()` and Safari is
+strict; nobody has run either, and quince#976 records the same uncertainty.
+
+**AND IT MAKES THE REGRESSION TABLE'S FIRST ROW AN INFERENCE**, which is corrected there rather than
+only here — that row is what a reader consults to decide which installs are already fine.
 
 ### D2. It is guidance, and never a control
 
