@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/config"
 	"testing"
 )
 
@@ -276,3 +279,121 @@ func TestTheProbeBodyDoesNotCarryTheUnencryptedCode(t *testing.T) {
 		t.Error("the cross-origin probe carries unencrypted_code — the frozen CORS body was widened")
 	}
 }
+
+// quince#940 §1 — A BROKEN CERTIFICATE STOPS BEING INVISIBLE.
+//
+// Before this, a user who pointed `tls.cert_file` at a mismatched or unreadable pair saw **Not
+// encrypted** and a tier card telling them to do the thing they had already done, while quince held
+// the reason. Operator ruling 2026-08-14: the KIND may be pre-auth on a claimed install; the raw
+// detail is authenticated.
+func TestTheTLSUnusableCodeNamesTheKindOfFailure(t *testing.T) {
+	dir := t.TempDir()
+	good, goodKey := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+	expired, expiredKey := writeCertPair(t, dir, "old.example", time.Now().Add(-time.Minute))
+
+	for _, tc := range []struct {
+		name           string
+		cert, key      string
+		hasCertificate bool
+		want           string
+	}{
+		{
+			name: "TLS is not configured at all", want: "",
+		},
+		{
+			// THE ORDINARY HEALTHY CASE. Configured and serving, so there is nothing to report —
+			// and, just as important, NO FILES ARE READ. The guard is what keeps a pre-auth
+			// endpoint off the disk.
+			name: "configured and serving", cert: good, key: goodKey, hasCertificate: true, want: "",
+		},
+		{
+			name: "the pair does not exist", cert: "/nonexistent/c.pem", key: "/nonexistent/c.key",
+			want: "unreadable",
+		},
+		{
+			name: "the certificate has expired", cert: expired, key: expiredKey,
+			want: "expired",
+		},
+		{
+			// THE MISMATCH, which is the case the standard library's own message describes with no
+			// path in it at all — and the reason `tlsx.Inspect` exists rather than a bare load.
+			name: "the key belongs to a different certificate", cert: good, key: expiredKey,
+			want: "mismatched",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testDeps(t)
+			deps.Keeper = &staticKeeper{has: tc.hasCertificate}
+			if tc.cert != "" {
+				next := deps.Config.Current()
+				next.TLS.CertFile, next.TLS.KeyFile = tc.cert, tc.key
+				if errs, _, err := deps.Config.Replace(next, config.SourcePutConfig); err != nil || len(errs) > 0 {
+					t.Fatalf("seed config: err=%v errs=%v", err, errs)
+				}
+			}
+
+			_, body := getOnboardingHTTPS(t, deps, "quince.example", nil, false)
+			got, _ := body["tls_unusable_code"].(string)
+			if got != tc.want {
+				t.Errorf("tls_unusable_code = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// NO PATH AND NO LOADER TEXT CROSSES TO A PRE-AUTH CALLER. This is the security half of the ruling,
+// and it is asserted against the WHOLE body rather than one field — a future change that adds
+// `tls_unusable_detail` beside the code would pass a narrower test.
+func TestTheTLSFailureDisclosesNoPathAndNoLoaderText(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keeper = &staticKeeper{has: false}
+	next := deps.Config.Current()
+	next.TLS.CertFile, next.TLS.KeyFile = "/etc/quince/secret-layout/c.pem", "/etc/quince/secret-layout/c.key"
+	if errs, _, err := deps.Config.Replace(next, config.SourcePutConfig); err != nil || len(errs) > 0 {
+		t.Fatalf("seed config: err=%v errs=%v", err, errs)
+	}
+
+	rec, body := getOnboardingHTTPS(t, deps, "quince.example", nil, false)
+	if body["tls_unusable_code"] != "unreadable" {
+		t.Fatalf("tls_unusable_code = %v — this case is not the one under test", body["tls_unusable_code"])
+	}
+	for _, leak := range []string{"secret-layout", "/etc/quince", "no such file", "x509", "tls:"} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Errorf("the pre-auth body contains %q: %s", leak, rec.Body.String())
+		}
+	}
+}
+
+// `wrong_host` IS NOT A FAILURE HERE, and passing the request's Host would make it one. This
+// endpoint has no opinion about which name a user is heading for — the certificate STEP asks that,
+// with the name they typed. Without this, every operator reaching a working certificate by IP or by
+// a second name would be told their certificate was broken.
+func TestAWorkingCertificateReachedByAnotherNameIsNotAFailure(t *testing.T) {
+	dir := t.TempDir()
+	cert, key := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+	deps := testDeps(t)
+	deps.Keeper = &staticKeeper{has: false} // not loaded, so the inspection runs
+	next := deps.Config.Current()
+	next.TLS.CertFile, next.TLS.KeyFile = cert, key
+	if errs, _, err := deps.Config.Replace(next, config.SourcePutConfig); err != nil || len(errs) > 0 {
+		t.Fatalf("seed config: err=%v errs=%v", err, errs)
+	}
+
+	// A host the certificate does NOT cover. `wrong_host` would be the answer if the Host header
+	// were passed to Inspect; `unknown` is the honest one — the pair is fine and quince cannot say
+	// why it is not loaded.
+	_, body := getOnboardingHTTPS(t, deps, "192.0.2.9:8968", nil, false)
+	if body["tls_unusable_code"] == "wrong_host" {
+		t.Fatal("the request's Host was passed to Inspect: a working certificate reached by another name is reported broken")
+	}
+	if body["tls_unusable_code"] != "unknown" {
+		t.Errorf("tls_unusable_code = %v, want \"unknown\"", body["tls_unusable_code"])
+	}
+}
+
+// staticKeeper is a Keeper that only answers the one question this surface asks. The certificate
+// trial's own fake records calls; this one does not need to.
+type staticKeeper struct{ has bool }
+
+func (staticKeeper) SetFiles(string, string) error { return nil }
+func (k *staticKeeper) HasCertificate() bool       { return k.has }

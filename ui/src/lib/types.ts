@@ -372,6 +372,19 @@ export interface OnboardingHTTPS {
   // `proxy_not_forwarding_scheme` IS A HINT AND MUST BE RENDERED AS ONE. It is inferred from
   // `X-Forwarded-For` being present, and nginx does not set that by default either — so a confident
   // sentence would tell some correctly-configured operators their proxy is broken.
+  // WHY quince's OWN certificate is not being served, when `config.yml` asks for one
+  // (quince#940 §1). A CLASSIFICATION AND NEVER A DETAIL: the path and the loader's own text are
+  // authenticated and never reach a pre-auth caller.
+  //
+  // ORTHOGONAL TO `unencrypted_code` — both can be set at once, and they answer different
+  // questions: one is about this CONNECTION, the other about quince's own certificate.
+  tls_unusable_code?:
+    | "unreadable"
+    | "malformed"
+    | "mismatched"
+    | "not_yet_valid"
+    | "expired"
+    | "unknown";
   unencrypted_code?:
     | "no_proxy_seen"
     | "proxy_not_forwarding_scheme"
