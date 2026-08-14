@@ -241,9 +241,11 @@ func TestSetLiveConfigTurnsEncryptionEnforcementOnForTheNextJob(t *testing.T) {
 	})
 	setTransports(h.dev, testUDID, true, false, "off") // unencrypted device
 
-	// Off: the backup runs to success.
+	// Off: the backup runs to success. waitSETTLED for the same reason as its mirror below —
+	// this test takes the identical single-flight window and has simply not been unlucky yet
+	// (quince#709).
 	first := h.start(t, TransportUSB, "")
-	if got := waitTerminal(t, h.eng, first.ID, 10*time.Second); got.State != StateSucceeded {
+	if got := waitSettled(t, h.eng, first.ID, 10*time.Second); got.State != StateSucceeded {
 		t.Fatalf("setup: with require_encryption off the job ended %s (%v), want succeeded",
 			got.State, got.Error)
 	}
@@ -272,8 +274,19 @@ func TestSetLiveConfigTurnsEncryptionEnforcementOffForTheNextJob(t *testing.T) {
 	})
 	setTransports(h.dev, testUDID, true, false, "off")
 
+	// waitSETTLED, and the second `h.start` below is the whole reason (quince#709).
+	//
+	// `waitTerminal` returns on the terminal ROW. `run` writes that row and keeps going, and
+	// `defer e.release(lj)` — registered first, so it fires last — is what deletes `e.running[udid]`.
+	// In the gap between the two, `StartBackup` for this device returns 409 and `h.start` turns that
+	// into `t.Fatalf`. That is the reported failure, verbatim from run 31199932262:
+	//
+	//	engine_transport_test.go:284: StartBackup: status=409 reason="a backup is already running for this device"
+	//
+	// `waitSettled` waits for the release itself — the SAME `e.running` entry the 409 checks — so the
+	// window is closed rather than tolerated.
 	first := h.start(t, TransportUSB, "")
-	blocked := waitTerminal(t, h.eng, first.ID, 10*time.Second)
+	blocked := waitSettled(t, h.eng, first.ID, 10*time.Second)
 	if blocked.Error == nil || blocked.Error.Code != ErrEncryptionRequired {
 		t.Fatalf("setup: an unencrypted device should fail with %s while require_encryption is on, "+
 			"got state=%s error=%v", ErrEncryptionRequired, blocked.State, blocked.Error)

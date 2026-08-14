@@ -266,8 +266,20 @@ func waitTerminal(t *testing.T, e *Engine, id string, d time.Duration) wire.Job 
 // takes. A settle window would pass almost always and reintroduce exactly the wall-clock dependency
 // this package keeps paying for. `drain` already leans on the same signal for the same reason.
 //
-// It does NOT mean the job is quiescent for a NEW job on the same UDID — that is the single-flight
-// window `startWhenReleased` documents, and it is a different question.
+// IT DOES CLEAR THE WAY FOR A NEW JOB ON THE SAME UDID, and this note said the opposite until
+// quince#709. It read: "it does NOT mean the job is quiescent for a NEW job on the same UDID — that
+// is the single-flight window `startWhenReleased` documents, and it is a different question." They
+// are the SAME question, and the same map: `engineOwns` walks `e.running`, `release` deletes
+// `e.running[udid]`, and `StartBackup`'s 409 is `if _, busy := e.running[udid]`. Once this returns,
+// with no other job in flight for that device, there is nothing left to 409 on.
+//
+// It is corrected rather than deleted because it was load-bearing in the wrong direction: it is the
+// sentence that makes `waitTerminal` + a bare start look like the only option, and two tests took
+// that window for months on the strength of it (quince#709, quince#644's sibling).
+//
+// `startWhenReleased` is still the right tool where you CANNOT wait first — a retry issued without
+// waiting on the job it retries. There, tolerating the 409 is the only move; here, not entering the
+// window is strictly better.
 func waitSettled(t *testing.T, e *Engine, id string, d time.Duration) wire.Job {
 	t.Helper()
 	final := waitTerminal(t, e, id, d)
