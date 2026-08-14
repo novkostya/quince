@@ -804,6 +804,30 @@ else
 	$(RUNTIME) build $(BUILD_ARGS) --target runtime -t $(IMAGE_NAME):$(APP_TAG) -f deploy/Dockerfile .
 endif
 
+# THE BROWSER'S SIDE IS KEPT TOO, AND IT ALWAYS WAS — nobody was told (quince#969).
+#
+# The daemon's log has been captured since this target existed (`logs $(E2E_APP) > $(E2E_LOG)`).
+# Somebody decided that side was worth keeping and the browser's side was never revisited, so a red
+# e2e gave a session the reporter output and nothing else — on a project where two of five open flake
+# issues are e2e-shaped and a trace is the one artifact that answers *what did the browser see*
+# without a reproduction.
+#
+# THE FIX IS A SENTENCE, NOT A MOUNT, and that is the measurement rather than the assumption. The
+# issue's own step one was *"I did not verify a trace file actually appears on the host"* — so it was
+# verified before this was written: a deliberate red, and on the host afterwards
+# `ui/test-results/<test>-retry1/trace.zip`, 62 KB, plus `error-context.md` for both the attempt and
+# the retry. The repo is already bind-mounted, so the artifact was reachable all along and unadvertised.
+#
+# THE NO-TRACE BRANCH IS NOT A FAILURE PATH. `trace: on-first-retry` fires on a RETRY, and retries are
+# on only under `CI=1` — so a local run that fails once legitimately produces none, and saying "no
+# trace was written" without that sentence would send somebody looking for a lost file.
+#
+# CLEARED BEFORE THE RUN, so what is there is from THIS run. Stale results from a previous failure
+# would be worse than none: a session reading a trace for a test that passed this time is being
+# actively misled, which is the shape quince#967 is about one directory over.
+#
+# THE CI UPLOAD IS NOT HERE. It needs a `.github/workflows/**` write no agent PAT seat has
+# (quince#113), and it is quince#969's other half.
 .PHONY: gates-ui-e2e
 gates-ui-e2e: image ## The WHOLE Playwright suite — every ui/e2e/*.spec.ts — against `quince serve --demo` (two containers)
 ifeq ($(E2E_NEEDED),3)
@@ -812,6 +836,7 @@ else
 	@set -e; \
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network create $(E2E_NET) >/dev/null 2>&1 || true; \
+	rm -rf ui/test-results; \
 	$(RUNTIME) run -d --name $(E2E_APP) --network $(E2E_NET) \
 	  -e QUINCE_LISTEN=:8968 -e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp \
 	  $(IMAGE_NAME):$(APP_TAG) serve --demo >/dev/null; \
@@ -823,6 +848,20 @@ else
 	$(RUNTIME) logs $(E2E_APP) > $(E2E_LOG) 2>&1 || true; \
 	$(RUNTIME) rm -f $(E2E_APP) >/dev/null 2>&1 || true; \
 	$(RUNTIME) network rm $(E2E_NET) >/dev/null 2>&1 || true; \
+	if [ $$status -ne 0 ]; then \
+	  echo ""; \
+	  echo "gates-ui-e2e: the daemon's log is at $(E2E_LOG)"; \
+	  traces=$$(find ui/test-results -name trace.zip 2>/dev/null | wc -l); \
+	  if [ "$$traces" -gt 0 ]; then \
+	    echo "gates-ui-e2e: $$traces Playwright trace(s), which answer what the BROWSER saw:"; \
+	    find ui/test-results -name trace.zip 2>/dev/null | sed 's|^|  |'; \
+	    echo "  open one with:  pnpm -C ui exec playwright show-trace <path>"; \
+	  else \
+	    echo "gates-ui-e2e: NO trace was written — 'trace: on-first-retry' only fires on a RETRY,"; \
+	    echo "  and retries are on only under CI=1 (ui/playwright.config.ts). Not a lost artifact."; \
+	  fi; \
+	  find ui/test-results -name error-context.md 2>/dev/null | head -1 | sed 's|^|gates-ui-e2e: error context: |'; \
+	fi; \
 	exit $$status
 endif
 
