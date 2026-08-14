@@ -98,9 +98,22 @@ func TestSetTLSFilesAcceptsAnEmptyPairAndTurnsTLSOff(t *testing.T) {
 
 // HALF A PAIR IS REFUSED, and the refusal is `Validate`'s rather than this function's — which is the
 // point of routing the narrow write through `replaceLocked` instead of writing the file itself.
-func TestSetTLSFilesRefusesHalfAPairAndChangesNothing(t *testing.T) {
+//
+// IT SEEDS A REAL PAIR FIRST, AND THAT IS THE WHOLE TEST (quince#977 review). Starting from
+// `testService`'s empty `tls:` asserts "a refused write does not write" — true, and not the sentence
+// this function's narrowness is defended with. The route that reaches it is PRE-AUTH, so the case
+// that matters is **a stranger sends half a pair and knocks TLS out**, and only a document that
+// already HOLDS a certificate can fail that way.
+func TestSetTLSFilesRefusesHalfAPairAndLeavesTheLIVEPairStanding(t *testing.T) {
 	svc := testService(t)
+	if _, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "/etc/quince/one.key", SourceApplyCertificate); err != nil || len(errs) > 0 {
+		t.Fatalf("seed: err=%v errs=%v", err, errs)
+	}
 	before := svc.Current()
+	if !before.TLS.Enabled() {
+		t.Fatal("the seed did not take, so a surviving pair cannot be proven")
+	}
+	seen := applied(t, svc)
 
 	_, errs, _, err := svc.SetTLSFiles("/etc/quince/one.pem", "", SourceApplyCertificate)
 	if err != nil {
@@ -110,7 +123,13 @@ func TestSetTLSFilesRefusesHalfAPairAndChangesNothing(t *testing.T) {
 		t.Fatalf("errors = %+v, want one on tls.key_file", errs)
 	}
 	if svc.Current().TLS != before.TLS {
-		t.Fatalf("live config moved on a refused write: %+v", svc.Current().TLS)
+		t.Fatalf("a refused write destroyed the live pair: %+v, want %+v", svc.Current().TLS, before.TLS)
+	}
+	// AND NO APPLIER RAN, so the daemon was never told to drop the certificate it is serving. The
+	// live config surviving and the Keeper surviving are two facts, and only the second is what a
+	// user with a working https connection would notice.
+	if seen.pair != nil {
+		t.Fatalf("an applier ran for a refused write, with %+v", seen.pair)
 	}
 }
 
