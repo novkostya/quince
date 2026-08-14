@@ -633,6 +633,52 @@ the **verdict**; both are sent although one is derivable from the other, so a cl
 whether to show the setup options never keeps its own list of which reasons count. That list is
 exactly what goes stale when a fourth reason appears.
 
+**PROPOSED (gap): `detected: "none"` collapses THREE causes with three different remedies, and every
+route to separating them is shut by a prior decision.**
+
+<!-- gap-heading-check: ignore — this block cites the quince#939 CORS ruling, the frozen-values note
+     on `HTTPSDetected` and this section's own two-field precedent, all NEIGHBOURING decisions about
+     other questions, as the three doors a ruling on THIS one has to choose between. None of them
+     answers it: how the distinction should be EXPRESSED is open, and the block's span ends at its
+     own last paragraph. -->
+
+Raised by the implementer seat 2026-08-14 while taking quince#940 §2; **nothing is built and nothing
+here is decided.** quince#939's ruling already anticipated it: *"a fourth `detected` value is the
+obvious way to distinguish them when the time comes; **deciding that is not owed today**, and shipping
+copy that quietly conflates them is not."* quince#955 shipped the copy half — the probe says plainly
+that it cannot tell them apart. This is the other half.
+
+**The daemon HAS the information.** `auth.SecureOrigin` reads `r.TLS`, the `X-Forwarded-Proto` value
+and the trusted-proxy list, and returns a **bool**; `detectHTTPS` then reports `none` for all of:
+
+| what quince saw | remedy |
+| --- | --- |
+| `X-Forwarded-Proto` **absent** | the nginx caveat — the proxy is not forwarding the scheme |
+| `X-Forwarded-Proto: http` | **the proxy is correct** and is reporting that the client reached *it* over plain http — fix the proxy's listener |
+| `X-Forwarded-Proto: https`, trust list configured, peer not in it | add that peer to `QUINCE_TRUSTED_PROXIES` |
+
+**The third is the cruel one:** quince tells a user their proxy is broken while the proxy is behaving
+perfectly and telling the truth. The second is nearly as bad, for the opposite reason.
+
+**Three doors, and each is closed by something already decided:**
+
+1. **More `HTTPSDetected` values.** The set is frozen at its own definition — *"Values are frozen: a
+   client renders different prose for each, and adding one is a contract change."*
+2. **A second field on `OnboardingHTTPS`.** This section argues the shape is deliberately narrow
+   because it is *"precedent for steps 2 and 3"*, and `wire` says a richer payload here *"would be a
+   precedent every later step cites."*
+3. **A field on the probe body.** The CORS ruling froze it at `{nonce, detected}` and said adding one
+   is a contracts change **and needs that ruling revisited**, because *it leaks nothing* is the whole
+   safety argument for the widening.
+
+**So this is not a question of plumbing — it is a question of which precedent to spend**, which is why
+it is filed rather than built. Door 3 carries an extra consideration the other two do not: the probe
+body is readable **cross-origin**, so anything added there is disclosed to a page holding a nonce,
+where doors 1 and 2 are same-origin only.
+
+**Not urgent, and the reason is worth stating.** `TrustedProxies` is nil today, which believes the
+header from anyone, so the third row **cannot currently occur**. The first two can and do.
+
 **Pre-auth is an Operator ruling** (2026-08-02, quince#501), and the chicken-and-egg is the whole
 rung: over plain http to a LAN address the browser discards the session cookie, so the page
 explaining that cannot sit behind the door the defect locks.
