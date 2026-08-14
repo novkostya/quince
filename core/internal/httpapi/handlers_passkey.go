@@ -129,14 +129,19 @@ func (d Deps) writePresentError(w http.ResponseWriter, err error, fallback strin
 // actionable refusal with an opaque one — and the client's fallback for a missing field is exactly
 // today's behaviour. Logged rather than swallowed, because a store that cannot answer this is a
 // problem even when it is not this request's problem.
-func (d Deps) writeReauthRequired(w http.ResponseWriter, message string,
+// `reason` IS THE LOG LINE, NOT THE MESSAGE, and the name is the whole of the fix — architect,
+// reviewing quince#1003. It was called `message` after the copy moved inside, so a reader at a call
+// site saw `writeReauthRequired(w, err.Error(), …)` and concluded the string was shown. The comment
+// saying otherwise lived in here, five lines away from the place somebody will one day pass
+// carefully-worded copy and never learn it was dropped — and nothing would fail.
+func (d Deps) writeReauthRequired(w http.ResponseWriter, reason string,
 	op auth.ProofOperation, rpID, target string) {
 	accepts, err := d.Auth.Accepts(op, rpID, target)
 	if err != nil {
 		d.Log.Error("could not compute the acceptable factors", "error", err, "operation", op)
 		accepts = nil
 	}
-	// THE CALLER'S `message` IS A Go ERROR STRING AND IT IS NOT FIT TO SHOW ANYONE — Operator,
+	// THE CALLER PASSES A Go ERROR STRING AND IT IS NOT FIT TO SHOW ANYONE — Operator,
 	// 2026-08-14, from a screenshot of the running stand:
 	//
 	//	auth: no proof for this operation — authenticate again
@@ -144,18 +149,18 @@ func (d Deps) writeReauthRequired(w http.ResponseWriter, message string,
 	// Every word of that is ours rather than the reader's. `auth:` is a package prefix; a *proof* is
 	// an internal mechanism nobody outside this codebase has heard of; *"authenticate again"* names
 	// no button on the screen. It reached a user because the call sites pass `err.Error()` as the
-	// wire `message`, and the UI renders that verbatim.
+	// wire message, and the UI rendered that verbatim.
 	//
 	// EVERY OTHER REFUSAL HERE ALREADY WRITES COPY — `bad_password` says *"current password is
 	// incorrect"* rather than `ErrBadPassword.Error()`. This one was the exception, so it is the one
 	// that leaked.
 	//
-	// THE ARGUMENT IS IGNORED RATHER THAN CLEANED UP AT EACH SITE, deliberately: a parameter every
+	// `reason` IS IGNORED FOR THE WIRE RATHER THAN CLEANED UP AT EACH SITE, deliberately: a parameter every
 	// caller must remember to make human is a parameter that drifts back to a Go string. There is
 	// nothing per-site to say, because the answer is the same wherever it is asked.
 	//
 	// THE ERROR STILL REACHES THE LOG, where `auth: no proof for this operation` is exactly right.
-	d.Log.Info("re-authentication required", "operation", op, "reason", message)
+	d.Log.Info("re-authentication required", "operation", op, "reason", reason)
 	writeReauthRequired(w, d.Log, "Confirm it is you before changing how you sign in.", accepts)
 }
 
