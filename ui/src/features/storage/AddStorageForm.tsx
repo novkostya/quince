@@ -879,7 +879,11 @@ export function AddStorageForm({
                       aria-hidden
                     />
                   )}
-                  <div>{hookCheck.reason}</div>
+                  {/* `whitespace-pre-line` SO THE DAEMON CAN BREAK ITS OWN SENTENCE. The ok reason
+                      ends with a clause about what was NOT tested, and run together the two read as
+                      one long line the eye skips (Operator, 2026-08-14). Only newlines are honoured
+                      — the string still wraps normally otherwise. */}
+                  <div className="whitespace-pre-line">{hookCheck.reason}</div>
                 </div>
                 {/* THE RAW OUTPUT IS FOR DIAGNOSING A FAILURE, so it is not shown on success. On
                     `ok` it is `capacity`'s two numbers in BYTES — `98304  128848920576` — which

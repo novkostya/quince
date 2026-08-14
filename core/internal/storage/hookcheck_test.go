@@ -411,4 +411,18 @@ esac`
 			t.Errorf("the ok reason does not name %q — %s.\ngot: %s", want.fact, want.why, got.Reason)
 		}
 	}
+
+	// THE TWO CLAUSES ARE SEPARATED, AND THE DAEMON IS WHAT SEPARATES THEM (Operator, 2026-08-14).
+	// What was proved and what was NOT are different statements; run together they read as one long
+	// line whose second half is the one a reader skips — which is precisely the half this sentence
+	// exists for. The form renders the reason with `whitespace-pre-line`, so the break is decided
+	// here, and asserting it here is what stops a later reword from quietly closing it up.
+	before, after, found := strings.Cut(got.Reason, "\n")
+	if !found {
+		t.Fatalf("the ok reason runs its two clauses together with no break.\ngot: %s", got.Reason)
+	}
+	if !strings.Contains(after, "not tested") {
+		t.Errorf("the break does not separate what was proved from what was not.\nbefore: %s\nafter: %s",
+			before, after)
+	}
 }

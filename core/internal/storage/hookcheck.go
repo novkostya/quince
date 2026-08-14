@@ -144,8 +144,13 @@ func CheckHook(ctx context.Context, parentDataset string, hookArgv []string) Hoo
 		// way to be wrong and the operator has just typed all three: the key reached the host, the
 		// forced command ran, and the dataset the helper is pinned to is the one in the form.
 		return HookCheck{Outcome: HookOK,
+			// THE NEWLINE IS DELIBERATE AND THE SURFACE HONOURS IT (Operator, 2026-08-14). Run
+			// together, the two clauses read as one long line the eye skips — and the second, what
+			// was NOT tested, is the half a reader is least likely to finish. The form renders this
+			// with `whitespace-pre-line`, so the break is decided here, once, rather than by a
+			// surface guessing where a clause ends.
 			Reason: "the key, the forced command and the parent dataset all line up — the helper " +
-				"answered both read-only checks. Writing is not tested here: the first backup is " +
+				"answered both read-only checks.\nWriting is not tested here: the first backup is " +
 				"what proves that",
 			Detail: strings.TrimSpace(capOut)}
 
