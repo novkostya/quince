@@ -97,13 +97,42 @@ start_free() {
 		# seconds on BusyBox awk, so a retry inside the same second redraws the SAME port and the
 		# loop spins twenty times on one number. Found by reading rather than by hitting it.
 		_port=$(draw_port "$_i$$")
-		if "$RUNTIME" run -d --name "$_name" -p "$_port":8968 "$@" >/dev/null 2>&1; then
+		# THE STDERR IS KEPT, AND THE FIRST VERSION OF THIS FUNCTION THREW IT AWAY (quince#946
+		# review). `run` fails for reasons that have nothing to do with the port — a missing image,
+		# an unwritable volume, a broken runtime, an OOM — and every one of them came back from the
+		# callers as "twenty failed port draws". Not merely unhelpful: FALSE, and pointing the
+		# reader at the one thing that was fine.
+		#
+		# IT WAS THIS FILE'S OWN BUG, ONE TURN LATER. The old code assumed `PORT + 1` was free; that
+		# version assumed a failed `run` meant the port was taken. Both are guesses standing in for
+		# something the system would have told us — and the commit that shipped it said, about a
+		# different mistake, that *reading the artifact rather than the tool's silence is what
+		# settled it*. It read the exit code and discarded the sentence.
+		#
+		# `2>&1 >/dev/null` — THE ORDER IS LOAD-BEARING: stderr is pointed at the current stdout,
+		# which is the capture, and only then is stdout sent to /dev/null. Written the other way
+		# round both are discarded, and this would be the same defect wearing a fix.
+		START_ERR=$("$RUNTIME" run -d --name "$_name" -p "$_port":8968 "$@" 2>&1 >/dev/null) && {
 			echo "$_port"
 			return 0
-		fi
+		}
 		"$RUNTIME" rm -f "$_name" >/dev/null 2>&1 || true
 		_i=$((_i + 1))
 	done
+	# THE ERROR LEAVES BY THE SAME DOOR AS THE PORT, and it has to: every caller invokes this inside
+	# `$(...)`, so the function body runs in a SUBSHELL and a variable set in here is gone by the
+	# time the caller reads it. The first attempt at this fix set `START_ERR` and the callers
+	# interpolated it — `set -u` refused with `parameter not set`, which is the good failure: it is
+	# the same defect this whole function is about, caught by a shell option instead of by a reader.
+	#
+	# So the captured value is the PORT on success and the RUNTIME'S SENTENCE on failure, and the
+	# return code says which. Callers name it in their message.
+	printf '%s' "$START_ERR"
+	# RETRYING TWENTY TIMES ON A NON-PORT ERROR IS DELIBERATE, and the alternative was considered:
+	# bailing on the first failure that does not look like a bind refusal means CLASSIFYING the
+	# error, which is another guess about a message this script does not own. Twenty attempts against
+	# a missing image cost a second and then report the truth; a classifier would be wrong the first
+	# time the runtime rephrased itself.
 	return 1
 }
 
@@ -137,7 +166,7 @@ else
 	PORT=$(start_free "$NAME" \
 		-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 		-v "$WORK/data":/data -v "$WORK/cache":/cache \
-		"$IMAGE" serve) || fail "could not bind a free port in 20 tries — say so, never treat it as a product failure"
+		"$IMAGE" serve) || fail "could not start the container in 20 attempts on different ports — the runtime last said: $PORT"
 fi
 
 # AFTER THE START, NOT BEFORE. This line stood above the `run` and printed `port=0` for every default
@@ -268,7 +297,7 @@ LOGFROM="$NAME2"
 PORT2=$(start_free "$NAME2" \
 	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 	-v "$WORK/invalid-data":/data -v "$WORK/invalid-cache":/cache \
-	"$IMAGE" serve) || fail "could not bind a free port for the invalid-config arm in 20 tries"
+	"$IMAGE" serve) || fail "could not start the invalid-config container in 20 attempts on different ports — the runtime last said: $PORT2"
 
 i=0
 while [ "$i" -lt 60 ]; do
@@ -379,7 +408,7 @@ LOGFROM="$NAME3"
 PORT3=$(start_free "$NAME3" \
 	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 	-v "$WORK/unread-data":/data -v "$WORK/unread-cache":/cache \
-	"$IMAGE" serve) || fail "could not bind a free port for the unreadable-config arm in 20 tries"
+	"$IMAGE" serve) || fail "could not start the unreadable-config container in 20 attempts on different ports — the runtime last said: $PORT3"
 
 i=0
 while [ "$i" -lt 60 ]; do
