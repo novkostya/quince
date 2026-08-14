@@ -514,6 +514,57 @@ GET  /api/onboarding/probe?nonce= → {nonce, detected}
      // indistinguishable from a network error to the page that sent it.
 ```
 
+**PROPOSED (gap): APPLYING a certificate needs a SECOND pre-auth config write, and §5's own
+confirm mechanism does not fire for the user most likely to need it.**
+
+<!-- gap-heading-check: ignore — this block cites the 2026-08-14 pre-auth-write ruling and the
+     offline-check block directly below, both NEIGHBOURING decisions about other routes, as the
+     scope this one falls outside of. Neither answers it: whether a pre-auth route may write `tls.*`
+     is open, and so is what to do about the interaction named in its second half. The block's span
+     ends at its own last paragraph. -->
+
+Raised by the implementer seat 2026-08-14 while taking quince#908 slice 5; **nothing is built and
+nothing here is decided.** Two separate things are wrong, and the second is the one that changes the
+design rather than the permissions.
+
+**ONE — THE RULED PRE-AUTH WRITE IS SCOPED TO ONE KEY.** The Operator's ruling of 2026-08-14 says of
+`POST /api/config/insecure-transport`: *"it writes `sessions.allow_insecure_transport` and nothing
+else. Not `PUT /api/config` exempted, which would expose every key."* Applying a certificate writes
+`tls.cert_file` and `tls.key_file` — a **second** pre-auth write, of different keys. quince#908 §3's
+argument extends to it unchanged (in the unclaimed window anyone reaching the port can claim the
+install outright, so a config write grants strictly less), but the ruling drew its scope line
+explicitly, so extending it is a decision rather than an inference.
+
+**TWO — `sessions.allow_insecure_transport` SUPPRESSES THE REDIRECT THAT §5 USES AS ITS PROOF.**
+This is measured from the code rather than reasoned about. §5's mechanism is: *"the plain half starts
+redirecting, so the page's next ordinary fetch is redirected to HTTPS by quince itself — turning it
+on IS the test."* But `plainHalf` redirects only when `keeper.HasCertificate() && !allowInsecure()`.
+
+**So for a user who took the plain-http escape hatch — precisely the user who could not reach quince
+securely, and therefore the one most likely to be configuring a certificate — applying it produces no
+redirect, no confirmation, and a revert timer that fires and undoes a certificate that was working.**
+The failure is silent and its remedy is invisible: the certificate they correctly configured is
+removed, and nothing says why.
+
+**Three ways out, none obviously right:** turn the opt-in **off** as part of applying (which is a
+second key written, and changes a setting the user chose); confirm over the **https half directly**
+rather than by being redirected (the client would have to navigate deliberately, which is buildable
+but is no longer *"turning it on IS the test"*); or refuse to apply while the opt-in is on and say
+why (honest, and leaves the stranded user where they started).
+
+**What is NOT in doubt: the revert timer must be SERVER-side.** §5 settles that structurally — once
+the redirect is live, a failed handshake redirects every http request into that failure, so the client
+has no working channel left to ask for a revert. A client-driven rollback is unbuildable here by
+construction. The timeout is *"room for a human reading a warning: thirty seconds of silence is a
+failure, three is someone reading"*, which reads as **~30s**; that number is worth confirming rather
+than inferring from a parenthesis.
+
+**A narrower slice exists and is worth considering instead.** An **authenticated** apply — TLS
+configured from Settings by an admin, which the CORS ruling already names as a real case — needs no
+new pre-auth permission and hits neither problem above, because a signed-in admin is not stranded and
+can be told to navigate. It would leave the first-run path for a later slice rather than blocking
+both on one ruling.
+
 **RULED and IMPLEMENTED: the OFFLINE CERTIFICATE CHECK — `POST /api/onboarding/certificate`
 (quince#908 §5, slice 4).** It answers *what is this pair I am about to declare?*, and **nothing else
 in quince performs that check before the pair goes live**: `validateTLS` says at its own definition
