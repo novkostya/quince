@@ -88,15 +88,15 @@ func TestSetupModeLeavesTheZFSSetupSurfaceOpen(t *testing.T) {
 	defer srv.Close()
 	c := authedClient(t, srv)
 
-	key := newReq(t, http.MethodPost, srv.URL+"/api/storages/zfs/key", "")
+	key := newReq(t, http.MethodPost, srv.URL+"/api/storages/zfs/key",
+		`{"parent_dataset":"tank/backups"}`)
 	key.Header.Set(auth.CSRFHeaderName, csrfFromJar(t, c, srv))
 	if code := doStatus(t, c, key); code == http.StatusServiceUnavailable {
 		t.Errorf("POST /api/storages/zfs/key was refused BY THE SETUP GUARD — the first-run zfs " +
 			"form cannot show the operator a key to install without it")
 	}
 
-	helper := newReq(t, http.MethodGet,
-		srv.URL+"/api/storages/zfs/helper?parent_dataset=tank%2Fbackups", "")
+	helper := newReq(t, http.MethodGet, srv.URL+"/api/storages/zfs/helper", "")
 	if code := doStatus(t, c, helper); code == http.StatusServiceUnavailable {
 		t.Errorf("GET /api/storages/zfs/helper was refused BY THE SETUP GUARD — the operator " +
 			"cannot install a helper they cannot be shown")

@@ -64,7 +64,7 @@ per-storage keys: `ssh_user`, `ssh_host`, and optionally `ssh_port` (default 22)
 (default `/data/keys/zfs`). It builds an argv array, never a shell string.
 
 **SSH IS THE SHAPE, not one transport among several**, and the reason is the guarantee the design
-rests on: `command="/usr/local/sbin/quince-zfs-helper"` in `authorized_keys` pins the helper
+rests on: `command="/usr/local/sbin/quince-zfs-helper <dataset>"` in `authorized_keys` pins the helper
 regardless of what the client asks for. Under any other transport that constraint would live only
 inside the script, and a caller could reach the host without going through it.
 
@@ -96,27 +96,42 @@ the exact `zfs destroy <dataset>` command for a human instead.
 `authorized_keys` (one line):
 
 ```
-command="/usr/local/sbin/quince-zfs-helper",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... quince
+command="/usr/local/sbin/quince-zfs-helper rpool/quince",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... quince
 ```
 
-`/usr/local/sbin/quince-zfs-helper` — the parent dataset is baked into the script rather than taken
-from the client, which is what stops the client escaping it.
+`/usr/local/sbin/quince-zfs-helper` — **the parent dataset is the forced command's own argument**
+(quince#985), read as `$1` before the script looks at the client's request, which is what stops the
+client escaping it. The dataset and the path are inside **one** pair of quotes: sshd parses
+`command="…"` as a single option value, so closing the quote after the path leaves the dataset where
+sshd expects the next option name and the line is rejected.
+
+**IT USED TO BE BAKED INTO THE SCRIPT, AND THAT IS WHY ONE INSTALL PATH WAS A TRAP.** Each storage's
+helper was rendered with its own `PARENT=`, so a second zfs storage on the same host saved its copy
+over the first's and the first failed at its next commit — hours later, with nothing pointing back at
+the storage that was added. The script is now **identical on every install**, and what differs is one
+word per key in `authorized_keys`.
+
+**So two storages on one host need two keys, one line each.** A forced command is a property of a
+key: sshd uses the first `authorized_keys` line whose key matches, so the same public key twice with
+two different datasets confines both to the first one. quince generates at
+`/data/keys/zfs`; point the second storage's `ssh_key` at a key you make yourself — `ssh-keygen -t
+ed25519 -f /data/keys/zfs-2 -N ""` — and give it its own line with its own dataset. **quince does not
+generate the second one for you** (quince#989).
 
 **THE SCRIPT IS A FILE, NOT A FENCE IN THIS DOCUMENT** — `core/internal/storage/zfshelper/quince-zfs-helper`.
 
-It moved there (quince#818 piece C) because it is becoming a **product artifact** rather than an
-excerpt: the point of that piece is that quince serves the script back with your `parent_dataset`
-already substituted, so the *Add storage* screen hands you a finished file instead of asking you to
+It moved there (quince#818 piece C) because it is a **product artifact** rather than an excerpt: the
+*Add storage* screen serves the script back, so it hands you a finished file instead of asking you to
 edit one. That needs `go:embed`, which cannot reach outside its module, and the module root is
 `core/` — so the path is decided by the mechanism rather than by taste.
 
-**The serving is NOT BUILT YET; this move is what makes it possible.** Today the file is the same
-script it always was, in a place quince can embed it from. Until that lands, set the `PARENT=` line
-by hand as before.
+**It is served, and since quince#985 it is served UNCHANGED** — the same bytes for every install of a
+version, because the only per-install value it ever carried now rides in the `authorized_keys` line.
 
 **How to install it, which the file itself deliberately does not say.** Copy it to the ZFS host as
-`/usr/local/sbin/quince-zfs-helper`, `chmod +x` it, set `PARENT=` to your parent dataset, and pin it
-as the forced command in the `authorized_keys` line above. Those instructions live here rather than
+`/usr/local/sbin/quince-zfs-helper`, `chmod +x` it, and pin it as the forced command in the
+`authorized_keys` line above, **with your parent dataset after it**. Nothing inside the file needs
+editing. Those instructions live here rather than
 in the script's own header because **a file that says *"install as …"* is addressing somebody who has
 not installed it, and every reader of the installed copy has.** Once it is on disk at that path the
 line is noise at best and contradicts its own location at worst — and once quince serves the script
@@ -149,8 +164,8 @@ why three lines that look wrong are not.
   without it is that every arm guards `$target` against `"$PARENT"`/`"$PARENT"/*` before reaching
   `zfs`.
 - **The `create` arm checks the parent exists BEFORE creating** — measured on a real pool, 2026-08-12
-  (quince#818). `zfs create -p` creates missing *parents* too, so a typo in the `PARENT=` line did
-  not fail: it silently built a whole new dataset tree and put backups in it. That tree has neither
+  (quince#818). `zfs create -p` creates missing *parents* too, so a typo in the dataset the forced
+  command names did not fail: it silently built a whole new dataset tree and put backups in it. That tree has neither
   of the two settings this document opens by requiring — no `com.sun:auto-snapshot=false`, no quota —
   so the failure surfaces much later as retention reclaiming nothing, or as ENOSPC mid-backup.
   Checking first turns that into a refusal naming the dataset, at a cost of one `zfs get` per create,

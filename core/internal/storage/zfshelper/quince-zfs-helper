@@ -1,7 +1,21 @@
 #!/bin/sh
 # quince-zfs-helper — the only command quince may run here. It cannot destroy a dataset.
+#
+# ONE FILE PER HOST, IDENTICAL BYTES FOR EVERY INSTALL. The dataset it is confined to arrives from
+# the forced command, so two quince storages on one machine share this file rather than overwriting
+# each other's copy of it:
+#
+#   command="/usr/local/sbin/quince-zfs-helper <pool>/<dataset>",no-port-forwarding,… ssh-ed25519 AAAA… quince
 set -eu
-PARENT="pool/path/to/iphone-backup"
+
+# $1 IS THE OPERATOR'S AND $SSH_ORIGINAL_COMMAND IS THE CLIENT'S. That is the whole security split,
+# and it is why this line comes BEFORE the `set --` below overwrites the positional parameters: ssh
+# puts the forced command's own words in "$@", and the client's request never reaches them.
+PARENT="${1:-}"
+[ -n "$PARENT" ] || {
+  echo "quince-zfs-helper: no parent dataset. The authorized_keys line must name it:" >&2
+  echo "  command=\"$0 <pool>/<dataset>\",no-port-forwarding,… ssh-ed25519 AAAA… quince" >&2
+  exit 1; }
 
 # Unquoted on purpose: ssh delivers the request as one string, so this split IS the arg parsing.
 # shellcheck disable=SC2086
@@ -13,7 +27,7 @@ case "$op" in
               # Checked first: `zfs create -p` silently builds a whole tree from a typo in PARENT.
               pmp=$(zfs get -H -o value mountpoint "$PARENT" 2>/dev/null) || pmp=""
               [ -n "$pmp" ] && [ -d "$pmp" ] || {
-                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the PARENT= line" >&2
+                echo "quince-zfs-helper: no such mounted dataset: $PARENT — check the dataset in the authorized_keys forced command" >&2
                 exit 1; }
               zfs create -p "$target" || exit 1
               # A new dataset is host-root-owned; quince may be a userns-mapped root that cannot write it.
