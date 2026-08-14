@@ -26,6 +26,40 @@ let attempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = true;
 
+// THE SNAPSHOT GOES UNDER THE EVENTS, NOT OVER THEM (quince#948).
+//
+// `refreshAll` ends in `replaceAll` — it swaps each store's whole contents for what the GET
+// returned. An event that arrives while that GET is in flight is therefore applied to a store the
+// snapshot is about to overwrite, and the snapshot was taken BEFORE the event: the socket delivers
+// `device.attached`, `upsert` puts the device in the list, the older list comes back, and the
+// device is gone. Nothing refetches until the next reconnect, so **the loss is permanent** rather
+// than late.
+//
+// It is not a demo artifact. Any `device.*`, `job.updated` or `version.*` landing in that window is
+// lost the same way on real hardware; the window is the GET's duration, which is why it fires on a
+// loaded CI runner and essentially never on an idle box. It is what made story1 wait the full 30s
+// for an iPad that had already attached (quince#948) — the pad's re-attach was applied and then
+// undone, and the demo's churn timer does not come back round for another 40s.
+//
+// So events that arrive during a refresh are HELD and replayed on top once the snapshot lands.
+// That is exactly contracts §3's model — a GET recovers current state, events are notifications
+// applied to it — and the bug was only ever that the notifications went underneath.
+//
+// This cannot wedge: every `refreshAll` fetch carries `AbortSignal.timeout` (lib/api.ts), so the
+// promise always settles and the queue always drains in the `finally`.
+let refreshing = false;
+let queued: WSEnvelope[] = [];
+// Bumped by every `hello` and every close, so a refresh whose socket is already gone cannot flush
+// a pre-disconnect queue on top of the snapshot that replaced it — nor clear the flag belonging to
+// the refresh that superseded it.
+let refreshGen = 0;
+
+function endRefresh(): void {
+  refreshGen += 1;
+  refreshing = false;
+  queued = [];
+}
+
 function open(): void {
   if (socket) return;
   const ws = new WebSocket(wsURL());
@@ -42,7 +76,21 @@ function open(): void {
       attempt = 0;
       useConnectionStore.getState().setStatus("online");
       dispatch(env);
-      void refreshAll();
+      refreshGen += 1;
+      const gen = refreshGen;
+      refreshing = true;
+      queued = [];
+      void refreshAll().finally(() => {
+        if (gen !== refreshGen) return; // superseded by a later hello, or by a close
+        refreshing = false;
+        const replay = queued;
+        queued = [];
+        for (const e of replay) dispatch(e);
+      });
+      return;
+    }
+    if (refreshing) {
+      queued.push(env);
       return;
     }
     dispatch(env);
@@ -50,6 +98,10 @@ function open(): void {
 
   ws.onclose = () => {
     socket = null;
+    // A queue held for a socket that is gone must not survive it: the reconnect issues its own
+    // hello and its own snapshot, and replaying pre-disconnect events on top of a post-reconnect
+    // snapshot would put back exactly what the refresh exists to correct.
+    endRefresh();
     if (!stopped) void reportIfSessionLost();
     scheduleReconnect();
   };
@@ -116,6 +168,8 @@ function resumeReconnect(): void {
   }
   attempt = 0;
   if (socket) {
+    // This path detaches onclose before closing, so the queue is abandoned here rather than there.
+    endRefresh();
     socket.onclose = null;
     socket.onerror = null;
     socket.onmessage = null;
@@ -163,6 +217,7 @@ export function connect(): void {
 // close tears the socket down and stops reconnecting (called on logout / shell unmount).
 export function close(): void {
   stopped = true;
+  endRefresh(); // same reason as onclose: nothing queued for this session outlives it
   removeResumeListeners();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);

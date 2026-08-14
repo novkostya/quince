@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { backoffDelay, close, connect } from "./client";
 import { api, notifyUnauthorized } from "@/lib/api";
+import { useDevicesStore } from "@/stores/devices";
+import type { Device } from "@/lib/types";
 
 // The handshake rejection is SIMULATED rather than driven off a real expiry (quince#374's
 // acceptance): the browser gives script no way to see the 401, so what the client actually reacts
@@ -159,5 +161,97 @@ describe("ws handshake rejected for a lost session", () => {
     await flush();
 
     expect(api.get).not.toHaveBeenCalled();
+  });
+});
+
+// quince#948: a `device.attached` that arrives while the hello-triggered snapshot GET is still in
+// flight was applied and then UNDONE by that snapshot, permanently — `refreshAll` ends in
+// `replaceAll`, and the list it replaces with was read before the event happened. Nothing refetches
+// until the next reconnect, so the device simply stays missing.
+//
+// Driven through the real `refreshAll` rather than a mock of it: the defect is the ORDER of two
+// real effects on one store, and a stubbed refresh cannot have an order.
+describe("ws refresh does not clobber events that raced it (quince#948)", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const pad = (): Device => ({
+    udid: "UDID-PAD",
+    name: "the-pad",
+    model: "iPad13,4",
+    ios_version: "18.5",
+    transports: { wifi: "2026-08-14T00:00:00Z" },
+    paired: "yes",
+    backup_encryption: "on",
+    wifi_sync: "on",
+    last_seen: "2026-08-14T00:00:00Z",
+    last_backup: null,
+  });
+
+  afterEach(() => {
+    close();
+    FakeWS.instances = [];
+    vi.unstubAllGlobals();
+    vi.mocked(api.get).mockReset();
+    useDevicesStore.getState().replaceAll([]);
+  });
+
+  it("replays an attach that landed mid-refresh, instead of losing it to the snapshot", async () => {
+    // The snapshot the server had BEFORE the pad attached — the whole point: it is not wrong, it is
+    // merely older than the event, which is the one thing `replaceAll` cannot express.
+    let releaseDevices: (v: { devices: Device[] }) => void = () => {};
+    const devicesGet = new Promise<{ devices: Device[] }>((resolve) => {
+      releaseDevices = resolve;
+    });
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "/api/devices") return devicesGet as never;
+      if (path === "/api/jobs") return Promise.resolve({ jobs: [], next_cursor: null }) as never;
+      return Promise.resolve({ versions: [] }) as never;
+    });
+
+    vi.stubGlobal("WebSocket", FakeWS);
+    connect();
+    const ws = FakeWS.instances[0];
+    ws.onmessage?.({ data: JSON.stringify({ type: "hello", data: { server_version: "t" } }) });
+
+    // The pad attaches while the GET is still out.
+    ws.onmessage?.({
+      data: JSON.stringify({ type: "device.attached", data: { ...pad(), transport: "wifi" } }),
+    });
+
+    releaseDevices({ devices: [] });
+    await flush();
+
+    // Against the old ordering this is 0: the attach was applied and the empty snapshot wiped it.
+    expect(useDevicesStore.getState().order).toEqual(["UDID-PAD"]);
+  });
+
+  it("does not replay a queue across a reconnect", async () => {
+    let releaseDevices: (v: { devices: Device[] }) => void = () => {};
+    const devicesGet = new Promise<{ devices: Device[] }>((resolve) => {
+      releaseDevices = resolve;
+    });
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "/api/devices") return devicesGet as never;
+      if (path === "/api/jobs") return Promise.resolve({ jobs: [], next_cursor: null }) as never;
+      if (path === "/api/versions") return Promise.resolve({ versions: [] }) as never;
+      return Promise.resolve({ state: "authenticated", csrf_token: "t" }) as never;
+    });
+
+    vi.stubGlobal("WebSocket", FakeWS);
+    connect();
+    const ws = FakeWS.instances[0];
+    ws.onmessage?.({ data: JSON.stringify({ type: "hello", data: { server_version: "t" } }) });
+    ws.onmessage?.({
+      data: JSON.stringify({ type: "device.attached", data: { ...pad(), transport: "wifi" } }),
+    });
+
+    // The socket dies before the snapshot lands. Whatever was queued belonged to THAT session: the
+    // reconnect fetches its own, and replaying a pre-disconnect attach on top of it would put back
+    // a device the refresh may have just correctly removed.
+    ws.onclose?.();
+    releaseDevices({ devices: [] });
+    await flush();
+
+    expect(useDevicesStore.getState().order).toEqual([]);
   });
 });
