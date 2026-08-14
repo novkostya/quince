@@ -42,7 +42,8 @@ func (s *Service) SetAllowInsecureTransport(allow bool) ([]wire.ConfigError, []W
 	next := s.Current()
 	next.Sessions.AllowInsecureTransport = allow
 
-	errs, warns, err := s.replaceLocked(next)
+	// One caller, so the route names itself — see AddStorage for the caveat (quince#967).
+	errs, warns, err := s.replaceLocked(next, SourceInsecureTransport)
 	if err != nil || len(errs) > 0 {
 		return errs, nil, err
 	}

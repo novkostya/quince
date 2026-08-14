@@ -57,7 +57,7 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 	// unchanged and still true. What changed is that the refusal is a REMOVAL, so it needs a previous
 	// document holding a storage. Unseeded, these two cases are 0 → 0, which the ruling permits, and
 	// the test would assert the behaviour that was corrected rather than the one that survives.
-	if errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "seed", Path: "/backups", Default: true})); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "seed", Path: "/backups", Default: true}), "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("seed: errs=%+v err=%v", errs, err)
 	}
 	seeded, err := os.ReadFile(path)
@@ -76,7 +76,7 @@ func TestReplaceRefusesWhatValidatePermits(t *testing.T) {
 			if errs := Validate(tc.cfg); len(errs) != 0 {
 				t.Fatalf("precondition: Validate must still permit this, got %+v", errs)
 			}
-			errs, _, err := svc.Replace(tc.cfg)
+			errs, _, err := svc.Replace(tc.cfg, "test")
 			if err != nil {
 				t.Fatalf("Replace: %v", err)
 			}
@@ -103,7 +103,7 @@ func TestReplaceAcceptsAConfigWithAStorage(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	svc := NewService(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}))
+	errs, _, err := svc.Replace(withStorages(StorageEntry{Name: "local", Path: "/backups", Default: true}), "test")
 	if err != nil || len(errs) != 0 {
 		t.Fatalf("a well-formed config must save: errs=%+v err=%v", errs, err)
 	}

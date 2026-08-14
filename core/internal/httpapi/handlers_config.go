@@ -82,7 +82,7 @@ func (d Deps) handleConfigPut() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
 			return
 		}
-		errs, applied, err := d.Config.Replace(cfg)
+		errs, applied, err := d.Config.Replace(cfg, config.SourcePutConfig)
 		if err != nil {
 			d.Log.Error("config write failed", "error", err)
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not write config")

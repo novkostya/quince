@@ -59,7 +59,7 @@ func TestReplaceRefusesACollidingParentDatasetAndWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	errs, _, err := svc.Replace(collidingPair())
+	errs, _, err := svc.Replace(collidingPair(), "test")
 	if err != nil {
 		t.Fatalf("Replace returned a transport error, want validation errors: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestReplaceRefusesACollidingParentDatasetAndWritesNothing(t *testing.T) {
 func TestTheCollisionRefusalNamesBothStoragesAndTheDataset(t *testing.T) {
 	svc, _ := serviceOver(t, oneGoodStorage)
 
-	errs, _, err := svc.Replace(collidingPair())
+	errs, _, err := svc.Replace(collidingPair(), "test")
 	if err != nil || len(errs) == 0 {
 		t.Fatalf("want validation errors, got errs=%v err=%v", errs, err)
 	}
@@ -121,7 +121,7 @@ func TestReplaceRefusesZFSIntentWithNoParentDataset(t *testing.T) {
 	}
 	c.Storage = &list
 
-	errs, _, err := svc.Replace(c)
+	errs, _, err := svc.Replace(c, "test")
 	if err != nil || len(errs) == 0 {
 		t.Fatalf("zfs with no parent_dataset was accepted; errs=%v err=%v", errs, err)
 	}
@@ -148,7 +148,7 @@ func TestReplaceStillAcceptsACoherentConfig(t *testing.T) {
 	}
 	c.Storage = &list
 
-	errs, _, err := svc.Replace(c)
+	errs, _, err := svc.Replace(c, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

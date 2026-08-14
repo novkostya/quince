@@ -149,7 +149,7 @@ func TestASuccessfulReplaceClearsTheDiscardRecord(t *testing.T) {
 	// file, and refusing it would leave them with no route back.
 	fixed := Default()
 	fixed.Storage = &[]StorageEntry{{Name: "one", Path: "/backups-a", Default: true, Backend: "copy"}}
-	if errs, _, err := svc.Replace(fixed); err != nil || len(errs) > 0 {
+	if errs, _, err := svc.Replace(fixed, "test"); err != nil || len(errs) > 0 {
 		t.Fatalf("the repair replace was refused: errs = %v, err = %v", errs, err)
 	}
 

@@ -47,7 +47,7 @@ func TestAnApplierRunsExactlyOncePerWrite(t *testing.T) {
 	svc.Subscribe("counter", func(_, _ Config) []Warning { calls++; return nil })
 
 	for i := 0; i < 3; i++ {
-		if errs, _, err := svc.Replace(validConfig()); err != nil || len(errs) > 0 {
+		if errs, _, err := svc.Replace(validConfig(), "test"); err != nil || len(errs) > 0 {
 			t.Fatalf("replace %d: errs=%v err=%v", i, errs, err)
 		}
 	}
@@ -67,7 +67,7 @@ func TestARefusedWriteDoesNotNotify(t *testing.T) {
 	// Invalid: fails Validate before anything is written.
 	bad := validConfig()
 	bad.Backup.PreferredTransport = "carrier-pigeon"
-	if errs, _, _ := svc.Replace(bad); len(errs) == 0 {
+	if errs, _, _ := svc.Replace(bad, "test"); len(errs) == 0 {
 		t.Fatal("setup is wrong: that document should not validate")
 	}
 	// Refused by CheckStorages rather than Validate — the other refusal path, and it is past
@@ -75,7 +75,7 @@ func TestARefusedWriteDoesNotNotify(t *testing.T) {
 	empty := validConfig()
 	none := []StorageEntry{}
 	empty.Storage = &none
-	if errs, _, _ := svc.Replace(empty); len(errs) == 0 {
+	if errs, _, _ := svc.Replace(empty, "test"); len(errs) == 0 {
 		t.Fatal("setup is wrong: an empty storage list should be refused")
 	}
 
@@ -98,12 +98,12 @@ func TestAnApplierSeesTheOldAndTheNewConfig(t *testing.T) {
 
 	first := validConfig()
 	first.Backup.PreferredTransport = "usb"
-	if _, _, err := svc.Replace(first); err != nil {
+	if _, _, err := svc.Replace(first, "test"); err != nil {
 		t.Fatal(err)
 	}
 	second := validConfig()
 	second.Backup.PreferredTransport = "wifi"
-	if _, _, err := svc.Replace(second); err != nil {
+	if _, _, err := svc.Replace(second, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,7 +126,7 @@ func TestApplierWarningsAreReturnedAndNeverStored(t *testing.T) {
 		return []Warning{{Path: "storage", Message: "could not re-open the disk"}}
 	})
 
-	_, warns, err := svc.Replace(validConfig())
+	_, warns, err := svc.Replace(validConfig(), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestEveryApplierRunsInOrderEvenWhenOneWarns(t *testing.T) {
 		return nil
 	})
 
-	_, warns, err := svc.Replace(validConfig())
+	_, warns, err := svc.Replace(validConfig(), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestAPanickingApplierDoesNotFailTheWrite(t *testing.T) {
 
 	next := validConfig()
 	next.Backup.PreferredTransport = "wifi"
-	errs, warns, err := svc.Replace(next)
+	errs, warns, err := svc.Replace(next, "test")
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("a panicking applier failed the write: errs=%v err=%v", errs, err)
 	}
@@ -214,7 +214,7 @@ func TestAnApplierMayCallBackIntoTheService(t *testing.T) {
 
 	next := validConfig()
 	next.Backup.PreferredTransport = "wifi"
-	if _, _, err := svc.Replace(next); err != nil {
+	if _, _, err := svc.Replace(next, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if seen != "wifi" {
@@ -231,7 +231,7 @@ func TestForgetStorageNotifiesAppliers(t *testing.T) {
 		StorageEntry{Name: "local", Path: "/backups", Default: true, Backend: "auto"},
 		StorageEntry{Name: "shuttle", Path: "/mnt/shuttle", Backend: "auto"},
 	)
-	if _, _, err := svc.Replace(two); err != nil {
+	if _, _, err := svc.Replace(two, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,7 +272,7 @@ func TestConcurrentWritesDoNotRaceTheApplierList(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, _ = svc.Replace(validConfig())
+			_, _, _ = svc.Replace(validConfig(), "test")
 		}()
 	}
 	wg.Wait()
@@ -334,7 +334,7 @@ func TestTheLastApplierCallMatchesTheLiveConfig(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _, _ = svc.Replace(first)
+		_, _, _ = svc.Replace(first, "test")
 	}()
 	<-entered // the first applier is now inside, holding the write open
 
@@ -343,7 +343,7 @@ func TestTheLastApplierCallMatchesTheLiveConfig(t *testing.T) {
 	secondDone := make(chan struct{})
 	go func() {
 		defer close(secondDone)
-		_, _, _ = svc.Replace(second)
+		_, _, _ = svc.Replace(second, "test")
 	}()
 
 	// Give the second write every chance to overtake. Under writeMu it is parked on the mutex;
@@ -382,7 +382,7 @@ func TestConcurrentForgetsBothTakeEffect(t *testing.T) {
 		StorageEntry{Name: "shuttle", Path: "/mnt/shuttle", Backend: "auto"},
 		StorageEntry{Name: "attic", Path: "/mnt/attic", Backend: "auto"},
 	)
-	if _, _, err := svc.Replace(three); err != nil {
+	if _, _, err := svc.Replace(three, "test"); err != nil {
 		t.Fatal(err)
 	}
 

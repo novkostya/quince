@@ -130,7 +130,8 @@ func (s *Service) ForgetStorage(name string, busyReason func(string) string) (Fo
 
 	// Replace re-validates the whole document and runs CheckStorages, so nothing here has to
 	// re-derive what a coherent declaration is. Its errors reach the caller as the same 422.
-	errs, warns, err := s.replaceLocked(next)
+	// One caller, so the route names itself — see AddStorage for the caveat (quince#967).
+	errs, warns, err := s.replaceLocked(next, SourceForgetStorage)
 	switch {
 	case err != nil:
 		return ForgetRefused, nil, nil, err
