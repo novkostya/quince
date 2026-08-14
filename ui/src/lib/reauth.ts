@@ -56,3 +56,38 @@ export async function proveWithPasskey(
   // different questions and the sign-in surface asks the second.
   return out.proof;
 }
+
+// WHAT THE SERVER SAID WOULD SATISFY A REFUSAL — qn.6o slice 2's `accepts`, read on the client.
+//
+// HERE RATHER THAN IN A COMPONENT because it is wire-shaped knowledge with two consumers since
+// slice 5: the add row and the passkey list. It lived in `AddPasskeyRow.tsx` while there was one.
+
+// A factor the server named. A union of the two strings rather than a boolean pair, so a third
+// factor widens this and fails the build at every place that switches on it.
+export type Factor = "password" | "passkey";
+
+// What a caller presents once a factor has satisfied the challenge. Exactly one of the two, matching
+// the server's `Presented`.
+export type Present = { current_password: string } | { proof: string };
+
+// acceptsOf pulls the list off a refusal.
+//
+// READ OFF `details`, WHICH IS THE WHOLE PARSED BODY, rather than promoted to a field on `APIError`.
+// That class carries `code`, `message` and the raw body; adding a typed field for one code's one
+// extra key would put a `reauth_required`-shaped hole in a type every error in the product uses.
+//
+// NARROWED RATHER THAN CAST. The values come off the wire, so a `Factor[]` assertion would be a
+// promise this code cannot keep — a daemon sending a factor this build has never heard of would flow
+// straight into the challenge and render nothing for it.
+//
+// UNDEFINED FOR AN ABSENT OR UNRECOGNISABLE LIST, and callers must treat that as *the server did not
+// say* rather than as *nothing would work*. The two are different refusals: the server sends
+// `last_credential` for a genuine dead end (D4), so an absent list here means an older daemon.
+export function acceptsOf(err: { details?: unknown }): Factor[] | undefined {
+  const body = err.details;
+  if (!body || typeof body !== "object" || !("error" in body)) return undefined;
+  const list = (body as { error?: { accepts?: unknown } }).error?.accepts;
+  if (!Array.isArray(list)) return undefined;
+  const known = list.filter((f): f is Factor => f === "password" || f === "passkey");
+  return known.length > 0 ? known : undefined;
+}
