@@ -20,6 +20,8 @@ export function PasswordForm({
   footer,
   variant = "card",
   passkeys = false,
+  password: wantPassword = true,
+  passkeyProof,
   onPasskey,
   onSubmit,
 }: {
@@ -41,6 +43,28 @@ export function PasswordForm({
   // deliberately: there is nothing to sign in to before a password exists, and the browser would be
   // asked to offer a credential for an account that has not been created.
   passkeys?: boolean;
+  // `password` — render the password field at all. DEFAULT TRUE, which is `variant`'s rule for the
+  // same reason: a surface that forgets to pass this stays exactly as it was, so login and setup
+  // cannot be changed by this prop existing.
+  //
+  // FALSE IS FOR THE CHALLENGE ONLY (qn.6o D5/G5), on a PASSWORDLESS install, where `accepts` omits
+  // the password because there is no password to type. Rendering it anyway would offer a field that
+  // cannot succeed — `qn.6g`'s rule, that a remedy the user cannot follow is the same defect as a
+  // silent failure.
+  password?: boolean;
+  // `passkeyProof` — qn.6o D5. The passkey button PROVES a present credential instead of signing in.
+  //
+  // A SEPARATE PROP FROM `passkeys`, NOT A MODE ON IT, because the two differ in the one way that
+  // matters: `passkeys` arms CONDITIONAL MEDIATION — browser autofill on load — and a challenge must
+  // be modal. `lib/reauth.ts` states that rule: *"a non-modal request sitting in an autofill dropdown
+  // is for a login form nobody has committed to yet."* Overloading one boolean would make the modal
+  // rule depend on remembering which value means which, which is the shape that gets passed the
+  // wrong way round.
+  //
+  // Present → the button renders and runs this instead of `signInWithPasskey`. `passkeys` stays
+  // false, and G6 asserts that on the prop, because an autofill prompt on a challenge is invisible
+  // in jsdom.
+  passkeyProof?: { cta: string; run: () => Promise<void> };
   // onPasskey is called after a successful passkey sign-in, so the page can route exactly as it
   // does after a password one. Absent on setup, where there is nothing to sign in to yet.
   onPasskey?: () => void | Promise<void>;
@@ -72,6 +96,14 @@ export function PasswordForm({
     setBusy(true);
     setError(null);
     try {
+      // THE CHALLENGE'S CEREMONY WHEN IT SUPPLIED ONE, and the sign-in ceremony otherwise. Both are
+      // modal `credentials.get()` calls behind this same button, so the error handling below is
+      // genuinely shared rather than coincidentally similar — `NotAllowedError` means the same
+      // thing to both, and neither can tell a cancellation from an absent credential.
+      if (passkeyProof) {
+        await passkeyProof.run();
+        return;
+      }
       await signInWithPasskey({ conditional: false });
       await onPasskey?.();
     } catch (err) {
@@ -155,17 +187,19 @@ export function PasswordForm({
             value="quince-admin"
           />
         </div>
-        <div className="mt-4 flex flex-col gap-1">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            autoFocus
-            autoComplete={passkeys ? "current-password webauthn" : "current-password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </div>
+        {wantPassword ? (
+          <div className="mt-4 flex flex-col gap-1">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoFocus
+              autoComplete={passkeys ? "current-password webauthn" : "current-password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+        ) : null}
         {/* `extra` — qn.6m slice 4. Whatever the surface wants BETWEEN the password and its button:
             on setup that is the passkey offer, which is how quince#841 item 2 gets both options onto
             one screen without a second route or a dialog.
@@ -197,9 +231,14 @@ export function PasswordForm({
             ) : null}
           </div>
         ) : null}
-        <Button type="submit" className="mt-4 w-full" disabled={busy || password.length === 0}>
-          {busy ? "…" : cta}
-        </Button>
+        {/* NO PASSWORD FIELD MEANS NO SUBMIT BUTTON. It is disabled on an empty password, so leaving
+            it would render a permanently dead primary action next to the one control that works —
+            *"no silent caps or fallbacks"* read at the level of a button nobody can press. */}
+        {wantPassword ? (
+          <Button type="submit" className="mt-4 w-full" disabled={busy || password.length === 0}>
+            {busy ? "…" : cta}
+          </Button>
+        ) : null}
 
         {/* SHOWN WHENEVER PASSKEYS ARE ARMED, not only when one exists — because whether this device
             has one is UNDETECTABLE. Hiding it until we "know" is not an option the platform offers,
@@ -208,7 +247,7 @@ export function PasswordForm({
 
             `type="button"`, because components/ui/button.tsx sets none and a Button inside a form is
             a submit by default (quince#824, quince#828). Here that would post an empty password. */}
-        {passkeys ? (
+        {passkeys || passkeyProof ? (
           <Button
             type="button"
             variant="outline"
@@ -216,7 +255,7 @@ export function PasswordForm({
             disabled={busy}
             onClick={passkeySignIn}
           >
-            Sign in with a passkey
+            {passkeyProof ? passkeyProof.cta : "Sign in with a passkey"}
           </Button>
         ) : null}
         {footer}
