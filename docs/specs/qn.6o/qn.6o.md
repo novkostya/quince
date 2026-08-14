@@ -170,8 +170,22 @@ proof succeeds, slice 4 renders a distinct *"Create the passkey"* button whose c
 activation, with `register/begin(proof)` the single await before `create()`. One extra tap, on a
 path that has already shown one sheet.
 
-**UNMEASURED, and stated as such.** Chrome is lenient about activation for `create()` and Safari is
-strict; nobody has run either, and quince#976 records the same uncertainty.
+**MEASURED 2026-08-14, AND THE PREDICTION WAS WRONG.** Operator, on hardware: `quince auth reset` →
+passkey-only install set up on an iPhone → signed in on a Mac by QR → added a passkey → confirmed
+with the iPhone's passkey by QR → **the creation prompt appeared by itself.** Chaining `create()`
+off a passkey proof works, so **the mandatory fresh click is removed** (quince#996).
+
+**THE REASONING ABOVE IS KEPT BECAUSE IT WAS SOUND AND IT WAS LABELLED.** This paragraph read
+*"UNMEASURED, and stated as such — Chrome is lenient about activation for `create()` and Safari is
+strict; nobody has run either"*, and that honesty is what made the experiment obvious to run. A
+prediction that flags its own evidence is worth more than one that turns out right.
+
+**WHAT WAS MEASURED IS ONE ENGINE AND ONE TRANSPORT** — Safari driving a cross-device ceremony — so
+the button survives as a **fallback** rather than as a step: the chained attempt runs first, and a
+refusal renders the click instead of resetting the row. Where the measurement holds nobody sees it;
+where it does not, the user is one real click away. A single-platform pass is not a general one, and
+`registerPasskey` cannot tell a lost activation from a dismissed sheet — both answer `false` — so the
+caller decides on the one thing it does know: whether a human just clicked.
 
 **AND IT MAKES THE REGRESSION TABLE'S FIRST ROW AN INFERENCE**, which is corrected there rather than
 only here — that row is what a reader consults to decide which installs are already fine.
@@ -304,13 +318,25 @@ Beyond `make gates` / `make gates-ui` / `make gates-ui-e2e`:
   because the failure — an autofill prompt on a dialog — is invisible in jsdom.
 - **G7 (owner: Operator)** — **add a passkey on a password-only install, on hardware**: one
   authenticator prompt, no assert. This is the regression, and it is the story that cannot be proven
-  in CI.
+  in CI. **PASSED 2026-08-14.** Reset → first-run setup, password only, passkey offer declined →
+  sign in → Settings → add. The challenge offered **only the password**, one prompt, credential
+  created. Evidence rather than recollection: the passkey row is named `mac`, which the setup-screen
+  offer cannot produce (it hardcodes `This device`), and the audit log holds **no `reauth_passkey`**
+  for that window — so the proof was the password on an install with no passkeys.
 - **G8 (owner: Operator)** — **add a second passkey by asserting**, on hardware. This is `qn.6n`'s G7
-  under its own name, still unrun, and this rung is what finally makes it reachable from a UI.
+  under its own name, and this rung is what finally made it reachable from a UI. **PASSED
+  2026-08-14.** The audit log is the evidence: `reauth_passkey` at `18:44:48`, the new credential
+  created at `18:45:00` — an assertion authorised it, not the password.
 
-**Declared unrun until they are run.** `qn.6n` shipped seven green slices and its two hardware gates
-are still owed; this rung starts by repairing a defect that every one of those gates was consistent
-with.
+**BOTH ARE NOW RUN, and they had been owed since `qn.6n` shipped seven green slices without them.**
+That rung's own note read *"its two hardware gates are still owed; this rung starts by repairing a
+defect that every one of those gates was consistent with"* — which is the argument for running them,
+and it took the surfaces this rung built to make them runnable at all.
+
+**WHAT MADE THEM CHEAP IS WORTH KEEPING.** Both were confirmed against the **audit log and the
+credential rows**, not against anybody's memory of what they clicked — and the first attempt at G7
+was genuinely ambiguous until the passkey's NAME distinguished the two code paths. A gate whose pass
+can be read off the database afterwards is a different kind of gate from one that rests on a report.
 
 ---
 

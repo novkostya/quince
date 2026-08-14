@@ -72,10 +72,17 @@ export function AddPasskeyRow({
     setError(null);
   }
 
-  // create RUNS THE CEREMONY, AND EVERY CALLER OF IT IS A CLICK HANDLER. That is the whole of D1's
-  // corrected constraint (quince#988): `navigator.credentials.create()` needs transient activation,
-  // and there is at most ONE await — `register/begin` — between the click and the sheet.
-  async function create(present: { current_password: string } | { proof: string } | undefined) {
+  // create RUNS THE CEREMONY. `navigator.credentials.create()` wants transient activation, and there
+  // is at most ONE await — `register/begin` — between the gesture and the sheet.
+  //
+  // `chained` MARKS THE CALL THAT DID NOT COME FROM A CLICK — the one made straight off a passkey
+  // proof, where the user's gesture was spent on the proof's own authenticator sheet. It changes
+  // nothing about the attempt; it only decides what a REFUSAL means, which is the whole of the
+  // fallback below.
+  async function create(
+    present: { current_password: string } | { proof: string } | undefined,
+    chained = false,
+  ) {
     setBusy(true);
     setError(null);
     try {
@@ -88,6 +95,19 @@ export function AddPasskeyRow({
       if (added) {
         onAdded();
         reset();
+        return;
+      }
+      // A CHAINED REFUSAL IS NOT A DISMISSAL, AND THIS IS THE ONLY PLACE THAT CAN TELL.
+      // `registerPasskey` answers `false` for both a dismissed sheet and a `NotAllowedError` from
+      // lost activation, and it cannot distinguish them — but the CALLER knows whether a human just
+      // clicked. If nobody did, the likely cause is the activation D1 warns about, and the remedy is
+      // a real click. So the button that used to be mandatory becomes a FALLBACK.
+      //
+      // IT IS NEVER SILENT EITHER WAY, which is the defect this also fixes: before, a refusal here
+      // reset the row and nothing appeared, so pressing Add on a device that already holds the
+      // credential looked like a dead button.
+      if (chained && present) {
+        setStage({ at: "proved", present });
         return;
       }
       // A DISMISSED SHEET IS NOT AN ERROR and `registerPasskey` returns false for it. Say nothing
@@ -142,10 +162,23 @@ export function AddPasskeyRow({
             await create(present);
             return;
           }
-          // THE PASSKEY PATH MUST NOT. The gesture was spent on the proof's own authenticator
-          // sheet, and completing a sheet grants no new activation — so chaining `create()` here
-          // is quince#976 exactly. Park the proof and ask for one more click (D1, quince#988).
-          setStage({ at: "proved", present });
+          // THE PASSKEY PATH CHAINS TOO — AND THAT IS A MEASUREMENT OVERTURNING A PREDICTION.
+          //
+          // D1 as corrected on quince#988 said this MUST fail: the gesture was spent on the proof's
+          // own authenticator sheet, completing a sheet grants no new activation, so `create()`
+          // arrives three awaits and one sheet past the last real click. The reasoning was sound and
+          // it was explicitly labelled UNMEASURED.
+          //
+          // MEASURED 2026-08-14 ON HARDWARE, and it PASSES: passwordless install, signed in on a Mac
+          // by QR, added a passkey, confirmed with the iPhone's passkey by QR — and the creation
+          // prompt appeared BY ITSELF. So the mandatory extra tap is gone.
+          //
+          // ONE ENGINE, ONE TRANSPORT, WHICH IS WHY THE FALLBACK STAYS. What was measured is Safari
+          // driving a cross-device ceremony; a stricter engine could still refuse, and the honest
+          // response to a single-platform measurement is not to assume it generalises. `create`'s
+          // `chained` flag turns that refusal into the button rather than into silence — so where the
+          // measurement holds nobody sees it, and where it does not the user is one real click away.
+          await create(present, true);
         }}
       />
     ) : null;
