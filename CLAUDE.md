@@ -712,13 +712,11 @@ Canon — this file, **three of** the four docs it names as canon, plus `CODEOWN
 by `@novkostya`, the human account.
 
 **`docs/contracts.md` IS DELIBERATELY NOT OWNED** — Operator ruling, 2026-08-14, taken on measurement
-rather than principle. Across the **14** merged PRs that touched it the code-owner review was
-`APPROVED` **14** times and `CHANGES_REQUESTED` **0**, and of the 10 sampled, **none** carried a
-review or comment body. The gate had never altered a contracts PR; what it supplied was latency on
-the most-touched document in the repository. **A required approver who changes nothing is not
-oversight — and fourteen silent approvals is what an unexercised discipline looks like from the
-outside.** Recorded so that a session finding no owner on that path learns it was decided, rather
-than assuming it drifted.
+over the whole merge history and against a named counterexample. **It is a decision, not an
+omission: do not restore the line.** The gate was a routing rule rather than a check on the
+contract, and the return did not earn a mandatory round trip on the most-touched document in the
+repository. The figures are in quince#953 and are deliberately not repeated here — they are
+provenance, and provenance in canon is a number nobody re-derives and everybody cites.
 
 **What stays owned is what the App must not be able to re-authorise: this file, and `CODEOWNERS`
 itself.** That second one is the keystone — own it and every other protection is one edit away. The
