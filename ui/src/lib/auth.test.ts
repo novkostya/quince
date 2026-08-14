@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { api, APIError } from "./api";
 import { changePassword } from "./auth";
 import * as webauthn from "./webauthn";
+import * as reauth from "./reauth";
+
 
 // qn.6n slice 6 — the re-authentication prompt, and the shape that lets it land BEFORE the server
 // demands a proof.
@@ -22,7 +24,7 @@ describe("changing the password", () => {
   // 204 to the first attempt, so no ceremony runs and the user sees no Face ID sheet at all.
   it("does not re-authenticate when the server accepts the first attempt", async () => {
     const put = vi.spyOn(api, "put").mockResolvedValue(undefined);
-    const prove = vi.spyOn(webauthn, "proveWithPasskey");
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
 
     await changePassword("old", "new");
 
@@ -39,7 +41,7 @@ describe("changing the password", () => {
       .spyOn(api, "put")
       .mockRejectedValueOnce(reauthRequired())
       .mockResolvedValueOnce(undefined);
-    const prove = vi.spyOn(webauthn, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+    const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
 
     await changePassword("", "brand-new");
 
@@ -60,7 +62,7 @@ describe("changing the password", () => {
     const put = vi
       .spyOn(api, "put")
       .mockRejectedValue(new APIError(401, "bad_password", "current password is incorrect"));
-    const prove = vi.spyOn(webauthn, "proveWithPasskey");
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
 
     await expect(changePassword("wrong", "new")).rejects.toMatchObject({ code: "bad_password" });
     expect(prove).not.toHaveBeenCalled();
@@ -71,7 +73,7 @@ describe("changing the password", () => {
   // into a silent hang behind repeated Face ID sheets.
   it("gives up after one retry rather than looping", async () => {
     const put = vi.spyOn(api, "put").mockRejectedValue(reauthRequired());
-    const prove = vi.spyOn(webauthn, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+    const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
 
     await expect(changePassword("", "new")).rejects.toMatchObject({ code: "reauth_required" });
     expect(prove).toHaveBeenCalledTimes(1);
@@ -83,8 +85,61 @@ describe("changing the password", () => {
   // and replaced by the server's error.
   it("surfaces a cancelled prompt rather than the 401 behind it", async () => {
     vi.spyOn(api, "put").mockRejectedValue(reauthRequired());
-    vi.spyOn(webauthn, "proveWithPasskey").mockRejectedValue(new Error("no credential"));
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(new Error("no credential"));
 
     await expect(changePassword("", "new")).rejects.toThrow("no credential");
+  });
+});
+
+// REGISTRATION RETRIES AT **BEGIN**, NOT AROUND THE WRITE — qn.6n slice 5b, and the asymmetry with
+// `changePassword` above is the point rather than an inconsistency.
+//
+// A WebAuthn creation ceremony is consumed by `navigator.credentials.create()`. A client that
+// learned at `finish` that a proof was required would have to run it again — a second Face ID sheet
+// for a credential the user has already made. So the server refuses before a ceremony exists and the
+// client retries there.
+describe("adding a passkey", () => {
+  // `navigator.credentials` does not exist in jsdom, and these tests never reach it: every case
+  // below is decided by the FIRST `begin` call.
+  it("re-authenticates at begin, then starts the ceremony with the proof", async () => {
+    const post = vi
+      .spyOn(api, "post")
+      .mockRejectedValueOnce(reauthRequired())
+      // The second `begin` resolves with a body that fails later, at the browser call — which is
+      // fine: what is asserted here is the two POSTs and the proof, not the ceremony.
+      .mockResolvedValueOnce({ ceremony: "C", options: { publicKey: {} } });
+    const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+
+    await expect(webauthn.registerPasskey("phone")).rejects.toBeDefined();
+
+    expect(prove).toHaveBeenCalledWith("add_passkey");
+    expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {});
+    expect(post).toHaveBeenNthCalledWith(2, "/api/auth/passkeys/register/begin", {
+      proof: "PROOF-TOKEN",
+    });
+  });
+
+  // FIRST RUN MUST NOT PROMPT. There is no session and no credential to present, so asking would be
+  // asking the user to prove possession of something they have not created yet.
+  it("never re-authenticates on the first-run pair", async () => {
+    vi.spyOn(api, "post").mockRejectedValue(reauthRequired());
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
+
+    await expect(webauthn.registerPasskey("phone", { firstRun: true })).rejects.toMatchObject({
+      code: "reauth_required",
+    });
+    expect(prove).not.toHaveBeenCalled();
+  });
+
+  it("does not re-authenticate on any other refusal", async () => {
+    vi.spyOn(api, "post").mockRejectedValue(
+      new APIError(409, "passkeys_unsupported_here", "passkeys need a domain name"),
+    );
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
+
+    await expect(webauthn.registerPasskey("phone")).rejects.toMatchObject({
+      code: "passkeys_unsupported_here",
+    });
+    expect(prove).not.toHaveBeenCalled();
   });
 });
