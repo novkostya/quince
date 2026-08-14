@@ -311,11 +311,11 @@ func TestTheTwoRPIDRulesAreOpposite(t *testing.T) {
 		t.Fatalf("Configured = %v (err=%v), want true — claiming does NOT filter by rpId", ok, err)
 	}
 	// Can prove a removal here — filtered, so the same credential does NOT get a ceremony.
-	if err := svc.provable(OpRemovePassword, here); !errors.As(err, &ErrLastCredential{}) {
+	if err := svc.provable(OpRemovePassword, here, ""); !errors.As(err, &ErrLastCredential{}) {
 		t.Fatalf("provable = %v, want ErrLastCredential — removal DOES filter by rpId", err)
 	}
 	// And it is not a blanket refusal: the credential's own address gets its ceremony.
-	if err := svc.provable(OpRemovePassword, elsewhere); err != nil {
+	if err := svc.provable(OpRemovePassword, elsewhere, ""); err != nil {
 		t.Fatalf("provable at the credential's own address = %v, want nil", err)
 	}
 }
