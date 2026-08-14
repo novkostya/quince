@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
-import { passkeysKey, usePasskeyList, rpIDOf, worksHere, passkeysSupported, type PasskeyList } from "@/features/settings/Passkeys";
+import { passkeysKey, usePasskeyList, rpIDOf, worksHere, type PasskeyList } from "@/features/settings/Passkeys";
 
 // The password controls on `/settings/auth` — qn.6m slice 6b, D4 and D7.
 //
@@ -130,11 +130,6 @@ export function PasswordControls() {
   const hasPassword = list.data?.has_password ?? true;
   const credentials = credentialState(list.data, hasPassword);
   const elsewhere = boundElsewhere(list.data);
-  // WHETHER THIS ADDRESS CAN HOLD A PASSKEY AT ALL — a different question from whether an existing
-  // one works here, and the one that decides whether the second remedy below is offerable. Read
-  // through the shared helper so this cannot answer differently from the `Passkeys` card, which is
-  // the defect the review found.
-  const canHoldPasskeys = passkeysSupported(list.data);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [changeBusy, setChangeBusy] = useState(false);
@@ -212,23 +207,22 @@ export function PasswordControls() {
             way in that does not depend on a device.
           </p>
         ) : null}
-        {/* THE SECOND REMEDY IS CONDITIONAL, AND OMITTING IT IS THE WHOLE FIX — quince#888 item 2
-            review. This said *"Set a password to fix that, or add a passkey for this address"*
-            unconditionally, while `Passkeys` ten lines above said *"an address like this cannot hold
-            a passkey"* with its Add button disabled. Two sections of one screen answering the same
-            question differently, and the sentence pointed at the one the user cannot follow.
+        {/* NAMED ADDRESSES ONLY WHEN THERE ARE ANY. A row with an empty `rp_id` cannot be produced by
+            this server, but it would have rendered "registered for ." rather than degrading.
 
-            AT A BARE IP THAT IS THE ONLY REACHABLE SHAPE OF THIS STATE, not a corner: `RPIDFromRequest`
-            returns the IP rather than "", so the unknown-rpId fallback above never fires, and
-            `isUsableRPID` refuses an IP, so no credential can ever match it. Every passwordless
-            install with a passkey, reached at its address, landed here.
-
-            `qn.6g`: a remedy the user cannot follow is the same defect as a silent failure. Saying
-            WHY it is not offered is left to the section above, which already says it in full — a
-            silent omission is honest, a contradiction is not.
-
-            NAMED ADDRESSES ONLY WHEN THERE ARE ANY. A row with an empty `rp_id` cannot be produced by
-            this server, but it would have rendered "registered for ." rather than degrading. */}
+            THE `passkeysSupported` CONDITION THAT USED TO GUARD THE SECOND REMEDY IS GONE WITH THE
+            REMEDY. quince#888 item 2's review made *"or add a passkey for this address"* conditional,
+            because at a bare IP no credential can ever match and the sentence pointed at something
+            the user could not do. Rule 1 now refuses that remedy in this state for EVERY address, so
+            the condition guards nothing — and a condition on a clause that no longer exists is the
+            archaeology the Operator ruled out on quince#595. The principle it served survives where
+            it belongs: `Passkeys` still disables its own Add button on an unsupported tier. */}
+        {/* BOTH REMEDIES THIS PARAGRAPH USED TO OFFER ARE NOW REFUSED — qn.6n D8, slice 7. It ended
+            *"Set a password to fix that, or add a passkey for this address"*, and rule 1 closed both:
+            each is a change to the credential set, so each demands a PRESENT credential, and here the
+            user has none that works. The copy was TRUE on `main` until the rung landed, which is why
+            it changes in this diff and not earlier — fixing it sooner would have sent somebody to a
+            console to escape a state the form really did fix. */}
         {credentials === "elsewhere-only" ? (
           <p className="mt-1 max-w-xl text-sm text-warn">
             This quince has no password, and none of its passkeys works at this address
@@ -239,8 +233,8 @@ export function PasswordControls() {
               </>
             ) : null}
             . A passkey only works at the address it was created on, so nothing can sign in here at
-            the moment. Set a password to fix that
-            {canHoldPasskeys ? ", or add a passkey for this address" : ""}.
+            the moment — and the form below cannot fix it, because changing what can sign in now
+            requires proving something that already can.
           </p>
         ) : null}
         {credentials === "unconfigured" ? (
@@ -334,25 +328,56 @@ export function PasswordControls() {
           </p>
         </section>
       ) : null}
-      {/* THE RECOVERY SENTENCE IS DIFFERENT HERE, WHICH IS WHY THIS IS NOT THE SAME BLOCK. The
-          passwordless copy above says the way back is `quince auth reset` — true when a passkey is
-          your one credential and it is lost. In these two states there is no working credential at
-          this address ALREADY, so a reset is not a way back in; it clears what is there and leaves
-          the install in first-run, which the form above reaches without a shell. Telling a user to
-          go and find a console when the fix is one field away would be the more expensive mistake,
-          and it is exactly the copy the old single branch would have shown them. */}
-      {credentials === "elsewhere-only" || credentials === "unconfigured" ? (
+      {/* THE TWO STATES SPLIT HERE — qn.6n D8, slice 7, and quince#903. They shared one sentence
+          because rule 1 did not exist: on `main` before this rung, `PUT /api/auth/password` accepted
+          an absent `current_password`, so *"use the form above"* was true in BOTH. Rule 1's exemption
+          is `Configured()`, which is exactly what separates them:
+
+            unconfigured    no credentials at all → NOT configured → exempt. The form still works.
+            elsewhere-only  passkeys exist, none here → CONFIGURED → rule 1 applies. The form does not.
+
+          quince#895 split this section from `passwordless`, correctly, and one split short. */}
+      {credentials === "unconfigured" ? (
         <section>
-          <h2 className="text-sm font-semibold">
-            {credentials === "unconfigured"
-              ? "This quince has no way to sign in"
-              : "No passkey of yours works at this address"}
-          </h2>
+          <h2 className="text-sm font-semibold">This quince has no way to sign in</h2>
           <p className="mt-1 max-w-xl text-sm text-muted">
             Use the form above — you are signed in now, so you can set a password without console
             access. <code className="font-mono text-fg">quince auth reset</code> is not the way back
             from here: it clears credentials rather than restoring them, and you would still have to
             set one afterwards.
+          </p>
+        </section>
+      ) : null}
+      {/* AND THE CHEAPER REMEDY IS NAMED FIRST, WHICH D8 DID NOT ANTICIPATE. The spec's analysis
+          concluded that `quince auth reset` was *"what is genuinely true there"* — it is true, and it
+          is not the only thing. A passkey registered for another address still WORKS at that address:
+          reach quince there, and setting a password satisfies rule 1 with the credential you have.
+          The password then works everywhere, including here.
+
+          Verified rather than assumed before this copy was written: `provable` imposes no restriction
+          on `set_password`, and `FinishReauth` resolves the credential against the ceremony's own
+          rpId — so an assertion at the address the passkey belongs to mints a usable proof.
+
+          CONDITIONAL, because reachability is the user's fact and not ours. A name in the credential
+          list may be a tunnel they no longer run, so this offers the route and the console both,
+          rather than promising one that may not exist. */}
+      {credentials === "elsewhere-only" ? (
+        <section>
+          <h2 className="text-sm font-semibold">No passkey of yours works at this address</h2>
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            The form above cannot help here: setting a password now requires proving a credential
+            that already works, and none of yours does at this address.
+            {elsewhere.length > 0 ? (
+              <>
+                {" If you can still reach quince at "}
+                <span className="font-mono">{elsewhere.join(" or ")}</span>
+                {", open it there — your passkey works at that address, and a password you set from " +
+                  "there will work everywhere, including here."}
+              </>
+            ) : null}{" "}
+            Otherwise the way back is{" "}
+            <code className="font-mono text-fg">quince auth reset</code> at the console, which clears
+            every credential and every session and returns this install to first-run setup.
           </p>
         </section>
       ) : null}
