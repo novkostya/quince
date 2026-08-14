@@ -84,6 +84,10 @@ func authExempt(r *http.Request) bool {
 		// still means pre-auth and read-only, and quince#908's pre-auth WRITE went elsewhere for
 		// exactly that reason.
 		"GET /api/onboarding/probe/nonce", "GET /api/onboarding/probe",
+		// The offline certificate check, pre-auth for the same reason and Configured()-gated in the
+		// handler. A READ of two files the caller names — see handlers_certprobe.go for why that is
+		// bounded by the same argument as the pre-auth config write.
+		"POST /api/onboarding/certificate",
 		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
 		// Registration is deliberately NOT here: it needs a session, which is what makes it the
 		// half that touches none of these lists.
@@ -218,6 +222,10 @@ func setupAllowed(r *http.Request) bool {
 		// exactly when somebody is working out how to reach quince securely, and 503ing the probe
 		// would leave that step unable to check the name it is about to recommend.
 		"GET /api/onboarding/probe/nonce", "GET /api/onboarding/probe",
+		// The offline certificate check, pre-auth for the same reason and Configured()-gated in the
+		// handler. A READ of two files the caller names — see handlers_certprobe.go for why that is
+		// bounded by the same argument as the pre-auth config write.
+		"POST /api/onboarding/certificate",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
 		// The pre-auth transport opt-in (quince#908 slice 6). A zero-storage first run is exactly
 		// the install it exists for — the user has declared nothing yet and cannot even set a

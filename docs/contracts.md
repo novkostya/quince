@@ -500,6 +500,11 @@ GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_pro
      // deliberately rather than by a prefix widening underneath everybody.
      // complete = this origin is already encrypted, so nothing needs doing.
 
+POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → CertificateProbe
+     // PRE-AUTH, 409 once auth.Configured() — the same bound and the same argument
+     // as POST /api/config/insecure-transport. The OFFLINE half: NO NETWORK, EVER.
+     // Every refusal is carried IN the body; only a missing or relative path is a
+     // 422. NOT csrfExempt — a pre-auth page already holds a token.
 GET  /api/onboarding/probe/nonce  → {nonce}
      // PRE-AUTH, SAME-ORIGIN, and NEVER CORS-readable. The asymmetry IS the gate.
 GET  /api/onboarding/probe?nonce= → {nonce, detected}
@@ -508,6 +513,31 @@ GET  /api/onboarding/probe?nonce= → {nonce, detected}
      // An ungated call still answers 200 with no header: a refusal must be
      // indistinguishable from a network error to the page that sent it.
 ```
+
+**RULED and IMPLEMENTED: the OFFLINE CERTIFICATE CHECK — `POST /api/onboarding/certificate`
+(quince#908 §5, slice 4).** It answers *what is this pair I am about to declare?*, and **nothing else
+in quince performs that check before the pair goes live**: `validateTLS` says at its own definition
+that it checks *"well-formedness and nothing else"*, and `CheckTLS` runs at **startup** against the
+pair already in `config.yml`. Between typing a path and restarting, an unreadable, mismatched or
+expired pair is invisible.
+
+**It reads caller-supplied paths before authentication, and that is bounded by an existing ruling
+rather than a new one.** The endpoint opens a file the caller names, so it can tell a stranger whether
+a path exists and whether it parses. In the **unclaimed** window that grants strictly less than what
+is already on offer — quince#908 §3: `POST /api/auth/setup` is itself authExempt and one-shot, so
+anyone reaching the port can claim the install outright, and an admin can point `tls.cert_file`
+anywhere and read the same load error from the startup refusal. `Configured()` shuts it the instant
+the install is claimed, and the 409 is decided **before the body is read**.
+
+**IT IS NOT quince#940 §1's OPEN QUESTION.** That one is about a **configured** install — an admin
+changed the pair at runtime and the page says nothing — where this window has shut and the argument
+above does not apply. Both touch *a path and an OpenSSL error reach a client*; only that one is
+unruled, and building this settles nothing about it.
+
+**NOT `csrfExempt`, unlike the other pre-auth POSTs**, and the difference is worth knowing: `ensureCSRF`
+mints the cookie on **every** request including the exempt ones, so a page that has loaded at all
+already holds a token and can double-submit. Being pre-auth does not mean being unable to, so the
+protection is kept rather than waived.
 
 **RULED and IMPLEMENTED: the PROBE PAIR — Operator ruling 2026-08-14, for `qn.6f` slice 4 and
 quince#939.** A page redirects a user to a name only after proving *the client that is about to be
