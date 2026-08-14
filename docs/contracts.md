@@ -514,6 +514,10 @@ GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_pro
      // unencrypted_code is present ONLY when detected is `none` and says WHICH of the
      // four causes quince saw — they have four different remedies and two of them do
      // not point at quince at all. FROZEN; see the ruling below.
+     // tls_unusable_code says WHY quince's OWN certificate is not serving, when
+     // config.yml asks for one: unreadable | malformed | mismatched | not_yet_valid
+     // | expired | unknown. A CLASSIFICATION and never a path or loader text — that
+     // detail is AUTHENTICATED. Orthogonal to unencrypted_code; both may be set.
 
 POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → CertificateProbe
      // PRE-AUTH, 409 once auth.Configured() — the same bound and the same argument
@@ -809,6 +813,55 @@ refuses for the row above.
 list believes the header from anyone. True, and it occurs the moment an operator sets
 `QUINCE_TRUSTED_PROXIES` — which is the configuration the docs recommend — so it is covered rather than
 deferred.
+
+**RULED and IMPLEMENTED: a certificate quince could not use says WHICH KIND, pre-auth —
+`tls_unusable_code` (quince#940 §1).** Operator ruling 2026-08-14.
+
+**THE LINE IS KIND VERSUS DETAIL.** `GET /api/onboarding/https` may say *the certificate and the key
+do not match* · *the file could not be read* · *it has expired*, on a **claimed** install, before
+authentication — a classification carrying **no filesystem path and no OpenSSL text**. `CheckTLS`'s
+raw `Detail` is **authenticated** and reaches a signed-in session only.
+
+**Why the line is there.** A pre-auth observer already knows TLS is not working — they are reading
+the page over http — so the classification tells them nothing the symptom does not. **A path is
+different in kind**: it is filesystem layout, and quince#908 §3's argument does not stretch to cover
+it, because that argument holds only where an install can be claimed outright. This one is claimed.
+And the actionable half must NOT sit behind the session, because a broken certificate is exactly
+what strands an admin on plain http with no way to sign in.
+
+**THE VALUES ARE `tlsx.Inspect`'s OWN OUTCOMES**, passed through rather than re-mapped, so there is
+one classification in the product instead of two that can drift: `unreadable · malformed ·
+mismatched · not_yet_valid · expired`, plus **`unknown`** — the honest answer when the pair inspects
+clean and is still not loaded. The ruling asks for that by name: *quince could not use this
+certificate and could not tell why* beats leaking the loader's string to say something. `usable`
+never appears; the field is absent instead.
+
+**`Inspect` ALREADY DRAWS THE RULING'S LINE.** Its `Outcome` is a closed enum with no path in it;
+its `Reason` names the file by design (quince#514) and therefore stays authenticated. Two fields on
+a type this rung shipped a week earlier.
+
+**THE TIER CARD IS REPLACED, NOT REPEATED, WHEN IT IS SET** — required by the ruling. *"Point
+`tls.cert_file` and `tls.key_file` at a certificate"* is the thing this user has already done, which
+is why quince has a failure to report; leaving it up is two messages contradicting each other on one
+card.
+
+**`CheckTLS` IS NOT THE SOURCE, THOUGH §1 NAMES IT.** It is a STARTUP gate — `main` treats
+`!req.OK()` as fatal — so a daemon that is serving has `Unusable: false` **by construction**, and
+surfacing it would surface `false` forever. The state §1 describes is the RUNTIME edit, where
+`subscribeTLS` warns and keeps serving; it lives in `tlsx.Keeper`. Recorded because a reader
+following §1 literally would wire up a field that is always false.
+
+**THE READ IS GATED ON `!HasCertificate()`, which is a PRE-AUTH cost decision.** `Inspect` reads two
+files, so an ungated check would let any unauthenticated caller drive disk IO. Only a config that
+ASKS for TLS while the daemon serves NO certificate reaches the read — and that is also the only
+case that can reach this page, because a failed *rotation* leaves the previous certificate loaded and
+`plainHalf` redirects that user to https, where they get `detected: tls` instead.
+
+**THE REQUEST'S `Host` IS NOT PASSED TO `Inspect`.** `wrong_host` is a question about the name a user
+is heading for, which this endpoint has no opinion about — the certificate STEP asks it, with the
+name they typed. Passing it would report a fault for every operator reaching a working certificate by
+IP or by a second name.
+
 **Pre-auth is an Operator ruling** (2026-08-02, quince#501), and the chicken-and-egg is the whole
 rung: over plain http to a LAN address the browser discards the session cookie, so the page
 explaining that cannot sit behind the door the defect locks.

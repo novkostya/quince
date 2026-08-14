@@ -439,7 +439,39 @@ type OnboardingHTTPS struct {
 	// UnencryptedCode is set ONLY when Detected is `none`, and omitted otherwise — there is no
 	// question to answer when the origin IS encrypted. See the Unencrypted* constants.
 	UnencryptedCode string `json:"unencrypted_code,omitempty"`
+	// TLSUnusableCode is set when `config.yml` ASKS for TLS and the daemon is serving no
+	// certificate — quince tried the operator's pair, failed, and knows what kind of failure it
+	// was (quince#940 §1). Omitted whenever TLS is off or the certificate is being served.
+	//
+	// A CLASSIFICATION AND NEVER A DETAIL. Operator ruling 2026-08-14: the KIND may be pre-auth on a
+	// claimed install, and the raw reason — which names the file and carries the loader's own text —
+	// is AUTHENTICATED. A pre-auth observer already knows TLS is not working, because they are
+	// reading the page over http; a filesystem path is different in kind.
+	//
+	// IT IS ORTHOGONAL TO `UnencryptedCode`, and both can be set at once: one says why this
+	// CONNECTION is not encrypted, the other says why quince's OWN certificate is not serving. A
+	// user with no proxy and a mismatched pair has two true answers and needs both.
+	TLSUnusableCode string `json:"tls_unusable_code,omitempty"`
 }
+
+// TLS failure kinds for OnboardingHTTPS.TLSUnusableCode (quince#940 §1).
+//
+// THE VALUES ARE `tlsx.Inspect`'s OWN OUTCOMES, passed through rather than re-mapped, so there is
+// one classification in the product instead of two that can drift. `usable` never appears here: a
+// pair that inspects clean is not a failure, and the field is absent.
+//
+// FROZEN, like every other enum on this surface: a client renders a different sentence for each.
+const (
+	TLSUnusableUnreadable  = "unreadable"    // the file could not be read at all
+	TLSUnusableMalformed   = "malformed"     // read, but not PEM quince could parse
+	TLSUnusableMismatched  = "mismatched"    // the certificate and the key are not a pair
+	TLSUnusableNotYetValid = "not_yet_valid" // its validity period has not started
+	TLSUnusableExpired     = "expired"       // its validity period has ended
+	// TLSUnusableUnknown is the honest answer when the pair inspects CLEAN and is still not loaded.
+	// The ruling asks for exactly this rather than a guess: *quince could not use this certificate
+	// and could not tell why* beats leaking the loader's string to say something.
+	TLSUnusableUnknown = "unknown"
+)
 
 // CertificateProbeRequest is POST /api/onboarding/certificate (quince#908 §5, slice 4).
 //

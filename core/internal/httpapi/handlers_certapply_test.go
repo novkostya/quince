@@ -91,6 +91,14 @@ func (k *fakeKeeper) SetFiles(certFile, keyFile string) error {
 	return nil
 }
 
+// HasCertificate is what `tlsUnusableCode` reads (quince#940 §1). It reports true once the fake has
+// been pointed at a pair, which is what the real Keeper does after a load that succeeds.
+func (k *fakeKeeper) HasCertificate() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.calls) > 0 && k.calls[len(k.calls)-1][0] != ""
+}
+
 func (k *fakeKeeper) last() ([2]string, bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()

@@ -282,3 +282,63 @@ describe("what quince saw behind `detected: none`", () => {
     expect(screen.queryByText(/looks like something is in front/i)).not.toBeInTheDocument();
   });
 });
+
+// quince#940 §1 — A BROKEN CERTIFICATE STOPS BEING INVISIBLE, AND STOPS BEING TOLD TO TRY AGAIN.
+describe("a certificate quince could not use", () => {
+  function broken(code: string) {
+    vi.spyOn(api, "get").mockResolvedValue({
+      complete: false,
+      detected: "none",
+      unencrypted_code: "no_proxy_seen",
+      tls_unusable_code: code,
+    });
+  }
+
+  // THE RULING REQUIRES THIS: the tier card must stop being OFFERED when the pair is unusable.
+  // "Point tls.cert_file and tls.key_file at a certificate" is the thing this user has already
+  // done — it is why quince has a failure to report — so leaving it up is two messages
+  // contradicting each other on one card.
+  it("replaces the instruction the user has already followed", async () => {
+    broken("mismatched");
+    renderPage();
+
+    expect(await screen.findByText(/tried your certificate and could not use it/i)).toBeInTheDocument();
+    expect(screen.queryByText(/at a certificate and key, mounted/i)).not.toBeInTheDocument();
+  });
+
+  // ONE CASE PER TEST rather than a loop. The first version looped and called `restoreAllMocks`
+  // between iterations, which left `api.get` unmocked for the next one — so the fifth case rendered
+  // an EMPTY PAGE and failed as *"the copy is missing"* when the page had never loaded at all. A
+  // green-for-the-wrong-reason in reverse, and the same class as quince-devlog#243.
+  it.each([
+    ["mismatched", /does not belong to that certificate/i],
+    ["expired", /Renew it/i],
+    ["unreadable", /still has to be mounted/i],
+    ["not_yet_valid", /check this machine's clock/i],
+    ["unknown", /cannot tell why/i],
+  ])("names a next action specific to %s", async (code, expected) => {
+    broken(code as string);
+    renderPage();
+    expect(await screen.findByText(expected as RegExp)).toBeInTheDocument();
+  });
+
+  // NO PATH AND NO LOADER TEXT — the server never sends them, and the page must not invent a place
+  // to put them either.
+  it("shows no filesystem path", async () => {
+    broken("unreadable");
+    const { container } = renderPage();
+
+    await screen.findByText(/tried your certificate and could not use it/i);
+    expect(container.textContent).not.toMatch(/\/etc\/|\.pem|\.key\b/);
+  });
+
+  // AND THE ORDINARY INSTRUCTION SURVIVES when there is no failure to report — the common case is a
+  // user who has not configured TLS at all, and they still need to be told how.
+  it("keeps the instruction when no certificate is configured", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ complete: false, detected: "none" });
+    renderPage();
+
+    expect(await screen.findByText(/at a certificate and key, mounted/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not use it/i)).not.toBeInTheDocument();
+  });
+});

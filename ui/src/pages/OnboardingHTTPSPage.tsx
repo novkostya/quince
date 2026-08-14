@@ -78,7 +78,7 @@ export function OnboardingHTTPSPage() {
           <Incomplete firstRun={firstRun} code={q.data.unencrypted_code} />
         )}
 
-        {showTiers ? <Tiers firstRun={firstRun} /> : null}
+        {showTiers ? <Tiers firstRun={firstRun} tlsUnusable={q.data?.tls_unusable_code} /> : null}
       </div>
     </div>
   );
@@ -249,7 +249,29 @@ function Incomplete({
 // THE BADGES STAY IN BOTH MODES. They are the most useful thing on the page: they rank four
 // options at a glance, which is exactly what somebody choosing needs.
 // returned. Rendered for a failed check as well as an unencrypted one.
-function Tiers({ firstRun }: { firstRun: boolean }) {
+// TLSFailure says WHAT KIND of failure quince met with the operator's own pair — never a path and
+// never the loader's text, which are authenticated (Operator ruling 2026-08-14, quince#940 §1).
+//
+// Each sentence names a DIFFERENT next action, which is the whole point: "quince could not use your
+// certificate" is one message for five situations with five fixes.
+function TLSFailure({ code }: { code: NonNullable<OnboardingHTTPS["tls_unusable_code"]> }) {
+  const what: Record<string, string> = {
+    unreadable: "quince could not read the files those two keys point at. Check the paths, and that the container can read them — a read-only mount still has to be mounted.",
+    malformed: "quince read the files, and they are not a certificate and key it can parse. A DER file renamed to .pem does this, as does a truncated download.",
+    mismatched: "quince read both files, and the key does not belong to that certificate. They are usually issued as a pair; check you have not mixed two renewals.",
+    not_yet_valid: "That certificate is not valid yet — its start date is in the future. If it was just issued, check this machine's clock.",
+    expired: "That certificate has expired. Renew it; quince picks up a replacement without a restart.",
+    unknown: "quince could not use that certificate and cannot tell why — the files read cleanly just now. The server log has the loader's own message.",
+  };
+  return (
+    <div role="status" className="rounded-card border border-danger bg-bg px-3 py-2">
+      <strong>quince tried your certificate and could not use it.</strong>{" "}
+      {what[code] ?? what.unknown}
+    </div>
+  );
+}
+
+function Tiers({ firstRun, tlsUnusable }: { firstRun: boolean; tlsUnusable?: OnboardingHTTPS["tls_unusable_code"] }) {
   return (
     <>
       <div className="mt-6 flex flex-col gap-4">
@@ -285,13 +307,23 @@ function Tiers({ firstRun }: { firstRun: boolean }) {
           badge={<Badge tone="accent">Also recommended</Badge>}
           body={
             <>
-              <p>
-                Point <code className="font-mono">tls.cert_file</code> and{" "}
-                <code className="font-mono">tls.key_file</code> in{" "}
-                <code className="font-mono">config.yml</code> at a certificate and key, mounted
-                read-only. From <code className="font-mono">acme.sh</code>,{" "}
-                <code className="font-mono">tailscale cert</code>, or a wildcard you already have.
-              </p>
+              {/* THE INSTRUCTION IS REPLACED, NOT REPEATED, WHEN THE PAIR IS ALREADY BROKEN
+                  (quince#940 §1, and the ruling requires it). This user HAS pointed those two keys
+                  at a certificate — that is why quince has a failure to report — so telling them to
+                  do it again is the defect the whole sweep is about. Two messages, one saying
+                  "quince tried yours and could not use it" and one saying "point it at a
+                  certificate", contradict each other on the same card. */}
+              {tlsUnusable ? (
+                <TLSFailure code={tlsUnusable} />
+              ) : (
+                <p>
+                  Point <code className="font-mono">tls.cert_file</code> and{" "}
+                  <code className="font-mono">tls.key_file</code> in{" "}
+                  <code className="font-mono">config.yml</code> at a certificate and key, mounted
+                  read-only. From <code className="font-mono">acme.sh</code>,{" "}
+                  <code className="font-mono">tailscale cert</code>, or a wildcard you already have.
+                </p>
+              )}
               {/* THE ISSUE'S OWN WORKED EXAMPLE of the test above: "quince serves both protocols
                   on the same port" is how-to, and it goes. It is a good sentence and it answers a
                   question the chooser has not asked yet. */}

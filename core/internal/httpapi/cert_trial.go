@@ -49,9 +49,14 @@ const certTrialWindow = 10 * time.Minute
 // with no file anywhere in it.
 //
 // AN INTERFACE SO `httpapi` DOES NOT IMPORT `tlsx`, and so a test can drive the trial without a real
-// certificate. `SetFiles` is the whole surface — the trial has no reason to ask what is loaded.
+// certificate.
+//
+// `HasCertificate` IS HERE FOR A SECOND CONSUMER, NOT FOR THE TRIAL (quince#940 §1). It answers *is
+// the daemon serving a certificate RIGHT NOW*, which is what lets `GET /api/onboarding/https` tell a
+// configured-but-broken pair apart from no TLS at all — see `tlsUnusableCode`.
 type certKeeper interface {
 	SetFiles(certFile, keyFile string) error
+	HasCertificate() bool
 }
 
 // certTrial holds the one certificate that is being tried out, and puts the previous one back if
@@ -292,3 +297,8 @@ var errNoKeeper = errors.New("no TLS keeper is wired: this quince cannot serve a
 type unavailableKeeper struct{}
 
 func (unavailableKeeper) SetFiles(string, string) error { return errNoKeeper }
+
+// HasCertificate is false because there is no TLS listener at all — which is the honest answer and
+// is also the SAFE one: `tlsUnusableCode` reports a broken certificate only when the config ASKS for
+// TLS, and a router with no keeper is one where nothing asked.
+func (unavailableKeeper) HasCertificate() bool { return false }
