@@ -592,12 +592,14 @@ export function AddStorageForm({
               onChange={(e) => {
                 setParentDataset(e.target.value);
                 setHookCheck(null);
-                // THE RENDERED HELPER IS ABOUT *THIS* DATASET, so it is dropped with the answer it
-                // was rendered for. A script left on screen after the field beneath it changed is
-                // worse than none: it is a correct-looking file with somebody else's `PARENT=`, and
-                // the operator has no way to tell by looking.
-                setHelper(null);
-                setHelperError("");
+                // THE HELPER IS *NOT* DROPPED HERE, AND THAT IS THE CHANGE (quince#985). It used to
+                // be, for a good reason that has stopped applying: the script carried this field's
+                // value, so one left on screen after the field moved was a correct-looking file with
+                // somebody else's `PARENT=`. The script is now the same bytes whatever is typed
+                // here, so re-fetching it would be a request that cannot return anything different.
+                //
+                // What DOES follow this field is the `authorized_keys` line above, which is where
+                // the dataset now lives — see the key effect.
               }}
               onKeyDown={onEnter(() => void testHelper(), canTestHelper)}
             />
@@ -709,9 +711,14 @@ export function AddStorageForm({
                 place to put it — so a second zfs storage overwrote the first's helper and the first
                 broke at its next commit. The dataset lives in the `authorized_keys` line above
                 instead, which is per key, and this script no longer names one at all. */}
-            {parentDataset.trim() !== "" ? (
-              <div className="mt-3">
-                {helper === null ? (
+            {/* NO LONGER GATED ON THE DATASET FIELD, and dropping that gate is part of quince#985
+                rather than tidying beside it. The gate existed because the script was RENDERED for
+                one dataset, so offering it before the field was filled in would have produced an
+                artifact with an empty `PARENT=`. There is nothing left to render: the same bytes
+                answer for every install, so the button is available as soon as the zfs branch is,
+                and reading the script is no longer something the operator has to earn. */}
+            <div className="mt-3">
+              {helper === null ? (
                   <Button
                     variant="outline"
                     size="sm"
@@ -719,7 +726,7 @@ export function AddStorageForm({
                     disabled={helperLoading}
                     data-testid="show-helper"
                   >
-                    {helperLoading ? "Rendering…" : "Show the helper script"}
+                    {helperLoading ? "Fetching…" : "Show the helper script"}
                   </Button>
                 ) : (
                   <div className="mt-1" data-testid="zfs-helper">
@@ -751,8 +758,8 @@ export function AddStorageForm({
                     {helperError}
                   </div>
                 ) : null}
-              </div>
-            ) : null}
+
+            </div>
 
 
             {/* THE HOST KEY, ABOVE `Test helper` BECAUSE IT GATES IT (quince#912). Until an entry

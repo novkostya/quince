@@ -563,13 +563,21 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   await page.getByTestId("backend-select").selectOption("zfs");
   await expect(page.getByTestId("zfs-fields")).toBeVisible();
 
+  // NOTHING IS OFFERED UNTIL THERE IS A DATASET TO CONFINE THE KEY TO (quince#985). That line IS the
+  // confinement now — the helper script is identical on every install — so one rendered before this
+  // field is filled in would bound the key to nothing.
+  await expect(page.getByTestId("zfs-key")).toHaveCount(0);
+  await page.getByLabel("Parent dataset").fill("tank/backups");
+
   const panel = page.getByTestId("zfs-key");
   await expect(panel).toBeVisible();
 
-  // THE FORCED COMMAND LEADS THE LINE. An operator who truncates it keeps the key and loses the
-  // constraint, so it must not be something they scroll to find.
+  // THE FORCED COMMAND LEADS THE LINE, AND CARRIES THE DATASET. An operator who truncates it keeps
+  // the key and loses the constraint, so it must not be something they scroll to find — and since
+  // quince#985 the dataset sits inside the SAME quotes, because sshd parses `command="…"` as one
+  // option value and a quote closed after the path leaves the dataset where an option name belongs.
   const line = page.getByTestId("zfs-authorized-keys");
-  await expect(line).toContainText('command="/usr/local/sbin/quince-zfs-helper"');
+  await expect(line).toContainText('command="/usr/local/sbin/quince-zfs-helper tank/backups"');
   await expect(line).toContainText("no-port-forwarding");
   await expect(line).toContainText("ssh-ed25519 ");
 
@@ -618,7 +626,7 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
     ta?.remove();
     return v;
   });
-  expect(contents).toContain('command="/usr/local/sbin/quince-zfs-helper"');
+  expect(contents).toContain('command="/usr/local/sbin/quince-zfs-helper tank/backups"');
   expect(contents).toContain("ssh-ed25519 ");
 
   // THE PANEL IS ZFS-ONLY. A copy-backend storage must not cause a keypair to be generated at all,
@@ -627,12 +635,18 @@ test("the zfs branch shows the key and the complete authorized_keys line", async
   await expect(page.getByTestId("zfs-key")).toHaveCount(0);
 });
 
-// quince#818 piece C — THE HELPER, RENDERED WITH THE OPERATOR'S OWN PARENT.
+// quince#818 piece C — THE HELPER IS SHOWN. quince#985 — AND IT NAMES NO DATASET.
 //
-// The half deferred on quince#884. Before this the screen showed a key whose forced command names a
-// script the screen never mentioned — so a user who installed only the key reached a host that
-// refuses everything, which presents as `unreachable` and is indistinguishable from a wrong key.
-test("the zfs branch renders the helper script with the typed parent dataset", async ({ page }) => {
+// piece C's half was deferred on quince#884: before it, the screen showed a key whose forced command
+// names a script the screen never mentioned, so a user who installed only the key reached a host
+// that refuses everything — `unreachable`, indistinguishable from a wrong key.
+//
+// RETITLED RATHER THAN REPOINTED (architect, quince#996 review). This was *"renders the helper script
+// with the typed parent dataset"*, and that behaviour is the bug quince#985 fixed: a per-install
+// script meant two zfs storages on one host overwrote each other's copy at the single documented
+// install path. A spec whose NAME asserts the old contract while its body checks the new one passes
+// while telling the next reader something false.
+test("the zfs branch shows the helper script, which names no dataset", async ({ page }) => {
   await authenticate(page);
 
   await page.getByTestId("add-storage").click();
@@ -641,24 +655,25 @@ test("the zfs branch renders the helper script with the typed parent dataset", a
   await page.getByTestId("backend-select").selectOption("zfs");
   await expect(page.getByTestId("zfs-fields")).toBeVisible();
 
-  // NOTHING IS OFFERED UNTIL THERE IS A DATASET TO RENDER FOR. A script with an empty PARENT is not
-  // a useful artifact, and asking for one would be a request per keystroke besides.
-  await expect(page.getByTestId("show-helper")).toHaveCount(0);
-
-  await page.getByLabel("Parent dataset").fill("tank/backups/iphone");
+  // OFFERED IMMEDIATELY, WITH NO DATASET TYPED. It used to be gated on that field, because a script
+  // rendered with an empty `PARENT=` is not a useful artifact. There is nothing left to render, so
+  // reading the file before committing to anything is no longer something to earn.
   await page.getByTestId("show-helper").click();
 
   const panel = page.getByTestId("zfs-helper");
   await expect(panel).toBeVisible();
 
   const script = page.getByTestId("zfs-helper-script");
-  // THE OPERATOR'S DATASET IS IN IT — the one line they used to have to edit by hand, and the one
-  // line that decides where every backup goes.
-  await expect(script).toContainText('PARENT="tank/backups/iphone"');
-  // AND THE PLACEHOLDER IS GONE. This is the assertion with teeth: a script that kept
-  // `pool/path/to/iphone-backup` is perfectly valid, installs cleanly, and silently sends the
-  // backups somewhere that is not theirs. Nothing about it looks wrong on screen.
+  // THE ASSERTION WITH TEETH, AND IT HAS INVERTED. It used to be that the placeholder must be gone;
+  // now NO dataset may appear at all. A script carrying one is a valid file that installs cleanly
+  // and silently sends backups somewhere that is not theirs — and, at one install path, replaces the
+  // helper another storage is using.
+  await expect(script).not.toContainText('PARENT="tank');
+  await expect(script).not.toContainText('PARENT="rpool');
   await expect(script).not.toContainText("pool/path/to/iphone-backup");
+  // It reads its parent from the forced command instead — the one line that decides where a key may
+  // reach, and the reason one file can serve every storage on a host.
+  await expect(script).toContainText('PARENT="${1:-}"');
   // It is the WHOLE file — the operator saves this and nothing else.
   await expect(script).toContainText("#!/bin/sh");
   await expect(script).toContainText("capacity)");
@@ -667,10 +682,14 @@ test("the zfs branch renders the helper script with the typed parent dataset", a
   // `authorized_keys` line above pins as its forced command — a helper saved elsewhere is never run.
   await expect(panel).toContainText("/usr/local/sbin/quince-zfs-helper");
 
-  // THE SCRIPT IS DROPPED WHEN THE DATASET CHANGES. A rendered helper left standing after the field
-  // beneath it moved is a correct-looking file with somebody else's PARENT, and the operator has no
-  // way to tell by looking.
+  // THE SCRIPT SURVIVES A DATASET CHANGE, WHICH IS THE OPPOSITE OF WHAT IT USED TO DO. It was
+  // dropped here, correctly, while it carried that field's value. Re-fetching now would be a request
+  // that cannot come back different — and what DOES follow the field is the authorized_keys line.
+  const before = await script.textContent();
   await page.getByLabel("Parent dataset").fill("tank/other");
-  await expect(page.getByTestId("zfs-helper")).toHaveCount(0);
-  await expect(page.getByTestId("show-helper")).toBeVisible();
+  await expect(page.getByTestId("zfs-helper")).toBeVisible();
+  expect(await script.textContent()).toBe(before);
+  await expect(page.getByTestId("zfs-authorized-keys")).toContainText(
+    'command="/usr/local/sbin/quince-zfs-helper tank/other"',
+  );
 });
