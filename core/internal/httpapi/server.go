@@ -391,6 +391,24 @@ func writeError(w http.ResponseWriter, log *slog.Logger, status int, code, messa
 	writeJSON(w, log, status, wire.APIError{Error: wire.ErrorDetail{Code: code, Message: message}})
 }
 
+// writeReauthRequired is the ONE place a `reauth_required` refusal is written — qn.6o slice 2.
+//
+// A SEPARATE FUNCTION RATHER THAN A VARIADIC ON writeError, because `accepts` belongs to exactly
+// this code and nothing else sets it. Five call sites emit this refusal across two files, and the
+// defect that shape guards against is already recorded at `writePresentError`: two spellings of one
+// refusal leave the client's retry working on one surface and silently not on the other. A caller
+// that cannot name its operation cannot reach this function.
+//
+// `accepts` MAY BE nil AND THAT IS THE DEAD-END CASE (D4) — the field then does not appear at all,
+// which is what `omitempty` on the wire type is for.
+func writeReauthRequired(w http.ResponseWriter, log *slog.Logger, message string, accepts []string) {
+	writeJSON(w, log, http.StatusUnauthorized, wire.APIError{Error: wire.ErrorDetail{
+		Code:    "reauth_required",
+		Message: message,
+		Accepts: accepts,
+	}})
+}
+
 // decodeOptionalJSON is decodeJSON for a request whose body may legitimately be ABSENT — today
 // `DELETE /api/auth/password`, which carries a credential when it has one to carry (qn.6n rule 2).
 //
