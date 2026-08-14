@@ -14,6 +14,11 @@ interface BackupControlsProps {
   storages: Storages;
   storageID: string;
   setStorageID: (id: string) => void;
+  // encryptionBlocks: this quince requires encrypted backups and this device's encryption is off,
+  // so a press can only fail at preflight (quince#889). A plain boolean rather than the page's
+  // tri-state: "we have not read the policy yet" and "the policy permits it" both mean *do not
+  // disable the button*, and the difference only matters to the sentence the page renders.
+  encryptionBlocks?: boolean;
 }
 
 // BackupControls is the assisted "Back up now" action on a device's details page. It starts a backup
@@ -40,6 +45,7 @@ export function BackupControls({
   storages,
   storageID,
   setStorageID,
+  encryptionBlocks = false,
 }: BackupControlsProps) {
   const [transport, setTransport] = React.useState<RequestTransport>("auto");
   // storages is LIFTED to the page (see DeviceDetailsPage) so the control and the notices below
@@ -146,15 +152,22 @@ export function BackupControls({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+        {/* THE THIRD MEMBER OF THE SAME PATTERN, not a new one: a press that cannot succeed is a
+            disabled button carrying its reason, as with an offline device and an unreachable
+            storage. Encryption off under `require_encryption` was the one knowable-in-advance
+            refusal still offered — it started a job, failed at preflight, and left a row reading
+            "Backup needs attention" beside real transfer failures (quince#889). */}
         <Button
           onClick={() => void start(effectiveTransport, { storageID: storageID || undefined })}
-          disabled={!present || busy || storageUnusable}
+          disabled={!present || busy || storageUnusable || encryptionBlocks}
           title={
             !present
               ? "Connect the device over USB or Wi-Fi to back it up"
-              : storageUnusable
-                ? `${chosen?.name ?? "That storage"} is unavailable — backups can't be written to it right now`
-                : undefined
+              : encryptionBlocks
+                ? "Encrypted backups are required here — turn on encryption for this device to back it up"
+                : storageUnusable
+                  ? `${chosen?.name ?? "That storage"} is unavailable — backups can't be written to it right now`
+                  : undefined
           }
           data-testid="backup-now"
         >
@@ -207,18 +220,29 @@ export function BackupControlsStatus({
   device,
   activeJob,
   error,
+  encryptionBlocks = false,
 }: {
   device: Device;
   activeJob?: Job;
   error: string | null;
   storages: Storages;
   storageID: string;
+  encryptionBlocks?: boolean;
 }) {
   const present = Boolean(device.transports.usb || device.transports.wifi);
   return (
     <>
       {!activeJob && !present ? (
         <p className="text-xs text-muted">Connect the device to back it up.</p>
+      ) : null}
+      {/* The reason lives here rather than only in the button's `title`, for the same reason every
+          other disabled-button sentence does: a hover title is invisible on a phone, and the phone
+          is the primary client (quince#325). It names the remedy — the Enable encryption button in
+          the banner above — because "encryption is required" without one is a dead end. */}
+      {!activeJob && present && encryptionBlocks ? (
+        <p className="text-xs text-muted">
+          Backups here have to be encrypted. Turn on encryption for this device to back it up.
+        </p>
       ) : null}
       {/* The storage sentences render HERE, under the row, not beside the select — quince#325's
           rule, which StorageSelect had reintroduced a breach of. While a job runs they are

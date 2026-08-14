@@ -10,6 +10,10 @@ import { isRunning, useJobsStore } from "@/stores/jobs";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { modelLine } from "@/features/devices/modelName";
+import {
+  encryptionBlocksBackup,
+  unencryptedConsequence,
+} from "@/features/devices/encryptionPolicy";
 import { PairDialog } from "@/features/devices/PairDialog";
 import { WifiSyncControl } from "@/features/devices/WifiSyncControl";
 import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
@@ -18,6 +22,7 @@ import { JobLogPane } from "@/features/jobs/JobLogPane";
 import { JobHistory } from "@/features/jobs/JobHistory";
 import { BackupControls, BackupControlsStatus } from "@/features/jobs/BackupControls";
 import { useStorages } from "@/features/jobs/useStorages";
+import { useConfig } from "@/lib/config";
 import { useBackup } from "@/features/jobs/useBackup";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
@@ -69,6 +74,12 @@ export function DeviceDetailsPage() {
     prevJobID.current = activeJobID;
   }, [activeJobID, storages]);
 
+  // ENCRYPTION OFF + `require_encryption` = A BACKUP THAT CANNOT START, and the page has both facts
+  // already (quince#889, Operator ruling 2026-08-13: the guard is the UI's, the API is unchanged).
+  // The rule itself lives in `encryptionPolicy` because three surfaces render off it.
+  const config = useConfig();
+  const encryptionBlocks = encryptionBlocksBackup(device, config.data);
+
   // A pair intent deep-linked from the dashboard card (router state) auto-opens the pair dialog on
   // arrival — qn.4b fix for (bq), keeping qn.3's narrated-flow-on-details decision.
   const location = useLocation();
@@ -117,9 +128,13 @@ export function DeviceDetailsPage() {
 
           {device.backup_encryption === "off" ? (
             <div className="mt-4 flex flex-col gap-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn sm:flex-row sm:items-center sm:justify-between">
+              {/* WHAT FOLLOWS DEPENDS ON THE POLICY, and the old single sentence was false under
+                  half of it: with `require_encryption: true` nothing is omitted, because nothing is
+                  backed up (quince#889). The sentence is composed in `encryptionPolicy` so this
+                  page and its test read one string rather than two copies of it. */}
               <span>
-                This device's backups are <strong>not encrypted</strong> — Health, Keychain, and
-                saved passwords are omitted.
+                This device's backups are <strong>not encrypted</strong>
+                {unencryptedConsequence(encryptionBlocks)}
               </span>
               {device.paired === "yes" ? (
                 <Button size="sm" onClick={() => openEncryption("enable")}>
@@ -141,6 +156,7 @@ export function DeviceDetailsPage() {
                   storages={storages}
                   storageID={storageID}
                   setStorageID={setStorageID}
+                  encryptionBlocks={encryptionBlocks === true}
                 />
                 <Button variant="outline" onClick={() => openEncryption()}>
                   Manage encryption
@@ -163,6 +179,7 @@ export function DeviceDetailsPage() {
                 error={backup.error}
                 storages={storages}
                 storageID={storageID}
+                encryptionBlocks={encryptionBlocks === true}
               />
             </div>
           ) : null}
