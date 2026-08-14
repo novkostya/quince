@@ -1009,6 +1009,24 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   discards it and is for **abandon** only — never the failure default, never after verify has passed.
 - **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off,
   adapter-failed, cache-dropped, truncated list) are surfaced in the UI and the logs.
+- **Troubleshooting is ACTIONABLE, not merely honest** — Operator, 2026-08-14 (quince#940).
+  When something does not work, the user learns **what exactly** failed and **how to fix it**.
+  This is the general form of the two rules around it: *state honesty* binds a message to be
+  **true**, *no silent caps* binds it to be **present**, and this binds it to be **usable**.
+  **Its teeth are in the negative: a diagnostic that collapses distinguishable causes is a
+  defect even when every word of it is true.** `Not encrypted` is accurate whether a proxy
+  omitted `X-Forwarded-Proto`, sent it from an address no trust list names, or correctly
+  reported that the client reached *it* over plain http — three different fixes, one useless
+  sentence, and quince holds the inputs to tell them apart in all three.
+  ***"quince cannot tell"* is legitimate only when quince genuinely cannot, and that is a claim
+  to CHECK rather than assume.** The information is usually one layer down, thrown away by a
+  predicate answering a narrower question: `SecureOrigin` returns a bool and `detectHTTPS` reads
+  only the bool, so five situations arrive as one. Look at what the code already has in hand
+  before writing a message that gives up — the architect seat wrote that escape hatch into a
+  ruling on quince#939 and the Operator struck it the same hour, because nothing was missing.
+  The house pattern already exists and predates the rule: `ErrUnsupportedRPID` names the address
+  it was reached at *and* the remedy, and `ErrLastCredential` names both this address and the
+  ones that would work.
 - **Config tidiness is a feature** (stack D12): every setting has a sane default, is
   editable in the UI, and needs no restart unless the spec says why. No UI-only state, no
   secrets in the file. **`config.yml` CONTAINS ONLY WHAT THE USER SET, and carries NO
