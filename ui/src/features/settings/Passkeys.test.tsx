@@ -65,7 +65,10 @@ describe("an address that cannot be a relying party", () => {
     renderCard();
 
     expect(await screen.findByText(/need a domain name over https/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /add a passkey/i })).toBeDisabled();
+    // THE INPUT, NOT THE BUTTON — qn.6o D9/story 9. The add affordance is a ROW now, and its button
+    // is disabled on an empty name whatever `supported` says, so asserting the button would pass
+    // here even if support were never consulted. The field is driven only by `supported`.
+    expect(screen.getByLabelText("Passkey name")).toBeDisabled();
   });
 });
 
@@ -82,9 +85,9 @@ describe("a malformed or absent list never takes the page down", () => {
 
     expect(await screen.findByText("Passkeys")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/no passkeys yet/i)).toBeInTheDocument());
-    // And with the shape unknown, the button stays disabled rather than starting a ceremony this
-    // address may not be able to finish.
-    expect(screen.getByRole("button", { name: /add a passkey/i })).toBeDisabled();
+    // And with the shape unknown, the add row stays disabled rather than starting a ceremony this
+    // address may not be able to finish. Asserted on the field for the reason given above.
+    expect(screen.getByLabelText("Passkey name")).toBeDisabled();
   });
 
   // AND WHEN `passkeys` IS PRESENT BUT NOT A LIST. `?? []` does not catch this — only a type check

@@ -67,7 +67,10 @@ describe("the auth page", () => {
     // The passkeys card moved here from Settings. Asserting its ACTION renders rather than matching
     // the word "passkey", which appears several times on this page — and rather than re-asserting
     // the card's internals, which `features/settings/Passkeys.test.tsx` already owns.
-    expect(await screen.findByRole("button", { name: /add a passkey/i })).toBeInTheDocument();
+    //
+    // THE ACTION IS A ROW SINCE qn.6o SLICE 4, not a button that opened a dialog. Its name field is
+    // what identifies it, and that is still the card's action rather than its internals.
+    expect(await screen.findByLabelText("Passkey name")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
   });
 });

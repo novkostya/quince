@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { api, APIError, messageFor } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { removePasskey } from "@/lib/auth";
-import { AddPasskeyDialog } from "./AddPasskeyDialog";
+import { AddPasskeyRow } from "./AddPasskeyRow";
 import { forgetPasskey } from "@/lib/passkeyHint";
 import { RelativeTime } from "@/components/RelativeTime";
 
@@ -86,7 +86,6 @@ export function passkeysSupported(data: PasskeyList | undefined): boolean {
 export function Passkeys() {
   const qc = useQueryClient();
   const list = usePasskeyList();
-  const [adding, setAdding] = React.useState(false);
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });
 
@@ -272,13 +271,11 @@ export function Passkeys() {
         </form>
       ) : null}
 
-      <div className="mt-4">
-        <Button type="button" onClick={() => setAdding(true)} disabled={!supported}>
-          Add a passkey
-        </Button>
-      </div>
-
-      <AddPasskeyDialog open={adding} onOpenChange={setAdding} onAdded={invalidate} />
+      {/* D6: THE ADD ROW SITS BELOW THE LIST — the list is what the user came to read, the action is
+          what they do after, and a new passkey then appears directly above the row that created it.
+          It replaces an *Add a passkey* button that opened `AddPasskeyDialog`; that dialog is gone,
+          and with it the fourth copy of the registration ceremony. */}
+      <AddPasskeyRow supported={supported} onAdded={invalidate} />
 
       {/* THE rpId HAZARD, STATED WHERE THE CREDENTIAL IS CREATED — the ruling asks for exactly this,
           and not only in the docs. Nothing in WebAuthn warns about it, and the failure looks like

@@ -91,30 +91,54 @@ describe("changing the password", () => {
   });
 });
 
-// REGISTRATION RETRIES AT **BEGIN**, NOT AROUND THE WRITE — qn.6n slice 5b, and the asymmetry with
-// `changePassword` above is the point rather than an inconsistency.
+// REGISTRATION IS REFUSED AT **BEGIN**, NOT AROUND THE WRITE — qn.6n slice 5b, and the asymmetry
+// with `changePassword` above is the point rather than an inconsistency.
 //
 // A WebAuthn creation ceremony is consumed by `navigator.credentials.create()`. A client that
 // learned at `finish` that a proof was required would have to run it again — a second Face ID sheet
-// for a credential the user has already made. So the server refuses before a ceremony exists and the
-// client retries there.
+// for a credential the user has already made. So the server refuses before a ceremony exists.
 describe("adding a passkey", () => {
   // `navigator.credentials` does not exist in jsdom, and these tests never reach it: every case
   // below is decided by the FIRST `begin` call.
-  it("re-authenticates at begin, then starts the ceremony with the proof", async () => {
-    const post = vi
-      .spyOn(api, "post")
-      .mockRejectedValueOnce(reauthRequired())
-      // The second `begin` resolves with a body that fails later, at the browser call — which is
-      // fine: what is asserted here is the two POSTs and the proof, not the ceremony.
-      .mockResolvedValueOnce({ ceremony: "C", options: { publicKey: {} } });
+
+  // IT NO LONGER RE-AUTHENTICATES BY ITSELF — qn.6o slice 4, and this test asserted the opposite
+  // until then. `registerPasskey` used to catch `reauth_required`, run `proveWithPasskey` and retry
+  // `begin` with the proof, which is the chain quince#976 is filed on:
+  //
+  //     click → reauth/begin → credentials.get() → reauth/finish → begin(proof) → create()
+  //                            ^ the user's gesture is SPENT on the proof's own sheet
+  //
+  // Completing an authenticator sheet grants no new activation, so `create()` arrived three awaits
+  // and one sheet past the last real click. The caller now runs the challenge and comes back from a
+  // FRESH CLICK (spec D1 as corrected on quince#988) — which a library cannot do for itself.
+  //
+  // KEPT AS AN ASSERTION RATHER THAN DELETED, inverted: the old behaviour is the bug, so what is
+  // worth pinning is that it does not come back.
+  it("does NOT re-authenticate by itself — the refusal reaches the caller", async () => {
+    const post = vi.spyOn(api, "post").mockRejectedValueOnce(reauthRequired());
     const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
 
-    await expect(webauthn.registerPasskey("phone")).rejects.toBeDefined();
+    await expect(webauthn.registerPasskey("phone")).rejects.toMatchObject({
+      code: "reauth_required",
+    });
 
-    expect(prove).toHaveBeenCalledWith("add_passkey");
-    expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {});
-    expect(post).toHaveBeenNthCalledWith(2, "/api/auth/passkeys/register/begin", {
+    expect(prove).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  // AND A PROOF THE CALLER ALREADY HAS TRAVELS ON THE FIRST `begin`, which is how the challenge
+  // hands its result back — one await between the fresh click and `create()`, and no second one.
+  it("sends a caller-supplied proof on the first begin", async () => {
+    const post = vi
+      .spyOn(api, "post")
+      // Resolves with a body that fails later, at the browser call — fine: what is asserted here is
+      // the single POST and its payload, not the ceremony.
+      .mockResolvedValueOnce({ ceremony: "C", options: { publicKey: {} } });
+
+    await expect(webauthn.registerPasskey("phone", { proof: "PROOF-TOKEN" })).rejects.toBeDefined();
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {
       proof: "PROOF-TOKEN",
     });
   });
