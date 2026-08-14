@@ -87,7 +87,7 @@ export function AuthPage({
       "flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6";
 
   const box = isPage
-    ? "mx-auto w-full max-w-2xl"
+    ? "mx-auto w-full max-w-4xl"
     : "w-full max-w-sm rounded-card border border-line bg-card p-6";
 
   const inner = (
