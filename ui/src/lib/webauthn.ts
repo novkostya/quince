@@ -1,6 +1,5 @@
 import { api, APIError } from "@/lib/api";
 import { forgetPasskey, rememberPasskey } from "@/lib/passkeyHint";
-import { proveWithPasskey } from "@/lib/reauth";
 // RE-EXPORTED so the many existing importers of these helpers keep working — the split in
 // `webauthnWire.ts` is structural and is not worth a rename sweep across the UI.
 export {
@@ -40,40 +39,54 @@ import type { BeginRegistration, BeginAssertion } from "@/lib/webauthnWire";
 //
 // `currentPassword` IS RULE 1's LIGHTER FACTOR, AND OMITTING IT BROKE THE SHIPPING FLOW. Adding the
 // first passkey right after setting a password is a call on an install that is already `configured`
-// with a password and NO credentials — so `RequirePresent` reaches `verifyPassword("")`, answers
-// `bad_password`, and the retry below (which only fires on `reauth_required`) rethrows it. The user
-// is then told *"current password is incorrect"* about a field they were never shown. Caught in
-// review of quince#930; the password is in scope at that call site two statements above it.
+// with a password and NO credentials — so `RequirePresent` reached `verifyPassword("")` and answered
+// `bad_password`, and the user was told *"current password is incorrect"* about a field they were
+// never shown. Caught in review of quince#930; the password is in scope at that call site two
+// statements above it.
+//
+// THAT SERVER-SIDE HALF IS FIXED SINCE quince#978 — presenting nothing is now `reauth_required`,
+// not `bad_password` — but passing the password is still right and still cheaper: it satisfies rule
+// 1 on the FIRST `begin`, so first-run setup never meets a challenge it has nothing to answer with.
 export async function registerPasskey(
   name: string,
-  opts: { firstRun?: boolean; currentPassword?: string } = {},
+  opts: { firstRun?: boolean; currentPassword?: string; proof?: string } = {},
 ): Promise<boolean> {
   const base = opts.firstRun ? "/api/auth/setup/passkey" : "/api/auth/passkeys/register";
   // Omitted rather than sent empty when there is none: on a passwordless install an empty string is
   // a WRONG password, where an absent field is the case the server decides for itself.
-  const present = opts.currentPassword ? { current_password: opts.currentPassword } : {};
+  const present = {
+    ...(opts.currentPassword ? { current_password: opts.currentPassword } : {}),
+    // A PROOF THE CALLER ALREADY EARNED, from a challenge it ran itself (qn.6o slice 4). Same
+    // omit-rather-than-empty rule as the password above.
+    ...(opts.proof ? { proof: opts.proof } : {}),
+  };
 
-  // RULE 1, AND THE RETRY GOES AROUND **BEGIN** RATHER THAN AROUND THE WRITE — qn.6n slice 5b.
-  // `changePassword` retries the whole call, because nothing was consumed by the refused attempt. A
-  // creation ceremony IS consumed, so learning the requirement after `create()` would mean a second
-  // Face ID sheet for a credential the user has already made.
+  // RULE 1: THE SERVER REFUSES AT **BEGIN**, BEFORE A CEREMONY EXISTS — qn.6n slice 5b.
+  // `changePassword` can retry its whole call, because nothing was consumed by the refused attempt.
+  // A creation ceremony IS consumed, so learning the requirement after `create()` would mean a
+  // second Face ID sheet for a credential the user has already made. Refusing at `begin` is what
+  // makes the demand recoverable at all.
   //
-  // The server therefore refuses at `begin`, before a ceremony exists, and this retries there. Same
-  // `reauth_required` code, same one-retry-never-a-loop rule, and equally inert against a server
-  // that does not demand a proof.
+  // WHAT THIS NO LONGER DOES IS RECOVER BY ITSELF, and removing that is qn.6o slice 4's point.
+  // There was a `catch` here that ran `proveWithPasskey` and retried `begin` with the proof. It
+  // read as the obvious kindness and it is the exact chain quince#976 is filed on:
   //
-  // FIRST RUN IS EXEMPT AND MUST NOT PROMPT. The pre-auth pair has no session and nothing to
-  // present, so it never answers `reauth_required` — but the branch is skipped outright rather than
-  // left to that, because a sheet during first-run setup would ask the user to prove possession of a
-  // credential they have not created yet.
-  let begin: BeginRegistration;
-  try {
-    begin = await api.post<BeginRegistration>(`${base}/begin`, present);
-  } catch (err) {
-    if (opts.firstRun || !(err instanceof APIError) || err.code !== "reauth_required") throw err;
-    const proof = await proveWithPasskey("add_passkey");
-    begin = await api.post<BeginRegistration>(`${base}/begin`, { ...present, proof });
-  }
+  //     click → reauth/begin → credentials.get() → reauth/finish → begin(proof) → create()
+  //                            ^ the user's gesture is SPENT on the proof's own sheet
+  //
+  // COMPLETING AN AUTHENTICATOR SHEET GRANTS NO NEW ACTIVATION — it is browser UI, not a DOM
+  // activation-triggering event — so `create()` arrived three awaits and one sheet past the last
+  // real click. The caller must instead run the challenge, and then reach this function from a
+  // FRESH CLICK, which is the one thing a library cannot do on its own (spec D1, as corrected on
+  // quince#988).
+  //
+  // IT NEVER FIRED IN SHIPPED CODE, which is why deleting it costs nothing: first run is exempt
+  // and skips it, the setup page passes `currentPassword` so `begin` succeeds first try, and
+  // `AddPasskeyDialog` held its own copy of this ceremony and never called here at all.
+  //
+  // SO `reauth_required` NOW REACHES THE CALLER. It carries `accepts`, which is what the caller
+  // renders the challenge from (slice 2).
+  const begin = await api.post<BeginRegistration>(`${base}/begin`, present);
   const pk = begin.options.publicKey;
 
   let cred: PublicKeyCredential | null;

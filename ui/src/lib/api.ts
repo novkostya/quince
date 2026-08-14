@@ -97,7 +97,16 @@ async function parseErrorBody(
 
 async function unauthorized(resp: Response, path: string): Promise<UnauthorizedError> {
   const { code, message, details } = await parseErrorBody(resp, "unauthorized", "authentication required");
-  if (!CREDENTIAL_ENDPOINTS.has(path)) onUnauthorized?.();
+  // `reauth_required` IS NOT A LOST SESSION — qn.6o slice 4. It means the session is fine and this
+  // particular operation wants a credential presented right now, which the caller answers with a
+  // challenge on the page it is already on. Firing the session-lost callback would send the app off
+  // to re-read auth status in the middle of that, on a question it has already answered.
+  //
+  // KEYED ON THE CODE, NOT THE PATH, unlike the exemption beside it. `CREDENTIAL_ENDPOINTS` lists
+  // the two routes where a 401 is a typed-in credential being wrong; this refusal can arrive from
+  // ANY credential-changing route, so a path list would have to grow every time one was added — and
+  // the one it forgot would interrupt the user mid-flow.
+  if (code !== "reauth_required" && !CREDENTIAL_ENDPOINTS.has(path)) onUnauthorized?.();
   return new UnauthorizedError(code, message, details);
 }
 
