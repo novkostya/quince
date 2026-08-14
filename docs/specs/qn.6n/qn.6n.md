@@ -321,14 +321,24 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 
 | | | code-owned? | |
 | --- | --- | --- | --- |
-| **1** | **this spec** — `docs/specs/**` is *not* code-owned | no | *this PR* |
+| **1** | **this spec** — `docs/specs/**` is *not* code-owned | no | quince#906 + quince#910, **merged** |
 | **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4, **G4b's session half**. | no | quince#920, **merged** |
-| **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922 |
-| **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | *this PR* |
-| **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927 |
-| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin\|finish` demand proof. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | not open |
+| **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922, **merged** |
+| **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | quince#928, **merged** |
+| **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **merged** |
+| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony key is only ever produced by a guarded begin. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | *this PR* |
 | **6** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** — `contracts.md` | not open |
 | **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
+
+**FIVE ROWS WERE STALE ABOUT THEIR OWN STATUS UNTIL THIS PR.** Rows 1 and 4 read *"this PR"* — true
+when written, false the moment they merged — and 3 and 5a carried a number with no state. **The
+fourth instance on this rung of the table being the wrong part**, after quince#409's heading,
+quince#922's unassigned gate and quince#927's row claiming two paths.
+
+**And the rule this table already carries does not catch it.** *Read every row against the diff that
+claims it* is a check against the **diff**; these rows were not wrong about their diff, they were
+wrong about the **world** after it landed. The two are the same act at different moments: **before
+merge, does the row describe the diff — after merge, does it still describe reality.**
 
 **ROW 5 SPLIT BECAUSE IT CLAIMED TWO PATHS AND ITS PR DID ONE** — self-reported on quince#927 after
 that PR had been approved twice, and the split is what the row needs rather than what the PR needs.
