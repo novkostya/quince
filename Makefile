@@ -973,6 +973,18 @@ push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 	@# that does not exist on a box where a runner is declared. Retagging across the two is what
 	@# keeps "build locally, push a release name" working in both cases: with no runner declared
 	@# the two are identical and this is exactly what it always was.
+	@#
+	@# THE SOURCE IS CHECKED BEFORE ANYTHING IS TAGGED OR PUSHED (quince#990). A plain `make image`
+	@# builds `$(IMAGE_NAME):$(IMAGE_TAG)$(NS)`, so `make push IMAGE_TAG=lab` after it looks for a
+	@# tag nobody built. All the runtime says about that is `level=fatal msg="…: not found"`, which
+	@# names neither the target it happened in nor the command that fixes it — and it is read, if at
+	@# all, several screens above wherever the run stopped. This refusal is the first thing the
+	@# target does and it names both.
+	@test -n "$$($(RUNTIME) images -q $(IMAGE_NAME):$(APP_TAG) 2>/dev/null)" || { \
+	  echo "push: REFUSED — $(IMAGE_NAME):$(APP_TAG) is not on this box, so there is nothing to push."; \
+	  echo "push: build it under the SAME tag first:  make image IMAGE_TAG=$(IMAGE_TAG)"; \
+	  echo "push: (that tag carries this box's declared runner; with none declared the two are identical.)"; \
+	  exit 2; }
 	$(RUNTIME) tag  $(IMAGE_NAME):$(APP_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 	$(RUNTIME) push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
