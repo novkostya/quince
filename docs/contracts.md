@@ -262,11 +262,16 @@ POST /api/auth/passkeys/register/finish?ceremony=<key>&name=<label>  → 201 {pa
      // SESSION REQUIRED. THE BODY BELONGS TO THE AUTHENTICATOR — it is the credential response,
      // whose exact bytes are what the signature covers — so these two parameters are in the
      // query rather than alongside it.
-     // NO PROOF FIELD SINCE qn.6n, AND THAT IS A PROPERTY RATHER THAN AN OMISSION. A ceremony
-     // key is only ever produced by `begin` above, so holding one IS the evidence that a proof
-     // was presented. The only other producer is `setup/passkey/begin`, which answers 409
-     // already_configured once `Configured()` is true and so cannot mint one on an install
-     // where rule 1 applies.
+     // NO PROOF FIELD SINCE qn.6n, AND THAT IS A PROPERTY RATHER THAN AN OMISSION. A
+     // REGISTRATION ceremony key is only ever produced by a guarded `begin`, so holding one IS
+     // the evidence that a proof was presented.
+     // THREE ENDPOINTS PRODUCE KEYS INTO THAT ONE STORE, NOT TWO — this paragraph said two until
+     // quince#930's review. `setup/passkey/begin` answers 409 already_configured once
+     // `Configured()` is true and so cannot mint one where rule 1 applies. `passkeys/login/begin`
+     // is PRE-AUTH, in all three exact-path lists, and callable by anyone who reaches the address.
+     // WHAT MAKES THE PROPERTY TRUE IS THE CEREMONY KIND, not the count: a ceremony records what
+     // it was begun for and a finisher refuses the other kind, so a login key presented here is
+     // rejected by quince rather than by a library invariant nobody tested.
      // 400 no_ceremony (expired or already used) · 400 passkey_rejected (failed verification)
      // 409 passkey_rp_mismatch (the ceremony began on a different domain) · 422 name_required
 ```

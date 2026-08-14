@@ -264,6 +264,24 @@ Beyond `make gates` / `make gates-ui` / `make gates-ui-e2e`:
 `qn.6m` was called code-complete with both hardware gates outstanding. Every automated gate above is
 consistent with this rung being inert in exactly the same way.
 
+**AND A GREEN SUITE PROVED THAT LITERALLY ONCE — worth a line here rather than a gate, because the
+lesson is about mocks and not about coverage** (quince#930 review). Rule 1 broke the shipping
+first-run flow: after `POST /api/auth/setup` the install is `configured` with a password and no
+credentials, so `register/begin` verified an empty string, answered `bad_password`, and the client —
+which retries only on `reauth_required` — put *"current password is incorrect"* on a screen with no
+such field. **Every layer mocked past it, each reasonably on its own:**
+
+- `auth.test.ts` mocked the first `begin` as `reauth_required` — the answer a **passwordless** install
+  gives, not the one this flow's install gives. The test encoded the assumed server behaviour.
+- `SetupPasswordPage.test.tsx` spies on `registerPasskey` wholesale, so the guard is invisible to it.
+- `story1-setup-login.spec.ts` asserts the passkey checkbox is **absent**, because Playwright runs
+  over http and passkeys need a secure context.
+
+**G7 would not have caught it either**, which is the part worth remembering: the flow fails *before*
+any authenticator sheet, so the hardware gate this rung was most worried about was aimed past the
+defect. **The remedy taken was one test driving the real first response**, not three more mocks —
+`auth.test.ts`'s *"adding the first passkey right after setting a password"*.
+
 ---
 
 ## Fixtures

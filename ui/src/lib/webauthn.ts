@@ -37,11 +37,21 @@ import type { BeginRegistration, BeginAssertion } from "@/lib/webauthnWire";
 // `firstRun` picks the PRE-AUTH pair (qn.6m D5). Two endpoint pairs, one ceremony — the wire shape
 // and the browser call are identical, and only the guard on the far side differs, so a second copy
 // of this function would be two places to fix the next `bytesToB64url` bug in.
+//
+// `currentPassword` IS RULE 1's LIGHTER FACTOR, AND OMITTING IT BROKE THE SHIPPING FLOW. Adding the
+// first passkey right after setting a password is a call on an install that is already `configured`
+// with a password and NO credentials — so `RequirePresent` reaches `verifyPassword("")`, answers
+// `bad_password`, and the retry below (which only fires on `reauth_required`) rethrows it. The user
+// is then told *"current password is incorrect"* about a field they were never shown. Caught in
+// review of quince#930; the password is in scope at that call site two statements above it.
 export async function registerPasskey(
   name: string,
-  opts: { firstRun?: boolean } = {},
+  opts: { firstRun?: boolean; currentPassword?: string } = {},
 ): Promise<boolean> {
   const base = opts.firstRun ? "/api/auth/setup/passkey" : "/api/auth/passkeys/register";
+  // Omitted rather than sent empty when there is none: on a passwordless install an empty string is
+  // a WRONG password, where an absent field is the case the server decides for itself.
+  const present = opts.currentPassword ? { current_password: opts.currentPassword } : {};
 
   // RULE 1, AND THE RETRY GOES AROUND **BEGIN** RATHER THAN AROUND THE WRITE — qn.6n slice 5b.
   // `changePassword` retries the whole call, because nothing was consumed by the refused attempt. A
@@ -58,11 +68,11 @@ export async function registerPasskey(
   // credential they have not created yet.
   let begin: BeginRegistration;
   try {
-    begin = await api.post<BeginRegistration>(`${base}/begin`, {});
+    begin = await api.post<BeginRegistration>(`${base}/begin`, present);
   } catch (err) {
     if (opts.firstRun || !(err instanceof APIError) || err.code !== "reauth_required") throw err;
     const proof = await proveWithPasskey("add_passkey");
-    begin = await api.post<BeginRegistration>(`${base}/begin`, { proof });
+    begin = await api.post<BeginRegistration>(`${base}/begin`, { ...present, proof });
   }
   const pk = begin.options.publicKey;
 

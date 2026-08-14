@@ -224,7 +224,13 @@ export function SetupPasswordPage() {
         // `register/begin` in the same gap, and that ships and works on hardware. This adds one more
         // local round trip inside the same activation window, not a different shape.
         try {
-          const added = await registerPasskey(FIRST_PASSKEY_NAME);
+          // THE PASSWORD IS PRESENTED, AND WITHOUT IT THIS FLOW IS BROKEN — rule 1, found in review
+          // of quince#930. `setup` above has just claimed the install, so by the time
+          // `register/begin` runs the server sees `configured`, WITH a password and NO credentials,
+          // and demands a present one. The only credential that exists is the password typed into
+          // this form; `RequirePresent` would otherwise verify an empty string against the hash and
+          // answer `bad_password` about a field this screen never showed.
+          const added = await registerPasskey(FIRST_PASSKEY_NAME, { currentPassword: pw });
           // FALSE MEANS DISMISSED, NOT FAILED — the sheet was cancelled, timed out, or the
           // authenticator refused as already-registered. The user ends up where they started, so
           // this is reported as a fact and never as an error (`lib/webauthn.ts`).
