@@ -518,6 +518,13 @@ GET  /api/onboarding/https → {complete: bool, detected: "tls" | "forwarded_pro
      // config.yml asks for one: unreadable | malformed | mismatched | not_yet_valid
      // | expired | unknown. A CLASSIFICATION and never a path or loader text — that
      // detail is AUTHENTICATED. Orthogonal to unencrypted_code; both may be set.
+     // THAT LIST IS HELD CLOSED BY A TEST, not by hand (quince#1015). The handler
+     // returns tlsx.Inspect's outcome straight through — one classification in the
+     // product rather than two that drift — so an outcome added to tlsx reaches this
+     // UNAUTHENTICATED field and falsifies this line. httpapi's
+     // TestEveryTLSOutcomeIsDecidedBeforeItCanGoPreAuth reads both sets out of the
+     // source and refuses one that is neither declared here nor listed as unreachable
+     // (usable, wrong_host today). EDIT THIS LIST AND THAT TEST TOGETHER.
 
 POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → CertificateProbe
      // PRE-AUTH, 409 once auth.Configured() — the same bound and the same argument
