@@ -16,9 +16,15 @@ import (
 
 const reauthRP = "quince.example.com"
 
+// THE FIXTURE HOLDS A PASSKEY FOR THIS ADDRESS, since qn.6n slice 6a. An install with no credential
+// at all cannot re-authenticate at all, so a ceremony fixture without one described a state no user
+// is ever in — and `remove_password` is now refused outright in it, by the check that keeps a user
+// from meeting an empty authenticator sheet. Seeded here rather than case by case, so each test
+// below asks about the mechanic it names rather than about whether a credential exists.
 func newReauth(t *testing.T) (*Service, *ReauthCeremonies, *Proofs) {
 	t.Helper()
-	svc, _ := newConfiguredService(t)
+	svc, st := newConfiguredService(t)
+	seedPasskey(t, st, cred1, reauthRP)
 	return svc, NewReauthCeremonies(), NewProofs()
 }
 
@@ -64,6 +70,33 @@ func TestBeginReauthRefusesAnAddressThatCannotHoldAPasskey(t *testing.T) {
 	_, _, err := svc.BeginReauth(cer, "192.0.2.10", ip, OpAddPasskey, "", sess)
 	if !errors.As(err, &ErrUnsupportedRPID{}) {
 		t.Fatalf("BeginReauth at a bare IP = %v, want ErrUnsupportedRPID", err)
+	}
+}
+
+// A `remove_password` CEREMONY IS REFUSED WHERE NOTHING COULD ASSERT — qn.6n slice 6a. This is the
+// lockout sentence DELETE /api/auth/password used to produce AFTER the fact, moved to the first call
+// the surface makes, so a user with no passkey for this address is told to add one rather than shown
+// an empty authenticator sheet.
+//
+// IT IS COPY AND NOT A GUARD, which is why the test asserts on the MESSAGE. Deleting this check
+// would weaken nothing: the removal is still refused, by rule 2, on what proved the request.
+func TestBeginReauthRefusesRemovePasswordWithNoPasskeyHere(t *testing.T) {
+	svc, cer, _ := newReauth(t)
+
+	// `elsewhere` holds no credential in this fixture — the passkey is bound to reauthRP.
+	_, _, err := svc.BeginReauth(cer, elsewhere, ip, OpRemovePassword, "", sess)
+	var last ErrLastCredential
+	if !errors.As(err, &last) {
+		t.Fatalf("BeginReauth(remove_password) with no passkey here = %v, want ErrLastCredential", err)
+	}
+	if len(last.Elsewhere) != 1 || last.Elsewhere[0] != reauthRP {
+		t.Errorf("Elsewhere = %v, want [%s] — the refusal must name where the passkey DOES work",
+			last.Elsewhere, reauthRP)
+	}
+	// AND ONLY THAT OPERATION. Adding a passkey at an address that holds none is the ordinary way to
+	// get one, so refusing it here would close the only route out of the state being reported.
+	if _, _, err := svc.BeginReauth(cer, elsewhere, ip, OpAddPasskey, "", sess); err != nil {
+		t.Fatalf("BeginReauth(add_passkey) with no passkey here = %v, want nil", err)
 	}
 }
 

@@ -59,10 +59,21 @@ export async function changePassword(current: string, next: string): Promise<voi
   }
 }
 
-// removePassword makes this install passwordless. The server REFUSES with 409 `last_credential`
-// unless a passkey exists for THIS address — deliberately not re-checked here, because a second
-// implementation of an rpId rule is a thing that drifts, and the server's refusal already names the
-// addresses the credentials it found belong to.
-export function removePassword(): Promise<void> {
-  return api.del<void>("/api/auth/password");
+// removePassword makes this install passwordless — and since qn.6n rule 2 it PROVES A PASSKEY
+// FIRST, unconditionally.
+//
+// NO PROBE-THEN-RETRY HERE, UNLIKE changePassword, and the asymmetry is the rule rather than a
+// stylistic choice. Changing a password accepts either factor, so trying the cheap one first is
+// worth a round trip; removing the password accepts ONLY a passkey, because the credential being
+// removed cannot vouch for what would be left behind. There is nothing to try first, so a probe
+// would be one guaranteed 409 on the way to the same prompt.
+//
+// THE CEREMONY'S OWN FAILURE IS DELIBERATELY NOT CAUGHT. `reauth/begin` answers 409
+// `last_credential` when this address holds no passkey — the same refusal this endpoint used to give
+// after the fact, carrying the same sentence naming where the credentials it DID find belong.
+// `messageFor` renders it, so the surface still says what to do rather than "could not remove the
+// password", and the rpId rule stays implemented once, on the server.
+export async function removePassword(): Promise<void> {
+  const proof = await proveWithPasskey("remove_password");
+  return api.del<void>("/api/auth/password", { proof });
 }

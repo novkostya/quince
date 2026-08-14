@@ -202,6 +202,25 @@ What the surface must then say, from quince#903's own analysis:
   quince#895's review handles the bare-IP case and does nothing for this one.
 - What is genuinely true there is `quince auth reset`, which today's copy explicitly rules out.
 
+### D9. The credential travels in a DELETE body, and the alternatives are worse
+
+Rule 2 needs `DELETE /api/auth/password` to carry a `proof`, and a `DELETE` with a body is unusual
+enough to be worth stating rather than discovering in a diff. Rung-local detail, decided within D4's
+already-ruled *"every mutating endpoint accepts `current_password` as an alternative to `proof`"*:
+
+- **The query is closed by the secrets rule.** A proof is a credential-equivalent for one operation.
+  It would land in every access log between the browser and here, which is the objection
+  `PUT /api/auth/password` already states for the password.
+- **A header is the same objection one step weaker.** Proxies log headers far more readily than
+  bodies, and it would be a novel pattern in this API for no gain.
+- **A body is legal and behaves.** RFC 9110 leaves DELETE content *undefined*, not forbidden;
+  `fetch` sends one; Go's decoder reads one. A proxy that strips it produces a **stated 401**, never
+  a silent success — the failure direction *no silent caps or fallbacks* asks for.
+
+**An ABSENT body is not a 400**, which is the one part that needed a decision rather than a
+preference: a caller presenting nothing has broken a rule about credentials, not about JSON, so it
+takes the credential refusal, whose sentence names what to present. A malformed body is still a 400.
+
 ---
 
 ## Stories
@@ -344,9 +363,17 @@ slice already marked **YES** — which is exactly when a naming trap is cheap to
 | **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922, **merged** |
 | **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | quince#928, **merged** |
 | **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **merged** |
-| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony key is only ever produced by a guarded begin. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | *this PR* |
-| **6** | **rule 2** — both removal paths, and the two lockout checks come **out** (D2). | **YES** — `contracts.md` | not open |
+| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony key is only ever produced by a guarded begin. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, approved |
+| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | *this PR* |
+| **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | not open |
 | **7** | **D8's copy** — lands with or after rule 1, never before. | no | not open |
+
+**ROW 6 SPLIT IN TWO, for 5a/5b's reason and not merely by analogy with it.** quince#927 claimed two
+paths and covered one, and the split that fixed it is the same shape here: two removal endpoints,
+two different UI flows, and each half is a complete working change on its own. **What is NOT copied
+from 5a/5b is the ordering trick** — those two put a server demand on `main` ahead of the client that
+could satisfy it, which slice 4 existed to cover. 6a and 6b each carry their own UI, so neither
+leaves a reachable flow broken for a merge.
 
 **FIVE ROWS WERE STALE ABOUT THEIR OWN STATUS UNTIL THIS PR.** Rows 1 and 4 read *"this PR"* — true
 when written, false the moment they merged — and 3 and 5a carried a number with no state. **The
@@ -405,17 +432,24 @@ was *"an unassigned canon edit is the one that lands in whichever PR notices it 
 the same shape. The rule generalises: **anything the Gates section names must appear in a row**, and
 a gate spanning two slices is named in both rather than in the later one.
 
-**§6 GOES IN SLICE 4 BECAUSE THAT IS WHERE THE MODEL ACTUALLY MOVES.** Rule 1 is the point at which a
-session stops being sufficient to change the credential set; slice 5 completes the picture but
-changes no statement §6 makes. Naming the slice matters more than which one it is — an unassigned
-canon edit is the one that lands in whichever PR notices it last.
+**§6 GOES IN SLICE 5a BECAUSE THAT IS WHERE THE MODEL ACTUALLY MOVES.** Rule 1 is the point at which a
+session stops being sufficient to change the credential set; rule 2 completes the picture but changes
+no statement §6 makes. Naming the slice matters more than which one it is — an unassigned canon edit
+is the one that lands in whichever PR notices it last. **It read *"SLICE 4"* until slice 6a, one row
+behind the same renumbering, and against a table that already said 5a** — which is where quince#927
+actually landed it.
 
 **2 IS SEPARATE AND HAS NO CALLER ON PURPOSE**, which is `qn.6m` slice 5a's ordering and `qn.6k`'s
 before it: the guard lands, alone and reviewable, before anything can depend on it. It is also the
 slice most likely to be got wrong, because D4's subject field is the whole of rule 2.
 
-**5 COMES AFTER 4 BECAUSE IT REMOVES A GUARD.** Rule 2 makes the lockout checks redundant *given rule
+**6 COMES AFTER 5 BECAUSE IT REMOVES A GUARD.** Rule 2 makes the lockout checks redundant *given rule
 1*; taking them out first would leave a window in which nothing prevents the quince#888 takeover.
+
+**This paragraph said *"5 COMES AFTER 4"* until slice 6a, and both numbers were one behind** — it was
+written when rule 1 was slice 4 and rule 2 was slice 5, and survived the renumbering that moved the
+UI prompt ahead of the rules. It named the right ORDER against the wrong rows, which is the failure
+mode a reader cannot spot: the sentence is coherent, and only the table disagrees.
 
 **7 IS A SEPARATE SLICE RATHER THAN PART OF 4** so that the copy can be reviewed against the shipped
 behaviour rather than against a promise, and so a wording objection does not hold up a security fix.

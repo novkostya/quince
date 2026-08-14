@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { api, APIError } from "./api";
-import { changePassword } from "./auth";
+import { changePassword, removePassword } from "./auth";
 import * as webauthn from "./webauthn";
 import * as reauth from "./reauth";
 
@@ -198,5 +198,50 @@ describe("adding the first passkey right after setting a password", () => {
     await expect(webauthn.registerPasskey("phone", { currentPassword: "" })).rejects.toBeDefined();
 
     expect(post).toHaveBeenNthCalledWith(1, "/api/auth/passkeys/register/begin", {});
+  });
+});
+
+// REMOVAL PROVES FIRST AND NEVER PROBES — qn.6n slice 6a. The third shape in this file, and the
+// three are not inconsistent: they follow what the SERVER accepts.
+//
+//	change    either factor  → try the cheap one, retry on the server's 401
+//	register  either factor  → retry at BEGIN, because a creation ceremony cannot be replayed
+//	remove    a passkey ONLY → no probe at all; there is nothing cheaper to try
+describe("removing the password", () => {
+  it("proves a passkey before asking, and sends the proof", async () => {
+    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+    const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+
+    await removePassword();
+
+    // THE OPERATION IS NAMED. A proof minted for anything else is refused by `Proofs.Consume`, so
+    // this argument is load-bearing rather than a label.
+    expect(prove).toHaveBeenCalledWith("remove_password");
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledWith("/api/auth/password", { proof: "PROOF-TOKEN" });
+  });
+
+  // NO BARE ATTEMPT FIRST. A probe would be one guaranteed 409 on the way to the same prompt, and
+  // — worse — a user watching the network would see the client ask for something it knows is
+  // refused. Asserted as "del is not called before prove", which is the failure a refactor makes.
+  it("never calls the endpoint without a proof", async () => {
+    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(new Error("no credential"));
+
+    await expect(removePassword()).rejects.toThrow("no credential");
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  // THE REFUSAL FROM `reauth/begin` IS WHAT THE USER SEES when this address holds no passkey — the
+  // lockout sentence, moved ahead of the sheet. It is rethrown untouched so `messageFor` can render
+  // the server's own words rather than "could not remove the password".
+  it("surfaces the server's lockout sentence from the ceremony", async () => {
+    const del = vi.spyOn(api, "del");
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(
+      new APIError(409, "last_credential", "this quince holds no passkey for example.com."),
+    );
+
+    await expect(removePassword()).rejects.toMatchObject({ code: "last_credential" });
+    expect(del).not.toHaveBeenCalled();
   });
 });

@@ -349,24 +349,75 @@ func (e ErrLastCredential) Error() string {
 		e.Presented, strings.Join(e.Elsewhere, ", "), e.Presented)
 }
 
+// ErrSelfRemoval — RULE 2: what was presented IS what is being removed, so it establishes nothing
+// about whether anything would be left.
+//
+// A SEPARATE REFUSAL FROM ErrLastCredential/ErrLastPasskey BECAUSE THE REMEDIES DIFFER, which is the
+// same test contracts.md applies when it refuses a second code for the two lockout paths. There the
+// remedy is identical — add the other kind of credential — so one code carries both. Here it is not:
+// this one says *try again with something else, which you have*, and the lockout pair says *you have
+// nothing else, go and make one*. A client that could not tell them apart would offer a retry that
+// cannot succeed, or fail to offer one that can.
+type ErrSelfRemoval struct {
+	// Detail is the whole user-facing sentence. Built where the alternatives are known rather than
+	// assembled at the wire, so the two removal paths can each name their own remedy.
+	Detail string
+}
+
+func (e ErrSelfRemoval) Error() string { return e.Detail }
+
 // RemovePassword makes this install PASSWORDLESS — qn.6m D4, permitted by ruling B on quince#841,
 // which superseded qn.6k's "a passkey is an addition, never a replacement".
 //
-// IT REFUSES UNLESS A PASSKEY EXISTS FOR **THIS** rpId, and that filter is the exact opposite of
-// Configured()'s. The two ask different questions, and saying so here is worth the lines because the
-// pair now sits in one file:
+// RULE 2 (qn.6n D1/D2): IT DEMANDS A PASSKEY ASSERTION, and the password cannot authorise its own
+// removal. That one comparison replaces the row check this function used to make, and the
+// replacement is strictly stronger for the reason D2 gives: **a dead row cannot produce an
+// assertion**. The old check asked whether a row EXISTED for this rpId and its comment claimed the
+// credential was usable — quince#888 made the comment honest and left the check, pending the ruling
+// that arrived. A passkey deleted from the phone, or a wiped device, left a row behind that
+// satisfied it, and console access was then the only way back.
 //
-//	Configured()      has this install been CLAIMED?    → do NOT filter. Guards first-run setup.
-//	RemovePassword()  can the user still SIGN IN here?  → DO filter. Guards the lockout.
+// SO THE rpId FILTER IS GONE FROM THIS FUNCTION, and the asymmetry it used to state is not lost —
+// it moved to where it can be enforced rather than inferred:
 //
-// A credential bound to another domain cannot sign in at this address, so counting it here would let
-// somebody remove their password and lock themselves out of their own backups — with the phone still
-// cheerfully listing a passkey that cannot help. That is qn.6k D2's hazard reached from the other
-// side, and `quince auth reset` (console access) would be the only way back.
+//	Configured()  has this install been CLAIMED?   → counts rows, does NOT filter. Guards first run.
+//	rule 2        can the user still SIGN IN here? → counts nothing. An assertion IS the proof.
 //
-// NOT RATE-LIMITED, deliberately: it verifies no credential, so there is nothing to guess. The
-// session guard is the whole of its protection, as for every other authenticated mutation.
-func (s *Service) RemovePassword(rpID, clientIP string) error {
+// A credential bound to another domain still cannot remove this password, because it cannot assert
+// at this address — the browser will not offer it and FinishReauth would refuse it. That is the same
+// guarantee the filter was reaching for, obtained from the authenticator instead of from a table.
+//
+// RATE-LIMITED THROUGH RequirePresent when a password is presented, which is new: this path verified
+// no credential before, and now it may verify one on its way to refusing it.
+func (s *Service) RemovePassword(proofs *Proofs, pres Presented, rpID, sessionID, clientIP string) error {
+	subject, err := s.RequirePresent(proofs, pres, OpRemovePassword, "", sessionID, clientIP)
+	if err != nil {
+		return err
+	}
+	// RULE 2, IN ONE COMPARISON. A correct password reaches here and is refused, which is the point:
+	// the thing being removed cannot vouch for the state it leaves behind.
+	//
+	// The zero subject — an install with NO credentials at all — is not `Password`, so it falls
+	// through and removes nothing that exists. That is RequirePresent's documented first-run
+	// exemption, and it must stay reachable: demanding an assertion on an unclaimed install would
+	// make `quince auth reset` recoverable only by a credential the reset just destroyed.
+	if subject.Password {
+		return s.passwordRemovalRefusal(rpID)
+	}
+	if _, err := s.store.DeleteSetting(settingPasswordHash); err != nil {
+		return err
+	}
+	s.audit("password_removed", clientIP)
+	return nil
+}
+
+// passwordRemovalRefusal picks WHICH refusal a rule-2 violation on this path earns.
+//
+// IT READS ROWS, AND THAT IS NOT THE GUARD COMING BACK. The removal was already refused one line
+// above, on the subject alone; this decides only what to SAY about it, and the two answers are
+// different instructions rather than different verdicts. D2 keeps ErrLastCredential for exactly this
+// — "a refusal that says only *present another credential* is correct and less useful".
+func (s *Service) passwordRemovalRefusal(rpID string) error {
 	rows, err := s.store.ListPasskeys()
 	if err != nil {
 		return err
@@ -375,23 +426,8 @@ func (s *Service) RemovePassword(rpID, clientIP string) error {
 	elsewhere := make([]string, 0, len(rows))
 	for _, p := range rows {
 		if p.RPID == rpID {
-			// A ROW EXISTS FOR THIS rpId. That is what is checked, and it is NOT the same as "a
-			// usable credential exists" — which is what this comment claimed until quince#888.
-			//
-			// A server-side row outlives the credential in ordinary use: the passkey is deleted
-			// from the device, the device is lost or wiped, the keychain entry goes. quince cannot
-			// tell from here; only an assertion can, and this path performs none. So removing the
-			// password against a dead row leaves console access as the only way back — the cost
-			// qn.6m D7 names, accepted here on the strength of a check that does not establish it.
-			//
-			// Left as a row check on purpose: making it a USABILITY check is quince#888 item 3,
-			// which needs a ruling because the fix interacts with step-up auth. Saying what the
-			// code actually does is the state-honesty rule and does not wait for that.
-			if _, err := s.store.DeleteSetting(settingPasswordHash); err != nil {
-				return err
-			}
-			s.audit("password_removed", clientIP)
-			return nil
+			return ErrSelfRemoval{Detail: "the password cannot authorise its own removal — " +
+				"confirm with a passkey instead."}
 		}
 		if !seen[p.RPID] {
 			seen[p.RPID] = true

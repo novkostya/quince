@@ -31,8 +31,12 @@ func TestTheTwoClickTakeoverIsRefusedAtTheSecondClick(t *testing.T) {
 	}
 	seedPasskey(t, st, "cred-1", here)
 
-	// Click one — allowed then and now. A passkey for this address remains, so this is not a lockout.
-	if err := svc.RemovePassword(here, ip); err != nil {
+	// Click one — allowed then and now, and since qn.6n rule 2 it costs a passkey assertion. The
+	// proof is minted directly rather than earned through a ceremony: what this test is about is the
+	// SEQUENCE, and routing it through WebAuthn would be testing the ceremony a second time.
+	proofs := NewProofs()
+	tok := mustMint(t, proofs, OpRemovePassword, "", ProofSubject{CredentialID: "cred-1"})
+	if err := svc.RemovePassword(proofs, Presented{Proof: tok}, here, sess, ip); err != nil {
 		t.Fatalf("RemovePassword: %v", err)
 	}
 

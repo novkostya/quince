@@ -117,6 +117,15 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 	if sessionID == "" {
 		return nil, "", ErrNoSession
 	}
+	// REFUSE BEFORE THE SHEET when this address holds nothing that could produce a usable proof.
+	//
+	// THIS IS COPY, NOT A GUARD, and the distinction is D2's. The guard is the assertion itself,
+	// which no row can fake; what this buys is that a user who cannot do the thing is told why, in
+	// the sentence ErrLastCredential has always carried, instead of meeting an empty passkey sheet
+	// and a browser error about no credentials being available. Removing it would weaken nothing.
+	if err := s.provable(op, rpID); err != nil {
+		return nil, "", err
+	}
 	if !s.limiter.allow(clientIP, s.now()) {
 		return nil, "", ErrRateLimited
 	}
@@ -140,6 +149,37 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 		return nil, "", err
 	}
 	return assertion, key, nil
+}
+
+// provable reports whether a ceremony for this operation could produce a proof this install would
+// accept, refusing with the sentence that names what to do about it.
+//
+// ONLY `remove_password` IS CHECKED HERE. Every other operation can be proven by any passkey this
+// address holds, and a caller with none of those has other routes: `set_password` and `add_passkey`
+// take the password, and `remove_passkey` is quince#888's mirror, which slice 6b adds with the
+// target exclusion it needs. An operation nothing can prove is a dead end worth naming; an operation
+// this particular client cannot prove is not, and refusing on the second would be D5's rejected
+// carve-out wearing a helpful face.
+func (s *Service) provable(op ProofOperation, rpID string) error {
+	if op != OpRemovePassword {
+		return nil
+	}
+	rows, err := s.store.ListPasskeys()
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(rows))
+	elsewhere := make([]string, 0, len(rows))
+	for _, p := range rows {
+		if p.RPID == rpID {
+			return nil
+		}
+		if !seen[p.RPID] {
+			seen[p.RPID] = true
+			elsewhere = append(elsewhere, p.RPID)
+		}
+	}
+	return ErrLastCredential{Presented: rpID, Elsewhere: elsewhere}
 }
 
 // FinishReauth verifies the assertion and mints a proof for the operation the ceremony named.
