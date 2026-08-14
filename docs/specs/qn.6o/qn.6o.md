@@ -173,7 +173,7 @@ path that has already shown one sheet.
 **MEASURED 2026-08-14, AND THE PREDICTION WAS WRONG.** Operator, on hardware: `quince auth reset` →
 passkey-only install set up on an iPhone → signed in on a Mac by QR → added a passkey → confirmed
 with the iPhone's passkey by QR → **the creation prompt appeared by itself.** Chaining `create()`
-off a passkey proof works, so **the mandatory fresh click is removed** (quince#996).
+off a passkey proof works, so **the mandatory fresh click is removed** (quince#998).
 
 **THE REASONING ABOVE IS KEPT BECAUSE IT WAS SOUND AND IT WAS LABELLED.** This paragraph read
 *"UNMEASURED, and stated as such — Chrome is lenient about activation for `create()` and Safari is
