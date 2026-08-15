@@ -32,13 +32,17 @@ type Deps struct {
 	Versions         VersionReader
 	VersionAdmin     VersionAdmin
 	Storages         StorageReader
-	// ZFSKeyPath is where POST /api/storages/zfs/key generates or finds the helper key. Empty means
-	// `config.DefaultZFSKeyPath`, which is what production leaves it as (quince#818).
+	// ZFSKeyDir is the directory POST /api/storages/zfs/key generates or finds helper keys in. Empty
+	// means `config.DefaultZFSKeyDir`, which is what production leaves it as (quince#818).
+	//
+	// A DIRECTORY SINCE quince#989, because there is one key per PARENT DATASET and the filename is
+	// derived from it. It was a single path, which is what let a second storage be handed the first
+	// storage's key — and with it the first storage's parent, silently.
 	//
 	// IT IS A DEPENDENCY SO TESTS CAN BE HERMETIC, not so an operator can retarget it: the handler
 	// takes no path from the request precisely so the endpoint has no reachable target but quince's
 	// own, and a test writing into `/data` would either fail or dirty the box.
-	ZFSKeyPath string
+	ZFSKeyDir string
 	// ZFSKnownHostsPath is where POST /api/storages/zfs/hostkey/trust records a confirmed host key.
 	// Empty means `config.DefaultZFSKnownHosts` (quince#912) — a dependency for the same
 	// hermetic-test reason as ZFSKeyPath above, and equally not a retargeting knob.

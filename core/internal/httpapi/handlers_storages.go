@@ -282,24 +282,36 @@ func (d Deps) handleZFSHelperPlain() http.HandlerFunc {
 // handleStorageZFSKey serves POST /api/storages/zfs/key {parent_dataset} → 200 {key} | 422 | 500
 // (contracts §1, quince#818 piece B; quince#985).
 //
-// It answers *"what key should I put on my ZFS host?"* — and it can only ever answer about ONE path,
-// `config.DefaultZFSKeyPath`, which is quince's own `/data/keys/zfs`.
+// It answers *"what key should I put on my ZFS host?"* — one key per PARENT DATASET, at a path
+// quince DERIVES from that dataset under `config.DefaultZFSKeyDir` (quince#989).
 //
-// IT DISCOVERS BEFORE IT GENERATES, which is the property that protects existing installs. A key
-// already at that path may have its public half in an `authorized_keys` on a host quince cannot see,
-// so replacing it would break a working storage silently, with the failure surfacing at the next
-// backup rather than here. `EnsureZFSKey` therefore has no force flag, and a file that is not a key
-// is a REFUSAL rather than a reason to overwrite.
+// ONE PATH FOR EVERY STORAGE WAS A BUG, NOT A LIMITATION, and it is worth naming because the symptom
+// pointed elsewhere. A forced command is a property of a key — sshd uses the first `authorized_keys`
+// line whose key matches and stops looking — so one key can be confined to exactly one parent. Asked
+// about a second storage's dataset, this endpoint's discover-before-generate found the FIRST key and
+// rendered a line pairing key A with dataset B. That line is inert; storage B stays confined to
+// dataset A. And it reads healthy: `capacity` takes no argument and answers for whatever `$PARENT`
+// the live forced command names, so *Test helper* returns dataset A's numbers and only `create`
+// fails, at commit.
+//
+// IT DISCOVERS BEFORE IT GENERATES, PER DERIVED PATH. A key already there may have its public half
+// in an `authorized_keys` on a host quince cannot see, so replacing it would break a working storage
+// silently, with the failure surfacing at the next backup rather than here. `EnsureZFSKey` therefore
+// has no force flag, and a file that is not a key is a REFUSAL rather than a reason to overwrite.
+// The property has to hold for EACH key rather than once globally, which is what the derivation
+// makes possible.
 //
 // THE PRIVATE HALF NEVER REACHES THE RESPONSE. `storage.ZFSKey` carries only the public line, the
 // complete `authorized_keys` line, the path, and whether it was just created — the same discipline
 // backup passwords follow. `Created` is on the wire because the form must be able to say *found
 // yours* rather than *made you one*.
 //
-// THE BODY IS ONE FIELD AND IT IS NOT A PATH, which keeps the security shape §1 states. A
-// caller-supplied *path* would make this a write-a-file-anywhere primitive; a caller-supplied
-// *dataset* is interpolated into a line that is rendered on screen and never written by quince at
-// all. The key still lands at `config.DefaultZFSKeyPath` and nowhere else.
+// THE BODY IS ONE FIELD AND IT IS NOT A PATH, which keeps the security shape §1 states — and the
+// derivation does not weaken it. A caller-supplied *path* would make this a write-a-file-anywhere
+// primitive; a caller-supplied *dataset* is validated, then escaped into a single filename component
+// under a directory quince chooses. `config.ZFSKeyPathFor` carries why that is escaping rather than
+// mirrored directories: `datasetPattern` accepts `tank/../../etc`, and a mirrored tree would resolve
+// it outside the key directory.
 //
 // 422 IS NEW, AND IT IS THE ONE THE HELPER ENDPOINT GAVE UP (quince#985). The dataset goes inside
 // `command="…"` in a file sshd parses, so an unsafe name is refused rather than escaped — the same
@@ -311,11 +323,14 @@ func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 			hookCheck422(w, d, "parent_dataset", "the request body could not be read as JSON")
 			return
 		}
-		path := d.ZFSKeyPath
-		if path == "" {
-			path = config.DefaultZFSKeyPath
+		dir := d.ZFSKeyDir
+		if dir == "" {
+			dir = config.DefaultZFSKeyDir
 		}
-		k, err := storage.EnsureZFSKey(path, req.ParentDataset)
+		// DERIVED BEFORE THE DATASET IS VALIDATED, AND THAT IS SAFE BECAUSE NOTHING TOUCHES DISK
+		// FIRST: `EnsureZFSKey` checks the name against `datasetPattern` before it reads or writes
+		// anything, so an unsafe dataset produces a path that is computed and then discarded.
+		k, err := storage.EnsureZFSKey(config.ZFSKeyPathIn(dir, req.ParentDataset), req.ParentDataset)
 		if err != nil {
 			if errors.Is(err, storage.ErrUnsafeDataset) {
 				// SAME FIELD, SAME FACTS as `CheckHook`'s refusal and the probe's — the buttons sit

@@ -111,12 +111,31 @@ over the first's and the first failed at its next commit — hours later, with n
 the storage that was added. The script is now **identical on every install**, and what differs is one
 word per key in `authorized_keys`.
 
-**So two storages on one host need two keys, one line each.** A forced command is a property of a
-key: sshd uses the first `authorized_keys` line whose key matches, so the same public key twice with
-two different datasets confines both to the first one. quince generates at
-`/data/keys/zfs`; point the second storage's `ssh_key` at a key you make yourself — `ssh-keygen -t
-ed25519 -f /data/keys/zfs-2 -N ""` — and give it its own line with its own dataset. **quince does not
-generate the second one for you** (quince#989).
+**So two storages on one host need two keys, one line each — and quince makes both** (quince#989). A
+forced command is a property of a key: sshd uses the first `authorized_keys` line whose key matches
+and stops looking, so one public key on two lines with two different datasets confines both to
+whichever line comes first.
+
+**One key per PARENT DATASET, at a path quince derives from it** under `/data/keys/`, escaping `/` as
+`+` — `tank/quince` → `/data/keys/zfs-tank+quince`. Press the button once per storage and each answer
+carries its own line. Two storages under **one** parent correctly share one key, exactly as they
+share one helper: their confinement is identical, so a second key would buy nothing but a second line
+to paste. Setting `ssh_key` yourself still wins, which is the escape hatch for a key you already have
+deployed.
+
+**`+` is not decoration.** No ZFS dataset name can contain one, so no two datasets can derive one
+filename — and because the escape removes every separator, a name like `tank/../../etc`, which
+quince's own validator accepts, cannot reach a file outside `/data/keys/`.
+
+**And it is `+` rather than `%` because OpenSSH percent-expands `IdentityFile`.** Measured on a rig,
+2026-08-15: `ssh -i /data/keys/zfs-labpool%quince` never connects — it dies parsing its own argument
+with `vdollar_percent_expand: unknown key %q` — while the same key at a `+` path answers. If you
+hand-place a key, keep percent signs out of its path. Mirroring datasets into
+real directories was considered and rejected for that, and for a second reason: `tank/backups` and
+`tank/backups/cold` are both legal datasets, and a directory tree cannot hold a file and a directory
+under one name. Git chose that layout for loose refs and can only refuse — `cannot lock ref
+'refs/heads/foo/bar': 'refs/heads/foo' exists` — and under ZFS, where nesting **is** the model and
+quince puts one child dataset per device under the parent, that shape sits on the common path.
 
 **THE SCRIPT IS A FILE, NOT A FENCE IN THIS DOCUMENT** — `core/internal/storage/zfshelper/quince-zfs-helper`.
 
