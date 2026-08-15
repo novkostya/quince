@@ -504,3 +504,51 @@ describe("quince#929 — a successful change tells the browser something happene
     expect(screen.getByLabelText("New password")).toHaveValue("");
   });
 });
+
+// quince#1000 — THE FORM IS RESET NATIVELY, not just cleared in state.
+//
+// After a successful change the values were already empty and Safari still painted the fields
+// yellow: `:-webkit-autofill` is browser-managed styling that a React state change does not touch.
+// The Operator's idea, measured on the stand 2026-08-15.
+//
+// ASSERTED ON `reset` BEING CALLED, which is as close as jsdom reaches — it computes no styling, so
+// the yellow itself is unobservable here. What this pins is the call and, more importantly, the
+// ORDER: the form reference must be taken before the await or it is null by the time we need it.
+describe("quince#1000 — the fields stop looking full", () => {
+  it("resets the form natively after a successful change", async () => {
+    const reset = vi.spyOn(HTMLFormElement.prototype, "reset");
+    vi.spyOn(api, "put").mockResolvedValue(undefined);
+    renderControls(true);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), {
+      target: { value: "old-one" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await waitFor(() => expect(reset).toHaveBeenCalled());
+    // AND THE VALUES ARE STILL EMPTY, so the reset did not fight the state that cleared them.
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+    expect(screen.getByLabelText("New password")).toHaveValue("");
+  });
+
+  // NOT ON A FAILURE. A refused change leaves what the user typed where they can correct it —
+  // resetting there would clear the field they are about to fix.
+  it("does not reset when the change was refused", async () => {
+    const reset = vi.spyOn(HTMLFormElement.prototype, "reset");
+    vi.spyOn(api, "put").mockRejectedValue(
+      new APIError(401, "bad_password", "current password is incorrect"),
+    );
+    renderControls(true);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), {
+      target: { value: "wrong" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await screen.findByText(/current password is incorrect/i);
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Current password")).toHaveValue("wrong");
+  });
+});
