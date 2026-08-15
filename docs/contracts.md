@@ -1502,7 +1502,38 @@ DELETE /api/config/storage/{name}
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
                     see the gap B ruling above for what a reconstructed full document
                     silently loses.
+POST /api/config/storage/{name}/default
+                  → make one storage the default: 200 {config, warnings, source} | 404.
+                    MOVES THE FLAG AND LEAVES FILE ORDER ALONE — the flag decides
+                    `slots[0]` (§6), so a re-designation is one edit and not a reorder.
+                    ALREADY DEFAULT IS A 200 and a no-op: the route asserts a state, so
+                    asking for the state it is in has been satisfied, and a refusal there
+                    would have "do nothing" as its remedy.
+                    NO BUSY REFUSAL, unlike the DELETE: forgetting a storage mid-backup
+                    leaves CommitJob unable to resolve its slot, where a re-designation
+                    removes no slot and rebinds no job — §6 already says it takes effect
+                    for the next UNBOUND job. AN UNREACHABLE STORAGE IS ALLOWED: it is
+                    the one somebody designates for later, and the job-start 409 already
+                    covers the consequence with a remedy the user can act on.
+                    422 is reachable only if the document fails re-validation for a
+                    reason unrelated to the flag — a hand-edit between load and call.
 ```
+
+**RULED and IMPLEMENTED: `POST /api/config/storage/{name}/default`** (Operator ruling 2026-08-11,
+[quince#722](https://github.com/novkostya/quince/issues/722)).
+
+**It is the third case the other two point at and nobody built.** `POST /api/config/storage` refuses
+a newcomer that claims `default`, ending *"changing which storage is default is a separate edit"*;
+`DELETE /api/config/storage/{name}` refuses the default with *"Make another storage the default
+first, then forget this one."* Both are correct, and until this route **both named a control the
+product did not have** — a remedy that was never going to work, which `qn.6g` already ruled is the
+same defect as a silent failure.
+
+**Rejected: routing it through the full-document `PUT`.** The capability was there — `PUT` is a
+genuine replace and `default` is a settable field — and no UI surface sends storages through it. Gap
+B's argument against reconstructing the document applies unchanged: a client that rebuilds the
+storage list from what it rendered drops every surviving entry's `zfs:` and `retention:` keys,
+because no storage card renders them.
 
 **RULED and IMPLEMENTED: `discarded` — THE FILE ON DISK WAS REFUSED AT LOAD** (Operator ruling
 2026-08-12, [quince#849](https://github.com/novkostya/quince/issues/849)). A boolean, from

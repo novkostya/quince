@@ -243,3 +243,57 @@ func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, append(loadWarns, warns...), src))
 	}
 }
+
+// POST /api/config/storage/{name}/default: make one declared storage the default (contracts §1,
+// Operator ruling 2026-08-11, quince#722).
+// → 200 {config, warnings, source} | 404 | 422.
+//
+// THE THIRD CASE NOBODY BUILT. Adding a storage and forgetting one both exist and both point at
+// this one: `POST /api/config/storage` refuses a newcomer that claims `default` and ends *"changing
+// which storage is default is a separate edit"*, and `DELETE` refuses the default with *"Make
+// another storage the default first."* Until this route, that remedy named a control the product
+// did not have — which is `qn.6g`'s own named defect, *a remedy that was never going to work is the
+// same defect as a silent failure*, sitting in shipped code.
+//
+// ADD'S AND FORGET'S MIRROR in every respect that matters: a config mutation, so it returns the
+// config-endpoint body rather than a 204, and the client re-renders from the same payload GET, PUT,
+// POST and DELETE all hand it.
+//
+// ADDRESSED BY THE CONFIG `name`, never the marker UUID, for `DELETE`'s reason (quince#570): an
+// unreachable storage has no UUID, and a disk that is currently unplugged is one somebody may well
+// be designating for later.
+//
+// THE FLAG MOVES AND THE FILE ORDER DOES NOT — that is the ruling, and `config.SetDefaultStorage`
+// carries the full reasoning along with why there is no busy refusal here and why an unreachable
+// storage is allowed.
+//
+// ALREADY-DEFAULT IS A 200. The route asserts a state rather than issuing a command, so asking for
+// the state it is already in has been satisfied; a refusal there would have "do nothing" as its
+// remedy. Delegated to the implementer by the ruling, and stated here because the absence of a
+// fourth status code is otherwise indistinguishable from a case nobody thought about.
+func (d Deps) handleConfigStorageSetDefault() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+
+		outcome, errs, warns, err := d.Config.SetDefaultStorage(name)
+		switch {
+		case err != nil:
+			d.Log.Error("config write failed", "error", err, "making default", name)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not write config")
+			return
+		case outcome == config.SetDefaultNoSuchStorage:
+			writeError(w, d.Log, http.StatusNotFound, "no_such_storage",
+				"no storage with that name is declared")
+			return
+		case outcome == config.SetDefaultRefused:
+			writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
+				Errors []wire.ConfigError `json:"errors"`
+			}{Errors: errs})
+			return
+		}
+
+		cfg2, loadWarns, src := d.Config.Snapshot()
+		d.Log.Info("storage made default", "storage", name, "applier_warnings", len(warns))
+		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, append(loadWarns, warns...), src))
+	}
+}

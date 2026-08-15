@@ -464,6 +464,7 @@ const (
 	SourcePutConfig         = "PUT /api/config"
 	SourceAddStorage        = "POST /api/config/storage"
 	SourceForgetStorage     = "DELETE /api/config/storage/{name}"
+	SourceSetDefaultStorage = "POST /api/config/storage/{name}/default"
 	SourceInsecureTransport = "POST /api/config/insecure-transport"
 	// SourceDemoSeed is `serve --demo` filling a throwaway config at startup. It is the reason
 	// `Replace` takes a source where the three narrow writes carry a constant: it genuinely has two
