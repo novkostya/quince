@@ -14,6 +14,7 @@ import { modelLine } from "@/features/devices/modelName";
 import { StorageDeviceBackup } from "@/features/storage/StorageDeviceBackup";
 import { StorageProblem } from "@/features/storage/StorageProblem";
 import { ForgetStorage } from "@/features/storage/ForgetStorage";
+import { MakeDefaultStorage } from "@/features/storage/MakeDefaultStorage";
 import type { Version } from "@/lib/types";
 
 // versionsOn scopes a version list to ONE storage, and is exported so it can be tested without
@@ -292,6 +293,30 @@ export function StorageDetailsPage() {
           <VersionList versions={versions} showDevice />
         )}
       </div>
+
+      {/* MAKE DEFAULT SITS ABOVE FORGET, and the order is the workflow rather than taste
+          (quince#722). Forget refuses the default and tells you to make another storage the default
+          first — so a user who arrives wanting to detach this disk is sent to a different storage's
+          page, and this is the control they came for. Putting it BELOW Forget would put the remedy
+          under the refusal that names it.
+
+          Hidden when this storage already is the default: the endpoint answers 200 to that request,
+          but a button that visibly does nothing is worse than no button, and the `Default` badge in
+          the header already says so. */}
+      {!storage.default ? (
+        <>
+          <h2 className="mt-10 text-sm font-semibold text-muted">Default storage</h2>
+          <div className="mt-3 rounded-card border border-line bg-card p-4">
+            <p className="text-sm text-muted">
+              Backups that do not name a storage go to the default. Making this one the default
+              changes where the next backup is written — nothing already on either disk moves.
+            </p>
+            <div className="mt-3">
+              <MakeDefaultStorage storage={storage} onDone={storages.reload} />
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {/* Forget sits at the BOTTOM, after everything a user might want to check before deciding —
           the version list directly above it is the answer to "what am I about to detach". */}

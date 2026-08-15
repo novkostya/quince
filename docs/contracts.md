@@ -1523,11 +1523,11 @@ POST /api/config/storage/{name}/default
 [quince#722](https://github.com/novkostya/quince/issues/722)).
 
 **It is the third case the other two point at and nobody built.** `POST /api/config/storage` refuses
-a newcomer that claims `default`, ending *"changing which storage is default is a separate edit"*;
-`DELETE /api/config/storage/{name}` refuses the default with *"Make another storage the default
-first, then forget this one."* Both are correct, and until this route **both named a control the
-product did not have** — a remedy that was never going to work, which `qn.6g` already ruled is the
-same defect as a silent failure.
+a newcomer that claims `default`; `DELETE /api/config/storage/{name}` refuses the default with
+*"Make another storage the default first, then forget this one."* Both refusals are correct, and
+until this route **both named a control the product did not have** — a remedy that was never going
+to work, which `qn.6g` already ruled is the same defect as a silent failure. The add's refusal said
+*"changing which storage is default is a separate edit"* and now names where that edit is made.
 
 **Rejected: routing it through the full-document `PUT`.** The capability was there — `PUT` is a
 genuine replace and `default` is a settable field — and no UI surface sends storages through it. Gap
@@ -1774,7 +1774,10 @@ the path that *adds* to a list it believes is empty.
   door. (`auto` itself remains legal in a hand-written file — *absorbed, not removed*.)
 - **`default` cannot be claimed.** The first storage is default by implication, and a later one must
   not steal it: honouring the flag would silently re-point every backup that names no storage.
-  Re-designation is a separate edit on an existing storage and this rung does not build it.
+  Re-designation is a separate act on an existing storage, and since quince#722 it has a route —
+  `POST /api/config/storage/{name}/default`, which the refusal now points at. This read *"and this
+  rung does not build it"*, which was true of `qn.6e` and is the sentence that made the refusal
+  unfollowable for as long as it stood.
 
 **`PUT /api/config` TAKES THE OPPOSITE POLICY ON THE SAME FIELDS, AND THE ASYMMETRY IS DELIBERATE**
 — ruled 2026-08-08 on [quince#754](https://github.com/novkostya/quince/issues/754). A `PUT` body may
