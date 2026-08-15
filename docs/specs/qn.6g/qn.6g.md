@@ -608,8 +608,7 @@ Each carries one reviewable claim and its own proof.
 
 1. **This spec.** **Not** code-owned — `/docs/specs/**` is one of `CODEOWNERS`' declared omissions,
    so the architect approves it. **PR 6 needs `@novkostya`; the rest do not** — including PR 4, whose
-   only owned-path claim was `contracts.md`, which stopped being code-owned on 2026-08-14
-   (quince#953).
+   only canon file is `contracts.md`, which is not an owned path (quince#953).
 2. **The seam** — `Applier`, `Subscribe`, notify from `Replace` and `ForgetStorage`, warning
    plumbing. No consumer yet, so the claim is *the mechanism exists and fires exactly once per
    write*. Proof: Go tests, including open question 2.
@@ -621,9 +620,9 @@ Each carries one reviewable claim and its own proof.
 
    **Three claims rather than one, and the bundling is forced.** Shipping the applier alone makes an
    unreachable refusal reachable mid-transfer — a regression introduced by the fix — so the `422`
-   cannot follow in a later PR. It also puts a `docs/contracts.md` §1 edit in item 4 — which made it
-   code-owned **when this rung ran**, and does not now: that file left `CODEOWNERS` on 2026-08-14
-   (quince#953), so an item shaped like this one today is the architect's to approve.
+   cannot follow in a later PR. It also puts a `docs/contracts.md` §1 edit in item 4, **which does
+   not make it code-owned**: that file is not an owned path (quince#953), so item 4 is the
+   architect's to approve like every item here but 6.
 
    **Retention moved here from item 5, and it is a dependency rather than a preference.** It lives on
    `Slot.Retention` (`slot.go:29`) and `policyFor` reads it off the slot list (`subsystem.go:518`),

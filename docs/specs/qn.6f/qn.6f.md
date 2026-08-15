@@ -567,8 +567,8 @@ were filed, and slice 7 is dropped rather than owed. **Filing the `secureCookie`
 it was ruled within three hours, and slice 8 joined the unblocked set before slice 4 existed.
 
 **Slices 4, 6 and 8 each flip a `PROPOSED (gap)` block in the same diff as their code**, heading
-narrowed, or `bin/gap-heading-check` fails `gates-sh`. `docs/contracts.md` was code-owned while this rung ran, so
-slices 4 and 6 needed `@novkostya`'s approval as well as an architect review — **that file left `CODEOWNERS` on 2026-08-14 (quince#953), so a slice shaped like those takes an architect approval alone now.** **Slice 8's block is
+narrowed, or `bin/gap-heading-check` fails `gates-sh`. `docs/contracts.md` is **not** an owned path
+(quince#953), so slices 4 and 6 take an architect review and nothing more. **Slice 8's block is
 already flipped** (quince#507, merged) — it must not be flipped twice.
 
 **The unblocked piece worth doing FIRST is not in this table**, because it is not this rung's:
