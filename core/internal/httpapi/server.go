@@ -251,6 +251,9 @@ func NewRouter(deps Deps) http.Handler {
 	// argument, and `authExempt`, which is the other half of it.
 	apiMux.HandleFunc("POST /api/config/insecure-transport", deps.handleInsecureTransportSet())
 	apiMux.HandleFunc("DELETE /api/config/storage/{name}", deps.handleConfigStorageDelete())
+	// `{name}/default` cannot collide with `{name}` — different methods, and a longer pattern wins
+	// in ServeMux regardless. It is the remedy `DELETE`'s own refusal names (quince#722).
+	apiMux.HandleFunc("POST /api/config/storage/{name}/default", deps.handleConfigStorageSetDefault())
 	apiMux.HandleFunc("GET /api/devices", deps.handleDevices())
 	apiMux.HandleFunc("POST /api/devices/rescan", deps.handleRescan())
 	apiMux.HandleFunc("GET /api/devices/{udid}", deps.handleDevice())
