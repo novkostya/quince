@@ -230,6 +230,36 @@ to Add-a-passkey beside the bespoke fallback slice 6b already built for removal 
 of asking the same question. That is `quince#908` §4's *"four different kinds of thing wearing one
 costume"*, arrived at one surface at a time.
 
+**AMENDED — ONE FACTOR NEEDS NO CHOOSER.** Operator ruling, 2026-08-15. When `accepts` names exactly
+one factor and it is a **passkey**, no challenge is shown at all: the ceremony runs from the press the
+user already made.
+
+**Raised from `quince#994`**, and the trigger is worth recording because it is the opposite of what a
+rung usually finds. Migrating the password paths to these mechanics would have **added** a dialog
+where today there is none: `remove_password` can only ever answer `["passkey"]` — rule 2 excludes the
+password from authorising its own removal — so the challenge there is a chooser with one choice,
+permanently. The consolidation would have shipped as a UX regression.
+
+**AND NOT AS A FALLBACK AFTER A CANCELLED SHEET EITHER**, which took a correction to get right. The
+implementer proposed keeping the dialog for that case; the Operator refused it: *"no, I think we
+should never show the dialog in this case."* Correct, because there is nothing to choose **after** a
+cancellation any more than before one — a one-option chooser appearing precisely when the user has
+just declined that option is the worst moment it could pick. A dismissed sheet leaves the surface as
+it was, which is `AddPasskeyRow`'s existing rule, and the button they pressed is the retry.
+
+**THE RULING AGAINST UNPROMPTED MODAL SHEETS IS NOT OVERRIDDEN — ITS PREMISE IS GONE.** `PasswordForm`
+states it: *"credential presence is undetectable, so an unprompted modal guesses wrong for everyone
+without one."* `accepts` containing `passkey` **is** the server confirming a credential exists that
+can assert at this address. Detectability is exactly what slice 2 added, so the case that ruling
+protects against cannot arise on this path.
+
+**A LONE `password` GETS NO SUCH TREATMENT AND CANNOT.** There is no ceremony to run, only a field to
+type into, so the surface has to be shown. The asymmetry is in what the factors *are*, not in how many
+there are — which is why the rule names the passkey rather than the count alone.
+
+**Measured on hardware, 2026-08-15**, on both surfaces this rung ships: add and remove, with the sheet
+completed and with it dismissed.
+
 ### D6. The name moves to the page, and `AddPasskeyDialog` is retired — Operator ruling
 
 > *"I don't want 2 dialogs in a row. Which means either custom dialog for passkey addition case, or
