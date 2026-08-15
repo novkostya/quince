@@ -238,3 +238,38 @@ test("a dialog centres in the viewport, clear of the notch and the home indicato
   // Equal gaps, to a pixel of rounding.
   expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
 });
+
+// A DIALOG TALLER THAN THE SCREEN MUST BE REACHABLE AT BOTH ENDS — Operator-reported 2026-08-15
+// from a phone in LANDSCAPE, with the encryption dialog's head above the top edge and its buttons
+// below the bottom one. Nothing scrolled, because at that moment nothing was a scroller.
+//
+// THE RISK THIS GATE EXISTS FOR IS NOT THE CSS, IT IS THE SCROLL LOCK. Radix wraps `Content` in
+// `react-remove-scroll`, which blocks scrolling everywhere except the content it is given. The
+// scroller here is the OVERLAY — an ancestor of that content, not the content itself — so whether it
+// can scroll at all is a question about a third-party library's internals, and the only honest way
+// to answer it is to scroll it. A landscape viewport is what makes the tallest dialog overflow.
+test("a dialog taller than the screen scrolls, and both its ends are reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 }); // landscape phone — the reported case
+  await authenticate(page);
+  await openTallDialog(page);
+
+  const dialog = page.getByRole("dialog");
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  // The premise of the test: this dialog really does overflow this viewport. If a copy change ever
+  // makes it fit, the assertions below would pass without exercising anything.
+  expect(box!.height).toBeGreaterThan(390);
+
+  // THE FOOT: the submit button is below the fold and must come into view.
+  const submit = page.getByRole("button", { name: /change backup password/i });
+  await submit.scrollIntoViewIfNeeded();
+  await expect(submit).toBeVisible();
+  expect((await submit.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+
+  // THE HEAD: and going back up must still reach the title, which is what was cut off in the report.
+  // The dialog title and its submit share a name, so this is scoped to the heading role.
+  const title = page.getByRole("heading", { name: /change backup password/i });
+  await title.scrollIntoViewIfNeeded();
+  await expect(title).toBeVisible();
+  expect((await title.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+});
