@@ -168,18 +168,22 @@ test("the add-storage page is usable on a phone, zfs branch included", async ({ 
   await expect(page.getByTestId("test-helper")).toBeVisible();
 });
 
-// quince#762 — A DIALOG IS CENTRED IN THE VISIBLE AREA, NOT THE LAYOUT VIEWPORT. Operator-reported
-// from a phone with screenshots: every dialog in the product sat against the top of the screen with
-// its head under the Dynamic Island.
+// quince#762 — A DIALOG CLEARS THE NOTCH AND THE HOME INDICATOR, AND IS CENTRED BETWEEN THEM.
+// Operator-reported from a phone with screenshots: every dialog in the product sat against the top
+// of the screen with its head under the Dynamic Island.
 //
-// WHAT THIS CAN AND CANNOT PROVE, because the difference is the whole reason the CSS is written the
-// way it is. A headless browser reports every `env(safe-area-inset-*)` as 0 and has no keyboard, so
-// a test written against `env()` directly could only ever exercise the fallback — it would pass just
-// as happily on the broken build. Both inputs are therefore read through custom properties that this
-// test can stand up itself: `--safe-*` is overridden here to raise a simulated Dynamic Island, and
-// `--vv-height` is driven for real by shrinking the viewport, which is what the keyboard does to the
-// visual viewport. THAT IOS ACTUALLY REPORTS THOSE INSETS IS OWED TO A DEVICE and is not claimed
-// here; what is claimed is that when something reports them, the dialog lands inside them.
+// THIS IS THE HALF OF quince#762 THAT SURVIVES. The other half — a JavaScript frame that tracked
+// `visualViewport` so the card re-centred in the visible area while the keyboard was up — is gone
+// (Operator direction 2026-08-15, quince#816): the correction could only ever land a frame after the
+// scroll that caused it, so it jumped on every focus change. The keyboard is Safari's now. What is
+// asserted here is the part that is pure CSS and has no such cost.
+//
+// WHAT THIS CAN AND CANNOT PROVE, because the difference is why the CSS is written the way it is. A
+// headless browser reports every `env(safe-area-inset-*)` as 0, so a test written against `env()`
+// directly could only ever exercise the fallback — it would pass just as happily on the broken
+// build. The insets are therefore read through custom properties this test can stand up itself.
+// THAT IOS ACTUALLY REPORTS THOSE INSETS IS OWED TO A DEVICE and is not claimed here; what is
+// claimed is that when something reports them, the dialog lands inside them.
 const ISLAND_TOP = 59; // iPhone-class portrait. The exact figure is not the claim — clearing it is.
 const HOME_INDICATOR = 34;
 
@@ -193,35 +197,14 @@ async function fakeSafeArea(page: Page, top: number, bottom: number): Promise<vo
   );
 }
 
-// The hook publishes the visible height asynchronously (a visualViewport event), so measuring the
-// dialog before it lands would measure the fallback. Waiting on the published value rather than on a
-// timeout also proves the hook RAN: on a build where it is absent this never settles.
-async function visibleHeightPublished(page: Page, px: number): Promise<void> {
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue("--vv-height").trim(),
-      ),
-    )
-    .toBe(`${px}px`);
-}
-
-// `bottomInset` is what the frame reserves at the foot, and it is NOT always the home indicator.
-// While the keyboard is up the indicator is BEHIND it, so reserving it would take a strip out of the
-// space above the keyboard for nothing — measured on the Operator's recording as a dead gap between
-// the card's foot and the keyboard's accessory bar (quince#762). With a keyboard, the reservation is
-// the plain 1rem gutter.
-const GUTTER = 16;
-
-// THE SUBJECT OF BOTH quince#762 GATES USED TO BE THE ADD-STORAGE DIALOG, AND IT NO LONGER EXISTS
-// (quince#846 made that surface a page). The fix it gates is a property of `DialogContent` and of
-// every portalled surface — not of the add flow — so the gates move to another dialog rather than
-// leaving with their old subject.
+// THE SUBJECT OF THIS GATE USED TO BE THE ADD-STORAGE DIALOG, AND IT NO LONGER EXISTS (quince#846
+// made that surface a page). The fix it gates is a property of `DialogContent` and of every
+// portalled surface — not of the add flow — so the gate moves to another dialog rather than leaving
+// with its old subject.
 //
 // THE ENCRYPTION DIALOG IS THE SUCCESSOR because it is the tallest one left: four fields and a
-// submit, which is what the notch case and the below-the-fold case both need. `family-iphone` is
-// paired with encryption on in `--demo`, so "Manage encryption" opens in change mode — the same
-// path story 3 drives.
+// submit. `family-iphone` is paired with encryption on in `--demo`, so "Manage encryption" opens in
+// change mode — the same path story 3 drives.
 async function openTallDialog(page: Page): Promise<void> {
   await page.getByRole("link", { name: "family-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
@@ -229,16 +212,21 @@ async function openTallDialog(page: Page): Promise<void> {
   await expect(page.getByRole("dialog")).toBeVisible();
 }
 
-async function expectCentredInVisibleArea(
-  page: Page,
-  visibleH: number,
-  bottomInset: number,
-): Promise<void> {
+test("a dialog centres in the viewport, clear of the notch and the home indicator", async ({
+  page,
+}) => {
+  await authenticate(page);
+  // Navigate FIRST, then fake the insets: the properties are set on `documentElement` of this
+  // document and client-side routing keeps it, but doing it in this order keeps that from being a
+  // thing a reader has to know.
+  await openTallDialog(page);
+  await fakeSafeArea(page, ISLAND_TOP, HOME_INDICATOR);
+
   const box = await page.getByRole("dialog").boundingBox();
   expect(box).not.toBeNull();
 
   const above = box!.y - ISLAND_TOP; // gap between the notch and the top of the card
-  const below = visibleH - bottomInset - (box!.y + box!.height); // card foot to what is reserved there
+  const below = 844 - HOME_INDICATOR - (box!.y + box!.height); // card foot to the home indicator
 
   // CLEARS BOTH. This is the reported bug: `above` was negative, so the card's head was under the
   // island. Asserted on the rendered box rather than on a class, because a class can be present and
@@ -249,75 +237,4 @@ async function expectCentredInVisibleArea(
   // AND IS CENTRED BETWEEN THEM, which is what the Operator asked for over merely clearing them.
   // Equal gaps, to a pixel of rounding.
   expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
-}
-
-test("a dialog centres in the visible area, clear of the notch and the home indicator", async ({
-  page,
-}) => {
-  await authenticate(page);
-  // Navigate FIRST, then fake the insets: the properties are set on `documentElement` of this
-  // document and client-side routing keeps it, but doing it in this order keeps that from being a
-  // thing a reader has to know.
-  await openTallDialog(page);
-  await fakeSafeArea(page, ISLAND_TOP, HOME_INDICATOR);
-  await visibleHeightPublished(page, 844);
-  await expectCentredInVisibleArea(page, 844, HOME_INDICATOR);
-
-  // THE KEYBOARD, as the visual viewport sees it: the visible area shrinks and the dialog must
-  // re-centre in what is left rather than staying put against a layout viewport that never moved.
-  // That is the failure the Operator reported twice before quince#762 — an input behind the
-  // keyboard, coming right only on a second focus.
-  await page.setViewportSize({ width: 390, height: 400 });
-  await visibleHeightPublished(page, 400);
-  // The keyboard is up now, so the home indicator is behind it and only the gutter is reserved.
-  await expectCentredInVisibleArea(page, 400, GUTTER);
-
-  // AND THE FOOT IS STILL REACHABLE once the card is bounded by a much smaller visible area — the
-  // case where centring and scrolling have to hold at the same time.
-  const submit = page.getByRole("button", { name: /change backup password/i });
-  await submit.scrollIntoViewIfNeeded();
-  await expect(submit).toBeVisible();
-});
-
-// quince#762 — FOCUSING A FIELD BELOW THE FOLD MUST NOT LEAVE IT ON THE EDGE OF THE SCROLL REGION.
-// On the Operator's phone `Parent dataset` came to rest half-cut at the bottom of the card and
-// `Helper command` (the field quince#818 replaced with `ZFS host` / `Remote user`) did not come
-// into view at all.
-//
-// THIS TEST PASSES WITH THE CORRECTION REMOVED, and that is recorded here rather than left for the
-// next reader to discover. Measured: `make gates-ui-e2e` exit 0 with `useScrollFocusIntoView`
-// unwired. Chromium's own scroll-into-view already clears this margin at the sizes the suite runs
-// at, so a green result here says nothing about whether our correction ran.
-//
-// It is kept because it exercises the whole path end to end — a real dialog, a real focus, a real
-// scroll container — which the unit test cannot. **The proof of the behaviour is
-// `ui/src/lib/useScrollFocusIntoView.test.ts`**, which states the geometry and fails 3 of 5 when the
-// correction is neutered. Do not read this one as coverage of the fix.
-//
-// THE SUBJECT MOVED WITH quince#846: the fields the Operator named were the zfs branch's, and that
-// branch is on a page now, where this correction does not apply and is not wanted — the shell owns
-// the scroll region and there is no card edge to be cut off by. The behaviour is a DIALOG's, so it
-// is gated on the tallest surviving dialog rather than followed to a container that has no fold.
-test("focusing a field below the fold brings it clear of the dialog's edges", async ({ page }) => {
-  await authenticate(page);
-
-  await openTallDialog(page);
-  const dialog = page.getByRole("dialog");
-
-  // The two lowest fields in the tall dialog — the ones a fold can cut, which is what the Operator
-  // reported about the two lowest fields of the one this replaces.
-  for (const label of ["New password", "Confirm new password"]) {
-    const field = page.getByLabel(label, { exact: true });
-    await field.focus();
-
-    // Settle: the correction runs on the next animation frame after `focusin`.
-    await expect
-      .poll(async () => {
-        const box = await dialog.boundingBox();
-        const rect = await field.boundingBox();
-        if (!box || !rect) return -1;
-        return Math.min(rect.y - box.y, box.y + box.height - (rect.y + rect.height));
-      })
-      .toBeGreaterThanOrEqual(16);
-  }
 });
