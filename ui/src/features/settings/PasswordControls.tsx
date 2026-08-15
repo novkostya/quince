@@ -141,12 +141,29 @@ export function PasswordControls() {
 
   async function submitChange(e: React.FormEvent) {
     e.preventDefault();
+    // CAPTURED BEFORE THE AWAIT, and that is not style — it is what makes the reset below possible.
+    // `e.currentTarget` is NULL once a handler has awaited, so the obvious `e.currentTarget.reset()`
+    // further down throws at runtime, and the failure reads as *the idea did not work* rather than
+    // *the reference was gone*. See the reset itself for what it is for (quince#1000).
+    const form = e.currentTarget as HTMLFormElement;
     setChangeBusy(true);
     setChangeMsg(null);
     try {
       await changePassword(current, next);
       setCurrent("");
       setNext("");
+      // A NATIVE RESET IS WHAT CLEARS SAFARI'S AUTOFILL PAINT — quince#1000, Operator's idea,
+      // measured on the stand 2026-08-15.
+      //
+      // THE FIELDS WERE ALREADY EMPTY AND STILL LOOKED FULL. The two lines above really do clear the
+      // values; what survives is `:-webkit-autofill`, browser-managed styling that a React state
+      // change does not touch. So the form read as still holding your password after a successful
+      // change — the appearance contradicting the state, on the one screen where that is alarming.
+      //
+      // IT CANNOT FIGHT REACT: these are controlled inputs with no `defaultValue`, so `reset()`
+      // restores them to empty, which is exactly what the two lines above just set. The reset is
+      // therefore a no-op for the VALUES and the whole point for the PAINT.
+      form.reset();
       // A SUCCESS MESSAGE, because nothing else on screen changes. A password change that looks
       // like nothing happened invites a second attempt with the OLD current password, which then
       // 401s and reads as "the change failed" — the opposite of the truth.
