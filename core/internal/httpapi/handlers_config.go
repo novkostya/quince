@@ -249,11 +249,11 @@ func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
 // → 200 {config, warnings, source} | 404 | 422.
 //
 // THE THIRD CASE NOBODY BUILT. Adding a storage and forgetting one both exist and both point at
-// this one: `POST /api/config/storage` refuses a newcomer that claims `default` and ends *"changing
-// which storage is default is a separate edit"*, and `DELETE` refuses the default with *"Make
-// another storage the default first."* Until this route, that remedy named a control the product
-// did not have — which is `qn.6g`'s own named defect, *a remedy that was never going to work is the
-// same defect as a silent failure*, sitting in shipped code.
+// this one: `POST /api/config/storage` refuses a newcomer that claims `default`, and `DELETE`
+// refuses the default with *"Make another storage the default first."* Until this route, that
+// remedy named a control the product did not have — which is `qn.6g`'s own named defect, *a remedy
+// that was never going to work is the same defect as a silent failure*, sitting in shipped code.
+// The add's refusal is reworded in the same change to name this route's surface.
 //
 // ADD'S AND FORGET'S MIRROR in every respect that matters: a config mutation, so it returns the
 // config-endpoint body rather than a 204, and the client re-renders from the same payload GET, PUT,

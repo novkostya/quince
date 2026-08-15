@@ -249,10 +249,15 @@ func validateAddition(e StorageEntry, existing *[]StorageEntry) []wire.ConfigErr
 	// DEFAULT IS NOT ASKED FOR AND NOT ACCEPTED HERE. The first storage is default by implication
 	// (ResolveStorages marks a lone entry), and a LATER one must not steal it — so an add that set
 	// `default: true` would silently re-point every backup that names no storage. Re-designation is
-	// a separate act on an existing storage, and this rung does not build it.
+	// a separate act on an existing storage.
+	//
+	// AND THE MESSAGE NOW NAMES WHERE THAT ACT LIVES (quince#722). It ended *"changing which storage
+	// is default is a separate edit"* while there was no edit to make — true, and unfollowable,
+	// which is the defect this refusal's sibling in `forget.go` was filed for. The separate act is
+	// `POST /api/config/storage/{name}/default`, reached from the storage's own page.
 	if e.Default {
 		add("default", "an added storage cannot claim `default` — the first storage is default "+
-			"implicitly, and changing which storage is default is a separate edit")
+			"implicitly. Add this storage first, then make it the default from its own page")
 	}
 	return errs
 }

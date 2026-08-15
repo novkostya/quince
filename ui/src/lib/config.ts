@@ -41,6 +41,23 @@ export function forgetStorage(name: string): Promise<ConfigResponse> {
   return api.del<ConfigResponse>(`/api/config/storage/${encodeURIComponent(name)}`);
 }
 
+// makeStorageDefault re-designates the default storage (contracts §1, quince#722).
+//
+// A NARROW ENDPOINT for the reason forgetStorage gives directly above, unchanged: the server
+// splices over the live parsed config, so every other entry keeps the keys this client never
+// rendered and could not round-trip.
+//
+// IT SENDS NO BODY. The name in the path is the whole request — there is nothing to say about a
+// storage beyond WHICH one — and a `{default:true}` body would invite the question of what
+// `{default:false}` means. There is no such state: exactly one storage is default at all times, so
+// un-defaulting is not an operation and the API deliberately does not offer one.
+//
+// Percent-encoded for forgetStorage's reason: `name` defaults to the PATH (quince#504), so on a
+// single-storage install it usually IS one.
+export function makeStorageDefault(name: string): Promise<ConfigResponse> {
+  return api.post<ConfigResponse>(`/api/config/storage/${encodeURIComponent(name)}/default`, {});
+}
+
 // probeStorage asks what a typed path IS, WITHOUT CHANGING IT (contracts §1, qn.6e).
 //
 // EVERY REFUSAL COMES BACK AS A 200 carrying `outcome`, not as an error status: "that path does not
