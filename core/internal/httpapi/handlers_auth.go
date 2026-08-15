@@ -89,7 +89,7 @@ func (d Deps) handleAuthSetup() http.HandlerFunc {
 			case errors.Is(err, auth.ErrRateLimited):
 				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			case errors.Is(err, auth.ErrAlreadyConfigured):
-				writeError(w, d.Log, http.StatusConflict, "already_configured", "admin password is already set")
+				writeError(w, d.Log, http.StatusConflict, "already_configured", alreadySetUp)
 			case errors.Is(err, auth.ErrNoProof), errors.Is(err, auth.ErrProofNotForThis):
 				// 401 — NOTHING USABLE WAS PRESENTED, which is the same class of refusal as a wrong
 				// password and takes the same status. The server's own sentence carries the remedy:
@@ -293,3 +293,25 @@ type removePasswordBody struct {
 	CurrentPassword string `json:"current_password"`
 	Proof           string `json:"proof"`
 }
+
+// alreadySetUp is what a FIRST-RUN route says when the install has been claimed underneath it.
+//
+// THREE SITES SHARE THIS AND SIX SHARE THE CODE, which is why it is a constant rather than a string
+// typed three times. `already_configured` is also answered by the certificate and transport routes,
+// where it is mundane — those keep their own words. What is shared here is not the code, it is the
+// MEANING: a setup screen only renders while the install is unclaimed, so a 409 on one of these
+// three means something claimed it between the page loading and the button being pressed.
+//
+// IT NAMES THE STALE-PAGE CASE FIRST, because that is the likely one and it has a remedy the reader
+// can act on immediately — Operator, 2026-08-15.
+//
+// AND IT NAMES THE OTHER ONE, which is the reason a redirect to sign-in was proposed and WITHDRAWN:
+//
+//	> that case might mean something really bad has just happened
+//
+// On a network-reachable first run this is not necessarily a second tab; it can be somebody else
+// taking the install, which quince#888 already names as a live shape in this product. Sending the
+// user to a login form would answer the event that most deserves a stop with the most reassuring
+// thing the app can say — and land them at a sign-in for an account they never created.
+const alreadySetUp = "this quince has already been set up. If you set it up yourself, this page is " +
+	"stale — refresh it. If you did not, someone else has claimed this install."
