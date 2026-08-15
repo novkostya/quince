@@ -112,11 +112,15 @@ func TestTheDefaultFollowsTheNewList(t *testing.T) {
 	if d, ok := m.defaultSlot(); !ok || d.Name != "alpha" {
 		t.Fatalf("setup: default is %+v ok=%v, want alpha", d.Name, ok)
 	}
-	m.ApplyStorages([]Slot{b, a}) // the user made beta the default
+	// The user made beta the default — which they do by moving `default: true`, not by reordering
+	// `config.yml` (quince#722). What reaches ApplyStorages either way is a slot list with the new
+	// default first, because the caller hoists it; a reordered list is the SHAPE of that edit, not
+	// its cause.
+	m.ApplyStorages([]Slot{b, a})
 	d, ok := m.defaultSlot()
 	if !ok || d.Name != "beta" {
-		t.Errorf("after apply the default is %q (ok=%v), want beta — position IS the default, so a "+
-			"reorder must move it", d.Name, ok)
+		t.Errorf("after apply the default is %q (ok=%v), want beta — `slots[0]` IS the default, so a "+
+			"new list must move it", d.Name, ok)
 	}
 	got, status, reason := m.ResolveChoice("")
 	if status != 0 {

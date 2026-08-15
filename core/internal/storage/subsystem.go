@@ -58,8 +58,15 @@ type Auditor interface {
 // publishes version.* events, runs startup reconciliation, and enforces retention. It serves
 // httpapi.VersionReader (Versions) + the version-delete admin path structurally.
 type Manager struct {
-	// slots is every storage this Manager speaks for, in declaration order. slots[0] is the
-	// DEFAULT — the storage a backup goes to when none is named (contracts §1).
+	// slots is every storage this Manager speaks for, DEFAULT FIRST. slots[0] is the DEFAULT — the
+	// storage a backup goes to when none is named (contracts §1).
+	//
+	// "DEFAULT FIRST", NOT "in declaration order", AND THE TWO ARE NOT THE SAME LIST. This said
+	// declaration order until 2026-08-15 and had been wrong since `qn.6c`: the caller hoists the
+	// entry carrying `default: true` (`declaredStorages`, cmd/quince/live.go), so the file's own
+	// order decides nothing (Operator ruling 2026-08-11, quince#722). The Manager is unaffected
+	// either way — it takes the list as given and reads slots[0] — which is exactly why the wrong
+	// sentence survived here: nothing this type does could contradict it.
 	//
 	// qn.6c story 3: this replaced a single `backend` + `backups` pair. Every per-storage
 	// operation now has to say WHICH storage, which is the point — the four reads that took
@@ -100,7 +107,8 @@ type Manager struct {
 
 // NewManager wires the subsystem. audit may be nil (skipped).
 //
-// slots is every storage this Manager speaks for, in declaration order; slots[0] is the DEFAULT.
+// slots is every storage this Manager speaks for, DEFAULT FIRST; slots[0] is the DEFAULT. It is the
+// caller that hoists the entry carrying `default: true` — see the field comment on Manager.slots.
 //
 // IT MAY BE EMPTY, AND THE CONSTRUCTION PANIC THAT SAID OTHERWISE IS GONE (qn.6e, Operator ruling
 // 2026-08-07). That comment read: "It must be non-empty — config.CheckStorages refuses to serve

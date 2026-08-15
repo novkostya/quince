@@ -62,7 +62,9 @@ func TestUnreachableStorageReportsUnknownBackend(t *testing.T) {
 	}
 }
 
-// Exactly one storage is default, and it is the first — declaration order is the contract.
+// Exactly one storage is default, and it is the first — SLOT order is the contract, which is not
+// the order of `config.yml`. The caller hoists the entry carrying `default: true` before this type
+// sees the list (quince#722), so at this layer `slots[0]` is the default, full stop.
 func TestExactlyOneStorageIsDefault(t *testing.T) {
 	m, _ := twoStorageManager(t)
 	var n int
@@ -75,7 +77,7 @@ func TestExactlyOneStorageIsDefault(t *testing.T) {
 		t.Errorf("exactly one storage must be default, got %d", n)
 	}
 	if !m.Storages("")[0].Default {
-		t.Error("the default must be the first slot — declaration order decides it")
+		t.Error("the default must be the first slot — slot order decides it")
 	}
 }
 
