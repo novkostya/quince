@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -42,7 +43,7 @@ func zfsKeyReq(t *testing.T, srv *httptest.Server, c *http.Client) *http.Request
 func TestZFSKeyEndpointGeneratesAndReturnsThePasteableLine(t *testing.T) {
 	deps := testDeps(t)
 	dir := t.TempDir()
-	deps.ZFSKeyPath = filepath.Join(dir, "keys", "zfs")
+	deps.ZFSKeyDir = filepath.Join(dir, "keys")
 	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 	c := authedClient(t, srv)
@@ -77,8 +78,8 @@ func TestZFSKeyEndpointGeneratesAndReturnsThePasteableLine(t *testing.T) {
 	if !strings.Contains(out.Key.AuthorizedKeys, ` `+testParent+`"`) {
 		t.Fatalf("authorized_keys does not confine the key to %q: %q", testParent, out.Key.AuthorizedKeys)
 	}
-	if out.Key.Path != deps.ZFSKeyPath {
-		t.Fatalf("path = %q, want %q", out.Key.Path, deps.ZFSKeyPath)
+	if out.Key.Path != config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent) {
+		t.Fatalf("path = %q, want %q", out.Key.Path, config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent))
 	}
 }
 
@@ -86,7 +87,7 @@ func TestZFSKeyEndpointGeneratesAndReturnsThePasteableLine(t *testing.T) {
 // against a field list, so adding a field cannot quietly start publishing it.
 func TestZFSKeyEndpointNeverSerialisesThePrivateHalf(t *testing.T) {
 	deps := testDeps(t)
-	deps.ZFSKeyPath = filepath.Join(t.TempDir(), "zfs")
+	deps.ZFSKeyDir = t.TempDir()
 	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 	c := authedClient(t, srv)
@@ -102,7 +103,7 @@ func TestZFSKeyEndpointNeverSerialisesThePrivateHalf(t *testing.T) {
 	}
 	body := string(rawBody)
 
-	raw, err := os.ReadFile(deps.ZFSKeyPath)
+	raw, err := os.ReadFile(config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestZFSKeyEndpointNeverSerialisesThePrivateHalf(t *testing.T) {
 // and so does not breaking a host whose authorized_keys already carries the old public half.
 func TestZFSKeyEndpointIsIdempotentAndSaysSo(t *testing.T) {
 	deps := testDeps(t)
-	deps.ZFSKeyPath = filepath.Join(t.TempDir(), "zfs")
+	deps.ZFSKeyDir = t.TempDir()
 	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 	c := authedClient(t, srv)
@@ -143,7 +144,7 @@ func TestZFSKeyEndpointIsIdempotentAndSaysSo(t *testing.T) {
 // the exempt set is five literal method+path strings and this is not one of them.
 func TestZFSKeyEndpointIsNotAuthExempt(t *testing.T) {
 	deps := testDeps(t)
-	deps.ZFSKeyPath = filepath.Join(t.TempDir(), "zfs")
+	deps.ZFSKeyDir = t.TempDir()
 	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 
@@ -155,7 +156,7 @@ func TestZFSKeyEndpointIsNotAuthExempt(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous status = %d, want 401", resp.StatusCode)
 	}
-	if _, err := os.Stat(deps.ZFSKeyPath); err == nil {
+	if _, err := os.Stat(config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent)); err == nil {
 		t.Fatalf("an anonymous request created a key")
 	}
 }
@@ -194,7 +195,7 @@ func TestZFSKeyEndpointRefusesAnUnsafeParent(t *testing.T) {
 		"",
 	} {
 		deps := testDeps(t)
-		deps.ZFSKeyPath = filepath.Join(t.TempDir(), "zfs")
+		deps.ZFSKeyDir = t.TempDir()
 		srv := httptest.NewServer(NewRouter(deps))
 		c := authedClient(t, srv)
 
@@ -206,7 +207,7 @@ func TestZFSKeyEndpointRefusesAnUnsafeParent(t *testing.T) {
 			t.Errorf("parent_dataset=%q → %d, want 422", bad, resp.StatusCode)
 		}
 		_ = resp.Body.Close()
-		if _, err := os.Stat(deps.ZFSKeyPath); err == nil {
+		if _, err := os.Stat(config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent)); err == nil {
 			t.Errorf("parent_dataset=%q was refused AFTER writing a key", bad)
 		}
 		srv.Close()
@@ -228,7 +229,7 @@ func TestZFSKeyEndpointRefusesAnUnsafeParent(t *testing.T) {
 // path-vs-dataset distinction fails even if what remains still reads well.
 func TestZFSKeyRefusalTellsThemItIsNotAPath(t *testing.T) {
 	deps := testDeps(t)
-	deps.ZFSKeyPath = filepath.Join(t.TempDir(), "zfs")
+	deps.ZFSKeyDir = t.TempDir()
 	srv := httptest.NewServer(NewRouter(deps))
 	defer srv.Close()
 	c := authedClient(t, srv)
@@ -266,4 +267,105 @@ func TestZFSKeyRefusalTellsThemItIsNotAPath(t *testing.T) {
 				want.fact, want.why, got.Errors[0].Message)
 		}
 	}
+}
+
+// quince#989 — TWO STORAGES ON ONE HOST GET TWO KEYS, AND THIS IS THE DEFECT THE ISSUE UNDERSTATED.
+//
+// It read as *quince cannot make the second key, so the operator makes it by hand*. What actually
+// happened is worse: `EnsureZFSKey` discovers before it generates and used ONE path, so asked about
+// a second storage's dataset it found the FIRST key and rendered a line pairing key A with dataset
+// B. sshd stops at the first line whose key matches, so that line is inert and storage B stays
+// confined to dataset A.
+//
+// AND IT READ HEALTHY. `capacity` takes no argument and answers for whatever `$PARENT` the live
+// forced command names, so `Test helper` returned dataset A's free space for storage B; only
+// `create` fails, at commit, after a transfer.
+//
+// So the assertion is on all three of the things that were wrong at once: two paths, two DIFFERENT
+// public keys, and each line naming its OWN dataset.
+func TestZFSKeyEndpointGivesTwoParentsTwoKeys(t *testing.T) {
+	deps := testDeps(t)
+	deps.ZFSKeyDir = t.TempDir()
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	ask := func(parent string) wire.StorageZFSKey {
+		t.Helper()
+		resp, err := c.Do(zfsKeyReqFor(t, srv, c, parent))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("parent %q → %d, want 200", parent, resp.StatusCode)
+		}
+		var out wire.StorageZFSKeyResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Key
+	}
+
+	a, b := ask("tank/one"), ask("tank/two")
+
+	if a.Path == b.Path {
+		t.Fatalf("both storages were given the key at %q — the second is confined to the first's "+
+			"dataset, and nothing on the form says so", a.Path)
+	}
+	if a.PublicKey == b.PublicKey {
+		t.Error("two parents were handed the same public key; the second authorized_keys line would " +
+			"be inert, because sshd stops at the first line whose key matches")
+	}
+	if !b.Created {
+		t.Error("the second parent's key was FOUND rather than made — that is the old shape, where " +
+			"discover-before-generate reached across datasets")
+	}
+	// EACH LINE NAMES ITS OWN DATASET. This is what made the old failure quiet: the line looked
+	// right, because the dataset in it was the one just typed.
+	if !strings.Contains(a.AuthorizedKeys, " tank/one\"") {
+		t.Errorf("the first line does not confine its key to tank/one: %q", a.AuthorizedKeys)
+	}
+	if !strings.Contains(b.AuthorizedKeys, " tank/two\"") {
+		t.Errorf("the second line does not confine its key to tank/two: %q", b.AuthorizedKeys)
+	}
+}
+
+// TWO STORAGES SHARING ONE PARENT SHARE ONE KEY, and that is correct rather than tolerated: a forced
+// command confines a key to one parent, so identical parents mean identical confinement and a second
+// key would buy nothing but a second line to paste.
+//
+// It is also the property that keeps `discover before generate` meaningful per path — the second ask
+// must FIND the first key, not make another.
+func TestZFSKeyEndpointSharesOneKeyWithinOneParent(t *testing.T) {
+	deps := testDeps(t)
+	deps.ZFSKeyDir = t.TempDir()
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	first := decodeZFSKeyFor(t, c, srv, "tank/shared")
+	second := decodeZFSKeyFor(t, c, srv, "tank/shared")
+
+	if !first.Created || second.Created {
+		t.Errorf("created = %v then %v, want true then false — the second ask must FIND the first key",
+			first.Created, second.Created)
+	}
+	if first.PublicKey != second.PublicKey {
+		t.Error("one parent produced two different keys across two asks")
+	}
+}
+
+func decodeZFSKeyFor(t *testing.T, c *http.Client, srv *httptest.Server, parent string) wire.StorageZFSKey {
+	t.Helper()
+	resp, err := c.Do(zfsKeyReqFor(t, srv, c, parent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out wire.StorageZFSKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out.Key
 }

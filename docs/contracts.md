@@ -1297,14 +1297,37 @@ ordinary request rather than a malformed one.
 B, under the ruling relayed at
 [issuecomment-5245496176](https://github.com/novkostya/quince/issues/818#issuecomment-5245496176)).
 
-It answers *"what do I put on my ZFS host?"* — returning the key at `/data/keys/zfs` and
-**generating one only if there is nothing there.**
+It answers *"what do I put on my ZFS host?"* — returning **one key per parent dataset**, at a path
+quince DERIVES from that dataset under `/data/keys/`, and **generating one only if there is nothing
+there.**
 
 **IT TAKES NO *PATH*, AND THAT IS THE SECURITY SHAPE RATHER THAN A MISSING FEATURE.** A
 caller-supplied path would make this an authenticated *write-a-file-anywhere* primitive whose
 contents happen to be a private key. Taking none means the endpoint has no reachable target but
 quince's own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses the
-button — which is why that field stays settable.
+button — which is why that field stays settable, and the derivation does not close it.
+
+**ONE PATH FOR EVERY STORAGE WAS A DEFECT, NOT A LIMITATION** (quince#989). A forced command is a
+property of a key — sshd uses the first `authorized_keys` line whose key matches and stops looking —
+so one key can be confined to exactly one parent. Asked about a second storage's dataset, discovery
+found the FIRST key and rendered a line pairing key A with dataset B: **inert, and storage B left
+confined to dataset A.** It read healthy, because `capacity` takes no argument and answers for
+whatever `$PARENT` the live forced command names, so `Test helper` returned dataset A's numbers. Only
+`create` failed, at commit, after a transfer.
+
+**THE DERIVATION ESCAPES, IT DOES NOT MIRROR.** `/` becomes `+`, which `datasetPattern` excludes, so
+the mapping is injective and the result is a single filename component. **`+` rather than `%`, which
+the ruling named first and which does not work:** OpenSSH percent-expands `IdentityFile`, so a `%`
+path never reaches the network — `vdollar_percent_expand: unknown key %q`, measured on a rig
+2026-08-15 against the real client, where the same key at a `+` path answered. Mirroring into real
+directories was rejected on three counts: `datasetPattern` accepts `tank/../../etc` — only a
+*leading* `..` is blocked — which would resolve outside the key directory; it accepts `tank/./x`,
+which normalises onto `tank/x` and reintroduces the collision this removes; and `tank/backups` beside
+`tank/backups/cold` needs one name to be a file and a directory at once, which is git's loose-ref bug
+and whose only answer there is to refuse a legal name.
+
+**Two storages under ONE parent share one key**, which is correct rather than tolerated: identical
+parents mean identical confinement, so a second key buys nothing but a second line to paste.
 
 **IT TAKES ONE FIELD, `parent_dataset`, AND THAT IS quince#985.** The body is new; the rule above is
 not narrowed by it, because a dataset name is not a path and quince never writes it anywhere — it is
@@ -2302,7 +2325,8 @@ the UI, `detail` for the user's eyes on their own machine.
 
 ```jsonc
 {
-  "path":            "/data/keys/zfs",   // where the PRIVATE half lives; never its contents
+  "path":            "/data/keys/zfs-rpool+quince",  // DERIVED from the parent dataset; where the
+                                                     // PRIVATE half lives, never its contents
   "public_key":      "ssh-ed25519 AAAA… quince",
   "authorized_keys": "command=\"/usr/local/sbin/quince-zfs-helper rpool/quince\",no-port-forwarding,… ssh-ed25519 AAAA… quince",
   "created":         true                // false when quince FOUND a key already there
@@ -2728,7 +2752,7 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
                             # entry is what bounds quince on the host, which is why SSH is the
                             # only shape rather than one transport among several.
       ssh_port: 22          # DEFAULTS. The happy path writes neither (D12), and `ssh_key` stays
-      ssh_key: /data/keys/zfs   # settable because the path was already settable inside hook_cmd —
+      ssh_key: /data/keys/zfs-rpool+quince  # DERIVED from parent_dataset (quince#989); settable
                             # removing it would be a narrowing dressed as a simplification.
       hook_cmd: ""          # RETIRED, and the key is kept ONLY so a file carrying it is REFUSED by
                             # path — naming ssh_user/ssh_host/ssh_port/ssh_key — rather than

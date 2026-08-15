@@ -229,8 +229,9 @@ type ZFSConfig struct {
 	// returns the array directly and that class is gone.
 	SSHUser string `yaml:"ssh_user" json:"ssh_user"`
 	SSHHost string `yaml:"ssh_host" json:"ssh_host"`
-	// SSHPort defaults to 22 and SSHKey to DefaultZFSKeyPath, so the happy path writes NEITHER into
-	// `config.yml` (D12: every setting has a sane default and the file carries only what was set).
+	// SSHPort defaults to 22, and SSHKey to the key quince derives for this storage's parent dataset
+	// (quince#989), so the happy path writes NEITHER into `config.yml` (D12: every setting has a
+	// sane default and the file carries only what was set).
 	//
 	// SSHKey stays settable rather than being hardcoded, and that is not hedging: the path is
 	// already settable today — it lives inside `hook_cmd` as `-i /data/keys/zfs` — so removing the

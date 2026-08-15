@@ -136,7 +136,8 @@ func validateStorages(storages *[]StorageEntry, add func(path, msg string)) {
 			add(at+".zfs.hook_cmd", "retired in favour of `ssh_user`, `ssh_host`, `ssh_port` and "+
 				"`ssh_key` — quince composes the ssh command itself now. Replace the whole key: "+
 				"`ssh_user: <the helper's user>` and `ssh_host: <the ZFS host>`, plus `ssh_port` "+
-				"and `ssh_key` only if they are not 22 and "+DefaultZFSKeyPath)
+				"and `ssh_key` only if they are not 22 and the key quince derives for this "+
+				"storage's parent dataset under "+DefaultZFSKeyDir)
 		}
 		// A MISSING TRANSPORT IS NOT VALIDATED HERE, and that is the same layering decision the
 		// parent-dataset check already records in `storagereq.go`: `Load` DISCARDS a config that
