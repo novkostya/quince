@@ -288,3 +288,30 @@ describe("DeviceCard action area ends with its button", () => {
     expect(actionArea(container).querySelector("button")).toBeNull();
   });
 });
+
+// quince#836 REGRESSION GUARD, and it is structural rather than cosmetic. The card is a grid item,
+// and a grid item defaults to `min-width: auto` — so it will not shrink below the intrinsic width
+// of its widest line. A model name is arbitrary-length text off the wire; when the map learned
+// "iPad Pro 11-inch (3rd generation)" the card stopped fitting, took its whole grid column with it,
+// and Home scrolled sideways by 55px at 320px. The `truncate` on the subtitle could not help,
+// because it cannot engage while the card itself is free to widen.
+//
+// jsdom HAS NO LAYOUT, so nothing here can prove the page stopped scrolling — only `story12` at a
+// real 320px viewport does that, and it is what caught this. What this asserts is the CLASS, which
+// is what quince#631 settled on one page over for exactly the same reason: a bare `min-w-0` with no
+// test reads as decoration and gets tidied away by a later pass.
+describe("DeviceCard grid containment", () => {
+  it("can shrink below its content, so one long model name cannot widen the row", () => {
+    const { container } = renderCard(device({ model: "iPad13,4" }));
+    const card = container.querySelector<HTMLElement>('[data-testid="device-card"]');
+    expect(card?.className.split(/\s+/)).toContain("min-w-0");
+  });
+
+  // The other half of the chain, one level in. Both are required and neither is sufficient alone.
+  it("keeps the name column able to shrink too", () => {
+    const { container } = renderCard(device({ model: "iPad13,4" }));
+    const subtitle = container.querySelector<HTMLElement>(".truncate");
+    expect(subtitle?.textContent).toBe("iPad Pro 11-inch (3rd generation) · iOS 26.0.1");
+    expect(subtitle?.parentElement?.className.split(/\s+/)).toContain("min-w-0");
+  });
+});

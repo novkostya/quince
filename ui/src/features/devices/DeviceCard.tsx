@@ -87,7 +87,13 @@ export function DeviceCard({ device }: { device: Device }) {
     // h-full + flex column so the primary action pins to the BOTTOM (mt-auto below): grid rows
     // stretch cards to equal height, so the buttons then line up across cards even when one has an
     // extra "needs attention" line (qn.6a soak fix).
-    <Card data-testid="device-card" className="flex h-full flex-col">
+    //
+    // min-w-0 closes the same chain quince#631 closed on Settings, one level up from the `min-w-0`
+    // on the name column below: a grid item defaults to `min-width: auto`, so this card would not
+    // shrink below the intrinsic width of its longest line — and a marketing name is arbitrary-
+    // length text off the wire — so the grid column, and every card in it, grew to match. The
+    // inner `truncate` is dead code until the card itself can shrink.
+    <Card data-testid="device-card" className="flex h-full min-w-0 flex-col">
       <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

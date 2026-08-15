@@ -220,7 +220,12 @@ export function StorageDetailsPage() {
               key={device.udid}
               data-testid="storage-device-row"
               data-udid={device.udid}
-              className="flex h-full flex-col"
+              // min-w-0 closes the same chain quince#631 closed on Settings, one level up from the
+              // `min-w-0` on the name column below: a grid item defaults to `min-width: auto`, so
+              // this card would not shrink below the intrinsic width of the longest model name in
+              // the list, and the column — every card in it — grew to match. The inner `truncate`
+              // cannot engage while the card itself is free to widen.
+              className="flex h-full min-w-0 flex-col"
             >
               <CardContent className="flex flex-1 flex-col p-4">
               <div className="flex items-start justify-between gap-3">
