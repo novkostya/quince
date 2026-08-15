@@ -180,9 +180,25 @@ func (d Deps) handleStorageHookCheck() http.HandlerFunc {
 		// COMPOSED BY THE SAME FUNCTION THE SAVED STORAGE WILL USE, deliberately. If this built its
 		// own argv the button could pass against a transport the running backup never takes, which
 		// is the precise failure `Test helper` exists to prevent.
+		// THE PARENT IS PART OF THE TRANSPORT SINCE quince#989, and omitting it here composed
+		// `ssh -i /data/keys/zfs-` — the derivation applied to an empty string. A path that cannot
+		// exist, so ssh offered no key and sshd answered `Permission denied (publickey)`: a refusal
+		// about the KEY that reads exactly like a wrong forced command, on the one screen whose job
+		// is to tell those apart. Every `Test helper` press was broken from quince#1026 until now.
+		//
+		// AND THE KEY IS THE ONE THE SCREEN SHOWED, which for a storage that has not been added yet
+		// is the pending key rather than the derived path (quince#1038). This check RUNS BEFORE the
+		// add — it is what gates the save — so resolving to a path that only exists afterwards makes
+		// a new zfs storage unaddable: the check can never pass, so the save stays disabled.
+		//
+		// An explicit `ssh_key` still wins, as everywhere else.
 		zc := config.ZFSConfig{
-			SSHUser: req.SSHUser, SSHHost: req.SSHHost,
+			ParentDataset: req.ParentDataset,
+			SSHUser:       req.SSHUser, SSHHost: req.SSHHost,
 			SSHPort: req.SSHPort, SSHKey: req.SSHKey,
+		}
+		if zc.SSHKey == "" {
+			zc.SSHKey = storage.ZFSKeyInUse(d.zfsKeyDir(), req.ParentDataset)
 		}
 		c := storage.CheckHook(r.Context(), req.ParentDataset, zc.SSHArgv())
 		writeJSON(w, d.Log, http.StatusOK, wire.StorageHookCheckResponse{
