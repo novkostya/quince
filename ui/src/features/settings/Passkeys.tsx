@@ -113,15 +113,35 @@ export function Passkeys() {
   // a real failure and says so, because the mutation never ran and has no error of its own to show.
   async function proveThenRemove(id: string) {
     setCeremonyErr(null);
+    // TWO TRY BLOCKS, NOT ONE, AND THE SPLIT IS THE POINT — architect, reviewing quince#1022.
+    //
+    // One `try` around both calls cannot tell their failures apart. `proveWithPasskey` makes its own
+    // `api.post`s to `reauth/begin` and `reauth/finish`, and both throw `APIError` — the same type a
+    // refused `DELETE` throws. A guard written for the second silently swallowed the first, so
+    // completing a Face ID prompt and having `reauth/finish` answer 401 (expired ceremony, rotated
+    // session) left the screen UNCHANGED: the ceremony error was returned past, the mutation never
+    // ran so `remove.error` was null, and nothing rendered.
+    //
+    // A COMPLETED PROMPT THAT CHANGES NOTHING is the *no silent caps or fallbacks* rule broken on an
+    // auth surface, and it is exactly what `ceremonyErr` was added for. Catching each failure where
+    // its ORIGIN is known is what makes the distinction structural instead of a predicate somebody
+    // has to keep correct.
+    let proof: string;
     try {
-      const proof = await proveWithPasskey("remove_passkey", id);
-      await remove.mutateAsync({ id, present: { proof } });
+      proof = await proveWithPasskey("remove_passkey", id);
     } catch (err) {
+      // A DISMISSED SHEET IS NOT AN ERROR — this file's rule and `AddPasskeyRow`'s. The user
+      // declined, nothing happened, and the Remove button they pressed is still the retry.
       if (err instanceof Error && err.name === "NotAllowedError") return;
-      // `mutateAsync` rejects on a refused DELETE too, and that one IS already rendered from
-      // `remove.error` — so this must not double-report it.
-      if (err instanceof APIError) return;
       setCeremonyErr("Could not confirm with a passkey.");
+      return;
+    }
+    try {
+      await remove.mutateAsync({ id, present: { proof } });
+    } catch {
+      // RENDERED FROM `remove.error`, where it always was. Swallowed here so the refusal is not
+      // reported twice — which is what the original guard was for, and all it should ever have
+      // covered.
     }
   }
 

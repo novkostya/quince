@@ -371,3 +371,57 @@ describe("a passkey-only answer skips the chooser entirely", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
+
+// THE SILENT FAILURE THE REVIEW CAUGHT — architect, quince#1022. A completed Face ID prompt whose
+// `reauth/finish` is refused must not leave the screen unchanged.
+//
+// One `try` around both the ceremony and the mutation could not tell their failures apart:
+// `proveWithPasskey` throws `APIError` from its own posts, exactly as a refused `DELETE` does, so a
+// guard written for the second swallowed the first. The mutation never ran, `remove.error` was null,
+// and nothing rendered.
+describe("a refused proof is not swallowed", () => {
+  function passkeyOnlyList() {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: false,
+      passkeys: [
+        { id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null },
+        { id: "b", name: "laptop", rp_id: HERE, created_at: "2026-07-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    vi.spyOn(api, "del").mockRejectedValue(
+      new UnauthorizedError("reauth_required", "Confirm it is you before changing how you sign in.", {
+        error: { code: "reauth_required", accepts: ["passkey"] },
+      }),
+    );
+  }
+
+  it("says so when the ceremony itself is refused", async () => {
+    passkeyOnlyList();
+    // An APIError from `reauth/finish` — the same TYPE a refused DELETE throws, which is why the
+    // original single-catch could not distinguish them.
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(
+      new UnauthorizedError("no_ceremony", "this passkey setup expired or was already completed"),
+    );
+
+    renderCard();
+    (await screen.findAllByRole("button", { name: /^remove$/i }))[0].click();
+
+    expect(await screen.findByText(/could not confirm with a passkey/i)).toBeInTheDocument();
+  });
+
+  // AND A DISMISSED SHEET STILL SAYS NOTHING, so the fix did not turn a non-event into an error.
+  it("stays quiet when the sheet is dismissed", async () => {
+    passkeyOnlyList();
+    const dismissed = new Error("cancelled");
+    dismissed.name = "NotAllowedError";
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(dismissed);
+
+    renderCard();
+    (await screen.findAllByRole("button", { name: /^remove$/i }))[0].click();
+
+    await waitFor(() => expect(screen.getByText("phone")).toBeInTheDocument());
+    expect(screen.queryByText(/could not confirm with a passkey/i)).not.toBeInTheDocument();
+  });
+});
