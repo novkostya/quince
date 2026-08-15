@@ -36,7 +36,7 @@ not a bug fix."*
 
 - `core/internal/auth/` — the proof mechanism, and the three rules applied to every mutating path.
 - `core/internal/httpapi/` — one new endpoint pair, four changed endpoints, the allowlist assertions.
-- `docs/contracts.md` — request fields and error codes on those endpoints. **Code-owned.**
+- `docs/contracts.md` — request fields and error codes on those endpoints. **Not code-owned**; `docs/quince.design.md` below is.
 - `docs/quince.design.md` §6 — the authority statement.
 - `ui/src/features/settings/` — the proof prompt, and the copy that becomes false when this lands.
 
@@ -369,10 +369,10 @@ defect. **The remedy taken was one test driving the real first response**, not t
   the Operator's, cited rather than re-derived. D3, D4, D6 and D7 are the four the ruling explicitly
   left to the architect for spec review, and each records its alternative. **Nothing here is a
   `PROPOSED (gap)`**: the gap was the ruling, and it has been taken.
-- **Contracts.** `docs/contracts.md` changes on **four** endpoints and gains a fifth pair.
-  `.github/CODEOWNERS` routes that file to `@novkostya`, and **an App cannot be a code owner**, so an
-  architect approval cannot make those PRs mergeable. Planned for in the slice table rather than met
-  at merge time — the ruling says so in as many words.
+- **Contracts.** `docs/contracts.md` changes on **four** endpoints and gains a fifth pair. That file
+  is **not** code-owned (Operator ruling 2026-08-14, quince#953), so those PRs take an ordinary
+  architect approval. What IS code-owned in this rung is `docs/quince.design.md` §6, which slice 5a
+  carries — planned for in the slice table rather than met at merge time.
 - **State honesty.** D8 is this rule applied to itself: the copy moves in the diff that makes it true,
   and not one PR earlier.
 - **No silent caps or fallbacks.** Every refusal is surfaced with the server's own sentence, which is
@@ -396,12 +396,15 @@ defect. **The remedy taken was one test driving the real first response**, not t
 Sequenced from `main`, **not stacked**. Code-owned slices need `@novkostya`; the others do not and
 must not be made to wait behind one.
 
-**THE COLUMN ASKS `code-owned?`, NOT `contracts?`, AND THE DIFFERENCE IS A TRAP** — spec review.
-`.github/CODEOWNERS` routes **`docs/quince.design.md` exactly as it routes `docs/contracts.md`**, and
-this rung's Boundary puts design §6 in scope. A column named for `contracts.md` reads as the whole
-gating fact, so a reader adding a slice would check the wrong file, mark a design-touching slice `no`,
-and discover at merge time that it needs the code owner. Nothing is mis-marked today — §6 lands in a
-slice already marked **YES** — which is exactly when a naming trap is cheap to remove.
+**THE COLUMN ASKS `code-owned?`, NOT `contracts?`, AND THE DIFFERENCE IS A TRAP** — spec review. A
+column named for `contracts.md` reads as the whole gating fact, so a reader adding a slice would
+check the wrong file rather than `.github/CODEOWNERS`, which is the only thing that decides.
+
+**AND THE TRAP NOW POINTS THE OTHER WAY.** `docs/contracts.md` is **no longer code-owned** — Operator
+ruling 2026-08-14, quince#953 — while `docs/quince.design.md` still is. So the rows below reading
+**YES — `contracts.md`** were right when this rung ran and would be wrong for a slice added today:
+a contracts-only slice takes an ordinary architect approval. The one that still needs `@novkostya`
+is **5a**, and for its design §6 half rather than its contracts half.
 
 | | | code-owned? | |
 | --- | --- | --- | --- |

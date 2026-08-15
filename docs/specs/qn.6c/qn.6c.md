@@ -930,7 +930,7 @@ lifecycle decision** (*when is a creation moment*, missing-medium, G5b) is the p
 row. Before the fix, (2) was "write it on first sight" and rode along with (1); after it, they are
 separable claims about separable code, so the split is the slicing catching up rather than a
 workaround. **Swapping 3 and 4 would not have unblocked anything either** — story 4 flips
-contracts §2, so it needs the code owner exactly as story 2's design §5 flip does.
+contracts §2, which needed the code owner exactly as story 2's design §5 flip did. **Only the design half would today** — `contracts.md` is no longer code-owned (quince#953).
 
 **PR 1b exists because the ruling falsified parts of a spec that was already merged**, and a
 merged spec asserting what the Operator overruled is the defect class this project files most.
