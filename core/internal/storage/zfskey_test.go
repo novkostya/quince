@@ -376,6 +376,34 @@ func TestCommitRefusesWhenThePendingKeyIsNotTheOneShown(t *testing.T) {
 	if err := CommitZFSKey(dir, "tank/three", ""); !errors.Is(err, ErrPendingKeyChanged) {
 		t.Errorf("an empty fingerprint = %v, want ErrPendingKeyChanged", err)
 	}
+
+	// THE PENDING KEY EXISTS AND IS A DIFFERENT ONE — a SECOND branch, and the one the cases above
+	// do not reach (architect, quince#1039 review, found by disabling the guard and watching nothing
+	// fail). Tab A's commit RENAMES `.pending` away, so everything above lands in the
+	// does-not-exist arm and returns before the comparison.
+	//
+	// It is reachable by the recovery this feature advertises: tab B re-reads the key as the refusal
+	// tells it to, which generates a FRESH `.pending` — and a save still carrying the old fingerprint
+	// arrives at a pending key that exists and differs. Without the check quince moves a key the
+	// operator never saw, and the line they pasted authenticates nothing.
+	fresh, err := ZFSKeyFor(dir, "tank/two") // the re-read, which regenerates `.pending`
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Fingerprint == shown.Fingerprint {
+		t.Fatal("the re-read returned the committed key's fingerprint; this case would not exercise " +
+			"the pending-differs branch")
+	}
+	if err := CommitZFSKey(dir, "tank/two", shown.Fingerprint); !errors.Is(err, ErrPendingKeyChanged) {
+		t.Errorf("a stale save against a REGENERATED pending key = %v, want ErrPendingKeyChanged", err)
+	}
+	if _, statErr := os.Stat(config.ZFSKeyPathIn(dir, "tank/two")); statErr == nil {
+		t.Error("the regenerated pending key was moved into place for a save that never saw it")
+	}
+	// AND THE FRESH FINGERPRINT STILL WORKS, so the refusal is recoverable rather than a dead end.
+	if err := CommitZFSKey(dir, "tank/two", fresh.Fingerprint); err != nil {
+		t.Errorf("the re-read key could not then be committed: %v", err)
+	}
 }
 
 // IT NEVER OVERWRITES A COMMITTED KEY. Discover-before-generate is unchanged: an existing key may
