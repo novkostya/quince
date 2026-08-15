@@ -48,7 +48,7 @@ Follows `qn.6j`'s precedent, which checked its own inferred letter rather than a
 - `core/cmd/quince/admin_cmd.go` — `quince auth reset`.
 - `ui/src/features/auth/` — conditional mediation on the login form.
 - `ui/src/features/settings/` — a passkeys surface: list, rename, remove, and the rpId hazard.
-- `docs/contracts.md` §1 — additive, **and code-owned**; see the Rule check.
+- `docs/contracts.md` §1 — additive. NOT code-owned; see the Rule check.
 
 **Explicitly out of scope.**
 
@@ -250,13 +250,13 @@ spec, and G9 blocks the rung being called done.**
 | --- | --- | --- |
 | **1** | **this spec** | reviewed before any code exists |
 | **2** | `quince auth reset` + the `0008` credentials table | **the recovery precondition — lands before any credential can be issued** |
-| **3** | the four endpoints, rpId storage and mismatch error, rate limiting, allowlists + **`contracts.md` §1** | **needs Operator approval**, see Rule check |
+| **3** | the four endpoints, rpId storage and mismatch error, rate limiting, allowlists + **`contracts.md` §1** | architect approval, like every other slice — see Rule check |
 | **4** | login: conditional mediation, gated | |
 | **5** | Settings: list / rename / remove, the rpId hazard, the unsupported-tier refusal | |
 | **6** | the onboarding offer | |
 
-Sequenced from `main`, not stacked. Slice 3 carries the contracts edit and therefore a code-owner
-approval that no architect verdict can substitute for.
+Sequenced from `main`, not stacked. Slice 3 carries the contracts edit, which is an ordinary architect
+approval like the rest of the rung.
 
 ---
 
@@ -267,9 +267,9 @@ approval that no architect verdict can substitute for.
   relative order against quince#726 — this spec **says so in its own section** and names the cheap
   reversal, rather than deciding quietly.
 - **Contracts.** The four endpoints are **additive to `docs/contracts.md` §1**, which
-  `.github/CODEOWNERS` routes to `@novkostya`. **An architect verdict structurally cannot satisfy
-  that** — an App cannot be a code owner. Slice 3 needs Operator approval; this spec PR does not
-  touch `contracts.md`.
+  `.github/CODEOWNERS` does **not** route to `@novkostya` — Operator ruling 2026-08-14, quince#953,
+  and that file says so at the line where a reader would otherwise add it back. So slice 3 takes an
+  ordinary architect approval and nothing in this rung waits on the Operator.
 - **Security.** This adds an authentication method. It does **not** change the session layer: a
   WebAuthn assertion sets the same `quince_session` cookie and the CSRF double-submit is untouched.
   The blast radius is the surface that has already had defects (quince#423, quince#372), which is

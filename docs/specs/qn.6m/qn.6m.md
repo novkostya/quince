@@ -59,8 +59,8 @@ defect this project files most often.
 
 - `core/internal/auth/` — the password becomes mutable; "configured" is redefined against passkeys.
 - `core/internal/httpapi/` — three new endpoints, the demo stand-in, and the exact-path lists.
-- `docs/contracts.md` §1 — **two existing endpoints change meaning**, plus additions. **Code-owned**;
-  see the Rule check.
+- `docs/contracts.md` §1 — **two existing endpoints change meaning**, plus additions. **NOT
+  code-owned** (quince#953); see the Rule check for what that does and does not excuse.
 - `ui/src/pages/` — the auth pages; `OnboardingPasskeyPage` is **deleted**.
 - `ui/src/features/auth/` — `PasswordForm` becomes a page rather than a card.
 - `ui/src/routes/` — `/settings/auth`, and sign-out in the shell.
@@ -393,11 +393,12 @@ holding the whole screen behind a code-owner review.
   being a bypass is rung-local detail written into this spec and into `contracts.md` — which is the
   ruled route for a contracts change, not a `PROPOSED (gap)` block. D5 and D8 are the two places the
   ruling explicitly left rung-local, and both are decided here with the alternatives recorded.
-- **Contracts.** Slices 5 and 7 touch `docs/contracts.md`, which `.github/CODEOWNERS` routes to
-  `@novkostya`. **An architect verdict structurally cannot satisfy that** — an App cannot be a code
-  owner. **Two existing ruled endpoints change meaning** (`GET /api/auth/status`, `POST
-  /api/auth/setup`), which is more than the additive edit `qn.6k` made, and slice 5's PR body must
-  say so in its first line. This spec PR touches no contract.
+- **Contracts.** Slices 5 and 7 touch `docs/contracts.md`, which `.github/CODEOWNERS` does **not**
+  route to `@novkostya` — Operator ruling 2026-08-14, quince#953 — so an architect verdict merges
+  them and nothing here waits on the Operator. **That is an approval path, not a licence:** **two
+  existing ruled endpoints change meaning** (`GET /api/auth/status`, `POST /api/auth/setup`), which
+  is more than the additive edit `qn.6k` made, and slice 5's PR body must still say so in its first
+  line. This spec PR touches no contract.
 - **Security.** This rung changes the authentication model. D3 is the whole of the risk and is stated
   as a measured defect-in-waiting with file and line, not as a caution. G1 and G2 exist to make it
   impossible to ship slice 5 without it. The session layer is untouched.

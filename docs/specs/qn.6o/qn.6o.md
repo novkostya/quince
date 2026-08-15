@@ -72,7 +72,7 @@ never at the screen that calls it:
 
 - `core/internal/auth/` — computing the acceptable factors, and returning them on the refusal.
 - `core/internal/wire/` + `core/internal/httpapi/` — the `accepts` field and the handlers that set it.
-- `docs/contracts.md` — the error envelope and the endpoints that populate it. **Code-owned.**
+- `docs/contracts.md` — the error envelope and the endpoints that populate it. **NOT code-owned** (quince#953); see the slice table.
 - `ui/src/features/auth/` — one challenge surface.
 - `ui/src/features/settings/Passkeys.tsx` — the inline add row; `AddPasskeyDialog` is retired.
 

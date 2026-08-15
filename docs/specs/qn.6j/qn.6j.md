@@ -564,10 +564,11 @@ test.
 ## Known gaps and open questions
 
 1. **The preview's contract edit — genuinely unruled, and not this seat's.** Either
-   `GET /api/config` gains the serialized file text (a `docs/contracts.md` §6 change, code-owned by
-   `@novkostya`), or the UI serializes YAML client-side. The issue argues the first is the honest
-   one *because the server is the only thing that knows what it actually wrote*, and the architect
-   agreed on quince#728; **it still needs a code-owner's yes.** This rung is built as though the
+   `GET /api/config` gains the serialized file text (a `docs/contracts.md` §6 change — **not**
+   code-owned since the Operator ruling of 2026-08-14, quince#953, so the architect can approve it),
+   or the UI serializes YAML client-side. The issue argues the first is the honest one *because the
+   server is the only thing that knows what it actually wrote*, and the architect agreed on
+   quince#728. **What is still owed is a ruling on WHICH option, not an approval.** This rung is built as though the
    answer may be no: the preview PR is last, independent, and its absence costs nothing else.
    **A note for whoever rules it:** this rung makes the second option strictly worse. A client-side
    serializer must now reproduce not only Go's quoting and ordering but its *omission* decisions,
@@ -600,7 +601,7 @@ Each PR branches from `main` and carries one reviewable claim. **Sequenced, neve
 | | claim | proof |
 | --- | --- | --- |
 | **1** | **this spec** | architect review; `docs/specs/**` is not code-owned |
-| **2** | **`replaceLocked` resolves before it validates** (D2a), closing quince#754: the `422`-stricter-than-the-file half, the `name: ""` half, and `retention: null` as a third. **Nothing about marshalling changes.** **`docs/contracts.md` is CODE-OWNED by `@novkostya`, so an architect approval cannot merge this PR** — it needs an Operator approval on top. Everything else in the rung waits behind it, so if that wait bites, the contracts line splits into its own tiny PR and the code lands on the architect's approval alone. Decided at authoring time rather than at merge time | G4a, G7, a `curl` reproduction through the running handler, and the existing config suites untouched |
+| **2** | **`replaceLocked` resolves before it validates** (D2a), closing quince#754: the `422`-stricter-than-the-file half, the `name: ""` half, and `retention: null` as a third. **Nothing about marshalling changes.** This slice was planned to need an Operator approval on top of the architect's, because `docs/contracts.md` was code-owned when the rung was written; **it is not since 2026-08-14 (quince#953), so a slice like this one now takes an architect approval alone.** The contingency planned here — split the contracts line into its own tiny PR if the wait bites — no longer has a wait to answer to | G4a, G7, a `curl` reproduction through the running handler, and the existing config suites untouched |
 | **3** | **the declared set exists and round-trips.** `Parse` computes it, `Loaded` and `Service` carry it, the node-prune `Marshal` is written and unit-tested — **and nothing calls it.** `replaceLocked` still writes the full document, so `main` is unchanged in behaviour | G2, G4 against the new function directly |
 | **4** | **the file stops inflating.** `replaceLocked` switches to the declared marshal; the diff against `old` supplies D2 clause 2; the runtime round-trip guard of decision 3 lands with it, sharing G4's comparator; the three false `qn.6` doc-comment comments are corrected | G1, G2, G4, G7 |
 | **5** | **the materialisation gate.** D3's `default: true` rule, plus `AddStorage`/`ForgetStorage` declared-set maintenance, plus story 10's fresh-install path | G3, G4, G7 |

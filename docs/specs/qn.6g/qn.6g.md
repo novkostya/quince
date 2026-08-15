@@ -553,7 +553,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 | **Docs are part of the diff** | contracts §6's table lands with the code that makes it true; `stack.md` D12's staged-delivery line and `design.md` §8's restart sentences change in the PR that falsifies them, not later. |
 | **Coverage declared** | Every code PR carries `go test -cover` plus a known-untested list. Expected standing entry: the applier-failure branch for a storage whose root becomes unreadable between the write and the apply, which no CI box stages reliably. |
 | **A rung's goal is provable at rung close** | G1–G9 run in CI or ui-e2e at rung close; none depends on a later rung. G10 is a host gate per PR. |
-| **Approver ≠ author** | Implementer authors. **PR 6 alone is code-owned** — `contracts.md`, `stack.md` and `design.md` are three of `CODEOWNERS`' six owned paths, so it needs `@novkostya`, and an App verdict cannot satisfy it because an App cannot be a code owner. **Every other PR here, this spec included, is the architect's to approve.** `/docs/specs/**` is deliberately *not* owned, and the file says why: specs *"bind one rung, not the project, and routing them to the Operator would make every rung wait on the seat that is deliberately not in the loop."* |
+| **Approver ≠ author** | Implementer authors. **PR 6 alone is code-owned** — for `stack.md` and `design.md`, two of `CODEOWNERS`' five owned paths, so it needs `@novkostya`, and an App verdict cannot satisfy it because an App cannot be a code owner. Its `contracts.md` half contributes nothing to that: **that file is not code-owned** (Operator ruling 2026-08-14, quince#953). **Every other PR here, this spec included, is the architect's to approve.** `/docs/specs/**` is deliberately *not* owned, and the file says why: specs *"bind one rung, not the project, and routing them to the Operator would make every rung wait on the seat that is deliberately not in the loop."* |
 
 ---
 
@@ -607,7 +607,9 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 Each carries one reviewable claim and its own proof.
 
 1. **This spec.** **Not** code-owned — `/docs/specs/**` is one of `CODEOWNERS`' declared omissions,
-   so the architect approves it. PRs **4** and **6** need `@novkostya`; the rest do not.
+   so the architect approves it. **PR 6 needs `@novkostya`; the rest do not** — including PR 4, whose
+   only owned-path claim was `contracts.md`, which stopped being code-owned on 2026-08-14
+   (quince#953).
 2. **The seam** — `Applier`, `Subscribe`, notify from `Replace` and `ForgetStorage`, warning
    plumbing. No consumer yet, so the claim is *the mechanism exists and fires exactly once per
    write*. Proof: Go tests, including open question 2.
@@ -619,8 +621,9 @@ Each carries one reviewable claim and its own proof.
 
    **Three claims rather than one, and the bundling is forced.** Shipping the applier alone makes an
    unreachable refusal reachable mid-transfer — a regression introduced by the fix — so the `422`
-   cannot follow in a later PR. **This makes item 4 code-owned** (it edits `docs/contracts.md` §1)
-   and therefore `@novkostya`'s to approve, which the line under item 1 said only PR 6 would be.
+   cannot follow in a later PR. It also puts a `docs/contracts.md` §1 edit in item 4 — which made it
+   code-owned **when this rung ran**, and does not now: that file left `CODEOWNERS` on 2026-08-14
+   (quince#953), so an item shaped like this one today is the architect's to approve.
 
    **Retention moved here from item 5, and it is a dependency rather than a preference.** It lives on
    `Slot.Retention` (`slot.go:29`) and `policyFor` reads it off the slot list (`subsystem.go:518`),

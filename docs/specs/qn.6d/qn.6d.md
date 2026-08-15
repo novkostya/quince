@@ -489,7 +489,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 | **Docs are part of the diff** | contracts §1/§2 in PR 1; `ui.design.md` principle 4 and `design.md` §8 in the PR that renames the tab and would otherwise make them false. |
 | **Coverage declared** | Every code PR carries `go test -cover` plus an explicit known-untested list. Expected standing entry: the `statfs` failure branch on a path that becomes unreadable between listing and measuring, which no CI box can stage reliably. |
 | **A rung's goal is provable at rung close** | G1a–G6 run in CI or ui-e2e at rung close; none depends on a later rung. G7 is a host gate run per PR. |
-| **Approver ≠ author** | Implementer authors. **PR 1 and the rename PR touch code-owned canon and need `@novkostya`** — an App cannot be a code owner, so those must not be routed to the architect. The architect approves the rest. |
+| **Approver ≠ author** | Implementer authors. **The rename PR touches code-owned canon and needs `@novkostya`** — `ui.design.md` and `design.md` — and an App cannot be a code owner, so it must not be routed to the architect. **PR 1 needed it too while this rung ran**, for `contracts.md`; that file left `CODEOWNERS` on 2026-08-14 (quince#953), so a contracts-only PR is the architect's now. The architect approves the rest. |
 
 ---
 
@@ -608,19 +608,28 @@ in the same diff as the flip rather than in a follow-up.
 **No status column** — `qn.6c`'s table recorded why, and its one self-exempting cell went stale by
 the event it was waiting for. A PR number is immutable; a reader who wants status has the forge.
 
+**THE APPROVAL COLUMN IS WHAT HAPPENED, AND THE ROUTING HAS SINCE CHANGED.** `docs/contracts.md` left
+`.github/CODEOWNERS` on 2026-08-14 (Operator ruling, quince#953), so rows **1**, **1b**, **5a** and
+**6a** — all code-owned for `contracts.md` alone — would take an ordinary architect approval today.
+Row **2** would still need `@novkostya`: it carries `ui.design.md` and `design.md`, which are owned.
+Do not copy this column into a new rung's plan.
+
 **PR 6 split into 6a and 6b for the same reason 5 did, and the table says so at the split rather
 than afterwards.** An endpoint and a destructive button are different claims with different proofs —
 6a's are three Go gates over the config layer, 6b's is what a user is told before they press it —
-and they take different approval paths, because 6a adds a route line to `contracts.md` and 6b
-touches no canon. **6a is code-owned and that is a deliberate cost:** the ruled gap-B block already
+and they took different approval paths, because 6a adds a route line to `contracts.md` and 6b
+touches no canon. **6a was code-owned and that was a deliberate cost:** the ruled gap-B block already
 documents the endpoint, so §1's `Config` listing could have been left alone and the PR routed to the
-architect. Fact 14 is the record of what that costs — §1's listing was already behind the built API
+architect. Fact 14 is the record of what that cost — §1's listing was already behind the built API
 in two places when this rung started, each an ordinary PR that declined to pay one approval hop.
+**That cost is now zero and the argument with it**: `contracts.md` is not code-owned since
+2026-08-14 (quince#953), so keeping §1's listing current no longer buys an approval hop at all.
 
 **PR 5 split into 5a and 5b while it was being built, and the table says so rather than keeping the
 plan.** `useBackup` is keyed by udid and hooks cannot be called in a loop, so *`Back up now` scoped
 to this storage* needs a component per device — a different claim from *the page exists and is
-correctly scoped*, and a different approval path, since 5a touches code-owned canon and 5b does not.
+correctly scoped*, and a different approval path at the time, since 5a touched `contracts.md` — then
+code-owned, not since (quince#953) — and 5b touched no canon.
 
 **It is recorded because a slicing table is a status table** (quince#409). The split was announced in
 5a's PR body and then **dropped out of a review summary** that counted the stories 5a delivered
