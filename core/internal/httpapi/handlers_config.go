@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -218,10 +220,44 @@ func (d Deps) jobsRunningOn(name string) []string {
 // question that was asked.
 func (d Deps) handleConfigStorageAdd() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var entry config.StorageEntry
-		if err := decodeJSON(r, &entry); err != nil {
+		// THE ENTRY, PLUS ONE SIBLING KEY. Embedding keeps the body a `StorageEntry` on the wire —
+		// every existing field stays exactly where it was — while carrying the fingerprint of the ssh
+		// key this screen showed, which is the only thing that can prove the save is committing the
+		// key whose line the operator actually pasted (quince#1038).
+		var body struct {
+			config.StorageEntry
+			ZFSKeyFingerprint string `json:"zfs_key_fingerprint"`
+		}
+		if err := decodeJSON(r, &body); err != nil {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
 			return
+		}
+		entry := body.StorageEntry
+
+		// THE KEY MOVES BEFORE THE CONFIG IS WRITTEN, and the order is deliberate: a config naming a
+		// storage whose key never landed is a storage that fails at its first backup, whereas a
+		// failed move with nothing written is a screen the operator is still looking at.
+		//
+		// ONLY WHERE QUINCE MANAGES THE KEY. An explicit `ssh_key` is the operator's own, placed by
+		// them, and no part of this has ever touched it.
+		if entry.Backend == "zfs" && entry.ZFS.SSHKey == "" && entry.ZFS.ParentDataset != "" {
+			if err := storage.CommitZFSKey(d.zfsKeyDir(), entry.ZFS.ParentDataset, body.ZFSKeyFingerprint); err != nil {
+				if errors.Is(err, storage.ErrPendingKeyChanged) {
+					// A 422 NAMING A FIELD, because the operator can act on it: the line they pasted
+					// on the host is for a key quince no longer holds, so it has to be re-read and
+					// re-pasted. The two-tab case, arriving honestly instead of as a storage that
+					// fails at its first backup.
+					writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
+						Errors []wire.ConfigError `json:"errors"`
+					}{Errors: []wire.ConfigError{{Path: "zfs.parent_dataset", Message: "the ssh key this screen " +
+						"showed is not the one quince holds now — another tab may have added a storage since. " +
+						"Read the key again and paste the new line on the ZFS host."}}})
+					return
+				}
+				d.Log.Error("committing the zfs key", "error", err)
+				writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not place the ssh key")
+				return
+			}
 		}
 
 		outcome, errs, warns, err := d.Config.AddStorage(entry)

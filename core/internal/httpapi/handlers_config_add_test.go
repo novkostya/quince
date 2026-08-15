@@ -5,9 +5,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -153,5 +158,118 @@ func TestAddStorageEndpointIsNotAuthExempt(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusOK {
 		t.Fatalf("an UNAUTHENTICATED add got 200 — this writes config and must never be auth-exempt")
+	}
+}
+
+// quince#1038 — ADD IS WHAT COMMITS THE KEY, and the fingerprint is what makes that safe.
+//
+// The two-parents-two-keys property quince#989 established is unchanged; what moved is WHEN it
+// becomes true. Asking about a dataset no longer writes anything, so both storages are shown the one
+// pending key while they are being filled in, and each gets its own only when it is added.
+func TestAddingAZFSStorageCommitsThePendingKey(t *testing.T) {
+	deps := testDeps(t)
+	deps.ZFSKeyDir = t.TempDir()
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	shown := decodeZFSKeyFor(t, c, srv, "tank/one")
+	if !shown.Pending {
+		t.Fatal("the key was not pending before the storage was added")
+	}
+
+	entry := `{"name":"one","path":"/backups-a","backend":"zfs","zfs":{"parent_dataset":"tank/one",` +
+		`"mode":"hook","ssh_user":"quince","ssh_host":"nas","seed":"auto"},` +
+		`"zfs_key_fingerprint":"` + shown.Fingerprint + `"}`
+	if code, body := addStorage(t, srv, c, entry); code != http.StatusOK {
+		t.Fatalf("add = %d, want 200: %s", code, body)
+	}
+
+	// THE KEY IS NOW UNDER `zfs-*` — which is the whole property: that directory names exactly the
+	// storages quince committed to.
+	landed := config.ZFSKeyPathIn(deps.ZFSKeyDir, "tank/one")
+	if _, err := os.Stat(landed); err != nil {
+		t.Fatalf("the key did not land at %s: %v", landed, err)
+	}
+	if _, err := os.Stat(filepath.Join(deps.ZFSKeyDir, storage.PendingKeyName)); !os.IsNotExist(err) {
+		t.Error("the pending key survived the add — it is a rename, so nothing is left behind")
+	}
+
+	// AND THE NEXT DATASET GETS A FRESH PENDING KEY, so two committed storages end up with two keys.
+	next := decodeZFSKeyFor(t, c, srv, "tank/two")
+	if next.Fingerprint == shown.Fingerprint {
+		t.Error("the second storage was shown the key the first one just committed")
+	}
+	// The one that was committed answers as committed, not pending.
+	first := decodeZFSKeyFor(t, c, srv, "tank/one")
+	if first.Pending || first.Created || first.Fingerprint != shown.Fingerprint {
+		t.Errorf("after the add: pending=%v created=%v same-key=%v",
+			first.Pending, first.Created, first.Fingerprint == shown.Fingerprint)
+	}
+}
+
+// THE TWO-TAB REFUSAL, at the endpoint: a 422 naming a field, not a silent second key.
+//
+// Tab A and tab B are both shown the pending key for different datasets, and both operators paste
+// their line on the host. Tab A adds; the key moves. Tab B adds — and quince must say so, because
+// the line tab B pasted is for a key it no longer holds.
+func TestAddingAZFSStorageRefusesAStaleKeyFingerprint(t *testing.T) {
+	deps := testDeps(t)
+	deps.ZFSKeyDir = t.TempDir()
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	shown := decodeZFSKeyFor(t, c, srv, "tank/one") // what both tabs were shown
+
+	entryA := `{"name":"one","path":"/backups-a","backend":"zfs","zfs":{"parent_dataset":"tank/one",` +
+		`"mode":"hook","ssh_user":"quince","ssh_host":"nas","seed":"auto"},` +
+		`"zfs_key_fingerprint":"` + shown.Fingerprint + `"}`
+	if code, body := addStorage(t, srv, c, entryA); code != http.StatusOK {
+		t.Fatalf("tab A's add = %d, want 200: %s", code, body)
+	}
+
+	entryB := `{"name":"two","path":"/backups-b","backend":"zfs","zfs":{"parent_dataset":"tank/two",` +
+		`"mode":"hook","ssh_user":"quince","ssh_host":"nas","seed":"auto"},` +
+		`"zfs_key_fingerprint":"` + shown.Fingerprint + `"}`
+	code, body := addStorage(t, srv, c, entryB)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("tab B's add = %d, want 422 — otherwise quince makes a second key and the line tab B "+
+			"pasted authenticates nothing: %s", code, body)
+	}
+	// THE SENTENCE HAS TO BE ACTIONABLE. The remedy is *read the key again and paste the new line*,
+	// and a refusal that only says "conflict" leaves the operator with a storage they cannot add.
+	for _, want := range []string{"not the one quince holds", "paste"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("the refusal does not carry %q: %s", want, body)
+		}
+	}
+	if _, err := os.Stat(config.ZFSKeyPathIn(deps.ZFSKeyDir, "tank/two")); err == nil {
+		t.Error("a key was written for tab B's dataset despite the refusal")
+	}
+}
+
+// AN EXPLICIT `ssh_key` IS THE OPERATOR'S OWN, AND NOTHING HERE TOUCHES IT. It is the escape hatch
+// for a key already deployed, so an add carrying one must not need a fingerprint and must not move
+// the pending key.
+func TestAddingAZFSStorageWithAnExplicitKeyCommitsNothing(t *testing.T) {
+	deps := testDeps(t)
+	deps.ZFSKeyDir = t.TempDir()
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	c := authedClient(t, srv)
+
+	_ = decodeZFSKeyFor(t, c, srv, "tank/one") // a pending key exists
+
+	entry := `{"name":"one","path":"/backups-a","backend":"zfs","zfs":{"parent_dataset":"tank/one",` +
+		`"mode":"hook","ssh_user":"quince","ssh_host":"nas","ssh_key":"/data/keys/mine","seed":"auto"}}`
+	if code, body := addStorage(t, srv, c, entry); code != http.StatusOK {
+		t.Fatalf("add = %d, want 200 — an explicit ssh_key needs no fingerprint: %s", code, body)
+	}
+	if _, err := os.Stat(config.ZFSKeyPathIn(deps.ZFSKeyDir, "tank/one")); err == nil {
+		t.Error("quince committed a key for a storage that brought its own")
+	}
+	if _, err := os.Stat(filepath.Join(deps.ZFSKeyDir, storage.PendingKeyName)); err != nil {
+		t.Error("the pending key was consumed by a storage that brought its own key")
 	}
 }

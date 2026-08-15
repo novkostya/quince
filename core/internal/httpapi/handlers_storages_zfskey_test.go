@@ -12,6 +12,7 @@ import (
 
 	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -78,8 +79,26 @@ func TestZFSKeyEndpointGeneratesAndReturnsThePasteableLine(t *testing.T) {
 	if !strings.Contains(out.Key.AuthorizedKeys, ` `+testParent+`"`) {
 		t.Fatalf("authorized_keys does not confine the key to %q: %q", testParent, out.Key.AuthorizedKeys)
 	}
-	if out.Key.Path != config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent) {
-		t.Fatalf("path = %q, want %q", out.Key.Path, config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent))
+	// IT IS PENDING UNTIL THE STORAGE IS ADDED (quince#1038). `path` names the dot-file the key sits
+	// in now — which the screen must NOT offer as an `ssh_key` — and `lands_at` names where the
+	// operator will find it afterwards.
+	if !out.Key.Pending {
+		t.Error("pending = false for a dataset with no storage — nothing has been committed yet")
+	}
+	if want := filepath.Join(deps.ZFSKeyDir, storage.PendingKeyName); out.Key.Path != want {
+		t.Errorf("path = %q, want the pending key at %q", out.Key.Path, want)
+	}
+	if want := config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent); out.Key.LandsAt != want {
+		t.Errorf("lands_at = %q, want %q", out.Key.LandsAt, want)
+	}
+	// THE FINGERPRINT IS ON THE WIRE because the save carries it back; without it the two-tab case
+	// is undetectable and resolves by quietly making a second key.
+	if !strings.HasPrefix(out.Key.Fingerprint, "SHA256:") {
+		t.Errorf("fingerprint = %q, want the SHA256 form ssh-keygen prints", out.Key.Fingerprint)
+	}
+	// AND NOTHING REACHED THE AUDIT SURFACE. A key under `zfs-*` means a committed storage.
+	if _, err := os.Stat(config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent)); err == nil {
+		t.Error("asking for a key wrote one into /data/keys/zfs-* before the storage was added")
 	}
 }
 
@@ -103,7 +122,7 @@ func TestZFSKeyEndpointNeverSerialisesThePrivateHalf(t *testing.T) {
 	}
 	body := string(rawBody)
 
-	raw, err := os.ReadFile(config.ZFSKeyPathIn(deps.ZFSKeyDir, testParent))
+	raw, err := os.ReadFile(filepath.Join(deps.ZFSKeyDir, storage.PendingKeyName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +136,18 @@ func TestZFSKeyEndpointNeverSerialisesThePrivateHalf(t *testing.T) {
 	}
 }
 
-// A SECOND PRESS FINDS THE FIRST KEY. The form's *"quince found your existing key"* rests on this,
-// and so does not breaking a host whose authorized_keys already carries the old public half.
-func TestZFSKeyEndpointIsIdempotentAndSaysSo(t *testing.T) {
+// ASKING TWICE RETURNS THE SAME KEY, and `created` stays true until a storage is committed.
+//
+// THE MEANING OF `created` MOVED IN quince#1038, and this test moved with it. It used to be *did
+// this call write a file*, which the form's debounced re-fetch made permanently false: the keystroke
+// that finished the dataset name found what an earlier keystroke had made, so the panel said *quince
+// found an ssh key it made earlier* about a key one second old. It now answers *does this dataset
+// already have a committed key*, which is the question the operator is actually asking — and while
+// the key is pending, it does not.
+//
+// The property that mattered underneath is unchanged and is asserted here: **the key material does
+// not change between asks.** A line pasted after the first ask must still be the right line.
+func TestZFSKeyEndpointReturnsTheSameKeyWhileItIsPending(t *testing.T) {
 	deps := testDeps(t)
 	deps.ZFSKeyDir = t.TempDir()
 	srv := httptest.NewServer(NewRouter(deps))
@@ -129,14 +157,15 @@ func TestZFSKeyEndpointIsIdempotentAndSaysSo(t *testing.T) {
 	first := decodeZFSKey(t, c, srv)
 	second := decodeZFSKey(t, c, srv)
 
-	if !first.Created {
-		t.Fatalf("the first press did not create")
+	if !first.Created || !second.Created {
+		t.Errorf("created = %v then %v — no storage has been added for this dataset, so both asks "+
+			"describe a dataset that has no key yet", first.Created, second.Created)
 	}
-	if second.Created {
-		t.Fatalf("created = true on the second press — the form would offer to overwrite a live key")
+	if !first.Pending || !second.Pending {
+		t.Errorf("pending = %v then %v, want true both times", first.Pending, second.Pending)
 	}
-	if second.PublicKey != first.PublicKey {
-		t.Fatalf("the key changed between presses:\n%q\n%q", first.PublicKey, second.PublicKey)
+	if second.PublicKey != first.PublicKey || second.Fingerprint != first.Fingerprint {
+		t.Fatalf("the key changed between asks:\n%q\n%q", first.PublicKey, second.PublicKey)
 	}
 }
 
@@ -266,93 +295,6 @@ func TestZFSKeyRefusalTellsThemItIsNotAPath(t *testing.T) {
 			t.Errorf("the refusal does not carry %q — %s.\ngot: %s",
 				want.fact, want.why, got.Errors[0].Message)
 		}
-	}
-}
-
-// quince#989 — TWO STORAGES ON ONE HOST GET TWO KEYS, AND THIS IS THE DEFECT THE ISSUE UNDERSTATED.
-//
-// It read as *quince cannot make the second key, so the operator makes it by hand*. What actually
-// happened is worse: `EnsureZFSKey` discovers before it generates and used ONE path, so asked about
-// a second storage's dataset it found the FIRST key and rendered a line pairing key A with dataset
-// B. sshd stops at the first line whose key matches, so that line is inert and storage B stays
-// confined to dataset A.
-//
-// AND IT READ HEALTHY. `capacity` takes no argument and answers for whatever `$PARENT` the live
-// forced command names, so `Test helper` returned dataset A's free space for storage B; only
-// `create` fails, at commit, after a transfer.
-//
-// So the assertion is on all three of the things that were wrong at once: two paths, two DIFFERENT
-// public keys, and each line naming its OWN dataset.
-func TestZFSKeyEndpointGivesTwoParentsTwoKeys(t *testing.T) {
-	deps := testDeps(t)
-	deps.ZFSKeyDir = t.TempDir()
-	srv := httptest.NewServer(NewRouter(deps))
-	defer srv.Close()
-	c := authedClient(t, srv)
-
-	ask := func(parent string) wire.StorageZFSKey {
-		t.Helper()
-		resp, err := c.Do(zfsKeyReqFor(t, srv, c, parent))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("parent %q → %d, want 200", parent, resp.StatusCode)
-		}
-		var out wire.StorageZFSKeyResponse
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			t.Fatal(err)
-		}
-		return out.Key
-	}
-
-	a, b := ask("tank/one"), ask("tank/two")
-
-	if a.Path == b.Path {
-		t.Fatalf("both storages were given the key at %q — the second is confined to the first's "+
-			"dataset, and nothing on the form says so", a.Path)
-	}
-	if a.PublicKey == b.PublicKey {
-		t.Error("two parents were handed the same public key; the second authorized_keys line would " +
-			"be inert, because sshd stops at the first line whose key matches")
-	}
-	if !b.Created {
-		t.Error("the second parent's key was FOUND rather than made — that is the old shape, where " +
-			"discover-before-generate reached across datasets")
-	}
-	// EACH LINE NAMES ITS OWN DATASET. This is what made the old failure quiet: the line looked
-	// right, because the dataset in it was the one just typed.
-	if !strings.Contains(a.AuthorizedKeys, " tank/one\"") {
-		t.Errorf("the first line does not confine its key to tank/one: %q", a.AuthorizedKeys)
-	}
-	if !strings.Contains(b.AuthorizedKeys, " tank/two\"") {
-		t.Errorf("the second line does not confine its key to tank/two: %q", b.AuthorizedKeys)
-	}
-}
-
-// TWO STORAGES SHARING ONE PARENT SHARE ONE KEY, and that is correct rather than tolerated: a forced
-// command confines a key to one parent, so identical parents mean identical confinement and a second
-// key would buy nothing but a second line to paste.
-//
-// It is also the property that keeps `discover before generate` meaningful per path — the second ask
-// must FIND the first key, not make another.
-func TestZFSKeyEndpointSharesOneKeyWithinOneParent(t *testing.T) {
-	deps := testDeps(t)
-	deps.ZFSKeyDir = t.TempDir()
-	srv := httptest.NewServer(NewRouter(deps))
-	defer srv.Close()
-	c := authedClient(t, srv)
-
-	first := decodeZFSKeyFor(t, c, srv, "tank/shared")
-	second := decodeZFSKeyFor(t, c, srv, "tank/shared")
-
-	if !first.Created || second.Created {
-		t.Errorf("created = %v then %v, want true then false — the second ask must FIND the first key",
-			first.Created, second.Created)
-	}
-	if first.PublicKey != second.PublicKey {
-		t.Error("one parent produced two different keys across two asks")
 	}
 }
 

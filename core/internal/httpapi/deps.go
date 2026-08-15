@@ -344,3 +344,13 @@ func (UnavailablePasswordAdmin) ChangePassword(*auth.Proofs, auth.Presented, str
 func (UnavailablePasswordAdmin) RemovePassword(*auth.Proofs, auth.Presented, string, string, string) error {
 	return ErrPasswordAdminUnavailable
 }
+
+// zfsKeyDir is the directory helper keys live in — `ZFSKeyDir` when a test set one, otherwise
+// quince's own. One accessor rather than the same two lines at each call site, since quince#1038
+// gave it a second caller and a third would have been the drift.
+func (d Deps) zfsKeyDir() string {
+	if d.ZFSKeyDir != "" {
+		return d.ZFSKeyDir
+	}
+	return config.DefaultZFSKeyDir
+}

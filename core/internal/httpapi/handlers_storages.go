@@ -323,14 +323,12 @@ func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 			hookCheck422(w, d, "parent_dataset", "the request body could not be read as JSON")
 			return
 		}
-		dir := d.ZFSKeyDir
-		if dir == "" {
-			dir = config.DefaultZFSKeyDir
-		}
-		// DERIVED BEFORE THE DATASET IS VALIDATED, AND THAT IS SAFE BECAUSE NOTHING TOUCHES DISK
-		// FIRST: `EnsureZFSKey` checks the name against `datasetPattern` before it reads or writes
-		// anything, so an unsafe dataset produces a path that is computed and then discarded.
-		k, err := storage.EnsureZFSKey(config.ZFSKeyPathIn(dir, req.ParentDataset), req.ParentDataset)
+		dir := d.zfsKeyDir()
+		// A READ, NOT A GENERATE (quince#1038). `ZFSKeyFor` answers what the key situation is for
+		// this dataset and writes nothing per call beyond the single `.pending` key the first time
+		// one is needed. It used to derive a path per dataset and generate into it, so the debounced
+		// re-fetch behind the form wrote a private key for every prefix the operator paused on.
+		k, err := storage.ZFSKeyFor(dir, req.ParentDataset)
 		if err != nil {
 			if errors.Is(err, storage.ErrUnsafeDataset) {
 				// SAME FIELD, SAME FACTS as `CheckHook`'s refusal and the probe's — the buttons sit
@@ -356,6 +354,9 @@ func (d Deps) handleStorageZFSKey() http.HandlerFunc {
 				PublicKey:      k.PublicKey,
 				AuthorizedKeys: k.AuthorizedKeys,
 				Created:        k.Created,
+				Pending:        k.Pending,
+				LandsAt:        k.LandsAt,
+				Fingerprint:    k.Fingerprint,
 			},
 		})
 	}
