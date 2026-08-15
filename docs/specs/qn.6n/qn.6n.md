@@ -400,22 +400,21 @@ must not be made to wait behind one.
 column named for `contracts.md` reads as the whole gating fact, so a reader adding a slice would
 check the wrong file rather than `.github/CODEOWNERS`, which is the only thing that decides.
 
-**AND THE TRAP NOW POINTS THE OTHER WAY.** `docs/contracts.md` is **no longer code-owned** — Operator
-ruling 2026-08-14, quince#953 — while `docs/quince.design.md` still is. So the rows below reading
-**YES — `contracts.md`** were right when this rung ran and would be wrong for a slice added today:
-a contracts-only slice takes an ordinary architect approval. The one that still needs `@novkostya`
-is **5a**, and for its design §6 half rather than its contracts half.
+**`docs/contracts.md` IS NOT AN OWNED PATH** (quince#953) and `docs/quince.design.md` is, which is
+the whole of the trap: a contracts-only slice is the architect's, and the one slice here needing
+`@novkostya` is **5a**, for its design §6 half. The `contracts.md` notes in the column below are
+what each slice touches, not what gates it.
 
 | | | code-owned? | |
 | --- | --- | --- | --- |
 | **1** | **this spec** — `docs/specs/**` is *not* code-owned | no | quince#906 + quince#910, **merged** |
 | **2** | **the proof primitive** — `operation`/`target`/subject/session, single-use, expiring, in `auth` alone, with **no caller**. G2, G3, G4, **G4b's session half**. | no | quince#920, **merged** |
-| **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | **YES** — `contracts.md` | quince#922, **merged** |
+| **3** | **the reauth endpoint pair** + the allowlist assertions (G1) and **G4b's no-`Set-Cookie` half**. Still no mutating endpoint consumes it. | no — `contracts.md` only | quince#922, **merged** |
 | **4** | **the UI prompt** — the reauth ceremony, and the retry that runs it. **Was slice 6; moved ahead of the rules, see below.** | no | quince#928, **merged** |
-| **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — `contracts.md` **+ design §6** | quince#927, **merged** |
-| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony records WHAT IT WAS BEGUN FOR and the registration finisher refuses the other kind. **Where G7 stops being theoretical.** | **YES** — `contracts.md` | quince#930, **merged** |
-| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | **YES** — `contracts.md` | quince#937, **merged** |
-| **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | **YES** — `contracts.md` | *this PR* |
+| **5a** | **rules 1 and 3, THE PASSWORD PATH** — `PUT /api/auth/password` demands proof. **Carries the `quince.design.md` §6 edit.** G5, G6. | **YES** — design §6 | quince#927, **merged** |
+| **5b** | **rule 1, PASSKEY REGISTRATION** — `register/begin` demands proof; `finish` needs none, because a ceremony records WHAT IT WAS BEGUN FOR and the registration finisher refuses the other kind. **Where G7 stops being theoretical.** | no — `contracts.md` only | quince#930, **merged** |
+| **6a** | **rule 2, THE PASSWORD PATH** — `DELETE /api/auth/password` demands a passkey; `ErrLastCredential` stops guarding and starts explaining. Carries the DELETE-body decision (D9). | no — `contracts.md` only | quince#937, **merged** |
+| **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | no — `contracts.md` only | *this PR* |
 | **7** | **D8's copy** — lands with or after rule 1, never before. Splits `elsewhere-only` from `unconfigured`, and names the cheaper remedy D8 missed. | no | *this PR* |
 
 **ROW 5b'S DESCRIPTION WAS STALE THE MOMENT IT MERGED, AND NOT ABOUT ITS STATUS.** It read *"a ceremony
