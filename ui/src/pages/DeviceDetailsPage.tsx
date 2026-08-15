@@ -23,6 +23,7 @@ import { JobHistory } from "@/features/jobs/JobHistory";
 import { BackupControls, BackupControlsStatus } from "@/features/jobs/BackupControls";
 import { useStorages } from "@/features/jobs/useStorages";
 import { useConfig } from "@/lib/config";
+import { useDialogRoute } from "@/lib/useDialogRoute";
 import { useBackup } from "@/features/jobs/useBackup";
 import { VersionList } from "@/features/versions/VersionList";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,9 @@ import { Badge } from "@/components/ui/badge";
 
 export function DeviceDetailsPage() {
   const { udid = "" } = useParams();
-  const [encOpen, setEncOpen] = useState(false);
+  // The dialog is a place, not a boolean — opening it pushes a history entry and closing it
+  // pops one, so Back closes it and the browser restores the page offset behind it (quince#931).
+  const { open: encOpen, onOpenChange: setEncOpen } = useDialogRoute("encryption");
   const [encMode, setEncMode] = useState<EncryptionMode | undefined>(undefined);
   const fromStore = useDevicesStore((s) => s.byUdid[udid]);
 

@@ -2,6 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { WifiSyncControl } from "./WifiSyncControl";
 import type { Device } from "@/lib/types";
+import { MemoryRouter } from "react-router-dom";
+
+// THESE COMPONENTS READ THE URL NOW (quince#931): a dialog is open because the address says
+// so rather than because a boolean does, and `useLocation` throws outside a router.
+function renderRouted(ui: Parameters<typeof render>[0]) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 function device(over: Partial<Device> = {}): Device {
   return {
@@ -22,7 +29,7 @@ function device(over: Partial<Device> = {}): Device {
 describe("WifiSyncControl", () => {
   it("offers to turn sync ON over USB, and posts enable", () => {
     const post = vi.fn().mockResolvedValue({ op_id: "op-1" });
-    render(<WifiSyncControl device={device()} post={post} />);
+    renderRouted(<WifiSyncControl device={device()} post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /turn on wi-fi sync/i }));
     expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "enable" });
@@ -30,7 +37,7 @@ describe("WifiSyncControl", () => {
 
   it("offers to turn sync OFF when it is on, and posts disable", () => {
     const post = vi.fn().mockResolvedValue({ op_id: "op-2" });
-    render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
+    renderRouted(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
     expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
@@ -41,7 +48,7 @@ describe("WifiSyncControl", () => {
   // cannot be reached over Wi-Fi. Offering the button and failing would be the dishonest shape.
   it("DISABLES enable on a Wi-Fi-only device and says why", () => {
     const post = vi.fn();
-    render(
+    renderRouted(
       <WifiSyncControl
         device={device({ wifi_sync: "off", transports: { wifi: "2026-07-31T00:00:00Z" } })}
         post={post}
@@ -57,7 +64,7 @@ describe("WifiSyncControl", () => {
 
   // `unknown` means quince has not read the flag. Rendering a direction from it would be guessing.
   it("renders nothing when the state is unknown", () => {
-    const { container } = render(
+    const { container } = renderRouted(
       <WifiSyncControl device={device({ wifi_sync: "unknown" })} post={vi.fn()} />,
     );
     expect(container.textContent).toBe("");
@@ -73,7 +80,7 @@ describe("WifiSyncControl", () => {
   // Deriving the expectation from that shared prefix is what a typo in this file cannot satisfy.
   it("posts to the same /api/devices prefix the other device ops use", () => {
     const post = vi.fn().mockResolvedValue({ op_id: "op-3" });
-    render(<WifiSyncControl device={device()} post={post} />);
+    renderRouted(<WifiSyncControl device={device()} post={post} />);
     fireEvent.click(screen.getByRole("button", { name: /turn on wi-fi sync/i }));
 
     const [path] = post.mock.calls[0];
@@ -87,7 +94,7 @@ describe("disable confirmation", () => {
   // and could only be recovered with a cable. A warning sentence was not enough.
   it("does NOT post immediately when disabling would disconnect the device", () => {
     const post = vi.fn();
-    render(
+    renderRouted(
       <WifiSyncControl
         device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
         post={post}
@@ -101,7 +108,7 @@ describe("disable confirmation", () => {
 
   it("posts disable only after the confirmation is accepted", () => {
     const post = vi.fn().mockResolvedValue({ op_id: "op-4" });
-    render(
+    renderRouted(
       <WifiSyncControl
         device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
         post={post}
@@ -119,7 +126,7 @@ describe("disable confirmation", () => {
   // ceremony — and ceremony on a harmless action is how people learn to click through real ones.
   it("does NOT confirm when the device is on USB, because nothing gets cut off", () => {
     const post = vi.fn().mockResolvedValue({ op_id: "op-5" });
-    render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
+    renderRouted(<WifiSyncControl device={device({ wifi_sync: "on" })} post={post} />);
     fireEvent.click(screen.getByRole("button", { name: /turn off wi-fi sync/i }));
 
     expect(post).toHaveBeenCalledWith("/api/devices/DEV-1/wifi-sync", { action: "disable" });
@@ -130,7 +137,7 @@ describe("disable confirmation", () => {
 // rejected a `title` for exactly that reason. It now lives in the confirmation dialog, which is
 // where a warning about a click belongs: at the moment of the click rather than as ambient prose.
 it("explains the disconnect inside the confirmation, not as standing text", () => {
-  render(
+  renderRouted(
     <WifiSyncControl
       device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
       post={vi.fn()}
@@ -147,12 +154,12 @@ it("explains the disconnect inside the confirmation, not as standing text", () =
 // gets a real button; disable is a setting nobody reaches for and recedes. Asserted because a
 // single weight is wrong half the time, and which half is not obvious from reading the component.
 it("gives ENABLE a prominent button and DISABLE a quiet one", () => {
-  const { unmount } = render(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
+  const { unmount } = renderRouted(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
   const enable = screen.getByRole("button", { name: /turn on wi-fi sync/i }).className;
   expect(enable).toContain("border"); // outline
   unmount();
 
-  render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
+  renderRouted(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
   const disable = screen.getByRole("button", { name: /turn off wi-fi sync/i }).className;
   expect(disable).not.toContain("border");
 });
@@ -161,12 +168,12 @@ it("gives ENABLE a prominent button and DISABLE a quiet one", () => {
 // neighbour's visible left edge is at the margin — it reads as a stray indent. Asserted because it
 // is invisible in every behavioural test and was reported from a screenshot twice.
 it("pulls the quiet variant back to the margin so its text aligns with its neighbours", () => {
-  const { unmount } = render(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
+  const { unmount } = renderRouted(<WifiSyncControl device={device({ wifi_sync: "on" })} post={vi.fn()} />);
   expect(screen.getByRole("button", { name: /turn off wi-fi sync/i }).className).toContain("-ml-3");
   unmount();
 
   // The prominent variant has a border at the margin to align to, so it must NOT be pulled.
-  render(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
+  renderRouted(<WifiSyncControl device={device({ wifi_sync: "off" })} post={vi.fn()} />);
   expect(screen.getByRole("button", { name: /turn on wi-fi sync/i }).className).not.toContain("-ml-3");
 });
 
@@ -176,7 +183,7 @@ it("pulls the quiet variant back to the margin so its text aligns with its neigh
 // about a device connected to nothing. Reported from an Operator screenshot.
 it("DISABLES disable on a device that is not there at all, and says why", () => {
   const post = vi.fn();
-  render(<WifiSyncControl device={device({ wifi_sync: "on", transports: {} })} post={post} />);
+  renderRouted(<WifiSyncControl device={device({ wifi_sync: "on", transports: {} })} post={post} />);
 
   expect(screen.getByRole("button", { name: /turn off wi-fi sync/i })).toBeDisabled();
   expect(screen.getByText(/connect the device to turn this off/i)).toBeTruthy();
@@ -190,7 +197,7 @@ it("DISABLES disable on a device that is not there at all, and says why", () => 
 // pass just as well with the control switched off for everyone.
 it("still offers disable over Wi-Fi, behind the confirmation", () => {
   const post = vi.fn().mockResolvedValue({ op_id: "op-3" });
-  render(
+  renderRouted(
     <WifiSyncControl
       device={device({ wifi_sync: "on", transports: { wifi: "2026-07-31T00:00:00Z" } })}
       post={post}

@@ -1,10 +1,10 @@
-import * as React from "react";
 import { Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import type { Device } from "@/lib/types";
 import { useDeviceOp, type StartFn } from "./useDeviceOp";
 import { OpNarration } from "./OpNarration";
+import { useDialogRoute } from "@/lib/useDialogRoute";
 
 // WifiSyncControl turns the device's Wi-Fi-sync flag on or off through quince, so setting up
 // Wi-Fi backups never needs Finder (qn.7).
@@ -21,7 +21,9 @@ import { OpNarration } from "./OpNarration";
 // is actually destructive; over USB nothing is severed and the click stands on its own.
 export function WifiSyncControl({ device, post }: { device: Device; post?: StartFn }) {
   const { op, starting, startError, start, inFlight } = useDeviceOp(post);
-  const [confirming, setConfirming] = React.useState(false);
+  // The confirm is a place too (quince#931): Back dismisses it, and it leaves no entry behind when
+  // it closes, so a second Back does not reopen it.
+  const { open: confirming, onOpenChange: setConfirming } = useDialogRoute("wifi-sync-off");
 
   // "unknown" means quince has not read the flag — never guess a direction from it.
   if (device.wifi_sync === "unknown") return null;
