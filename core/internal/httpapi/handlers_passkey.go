@@ -450,7 +450,7 @@ func (d Deps) handleSetupPasskeyBegin() http.HandlerFunc {
 			case errors.Is(err, auth.ErrRateLimited):
 				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			case errors.Is(err, auth.ErrAlreadyConfigured):
-				writeError(w, d.Log, http.StatusConflict, "already_configured", "this quince is already set up")
+				writeError(w, d.Log, http.StatusConflict, "already_configured", alreadySetUp)
 			case d.writePasskeyError(w, err):
 				// already written — covers passkeys_unsupported_here
 			default:
@@ -493,7 +493,7 @@ func (d Deps) handleSetupPasskeyFinish() http.HandlerFunc {
 				// THE RACE'S LOSER GETS THIS. Two ceremonies can begin on a virgin install; the
 				// credential write decides, and the second finisher is told the box is taken rather
 				// than silently adding a second admin credential to it.
-				writeError(w, d.Log, http.StatusConflict, "already_configured", "this quince is already set up")
+				writeError(w, d.Log, http.StatusConflict, "already_configured", alreadySetUp)
 			case d.writePasskeyError(w, err):
 				// already written
 			default:

@@ -35,6 +35,13 @@ function submit(pw = "hunter2") {
   fireEvent.click(screen.getByRole("button", { name: /set password and continue/i }));
 }
 
+// TICK THE PASSKEY OFFER. Required since it went OFF by default (Operator, 2026-08-15) — every case
+// below that is ABOUT the passkey has to ask for one first, which is the point of the change: the
+// ceremony now happens only for somebody who opted in.
+function alsoPasskey() {
+  fireEvent.click(screen.getByRole("checkbox", { name: /also set up a passkey/i }));
+}
+
 const AUTHED = { state: "authenticated", csrf_token: "t" } as const;
 
 beforeEach(() => {
@@ -53,10 +60,15 @@ afterEach(() => {
 });
 
 describe("both options on one screen", () => {
-  it("offers the passkey beside the password, checked by default", () => {
+  // OFF BY DEFAULT since 2026-08-15 — Operator. This asserted `toBeChecked()` until then, and the
+  // replacement is the same claim inverted rather than a weaker one: the offer must still BE there,
+  // and it must not be pre-taken. A first run that presses the primary button gets a password and
+  // no authenticator sheet it did not ask for.
+  it("offers the passkey beside the password, and does not pre-tick it", () => {
     renderPage();
     const box = screen.getByRole("checkbox", { name: /also set up a passkey/i });
-    expect(box).toBeChecked();
+    expect(box).toBeInTheDocument();
+    expect(box).not.toBeChecked();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
 
@@ -81,6 +93,7 @@ describe("the happy paths", () => {
   it("sets the password, registers, and lands on Home", async () => {
     const reg = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
     renderPage();
+    alsoPasskey();
     submit();
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }));
@@ -94,14 +107,15 @@ describe("the happy paths", () => {
     // MIRRORS THE FIRST-RUN ASSERTION FURTHER DOWN, deliberately. That path pins `{ firstRun: true }`
     // for the same reason: the options object is the only thing distinguishing which endpoint pair
     // and which guard this call meets, so it is the part worth pinning rather than the call itself.
-    expect(reg).toHaveBeenCalledWith("This device", { currentPassword: "hunter2" });
+    expect(reg).toHaveBeenCalledWith("admin", { currentPassword: "hunter2" });
   });
 
   // SKIPPING IS NORMAL AND UNREMARKED — story 3. Unchecking must not cost a screen.
   it("skips registration entirely when unchecked, with no extra step", async () => {
     const reg = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
     renderPage();
-    fireEvent.click(screen.getByRole("checkbox", { name: /also set up a passkey/i }));
+    // NO TICK — unchecked is the default since 2026-08-15, so this test now asserts
+    // the DEFAULT path rather than an opt-out. The click that used to be here would opt IN.
     submit();
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }));
@@ -117,6 +131,7 @@ describe("when the passkey does not happen", () => {
     // `registerPasskey` resolves FALSE for a cancelled or timed-out sheet — never throws for it.
     vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(false);
     renderPage();
+    alsoPasskey();
     submit();
 
     expect(await screen.findByText(/no passkey was added/i)).toBeInTheDocument();
@@ -133,6 +148,7 @@ describe("when the passkey does not happen", () => {
       new APIError(409, "passkeys_unsupported_here", "this address cannot hold a passkey"),
     );
     renderPage();
+    alsoPasskey();
     submit();
 
     expect(await screen.findByText(/tied to a domain name/i)).toBeInTheDocument();
@@ -143,6 +159,7 @@ describe("when the passkey does not happen", () => {
   it("any other failure still ends on a way forward rather than a dead form", async () => {
     vi.spyOn(webauthn, "registerPasskey").mockRejectedValue(new Error("network is on fire"));
     renderPage();
+    alsoPasskey();
     submit();
 
     expect(await screen.findByRole("button", { name: /continue to quince/i })).toBeInTheDocument();
@@ -156,6 +173,7 @@ describe("when the passkey does not happen", () => {
   it("NEVER leaves the user on the setup form after the password exists", async () => {
     vi.spyOn(webauthn, "registerPasskey").mockRejectedValue(new Error("boom"));
     renderPage();
+    alsoPasskey();
     submit();
 
     await screen.findByRole("button", { name: /continue to quince/i });
@@ -190,7 +208,7 @@ describe("going passwordless at first run", () => {
     fireEvent.click(screen.getByRole("button", { name: /use a passkey instead/i }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }));
-    expect(reg).toHaveBeenCalledWith("This device", { firstRun: true });
+    expect(reg).toHaveBeenCalledWith("admin", { firstRun: true });
     // NO PASSWORD IS SET, EVER — the rejected alternative was to generate one, register, then
     // delete it, which strands the user behind a password they never saw if registration fails.
     expect(auth.setup).not.toHaveBeenCalled();

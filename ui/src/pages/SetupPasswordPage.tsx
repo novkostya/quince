@@ -30,17 +30,58 @@ function browserCanPasskey(): boolean {
   return typeof window.PublicKeyCredential !== "undefined" && window.isSecureContext;
 }
 
-// The name a first-run passkey gets. NOT A FIELD, deliberately: naming a credential matters when
-// there are several to tell apart, and on first run there is exactly one. Settings renames it
-// (`PATCH /api/auth/passkeys/{id}`), which is the surface where the question is worth asking.
-const FIRST_PASSKEY_NAME = "This device";
+// The name a first-run passkey gets.
+//
+// NOT A FIELD, deliberately: naming a credential matters when there are several to tell apart, and
+// on first run there is exactly one. Settings renames it (`PATCH /api/auth/passkeys/{id}`), which is
+// the surface where the question is worth asking.
+//
+// AND THIS SCREEN IS THE WRONG PLACE TO ASK — Operator, 2026-08-15, on a proposal to put a name
+// field here for consistency with the add row's. That row is single-purpose; this screen already
+// carries a username anchor, a password, a passkey checkbox, a primary action AND a separate
+// passwordless path below it. A name field would have to appear conditionally under one entry point
+// and be duplicated for the other, on the screen where friction is most expensive. *"Sounds good on
+// paper but in reality it's a tough UI/UX challenge."*
+//
+// IT WAS "This device" UNTIL 2026-08-15, AND THAT WAS WRONG IN A SPECIFIC WAY WORTH KEEPING.
+// The phrase is DEICTIC — its meaning depends on where the reader is standing. It was true at the
+// instant of creation and false the moment the list was read from anywhere else: the Operator met it
+// on a Mac, describing a credential made on an iPhone. iCloud Keychain makes it worse, since the
+// credential is not on one device at all.
+//
+// SO THE DEFECT IS A LABEL PERSISTED AND READ LATER, NOT THE PHRASE. The checkbox on this same
+// screen still says *"Also set up a passkey on this device"* and is left alone: it is read once, at
+// the moment it is true, describing what is about to happen rather than labelling a row forever.
+//
+// `admin` RATHER THAN `First passkey` — Operator: *"I don't want to name passkey passkey. You would
+// name other passkeys iPhone, iPad, etc, NOT iPhone passkey."* Right: this list IS passkeys, so a
+// category word is `file1.txt` inside a Files folder. `admin` is a noun that sits beside `iPhone` and
+// `mac`, matches the `quince-admin` anchor this screen already shows, and can never become false —
+// a first-run credential is the admin's however it is later read.
+//
+// WHAT IT DOES NOT DO IS DISTINGUISH, and that is accepted rather than missed: quince is
+// single-admin, so every passkey here is the admin's. Uninformative beats wrong.
+const FIRST_PASSKEY_NAME = "admin";
 
 type Outcome = { kind: "dismissed" } | { kind: "unsupported" } | { kind: "failed"; message: string };
 
 export function SetupPasswordPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [wantPasskey, setWantPasskey] = useState(true);
+  // OFF BY DEFAULT — Operator, 2026-08-15. It was ON, so a first run that just pressed the primary
+  // button got an authenticator sheet it had not asked for, in the middle of setting a password.
+  //
+  // AN OPT-IN IS WHAT A SECOND CREDENTIAL SHOULD BE. The passkey is genuinely optional here — the
+  // password alone is a complete setup, and the screen already offers a THIRD path below for people
+  // who want a passkey instead. Pre-ticking it makes the common case carry a ceremony, and a sheet
+  // nobody asked for is the exact shape `PasswordForm` refuses on the login screen for its own
+  // reasons.
+  //
+  // IT ALSO REMOVES A FAILURE FROM THE HAPPY PATH. A dismissed or unsupported sheet lands the user in
+  // the outcome panel with a red line — *"No passkey was added"* — after an action that SUCCEEDED,
+  // because the password was set either way. Off by default, that message only appears for somebody
+  // who asked for the thing that failed.
+  const [wantPasskey, setWantPasskey] = useState(false);
   // Set once the password exists. From that moment the user is SIGNED IN and this screen is no
   // longer a setup form — which is why the outcome panel below REPLACES it rather than sitting under
   // it. Re-submitting would 409, and the only thing left to do is get on with it.
@@ -77,6 +118,19 @@ export function SetupPasswordPage() {
       qc.setQueryData(authStatusKey, { state: "authenticated", csrf_token: "" });
       done();
     } catch (err) {
+      // `already_configured` IS SHOWN, NOT REDIRECTED PAST, AND THAT IS A DELIBERATE REFUSAL —
+      // Operator, 2026-08-15. A redirect to sign-in was proposed and withdrawn on better reasoning:
+      //
+      //   > that case might mean something really bad has just happened
+      //
+      // This screen only renders while the install is UNCLAIMED. A 409 here means somebody claimed
+      // it between the page loading and this button being pressed — which on a network-reachable
+      // first run is not a stale tab, it is somebody else taking the install. quince#888 already
+      // names an unauthenticated takeover as a live shape in this product.
+      //
+      // SO THE REMEDY IS NOT A BUTTON, IT IS NOTICING. Sending the user to sign in would answer the
+      // one event that most deserves a stop with the most reassuring thing the app can say, and the
+      // user would arrive at a login form for an account they never created.
       setPasswordlessErr(
         err instanceof APIError ? err.message : "Could not set up a passkey on this device.",
       );
