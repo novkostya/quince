@@ -402,9 +402,19 @@ func buildStorage(ctx context.Context, _ config.Bootstrap, cfgSvc *config.Servic
 // sameStorageDeclaration reports whether two resolved declarations are the same storages, in the
 // same order, with the same per-entry settings.
 //
-// ORDER MATTERS and is not a detail: position IS the default (`slots[0]`), so a reorder with
-// identical members is a real change — the user made a different disk the default. Comparing sets
-// would miss exactly that.
+// IT COMPARES POSITION-WISE, AND THE REASON IT USED TO GIVE WAS FALSE. This read: *"ORDER MATTERS
+// and is not a detail: position IS the default (`slots[0]`), so a reorder with identical members is
+// a real change — the user made a different disk the default."* The `default: true` FLAG decides,
+// and `declaredStorages` hoists the entry carrying it — so a reorder that moves no flag changes
+// nothing about which disk an unbound backup lands on (Operator ruling 2026-08-11, quince#722;
+// pinned by live_default_flag_test.go).
+//
+// THE BEHAVIOUR IS UNCHANGED AND STILL RIGHT, which is why this is a comment fix and not a code
+// one: treating a bare reorder as a change costs one idempotent re-resolution and nothing else,
+// where relaxing the comparison to a set would trade a wasted stat for a real risk of missing an
+// edit. What had to go is the stated reason, because that is the sentence a later reader reasons
+// FROM — and reasoning forward from this one lands on "compare sets, order is meaningless", which
+// would drop a genuine `path` or `backend` change that happened to reorder.
 //
 // It exists so an edit to `backup:` or `ui:` does not re-resolve every storage. Re-resolution is
 // idempotent but not free: it stats every declared root and may probe a backend.

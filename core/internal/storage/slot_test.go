@@ -18,7 +18,7 @@ const (
 )
 
 // twoSlots is A-then-B, so A is the default. Resolving to B therefore cannot be an accident of
-// declaration order.
+// slot order.
 func twoSlots() []Slot {
 	return []Slot{
 		{StorageID: slotAID, Name: "internal", Root: "/srv/a", BackendName: BackendZFS},
