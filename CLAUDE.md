@@ -1158,11 +1158,20 @@ defect, and `provision:27` is where it is decided.
 checked.** It read *"quince#308 is the control, not provisioning hygiene … until `provision` places
 the hook on every box"* — which implies work outstanding. **quince#308 is CLOSED, `COMPLETED`,
 2026-07-31T09:46:29Z**, and `provision` has done all of this since. What is actually true is that a
-box which has not been **re-provisioned** since does not have it: measured on the architect box,
-where `preflight` reports `no journal pre-push hook in a git template` and `quince.privacy-check is
-unset`. That is the same story `provision` tells about itself for the launchpad (quince#322,
-quince#324) — *"provision has not been RE-RUN; that is the same freshness story as everything else
-here."*
+box which has not been **re-provisioned** since does not have it: measured on the **implementer**
+box 2026-08-15, where `preflight` reports `no journal pre-push hook in a git template` and
+`quince.privacy-check is unset`. **The architect box has BOTH**, measured 2026-08-09 (quince#785) —
+this sentence named that box and was wrong about it. That is the same story `provision` tells about
+itself for the launchpad (quince#322, quince#324) — *"provision has not been RE-RUN; that is the
+same freshness story as everything else here."*
+
+**SO THE JOURNAL GUARD IS ABSENT ON THE BOX THAT WRITES MOST OF THE JOURNAL**, and the reasoning
+this file already gives for the supervisor box applies here unchanged: a hook can only refuse if it
+is installed, so what stands in for it is the seat running `privacy-check` **by hand** before it
+pushes. That is discipline, not a control. Measured by a session doing exactly that on 2026-08-15 —
+a journal entry pushed from this box, swept only because the session ran the gate itself and read
+its banner. **The remedy is an Operator action and a re-run rather than new work**: `provision` has
+placed both since quince#308, so `deploy/runner/provision` for this role installs them.
 
 **Recorded rather than quietly fixed, because the error is this file's own defect class arriving
 inside the correction for it.** A ruling was carried into canon citing an issue that had been closed
