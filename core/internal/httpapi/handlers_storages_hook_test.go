@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -130,5 +135,69 @@ func TestHookCheckRefusesAnUnsafeDatasetWithoutExecuting(t *testing.T) {
 	}
 	if out.Check.Outcome == "ok" {
 		t.Fatalf("an unsafe dataset name produced %q — the name guard did not run", out.Check.Outcome)
+	}
+}
+
+// quince#1040 — THE PROBE MUST POINT `ssh -i` AT A KEY THAT EXISTS.
+//
+// It composed `-i /data/keys/zfs-`: the quince#989 derivation applied to an empty `ParentDataset`,
+// because this handler built a partial `ZFSConfig` and `SSHArgv` had quietly gained a dependency on
+// that field. The path cannot exist, so ssh offered no key and sshd answered `Permission denied
+// (publickey)` — a refusal about the KEY that reads exactly like a wrong forced command, on the one
+// screen whose entire job is to tell those apart. Every press was broken from quince#1026 until now.
+//
+// ASSERTED ON THE ARGV THE HANDLER COMPOSES rather than on the outcome, because the outcome is
+// `unreachable` either way — which is precisely why nothing caught it. The composed transport is the
+// thing that was wrong, so it is the thing to pin.
+func TestHookCheckPointsAtAKeyThatCanExist(t *testing.T) {
+	dir := t.TempDir()
+
+	// No storage committed yet: the key the operator was shown is the pending one, and the check
+	// runs BEFORE the add — it is what gates the save — so this is the case that must work.
+	pending := filepath.Join(dir, storage.PendingKeyName)
+	if err := os.WriteFile(pending, []byte("not a real key, but it exists"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := storage.ZFSKeyInUse(dir, "tank/one")
+	if got != pending {
+		t.Errorf("with nothing committed the check must use the pending key; got %q", got)
+	}
+
+	// Once committed, it is the derived path — the same key, at the name it now lives under.
+	derived := config.ZFSKeyPathIn(dir, "tank/one")
+	if err := os.Rename(pending, derived); err != nil {
+		t.Fatal(err)
+	}
+	if got := storage.ZFSKeyInUse(dir, "tank/one"); got != derived {
+		t.Errorf("with a committed key the check must use it; got %q", got)
+	}
+
+	// AND THE EMPTY-PARENT PATH IS NEVER COMPOSED. `zfs-` is what the defect looked like, and it is
+	// a name no dataset can produce, so its appearance is unambiguous.
+	for _, p := range []string{"", "tank/one"} {
+		if k := storage.ZFSKeyInUse(dir, p); strings.HasSuffix(k, "/zfs-") {
+			t.Errorf("ZFSKeyInUse(%q) = %q — the derivation was applied to an empty dataset", p, k)
+		}
+	}
+}
+
+// IT NEVER GENERATES. A check asks what is already there; a press that quietly created key material
+// would be quince#1038's defect arriving through a second door.
+func TestHookCheckKeyResolutionWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+
+	_ = storage.ZFSKeyInUse(dir, "tank/one")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("resolving the probe key wrote %v", names)
 	}
 }

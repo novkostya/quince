@@ -324,3 +324,24 @@ func authorizedKeysLine(parentDataset, publicKey string) string {
 	return fmt.Sprintf("command=%q,%s %s",
 		ZFSHelperPath+" "+parentDataset, authorizedKeysOptions, publicKey)
 }
+
+// ZFSKeyInUse is the key a storage with this parent WOULD authenticate with right now — the
+// committed one if there is one, otherwise the pending one. It reads; it never generates.
+//
+// `Test helper` NEEDS IT AND CANNOT USE THE DERIVED PATH ALONE (quince#1040). The check runs BEFORE
+// the storage is added — it is what gates the save — so for a new storage there is nothing at the
+// derived path yet: the key the operator was shown, and pasted on their host, is `.pending`. Pointing
+// `ssh -i` at the derived path there names a file that does not exist, ssh offers nothing, and sshd
+// answers `Permission denied (publickey)` — a refusal about the key that reads exactly like a wrong
+// forced command.
+//
+// IT NEVER GENERATES, unlike `ZFSKeyFor`. A check is a question about what is already there, and a
+// press that quietly created key material would be the defect quince#1038 removed, arriving through
+// a second door. If there is no key at all the check fails honestly.
+func ZFSKeyInUse(dir, parentDataset string) string {
+	derived := config.ZFSKeyPathIn(dir, parentDataset)
+	if _, err := os.Stat(derived); err == nil {
+		return derived
+	}
+	return filepath.Join(dir, PendingKeyName)
+}
