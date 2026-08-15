@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { useDialogRoute } from "@/lib/useDialogRoute";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,7 +47,10 @@ function firstError(err: unknown): string {
 // here changes for it — `firstError` already renders the server's sentence, which names the job and
 // both remedies — and that is the point of having refused to reword refusals client-side.
 export function ForgetStorage({ storage }: { storage: Storage }) {
-  const [open, setOpen] = useState(false);
+  // A destructive confirm is still a place you went (quince#931). Closing pops the entry it
+  // pushed rather than adding one, so Back dismisses it and a second Back does not bring
+  // "are you sure?" back.
+  const { open, onOpenChange: setOpen } = useDialogRoute("forget-storage");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);

@@ -4,6 +4,13 @@ import { PairDialog } from "./PairDialog";
 import { APIError } from "@/lib/api";
 import { useOpsStore } from "@/stores/ops";
 import type { Op } from "@/lib/types";
+import { MemoryRouter } from "react-router-dom";
+
+// THESE COMPONENTS READ THE URL NOW (quince#931): a dialog is open because the address says
+// so rather than because a boolean does, and `useLocation` throws outside a router.
+function renderRouted(ui: Parameters<typeof render>[0]) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 beforeEach(() => useOpsStore.setState({ byId: {} }));
 
@@ -14,7 +21,7 @@ function pushOp(op: Op) {
 describe("PairDialog", () => {
   it("starts pairing and narrates op.updated through to success", async () => {
     const post = vi.fn().mockResolvedValue({ op_id: "OP1" });
-    render(<PairDialog udid="DEV-1" post={post} />);
+    renderRouted(<PairDialog udid="DEV-1" post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^pair$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /start pairing/i }));
@@ -43,7 +50,7 @@ describe("PairDialog", () => {
 
   it("surfaces a start error (needs USB / 409) without a dead button", async () => {
     const post = vi.fn().mockRejectedValue(new APIError(409, "conflict", "pairing needs a USB connection"));
-    render(<PairDialog udid="DEV-1" post={post} />);
+    renderRouted(<PairDialog udid="DEV-1" post={post} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^pair$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /start pairing/i }));
@@ -54,12 +61,12 @@ describe("PairDialog", () => {
   // so the click lands IN the dialog rather than just navigating (qn.3's narrated-flow-on-details
   // decision stands — this only changes where the click delivers).
   it("auto-opens when arriving with a pair intent", () => {
-    render(<PairDialog udid="DEV-1" autoOpen />);
+    renderRouted(<PairDialog udid="DEV-1" autoOpen />);
     expect(screen.getByText(/pair this device/i)).toBeTruthy();
   });
 
   it("stays closed without a pair intent (the trigger button is shown, not the dialog)", () => {
-    render(<PairDialog udid="DEV-1" />);
+    renderRouted(<PairDialog udid="DEV-1" />);
     expect(screen.queryByText(/pair this device/i)).toBeNull();
   });
 });

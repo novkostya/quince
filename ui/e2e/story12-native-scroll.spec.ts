@@ -466,3 +466,61 @@ test("a new screen opens at the top, and Back returns to where you were", async 
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
 });
+
+// A DIALOG IS A NAVIGATION, AND CLOSING ONE PUTS THE PAGE BACK WHERE IT WAS — quince#931.
+//
+// THE REPORT, from a phone, 2026-08-15: open a dialog at the top of a device page, let Safari scroll
+// the document to clear the on-screen keyboard, close the dialog, and the page underneath is left
+// wherever Safari put it — three screenshots, ending on Backup history when it started at the top.
+// The document moving is CORRECT and is what quince#838 asked for; what was missing is that leaving
+// the page was never recorded as going anywhere, so there was nothing to come back to.
+//
+// WHAT THIS TEST CAN AND CANNOT REPRODUCE. There is no on-screen keyboard in a headless browser, so
+// the scroll is performed here rather than provoked. That is honest about the mechanism: the claim
+// is not "we handle the keyboard" — nothing does, deliberately — it is that ANY scroll that happens
+// while a dialog is open is undone by closing it, because closing is a history pop and the browser
+// restores the offset. The keyboard is just the most common way for that scroll to occur.
+test("opening a dialog is a push, and closing it restores the page behind it", async ({ page }) => {
+  await authenticate(page);
+  await page.getByRole("link", { name: "family-iphone" }).click();
+  await expect(page).toHaveURL(/\/devices\//);
+  await expectCanHold(page, "the device details page");
+
+  await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+
+  // OPENING IS A NAVIGATION, and the address says which dialog. A query param rather than a path
+  // segment on purpose: `useScrollReset` sends a new PATHNAME to the top, so a path-shaped dialog
+  // route would scroll this page to 0 on open — the defect class, reintroduced by its own fix.
+  await page.getByRole("button", { name: /manage encryption/i }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page).toHaveURL(/[?&]dialog=encryption/);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+
+  // WHAT THE KEYBOARD DOES ON A DEVICE, performed by hand: the document moves under the open dialog.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+
+  // CLOSING IS A POP, so the browser puts the offset back. Nothing in quince restores it.
+  await page.getByRole("button", { name: /^cancel$/i }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/dialog=/);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+});
+
+// AND BACK CLOSES IT, which is what the gesture on a phone actually is. Without a history entry the
+// edge-swipe leaves the page entirely with the dialog still up in memory.
+test("the Back gesture closes an open dialog rather than leaving the page", async ({ page }) => {
+  await authenticate(page);
+  await page.getByRole("link", { name: "family-iphone" }).click();
+  await expect(page).toHaveURL(/\/devices\//);
+
+  await page.getByRole("button", { name: /manage encryption/i }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // STILL ON THE DEVICE PAGE. The dialog consumed the Back; it did not pass it through.
+  await expect(page).toHaveURL(/\/devices\//);
+  await expect(page.getByRole("heading", { name: "family-iphone" })).toBeVisible();
+});
