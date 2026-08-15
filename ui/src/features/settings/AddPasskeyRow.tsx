@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
 import { registerPasskey } from "@/lib/webauthn";
+import { onlyPasskey, proveWithPasskey } from "@/lib/reauth";
 import { ReauthChallenge, type Factor } from "@/features/auth/ReauthChallenge";
 
 // ADD A PASSKEY, INLINE — qn.6o slice 4, D6. Operator ruling:
@@ -124,7 +125,23 @@ export function AddPasskeyRow({
         // list here means an older daemon, and the honest answer is to say so rather than to render
         // a prompt with no controls in it (D4).
         const accepts = acceptsOf(err);
-        if (accepts && accepts.length > 0) {
+        if (accepts && onlyPasskey(accepts)) {
+          // ONE FACTOR NEEDS NO CHOOSER — Operator ruling, D5 as amended. A passwordless install can
+          // only ever answer `["passkey"]` here, so the dialog would be a one-option chooser between
+          // the user's press and the sheet they already expect.
+          //
+          // AND NOT AS A FALLBACK AFTER A CANCELLATION EITHER: `proveWithPasskey` throwing leaves the
+          // row exactly as it was, so the Add button they pressed is the retry. The `catch` below
+          // handles it, and a dismissed sheet is deliberately quiet.
+          //
+          // THE ACTIVATION CHAIN IS THE THING TO WATCH HERE, and it is why this path keeps its
+          // fallback: `create()` is now one await further from the click than the shape measured on
+          // 2026-08-14, because the refused `register/begin` sits in front of it. If that costs the
+          // activation, `create(present, true)` answers false and the *"Create the passkey"* button
+          // appears — the mechanism quince#998 already built, doing the job it was kept for.
+          const proof = await proveWithPasskey("add_passkey");
+          await create({ proof }, true);
+        } else if (accepts && accepts.length > 0) {
           setStage({ at: "challenge", accepts });
         } else {
           setError("This quince needs a credential to add a passkey, but did not say which.");

@@ -94,14 +94,17 @@ describe("the passkey path creates without a second press", () => {
 
     typeNameAndAdd();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Use a passkey" }));
-    await waitFor(() => expect(prove).toHaveBeenCalledWith("add_passkey", undefined));
+    // NO DIALOG AND NO SECOND PRESS — Operator ruling, 2026-08-15, D5 as amended. `["passkey"]` is
+    // the only answer a passwordless install can give here, so the chooser would have one choice;
+    // the ceremony runs straight from the press that opened this.
+    await waitFor(() => expect(prove).toHaveBeenCalledWith("add_passkey"));
 
     await waitFor(() =>
       expect(register).toHaveBeenLastCalledWith("my iPhone", { proof: "PROOF-TOKEN" }),
     );
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    // NO INTERMEDIATE BUTTON on the path the measurement covers.
+    // Neither affordance appears: no chooser, and no intermediate button on the measured path.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create the passkey" })).not.toBeInTheDocument();
   });
 
@@ -119,9 +122,12 @@ describe("the passkey path creates without a second press", () => {
     renderRow();
 
     typeNameAndAdd();
-    fireEvent.click(await screen.findByRole("button", { name: "Use a passkey" }));
 
+    // STILL NO CHOOSER ON THE WAY IN — the skip is unconditional for `["passkey"]`, and the fallback
+    // is the fresh-click button rather than the dialog. That distinction is the Operator's
+    // correction: a one-option chooser is worst exactly when the user has just declined that option.
     const retry = await screen.findByRole("button", { name: "Create the passkey" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     // AND IT STILL CARRIES THE PROOF, so the fallback costs a click and not the ceremony.
     register.mockResolvedValueOnce(true);

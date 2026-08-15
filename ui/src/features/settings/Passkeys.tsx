@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { api, APIError, messageFor } from "@/lib/api";
 import { removePasskey } from "@/lib/auth";
-import { acceptsOf, type Factor, type Present } from "@/lib/reauth";
+import { acceptsOf, onlyPasskey, proveWithPasskey, type Factor, type Present } from "@/lib/reauth";
 import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
 import { AddPasskeyRow } from "./AddPasskeyRow";
 import { forgetPasskey } from "@/lib/passkeyHint";
@@ -97,6 +97,33 @@ export function Passkeys() {
   // them from `last_credential` + `has_password`. Those two are still the DEAD-END signal and are
   // still handled below — they just no longer stand in for a list the server can send.
   const [challenge, setChallenge] = React.useState<{ id: string; accepts: Factor[] } | null>(null);
+  // The ceremony's own failure, which the mutation cannot carry: when the assertion is what went
+  // wrong, `remove` was never called and has no error to render.
+  const [ceremonyErr, setCeremonyErr] = React.useState<string | null>(null);
+
+  // proveThenRemove RUNS THE CEREMONY AND RETRIES, for the one-factor case where no chooser is shown.
+  //
+  // A FUNCTION RATHER THAN AN INLINE `void (async () => …)()` INSIDE `onError`, because that shape
+  // leaked an UNHANDLED REJECTION the moment the sheet was dismissed — caught by `gates-ui` failing
+  // while every test passed, which is the only reason it did not ship. A detached promise with no
+  // catch is a silent failure by construction.
+  //
+  // A DISMISSED SHEET STAYS QUIET, which is this file's existing rule and `AddPasskeyRow`'s: the user
+  // declined, nothing happened, and the Remove button they pressed is still there. Anything else is
+  // a real failure and says so, because the mutation never ran and has no error of its own to show.
+  async function proveThenRemove(id: string) {
+    setCeremonyErr(null);
+    try {
+      const proof = await proveWithPasskey("remove_passkey", id);
+      await remove.mutateAsync({ id, present: { proof } });
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") return;
+      // `mutateAsync` rejects on a refused DELETE too, and that one IS already rendered from
+      // `remove.error` — so this must not double-report it.
+      if (err instanceof APIError) return;
+      setCeremonyErr("Could not confirm with a passkey.");
+    }
+  }
 
   const remove = useMutation({
     mutationFn: ({ id, present }: { id: string; present?: Present }) => removePasskey(id, present),
@@ -124,7 +151,24 @@ export function Passkeys() {
       // challenge — is the server's here, and this is the client half of it.
       if (present || !(err instanceof APIError) || err.code !== "reauth_required") return;
       const accepts = acceptsOf(err);
-      if (accepts) setChallenge({ id, accepts });
+      if (!accepts) return;
+      // ONE FACTOR NEEDS NO CHOOSER — Operator ruling, D5 as amended. With `["passkey"]` the dialog
+      // is a chooser with one choice, so the ceremony runs straight from the press the user already
+      // made.
+      //
+      // NO ACTIVATION CONCERN ON THIS PATH, unlike the add row's: a removal ends in a `DELETE`, an
+      // ordinary request needing no gesture. `credentials.get()` needs one, and it is two fast local
+      // awaits from the click with no sheet in between — comfortably inside what quince#998 measured
+      // surviving three awaits AND a completed sheet.
+      //
+      // A DISMISSED SHEET LEAVES THE ROW ALONE. `mutateAsync` rejects, `remove.isError` renders the
+      // reason where it always did, and the Remove button they pressed is the retry — no dialog,
+      // then or ever, which is the half of the ruling that took a correction to get right.
+      if (onlyPasskey(accepts)) {
+        void proveThenRemove(id);
+        return;
+      }
+      setChallenge({ id, accepts });
     },
   });
 
@@ -234,6 +278,11 @@ export function Passkeys() {
           {messageFor(remove.error, "Could not remove the passkey.")}
         </p>
       ) : null}
+
+      {/* THE CEREMONY'S OWN FAILURE, which the mutation above cannot carry: when the assertion is
+          what went wrong, `remove` was never called. Never shown for a DISMISSED sheet — the user
+          declined and nothing happened, which is not an error on any surface in this rung. */}
+      {ceremonyErr ? <p className="mt-3 text-sm text-danger">{ceremonyErr}</p> : null}
 
       {/* THE CHALLENGE, REPLACING THE BESPOKE PASSWORD FALLBACK — qn.6o slice 5. What stood here was
           a hand-rolled form: a label, a password input, Confirm and Cancel, offered when the client

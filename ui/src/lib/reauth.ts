@@ -91,3 +91,28 @@ export function acceptsOf(err: { details?: unknown }): Factor[] | undefined {
   const known = list.filter((f): f is Factor => f === "password" || f === "passkey");
   return known.length > 0 ? known : undefined;
 }
+
+// ONE FACTOR NEEDS NO CHOOSER — Operator ruling, 2026-08-15, amending qn.6o D5.
+//
+// When the server names exactly one acceptable factor and it is a passkey, the challenge dialog is a
+// chooser with one choice. `remove_password` can never be anything else: rule 2 excludes the password
+// from authorising its own removal, so `accepts` on that path is `["passkey"]` for every install that
+// can do it at all. A dialog whose entire content is decided before it opens is ceremony.
+//
+// IT IS NOT A FALLBACK EITHER, and that is the sharper half of the ruling. My first proposal kept the
+// dialog for a cancelled sheet; the Operator refused it, correctly — there is nothing to choose
+// AFTER a cancellation any more than before one, so showing a one-option chooser precisely when the
+// user has just declined that option is the worst moment for it. A dismissed sheet leaves the surface
+// as it was, which is `AddPasskeyRow`'s existing rule, and the button they pressed IS the retry.
+//
+// THE STANDING RULING AGAINST UNPROMPTED MODAL SHEETS IS NOT OVERRIDDEN — ITS PREMISE IS GONE.
+// `PasswordForm` states it: *"credential presence is undetectable, so an unprompted modal guesses
+// wrong for everyone without one."* `accepts` containing `passkey` IS the server confirming a
+// credential exists that can assert at this address. Detectability is exactly what the field added,
+// so the case that ruling was about cannot arise here.
+//
+// A LONE `password` DOES NOT GET THE SAME TREATMENT, and cannot: there is no ceremony to run, only a
+// field to type into, so the surface has to be shown. The asymmetry is in what the factors ARE.
+export function onlyPasskey(accepts: Factor[]): boolean {
+  return accepts.length === 1 && accepts[0] === "passkey";
+}
