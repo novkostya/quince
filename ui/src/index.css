@@ -38,16 +38,14 @@
  * regression test written against `env()` directly can only ever prove the fallback. `ui/e2e`
  * overrides these to stand a simulated Dynamic Island up in CI.
  *
- * `--vv-*` describe the VISIBLE viewport and are written by `useVisualViewport` while a dialog is
- * open; the values below are what holds when nothing has published better ones. `100dvh` is the
- * whole visible height, which is right in every case except an open keyboard — the one case only
- * JavaScript can see. `dvh` not `vh`, ruled on quince#659. */
+ * THE INSETS ARE ALL THAT IS LEFT HERE. `--vv-top` / `--vv-height` / `--vv-pad-bottom` stood beside
+ * them and were written by JavaScript that tracked the visual viewport for the keyboard; that whole
+ * mechanism is gone (Operator direction 2026-08-15, quince#816) and the keyboard is Safari's to
+ * handle. A portalled surface wants the safe area, which is CSS; it does not want a viewport
+ * follower. See `components/ui/dialog.tsx`. */
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --vv-top: 0px;
-  --vv-height: 100dvh;
-  --vv-pad-bottom: max(1rem, var(--safe-bottom));
 }
 
 /* THE DOCUMENT IS THE SCROLLER, AT EVERY BREAKPOINT — Operator direction 2026-08-11 (quince#838):
@@ -69,14 +67,14 @@
  * is the whole of quince#649's cure. Anything past the fold is reachable by construction.
  *
  * `svh`, NOT `dvh`, AND THAT IS NOT A CONTRADICTION OF quince#659. That ruling is `dvh` over `vh`
- * for a box that must track the VISIBLE area — a dialog, which still uses `--vv-height` below. This
+ * for a box that must track the VISIBLE area. This
  * is the document's own MINIMUM, and a minimum that grows when Safari's toolbars collapse can flip a
  * just-under-viewport page between scrollable and not, which then re-expands the toolbars: an
  * oscillation. `svh` is the toolbars-shown height and never moves, so a short page is exactly one
  * screen and a long one scrolls. Different question, different unit.
  *
- * Inner scrollers that remain — a dialog's card, the job log — carry `overscroll-contain`
- * themselves, which is where scroll chaining is actually worth stopping. */
+ * The one inner scroller that remains — the job log — carries `overscroll-contain` itself, which is
+ * where scroll chaining is actually worth stopping. A dialog's card no longer scrolls at all. */
 html,
 body,
 #root {
