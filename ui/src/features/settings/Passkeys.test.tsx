@@ -297,3 +297,77 @@ describe("removal by another passkey", () => {
     );
   });
 });
+
+// ONE FACTOR NEEDS NO CHOOSER — Operator ruling, 2026-08-15, amending qn.6o D5.
+//
+// Raised from quince#994: migrating the password paths to this rung's mechanics would ADD a dialog
+// where today there is none, because `remove_password` can only ever answer `["passkey"]` — rule 2
+// excludes the password from authorising its own removal. A chooser with one choice is ceremony, and
+// the migration would have shipped it as a regression.
+//
+// PASSKEY REMOVAL HAS THE SAME SHAPE whenever no password exists, which is what this covers.
+describe("a passkey-only answer skips the chooser entirely", () => {
+  it("runs the ceremony from the press, with no dialog", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: false,
+      passkeys: [
+        { id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null },
+        { id: "b", name: "laptop", rp_id: HERE, created_at: "2026-07-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    const del = vi
+      .spyOn(api, "del")
+      .mockRejectedValueOnce(
+        new UnauthorizedError("reauth_required", "Confirm it is you before changing how you sign in.", {
+          error: { code: "reauth_required", accepts: ["passkey"] },
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
+
+    renderCard();
+    (await screen.findAllByRole("button", { name: /^remove$/i }))[0].click();
+
+    // THE TARGET STILL TRAVELS — without it `reauth/begin` cannot exclude the credential being
+    // removed from its own allow-list, and the sheet would offer the very passkey being deleted.
+    await waitFor(() => expect(prove).toHaveBeenCalledWith("remove_passkey", "a"));
+    await waitFor(() =>
+      expect(del).toHaveBeenLastCalledWith("/api/auth/passkeys/a", { proof: "PROOF-TOKEN" }),
+    );
+
+    // AND NO DIALOG AT ANY POINT. This is the assertion the ruling is about.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  });
+
+  // A CANCELLED SHEET STILL SHOWS NO DIALOG — the half that took a correction. There is nothing to
+  // choose after a cancellation any more than before one, so the row is left as it was and the
+  // Remove button they pressed is the retry.
+  it("shows no dialog when the sheet is dismissed", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      rp_id: HERE,
+      supported: true,
+      has_password: false,
+      passkeys: [
+        { id: "a", name: "phone", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null },
+        { id: "b", name: "laptop", rp_id: HERE, created_at: "2026-07-01T00:00:00Z", last_used_at: null },
+      ],
+    });
+    vi.spyOn(api, "del").mockRejectedValue(
+      new UnauthorizedError("reauth_required", "Confirm it is you before changing how you sign in.", {
+        error: { code: "reauth_required", accepts: ["passkey"] },
+      }),
+    );
+    const dismissed = new Error("cancelled");
+    dismissed.name = "NotAllowedError";
+    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(dismissed);
+
+    renderCard();
+    (await screen.findAllByRole("button", { name: /^remove$/i }))[0].click();
+
+    await waitFor(() => expect(screen.getByText("phone")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
