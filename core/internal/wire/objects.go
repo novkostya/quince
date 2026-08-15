@@ -693,7 +693,30 @@ type StorageZFSKey struct {
 	// ON THE WIRE BECAUSE THE FORM MUST SAY WHICH. "quince made you a key" and "quince found your
 	// existing key" call for different next steps — the first needs pasting, the second may already
 	// be installed — and guessing wrong invites an operator to replace an entry that works.
+	//
+	// IT DESCRIBES THE STORAGE, NOT THE FILE (quince#1038). As *did this call write a file* it was
+	// permanently false: the debounced re-fetch meant the keystroke finishing a dataset name found
+	// what an earlier keystroke had made, so the panel said *quince found an ssh key it made earlier*
+	// about a key one second old.
 	Created bool `json:"created"`
+	// Pending says this key is not in `/data/keys/zfs-*` yet — it is the single `.pending` key, shown
+	// for a storage nobody has added.
+	//
+	// A KEY UNDER `zfs-*` MEANS A STORAGE QUINCE COMMITTED TO (quince#1038). Nothing reaches that
+	// surface until *Add this storage*, so the directory answers *which parents can quince reach*
+	// exactly, rather than recording everything anyone ever typed into the field.
+	Pending bool `json:"pending"`
+	// LandsAt is where a pending key will be moved on Add; empty when `pending` is false.
+	//
+	// ON THE WIRE SO THE SCREEN SAYS WHERE IT IS GOING rather than where it is. `path` names the
+	// dot-file it sits in now, which is not somewhere an operator should point `ssh_key`.
+	LandsAt string `json:"lands_at"`
+	// Fingerprint is the `SHA256:…` of the public half — the string `ssh-keygen -lf` prints.
+	//
+	// THE SAVE CARRIES IT BACK, which is constraint 2 of quince#1038's ruling. One pending key is
+	// shared by every open tab, so `POST /api/config/storage` must prove it is committing the key
+	// whose line the operator actually pasted, and refuse rather than quietly making another.
+	Fingerprint string `json:"fingerprint"`
 }
 
 type StorageZFSKeyResponse struct {

@@ -519,6 +519,15 @@ export interface StorageAddition {
     ssh_key?: string;
     seed: string;
   };
+  // zfs_key_fingerprint is the ssh key THIS SCREEN SHOWED, carried back so the save can prove it is
+  // committing the key whose line the operator pasted (quince#1038).
+  //
+  // NOTHING REACHES `/data/keys/zfs-*` UNTIL THIS REQUEST. quince holds one `.pending` key while a
+  // storage is being filled in, and moves it on Add — so a key under that name means a storage
+  // quince committed to, rather than a record of everything anyone typed into the field. That one
+  // pending key is shared by every open tab, so without this a second tab saving after the first
+  // would silently get a different key and the line it pasted would authenticate nothing.
+  zfs_key_fingerprint?: string;
 }
 
 // StorageHookCheck is POST /api/storages/probe/hook (contracts §2, qn.6e) — does the operator's
@@ -557,8 +566,30 @@ export interface StorageZFSKey {
    * pinned to one dataset.
    */
   authorized_keys: string;
-  /** true when quince made this key just now; false when it FOUND one already there. */
+  /**
+   * true when this dataset has no committed key yet; false when quince already holds one for it.
+   *
+   * IT DESCRIBES THE STORAGE, NOT THE FILE (quince#1038). As *did this call write a file* it was
+   * permanently false, because the debounced re-fetch meant the keystroke that finished the dataset
+   * name found what an earlier keystroke had made — so the panel claimed to have *found a key it
+   * made earlier* about one a second old.
+   */
   created: boolean;
+  /**
+   * true while this is the single `.pending` key — shown for a storage nobody has added yet, and
+   * moved into `/data/keys/zfs-*` on Add. A key under that name means a storage quince committed to.
+   */
+  pending: boolean;
+  /** where a pending key will be moved on Add; empty when `pending` is false. */
+  lands_at: string;
+  /**
+   * the `SHA256:…` of the public half — the string `ssh-keygen -lf` prints.
+   *
+   * SENT BACK ON SAVE, so the add commits the key this screen showed or refuses. One pending key is
+   * shared by every open tab; without this a second tab would silently get a different one and the
+   * line it pasted on the host would authenticate nothing.
+   */
+  fingerprint: string;
 }
 
 export interface StorageZFSKeyResponse {

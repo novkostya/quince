@@ -1307,6 +1307,36 @@ contents happen to be a private key. Taking none means the endpoint has no reach
 quince's own. An operator who keeps a key elsewhere sets `ssh_key` by hand and never presses the
 button — which is why that field stays settable, and the derivation does not close it.
 
+**IT IS A READ. NOTHING REACHES `/data/keys/zfs-*` UNTIL THE OPERATOR TAPS *Add this storage***
+(Operator ruling, quince#1038). The form re-asks on every debounced keystroke — it must, because the
+`authorized_keys` line carries the dataset and a stale line confines the key to the wrong parent — so
+a call that generated per dataset wrote a private key for **every prefix the operator paused on**.
+Fourteen of them on a lab rig from typing two names, and no debounce fixes it: `labpool` is a legal
+dataset name, so a prefix and a finished name are the same shape.
+
+Two answers, and which one you get is whether this dataset has a committed key:
+
+| state | answer | writes |
+| --- | --- | --- |
+| a key at the derived path | that key, `created: false`, `pending: false` | none |
+| nothing there | the **one** `.pending` key, rendered for this dataset, `lands_at` naming where it will go | none, beyond generating `.pending` the first time one is needed |
+
+**`.pending` IS ONE FILE, NOT ONE PER DATASET.** A pending path derived from the dataset would have
+relocated the litter rather than removed it. The key material does not change while the operator
+types; what changes is the `PARENT` inside `command="…"`, which is all the re-fetch ever needed.
+
+**`created` DESCRIBES THE STORAGE, NOT THE FILE.** As *did this call write a file* it was permanently
+false — the keystroke finishing a name found what an earlier one made — so the screen said *quince
+found an ssh key it made earlier* about a key one second old.
+
+**THE SAVE CARRIES `zfs_key_fingerprint` AND THE MOVE HAPPENS THERE.** `POST /api/config/storage`
+takes the `StorageEntry` plus that one sibling key, moves `.pending` to the derived path, and
+**refuses with a `422` when the fingerprint is not what quince now holds** — the two-tab case, which
+one shared pending key makes possible: tab A adds and the key moves, so the line tab B pasted on the
+host is for a key that is gone. Silently generating another would leave tab B's storage failing at
+its first backup. A matching fingerprint on a key already in place is a no-op, so a retried save is
+safe, and an explicit `ssh_key` skips all of it.
+
 **ONE PATH FOR EVERY STORAGE WAS A DEFECT, NOT A LIMITATION** (quince#989). A forced command is a
 property of a key — sshd uses the first `authorized_keys` line whose key matches and stops looking —
 so one key can be confined to exactly one parent. Asked about a second storage's dataset, discovery
@@ -1485,9 +1515,13 @@ Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 GET /api/config   → {config, warnings: [], source: {path, mtime}, file_text, discarded}
 PUT /api/config   → full-document replace; validated then atomically written to
                     /data/config.yml; 422 {errors: [{path, message}]} on invalid
-POST /api/config/storage
+POST /api/config/storage  {StorageEntry, zfs_key_fingerprint?}
                   → add one storage: 200 {config, warnings, source} | 422.
                     Splices SERVER-SIDE, for the identical reason the DELETE does.
+                    `zfs_key_fingerprint` is the key the SCREEN SHOWED. This is where
+                    quince's pending ssh key MOVES into /data/keys/ (quince#1038), so
+                    a fingerprint that is not what quince now holds is a 422 rather
+                    than a silently different key. Ignored when `ssh_key` is set.
                     REFUSED 422 while the file on disk was DISCARDED at load — the
                     splice would replace a config quince could not read. See below.
 POST /api/config/insecure-transport
@@ -2359,11 +2393,15 @@ the UI, `detail` for the user's eyes on their own machine.
 
 ```jsonc
 {
-  "path":            "/data/keys/zfs-rpool+quince",  // DERIVED from the parent dataset; where the
-                                                     // PRIVATE half lives, never its contents
+  "path":            "/data/keys/.pending",           // where the private half is RIGHT NOW; while
+                                                      // pending that is a dot-file about to move,
+                                                      // and never somewhere to point `ssh_key`
+  "lands_at":        "/data/keys/zfs-rpool+quince",   // where it goes on Add; "" once committed
+  "pending":         true,                            // false once a storage committed this key
   "public_key":      "ssh-ed25519 AAAA… quince",
   "authorized_keys": "command=\"/usr/local/sbin/quince-zfs-helper rpool/quince\",no-port-forwarding,… ssh-ed25519 AAAA… quince",
-  "created":         true                // false when quince FOUND a key already there
+  "fingerprint":     "SHA256:…",          // the save carries this back; the string ssh-keygen -lf prints
+  "created":         true                 // false when this DATASET already has a committed key
 }
 ```
 

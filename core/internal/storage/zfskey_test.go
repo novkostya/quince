@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/novkostya/quince/core/internal/config"
 )
 
 // quince#818 piece B — quince generates or FINDS its own key.
@@ -226,5 +228,189 @@ func TestEnsureZFSKeyRefusesADatasetThatCouldBreakTheLine(t *testing.T) {
 		if _, statErr := os.Stat(path); statErr == nil {
 			t.Errorf("EnsureZFSKey(%q) wrote a key before refusing", bad)
 		}
+	}
+}
+
+// quince#1038 — TYPING WRITES NOTHING PER KEYSTROKE, AND NOTHING REACHES `zfs-*` UNTIL Add.
+
+// THE DEFECT, STATED AS A TEST: asking about twelve prefixes of one dataset must leave ONE key.
+//
+// The form re-asks on every debounced change, because the `authorized_keys` line carries the dataset
+// and a stale line confines the key to the wrong parent. When each dataset derived its own path and
+// the endpoint generated into it, that produced a private key per prefix — fourteen on a lab rig
+// from typing two names. There is no debounce or validation that fixes it: `labpool` is a legal
+// dataset name, so a prefix and a finished name are the same shape.
+func TestTypingADatasetNameLeavesOnePendingKey(t *testing.T) {
+	dir := t.TempDir()
+	name := "labpool/quince"
+
+	var seen []string
+	for i := 1; i <= len(name); i++ {
+		prefix := name[:i]
+		if !datasetPattern.MatchString(prefix) {
+			continue // `labpool/` alone is not a legal name; the form would get a 422
+		}
+		k, err := ZFSKeyFor(dir, prefix)
+		if err != nil {
+			t.Fatalf("ZFSKeyFor(%q): %v", prefix, err)
+		}
+		seen = append(seen, k.Fingerprint)
+	}
+	if len(seen) < 5 {
+		t.Fatalf("only %d prefixes were legal names; this test would not exercise the defect", len(seen))
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, e := range entries {
+		files = append(files, e.Name())
+	}
+	if len(files) != 1 || files[0] != PendingKeyName {
+		t.Fatalf("typing %d prefixes left %v — want exactly [%s]", len(seen), files, PendingKeyName)
+	}
+
+	// AND IT IS ONE KEY, NOT ONE PER PREFIX THAT HAPPENED TO OVERWRITE. The material must not change
+	// while the operator types: they may have pasted the line already.
+	for _, fp := range seen[1:] {
+		if fp != seen[0] {
+			t.Fatalf("the key changed while typing: %q then %q — a line pasted early would be dead",
+				seen[0], fp)
+		}
+	}
+}
+
+// THE LINE FOLLOWS THE DATASET EVEN THOUGH THE KEY DOES NOT. This is what quince#996 needed the
+// re-fetch for, and it never required a new keypair.
+func TestThePendingLineRendersForWhicheverDatasetIsAsked(t *testing.T) {
+	dir := t.TempDir()
+
+	a, err := ZFSKeyFor(dir, "tank/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ZFSKeyFor(dir, "tank/two")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if a.Fingerprint != b.Fingerprint {
+		t.Error("two datasets got two pending keys — there is one, by ruling")
+	}
+	if !strings.Contains(a.AuthorizedKeys, " tank/one\"") {
+		t.Errorf("the line for tank/one does not confine to it: %q", a.AuthorizedKeys)
+	}
+	if !strings.Contains(b.AuthorizedKeys, " tank/two\"") {
+		t.Errorf("the line for tank/two does not confine to it: %q", b.AuthorizedKeys)
+	}
+	// AND IT SAYS WHERE IT WILL LAND, per dataset, so the screen can name a path the operator will
+	// recognise later rather than the dot-file it sits in now.
+	if a.LandsAt == b.LandsAt || !a.Pending || !b.Pending {
+		t.Errorf("lands_at = %q and %q, pending = %v and %v", a.LandsAt, b.LandsAt, a.Pending, b.Pending)
+	}
+}
+
+// ADD IS WHAT MOVES IT, and afterwards `/data/keys/zfs-*` names exactly the committed storages.
+func TestCommitMovesThePendingKeyIntoPlace(t *testing.T) {
+	dir := t.TempDir()
+
+	k, err := ZFSKeyFor(dir, "tank/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitZFSKey(dir, "tank/one", k.Fingerprint); err != nil {
+		t.Fatalf("CommitZFSKey: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, PendingKeyName)); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the pending key survived the move — it is a rename, so nothing should be left behind")
+	}
+	landed, err := os.Stat(k.LandsAt)
+	if err != nil {
+		t.Fatalf("the key did not land at %s: %v", k.LandsAt, err)
+	}
+	if perm := landed.Mode().Perm(); perm != 0o600 {
+		t.Errorf("landed mode = %#o, want 0600 — ssh refuses a key others can read", perm)
+	}
+
+	// AND THE COMMITTED KEY IS NOW WHAT THE DATASET ANSWERS WITH, no longer pending.
+	again, err := ZFSKeyFor(dir, "tank/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Pending || again.Created || again.Fingerprint != k.Fingerprint {
+		t.Errorf("after the move: pending=%v created=%v fingerprint match=%v",
+			again.Pending, again.Created, again.Fingerprint == k.Fingerprint)
+	}
+}
+
+// CONSTRAINT 2 — THE TWO-TAB CASE, which is the single sharp edge of one shared pending key.
+//
+// Tab A and tab B each render the pending key for a different dataset and both operators paste their
+// line on the host. Tab A saves; the key MOVES. Tab B saves — and if quince quietly made a fresh key
+// there, the line tab B pasted would be dead and the storage would fail later, somewhere else.
+func TestCommitRefusesWhenThePendingKeyIsNotTheOneShown(t *testing.T) {
+	dir := t.TempDir()
+
+	shown, err := ZFSKeyFor(dir, "tank/one") // both tabs were shown this key
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitZFSKey(dir, "tank/one", shown.Fingerprint); err != nil { // tab A adds
+		t.Fatal(err)
+	}
+
+	// Tab B saves for its own dataset, carrying the fingerprint it was shown.
+	err = CommitZFSKey(dir, "tank/two", shown.Fingerprint)
+	if !errors.Is(err, ErrPendingKeyChanged) {
+		t.Fatalf("tab B's save = %v, want ErrPendingKeyChanged — otherwise quince makes a second key "+
+			"and the line tab B pasted authenticates nothing", err)
+	}
+	if _, statErr := os.Stat(config.ZFSKeyPathIn(dir, "tank/two")); statErr == nil {
+		t.Error("a key was written for tab B's dataset despite the refusal")
+	}
+
+	// AND A SAVE CARRYING NO FINGERPRINT AT ALL IS THE SAME REFUSAL, rather than a silent generate.
+	if err := CommitZFSKey(dir, "tank/three", ""); !errors.Is(err, ErrPendingKeyChanged) {
+		t.Errorf("an empty fingerprint = %v, want ErrPendingKeyChanged", err)
+	}
+}
+
+// IT NEVER OVERWRITES A COMMITTED KEY. Discover-before-generate is unchanged: an existing key may
+// already be in an `authorized_keys` quince cannot see, so a differing fingerprint is a refusal
+// rather than a replacement — and a matching one is a no-op, so a retried save is safe.
+func TestCommitNeverOverwritesAKeyAlreadyThere(t *testing.T) {
+	dir := t.TempDir()
+
+	first, err := ZFSKeyFor(dir, "tank/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitZFSKey(dir, "tank/one", first.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(config.ZFSKeyPathIn(dir, "tank/one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The same save again — idempotent, because the fingerprint still matches.
+	if err := CommitZFSKey(dir, "tank/one", first.Fingerprint); err != nil {
+		t.Errorf("a repeated save was refused: %v", err)
+	}
+
+	// A save carrying somebody else's fingerprint must not replace it.
+	if err := CommitZFSKey(dir, "tank/one", "SHA256:not-the-key-that-is-there"); !errors.Is(err, ErrPendingKeyChanged) {
+		t.Errorf("a mismatched save = %v, want ErrPendingKeyChanged", err)
+	}
+	after, err := os.ReadFile(config.ZFSKeyPathIn(dir, "tank/one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("THE COMMITTED KEY WAS REWRITTEN — that silently breaks any host whose authorized_keys " +
+			"carries the old public half")
 	}
 }

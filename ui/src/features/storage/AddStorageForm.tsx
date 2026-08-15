@@ -410,6 +410,12 @@ export function AddStorageForm({
                 ssh_host: sshHost.trim(),
                 seed: "auto",
               },
+              // THE KEY THIS SCREEN SHOWED, so the save commits that one or refuses (quince#1038).
+              // quince holds ONE pending key and moves it into place here; if another tab added a
+              // storage meanwhile it has already moved, and the line the operator pasted on the host
+              // is for a key quince no longer holds. Sending the fingerprint turns that into a
+              // sentence on this screen instead of a storage that fails at its first backup.
+              ...(zfsKey !== null ? { zfs_key_fingerprint: zfsKey.fingerprint } : {}),
             }
           : {}),
       });
@@ -723,8 +729,8 @@ export function AddStorageForm({
                       means *this still has to be pasted*. Guessing wrong invites replacing a working
                       entry. */}
                   {zfsKey.created
-                    ? "quince made an ssh key for this"
-                    : "quince found an ssh key it made earlier"}
+                    ? "quince made an ssh key for this storage"
+                    : "quince already has an ssh key for this dataset"}
                 </div>
                 <div className="mt-1 text-sm text-muted">
                   Add this line to{" "}
@@ -751,9 +757,16 @@ export function AddStorageForm({
                   wrap="anywhere"
                   testId="zfs-authorized-keys"
                 />
+                {/* WHERE IT WILL BE, NOT WHERE IT IS (quince#1038). While pending, the private half
+                    sits in a dot-file that is about to move, and naming that would put a path on
+                    screen the operator must never point `ssh_key` at. `lands_at` is the one they
+                    would recognise later in `/data/keys/`. */}
                 <div className="mt-2 text-xs text-muted">
                   The private key stays on this machine, in{" "}
-                  <code className="font-mono">{zfsKey.path}</code>.
+                  <code className="font-mono">
+                    {zfsKey.pending ? zfsKey.lands_at : zfsKey.path}
+                  </code>
+                  {zfsKey.pending ? " once you add this storage." : "."}
                 </div>
               </div>
             ) : null}
