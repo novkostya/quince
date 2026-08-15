@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { api, APIError } from "./api";
+import { api, APIError, UnauthorizedError } from "./api";
 import { changePassword, removePassword } from "./auth";
 import * as webauthn from "./webauthn";
 import * as reauth from "./reauth";
@@ -231,41 +231,77 @@ describe("adding the first passkey right after setting a password", () => {
 //	change    either factor  → try the cheap one, retry on the server's 401
 //	register  either factor  → retry at BEGIN, because a creation ceremony cannot be replayed
 //	remove    a passkey ONLY → no probe at all; there is nothing cheaper to try
+
+// quince#994 — IT ASKS THE SERVER BEFORE IT OPENS A SHEET.
+//
+// This block asserted the OPPOSITE until 2026-08-15: *"proves a passkey before asking"*, with a
+// companion insisting the endpoint is never called without a proof, defended as *"a probe would be
+// one guaranteed 409 on the way to the same prompt."*
+//
+// THE ARGUMENT WAS RIGHT ABOUT THE FACTOR AND WRONG ABOUT THE COST. The round trip does not buy a
+// choice — rule 2 leaves only one — it buys knowing whether the ceremony can succeed at all. On an
+// install whose passkeys are bound elsewhere the old path opened a sheet with nothing in it and
+// produced the lockout refusal only after the user had dismissed it.
+const REAUTH_NEEDS_PASSKEY = new UnauthorizedError(
+  "reauth_required",
+  "Confirm it is you before changing how you sign in.",
+  { error: { code: "reauth_required", accepts: ["passkey"] } },
+);
+
 describe("removing the password", () => {
-  it("proves a passkey before asking, and sends the proof", async () => {
-    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+  it("presents nothing first, then proves with the factor the server named", async () => {
+    const del = vi
+      .spyOn(api, "del")
+      .mockRejectedValueOnce(REAUTH_NEEDS_PASSKEY)
+      .mockResolvedValueOnce(undefined);
     const prove = vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
 
     await removePassword();
 
+    // THE BARE ATTEMPT IS FIRST, and it is what earns `accepts`.
+    expect(del).toHaveBeenNthCalledWith(1, "/api/auth/password", {});
     // THE OPERATION IS NAMED. A proof minted for anything else is refused by `Proofs.Consume`, so
     // this argument is load-bearing rather than a label.
     expect(prove).toHaveBeenCalledWith("remove_password");
-    expect(del).toHaveBeenCalledTimes(1);
-    expect(del).toHaveBeenCalledWith("/api/auth/password", { proof: "PROOF-TOKEN" });
+    expect(del).toHaveBeenNthCalledWith(2, "/api/auth/password", { proof: "PROOF-TOKEN" });
   });
 
-  // NO BARE ATTEMPT FIRST. A probe would be one guaranteed 409 on the way to the same prompt, and
-  // — worse — a user watching the network would see the client ask for something it knows is
-  // refused. Asserted as "del is not called before prove", which is the failure a refactor makes.
-  it("never calls the endpoint without a proof", async () => {
-    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
-    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(new Error("no credential"));
+  // THE DEAD END NEVER REACHES A SHEET, which is the whole point of the change. A refusal that does
+  // not name the passkey means nothing on this install can authorise the removal, so opening an
+  // authenticator prompt would ask a question with no possible answer.
+  it("opens no sheet when the server does not name the passkey", async () => {
+    vi.spyOn(api, "del").mockRejectedValue(
+      new APIError(409, "last_credential", "this quince holds no passkey for example.com."),
+    );
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
 
-    await expect(removePassword()).rejects.toThrow("no credential");
-    expect(del).not.toHaveBeenCalled();
+    await expect(removePassword()).rejects.toMatchObject({ code: "last_credential" });
+    expect(prove).not.toHaveBeenCalled();
   });
 
-  // THE REFUSAL FROM `reauth/begin` IS WHAT THE USER SEES when this address holds no passkey — the
-  // lockout sentence, moved ahead of the sheet. It is rethrown untouched so `messageFor` can render
-  // the server's own words rather than "could not remove the password".
-  it("surfaces the server's lockout sentence from the ceremony", async () => {
-    const del = vi.spyOn(api, "del");
+  // AND THE SERVER'S SENTENCE SURVIVES, so the surface still says where the credentials it found
+  // belong rather than "could not remove the password".
+  it("rethrows the ceremony's own failure untouched", async () => {
+    vi.spyOn(api, "del").mockRejectedValue(REAUTH_NEEDS_PASSKEY);
     vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(
       new APIError(409, "last_credential", "this quince holds no passkey for example.com."),
     );
 
     await expect(removePassword()).rejects.toMatchObject({ code: "last_credential" });
-    expect(del).not.toHaveBeenCalled();
   });
+});
+
+// AN OLDER DAEMON ANSWERS `reauth_required` WITH NO `accepts`, and that must not open a sheet either.
+//
+// FOUND BY A PROBE THAT PASSED. Deleting the `accepts` guard broke nothing, because the dead-end
+// test above mocks `last_credential` — a 409, rethrown before this branch is reached. So the guard
+// had no coverage at all and the probe said so, which is the point of running one.
+it("opens no sheet when the refusal names no factor", async () => {
+  vi.spyOn(api, "del").mockRejectedValue(
+    new UnauthorizedError("reauth_required", "Confirm it is you before changing how you sign in."),
+  );
+  const prove = vi.spyOn(reauth, "proveWithPasskey");
+
+  await expect(removePassword()).rejects.toMatchObject({ code: "reauth_required" });
+  expect(prove).not.toHaveBeenCalled();
 });

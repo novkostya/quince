@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, APIError } from "./api";
-import { proveWithPasskey } from "./reauth";
+import { acceptsOf, proveWithPasskey } from "./reauth";
 import type { AuthStatus } from "./types";
 
 export const authStatusKey = ["auth", "status"] as const;
@@ -59,31 +59,60 @@ export async function changePassword(current: string, next: string): Promise<voi
   }
 }
 
-// removePassword makes this install passwordless — and since qn.6n rule 2 it PROVES A PASSKEY
-// FIRST, unconditionally.
+// removePassword makes this install passwordless — and since qn.6n rule 2 only a PASSKEY can
+// authorise it: the credential being removed cannot vouch for what would be left behind.
 //
-// NO PROBE-THEN-RETRY HERE, UNLIKE changePassword, and the asymmetry is the rule rather than a
-// stylistic choice. Changing a password accepts either factor, so trying the cheap one first is
-// worth a round trip; removing the password accepts ONLY a passkey, because the credential being
-// removed cannot vouch for what would be left behind. There is nothing to try first, so a probe
-// would be one guaranteed 409 on the way to the same prompt.
+// IT ASKS THE SERVER BEFORE IT OPENS A SHEET — quince#994. It used to call `proveWithPasskey`
+// unconditionally, and the comment defended that: *"removing the password accepts ONLY a passkey …
+// there is nothing to try first, so a probe would be one guaranteed 409 on the way to the same
+// prompt."*
 //
-// THE CEREMONY'S OWN FAILURE IS DELIBERATELY NOT CAUGHT. `reauth/begin` answers 409
-// `last_credential` when this address holds no passkey — the same refusal this endpoint used to give
-// after the fact, carrying the same sentence naming where the credentials it DID find belong.
-// `messageFor` renders it, so the surface still says what to do rather than "could not remove the
-// password", and the rpId rule stays implemented once, on the server.
+// THAT ARGUMENT WAS RIGHT ABOUT THE FACTOR AND WRONG ABOUT THE COST. The round trip does not buy a
+// CHOICE — there is only ever one — it buys knowing whether the ceremony can succeed at all. On an
+// install whose passkeys are bound elsewhere, the old path opened an authenticator sheet with
+// nothing in it and produced the `last_credential` refusal only after the user had dismissed it. A
+// prompt that cannot be answered is `qn.6g`'s defect, and it was being shown to the one user who
+// could not act on it.
+//
+// SO THE FIRST CALL PRESENTS NOTHING, which is what earns `reauth_required` carrying `accepts`
+// (qn.6o slice 2). If the server names the passkey, the ceremony runs. If it does not — a dead end —
+// the refusal propagates with its own sentence naming where the credentials it found belong, and no
+// sheet is ever opened.
+//
+// NO CHALLENGE DIALOG, EVER, ON THIS PATH — qn.6o D5 as amended, and the reason quince#994 was worth
+// taking at all: `accepts` here is `["passkey"]` for every install that can do this, so a chooser
+// would have one choice. The ceremony runs from the press the user already made.
+//
+// THE CEREMONY'S OWN FAILURE IS DELIBERATELY NOT CAUGHT. *"You cancelled the prompt"* is more useful
+// than the 401 that preceded it, and `messageFor` renders whatever the server said.
 export async function removePassword(): Promise<void> {
-  const proof = await proveWithPasskey("remove_password");
-  return api.del<void>("/api/auth/password", { proof });
+  const path = "/api/auth/password";
+  try {
+    return await api.del<void>(path, {});
+  } catch (err) {
+    if (!(err instanceof APIError) || err.code !== "reauth_required") throw err;
+    // NOT `onlyPasskey`, and the difference matters: this asks whether the passkey is OFFERED, not
+    // whether it is the sole offer. Rule 2 makes it the sole one today; a build where that changed
+    // should still run the ceremony rather than fall through to a rethrow with no explanation.
+    const accepts = acceptsOf(err);
+    if (!accepts?.includes("passkey")) throw err;
+    const proof = await proveWithPasskey("remove_password");
+    return await api.del<void>(path, { proof });
+  }
 }
 
 // removePasskey deletes one credential, presenting a DIFFERENT one — qn.6n rule 2, slice 6b.
 //
 // TWO FACTORS QUALIFY HERE, UNLIKE `removePassword`, and that is what makes this the one removal
 // with a choice to make. A passkey may be removed by the password or by another passkey; only the
-// credential being removed is excluded. `removePassword` had no such choice — nothing but a passkey
-// can prove it — which is why that one prompts unconditionally and this one does not.
+// credential being removed is excluded. `removePassword` has no such choice — nothing but a passkey
+// can prove it.
+//
+// THAT USED TO BE THE REASON THE TWO LOOKED DIFFERENT, AND IT NO LONGER IS. This sentence ended
+// *"which is why that one prompts unconditionally and this one does not"* until quince#994. Both now
+// ask the server first; what still differs is only WHO runs the ceremony afterwards — there, the
+// library, because the answer can only ever be a passkey; here, the caller, because it can be
+// either and the client must not choose.
 //
 // IT PRESENTS WHAT THE CALLER GIVES IT AND RUNS NO CEREMONY OF ITS OWN — qn.6o slice 5.
 //

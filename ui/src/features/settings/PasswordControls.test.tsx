@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { PasswordControls } from "./PasswordControls";
 import { Passkeys } from "./Passkeys";
-import { api, APIError } from "@/lib/api";
+import { api, APIError, UnauthorizedError } from "@/lib/api";
 import * as reauth from "@/lib/reauth";
 
 // qn.6m slice 6b — D4 and D7. The change form is ordinary; everything interesting is on the REMOVE
@@ -116,9 +116,21 @@ describe("what passwordless costs is on the screen", () => {
 
 describe("removing the password", () => {
   it("takes two deliberate steps", async () => {
-    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
-    // SINCE qn.6n RULE 2 THE CONFIRM STEP COSTS A PASSKEY ASSERTION. Stubbed rather than left to
-    // jsdom, which has no `navigator.credentials` — what this test is about is the two clicks.
+    // SINCE quince#994 THE CONFIRM ASKS BEFORE IT PROMPTS: a bare `DELETE` earns the refusal naming
+    // the acceptable factor, and only then does the sheet open. First mock is that refusal, second
+    // is the retry carrying the proof.
+    const del = vi
+      .spyOn(api, "del")
+      .mockRejectedValueOnce(
+        new UnauthorizedError(
+          "reauth_required",
+          "Confirm it is you before changing how you sign in.",
+          { error: { code: "reauth_required", accepts: ["passkey"] } },
+        ),
+      )
+      .mockResolvedValueOnce(undefined);
+    // Stubbed rather than left to jsdom, which has no `navigator.credentials` — what this test is
+    // about is the two CLICKS.
     vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
     renderControls();
 
@@ -127,8 +139,10 @@ describe("removing the password", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
     await waitFor(() =>
-      expect(del).toHaveBeenCalledWith("/api/auth/password", { proof: "PROOF-TOKEN" }),
+      expect(del).toHaveBeenLastCalledWith("/api/auth/password", { proof: "PROOF-TOKEN" }),
     );
+    // AND THE FIRST CALL PRESENTED NOTHING, which is what earned `accepts`.
+    expect(del).toHaveBeenNthCalledWith(1, "/api/auth/password", {});
   });
 
   it("can be backed out of", () => {
@@ -147,11 +161,15 @@ describe("removing the password", () => {
   // that rule client-side would be a second implementation of an rpId check — the shape
   // `RequireStorage` is commented against — and a disabled button explains nothing.
   //
-  // THE REFUSAL MOVED IN qn.6n AND THE CLAIM DID NOT. It used to come back from `DELETE`; it now
-  // comes from `reauth/begin`, before the authenticator sheet. Mocked at the ceremony for that
-  // reason — mocking `del` would assert against a path this flow no longer takes.
+  // THE REFUSAL HAS MOVED TWICE AND THIS COMMENT HAS FOLLOWED IT BOTH TIMES. It came back from
+  // `DELETE`; `qn.6n` moved it to `reauth/begin`, ahead of the sheet; quince#994 moved it back to
+  // `DELETE`, ahead of the ceremony entirely — because asking first is what lets a dead end refuse
+  // WITHOUT opening an authenticator prompt nobody can answer.
+  //
+  // SO IT IS MOCKED AT `del` AGAIN, and the prove step is asserted NOT to run: that is the
+  // behavioural claim now, not an implementation detail.
   it("surfaces the server's refusal verbatim, because it names what this client cannot know", async () => {
-    vi.spyOn(reauth, "proveWithPasskey").mockRejectedValue(
+    vi.spyOn(api, "del").mockRejectedValue(
       new APIError(
         409,
         "last_credential",
@@ -159,12 +177,15 @@ describe("removing the password", () => {
           'this quince holds are registered for quince.example.net',
       ),
     );
+    const prove = vi.spyOn(reauth, "proveWithPasskey");
     renderControls();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
 
     expect(await screen.findByText(/registered for quince\.example\.net/)).toBeInTheDocument();
+    // NO SHEET WAS OPENED. This is the defect quince#994 fixed, stated as an assertion.
+    expect(prove).not.toHaveBeenCalled();
   });
 
   // THE DEMO CARVE-OUT REACHING THE USER. `no silent caps or fallbacks` wants the control present
