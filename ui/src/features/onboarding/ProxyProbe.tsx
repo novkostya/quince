@@ -99,12 +99,9 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
               name; it does not prove the certificate is trusted here, and a redirect into a warning
               interstitial would look like quince broke something. Let them take the step.
 
-              IT LANDS ON THE ROOT, AND IT USED TO LAND ON `/onboarding/https` (quince#1070). At the
-              new address that page says **Encrypted — nothing to do** and offers nothing else, so a
-              first-run user who had just got their proxy working was parked on a page with no exit,
-              one step from the password they came to set. The root goes through `RequireAuth`, which
-              routes on the live auth state — `/setup` on first run, `/login` once claimed — so this
-              card states no step order of its own. Two redirects, one truth. */}
+              IT LANDS ON THE ROOT, NOT ON A NAMED STEP. `RequireAuth` routes on the live auth state —
+              `/setup` on first run, `/login` once claimed — so this card states no step order of its
+              own. Two redirects, one truth. */}
           <p className="mt-2">
             <a className="underline" href={`${outcome.url}/`}>
               Continue at {outcome.url}

@@ -180,10 +180,9 @@ describe("the two modes", () => {
     return renderPage();
   }
 
-  // quince#1070 — THE ENCRYPTED CARD HAD NO EXIT, and first run is exactly how somebody arrives at
-  // it: the proxy tier's own "Continue at …" link brings them here at the new address, over a
-  // connection that is now secure, with no password set. `showTiers` is false once the check is
-  // complete, so what they read was "Nothing to do" above nothing at all.
+  // AN ENCRYPTED ORIGIN STILL NEEDS AN EXIT, and first run is how somebody arrives at one without a
+  // password: the proxy tier's link brings them here at the new address, and `showTiers` is false
+  // once the check is complete, so this card is the whole page.
   //
   // THE DESTINATION IS ASSERTED, NOT THE STEP. `RequireAuth` routes on the live auth state, so
   // naming `/setup` here would encode a sequence this page cannot know is still true — on a route
