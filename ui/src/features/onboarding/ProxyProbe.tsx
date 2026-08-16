@@ -35,7 +35,18 @@ export function ProxyProbe() {
   }
 
   return (
-    <div className="mt-3">
+    // A FORM, SO ENTER CHECKS. One field and one button is the exact shape a person types an
+    // address into and presses Enter — and this one did nothing, on a page reached by somebody
+    // whose deployment is already half-broken (quince#1066). A `div` costs that for free; the
+    // implicit submission a form gives back is the keyboard behaviour every other field on the
+    // web has.
+    <form
+      className="mt-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void check();
+      }}
+    >
       <label className="block text-sm" htmlFor="proxy-host">
         The address you will reach quince at
       </label>
@@ -58,7 +69,9 @@ export function ProxyProbe() {
         }}
       />
       <div className="mt-2 flex items-center gap-2">
-        <Button onClick={() => void check()} disabled={!target || busy}>
+        {/* `type="submit"` EXPLICITLY: `Button` defaults to `type="button"`, so the form above would
+            have no submit control and Enter would go on doing nothing. */}
+        <Button type="submit" disabled={!target || busy}>
           {busy ? "Checking…" : "Check this address"}
         </Button>
         {value.trim() !== "" && !target ? (
@@ -66,7 +79,7 @@ export function ProxyProbe() {
         ) : null}
       </div>
       {outcome ? <Outcome outcome={outcome} /> : null}
-    </div>
+    </form>
   );
 }
 
@@ -167,8 +180,8 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
             or the certificate may not be trusted by this browser yet.
           </p>
           <p className="mt-2">
-            Open <Addr url={outcome.url} /> in a new tab — whatever your browser says there is the
-            specific answer this check cannot see.
+            Open <AddrLink url={outcome.url} /> in a new tab — whatever your browser says there is
+            the specific answer this check cannot see.
           </p>
         </Box>
       );
@@ -177,6 +190,27 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
 
 function Addr({ url }: { url: string }) {
   return <code className="font-mono">{url}</code>;
+}
+
+// THE ONE THE COPY TELLS YOU TO OPEN IS A LINK (quince#1066). *"Open https://… in a new tab"* above
+// a piece of unclickable monospace asks somebody on a phone to retype an address they cannot select
+// — and the whole point of that sentence is that the browser's own error is the answer this check
+// cannot see, so getting there has to be easy.
+//
+// ONLY THAT ONE, deliberately. The other `Addr` on this card is the subject of a sentence about what
+// FAILED, not an instruction; linking every address on the page would make the actionable one stop
+// standing out.
+//
+// `target="_blank"` WITH `rel="noreferrer"`: a new tab is what the sentence promises, and this page
+// is where somebody is mid-decision — taking the tab away from them would lose it. `noreferrer`
+// keeps this origin out of the request, which matters more than usual here, since it is a plain-http
+// address that would otherwise travel to a name the user does not yet control.
+function AddrLink({ url }: { url: string }) {
+  return (
+    <a className="font-mono underline" href={url} target="_blank" rel="noreferrer">
+      {url}
+    </a>
+  );
 }
 
 function Box({ tone, children }: { tone: "ok" | "warn" | "danger"; children: React.ReactNode }) {
