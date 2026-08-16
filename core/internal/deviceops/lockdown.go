@@ -108,3 +108,37 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
+
+// Writable reports whether quince can write a pairing record, and why not when it cannot
+// (qn.6p D7, Operator 2026-08-16: quince should detect a read-only lockdown dir "and mention it in
+// UI instead of offering Pair button, like springback does").
+//
+// A WRITE PROBE, NOT A MOUNT-FLAG READ, and the choice is deliberate. `:ro` is visible through
+// statfs's ST_RDONLY, but it is one of three ways this fails and the other two set no flag: a
+// permissions problem, and a full filesystem. The question the UI needs answered is *can quince
+// write a pairing record here*, so the check is to write one — an empty file, removed immediately,
+// in a directory quince already owns. Nothing is read, so no record's content is touched (design
+// §6: these are private-key-grade secrets).
+//
+// SHARING THIS DIRECTORY READ-WRITE IS NOT RULED ON, here or anywhere (qn.6p D7). Per-device
+// records are whole-file writes, one file per device; the shared mutable thing is the host
+// identity, and whoever regenerates it invalidates every record that refers to it. That is a
+// property of the OTHER tool, not of quince, and the Operator ruled it out of scope: "we don't want
+// to mention it in readme at all and leave decision to users."
+func (l *LockdownStore) Writable() (bool, string) {
+	if err := os.MkdirAll(l.sysDir, 0o700); err != nil {
+		return false, l.sysDir + " cannot be created: " + err.Error()
+	}
+	f, err := os.CreateTemp(l.sysDir, ".quince-pairwrite-*")
+	if err != nil {
+		return false, l.sysDir + " is not writable: " + err.Error()
+	}
+	name := f.Name()
+	_ = f.Close()
+	if err := os.Remove(name); err != nil {
+		// Written but not removable is still writable for pairing's purposes; say so rather than
+		// failing the check, and leave a trace so the stray file is explicable.
+		l.log.Warn("lockdown: write probe left a file behind", "path", name, "error", err)
+	}
+	return true, ""
+}
