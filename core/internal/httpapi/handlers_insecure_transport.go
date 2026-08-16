@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -62,14 +63,39 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not read auth state")
 			return
 		}
+		// A CLAIMED INSTALL IS NOT CLOSED TO ITS OWN ADMIN — Operator direction, 2026-08-16
+		// (quince#1069). The setting could be turned ON from the UI and could not be turned OFF from
+		// anywhere: `ConfigEditor` does not render the key, and the banner that says "turn this off"
+		// pointed at a text editor on the box. That is stack D12 broken, and the narrow write this
+		// handler already performs is the fix — the route stops being pre-auth-only rather than a
+		// second writer appearing somewhere else.
+		//
+		// `PUT /api/config` WOULD HAVE BEEN THE CHEAPER-LOOKING ROUTE AND IS THE WRONG ONE: it is a
+		// full-document replace, so a client that does not model every Go key drops the ones it does
+		// not know (quince#493). `SetAllowInsecureTransport` writes one key by name.
+		//
+		// WHAT THE PRE-AUTH WINDOW RESTED ON, AND WHY THE AUTHENTICATED PATH MAY NOT INHERIT IT: this
+		// route is in `csrfExempt` because before a session exists there is no cookie to
+		// double-submit, and the comment there names `Configured()` as the whole of what protects it —
+		// on a claimed install the route used to refuse before reading the body. Once an authenticated
+		// caller is allowed through, that bound is gone and a cross-site page could otherwise POST
+		// `{allow:true}` with the admin's cookies: the downgrade primitive quince#908 §3 warns about,
+		// arriving through the door added to remove one. So the authenticated path checks the session
+		// AND the token here, explicitly, rather than relying on either list.
 		if configured {
-			// THE SAME CODE AND THE SAME SHAPE AS `POST /api/auth/setup`'s one-shot refusal, because
-			// it is the same fact: this install has been claimed. A 404 would hide the route, which
-			// is worth less than it looks — the UI is public and the path is in the docs — and it
-			// would cost the first-run user a comprehensible answer if they ever reached it late.
-			writeError(w, d.Log, http.StatusConflict, "already_configured",
-				"quince is already set up — sign in and change this in Settings")
-			return
+			if _, err := d.Auth.Authenticate(sessionCookieValue(r)); err != nil {
+				// THE SAME CODE AND THE SAME SHAPE AS `POST /api/auth/setup`'s one-shot refusal, for
+				// an anonymous caller: the install has been claimed. A 404 would hide the route, which
+				// is worth less than it looks — the UI is public and the path is in the docs — and it
+				// would cost the first-run user a comprehensible answer if they ever reached it late.
+				writeError(w, d.Log, http.StatusConflict, "already_configured",
+					"quince is already set up — sign in to change this")
+				return
+			}
+			if !auth.CheckCSRF(r) {
+				writeError(w, d.Log, http.StatusForbidden, "csrf", "missing or invalid CSRF token")
+				return
+			}
 		}
 
 		var body insecureTransportBody
@@ -91,12 +117,18 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 			return
 		}
 
-		// LOGGED, because this is an unauthenticated write and the startup line is the only other
-		// place it would ever appear. `state honesty` and `no silent caps or fallbacks` both land
-		// here: the operator reading the journal afterwards should find the moment somebody relaxed
-		// the transport, not infer it from the file's mtime.
-		d.Log.Warn("sessions.allow_insecure_transport written by a PRE-AUTH caller",
-			"allow", body.Allow, "route", "POST /api/config/insecure-transport")
+		// LOGGED, because the startup line is the only other place this would ever appear. `state
+		// honesty` and `no silent caps or fallbacks` both land here: the operator reading the journal
+		// afterwards should find the moment somebody changed the transport, not infer it from the
+		// file's mtime.
+		//
+		// IT SAYS WHICH CALLER, because the two are no longer the same event. A pre-auth write is the
+		// stranded first-run user taking the escape hatch; an authenticated one is the admin using the
+		// control in the banner. Reading `PRE-AUTH` about the second would be the log lying about who
+		// did it — and this line is the audit trail for a security setting.
+		d.Log.Warn("sessions.allow_insecure_transport written",
+			"allow", body.Allow, "caller", map[bool]string{true: "authenticated", false: "pre-auth"}[configured],
+			"route", "POST /api/config/insecure-transport")
 
 		cfg, loadWarns, src := d.Config.Snapshot()
 		// APPENDED to the load's own warnings, as every other config route does: an applier warning
