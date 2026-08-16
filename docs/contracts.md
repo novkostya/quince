@@ -1508,7 +1508,7 @@ to a reader: **ruled-and-unbuilt** is work to do, where **unruled** is a thread 
 **Two surfaces this proposal does NOT cover** and which story 5 needs, both proposed in the spec and
 neither built: a **re-probe endpoint** — the 2026-08-01 ruling makes reachability changeable without
 a restart, *plug the disk in and press the button*, and there is no button in this contract — and
-the **shape of `unreachable_reason`**, now that `missing_medium` and `unreachable` must be
+the **shape of `unreachable_reason`**, now that `missing_medium` and `path_unreachable` must be
 distinguishable by it.
 
 **RULED (was `PROPOSED (gap)`): how a storage is FORGOTTEN — `qn.6d`, Operator ruling 2026-08-03, relayed on quince#443.**
@@ -2244,15 +2244,17 @@ Storage: {
                                // Version.storage_id). Two fields rather than one because prose
                                // cannot be branched on and an enum cannot be shown.
                                //
-                               // DECLARED VALUES ARE WRONG IN THE CODE TODAY — see quince#569. The
-                               // daemon also emits `unreachable` (for an unreadable path, where
-                               // this enum says `path_unreachable`) and `corrupt_marker`, neither
-                               // of which is below. Documented here as the field's EXISTENCE, which
-                               // was the drift; the values are quince#569's to fix and are
-                               // deliberately not corrected by inventing a third answer.
+                               // THE CODE NOW MATCHES THIS ENUM (quince#569, fixed). It did not:
+                               // `live.go` stringified the internal `storage.Resolution` straight
+                               // onto the wire, so an unreadable path shipped `unreachable` where
+                               // this says `path_unreachable`. The daemon now TRANSLATES at the
+                               // boundary — `wireUnreachableCode` — which is the ruled shape and
+                               // not merely a rename: the two vocabularies stay separate so a new
+                               // internal state cannot become a wire value without a diff touching
+                               // this file.
   "unreachable_reason": null,  // set when reachable is false; SHOWN, never thrown — an unreachable
                                // storage must not block backups to any other (epic point 5).
-                               // THREE distinguishable causes, because the remedy differs:
+                               // FOUR distinguishable causes, because the remedy differs:
                                //   path_unreachable  the path itself cannot be read
                                //   missing_medium    the path reads, the marker is GONE, and the DB
                                //                     knows this storage — an unplugged disk's bare
@@ -2261,6 +2263,28 @@ Storage: {
                                //                     mountpoint is created as a NEW storage and
                                //                     backups land on the system disk.
                                //   backend_mismatch  the marker and the probe disagree (remount)
+                               //   corrupt_marker    a marker IS present and fails its own checksum.
+                               //                     The disk is PRESENT AND READABLE — quince just
+                               //                     cannot confirm WHICH storage it is, so folding
+                               //                     this into path_unreachable would state something
+                               //                     false about the cause. Ruled a fourth code on
+                               //                     2026-08-02 (quince#569) by the architect under
+                               //                     explicit Operator delegation. THE REMEDY IS NOT
+                               //                     OBVIOUS AND MUST NOT BE OFFERED AS ONE CLICK:
+                               //                     recreating a marker wrongly attaches the wrong
+                               //                     storage.
+                               //
+                               // And one value that is not a cause:
+                               //   unmapped          NEVER EXPECTED. The daemon reached an internal
+                               //                     resolution with no declared code here, logged an
+                               //                     error, and emitted this rather than guessing a
+                               //                     neighbour. It is a quince bug, and it is
+                               //                     deliberately implausible so a client fails
+                               //                     visibly instead of rendering a confident wrong
+                               //                     remedy. Declaring it is a rung-local call, not
+                               //                     part of the ruling: an UNdeclared sentinel would
+                               //                     be invisible to a client in exactly the way the
+                               //                     two codes quince#569 fixed were.
   "will_be_full": true,        // this device's next backup here is a FULL transfer, because
                                // incremental is scoped to (device, storage) and there is no prior
                                // version on this one. Present ONLY when `?udid=` is passed —
@@ -2384,8 +2408,8 @@ honest for API clients even where the card renders no caveat.
 
 **Two pieces of pre-existing drift are corrected by the PR that builds this**, and neither is part
 of the ruling: §1's code block omits both the `?udid=` form and `POST /api/storages/{name}/recheck`,
-and this section has never documented `unreachable_code` — whose declared values are wrong in a
-second way, see quince#569.
+and this section has never documented `unreachable_code` — whose declared values were wrong in a
+second way, since fixed; see quince#569 and the field's own entry in §2.
 
 Spec: `docs/specs/qn.6d/qn.6d.md`, gap A.
 

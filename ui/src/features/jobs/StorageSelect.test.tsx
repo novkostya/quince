@@ -328,7 +328,12 @@ const ghost = storage({
   name: "ghost",
   default: false,
   reachable: false,
-  unreachable_code: "path_unreachable", // the daemon also emits "unreachable", which the TS enum lacks (quince#569)
+  // This read "the daemon also emits `unreachable`, which the TS enum lacks (quince#569)". Fixed —
+  // the daemon translates at the boundary, so this IS what it sends for an unreadable path now. What
+  // that does NOT change: the fixture is still hand-built, so it proves the component and not the
+  // daemon. `live_test.go` is where a real path is driven through resolveSlot to a Slot, and the
+  // absence of exactly that test is why this drift survived a whole rung.
+  unreachable_code: "path_unreachable",
   unreachable_reason: "the path could not be read",
 });
 

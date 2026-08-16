@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,5 +145,145 @@ func TestBuildStorageServesWithNoStoragesDeclared(t *testing.T) {
 	// "pretending to work".
 	if _, status, _ := mgr.ResolveChoice(""); status != 409 {
 		t.Errorf("ResolveChoice on an empty manager = %d, want 409", status)
+	}
+}
+
+// quince#569 — THE WIRE CODE IS TRANSLATED, NOT STRINGIFIED, AND THESE ARE THE PATHS THAT PROVE IT.
+//
+// WHY THESE TESTS AND NOT THE TWO THAT ALREADY EXISTED. `reset_test.go` and `StorageSelect.test.tsx`
+// both pinned `path_unreachable` and both CONSTRUCTED the slot by hand, so they asserted the value
+// the contract declares against a fixture their author wrote. Nothing drove a real unreadable
+// directory to the wire, which is why a daemon emitting `unreachable` sat green for a whole rung.
+// The architect's ruling makes that the condition on any fix: a real path, through resolveSlot, to a
+// Slot. Reading the mapping function proves the mapping; only this proves what the daemon emits.
+//
+// Each case names the branch of ResolveStorage it takes, because the codes are only distinguishable
+// by which limb produced them and a test that reached the wrong limb would still pass.
+
+// A path that does not exist: ResolveStorage's FIRST branch, `!reachable(path)`, which is
+// ResolutionUnreachable. THE MOST COMMON FAILURE IN THE WHOLE MODEL — an unplugged removable disk —
+// and the one that shipped an undeclared code.
+func TestResolveSlotEmitsPathUnreachableForAPathThatIsNotThere(t *testing.T) {
+	st := testStore(t)
+	gone := filepath.Join(t.TempDir(), "not-mounted")
+
+	slot := resolveSlot(context.Background(), config.StorageEntry{Name: "usb", Path: gone}, st, quietLog())
+
+	if slot.Reachable {
+		t.Fatal("a path that does not exist must not resolve as reachable")
+	}
+	if slot.UnreachableCode != "path_unreachable" {
+		t.Errorf("UnreachableCode = %q, want %q — the daemon emitted the internal Resolution instead "+
+			"of the declared wire code, which is quince#569 returning. contracts.md, wire/objects.go "+
+			"and ui/src/lib/types.ts all say path_unreachable; a client branching on the union gets no "+
+			"match and falls through to a default for an unplugged disk",
+			slot.UnreachableCode, "path_unreachable")
+	}
+}
+
+// A marker that fails its own checksum: the ErrStorageMarkerCorrupt branch, ResolutionCorruptMarker.
+// RULED A FOURTH CODE on 2026-08-02 rather than folded into path_unreachable, because the disk here
+// is PRESENT AND READABLE and saying "the path cannot be read" about it would be false.
+func TestResolveSlotEmitsCorruptMarkerForAMarkerThatFailsItsChecksum(t *testing.T) {
+	st := testStore(t)
+	root := t.TempDir()
+	// A well-formed marker whose checksum does not match its contents. Written by hand rather than
+	// through WriteStorageMarker, which would compute a VALID one — the corruption is the fixture.
+	const bad = `{"storage_id":"01JUSB000000000000000000","backend":"copy",` +
+		`"created_at":"2026-01-01T00:00:00Z","app_version":"0.0.0-dev","checksum":"not-the-real-sum"}`
+	if err := os.WriteFile(filepath.Join(root, storage.StorageMarkerName), []byte(bad), 0o644); err != nil {
+		t.Fatalf("stage a corrupt marker: %v", err)
+	}
+
+	slot := resolveSlot(context.Background(), config.StorageEntry{Name: "usb", Path: root}, st, quietLog())
+
+	if slot.Reachable {
+		t.Fatal("a storage whose marker failed its checksum must not resolve as reachable")
+	}
+	if slot.UnreachableCode != "corrupt_marker" {
+		t.Errorf("UnreachableCode = %q, want %q — the disk is present and readable and quince simply "+
+			"cannot confirm WHICH storage it is. The remedy differs from path_unreachable's *plug it "+
+			"in* and is dangerous to guess at, so the two must stay distinguishable",
+			slot.UnreachableCode, "corrupt_marker")
+	}
+}
+
+// A readable path with NO marker, for a storage the DB already knows: the missing-medium branch.
+// The control for the two above — it was already correct, so it is what shows the mapping did not
+// break the codes that happened to agree with their internal spelling.
+func TestResolveSlotStillEmitsMissingMediumForAKnownStorageWithNoMarker(t *testing.T) {
+	st := testStore(t)
+	root := t.TempDir() // reachable, empty: a bare mountpoint
+	seedKnownStorage(t, st, "usb", root, "01JUSB000000000000000000")
+
+	slot := resolveSlot(context.Background(), config.StorageEntry{Name: "usb", Path: root}, st, quietLog())
+
+	if slot.Reachable {
+		t.Fatal("a known storage with no marker must not resolve as reachable")
+	}
+	if slot.UnreachableCode != "missing_medium" {
+		t.Errorf("UnreachableCode = %q, want %q", slot.UnreachableCode, "missing_medium")
+	}
+}
+
+// THE DEFAULT, WHICH IS THE POINT OF MAPPING AT ALL. The ruling's condition is that an unmapped
+// internal state produces a logged error and an OBVIOUSLY WRONG wire value — never `""` and never
+// the nearest plausible neighbour, because a default that guesses reproduces quince#569 one layer
+// down, with a UI rendering a confident wrong remedy instead of failing to match.
+//
+// The input is a Resolution that does not exist. That is the whole scenario: this arm exists for the
+// SEVENTH value somebody adds to the enum without touching the three declaration sites.
+func TestWireUnreachableCodeRefusesToGuessAtAnUnmappedResolution(t *testing.T) {
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	got := wireUnreachableCode(storage.Resolution("a_state_nobody_declared"), "usb", log)
+
+	if got == "" {
+		t.Error(`UnreachableCode = "" — an empty code is indistinguishable from "reachable, no cause" ` +
+			`on the wire, which is the silent fallthrough the ruling forbids by name`)
+	}
+	for _, plausible := range []string{"path_unreachable", "missing_medium", "backend_mismatch", "corrupt_marker"} {
+		if got == plausible {
+			t.Errorf("UnreachableCode = %q for an unmapped state — the default picked a plausible "+
+				"neighbour, so a client renders a confident WRONG remedy and nobody learns the "+
+				"vocabulary is incomplete", got)
+		}
+	}
+	if got != "unmapped" {
+		t.Errorf("UnreachableCode = %q, want %q — the declared sentinel", got, "unmapped")
+	}
+	// The log line is half the mechanism: the wire value says something is wrong, and only this says
+	// WHICH state was missed, which is what a maintainer needs to fix it.
+	if s := logged.String(); !strings.Contains(s, "a_state_nobody_declared") {
+		t.Errorf("the error log does not name the unmapped resolution, so the wire value is the only "+
+			"evidence and it does not say what was missed; got: %s", s)
+	}
+}
+
+// AND THE MAPPING IS TOTAL OVER THE STATES THAT CAN REACH IT. Every Resolution that is not OK() must
+// have an arm — this is what turns "somebody adds a seventh value" from a silent wire change into a
+// failing test, which is the guarantee the boundary mapping was ruled FOR.
+func TestEveryUnreachableResolutionHasADeclaredWireCode(t *testing.T) {
+	declared := map[string]bool{
+		"path_unreachable": true, "missing_medium": true, "backend_mismatch": true, "corrupt_marker": true,
+	}
+	// Enumerated by hand because Go has no way to range over a string-const enum. THAT IS THE WEAK
+	// LINK AND IT IS NAMED: a value added to storage.Resolution and not added here is not caught by
+	// this test. It is still worth having — it catches an arm DELETED from the switch, and it fails
+	// loudly if a mapping starts returning something undeclared.
+	for _, r := range []storage.Resolution{
+		storage.ResolutionUnreachable, storage.ResolutionMissingMedium,
+		storage.ResolutionBackendMismatch, storage.ResolutionCorruptMarker,
+	} {
+		if r.OK() {
+			t.Errorf("%q reports OK() — it cannot reach the unreachable branch and should not be here", r)
+			continue
+		}
+		got := wireUnreachableCode(r, "usb", quietLog())
+		if !declared[got] {
+			t.Errorf("wireUnreachableCode(%q) = %q, which is not a code declared in contracts.md, "+
+				"wire/objects.go and ui/src/lib/types.ts", r, got)
+		}
 	}
 }
