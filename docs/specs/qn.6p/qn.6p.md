@@ -5,8 +5,14 @@ runs — a host `usbmuxd`, a sidecar container, another tool's daemon — dialin
 address indifferently, and reporting what a real dial returned rather than what the config asked
 for. The all-in-one profile is **descoped to a later version, not abandoned.**
 
-Operator ruling, 2026-08-16, taken in session across five exchanges. Each decision is attributed at
-the point it is recorded below.
+Operator ruling, 2026-08-16, taken in session across five exchanges and recorded on the forge at
+[quince#897 (comment)](https://github.com/novkostya/quince/issues/897#issuecomment-5306581561) —
+**relayed by the implementer seat, not posted by the Operator**, which is the open question of
+quince-devlog#254. Each decision is attributed at the point it is recorded below.
+
+**One clause is weaker than the rest and the record says so:** the profile decision arrived as
+*"leaning towards"* rather than as a flat ruling, and the exchanges after it proceeded on that
+basis. If it is going to be reversed, this rung is where it is cheapest.
 
 ---
 
@@ -64,6 +70,46 @@ versions, I'm not giving up on all-in-one."* Three consequences bind this rung:
 2. **The endpoint keys are NOT renamed** — see D3. A rename buys tidiness in the profile that ships
    and must be re-argued when the other returns.
 3. **`manage_muxer` stays in the schema** — see D2. Deleting it would be a *silent* downgrade.
+
+---
+
+## Boundary
+
+**In scope — the trees this rung may touch.** A later PR that wanders outside this list is
+mis-sliced, which is what a Boundary is for when the slice runs to nine.
+
+| tree | what changes | PR |
+| --- | --- | --- |
+| `core/internal/muxd/` | the address grammar; `Client.dial` | 2 |
+| `core/internal/deviceops/` | `socketAddr`; `LockdownStore` write-probe | 2, 7 |
+| `core/internal/backup/supervisor.go` | `socketAddr` — the third copy of the `UNIX:` logic | 2 |
+| `core/internal/muxsup/` | `AddUnmanaged` probes; the supervision path parked | 3, 5 |
+| `core/cmd/quince/` | `muxers.go`, `live.go` — one client per endpoint, not per key | 3, 4, 5 |
+| `core/internal/config/` | `manage_muxer` validation; endpoint doc-comments; the dead default | 2, 5 |
+| `core/internal/httpapi/` | muxer health entries; pair `409`; the pair-capability field | 3, 7 |
+| `ui/src/` | the pairing control's unavailable state and its reason | 7 |
+| `deploy/` | `Dockerfile` runtime stage; `compose.hardened.yml`; `compose.nas.yml` | 8, 9 |
+| `docs/` | design §2/§9, contracts, stack D2 — and roadmap M5 in the devlog | 9 |
+
+**Out of scope**, each with where it went instead:
+
+- **the `quince-muxer` image** — its own unit of work; recommended for Wi-Fi, not required for a
+  working deployment (D1), and the moment to decide the libimobiledevice coupling below;
+- **reintroducing `manage_muxer`** — a later version, and D2 is what keeps that cheap;
+- **quince#326's netmuxd-USB audition** — raised and not ruled;
+- **whether `compose.hardened.yml` carries the storage side** — quince#721 did not say and neither
+  does this rung;
+- **transport for a dual-transport muxer** — architectural and blocked; see the gap section;
+- **whether sharing the lockdown dir read-write is safe** — explicitly not ruled (D7).
+
+**One thing that leaves scope by being removed, and returns when `quince-muxer` is built.** Today
+the runtime `COPY`s quince's patched `libimobiledevice` over the `apk`-installed one *after* the
+`apk add`, so the packaged `usbmuxd` links it — `apk audit --system` reports exactly two modified
+files, both that library. Its `src/preflight.c` pairs and validates through
+`property_list_service_receive_plist()`, which is the function patch `0001` changes from 30 s to
+15 min. **So usbmuxd's Trust handshake currently runs on a timeout chosen for `idevicebackup2`, by
+layer ordering rather than by decision.** D1 removes the daemon and with it the accident. Whoever
+builds `quince-muxer` from these stages inherits the question as a choice, which is the improvement.
 
 ---
 
@@ -205,8 +251,9 @@ already correct for the shared case — *"a live/bind-mounted record wins"* — 
 **What this rung does NOT do:** rule on whether sharing the directory read-write is safe. Per-device
 records are whole-file writes, one file per device; the shared mutable thing is
 `SystemConfiguration.plist`, the host identity that every record's `HostID` refers back to. Operator,
-2026-08-16: *"multiple writers could work, although probably not recommended […] we don't want to
-mention it in readme at all and leave decision to users."* No rule, no recommendation, no README line.
+2026-08-16: *"I think multiple writes could work, although probably not recommended. Idk but I guess
+we don't want to mention it in readme at all and leave decision to users."* No rule, no
+recommendation, no README line.
 
 ### D8 — canon says one profile
 
