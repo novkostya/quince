@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/novkostya/quince/core/internal/device"
+	"github.com/novkostya/quince/core/internal/muxaddr"
 )
 
 // Transports (matching the muxd/wire strings). Pairing is USB-only at the protocol floor
@@ -50,11 +51,14 @@ type Tools struct {
 	Idevicepair    string // default "idevicepair"
 	Ideviceinfo    string // default "ideviceinfo"
 	Idevicebackup2 string // default "idevicebackup2"
-	UsbmuxdSocket  string // devices.usbmuxd_socket (a path) — USB muxer
-	NetmuxdAddr    string // devices.netmuxd_addr (host:port) — Wi-Fi muxer
-	Log            *slog.Logger
-	env            []string // extra child env (tests only)
-	argPrefix      []string // prepended to every argv (tests only: re-exec as the fake CLI)
+	// Usbmuxd and Netmuxd are PARSED endpoints (qn.6p D3), not raw config strings: either may be
+	// a unix socket or a TCP address, and the spelling a subprocess needs is the endpoint's to
+	// give. Holding strings here is what let the two keys disagree about their own grammar.
+	Usbmuxd   muxaddr.Endpoint // devices.usbmuxd_socket — USB muxer
+	Netmuxd   muxaddr.Endpoint // devices.netmuxd_addr  — Wi-Fi muxer
+	Log       *slog.Logger
+	env       []string // extra child env (tests only)
+	argPrefix []string // prepended to every argv (tests only: re-exec as the fake CLI)
 	// wifiSyncKey is the lockdown key wifiSync reads; empty means "do not ask the device", which is
 	// what it meant for every build before story 3 measured the name (see the wifiSyncKey const).
 	// The empty branch stays: it is the honest answer whenever the key is unknown, not scaffolding
@@ -73,26 +77,28 @@ func (t *Tools) args(cliArgs ...string) []string {
 	return append(append([]string{}, t.argPrefix...), cliArgs...)
 }
 
-// NewTools returns Tools with the real binary names and the configured muxer sockets.
-func NewTools(usbmuxdSocket, netmuxdAddr string, log *slog.Logger) *Tools {
+// NewTools returns Tools with the real binary names and the configured muxer endpoints.
+func NewTools(usbmuxd, netmuxd muxaddr.Endpoint, log *slog.Logger) *Tools {
 	return &Tools{
 		Idevicepair:    "idevicepair",
 		Ideviceinfo:    "ideviceinfo",
 		Idevicebackup2: "idevicebackup2",
-		UsbmuxdSocket:  usbmuxdSocket,
-		NetmuxdAddr:    netmuxdAddr,
+		Usbmuxd:        usbmuxd,
+		Netmuxd:        netmuxd,
 		Log:            log,
 		wifiSyncKey:    wifiSyncKey,
 	}
 }
 
-// socketAddr is the USBMUXD_SOCKET_ADDRESS value for a transport: UNIX:<path> for the usbmuxd
-// unix socket, host:port for netmuxd's TCP listener (verified live — qn.3 interface fact 2).
+// socketAddr is the USBMUXD_SOCKET_ADDRESS value for a transport (verified live — qn.3 interface
+// fact 2). The spelling is the ENDPOINT's, not this function's: it used to prefix "UNIX:"
+// unconditionally for USB and return the Wi-Fi address verbatim, so a unix-socket Wi-Fi muxer
+// reached the CLIs as a bare path and libusbmuxd read it as a host:port (quince#897 item 1).
 func (t *Tools) socketAddr(transport string) string {
 	if transport == TransportWiFi {
-		return t.NetmuxdAddr
+		return t.Netmuxd.Env()
 	}
-	return "UNIX:" + t.UsbmuxdSocket
+	return t.Usbmuxd.Env()
 }
 
 // childEnv builds the subprocess environment: the inherited env + the muxer pointer + any

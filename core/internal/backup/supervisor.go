@@ -4,30 +4,32 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
+
+	"github.com/novkostya/quince/core/internal/muxaddr"
 )
 
 // tool spawns idevicebackup2 with the qn.3 subprocess hygiene (argv arrays never a shell, own
 // process group, ctx-killed as a group) pointed at a muxer via USBMUXD_SOCKET_ADDRESS.
 type tool struct {
-	bin       string   // "idevicebackup2" (prod) or the test binary (fake harness)
-	argPrefix []string // test-only leading args (empty in production): -test.run=… + "--"
-	env       []string // test-only extra child env (empty in production): the fake harness knobs
-	usbmuxd   string   // devices.usbmuxd_socket
-	netmuxd   string   // devices.netmuxd_addr
+	bin       string           // "idevicebackup2" (prod) or the test binary (fake harness)
+	argPrefix []string         // test-only leading args (empty in production): -test.run=… + "--"
+	env       []string         // test-only extra child env (empty in production): the fake harness knobs
+	usbmuxd   muxaddr.Endpoint // devices.usbmuxd_socket
+	netmuxd   muxaddr.Endpoint // devices.netmuxd_addr
 }
 
-// socketAddr is the USBMUXD_SOCKET_ADDRESS for a transport (VERIFIED qn.3): UNIX:<path> for the
-// usbmuxd unix socket, host:port for netmuxd.
-func socketAddr(transport, usbmuxd, netmuxd string) string {
+// socketAddr is the USBMUXD_SOCKET_ADDRESS for a transport (VERIFIED qn.3). This was the THIRD
+// copy of the grammar and the one easiest to miss: it prefixed "UNIX:" for a usbmuxd path but
+// returned the Wi-Fi address verbatim, so a unix-socket Wi-Fi muxer would leave presence and
+// device ops working while every BACKUP over Wi-Fi reached the child as a bare path libusbmuxd
+// reads as host:port (quince#897 item 1, qn.6p D3). The spelling is now the endpoint's, in all
+// three places.
+func socketAddr(transport string, usbmuxd, netmuxd muxaddr.Endpoint) string {
 	if transport == TransportWiFi {
-		return netmuxd
+		return netmuxd.Env()
 	}
-	if strings.HasPrefix(usbmuxd, "/") {
-		return "UNIX:" + usbmuxd
-	}
-	return usbmuxd
+	return usbmuxd.Env()
 }
 
 // The idevicebackup2 TARGET is the storage backend's working/ parent (Seed's return). The tool

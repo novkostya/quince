@@ -264,14 +264,31 @@ type DevicesConfig struct {
 	// purpose (D12 config tidiness): the mixed topology still degrades honestly through
 	// refuse-loudly. Applied at process start; live re-supervision on an edit is qn.7.
 	ManageMuxer bool `yaml:"manage_muxer" json:"manage_muxer"`
-	// UsbmuxdSocket is where the USB muxer listens — authoritative: a managed usbmuxd is started
+	// UsbmuxdSocket is where the USB muxer answers — authoritative: a managed usbmuxd is started
 	// with `-S <this>`, and POST /api/devices/rescan restarts THIS daemon (USB hotplug is what
 	// rescan exists for).
+	//
+	// THREE FORMS, not one (qn.6p D3, quince#897 item 1) — the grammar is internal/muxaddr's:
+	//
+	//	/run/mux/usbmuxd         a unix socket path
+	//	UNIX:/run/mux/usbmuxd    the same, in libusbmuxd's own spelling
+	//	127.0.0.1:27015          TCP
+	//
+	// Empty = no USB muxer at all.
 	UsbmuxdSocket string `yaml:"usbmuxd_socket" json:"usbmuxd_socket"`
-	// NetmuxdAddr is the Wi-Fi muxer's host:port — authoritative: a managed netmuxd is started
+	// NetmuxdAddr is where the Wi-Fi muxer answers — authoritative: a managed netmuxd is started
 	// with `--host/--port` from it (plus a private --socket-path, since netmuxd would otherwise
 	// delete and rebind the usbmuxd socket, and --disable-usb, since usbmuxd is the USB anchor
 	// until qn.7's audition). Empty = no Wi-Fi muxer at all.
+	//
+	// THE SAME THREE FORMS. This was host:port ONLY, which is why an external netmuxd on a unix
+	// socket could not be configured at all — and that is the shape which serves BOTH transports
+	// over one socket, the one an operator reaches for precisely so as not to open an
+	// unauthenticated TCP port (quince#897 item 1).
+	//
+	// BOTH KEY NAMES NOW UNDER-DESCRIBE WHAT THEY ACCEPT, and they are deliberately not renamed:
+	// they carry daemon identity, which a reintroduced ManageMuxer needs, and all-in-one is
+	// DESCOPED rather than abandoned (qn.6p, Operator 2026-08-16).
 	NetmuxdAddr string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
 }
 

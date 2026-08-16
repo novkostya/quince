@@ -11,7 +11,21 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/novkostya/quince/core/internal/muxaddr"
 )
+
+// mustEndpoint parses a listener address the way production does. Tests go through the same
+// grammar as `serve` on purpose: a fixture that hand-built an Endpoint could pass while the
+// parser that production depends on was wrong, which is the shape of quince#897 item 1.
+func mustEndpoint(t *testing.T, addr string) muxaddr.Endpoint {
+	t.Helper()
+	ep, err := muxaddr.Parse(addr)
+	if err != nil {
+		t.Fatalf("muxaddr.Parse(%q): %v", addr, err)
+	}
+	return ep
+}
 
 // recordingSink is a muxd.Sink that records the ordered Reset/Apply calls a Client makes, so a
 // test can assert the reconnect contract (Reset before the muxer's replay, then re-apply only
@@ -140,7 +154,7 @@ func TestClientRunReconnectResetsAndReplays(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				NewClient(addr, testLog()).Run(ctx, sink)
+				NewClient(mustEndpoint(t, addr), testLog()).Run(ctx, sink)
 			}()
 
 			// Wait until the second connect's Reset + replay have landed.
