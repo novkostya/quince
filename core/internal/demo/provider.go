@@ -41,6 +41,36 @@ type Provider struct {
 	// opInflight is the per-UDID device-op single-flight slot (quince#465). Distinct from
 	// `running`, the BACKUP slot — startGuardedOp says why they are deliberately not shared.
 	opInflight map[string]string
+
+	// defaultStorageName answers "which storage does the DECLARED config call default", and is nil
+	// for a provider nobody wired one into (quince#1036).
+	//
+	// IT EXISTS BECAUSE `Default` IS SETTABLE THROUGH THE API THE DEMO SERVES, which is what makes
+	// it different from the other fabricated fields here. `POST /api/config/storage/{name}/default`
+	// answered 200 and wrote the config; `GET /api/storages` kept reporting the literal, so the
+	// badge never moved and the button never went away. Indistinguishable from a no-op, on the
+	// surface a reviewer clicks, for a feature that works.
+	//
+	// The capacity figures next to it stay invented on purpose — a demo has no filesystem to statfs
+	// and nothing can set them. `Default` is the one a visitor can change, so it is the one that has
+	// to be read rather than asserted. That is the narrow answer to "how much of the daemon should a
+	// demo reimplement"; the wider question is still quince#1036's to settle.
+	//
+	// SET ONCE AT WIRING TIME, BEFORE Run — the same shape as `registry.SetLastBackupSource`. It is
+	// read under `mu` and never written after, so there is no lock ordering to get wrong.
+	defaultStorageName func() string
+}
+
+// SetDefaultStorageName tells the provider where to read the declared default from (quince#1036).
+//
+// Called from `main.go` with the config service, AFTER the demo's storages have been seeded into the
+// document — so the fixture and the declaration agree from the first request rather than converging
+// on the second. A provider without it falls back to the literal, which is what every unit test
+// constructing a bare Provider gets and is why the field is nil-checked rather than required.
+func (p *Provider) SetDefaultStorageName(fn func() string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.defaultStorageName = fn
 }
 
 // NewProvider builds a provider seeded with deterministic fixtures. It does NOT start the
@@ -202,9 +232,20 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 	// measured, but the database that remembers what is on it is reachable either way.
 	free, total := int64(1_200_000_000_000), int64(3_600_000_000_000)
 
+	// `Default` IS READ FROM THE DECLARATION, NOT ASSERTED (quince#1036). `defaultName` is the name
+	// the config says is default; the fallback is the fixture's own answer, for a provider nobody
+	// wired a config into. Computed ONCE here rather than per entry, so the two entries cannot
+	// disagree about which of them it is — the same reason the counts are one fold (quince#624).
+	defaultName := "internal"
+	if p.defaultStorageName != nil {
+		if n := p.defaultStorageName(); n != "" {
+			defaultName = n
+		}
+	}
+
 	out := []wire.Storage{{
 		ID: demoStorageInternal, Name: "internal", Path: "/backups", Backend: "reflink",
-		Default: true, Reachable: true,
+		Default: defaultName == "internal", Reachable: true,
 		FilesystemFreeBytes: &free, FilesystemTotalBytes: &total,
 		BackupCount: tally.backups[demoStorageInternal],
 		DeviceCount: len(tally.devices[demoStorageInternal]),
@@ -228,7 +269,11 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 		// A removable disk on an offsite rotation, mounted under its own label, is what an operator
 		// actually has — which is why this raises the fixture's fidelity rather than contorting it.
 		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/usb/external-8tb-offsite-rotation/quince-backups-and-archives-2026-q3", Backend: "unknown",
-		Default: false, Reachable: false,
+		// AN UNREACHABLE STORAGE CAN BE THE DEFAULT, and the daemon allows it — being away is a fact
+		// about the medium, not about the declaration. So this reads the same source as the entry
+		// above rather than being pinned false, which would have made re-designation work in one
+		// direction only.
+		Default: defaultName == "shuttle", Reachable: false,
 		UnreachableCode: &code, UnreachableReason: &reason,
 		BackupCount: tally.backups[demoStorageShuttle],
 		DeviceCount: len(tally.devices[demoStorageShuttle]),

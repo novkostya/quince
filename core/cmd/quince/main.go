@@ -195,6 +195,24 @@ func serve(args []string) error {
 			return err
 		}
 		prov := demo.NewProvider(eventBus, log)
+		// THE DEMO'S `default` IS READ FROM THE DECLARED CONFIG, NOT FABRICATED (quince#1036).
+		//
+		// `POST /api/config/storage/{name}/default` answered 200 and wrote the document, and
+		// `GET /api/storages` went on reporting a literal — so the badge did not move and the button
+		// did not go away. Indistinguishable from a no-op on the surface a reviewer clicks, and an
+		// e2e written against it would have been green whatever the daemon did, which is the shape
+		// quince#661 already cost this file once.
+		//
+		// AFTER configureDemo, which seeds these storages into the document, so the list and the
+		// declaration agree on the FIRST request rather than converging later.
+		prov.SetDefaultStorageName(func() string {
+			for _, e := range declaredStorages(cfgSvc.Current().Storage) {
+				if e.Default {
+					return e.Name
+				}
+			}
+			return ""
+		})
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
 		storages = prov
