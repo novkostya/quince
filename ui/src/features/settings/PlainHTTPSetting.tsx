@@ -14,13 +14,12 @@ import { healthKey, useInsecureTransportAllowed } from "@/lib/health";
 
 // THE WAY BACK, AND IT IS WHAT MAKES THE BANNER'S CONTROL SAFE TO OFFER — quince#1069.
 //
-// The Operator built the banner's *Turn this off*, used it, and found the hole in one move: with the
-// setting off and a plain-http address, `POST /api/auth/login` answers 426, and
-// `POST /api/config/insecure-transport` answers 409 to anybody without a session. The first-run
-// confirm on `/onboarding/https` does not render either — it is `needs_setup` only, deliberately,
-// because in `needs_login` an unauthenticated control that RELAXES transport is a downgrade
-// primitive (quince#908 §3). A user who turns it off and then loses their session is back to editing
-// `config.yml` over ssh, which is the dead end quince#908 exists to remove.
+// With the setting off and a plain-http address every door is shut at once: `POST /api/auth/login`
+// answers 426, `POST /api/config/insecure-transport` answers 409 to anybody without a session, and
+// the first-run confirm on `/onboarding/https` renders only in `needs_setup` — because in
+// `needs_login` an unauthenticated control that RELAXES transport is the downgrade primitive
+// quince#908 §3 refuses. Without a control behind a session, a reader who turns the setting off and
+// then loses that session is editing `config.yml` over ssh: the dead end quince#908 exists to remove.
 //
 // SO THE REVERSAL LIVES BEHIND A SESSION, WHERE IT IS SAFE. An admin who is still signed in can turn
 // it back on here; a stranger on the LAN cannot. That is the same asymmetry the pre-auth window
