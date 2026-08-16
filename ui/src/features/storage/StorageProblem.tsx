@@ -37,10 +37,13 @@ export function StorageProblem({
       data-testid="storage-detail-reason"
       className="mt-3 flex flex-wrap items-center gap-2 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
     >
-      {/* THE DAEMON'S OWN SENTENCE, never a code mapped to client copy. `unreachable_code`'s
-          declared values are wrong today (quince#569 — the daemon also emits `unreachable` and
-          `corrupt_marker`, neither in the enum), so a client that switched on it would silently
-          default for the commonest failure there is, an unmounted disk. */}
+      {/* THE DAEMON'S OWN SENTENCE, never a code mapped to client copy — it names WHICH path and
+          WHICH marker, which no client-side copy for a code can.
+
+          THE OLD REASON FOR THIS IS SPENT (quince#569, fixed). It read "`unreachable_code`'s declared
+          values are wrong today", which was true while the daemon stringified its internal enum; it
+          now translates at the boundary. Rendering the prose is still right, but on the argument
+          above rather than because the code could not be trusted. */}
       <span className="min-w-0 break-words">{storage.unreachable_reason}</span>
       {/* RE-CHECK SITS ON THE ROW THAT STATES THE PROBLEM (quince#459): the Operator's ruling is
           "plug the disk in and press the button", and this is where the sentence describing the

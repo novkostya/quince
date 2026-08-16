@@ -563,9 +563,13 @@ func resolveSlot(ctx context.Context, e config.StorageEntry,
 		// A STATE, NOT AN EXIT. The Reason carries observation, consequence and remedy (preflight's
 		// idiom), and it is the only thing that can tell a user WHICH disk — so it is kept verbatim
 		// rather than replaced with a category.
+		//
+		// TRANSLATED, NOT STRINGIFIED (quince#569). This was `string(state.Resolution)`, which welded
+		// the internal enum to the wire and shipped `unreachable` where the contract, wire/objects.go
+		// and the TS union all say `path_unreachable`.
 		return storage.Slot{
 			StorageID: state.StorageID, Name: e.Name, Root: e.Path, Reachable: false,
-			UnreachableCode: string(state.Resolution), UnreachableReason: state.Reason,
+			UnreachableCode: wireUnreachableCode(state.Resolution, e.Name, log), UnreachableReason: state.Reason,
 		}
 	}
 	if stBackend == nil {
@@ -616,6 +620,46 @@ func resolveSlot(ctx context.Context, e config.StorageEntry,
 		StorageID: state.StorageID, Name: e.Name, Root: e.Path,
 		Backend: stBackend, BackendName: backendName, Reachable: true,
 	}
+}
+
+// wireUnreachableCode translates an internal Resolution into the wire's `unreachable_code`.
+//
+// ARCHITECT RULING, 2026-08-02 (quince#569): MAP AT THE BOUNDARY. The two vocabularies stay
+// separate on purpose, and the reason is what the alternative does to the NEXT state somebody adds:
+// stringifying the enum makes every future internal value a wire value by accident — no diff
+// touching contracts.md, no reviewer prompted to ask, a contract change nobody decided. Mapping
+// makes the omission loud instead.
+//
+// THE DEFAULT IS THE WHOLE POINT AND IT MUST NEVER BE PLAUSIBLE. The ruling's one condition, in its
+// own words: *"never a silent fallthrough to `""` or to `path_unreachable`. An unmapped internal
+// state should produce a logged error and an obviously-wrong wire value, not a plausible one."* A
+// default that quietly picks the nearest neighbour reproduces quince#569 with an extra layer — a UI
+// would render a confident wrong remedy instead of failing to match.
+//
+// `unmapped` IS DECLARED IN contracts.md rather than left undeclared, which is a rung-local call and
+// not part of the ruling. An undeclared sentinel is invisible to a client exactly like the two codes
+// this fixes were; declaring it as *never expected, means a quince bug* lets a client show something
+// honest, and CLAUDE.md's `no silent caps or fallbacks` points the same way. Say so if you disagree —
+// it is one line in three files.
+//
+// ONLY THE NON-OK RESOLUTIONS ARE LISTED. `created` and `opened` satisfy Resolution.OK(), so they
+// never reach a caller of this function; a switch arm for them would be unreachable code asserting
+// something false.
+func wireUnreachableCode(r storage.Resolution, name string, log *slog.Logger) string {
+	switch r {
+	case storage.ResolutionUnreachable:
+		return "path_unreachable"
+	case storage.ResolutionMissingMedium:
+		return "missing_medium"
+	case storage.ResolutionBackendMismatch:
+		return "backend_mismatch"
+	case storage.ResolutionCorruptMarker:
+		return "corrupt_marker"
+	}
+	log.Error("storage: no wire code for this resolution — the wire vocabulary is missing a value "+
+		"the daemon can reach; declare it in docs/contracts.md, wire/objects.go and ui/src/lib/types.ts",
+		"storage", name, "resolution", string(r))
+	return "unmapped"
 }
 
 // declaredStorages returns every declared storage, DEFAULT FIRST.

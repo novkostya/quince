@@ -301,7 +301,24 @@ export interface Storage {
   reachable: boolean;
   // The code is what to branch on; the reason is what to show. The daemon's sentence carries what
   // the client cannot know — which path, which marker.
-  unreachable_code: "path_unreachable" | "missing_medium" | "backend_mismatch" | null;
+  //
+  // `corrupt_marker` IS NOT A FLAVOUR OF `path_unreachable` (quince#569, ruled 2026-08-02). The disk
+  // is PRESENT and READABLE; quince cannot confirm WHICH storage it is. The remedies diverge, which
+  // is what makes the fourth value load-bearing rather than pedantic — `path_unreachable` means
+  // *plug it in*, and `corrupt_marker` means something that is not obvious and is DANGEROUS to
+  // guess at, because recreating a marker wrongly attaches the wrong storage. A card must not offer
+  // a one-click remedy here.
+  //
+  // `unmapped` should never arrive. It means the daemon reached an internal state with no declared
+  // wire code — a quince bug, deliberately obvious rather than a plausible neighbour, so it fails
+  // visibly instead of rendering a confident wrong remedy.
+  unreachable_code:
+    | "path_unreachable"
+    | "missing_medium"
+    | "backend_mismatch"
+    | "corrupt_marker"
+    | "unmapped"
+    | null;
   unreachable_reason: string | null;
   // Present only when the list was fetched with `?udid=`. null means "not asked", NOT "no".
   will_be_full: boolean | null;

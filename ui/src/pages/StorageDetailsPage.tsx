@@ -128,10 +128,14 @@ export function StorageDetailsPage() {
 
       {/* THE STATUS HEADER — quince-storage.json rendered, which is what makes a storage an object.
           It branches on `reachable` and falls back to the daemon's own prose rather than mapping
-          `unreachable_code` to a remedy of its own: the code's declared values are WRONG today
-          (quince#569 — the daemon also emits `unreachable` and `corrupt_marker`, neither in the
-          enum), so a client that switched on it would silently default for the commonest failure
-          there is, an unmounted disk. The reason always says what happened; the code does not. */}
+          `unreachable_code` to a remedy of its own. The reason always says WHICH path and WHICH
+          marker; a code cannot.
+
+          THIS SAID "the code's declared values are WRONG today" AND THAT IS FIXED (quince#569): the
+          daemon translates at the boundary now and emits only declared values, so switching on the
+          code is no longer unsafe — it is simply not what this header does. If a later rung does
+          branch here, the ruling carries an obligation with it: `corrupt_marker` MUST NOT be given a
+          one-click remedy, because recreating a marker wrongly attaches the WRONG storage. */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {storage.reachable ? (
           <Badge tone="ok">connected</Badge>

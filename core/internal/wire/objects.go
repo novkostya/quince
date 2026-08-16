@@ -262,7 +262,11 @@ type Storage struct {
 	// the disk in* versus *this path is readable but it is not your backup medium*. A client
 	// mapping the code to its own copy cannot include what the daemon knows and it does not:
 	// which path, which marker.
-	UnreachableCode   *string `json:"unreachable_code"`   // path_unreachable | missing_medium | backend_mismatch
+	// FOUR CODES SINCE quince#569, and the wire vocabulary is deliberately NOT the daemon's internal
+	// `storage.Resolution` enum — `live.go`'s wireUnreachableCode translates, so a new internal state
+	// cannot reach a client without somebody declaring it here. `unmapped` is what an undeclared one
+	// produces: never expected, and it means quince has a state it failed to map.
+	UnreachableCode   *string `json:"unreachable_code"`   // path_unreachable | missing_medium | backend_mismatch | corrupt_marker | unmapped
 	UnreachableReason *string `json:"unreachable_reason"` //
 
 	// WillBeFull answers "will the next backup to this storage be a full transfer" for ONE device,
