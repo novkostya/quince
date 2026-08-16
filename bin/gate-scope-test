@@ -39,7 +39,7 @@ mkdir -p "$R"
 git init -q "$R"
 git -C "$R" symbolic-ref HEAD refs/heads/main
 mkdir -p "$R/core" "$R/ui" "$R/bin" "$R/docs" "$R/deploy"
-for f in core/a.go ui/a.ts bin/a docs/a.md deploy/Dockerfile versions.env Makefile; do
+for f in core/a.go ui/a.ts bin/a docs/a.md deploy/Dockerfile .dockerignore versions.env Makefile; do
 	printf 'x\n' >"$R/$f"
 done
 cp "$GS" "$R/bin/gate-scope"
@@ -144,7 +144,12 @@ done
 # --- 5. THE SHARED INPUTS REACH EVERY GATE -----------------------------------------------------
 # versions.env pins every toolchain image, so a change to it can break a gate whose own tree is
 # untouched. If this ever stops being true the saving is bought with a real hole.
-for f in versions.env deploy/Dockerfile Makefile; do
+#
+# `.dockerignore` joined this list with quince#1031, and part 8 below is what FOUND that it had to:
+# adding the file left it unclaimed, so an edit to it would have run gates-sh alone — a change to
+# what every image build can see, gated by a shell linter. This loop is the positive half of the
+# same claim; part 8 only says the path is spoken for.
+for f in versions.env deploy/Dockerfile .dockerignore Makefile; do
 	git -C "$R" checkout -q -B "t-shared" main
 	printf 'more\n' >>"$R/$f"
 	git -C "$R" commit -qam "touch $f"
@@ -204,7 +209,11 @@ fi
 # accepted rather than overlooked — see deploy/demo.md, which says the same thing where an operator
 # will meet it.
 PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml'
-product_covered='core ui deploy versions.env Makefile'
+# Mirrors gate-scope's own coverage: the three directories plus SHARED. `.dockerignore` is here
+# because it is in SHARED (quince#1031) — NOT because listing it here makes the failure go away.
+# Silencing this check without claiming the path in gate-scope is the one wrong fix available, and
+# it produces exactly what the message warns about: a file gated by gates-sh alone.
+product_covered='core ui deploy versions.env .dockerignore Makefile'
 uncovered=''
 for top in $(git ls-files | awk -F/ '{print $1}' | sort -u); do
 	found=no
