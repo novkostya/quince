@@ -135,8 +135,24 @@ reference is to the *socket path* or to the client library `libusbmuxd`, which s
 2026-08-16, on keeping the daemon binary: *"I'd say no, why would that even be needed?"*
 
 **The runtime deps that arrived transitively must become explicit.** The Dockerfile's own comment
-says *"libssl3/libcrypto3 come transitively via usbmuxd"*. With the package gone they would survive
-only because `python3` also requires `libssl3` — accidental in exactly the way D7's finding below was.
+says *"libssl3/libcrypto3 come transitively via usbmuxd"*. **That comment is wrong, and so was this
+paragraph's own reading of it** — corrected here because quince#268 removed `python3`, which is the
+backstop the original sentence named. Measured in the built image with `python3` already gone
+(`apk info --rdepends libssl3`):
+
+```
+libssl3-3.5.7-r0 is required by:
+libapk-3.0.6-r0  libcurl-8.21.0-r0  ssl_client-1.37.0-r31  libimobiledevice-1.4.0-r0
+```
+
+`usbmuxd` is **not** in that list, and neither was `python3`. Two of the four — `libapk` and
+`ssl_client` — are the Alpine base itself, and `libimobiledevice` is quince's own hard dependency.
+**So dropping `usbmuxd` cannot take `libssl3` with it**, and the accident this paragraph was
+guarding against does not exist.
+
+Whether D1 still wants them named explicitly is **this rung's call, not quince#268's** — the
+argument from *"a runtime dep should be declared rather than inherited"* survives the measurement
+even though the argument from *"it would otherwise vanish"* does not.
 
 **Not in this rung:** a `quince-muxer` image. It is recommended for the Wi-Fi case and is **not
 required** for a working deployment — a host `usbmuxd` is a legitimate answer, as is a sidecar, as is
