@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- THE CANVAS IS WHITE UNTIL SOMETHING SAYS OTHERWISE, and the stylesheet is too late to be
+         that something (quince#1081). This is the FIRST line of the page that mentions colour, and
+         it is here rather than lower down because everything below it can only run afterwards.
+
+         `dark light` does not force dark — it declares which schemes the page supports, and the UA
+         paints its canvas with whichever one the reader actually prefers. A dark-mode reader gets a
+         dark canvas from the first frame, before any CSS, before any script. -->
+    <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0b0d10" />
     <!-- Home-screen / standalone behaviour (qn.6a soak). Without these iOS runs an added-to-home-screen
          site in a quirky web-clip mode with an off geometry (the content-offset bug); declaring
@@ -44,6 +52,20 @@
            behaviour — a light first paint — rather than breaking the page. */
       }
     </script>
+    <!-- AND THE CANVAS AGAIN, NOW THAT THE CLASS IS KNOWN (quince#1081). The meta above follows the
+         READER's preference; this follows the CHOSEN theme, which are different whenever someone has
+         overridden it. Keyed on the class the script just set, so it is already correct here and it
+         keeps tracking `.dark` for free when the theme changes at runtime — an inline style attribute
+         written by JS would have to be kept in sync by hand.
+
+         THESE TWO HEX VALUES ARE DUPLICATED FROM tokens.css, AND THE DUPLICATION IS THE POINT rather
+         than an oversight: they are needed BEFORE the file that defines them can be fetched, which no
+         import can solve. They are the one pair a reader must change in two places — `--bg` and
+         `.dark --bg`. Nothing else about the palette belongs here. -->
+    <style>
+      :root { background: #f6f7f8; }
+      :root.dark { background: #0b0d10; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
