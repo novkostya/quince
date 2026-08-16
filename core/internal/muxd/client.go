@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"howett.net/plist"
+
+	"github.com/novkostya/quince/core/internal/muxaddr"
 )
 
 // Transport names (quince's per-transport presence keys, contracts §2). The muxer's
@@ -136,16 +138,18 @@ func listen(ctx context.Context, conn io.ReadWriter, log *slog.Logger, emit func
 	}
 }
 
-// Client maintains a Listen connection to one muxer socket, reconnecting with capped
-// exponential backoff. addr is a Unix socket path (usbmuxd) or a host:port (netmuxd TCP);
-// the form selects the dial network.
+// Client maintains a Listen connection to one muxer endpoint, reconnecting with capped
+// exponential backoff.
 type Client struct {
-	addr string
-	log  *slog.Logger
+	ep  muxaddr.Endpoint
+	log *slog.Logger
 }
 
-// NewClient returns a Client for the given muxer address.
-func NewClient(addr string, log *slog.Logger) *Client { return &Client{addr: addr, log: log} }
+// NewClient returns a Client for an ALREADY-PARSED endpoint. It takes a muxaddr.Endpoint rather
+// than a string so the grammar is decided once, at startup, where a bad address can refuse the
+// process — rather than per-dial, where it could only be logged about once a second forever
+// (qn.6p D3). Which network to dial is the endpoint's answer, not this package's.
+func NewClient(ep muxaddr.Endpoint, log *slog.Logger) *Client { return &Client{ep: ep, log: log} }
 
 const (
 	dialTimeout    = 5 * time.Second
@@ -167,7 +171,7 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 		}
 		conn, err := c.dial(ctx)
 		if err != nil {
-			c.log.Warn("muxd: dial failed", "addr", c.addr, "error", err)
+			c.log.Warn("muxd: dial failed", "addr", c.ep, "error", err)
 			if !sleep(ctx, delay) {
 				return
 			}
@@ -181,7 +185,7 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 		if ctx.Err() != nil {
 			return
 		}
-		c.log.Warn("muxd: listen ended, reconnecting", "addr", c.addr, "error", err)
+		c.log.Warn("muxd: listen ended, reconnecting", "addr", c.ep, "error", err)
 		if !sleep(ctx, delay) {
 			return
 		}
@@ -189,15 +193,13 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 	}
 }
 
-// dial connects to the muxer: a leading "/" (or no ":") means a Unix socket path, otherwise
-// a TCP host:port.
+// dial connects to the muxer. The network/address split is the endpoint's, decided once at
+// parse time — this used to re-derive it from a leading "/", which is the half of quince#897
+// item 1 that made `UNIX:/run/mux/usbmuxd` dial TCP.
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
-	network := "tcp"
-	if strings.HasPrefix(c.addr, "/") {
-		network = "unix"
-	}
+	network, address := c.ep.DialArgs()
 	d := net.Dialer{Timeout: dialTimeout}
-	return d.DialContext(ctx, network, c.addr)
+	return d.DialContext(ctx, network, address)
 }
 
 func nextBackoff(d time.Duration) time.Duration {

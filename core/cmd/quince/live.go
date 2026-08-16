@@ -14,6 +14,7 @@ import (
 	"github.com/novkostya/quince/core/internal/deviceops"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/id"
+	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
@@ -52,21 +53,36 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	go group.Run(ctx)
 	ls.muxer = muxerHealth{group}
 
-	// Live device tracking (qn.2): one muxd client per configured muxer socket feeds the registry.
+	// THE MUXER GRAMMAR IS PARSED ONCE, HERE, AND A BAD ADDRESS REFUSES THE PROCESS (qn.6p D3).
+	// Deliberately NOT decided in config.Validate: Load() DISCARDS a config that fails Validate and
+	// falls back to Default(), so a typo here would start quince on the DEFAULT muxer addresses and
+	// dial a daemon the operator never named — the silent downgrade the `tls:` block refuses for
+	// exactly this reason. Validate still checks well-formedness, which is what rejects a bad PUT;
+	// this is what stops a bad FILE from being quietly ignored.
+	usbEP, err := muxaddr.Parse(dcfg.UsbmuxdSocket)
+	if err != nil {
+		return nil, fmt.Errorf("devices.usbmuxd_socket: %w", err)
+	}
+	wifiEP, err := muxaddr.Parse(dcfg.NetmuxdAddr)
+	if err != nil {
+		return nil, fmt.Errorf("devices.netmuxd_addr: %w", err)
+	}
+
+	// Live device tracking (qn.2): one muxd client per configured muxer endpoint feeds the registry.
 	reg := device.NewRegistry(eventBus, log)
-	for _, addr := range []string{dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr} {
-		if addr == "" {
+	for _, ep := range []muxaddr.Endpoint{usbEP, wifiEP} {
+		if ep.IsZero() {
 			continue
 		}
-		client := muxd.NewClient(addr, log)
-		sink := reg.Sink(addr)
+		client := muxd.NewClient(ep, log)
+		sink := reg.Sink(ep.String())
 		go client.Run(ctx, sink)
 	}
 	ls.devices = reg
-	log.Info("device registry watching muxers", "usbmuxd", dcfg.UsbmuxdSocket, "netmuxd", dcfg.NetmuxdAddr)
+	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP)
 
 	// Device ops (qn.3): pair/validate/info + encryption; enrichment overlays lockdown identity.
-	tools := deviceops.NewTools(dcfg.UsbmuxdSocket, dcfg.NetmuxdAddr, log)
+	tools := deviceops.NewTools(usbEP, wifiEP, log)
 	lockdown := deviceops.NewLockdownStore(bootstrap.Data, lockdownSystemDir, log)
 	lockdown.Restore()
 	opsMgr := deviceops.NewManager(ctx, tools, reg, eventBus, st, log)
@@ -145,7 +161,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 		Prober: opsMgr, Announcer: reg,
 		Bus: eventBus, Log: log, Config: ecfg, Backups: engineBackupsRoot, NewID: id.New,
 		Tool: backup.ToolConfig{
-			Bin: "idevicebackup2", UsbmuxdSocket: dcfg.UsbmuxdSocket, NetmuxdAddr: dcfg.NetmuxdAddr,
+			Bin: "idevicebackup2", Usbmuxd: usbEP, Netmuxd: wifiEP,
 		},
 	})
 	if err := eng.Reconcile(); err != nil {

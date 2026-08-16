@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/novkostya/quince/core/internal/bus"
+	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -78,11 +79,14 @@ type Options struct {
 // (Seed's return), always on the storage filesystem, so idevicebackup2's free-space statfs is
 // truthful by construction (qn.5b dropped the old symlink stub; qn.4c lab finding, bug 28b97de).
 type ToolConfig struct {
-	Bin           string   // "" → "idevicebackup2"
-	ArgPrefix     []string // test-only leading args (-test.run=… "--")
-	Env           []string // test-only extra child env (the fake harness knobs)
-	UsbmuxdSocket string
-	NetmuxdAddr   string
+	Bin       string   // "" → "idevicebackup2"
+	ArgPrefix []string // test-only leading args (-test.run=… "--")
+	Env       []string // test-only extra child env (the fake harness knobs)
+	// PARSED endpoints, not config strings (qn.6p D3): the grammar is decided once at startup,
+	// so a backup child cannot be handed a spelling libusbmuxd reads differently from the
+	// presence client that is talking to the same daemon.
+	Usbmuxd muxaddr.Endpoint
+	Netmuxd muxaddr.Endpoint
 }
 
 // Engine runs backups. One goroutine per job; a global per-UDID single-flight (never two jobs for
@@ -193,7 +197,7 @@ func New(o Options) *Engine {
 			preferredTransport: o.Config.PreferredTransport,
 		},
 		tool: &tool{bin: o.Tool.Bin, argPrefix: o.Tool.ArgPrefix, env: o.Tool.Env,
-			usbmuxd: o.Tool.UsbmuxdSocket, netmuxd: o.Tool.NetmuxdAddr},
+			usbmuxd: o.Tool.Usbmuxd, netmuxd: o.Tool.Netmuxd},
 		running: map[string]*liveJob{}, logs: newLogStore(),
 	}
 }

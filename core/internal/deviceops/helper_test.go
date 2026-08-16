@@ -11,7 +11,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novkostya/quince/core/internal/muxaddr"
 )
+
+// mustEP parses a muxer address the way production does. Tests go through the REAL grammar
+// rather than hand-building an Endpoint, so a fixture cannot pass while the parser `serve`
+// depends on is wrong — which is the shape of quince#897 item 1. It panics rather than taking a
+// *testing.T because its callers pass literals and one of them has no T in hand.
+func mustEP(s string) muxaddr.Endpoint {
+	ep, err := muxaddr.Parse(s)
+	if err != nil {
+		panic("muxaddr.Parse(" + s + "): " + err.Error())
+	}
+	return ep
+}
 
 // Fake-CLI harness (the muxsup GO_WANT_HELPER_PROCESS discipline): every wrapper points at
 // this test binary, re-exec'd via -test.run=TestHelperProcess, so the libimobiledevice CLIs
@@ -25,7 +39,7 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 // fakeTools returns a Tools whose three CLIs are the test binary, with the given extra child
 // env selecting fake behaviour (DEVICEOPS_FAKE=…, DEVICEOPS_* knobs).
 func fakeTools(env ...string) *Tools {
-	tl := NewTools("/var/run/usbmuxd", "127.0.0.1:27015", discard())
+	tl := NewTools(mustEP("/var/run/usbmuxd"), mustEP("127.0.0.1:27015"), discard())
 	tl.Idevicepair = os.Args[0]
 	tl.Ideviceinfo = os.Args[0]
 	tl.Idevicebackup2 = os.Args[0]

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -22,6 +23,7 @@ func Validate(c Config) []wire.ConfigError {
 	}
 	validateStorages(c.Storage, add)
 	validateTLS(c.TLS, add)
+	validateDevices(c.Devices, add)
 	// `>= 0`, NOT `> 0`, and the difference IS the feature: 0 is how the schedule is turned off
 	// (qn.6i). A negative is meaningless rather than meaningful-and-off, so it is refused.
 	if c.Reconcile.IntervalMinutes < 0 {
@@ -37,6 +39,30 @@ func Validate(c Config) []wire.ConfigError {
 		add("ui.theme", enumMsg(c.UI.Theme, "system", "light", "dark"))
 	}
 	return errs
+}
+
+// validateDevices checks that each muxer address is WELL-FORMED and nothing else (qn.6p D3) —
+// the same division validateTLS draws, for the same reason.
+//
+// WELL-FORMEDNESS ONLY, and the boundary is load-bearing. Whether anything ANSWERS at the address
+// is not checked here: an external muxer may legitimately be down at the moment a config is
+// written, and refusing the write would make quince unconfigurable exactly when an operator is
+// trying to fix it. Reachability is reported by /api/health, which probes.
+//
+// THIS IS WHAT REJECTS A BAD `PUT`, and it is deliberately not the only guard. Load() DISCARDS a
+// config that fails Validate and falls back to Default(), so on the FILE path an unparseable
+// address would silently become the default muxer addresses. buildLiveStack therefore parses
+// again and refuses to start. Two checks, because they catch two different failures: this one
+// answers the user typing into the UI, that one stops a typo in config.yml being ignored.
+func validateDevices(d DevicesConfig, add func(path, msg string)) {
+	for _, f := range []struct{ path, value string }{
+		{"devices.usbmuxd_socket", d.UsbmuxdSocket},
+		{"devices.netmuxd_addr", d.NetmuxdAddr},
+	} {
+		if _, err := muxaddr.Parse(f.value); err != nil {
+			add(f.path, err.Error())
+		}
+	}
 }
 
 // validateTLS checks the `tls:` pair for well-formedness and nothing else (qn.6f story 3).
