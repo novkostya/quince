@@ -17,7 +17,7 @@
                     │ (Go core)│             │ idevicepair etc. │            (mounted) │
                     │          │   spawns    ├──────────────────┤                      │
                     │  event   │────────────►│ quince-vault    │──reads───► /backups  │
-                    │  bus     │  stdio RPC  │ (Python sidecar) │──writes──► /cache    │
+                    │  bus     │  stdio RPC  │ (vault sidecar)  │──writes──► /cache    │
                     └────┬─────┘             └──────────────────┘                      │
                          │ REST + WebSocket                                            │
                          ▼                                                             │
@@ -863,7 +863,7 @@ this.
 route as well as the endpoint, and what the page renders to a visitor who is not yet authenticated —
 the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 1 it is.
 
-## 7. Vault: lazy, session-scoped reading (Python today, swappable seam)
+## 7. Vault: lazy, session-scoped reading behind a swappable seam
 
 - **Lazy is the model** (Operator decision): backup content is read only inside an
   unlocked session, from live decrypted copies in session scratch. Nothing persistent is
@@ -905,10 +905,10 @@ the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 
   `fetchall()` the Manifest, cap thumbnail workers (default 2, config); the vault process
   dies at session lock — RSS returns to zero between sessions.
 - **Swap-ready seam** (Operator decision): the core depends on a Go `vault.Vault`
-  interface; the stdio-RPC Python process is one implementation. The RPC contract +
-  golden conformance suite against fixture backups define correctness; a future all-Go
-  vault (decryption ported as a separate side project) is a drop-in second
-  implementation that must pass the same suite.
+  interface, and a stdio-RPC child process is one implementation of it. The RPC contract +
+  golden conformance suite against fixture backups define correctness; any other
+  implementation — including an in-process one — is a drop-in that must pass the same
+  suite. Which of the two qn.8 builds is open (stack D4).
 
 ## 8. Frontend shape
 

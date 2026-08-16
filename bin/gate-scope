@@ -51,7 +51,7 @@ usage: gate-scope --list [<git-range>]
                A range that resolves to NO changed files is exit 2, never 3: that is what you
                get before committing, and a scope check on nothing says nothing.
 
-  gates: gates-go · gates-vault · gates-ui · gates-sh · image · e2e
+  gates: gates-go · gates-ui · gates-sh · image · e2e
 
   exit 0 needed · 3 not needed · 2 could not determine (the caller must run it anyway)
 EOF
@@ -65,7 +65,7 @@ die() {
 }
 
 # The gate ladder, in `gates`' own order. `gates-sh` is here and is never filtered — see the header.
-ALL_GATES='gates-go gates-vault gates-ui gates-sh'
+ALL_GATES='gates-go gates-ui gates-sh'
 
 # cannot_answer — say why, then take the SAFE direction for the mode, and exit 2.
 #
@@ -87,8 +87,8 @@ cannot_answer() {
 }
 
 # WHAT EACH GATE COVERS, derived from where the gate actually runs rather than invented: the
-# Makefile mounts /src/core for gates-go, /src/vault for gates-vault, /src/ui for gates-ui. The
-# shared entries are the inputs that change what the gate BUILDS WITH — `versions.env` pins every
+# Makefile mounts /src/core for gates-go and /src/ui for gates-ui. The shared entries are the
+# inputs that change what the gate BUILDS WITH — `versions.env` pins every
 # toolchain image, `deploy/Dockerfile` is the stage those images come from, and the `Makefile` is
 # the recipe itself. A change to any of them can break a gate whose own tree is untouched, so they
 # belong to all of them.
@@ -97,12 +97,11 @@ SHARED='versions.env deploy/Dockerfile Makefile'
 covers() {
 	case "$1" in
 	gates-go) printf 'core/ %s\n' "$SHARED" ;;
-	gates-vault) printf 'vault/ %s\n' "$SHARED" ;;
 	gates-ui) printf 'ui/ %s\n' "$SHARED" ;;
 	# `image` builds the product image from the whole product tree plus deploy/.
-	image) printf 'core/ ui/ vault/ deploy/ %s\n' "$SHARED" ;;
+	image) printf 'core/ ui/ deploy/ %s\n' "$SHARED" ;;
 	# `e2e` builds that same image and drives the UI against it, so its inputs are image's.
-	e2e) printf 'core/ ui/ vault/ deploy/ %s\n' "$SHARED" ;;
+	e2e) printf 'core/ ui/ deploy/ %s\n' "$SHARED" ;;
 	# Unconditional. Printed as `.` — every path is under it — so the answer is "always" rather
 	# than a list somebody might trim.
 	gates-sh) printf '.\n' ;;

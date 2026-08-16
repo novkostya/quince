@@ -219,7 +219,7 @@ every session box, so reaching for it costs a cycle to an exit `127` — three s
 afternoon, on two seats, and once the defensive `python3 … || { sed … }` form failed *differently*
 and cost more than the original. **Use `jq` for JSON, and do not assume GNU flags**: `${PIPESTATUS[0]}`,
 `ls --time-style` and `find -newermt` all work in CI and all fail here. Python is absent from **the
-box** deliberately — it *is* in the release image, for the vault — and BusyBox is what that image
+box** deliberately, and from the release image too — and BusyBox is what that image
 ships as its shell, so the fix is never to install something on the host, it is to write the
 portable form. Full statement, with what was measured and the two traps quince#246 got wrong, in
 [`deploy/dev.md`](../../../deploy/dev.md), *What a session box actually is*.

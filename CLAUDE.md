@@ -1,8 +1,9 @@
 # quince — agent entry point
 
-Self-hosted iPhone/iPad backup server. Go core daemon + swappable vault sidecar (Python
-today, reusing OSS encrypted-backup decryption; lazy session-scoped reads, no persistent
-index) + React/TS UI (Tailwind v4 tokens, vendored shadcn-style components, Zustand;
+Self-hosted iPhone/iPad backup server. Go core daemon + a swappable vault behind the Go
+`vault.Vault` seam (quince's own `ios-backup-crypt` / `ios-backup-parser` libraries; lazy
+session-scoped reads, no persistent index; **unbuilt — qn.8**, and its process model is
+open, stack D4) + React/TS UI (Tailwind v4 tokens, vendored shadcn-style components, Zustand;
 device-centric IA — Devices + Settings only), REST + one WebSocket, SQLite app DB,
 never-mutate-committed versioned storage — **one lifecycle across all backends since
 qn.5b** (design §5): `idevicebackup2` writes only into a per-job `working/<udid>` seeded

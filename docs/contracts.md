@@ -2583,9 +2583,12 @@ are never logged). The vault is spawned with its **session scratch root as its o
 writable directory**; no filesystem destination ever crosses the RPC boundary — the
 vault writes only under its root and returns opaque handles with scratch-relative paths.
 The version dir is passed read-only. **This protocol is the replaceable seam**: the core
-talks to a `vault.Vault` Go interface; any implementation (today's Python process, a
-future all-Go port) must pass the golden conformance suite (`vault/conformance/`) —
-recorded request/response pairs against fixture backups — before it can ship.
+talks to a `vault.Vault` Go interface; any implementation of it, in-process or over this
+RPC, must pass the golden conformance suite — recorded request/response pairs against
+fixture backups — before it can ship. **That suite does not exist**
+([quince#184](https://github.com/novkostya/quince/issues/184)); it is authored alongside
+the implementation at qn.8, and this paragraph names no path for it because there is no
+`vault/` tree to put one in (stack D11).
 
 ```
 initialize  {password, backup_path}          → {protocol_version, device_name,

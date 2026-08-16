@@ -1,6 +1,6 @@
 # quince — the one entrypoint. CI calls only these targets (no logic in YAML).
 #
-# The dev host is a PURE CONTAINER HOST: no Go/Node/Python toolchains are installed on
+# The dev host is a PURE CONTAINER HOST: no Go or Node toolchains are installed on
 # it. Every gate runs inside a pinned toolchain container built from the production
 # Dockerfile's own build stages, so dev / CI / release compile with identical toolchains.
 # All version + image pins live in versions.env (the single source of truth).
@@ -38,9 +38,9 @@ NS          := $(if $(RUNNER),-$(RUNNER),)
 # runtime storage). They are what keep containerized gates fast.
 #
 # NOT NAMESPACED PER RUNNER (quince#45), and the reason is not "they are caches" — E2E_MODULES is
-# cache-shaped too and IS namespaced. It is that all four are safe for CONCURRENT WRITERS by
-# construction: Go's build and module caches lock, and the pnpm and uv stores are content-addressed,
-# so two runners writing the same entry write the same bytes. A materialised `node_modules` tree is
+# cache-shaped too and IS namespaced. It is that all three are safe for CONCURRENT WRITERS by
+# construction: Go's build and module caches lock, and the pnpm store is content-addressed, so
+# two runners writing the same entry write the same bytes. A materialised `node_modules` tree is
 # none of those things — it is one checkout's dependency state, and a second writer corrupts it.
 #
 # THAT PAIR IS THE POINT: `PNPM_VOL` is shared and `E2E_MODULES` is not, and both are node
@@ -59,7 +59,6 @@ NS          := $(if $(RUNNER),-$(RUNNER),)
 GO_BUILD_VOL := quince-go-build
 GO_MOD_VOL   := quince-go-mod
 PNPM_VOL     := quince-pnpm-store
-UV_VOL       := quince-uv-cache
 
 # Locally-built toolchain images (== Dockerfile build stages).
 # NOT namespaced, deliberately, and this is the distinction quince#45's inventory does not draw:
@@ -69,7 +68,6 @@ UV_VOL       := quince-uv-cache
 # them during a gate, so there is nothing to collide.
 TC_GO   := quince-toolchain-go:$(IMAGE_TAG)
 TC_NODE := quince-toolchain-node:$(IMAGE_TAG)
-TC_UV   := quince-toolchain-uv:$(IMAGE_TAG)
 
 # e2e (Playwright) plumbing: a demo app container + a runner container on a shared network.
 E2E_NET     := quince-e2e-net$(NS)
@@ -177,7 +175,6 @@ endif
 BUILD_ARGS := \
 	--build-arg GO_IMAGE=$(GO_IMAGE) \
 	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
-	--build-arg UV_IMAGE=$(UV_IMAGE) \
 	--build-arg RUST_IMAGE=$(RUST_IMAGE) \
 	--build-arg ALPINE_IMAGE=$(ALPINE_IMAGE) \
 	--build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) \
@@ -236,10 +233,9 @@ privacy-check-test: ## The privacy gate's own failure-path suite (synthetic — 
 # Toolchain images — built once from the Dockerfile stages, reused by gates.
 # ---------------------------------------------------------------------------
 .PHONY: toolchains
-toolchains: preflight ## Build the go/node/uv toolchain images from the Dockerfile
+toolchains: preflight ## Build the go/node toolchain images from the Dockerfile
 	$(RUNTIME) build $(BUILD_ARGS) --target toolchain-go   -t $(TC_GO)   -f deploy/Dockerfile .
 	$(RUNTIME) build $(BUILD_ARGS) --target toolchain-node -t $(TC_NODE) -f deploy/Dockerfile .
-	$(RUNTIME) build $(BUILD_ARGS) --target toolchain-uv   -t $(TC_UV)   -f deploy/Dockerfile .
 
 .PHONY: tc-go
 tc-go: preflight
@@ -247,9 +243,6 @@ tc-go: preflight
 .PHONY: tc-node
 tc-node: preflight
 	$(RUNTIME) build $(BUILD_ARGS) --target toolchain-node -t $(TC_NODE) -f deploy/Dockerfile .
-.PHONY: tc-uv
-tc-uv: preflight
-	$(RUNTIME) build $(BUILD_ARGS) --target toolchain-uv   -t $(TC_UV)   -f deploy/Dockerfile .
 
 # ---------------------------------------------------------------------------
 # Gate ladder.
@@ -258,7 +251,7 @@ tc-uv: preflight
 # literal list beside a literal list — `bin/gate-scope`'s own `covers()` is the other one — and
 # `gate-scope-test` asserts the two agree, because a skipped-set computed from a stale roster would
 # under-report exactly the gate nobody noticed was gone.
-ALL_GATES := gates-go gates-vault gates-ui gates-sh
+ALL_GATES := gates-go gates-ui gates-sh
 
 .PHONY: gates
 # Prerequisites come from gate-scope so the SKIPPING is visible as a dependency list rather than
@@ -332,11 +325,10 @@ SH_LIBS         := deploy/devct/lib.sh
 # fail on BusyBox — measured on a box, in `deploy/dev.md`.
 #
 # BARE ALPINE PLUS ONLY WHAT THE SUITES NEED, ruled 2026-07-30, and deliberately NOT the shipped
-# runtime image. That image also carries `python3`, `openssh-client`, `ca-certificates`, `tzdata` and
-# the libimobiledevice runtime deps — none of which a shell suite touches, and pinning to it would
+# runtime image. That image also carries `openssh-client`, `ca-certificates`, `tzdata` and the
+# libimobiledevice runtime deps — none of which a shell suite touches, and pinning to it would
 # make the gate weaker than bare Alpine for no gain. `jq`, `git` and `make` are the same
-# implementations on Alpine as anywhere, so adding them reintroduces nothing GNU; the same three are
-# what `toolchain-uv` installs.
+# implementations on Alpine as anywhere, so adding them reintroduces nothing GNU.
 #
 # 18 OF 18 PASS, measured. Bare Alpine alone is 5 of 18 — the rest need `jq` or `git`. The last
 # holdout was `home-resolution-test`, which needed `gh` on PATH and is fixed in quince#162, which is
@@ -771,17 +763,6 @@ gen-golden: tc-go ## Regenerate httpapi golden fixtures (UPDATE_GOLDEN=1)
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
 	  -e CGO_ENABLED=1 -e UPDATE_GOLDEN=1 $(TC_GO) sh -euc 'go test ./internal/httpapi/ -run TestReadEndpointsMatchGolden'
 
-.PHONY: gates-vault
-gates-vault: tc-uv ## Vault: ruff check + ruff format --check + mypy --strict + pytest
-	$(RUN) -w /src/vault \
-	  -v $(UV_VOL):/uv-cache \
-	  -e UV_CACHE_DIR=/uv-cache $(TC_UV) sh -euc '\
-	    uv sync --frozen --all-extras; \
-	    uv run ruff check .; \
-	    uv run ruff format --check .; \
-	    uv run mypy --strict src tests; \
-	    uv run pytest -q'
-
 .PHONY: gates-ui
 gates-ui: tc-node ## UI: typecheck + lint + vitest + build
 	$(RUN) -w /src/ui \
@@ -993,8 +974,8 @@ push: preflight ## Push to $(REGISTRY) (creds via env only; never committed)
 # ---------------------------------------------------------------------------
 .PHONY: clean
 clean: ## Drop cache volumes and locally-built images
-	-$(RUNTIME) volume rm $(GO_BUILD_VOL) $(GO_MOD_VOL) $(PNPM_VOL) $(UV_VOL) $(E2E_MODULES)
-	-$(RUNTIME) rmi $(TC_GO) $(TC_NODE) $(TC_UV) $(IMAGE_NAME):$(IMAGE_TAG)
+	-$(RUNTIME) volume rm $(GO_BUILD_VOL) $(GO_MOD_VOL) $(PNPM_VOL) $(E2E_MODULES)
+	-$(RUNTIME) rmi $(TC_GO) $(TC_NODE) $(IMAGE_NAME):$(IMAGE_TAG)
 
 .PHONY: forge-watch-selfcaused-test
 forge-watch-selfcaused-test: ## An act this runner performed must not wake it (quince#242)
@@ -1025,7 +1006,7 @@ storageless-smoke: image ## A REAL container from a fresh install to a working s
 # on quince#718, where `image: SKIPPED` was followed by `pull access denied for quince` and a red
 # `e2e` (quince#713).
 #
-# SKIPPING COSTS NO COVERAGE. `e2e`'s scope is `core/ ui/ vault/ deploy/` plus the shared pins — the
+# SKIPPING COSTS NO COVERAGE. `e2e`'s scope is `core/ ui/ deploy/` plus the shared pins — the
 # whole product tree — and this smoke's subject lives inside it: the startup path is `core/`, the
 # script is `deploy/`. A change that could break a fresh install therefore TRIGGERS this rather than
 # skipping it. What skips is docs, `.claude/` and `.github/`-only diffs, which cannot.

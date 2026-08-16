@@ -191,7 +191,7 @@ Four things about that block, stated rather than hidden:
   pin flyctl itself. Worth doing; it needs a SHA read at install time, so it is left to whoever
   installs the file rather than guessed here.
 - **`--remote-only` builds on fly's builder**, from `deploy/Dockerfile`, which is a heavy
-  multi-stage build (Go + Node + Rust + uv). It is the right call *today* only because there is no
+  multi-stage build (Go + Node + Rust). It is the right call *today* only because there is no
   published image to consume: `ci.yml`'s `image` job builds with **no push**. When M5's release
   pipeline publishes to ghcr, this should become `flyctl deploy --image ghcr.io/...` and the build
   disappears. Until then the demo builds a second time what CI already built once.
