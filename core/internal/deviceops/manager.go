@@ -189,7 +189,8 @@ func (m *Manager) pruneLocked() {
 // --- pairing ---
 
 // Pair starts an async pairing op. Returns (opID, 202, "") on accept, else ("", status,
-// reason): 404 unknown device, 409 not on USB (pairing is USB-only, stack D2), 400 bad udid.
+// reason): 404 unknown device, 409 not on USB (pairing is USB-only, stack D2), 409 when pairing
+// records cannot be written (qn.6p D7), 400 bad udid.
 func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 	if !validUDID(udid) {
 		return "", http.StatusBadRequest, "invalid udid"
@@ -200,6 +201,17 @@ func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 	}
 	if dev.Transports.USB == nil {
 		return "", http.StatusConflict, "pairing needs a USB connection — connect the device by cable"
+	}
+	// A PAIRING THAT CANNOT BE RECORDED IS NOT A PAIRING (qn.6p D7). Without this, idevicepair
+	// runs, the phone shows Trust, somebody walks over and taps it, and the record fails to
+	// write — so the refusal comes BEFORE the user is asked to act, carrying the reason.
+	//
+	// CHECKED HERE AND NOT ONLY IN THE UI. The wire field the UI reads is the answer from startup;
+	// this is the answer NOW, and a disk fills or a mount changes in between. The field keeps the
+	// button from being offered; this is what makes it harmless if it is.
+	if writable, why := m.PairingWritable(); !writable {
+		return "", http.StatusConflict, "pairing records cannot be written, so a pairing would not " +
+			"survive: " + why + " — if another tool owns these records, quince can still read them"
 	}
 	op, free := m.startGuardedOp("pair", udid, "Starting pairing…", func(opID string) {
 		m.runPair(opID, udid)
@@ -647,4 +659,18 @@ func encDoneMsg(action string) string {
 	default:
 		return "Done."
 	}
+}
+
+// PairingWritable reports whether a pairing record could be written right now (qn.6p D7).
+//
+// NO LOCKDOWN STORE MEANS NO CLAIM, AND THAT ARM IS `true` DELIBERATELY. The store is optional —
+// SetLockdown's own doc says nil means no persistence, which is how tests and the demo run — so
+// refusing to pair when nobody attached one would break every caller that never wanted persistence
+// in order to guard a directory that does not exist. The honest reading of nil is "quince is not
+// recording pairings here", not "quince cannot".
+func (m *Manager) PairingWritable() (bool, string) {
+	if m.lockdown == nil {
+		return true, ""
+	}
+	return m.lockdown.Writable()
 }

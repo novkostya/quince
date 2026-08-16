@@ -33,6 +33,9 @@
       "last_seen": "2026-07-17T20:00:00Z",
       "last_backup": null
     }
-  ]
+  ],
+  "pairing": {
+    "writable": true
+  }
 }
 
