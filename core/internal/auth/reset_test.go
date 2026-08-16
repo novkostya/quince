@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -164,5 +165,135 @@ func TestResetIsIdempotent(t *testing.T) {
 	}
 	if res.HadPassword || res.Passkeys != 0 || res.Sessions != 0 {
 		t.Errorf("second run reported %+v, want all-zero", res)
+	}
+}
+
+// THE PARTIAL-FAILURE PATH — quince#1032, carried out of quince#841's ruling B.
+//
+// `Reset` is DELIBERATELY NOT ATOMIC, and its comment argues the case: three statements on one local
+// file, run by hand at a console, where *"wrapping them in a transaction would make a partial failure
+// invisible rather than impossible."* The argument is sound. Every clause of it was also a testable
+// claim that nothing tested — the four tests above are all happy paths.
+//
+// THAT WAS FINE WHILE RESET WAS A BACKSTOP. quince#841 ruling B shipped passwordless and said what
+// it cost: *"quince auth reset stops being a backstop and becomes THE recovery path … its
+// partial-failure path is untested — acceptable for a backstop, less so for the only way back in."*
+//
+// THE SECOND STATEMENT IS BROKEN BY RENAMING ITS TABLE AWAY, on a second handle to the same file. The
+// driver is already registered by `store`'s blank import, so this needs no new dependency — and it
+// fails the way a real failure does, inside the store call, rather than through a seam added to the
+// production type for the benefit of a test.
+// RENAMED AWAY RATHER THAN DROPPED, so the break is REVERSIBLE — which is what makes it a model of
+// the failure this path is about. The recoverability claim concerns a TRANSIENT failure: a lock, a
+// full disk, something that is gone by the second run. A dropped table is a permanent break and
+// would test the wrong thing.
+//
+// AND REOPENING DOES NOT REPAIR ONE, which is worth knowing and is how the second test first failed:
+// `store.Open` runs migrations, but applied migrations are RECORDED, so a table dropped afterwards
+// is not recreated by opening the file again. The repair has to be the reverse of the break.
+func breakPasskeys(t *testing.T, path string) {
+	t.Helper()
+	execRaw(t, path, "ALTER TABLE passkeys RENAME TO passkeys_broken")
+}
+
+func repairPasskeys(t *testing.T, path string) {
+	t.Helper()
+	execRaw(t, path, "ALTER TABLE passkeys_broken RENAME TO passkeys")
+}
+
+func execRaw(t *testing.T, path, stmt string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("second handle: %v", err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err := raw.Exec(stmt); err != nil {
+		t.Fatalf("%s: %v", stmt, err)
+	}
+}
+
+// THE ORDERING CLAIM, WHICH IS THE ONE WITH A SECURITY CONSEQUENCE. `Reset` deletes the password
+// FIRST, *"so that a failure in either step below still leaves the box unable to accept the old
+// password."* That property was held in place by a comment: reorder the three statements and nothing
+// would have failed.
+func TestResetClearsThePasswordEvenWhenALaterStepFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "q.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	svc := NewService(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed password: %v", err)
+	}
+	seedPasskey(t, st, "cre1", here)
+
+	breakPasskeys(t, path)
+
+	out, err := Reset(st)
+	if err == nil {
+		t.Fatal("Reset succeeded with the passkeys table gone — the failure was swallowed")
+	}
+	// IT STOPS AT THE FIRST ERROR rather than pressing on.
+	if out.Passkeys != 0 || out.Sessions != 0 {
+		t.Fatalf("kept going past the failure: %+v", out)
+	}
+	// AND IT REPORTS WHAT HAD ALREADY GONE, which is what makes the state recoverable rather than
+	// unknown — the caller can say so at the console.
+	if !out.HadPassword {
+		t.Fatal("the result does not report the password that was already removed")
+	}
+	// THE PROPERTY THAT MATTERS: the old password no longer opens the box, despite the reset having
+	// failed part-way.
+	if _, _, err := svc.Login("old-one", ip, ""); !errors.Is(err, ErrNoPassword) {
+		t.Fatalf("the old password survived a partial reset: %v", err)
+	}
+}
+
+// RE-RUNNING AFTER A PARTIAL FAILURE REACHES A CLEAN STATE — the other half of the comment's claim,
+// *"because re-running is a no-op on what is already clear."* The idempotence test above covers a
+// re-run after a CLEAN one, which is the easy case.
+//
+// THE FAILURE IS UNDONE, NOT WORKED AROUND — a transient fault clearing, which is the case the
+// comment's *"re-running is a no-op on what is already clear"* is about. The operator's second run
+// then has to finish the job rather than trip over what the first one already did.
+func TestResetIsRecoverableByRunningItAgain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "q.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	svc := NewService(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := svc.SetPassword("old-one", ip); err != nil {
+		t.Fatalf("seed password: %v", err)
+	}
+	seedPasskey(t, st, "cre1", here)
+
+	breakPasskeys(t, path)
+	if _, err := Reset(st); err == nil {
+		t.Fatal("precondition: the first reset was expected to fail")
+	}
+	repairPasskeys(t, path)
+
+	out, err := Reset(st)
+	if err != nil {
+		t.Fatalf("the second run did not succeed: %v", err)
+	}
+	// THE PASSWORD IS NOT REPORTED TWICE. It went in the first run, so a second `HadPassword` would
+	// mean the first had lied about what it did.
+	if out.HadPassword {
+		t.Fatalf("reported removing a password that was already gone: %+v", out)
+	}
+	configured, err := svc.Configured()
+	if err != nil {
+		t.Fatalf("Configured: %v", err)
+	}
+	if configured {
+		t.Fatal("the install is still claimed after a completed reset")
 	}
 }
