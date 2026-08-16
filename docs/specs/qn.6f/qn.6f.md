@@ -497,6 +497,27 @@ that the rule is negotiable.
 link to it. Both look right and both are about the login flow rather than this page, so they belong
 with whoever builds it and can see it working. Named rather than quietly left.
 
+**RULED 2026-08-16 — YES, REDIRECT** (Operator, quince#1069, from the rig). `LoginGate` sends a
+`needs_login` visitor on an insecure origin to `/onboarding/https`, with `replace`, after the
+auth-state checks. quince#923 had already done this for first run; this is the returning-user half,
+and it was left open here because it could not be judged without seeing it.
+
+**THE ARGUMENT IS NOT THAT THE FORM WOULD FAIL — IT IS WHERE THE PASSWORD GOES.**
+`refuseInsecureOrigin` answers `426` *before* the credential is examined, but the browser has
+already put it on the wire in clear by then. The form as it stood invited somebody to hand their
+admin password to the network in order to be told they could not sign in here. A redirect means the
+keystroke is never sent, which is a stronger reason than the convenience one this question was
+originally framed around.
+
+**§3 IS UNTOUCHED.** The plain-HTTP confirm on step 1 is `firstRun`-only, so a `needs_login` visitor
+lands on the *instructional* page and reaches no control — the split §2 asks for, arrived at by
+routing rather than by a link. **Loopback still gets the form**: `insecure_origin` is false there,
+so the admin at the machine is never sent away from the one place they can sign in.
+
+**The second half stays unsettled and is now smaller.** The `426` body still names the setting rather
+than linking to step 1 — it is a server string served to several callers, and with this redirect in
+place the login form is not where that audience ends up anyway.
+
 ---
 
 ## Known gaps and open questions
