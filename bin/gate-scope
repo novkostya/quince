@@ -89,10 +89,16 @@ cannot_answer() {
 # WHAT EACH GATE COVERS, derived from where the gate actually runs rather than invented: the
 # Makefile mounts /src/core for gates-go and /src/ui for gates-ui. The shared entries are the
 # inputs that change what the gate BUILDS WITH — `versions.env` pins every
-# toolchain image, `deploy/Dockerfile` is the stage those images come from, and the `Makefile` is
-# the recipe itself. A change to any of them can break a gate whose own tree is untouched, so they
-# belong to all of them.
-SHARED='versions.env deploy/Dockerfile Makefile'
+# toolchain image, `deploy/Dockerfile` is the stage those images come from, `.dockerignore` decides
+# what those stages can SEE, and the `Makefile` is the recipe itself. A change to any of them can
+# break a gate whose own tree is untouched, so they belong to all of them.
+#
+# `.dockerignore` IS SHARED AND NOT `deploy/`-LOCAL, which is not where you would first put it
+# (quince#1031). Docker reads it ONLY from the context root, so it cannot live beside the Dockerfile
+# it is about — and every gate here builds an image from that context, gates-go and gates-ui
+# included, since their toolchain stages come from the same file. A file deciding what a build can
+# SEE is the same category as the file deciding what the build DOES.
+SHARED='versions.env deploy/Dockerfile .dockerignore Makefile'
 
 covers() {
 	case "$1" in
