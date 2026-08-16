@@ -17,10 +17,10 @@ function renderIn() {
   );
 }
 
-// THIS CONTROL IS WHAT MAKES THE BANNER'S SAFE TO PRESS — quince#1069. The Operator turned plain
-// HTTP off from the banner and found that nothing could turn it back on: login answers 426 at that
-// address, the pre-auth route answers 409 to a caller with no session, and the first-run confirm
-// does not render once the install is claimed. A signed-in admin needs a way back, and this is it.
+// THIS CONTROL IS WHAT MAKES THE BANNER'S SAFE TO PRESS — quince#1069. With plain HTTP off at that
+// address, login answers 426, the pre-auth route answers 409 to a caller with no session, and the
+// first-run confirm does not render once the install is claimed. A signed-in admin is the only one
+// who can still change it, so this is where the way back has to be.
 describe("the plain-HTTP setting", () => {
   beforeEach(() => vi.restoreAllMocks());
 
@@ -65,11 +65,10 @@ describe("the plain-HTTP setting", () => {
   });
 });
 
-// THE CONFIG QUERY IS INVALIDATED TOO, AND THE STALE PANEL WAS THE SMALLER HALF — Operator,
-// 2026-08-17: *"when you turn off insecure_transport via banner on Settings page, it's not
-// updated."* `ConfigEditor`'s draft follows the config query, and `PUT /api/config` is a
-// full-document replace — so a reader who turned the setting off and then saved an unrelated field
-// on the same screen would have shipped a document still carrying `allow_insecure_transport: true`.
+// THE CONFIG QUERY IS INVALIDATED TOO, AND THE STALE PANEL IS THE SMALLER HALF. `ConfigEditor`'s
+// draft follows that query and `PUT /api/config` is a full-document replace — so without this, a
+// reader who changes the setting here and then saves an unrelated field on the same screen ships a
+// document carrying the OLD value and silently puts it back.
 //
 // ASSERTED AS A REFETCH rather than as a call to `invalidateQueries`, because what the user gets is
 // the panel updating, and a test that spied on the client would pass against a key that nothing
