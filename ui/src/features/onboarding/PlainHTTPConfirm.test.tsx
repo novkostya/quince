@@ -69,7 +69,12 @@ describe("the plain-HTTP confirm", () => {
 
   // A WAY ONWARD, ASSERTED AS THE DESTINATION rather than as link text. The page this renders on
   // has no other exit — its only links are the certificate sub-page and the doc link — and after
-  // the opt-in `SetupGate` stops diverting, so `/setup` is the step the user came for.
+  // the opt-in `SetupGate` stops diverting, so the ordinary route works again.
+  //
+  // `/`, NOT `/setup` — Operator direction, 2026-08-16, and quince#1070 carries the reasoning:
+  // `RequireAuth` routes on the LIVE auth state, so no component on this path states a step order of
+  // its own. Asserted here so that a well-meaning "point it straight at setup, it is one redirect
+  // fewer" fails rather than reads as a tidy-up.
   it("offers the next step", async () => {
     vi.spyOn(api, "post").mockResolvedValue({});
     renderConfirm();
@@ -79,7 +84,7 @@ describe("the plain-HTTP confirm", () => {
 
     expect(await screen.findByRole("link", { name: /Set your password/i })).toHaveAttribute(
       "href",
-      "/setup",
+      "/",
     );
   });
 
