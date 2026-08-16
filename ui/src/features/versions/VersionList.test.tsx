@@ -52,6 +52,25 @@ describe("VersionList", () => {
     expect(screen.queryByText(/missing/i)).toBeNull();
   });
 
+  // quince#1047. The row makes NO verification claim. "structure verified" was tautological — a tree
+  // that fails structural verify never commits, so it appeared on every job-created row and said
+  // nothing — and "decryption verified" is set by nothing in the engine. `ver()` sets
+  // structure_verified_at, so this fixture is exactly the case that used to render the label.
+  it("makes no verification claim, on a version that IS structurally verified", () => {
+    render(<VersionList versions={[ver({ structure_verified_at: "2026-07-18T08:00:00Z" })]} />);
+    expect(screen.getByText("42.5 GB")).toBeTruthy();
+    expect(screen.queryByText(/verified/i)).toBeNull();
+    expect(screen.queryByText(/unverified/i)).toBeNull();
+  });
+
+  // ...and it does not come back for a version carrying content_verified_at either. That field is
+  // reachable only from demo fixtures today; when qn.8 makes it real the label returns deliberately,
+  // through a change that has to delete this test rather than pass it by accident.
+  it("makes no verification claim even when content_verified_at is set", () => {
+    render(<VersionList versions={[ver({ content_verified_at: "2026-07-18T08:00:00Z" })]} />);
+    expect(screen.queryByText(/verified/i)).toBeNull();
+  });
+
   it("renders a missing version explicitly dead: no size, no Unlock, a Remove action (cr)", () => {
     render(<VersionList versions={[ver({ missing: true })]} />);
     expect(screen.getByText(/missing/i)).toBeTruthy();

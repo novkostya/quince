@@ -9,11 +9,25 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 
-function verifyLabel(v: Version): string {
-  if (v.content_verified_at) return "decryption verified";
-  if (v.structure_verified_at) return "structure verified";
-  return "unverified";
-}
+// NO VERIFICATION LABEL ON A VERSION ROW. `verifyLabel` rendered one of three strings here until
+// quince#1047, and each was unusable for its own reason:
+//
+//   "structure verified"  — TAUTOLOGICAL. Structural verify is the gate at commit (verify →
+//                           RENAME_EXCHANGE → snapshot), so a tree that fails it never becomes a
+//                           version. Every job-created row said this because it could not be in
+//                           the list otherwise, which is a row congratulating quince for meeting
+//                           its own entry requirement.
+//   "unverified"          — UNREACHABLE. It needs a marker with no parseable structure_verified_at,
+//                           and every marker quince writes sets one. Blanking it by hand fails the
+//                           marker's own sha256, and scanDir then refuses to adopt the version AT
+//                           ALL — the row vanishes rather than appearing unverified.
+//   "decryption verified" — the only one that would mean something, and NOTHING IN THE ENGINE SETS
+//                           content_verified_at (quince#1047). Only demo/fixtures.go did, so the
+//                           demo showed a state the product cannot reach.
+//
+// It comes back with qn.8's unlock, where a resolved canary makes "decryption verified" a claim
+// quince has actually earned. Until then the row makes no verification claim at all, which is the
+// honest state — not a weaker claim standing in for the one that is unbuilt.
 
 // RemoveButton deletes a version whose artifact is gone (DELETE /api/versions/{id}). On success the
 // server emits version.deleted and the store drops the row; if the WS is slow, remove it locally too
@@ -99,9 +113,8 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
             came from the same walk, so the row printed one number twice and captioned them as two
             different measurements. The word "logical" went with the second figure — it existed only
             to tell them apart, and a lone qualified size asks the reader what the other one was. */}
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs tabular-nums text-subtle">
-          <span>{formatBytes(version.logical_bytes)}</span>
-          <span>{verifyLabel(version)}</span>
+        <div className="mt-1 font-mono text-xs tabular-nums text-subtle">
+          {formatBytes(version.logical_bytes)}
         </div>
       </div>
       {/* A quiet chevron instead of a disabled "Unlock" button — it reads for BOTH encrypted and
