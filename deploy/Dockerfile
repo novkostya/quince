@@ -6,7 +6,6 @@
 # ---- pinned base images (mirror versions.env) — ONE Alpine line (3.24) everywhere ----
 ARG GO_IMAGE=golang:1.26.5-alpine3.24
 ARG NODE_IMAGE=node:22.23.1-alpine3.24
-ARG RUST_IMAGE=rust:1.97.1-alpine3.24
 ARG ALPINE_IMAGE=alpine:3.24
 
 # =============================================================================
@@ -38,15 +37,6 @@ WORKDIR /src
 COPY ui/ ./ui/
 WORKDIR /src/ui
 RUN pnpm run build
-
-# --- netmuxd: pinned, built from source (Wi-Fi is a primary transport, D13) ---
-FROM ${RUST_IMAGE} AS netmuxd-build
-ARG NETMUXD_REF
-RUN apk add --no-cache git musl-dev pkgconf openssl-dev openssl-libs-static
-RUN git clone --depth 1 --branch ${NETMUXD_REF} https://github.com/jkcoxson/netmuxd /src/netmuxd
-WORKDIR /src/netmuxd
-ENV OPENSSL_STATIC=1
-RUN cargo build --release && install -m0755 target/release/netmuxd /netmuxd
 
 # --- libimobiledevice: pinned tag, built from source with quince's in-tree patches (qn.6b) ---
 # Built from SOURCE (not the Alpine `-progs` package) so four in-tree patches ship in the image:
@@ -105,34 +95,54 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # Runtime — Alpine + Apple protocol tooling + the daemon. No language runtime (D10).
 # =============================================================================
 FROM ${ALPINE_IMAGE} AS runtime
-# Apple-protocol userland (stack D2). Runtime base is alpine:3.24 because the usbmuxd
-# DAEMON lands in Alpine community only at 3.24+ (1.1.1_git20250201; genuinely absent in
-# 3.21–3.23 — the qn.0 "no package" finding was correct for the old pinned base).
-#   usbmuxd                = USB muxer daemon, the reliability anchor. netmuxd's young USB
-#                            path has a recorded bug (D2), so usbmuxd is the USB default;
-#                            netmuxd serves Wi-Fi. `simple` profile runs it in-container.
-#   netmuxd (source, above)= the Wi-Fi muxer
+# Apple-protocol userland (stack D2).
+#
+# THIS IMAGE SHIPS NO MUXER DAEMON (qn.6p D1, Operator 2026-08-16). The operator runs one — a host
+# usbmuxd, a sidecar container, or another tool's — and quince dials it. `devices.manage_muxer:
+# true` is refused at startup, so a daemon here would be one nothing could start; it goes with the
+# profile rather than being left as a binary a reader would reasonably assume was reachable.
+# The in-container profile is DESCOPED, not abandoned: bringing it back restores the `usbmuxd`
+# package and the netmuxd source stage, which built the pinned v0.4.3 that muxsup's parked argv was
+# verified against.
+#
+# WHEN IT COMES BACK, `apk add usbmuxd` MUST STAY IN THIS RUN — ABOVE THE COPY BELOW. Measured
+# 2026-08-16: usbmuxd depends on `libimobiledevice`, and installing it REPLACES quince's patched
+# /usr/lib/libimobiledevice-1.0.so.6 — a 1.1 MB regular file — with a SYMLINK into the stock
+# package. Patch 0001 (receive timeout 30s → 15min) disappears with it, and the symptom is a
+# premature receive error on a slow passcode or a large transfer: exactly the bug that patch
+# exists to fix, arriving with nothing to connect it to a Dockerfile line. Adding the package in a
+# later layer, or after the COPY, loses the patch silently.
+#
 #   libimobiledevice       = the CLIs (idevicebackup2/idevicepair/ideviceinfo) — built FROM SOURCE
 #                            in the libimobiledevice-build stage (qn.6b patches), NOT apk'd; only
 #                            its runtime link deps are installed here.
 #   libplist / -glue / libtatsu = runtime link deps of the built libimobiledevice (Alpine 3.24);
 #   libusbmuxd             = the client library the CLIs speak (also a build dep, runtime here).
-#                            libssl3/libcrypto3 come transitively via usbmuxd.
+#   libssl3 / libcrypto3   = DECLARED, NOT INHERITED. This comment used to say they "come
+#                            transitively via usbmuxd", which was measured false: `apk info
+#                            --rdepends libssl3` names libapk, libcurl, ssl_client and
+#                            libimobiledevice — never usbmuxd. quince's own source-built
+#                            libimobiledevice links them, so they are named here rather than left
+#                            to whatever the base happens to ship (qn.6p D1).
 #   openssh-client         = transport for the zfs `hook` mode — quince runs the constrained
 #                            quince-zfs-helper on the ZFS host over ssh (deploy/storage.md).
 #                            Required whenever storage.zfs.mode: hook; harmless otherwise.
 #                            (qn.4a gate-15 finding #2: hook mode was proven on a hand-`apk
 #                            add`ed container; codified here so it survives a compose recreate.)
+#
+# The runtime base stays alpine:3.24 — ONE Alpine line across every stage (versions.env). The
+# reason recorded here was that the usbmuxd DAEMON is packaged only at 3.24+; that daemon is gone
+# and the single-line rule stands on its own.
 RUN apk add --no-cache \
       ca-certificates tzdata \
-      usbmuxd \
       libplist \
       libimobiledevice-glue \
       libusbmuxd \
       libtatsu \
+      libssl3 \
+      libcrypto3 \
       openssh-client
 
-COPY --from=netmuxd-build /netmuxd /usr/local/bin/netmuxd
 # The patched libimobiledevice: the CLIs + the shared lib (shared object glob covers .so + soname).
 COPY --from=libimobiledevice-build /stage/usr/bin/ /usr/bin/
 COPY --from=libimobiledevice-build /stage/usr/lib/libimobiledevice-1.0.so* /usr/lib/

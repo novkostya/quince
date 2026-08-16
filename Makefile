@@ -175,11 +175,9 @@ endif
 BUILD_ARGS := \
 	--build-arg GO_IMAGE=$(GO_IMAGE) \
 	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
-	--build-arg RUST_IMAGE=$(RUST_IMAGE) \
 	--build-arg ALPINE_IMAGE=$(ALPINE_IMAGE) \
 	--build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) \
 	--build-arg PNPM_VERSION=$(PNPM_VERSION) \
-	--build-arg NETMUXD_REF=$(NETMUXD_REF) \
 	--build-arg LIBIMOBILEDEVICE_REF=$(LIBIMOBILEDEVICE_REF) \
 	--build-arg VERSION=$(VERSION)
 
