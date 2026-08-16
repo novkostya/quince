@@ -146,3 +146,49 @@ describe("StorageCard", () => {
     expect(screen.getByText("free space unavailable")).toBeInTheDocument();
   });
 });
+
+// quince#1042 REGRESSION GUARD — the same structural defect quince#1033 fixed on the device cards
+// and did not apply to their stated mirror. The card is a grid item, and a grid item defaults to
+// `min-width: auto`, so it will not shrink below the intrinsic width of its widest line; below `sm:`
+// the implicit column then sizes to content and one over-wide card widens every card beside it.
+//
+// jsdom HAS NO LAYOUT, so nothing here can prove the page stopped scrolling — `story12` and `story5`
+// at real phone viewports are what do that, and the demo fixture now carries a path long enough for
+// them to see it (measured: 320px overflowed by 139px with this class removed). What this asserts is
+// the CLASS, which is quince#631's convention for its stated reason: a bare `min-w-0` with no test
+// reads as decoration and gets tidied away by a later pass. That is not hypothetical here — it is how
+// the mirror got broken in the first place.
+//
+// TWO GUARDS FOR ONE PROPERTY, DELIBERATELY. The e2e pair observes the real defect and needs a
+// browser, a built image and a fixture that stays long; this one is cheap, runs on every
+// `make gates-ui`, and survives a fixture someone shortens. Neither subsumes the other.
+describe("StorageCard grid containment", () => {
+  // The demo fixture's own path (core/internal/demo/provider.go), so a reader can see the length the
+  // e2e gates actually run against instead of inferring it from a shorter stand-in.
+  const longPath = "/mnt/usb/external-8tb-offsite-rotation/quince-backups-and-archives-2026-q3";
+
+  it("can shrink below its content, so one long path cannot widen the row", () => {
+    const { container } = show(storage({ path: longPath }));
+    const card = container.querySelector<HTMLElement>('[data-testid="storage-card"]');
+    expect(card?.className.split(/\s+/)).toContain("min-w-0");
+  });
+
+  // The other half of the chain, one level in. Both are required and neither is sufficient alone —
+  // and this half was already right, which is exactly why the outer one read as unnecessary.
+  it("keeps the name column able to shrink too", () => {
+    const { container } = show(storage({ path: longPath }));
+    const path = container.querySelector<HTMLElement>(".truncate.text-xs");
+    expect(path?.textContent).toBe(longPath);
+    expect(path?.parentElement?.className.split(/\s+/)).toContain("min-w-0");
+  });
+
+  // The unreachable variant appends to the same className string, so the class list is BUILT
+  // differently on that branch. Asserted separately because the reachable case passing says nothing
+  // about a template literal one conditional away.
+  it("keeps min-w-0 on an unreachable card, where the class list is built differently", () => {
+    const { container } = show(storage({ reachable: false }));
+    const card = container.querySelector<HTMLElement>('[data-testid="storage-card"]');
+    expect(card?.className.split(/\s+/)).toContain("min-w-0");
+    expect(card?.className.split(/\s+/)).toContain("border-dashed");
+  });
+});

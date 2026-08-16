@@ -9,8 +9,13 @@ import { formatBytes } from "@/lib/format";
 // StorageCard is one declared storage on Home (qn.6d stories 2-4).
 //
 // It mirrors DeviceCard's anatomy deliberately — same Card/CardContent shell, same `h-full` +
-// `mt-auto` so the two kinds align in one grid, same title/status/meta rhythm. Storage is a PEER of
-// Device, and a card that looked like a different species would say otherwise.
+// `min-w-0` + `mt-auto` so the two kinds align in one grid, same title/status/meta rhythm. Storage
+// is a PEER of Device, and a card that looked like a different species would say otherwise.
+//
+// THAT MIRROR IS A CLAIM A READER TRUSTS INSTEAD OF CHECKING, and it was false for a while: quince#1033
+// put `min-w-0` on DeviceCard and StorageDetailsPage and not here, so this sentence described an
+// anatomy two of three cards had (quince#1042). Restated with the class named, because "same shell"
+// is not something the next reader can check against a diff.
 //
 // THE ACTION SLOT IS EMPTY IN THIS RUNG. Devices put `Back up now` there; storage has no card-level
 // action until a later rung. The slot is still reserved so the two card kinds keep the same shape.
@@ -50,10 +55,21 @@ export function StorageCard({ storage, showDefault }: { storage: Storage; showDe
   const unreachable = !storage.reachable;
 
   return (
+    // min-w-0 closes the same chain quince#631 closed on Settings and quince#1033 closed on the two
+    // device cards, one level up from the `min-w-0` on the name column below: a grid item defaults
+    // to `min-width: auto`, so this card would not shrink below the intrinsic width of its widest
+    // line. Below `sm:` the grid has no explicit template, so the implicit column sizes to content
+    // and ONE over-wide card widens the column and every card in it. The `truncate` on the name and
+    // the path is dead code until the card itself can shrink.
+    //
+    // REACHABLE HERE THROUGH TWO ARBITRARY-LENGTH USER-CONTROLLED STRINGS, which is what made this
+    // worth fixing rather than mirroring for symmetry: `storage.name` and `storage.path` both come
+    // off the wire with nothing bounding them, and a filesystem path passes the width that broke
+    // quince#1033 without trying.
     <Card
       data-testid="storage-card"
       data-storage-name={storage.name}
-      className={`flex h-full flex-col${unreachable ? " border-dashed opacity-80" : ""}`}
+      className={`flex h-full min-w-0 flex-col${unreachable ? " border-dashed opacity-80" : ""}`}
     >
       <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">

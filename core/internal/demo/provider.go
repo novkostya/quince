@@ -209,7 +209,25 @@ func (p *Provider) Storages(udid string) []wire.Storage {
 		BackupCount: tally.backups[demoStorageInternal],
 		DeviceCount: len(tally.devices[demoStorageInternal]),
 	}, {
-		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/shuttle", Backend: "unknown",
+		// A DEEP PATH, ON PURPOSE, AND IT IS A GATE INPUT RATHER THAN SET DRESSING (quince#1042).
+		// `story12` and `story5` sweep for sideways scroll, and neither could see a storage card
+		// overflow while both fixture paths were short enough to fit — a gate passing because the
+		// fixture is convenient, which story12's own header names as worse than no assertion.
+		//
+		// MEASURED, THREE WAYS, because the length is the whole of why this works. On a build with
+		// `min-w-0` removed from StorageCard:
+		//
+		//	74-char path   story12 RED — 320px by 139px, 375px by 84px, 390px by 69px, 430px by 29px
+		//	               story5 RED too (the 390px dashboard)
+		//	36-char path   BOTH GREEN — the card still fit, so the fixture proved nothing
+		//
+		// So a "long enough to look long" path does NOT arm this. Do not shorten it: anything near
+		// the threshold disarms the gate silently, and the failure mode is a green suite over a
+		// reachable defect. The margin at 320px is the point, not the exact string.
+		//
+		// A removable disk on an offsite rotation, mounted under its own label, is what an operator
+		// actually has — which is why this raises the fixture's fidelity rather than contorting it.
+		ID: demoStorageShuttle, Name: "shuttle", Path: "/mnt/usb/external-8tb-offsite-rotation/quince-backups-and-archives-2026-q3", Backend: "unknown",
 		Default: false, Reachable: false,
 		UnreachableCode: &code, UnreachableReason: &reason,
 		BackupCount: tally.backups[demoStorageShuttle],
