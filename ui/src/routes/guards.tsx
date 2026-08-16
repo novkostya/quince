@@ -37,8 +37,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 // (quince#908 §3). In the pre-credential window `POST /api/auth/setup` is already authExempt and
 // one-shot, so anyone who reaches the port can claim the install outright — routing them to a page
 // about transport grants strictly less than what is already on offer. Once a credential exists that
-// reasoning stops holding, so `needs_login` keeps the "How to fix this" LINK on the login form and
-// gets no redirect.
+// reasoning stops holding, which is why this gate stops at `needs_setup`: the returning visitor is
+// `LoginGate`'s to route, on the narrower argument recorded there (quince#1069).
 //
 // SetupGate IS THE SINGLE FUNNEL, which is why this lives here rather than in three places:
 // `RequireAuth` and `LoginGate` both send `needs_setup` to `/setup`, so every route into first run
