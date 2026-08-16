@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PlainHTTPConfirm } from "./PlainHTTPConfirm";
 import { api } from "@/lib/api";
@@ -8,7 +9,11 @@ function renderConfirm() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <PlainHTTPConfirm />
+      {/* THE SUCCESS STATE LINKS ONWARD, so the component needs a router the way every other
+          surface with a `Link` in this suite does. */}
+      <MemoryRouter>
+        <PlainHTTPConfirm />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -42,6 +47,39 @@ describe("the plain-HTTP confirm", () => {
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/config/insecure-transport", { allow: true }),
+    );
+  });
+
+  // THE ASSERTION THAT WAS MISSING, AND ITS ABSENCE WAS THE BUG (quince#1064). Every failure path
+  // below asserts what RENDERS; the success path asserted only that the POST fired, and the
+  // component rendered nothing at all — so the one path that works was the only one a user could
+  // not tell had happened.
+  it("says it worked, where the button was", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({});
+    renderConfirm();
+
+    arm();
+    confirm();
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/Plain HTTP is on/i);
+    // AND THE CONFIRM IS GONE. A success that left "Turn it on" standing would invite a second
+    // press, which the daemon answers 409 to once the install is claimed.
+    expect(screen.queryByRole("button", { name: /^Turn it on$/i })).not.toBeInTheDocument();
+  });
+
+  // A WAY ONWARD, ASSERTED AS THE DESTINATION rather than as link text. The page this renders on
+  // has no other exit — its only links are the certificate sub-page and the doc link — and after
+  // the opt-in `SetupGate` stops diverting, so `/setup` is the step the user came for.
+  it("offers the next step", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({});
+    renderConfirm();
+
+    arm();
+    confirm();
+
+    expect(await screen.findByRole("link", { name: /Set your password/i })).toHaveAttribute(
+      "href",
+      "/setup",
     );
   });
 
