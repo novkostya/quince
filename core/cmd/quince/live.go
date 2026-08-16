@@ -47,6 +47,14 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
+	// A config asking for the in-container profile refuses the process HERE rather than in
+	// Validate, for the reason CheckMuxerProfile states: a validation error discards the whole
+	// config to Default(), which has no storage, so an upgrader with a working all-in-one install
+	// would be told to add their first storage (quince#849). Same ruling `tls:` already records.
+	if err := config.CheckMuxerProfile(dcfg); err != nil {
+		return nil, err
+	}
+
 	// THE MUXER GRAMMAR IS PARSED ONCE, HERE, AND A BAD ADDRESS REFUSES THE PROCESS (qn.6p D3).
 	// Deliberately NOT decided in config.Validate: Load() DISCARDS a config that fails Validate and
 	// falls back to Default(), so a typo here would start quince on the DEFAULT muxer addresses and

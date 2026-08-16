@@ -51,34 +51,54 @@ func TestValidateRefusesAMalformedMuxerAddressByPath(t *testing.T) {
 	}
 }
 
-// qn.6p D2. `manage_muxer: true` asks for a profile v0.1 does not ship, and it is REFUSED rather
-// than ignored — because yaml.Unmarshal drops unknown keys silently, so deleting the key would
-// have turned an existing all-in-one install into a muxerless one with no muxer configured and
-// nothing said about it (storages_validate_test.go:162 is this repo's record of that class).
-func TestValidateRefusesManageMuxerTrue(t *testing.T) {
+// qn.6p D2. `manage_muxer: true` asks for a profile v0.1 does not ship. It is refused rather than
+// ignored — yaml.Unmarshal drops unknown keys silently, so deleting the key would have turned an
+// existing all-in-one install into a muxerless one with nothing said about it
+// (storages_validate_test.go:162 is this repo's record of that class).
+//
+// VALIDATE MUST NOT BE WHERE THAT HAPPENS, which is what this test pins. A validation error
+// discards the config to Default(), which has no storage, so an operator with a working install
+// would be told to add their first storage while the real reason sat in `GET /api/config`
+// warnings — rendered by no surface a user can reach (quince#849). Architect ruling, quince#1059,
+// on the same grounds `tls:` already records in contracts.
+func TestValidateDoesNotRefuseManageMuxerTrue(t *testing.T) {
 	c := Default()
 	c.Devices.ManageMuxer = true
-
-	var msg string
 	for _, e := range Validate(c) {
 		if e.Path == "devices.manage_muxer" {
-			msg = e.Message
-		}
-	}
-	if msg == "" {
-		t.Fatal("Validate accepted manage_muxer: true; want a refusal on devices.manage_muxer")
-	}
-	// The refusal must tell an upgrader what to do instead. A bare "not supported" would leave
-	// them to find the replacement, and the replacement is the whole point of the change.
-	for _, want := range []string{"usbmuxd_socket", "quince#897"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("refusal %q does not name %q", msg, want)
+			t.Fatalf("Validate refused manage_muxer at %s (%q) — that discards the whole config "+
+				"to Default() and reports it as a missing storage; it is a serve-path refusal",
+				e.Path, e.Message)
 		}
 	}
 }
 
-// Default() must not carry a value Validate refuses: Load() DISCARDS an invalid config and falls
-// back to Default(), so a Default that failed its own validation would make that fallback
+// CheckMuxerProfile IS where it is refused: fatal, on the serve path, leaving the config intact.
+func TestCheckMuxerProfileRefusesTheManagedProfile(t *testing.T) {
+	if err := CheckMuxerProfile(Default().Devices); err != nil {
+		t.Fatalf("CheckMuxerProfile refused the shipped defaults: %v", err)
+	}
+
+	d := Default().Devices
+	d.ManageMuxer = true
+	err := CheckMuxerProfile(d)
+	if err == nil {
+		t.Fatal("CheckMuxerProfile accepted manage_muxer: true; want a refusal")
+	}
+	// The refusal is read by somebody whose working install just stopped starting, so it must name
+	// the key, what to do instead, and — because the Validate route's whole failure mode was an
+	// operator believing their config was gone — that nothing was discarded.
+	for _, want := range []string{
+		"manage_muxer", "usbmuxd_socket", "quince#897", "has been changed or discarded",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not name %q:\n%v", want, err)
+		}
+	}
+}
+
+// Default() must pass its own validation: Load() DISCARDS an invalid config and falls
+// back to Default(), so a Default that failed validation would make that fallback
 // invalid too — a loop with no honest answer.
 func TestDefaultPassesItsOwnValidation(t *testing.T) {
 	if errs := Validate(Default()); len(errs) > 0 {
