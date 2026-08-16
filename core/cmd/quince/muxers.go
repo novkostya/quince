@@ -6,6 +6,7 @@ import (
 
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/httpapi"
+	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
 
@@ -118,4 +119,39 @@ func (m muxerHealth) MuxersHealth() []httpapi.MuxerHealth {
 		})
 	}
 	return out
+}
+
+// muxerBinding is one configured `devices:` key and the endpoint it resolved to.
+type muxerBinding struct {
+	configured string // the address exactly as written in config.yml — what the plan carries
+	ep         muxaddr.Endpoint
+}
+
+// distinctEndpoints answers "how many muxers is this, really" (qn.6p D4).
+//
+// ONE MUXER SERVING BOTH TRANSPORTS IS THE HARDENED SHAPE, not an edge case: netmuxd serves USB
+// and mDNS-discovered Wi-Fi over a single socket, which is what an operator reaches for so as not
+// to open an unauthenticated TCP port. The way to say that in config is to point both keys at it —
+// and doing so used to open TWO muxd clients on one socket, giving the registry two sources and
+// duplicating every replay (quince#897, the finding it did not name).
+//
+// It returns the unique endpoints in configuration order, and a map from each configured address
+// to its endpoint, so a caller can build one client per endpoint and still answer health per key.
+// Deduplication is a plain `==` because muxaddr.Endpoint is comparable — `/run/mux/usbmuxd` and
+// `UNIX:/run/mux/usbmuxd` are the same muxer written two ways, and this is where that matters.
+func distinctEndpoints(bindings []muxerBinding) (unique []muxaddr.Endpoint, byConfigured map[string]muxaddr.Endpoint) {
+	byConfigured = make(map[string]muxaddr.Endpoint, len(bindings))
+	seen := make(map[muxaddr.Endpoint]bool, len(bindings))
+	for _, b := range bindings {
+		if b.ep.IsZero() {
+			continue // no muxer for this transport; not an error (qn.6p D4)
+		}
+		byConfigured[b.configured] = b.ep
+		if seen[b.ep] {
+			continue
+		}
+		seen[b.ep] = true
+		unique = append(unique, b.ep)
+	}
+	return unique, byConfigured
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/config"
+	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
 
@@ -125,5 +126,60 @@ func TestPlannedMuxersDefaultConfig(t *testing.T) {
 				t.Fatal("default netmuxd argv points at the usbmuxd socket")
 			}
 		}
+	}
+}
+
+// TestDistinctEndpointsCollapsesOneMuxerServingBoth is qn.6p D4. Pointing both `devices:` keys at
+// one daemon is how an operator says "this muxer serves both transports" — the hardened shape,
+// since netmuxd serves USB and mDNS Wi-Fi over a single socket. It used to open TWO muxd clients
+// on that socket, so the registry saw two sources and every replay arrived twice.
+func TestDistinctEndpointsCollapsesOneMuxerServingBoth(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		usb, wifi  string
+		wantClient int
+		wantShared bool
+	}{
+		{name: "two separate muxers", usb: "/var/run/usbmuxd", wifi: "127.0.0.1:27015", wantClient: 2},
+		{name: "one muxer, both keys", usb: "/run/mux/usbmuxd", wifi: "/run/mux/usbmuxd", wantClient: 1, wantShared: true},
+		// The SAME socket written two ways. This is the row that needs Endpoint comparability
+		// rather than string equality, and the one an operator produces by copying the value
+		// out of a health detail into the other key.
+		{name: "one muxer, two spellings", usb: "/run/mux/usbmuxd", wifi: "UNIX:/run/mux/usbmuxd", wantClient: 1, wantShared: true},
+		{name: "usb only", usb: "/var/run/usbmuxd", wifi: "", wantClient: 1},
+		{name: "wifi only", usb: "", wifi: "127.0.0.1:27015", wantClient: 1},
+		{name: "no muxer at all", usb: "", wifi: "", wantClient: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usbEP, err := muxaddr.Parse(tc.usb)
+			if err != nil {
+				t.Fatalf("parse usb %q: %v", tc.usb, err)
+			}
+			wifiEP, err := muxaddr.Parse(tc.wifi)
+			if err != nil {
+				t.Fatalf("parse wifi %q: %v", tc.wifi, err)
+			}
+
+			unique, byConfigured := distinctEndpoints([]muxerBinding{{tc.usb, usbEP}, {tc.wifi, wifiEP}})
+			if len(unique) != tc.wantClient {
+				t.Fatalf("distinct endpoints = %d (%v); want %d", len(unique), unique, tc.wantClient)
+			}
+
+			// Every configured key must still resolve, or health loses its entry for that
+			// transport — an absent entry reads as "no muxer" (design §10).
+			for _, configured := range []string{tc.usb, tc.wifi} {
+				if configured == "" {
+					continue
+				}
+				if _, ok := byConfigured[configured]; !ok {
+					t.Errorf("configured address %q resolves to nothing; health would lose its entry", configured)
+				}
+			}
+
+			if tc.wantShared && byConfigured[tc.usb] != byConfigured[tc.wifi] {
+				t.Errorf("both keys name one muxer but resolved differently: %v vs %v",
+					byConfigured[tc.usb], byConfigured[tc.wifi])
+			}
+		})
 	}
 }
