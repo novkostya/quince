@@ -40,10 +40,26 @@ export function InsecureTransportBanner() {
       // shadcn defaults that Tailwind then emitted nothing for.
       className="mb-4 rounded-card border border-danger bg-card px-3 py-2 text-sm text-fg"
     >
-      <strong className="text-danger">Plain HTTP is allowed on this quince.</strong> Your sign-in
-      cookie and CSRF token cross the network unencrypted, so anyone who can see the traffic can sign
-      in as you. Turn off <code className="font-mono">sessions.allow_insecure_transport</code> once
-      you have HTTPS working.
+      {/* WRITTEN FOR THE PERSON READING IT — Operator direction, 2026-08-16 (quince#1069), on the
+          copy this replaces:
+
+            "Your sign-in cookie and CSRF token cross the network unencrypted … Turn off
+             sessions.allow_insecure_transport once you have HTTPS working."
+
+          A config key is not a sentence, and a CSRF token is a detail nobody outside this codebase
+          can act on. Both were written for a reader who already knows the system — which is every
+          reader this text will never have.
+
+          IT STILL NAMES WHAT IS UNPROTECTED, which is quince#446's ruling. "Your sign-in travels in
+          the clear" is that claim in words a person can weigh; the cookie and the token are HOW, and
+          how is not what somebody about to type a password needs to decide anything.
+
+          IT IS ABOUT THE INSTALL, NOT THIS CONNECTION, and that survives the rewrite deliberately.
+          The setting is global, so a reader can be on a perfectly good HTTPS address while it is on
+          — "this connection is not encrypted" would be a lie to exactly that reader. */}
+      <strong className="text-danger">quince is allowing plain HTTP.</strong> Your sign-in travels in
+      the clear, so anyone who can see the traffic can sign in as you. Turn this off once you can
+      reach quince over HTTPS.
     </div>
   );
 }

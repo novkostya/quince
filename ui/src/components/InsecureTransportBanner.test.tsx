@@ -27,8 +27,25 @@ describe("InsecureTransportBanner", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByText(CONSEQUENCE)).toBeInTheDocument();
-    // NAMES THE COOKIE AND THE TOKEN, not merely "this connection is insecure" (quince#539).
-    expect(screen.getByText(/sign-in cookie and CSRF token/i)).toBeInTheDocument();
+    // NAMES WHAT IS UNPROTECTED, which is quince#446's ruling — in words rather than in mechanism.
+    // This asserted `/sign-in cookie and CSRF token/` until quince#1069: the ruling asks for what is
+    // unprotected, and "your sign-in travels in the clear" is that, for a reader who does not know
+    // what a CSRF token is. A test pinned to the mechanism makes the human version look like a
+    // regression, which is how copy written for insiders survives review.
+    expect(screen.getByText(/your sign-in travels in the clear/i)).toBeInTheDocument();
+  });
+
+  // NO CONFIG KEY IN FRONT OF A PERSON — Operator direction, 2026-08-16: user-facing text is written
+  // for humans. Asserted as an ABSENCE so the next well-meaning "be precise, name the setting" edit
+  // fails here rather than shipping. A key belongs in a doc or a config file, not in a warning
+  // somebody reads while deciding whether to type their password.
+  it("does not put a config key or a mechanism in front of a person", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ ...OK, insecure_transport_allowed: true });
+    renderIn(<InsecureTransportBanner />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).not.toHaveTextContent(/allow_insecure_transport/);
+    expect(alert).not.toHaveTextContent(/CSRF/i);
   });
 
   // NON-DISMISSIBLE IS THE RULING (quince#446): a degraded mode that can be hidden stops being
