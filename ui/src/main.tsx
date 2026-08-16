@@ -9,9 +9,11 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { authStatusKey } from "@/lib/auth";
 import "./index.css";
 
-// System-follow theme at boot (ui.design.md principle 6); the Settings editor can override
-// via config.ui.theme once loaded.
-initTheme("system");
+// Theme at boot (ui.design.md principle 6): system-follow by default, or the last preference the
+// Settings editor applied. NO ARGUMENT — `initTheme` adopts the cached preference, which is what
+// index.html's pre-paint script has already painted from. Passing "system" here, as this did until
+// quince#1074, overwrites an explicit override one frame after it was correctly shown.
+initTheme();
 
 // A LOST SESSION MUST REACH THE LOGIN SCREEN. `RequireAuth` already redirects — it simply never got
 // the news. `useAuthStatus` refetches on mount or invalidation only, and the guard stays mounted for
