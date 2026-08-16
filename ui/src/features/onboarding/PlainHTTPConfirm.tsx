@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -21,6 +22,7 @@ export function PlainHTTPConfirm() {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   const qc = useQueryClient();
 
   async function allow() {
@@ -28,20 +30,47 @@ export function PlainHTTPConfirm() {
     setFailed(null);
     try {
       await api.post("/api/config/insecure-transport", { allow: true });
-      // THE BANNER IS THE RECEIPT. quince#446 requires this degraded mode be surfaced in three
-      // channels and quince#539 shipped the non-dismissible one; invalidating health is what makes
-      // it appear immediately rather than at the next poll. The user should watch the warning
-      // arrive as a consequence of what they just did, not meet it later as a surprise.
+      // quince#446 requires this degraded mode be surfaced in three channels and quince#539 shipped
+      // the non-dismissible banner; invalidating health is what makes it appear immediately rather
+      // than at the next poll.
+      //
+      // THE BANNER IS NOT THE RECEIPT, WHICH IS WHAT THIS COMMENT USED TO CLAIM (quince#1064). It
+      // mounts at the TOP of `OnboardingHTTPSPage`, above the wordmark; this confirm sits below the
+      // whole tier chooser. On a phone the two are several screens apart, so the user pressed a
+      // button, everything within the viewport stayed identical, and the only honest reading was
+      // that nothing had happened. Measured on a rig: the write succeeded every time.
       await qc.invalidateQueries({ queryKey: healthKey });
-      // NO NAVIGATION. `SetupGate` sends a first-run visitor here while the cookie would be
-      // discarded; with the opt-in on `insecure_origin` goes false, so the ordinary route works
-      // again and the link below is a plain one. Pushing them somewhere automatically would take
-      // the decision away at the exact moment they should see its consequence.
+      setDone(true);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  // THE SUCCESS STATE, AND IT IS WHERE THE FINGER ALREADY IS. The failure paths below render a
+  // `role="alert"` at the button; success rendered nothing at all, so the one path that WORKS was
+  // the only one with no feedback where the act happened.
+  //
+  // STILL NO AUTOMATIC NAVIGATION, and now for a mechanical reason as well as the original one.
+  // `SetupGate` diverts on `insecure_origin`, which it reads from the cached health query — navigate
+  // before that refetch has landed and the gate sends the user straight back here, which reads as a
+  // loop. A link they press themselves cannot race anything.
+  //
+  // IT DOES NOT REPEAT THAT THE WARNING WILL PERSIST — Operator direction, 2026-08-16. The confirm
+  // one screen up says it before the press, which is where it changes a decision; saying it again
+  // afterwards tells somebody who has already chosen something they cannot act on.
+  if (done) {
+    return (
+      <div role="status" className="mt-3 rounded-card border border-warn bg-card px-3 py-2">
+        <p className="text-sm">
+          <strong>Plain HTTP is on.</strong>
+        </p>
+        <Button asChild className="mt-3">
+          <Link to="/setup">Set your password</Link>
+        </Button>
+      </div>
+    );
   }
 
   if (!armed) {
