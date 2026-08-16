@@ -397,7 +397,7 @@ func TestGroupRescanRestartsOnlyTheUSBMuxer(t *testing.T) {
 func TestGroupStatuses(t *testing.T) {
 	g := NewGroup()
 	g.Supervise(fakeSupervisor(fakeSpec("usbmuxd", RoleUSB, "unix", filepath.Join(t.TempDir(), "m.sock"), "serve"), ""))
-	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015")
+	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", connectedClient)
 
 	got := g.Statuses()
 	if len(got) != 2 {
@@ -411,6 +411,66 @@ func TestGroupStatuses(t *testing.T) {
 	}
 }
 
+func connectedClient() (bool, string) { return true, "" }
+
+// TestExternalStateFollowsTheDialingClient is quince#897 item 2's regression, and the whole of
+// qn.6p D5. `external` was a constant string built at construction, so health reported a muxer as
+// served while the daemon logged `connection refused` against that same address.
+//
+// The state is re-read at every Statuses() call, so ONE group answers differently as the
+// connection comes and goes — which is what "continuing rather than one-shot" means in practice.
+func TestExternalStateFollowsTheDialingClient(t *testing.T) {
+	var connected bool
+	var detail string
+	g := NewGroup()
+	g.AddUnmanaged("netmuxd", RoleWiFi, "/run/mux/usbmuxd", func() (bool, string) { return connected, detail })
+
+	// Before the first dial lands: not connected, nothing to report. `unreachable` here would be
+	// a failure claim about an attempt nobody has made.
+	if got := g.Statuses()[0]; got.State != StateStarting {
+		t.Errorf("before the first dial: state = %q, want %q (detail %q)", got.State, StateStarting, got.Detail)
+	}
+
+	connected, detail = true, ""
+	if got := g.Statuses()[0]; got.State != StateExternal {
+		t.Errorf("connected: state = %q, want %q", got.State, StateExternal)
+	}
+
+	// The muxer dies. Health must follow WITHOUT the group being rebuilt, and must carry the
+	// dialer's own words rather than a generic phrase.
+	connected, detail = false, "dial unix /run/mux/usbmuxd: connect: connection refused"
+	got := g.Statuses()[0]
+	if got.State != StateUnreachable {
+		t.Errorf("after the muxer died: state = %q, want %q", got.State, StateUnreachable)
+	}
+	if !strings.Contains(got.Detail, "connection refused") {
+		t.Errorf("detail = %q, want the dialer's own error", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "/run/mux/usbmuxd") {
+		t.Errorf("detail = %q, want the address it could not reach", got.Detail)
+	}
+
+	// And back, because an external muxer that restarts must stop being reported as broken.
+	connected, detail = true, ""
+	if got := g.Statuses()[0]; got.State != StateExternal {
+		t.Errorf("after the muxer came back: state = %q, want %q", got.State, StateExternal)
+	}
+}
+
+// A configured muxer that NOTHING dials is a wiring bug. It must not read as `external`, which is
+// the healthy-looking word that would hide it.
+func TestExternalWithNoDialerSaysSo(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", nil)
+	got := g.Statuses()[0]
+	if got.State == StateExternal {
+		t.Fatalf("an undialed muxer reported %q — the one word that hides the bug", got.State)
+	}
+	if !strings.Contains(got.Detail, "nothing is dialing it") {
+		t.Errorf("detail = %q, want it to name the missing dialer", got.Detail)
+	}
+}
+
 // TestGroupRescanWithoutManagedUSBMuxer: rescan is honestly refused (409 + reason) when quince
 // owns no USB muxer — the manage_muxer:false case and the netmuxd-only case alike.
 func TestGroupRescanWithoutManagedUSBMuxer(t *testing.T) {
@@ -421,7 +481,7 @@ func TestGroupRescanWithoutManagedUSBMuxer(t *testing.T) {
 	}
 
 	external := NewGroup()
-	external.AddUnmanaged("usbmuxd", RoleUSB, "/var/run/usbmuxd")
+	external.AddUnmanaged("usbmuxd", RoleUSB, "/var/run/usbmuxd", connectedClient)
 	accepted, reason := external.Rescan(rescanCtx(t))
 	if accepted || !strings.Contains(reason, "external") {
 		t.Fatalf("external rescan = (accepted=%v, reason=%q); want refused naming the external muxer", accepted, reason)

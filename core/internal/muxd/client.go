@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"howett.net/plist"
@@ -143,6 +144,34 @@ func listen(ctx context.Context, conn io.ReadWriter, log *slog.Logger, emit func
 type Client struct {
 	ep  muxaddr.Endpoint
 	log *slog.Logger
+
+	// mu guards the health fields, which Run writes and /api/health reads from the HTTP
+	// goroutine. `go test -race` is what keeps this honest.
+	mu        sync.Mutex
+	connected bool
+	detail    string // why not connected: the dial or listen error, in the muxer's own words
+}
+
+// Health reports whether THIS client currently holds a Listen connection, and if not, what the
+// last attempt said.
+//
+// It exists so /api/health can report an external muxer from the connection quince ACTUALLY
+// DEPENDS ON, rather than from a second prober beside it (qn.6p D5). A prober is the obvious
+// design and it is the wrong one: it can dial successfully while this client sits in a 30 s
+// backoff after a protocol-level failure, so health would read `external` — fine — while no
+// device could appear. That is the same defect as the asserted status it replaces (quince#897
+// item 2), moved rather than fixed.
+func (c *Client) Health() (connected bool, detail string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected, c.detail
+}
+
+// setHealth records the outcome of a dial or a listen. Called only from Run.
+func (c *Client) setHealth(connected bool, detail string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.connected, c.detail = connected, detail
 }
 
 // NewClient returns a Client for an ALREADY-PARSED endpoint. It takes a muxaddr.Endpoint rather
@@ -171,6 +200,7 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 		}
 		conn, err := c.dial(ctx)
 		if err != nil {
+			c.setHealth(false, err.Error())
 			c.log.Warn("muxd: dial failed", "addr", c.ep, "error", err)
 			if !sleep(ctx, delay) {
 				return
@@ -178,10 +208,14 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 			delay = nextBackoff(delay)
 			continue
 		}
+		c.setHealth(true, "")
 		delay = backoffInitial // a successful connection resets the backoff
 		sink.Reset()           // (re)connect: drop this source's edges; the replay re-adds live ones
 		err = listen(ctx, conn, c.log, sink.Apply)
 		_ = conn.Close()
+		// The connection is gone whether or not ctx is done, so health says so BEFORE the
+		// shutdown check — otherwise a cancelled serve leaves health claiming a live connection.
+		c.setHealth(false, errText(err))
 		if ctx.Err() != nil {
 			return
 		}
@@ -220,4 +254,13 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// errText renders an error for health detail, tolerating nil (listen returns nil only if it ever
+// stops without error; treat that as a plain disconnect rather than printing "<nil>").
+func errText(err error) string {
+	if err == nil {
+		return "connection closed"
+	}
+	return err.Error()
 }

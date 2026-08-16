@@ -47,12 +47,6 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
-	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
-	// external (HARDENED / manage_muxer: false — dialed only, still reported in /api/health).
-	group := buildMuxerGroup(dcfg, log)
-	go group.Run(ctx)
-	ls.muxer = muxerHealth{group}
-
 	// THE MUXER GRAMMAR IS PARSED ONCE, HERE, AND A BAD ADDRESS REFUSES THE PROCESS (qn.6p D3).
 	// Deliberately NOT decided in config.Validate: Load() DISCARDS a config that fails Validate and
 	// falls back to Default(), so a typo here would start quince on the DEFAULT muxer addresses and
@@ -69,17 +63,38 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	}
 
 	// Live device tracking (qn.2): one muxd client per configured muxer endpoint feeds the registry.
+	//
+	// THE CLIENTS ARE BUILT BEFORE THE MUXER GROUP, and the order is load-bearing rather than
+	// tidy: health reports an external muxer FROM ITS DIALING CLIENT (qn.6p D5), so the group
+	// needs those clients to exist before it can be asked anything true about them.
 	reg := device.NewRegistry(eventBus, log)
-	for _, ep := range []muxaddr.Endpoint{usbEP, wifiEP} {
-		if ep.IsZero() {
+	clients := map[string]*muxd.Client{} // keyed by the address as CONFIGURED, which is what the plan carries
+	for _, c := range []struct {
+		configured string
+		ep         muxaddr.Endpoint
+	}{{dcfg.UsbmuxdSocket, usbEP}, {dcfg.NetmuxdAddr, wifiEP}} {
+		if c.ep.IsZero() {
 			continue
 		}
-		client := muxd.NewClient(ep, log)
-		sink := reg.Sink(ep.String())
+		client := muxd.NewClient(c.ep, log)
+		clients[c.configured] = client
+		sink := reg.Sink(c.ep.String())
 		go client.Run(ctx, sink)
 	}
 	ls.devices = reg
 	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP)
+
+	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
+	// external (HARDENED / manage_muxer: false — dialed only, and reported in /api/health from
+	// the dialing client's real connection state rather than asserted).
+	group := buildMuxerGroup(dcfg, func(address string) func() (bool, string) {
+		if c, ok := clients[address]; ok {
+			return c.Health
+		}
+		return nil // nothing dials it; muxsup reports that rather than assuming the best
+	}, log)
+	go group.Run(ctx)
+	ls.muxer = muxerHealth{group}
 
 	// Device ops (qn.3): pair/validate/info + encryption; enrichment overlays lockdown identity.
 	tools := deviceops.NewTools(usbEP, wifiEP, log)

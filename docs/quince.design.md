@@ -985,9 +985,28 @@ qn.7 UI panel consumes it). One entry per configured muxer daemon — quince may
  ]}
 ```
 
-`state` ∈ `starting | running | degraded | stopped | external`; `detail` carries the last exit
-reason / why degraded / why external; `rescan` says whether `POST /api/devices/rescan` restarts
-that daemon (USB only). An external muxer (`manage_muxer: false`) appears with `managed: false`
-rather than being omitted — an absent entry would read as "no muxer". `--demo` reports `[]`.
+`state` ∈ `starting | running | degraded | stopped | external | unreachable`; `detail` carries the
+last exit reason / why degraded / why external / why unreachable; `rescan` says whether
+`POST /api/devices/rescan` restarts that daemon (USB only). An external muxer
+(`manage_muxer: false`) appears with `managed: false` rather than being omitted — an absent entry
+would read as "no muxer". `--demo` reports `[]`.
 qn.2b's singular `muxer` object is **gone** (qn.4c clean break, ruled (bz)): with two daemons a
 single aggregate could not say which one was degraded, and two overlapping representations rot.
+
+**`external` IS A PROBED CLAIM, AND `unreachable` IS ITS OTHER HALF** (qn.6p D5, quince#897 item 2).
+It was asserted from configuration alone until then — `AddUnmanaged` built a status reading *"is
+served by an external muxer"* without dialing anything — and it was measured saying exactly that
+about an address the daemon was **simultaneously** logging `connection refused` against. So
+`external` now means *quince does not own this daemon **and is connected to it***, and one it cannot
+reach reports `unreachable` carrying the dialer's own words.
+
+**Read from the DIALING CLIENT, not from a prober beside it.** The `muxd.Client` for that endpoint
+already holds the connection, so health asks it at read time. A second prober is the obvious design
+and is wrong for the reason this state exists: it can dial successfully while the client sits in a
+30 s backoff after a protocol-level failure, so health would read `external` while no device could
+appear — the same defect relocated rather than fixed.
+
+**`unreachable` is not `degraded`, and the distinction is the honest one.** `degraded` describes a
+daemon **quince runs** misbehaving; under the hardened profile quince runs nothing, so no child
+crash surfaces and rescan restarts nothing. Health is then the *only* muxer signal there is, which
+is why it must not be incapable of saying anything but fine.
