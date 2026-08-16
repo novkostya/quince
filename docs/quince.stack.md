@@ -36,9 +36,10 @@ HTTP/WebSocket API, UI hosting — is a single Go binary (`quince`).
 
 **Alternatives.** *All-Python (FastAPI)*: fastest start, native access to decryption
 libs, Operator has some Python — but weakest on idle footprint, packaging, and
-"discourages shitty code" for a 24/7 daemon. Rejected as the core, retained as the vault
-(D4). *All-Go*: would mean re-implementing backup keybag decryption, violating the hard
-requirement to reuse existing open-source decryption. Rejected.
+"discourages shitty code" for a 24/7 daemon. Rejected. *Splitting the decryption layer
+into a second-language sidecar*, to reuse a mature ecosystem there: rejected too, and D4
+is why — it drags a whole second runtime into every image layer for a format small enough
+to implement first-party in Go.
 
 ## D2. Device layer: speak the muxd protocol natively; drive Apple ops via CLI subprocesses
 
@@ -173,39 +174,59 @@ activity-sampler liveness with staged stall states (design §4), and never "resu
 torn session: recovery is always a fresh job, user-initiated per the assisted model
 (D13 — no automatic retries exist). Never run two jobs for one UDID.
 
-## D4. Vault: Python sidecar behind a language-neutral seam, reusing existing decryption
+## D4. Vault: encrypted-backup reading behind a language-neutral seam
 
-**Decision.** All encrypted-backup reading lives in `quince-vault serve` — a
-session-scoped child process built on the open-source `iphone_backup_decrypt` family
-(proven against our real backup in the lab). It receives the backup password on stdin,
-unlocks the keybag, and answers JSON-RPC over stdio (list, stat, decrypt-file, domain
-queries); it is killed on session lock/timeout, so keys live only in that process's
-memory. There is no batch indexer: reading is lazy and session-scoped (D8).
+**Decision.** All encrypted-backup reading lives behind a Go `vault.Vault` interface —
+the swappable seam. It takes the backup password, unlocks the keybag, and answers list /
+stat / decrypt-file / domain queries; keys live only for the duration of an unlocked
+session and are gone at lock or timeout. There is no batch indexer: reading is lazy and
+session-scoped (D8).
 
-**The seam is designed for replacement.** The core never knows the vault is Python: it
-talks to a Go `vault.Vault` interface whose only current implementation is
-process-over-stdio. The RPC protocol (`contracts.md` §4) is language-neutral and
-versioned, and the vault's conformance test suite (golden requests/responses against
-fixture backups) is the contract's executable form. A future all-Go vault — porting the
-keybag/decryption logic as its own side project — drops in as a second implementation of
-the same interface and must pass the same conformance suite. Nothing else changes.
+**Built on quince's own Go libraries, as ordinary pinned module dependencies** — Operator
+ruling, 2026-07-30; a module dependency, not vendored. Decryption is
+[`ios-backup-crypt`](https://github.com/novkostya/ios-backup-crypt): keybag, PBKDF2,
+AES-CBC/KW, `Manifest.db`, file streaming. Domain parsing is
+[`ios-backup-parser`](https://github.com/novkostya/ios-backup-parser): typed records per
+domain, plus a capability report naming what a given backup's schema *cannot* provide —
+which is "no silent caps or fallbacks" one layer down, and the degraded-mode surface the
+UI needs. Both are MIT, live in their own public repos, and are written for quince rather
+than adopted. **This costs zero new third-party surface:** their direct dependencies
+(`howett.net/plist`, `modernc.org/sqlite`) are already in `core/go.mod` at identical
+versions. Re-verify that when the rung starts.
 
-**Why.** Reusing existing decryption is a hard requirement today, and Python is where
-that ecosystem lives. Sidecar-as-child-process keeps the polyglot cost near zero and the
-exit door open: the Operator explicitly wants the option to go all-Go later.
+**Why first-party Go.** One language and one runtime in the image, on a product whose
+deployment target is a weak NAS (D1). The format is small and frozen — backup encryption
+has been stable since iOS 10.2 — and every primitive has a mature Go counterpart, so a
+first-party implementation is tractable rather than heroic. Owning it also makes the
+fixture-backup generator free: it falls out of the decryption library's own
+encrypt/builder side, which is what lets the conformance suite run in CI rather than only
+on lab hardware.
 
-**Planned successor (ruled 2026-07-19).** The all-Go option is now an active parallel
-project: an **independent Go library** (own public MIT repo) ports the decryption —
-the reference implementation is small and frozen (last release 2024; the backup
-encryption format has been stable since iOS 10.2), and every primitive has a mature Go
-counterpart. When it's ready, `quince-vault` becomes a thin **Go binary on the same
-stdio RPC** — subprocess boundary and key isolation deliberately kept (Operator
-ruling), contracts §4 untouched. **Python remains the shipped implementation until the
-Go vault passes the full conformance suite byte-for-byte**, including a differential
-gate against the Python reference on the Operator's real backup. Bonus: the library's
-test-only encrypt/builder side doubles as the synthetic-fixture generator qn.8 wants.
-The suite's goldens are generated by the Python reference regardless of which
-implementation ships.
+**The seam is designed for replacement.** The core never knows which implementation it
+holds. The conformance suite — golden requests/responses against fixture backups — is the
+contract's executable form, and **any implementation must pass it before it can ship.**
+That is a gate, not a preference.
+
+**OPEN — the process model, decided at qn.8**
+([quince#270](https://github.com/novkostya/quince/issues/270) §6). Nothing here presumes
+it. Whether the vault runs in-process or as a stdio-RPC child is unruled. In-process is
+far simpler and streams once, where a process boundary forces every file read through
+decrypt → scratch → read → unlink, i.e. double I/O on the slowest disks quince targets. A
+child process buys crash isolation (a decrypt panic or OOM must not kill the daemon
+mid-multi-hour transfer), a memory ceiling that can be rlimited on small-RAM hardware,
+and a password that exits at `lock` rather than living for the daemon's lifetime.
+`contracts.md` §4 specifies the RPC and permits either, because the seam is the
+*interface*, not the process. **The deciding measurement is peak RSS decrypting the
+largest realistic backup on the smallest target box** — it turns a design argument into a
+number.
+
+**Not built, and not yet validated on real data.** `core/internal/vault/` does not exist;
+the implementation is qn.8 (M6). The decryption library's correctness today rests on
+known-answer vectors, a synthetic round trip under `-race`, and a differential against an
+independent reference implementation — **not** on a real device backup. The rung gate
+(*unlock a real version, browse domains, download a file, lock*) is what closes that, and
+it is operator-local work. `CLAUDE.md`'s *"hardware-proven over both transports"* is a
+claim about the backup engine; the vault does not inherit it.
 
 ## D5. Storage: two genuinely different version models — ZFS snapshot-native, or namespace-versioned
 
@@ -531,9 +552,11 @@ indexing) — v1 keeps no secrets at rest, full stop.
   transcripts captured in the lab, including the pathological ones: 30 s stalls, `-4`
   disconnects, silent minutes) and a **fake muxd socket** (record/replay of the plist
   protocol).
-- Python: pytest against fixture backups; a fixture *generator* (tiny synthetic encrypted
-  backup with known password) is its own rung — until it lands, decryption integration
-  tests run against a real backup on the Operator's lab box (a non-CI gate).
+- Vault: the golden conformance suite against fixture backups, which any implementation
+  must pass before it ships (D4). The fixture *generator* — a tiny synthetic encrypted
+  backup with a known password — comes from the decryption library's encrypt/builder
+  side. Until the decrypt layer has real-data validation, it is additionally checked
+  against a real backup on the Operator's lab box (a non-CI gate).
 - Frontend: vitest for logic, Playwright against `quince serve --demo` (fixture data, no
   device) — the demo mode doubles as the public screenshot/demo story.
 - Live E2E (real iPhone, real LXC): a documented manual checklist per release, not CI.
@@ -543,23 +566,26 @@ real failure modes. Demo mode keeps UI development unblocked by hardware.
 
 ## D10. Delivery: GitHub Actions → multi-arch images + releases
 
-**Decision.** CI on every PR: lint (golangci-lint, ruff+mypy, eslint/tsc) + all test
+**Decision.** CI on every PR: lint (golangci-lint, eslint/tsc) + all test
 suites. On tag: goreleaser builds binaries, buildx builds `linux/amd64 + linux/arm64`
 images pushed to `ghcr.io` (Docker Hub mirror optional later), GitHub Release with
 changelog. During pre-public development the same image target pushes to the Operator's
 LAN registry via `make image push REGISTRY=...` (registry/creds via env, never committed).
 Base image: Alpine; ships usbmuxd, netmuxd (pinned, built from source in a CI stage),
-libimobiledevice-progs (later: patched-timeout build), python3 + locked venv (uv).
+libimobiledevice-progs (later: patched-timeout build). **One binary and no language
+runtime** — the daemon is static Go and the UI is embedded in it, so the image carries
+Apple-protocol userland and nothing else executable.
 
 **Why.** Standard, boring, reproducible; multi-arch is what makes the Synology story real.
 
 ## D11. Language/toolchain versions & conventions
 
 - Go: latest stable (1.24.x at writing), `golangci-lint` pinned config, no cgo.
-- Python: 3.12+, `uv` for env+lock, `ruff` + `mypy --strict`, `pytest`.
 - Node: 22 LTS, `pnpm`, workspace mirroring mercury conventions where sensible.
-- Monorepo layout: `core/` (Go), `vault/` (Python), `ui/` (React), `deploy/`
-  (Dockerfile, compose examples), `docs/`.
+- Monorepo layout: `core/` (Go), `ui/` (React), `deploy/` (Dockerfile, compose examples),
+  `docs/`. Two languages. The vault has no tree of its own: in-process or as a second
+  binary, it is Go under `core/` either way, so D4's open process-model question does not
+  move this line.
 - Licenses: MIT for quince; all Apple-protocol heavy lifting stays in subprocesses
   (libimobiledevice is LGPL — invoked, not linked). A license audit is part of the first
   public release rung.
