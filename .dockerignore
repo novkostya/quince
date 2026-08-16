@@ -1,0 +1,61 @@
+# .dockerignore — what must NOT enter the build context.
+#
+# THE DEFECT THIS EXISTS FOR (quince#1031). `deploy/Dockerfile` does `COPY ui/ ./ui/`, and `ui/dist/`
+# is gitignored but nothing excluded it from a DOCKER BUILD CONTEXT. Inside the builder there is no
+# `.git`, so Tailwind v4's gitignore-aware scanning has nothing to consult and a previous build's
+# `dist/assets/index-*.css` and `index-*.js` are just two more files full of class candidates. The
+# shipped CSS then re-emits utilities the source no longer has.
+#
+# MEASURED ON THIS FILE'S OWN BRANCH, same commit, nothing else changed:
+#
+#	ui/dist present, no .dockerignore   dist/assets/index-CXvVBhjb.css   36.58 kB
+#	ui/dist absent,  no .dockerignore   dist/assets/index-B8wCXvvF.css   27.02 kB
+#
+# Two different bundles and two different content hashes from one commit, decided by whether the box
+# had ever run `make gates-ui`. CI clones fresh and has no `dist`; a runner that has built the UI
+# does. Every gate is green in both cases, which is what makes it quiet.
+#
+# THE SHARPER COST IS NOT THE DEAD BYTES. A removal cannot be proved by grepping the served bundle —
+# which is the check this project actually uses — because the grep reports the PREVIOUS build's
+# vocabulary for anything deleted. quince#1028's verification was exactly that grep.
+#
+# WHY A DENYLIST AND NOT AN ALLOWLIST. The build needs three trees and no more (`ui/`, `core/`,
+# `deploy/patches/`), so `*` plus three negations would be tighter and would not need maintaining as
+# build outputs are added. It is deliberately not done here: an allowlist turns "somebody added a
+# directory the build needs" into a build failure at a distance, and quince#1031 asked for the narrow
+# fix. If a fourth tree is ever copied in, revisit this choice rather than appending forever.
+
+# --- Build outputs. The whole point of this file (quince#1031). ---
+# Tailwind scans these and re-emits classes the source has deleted.
+ui/dist
+# Populated by the ui-build stage via COPY --from, so a stale host copy would MERGE with the fresh
+# one rather than replace it — COPY does not clear a destination directory.
+core/internal/webui/dist
+core/dist
+ui/.vite
+ui/*.tsbuildinfo
+
+# --- Dependencies. The builder installs its own from the lockfile; the host's are the wrong
+#     platform's and are the single largest thing in the context. ---
+ui/node_modules
+
+# --- Test and gate artifacts. Playwright traces and screenshots, which can be tens of MB. ---
+ui/test-results
+ui/playwright-report
+
+# --- The private layer (CLAUDE.md, "The private layer"). `local` is a gitignored SYMLINK to the
+#     quince-local clone — lab topology, the privacy pattern list, personal transcripts. It reaches
+#     no COPY, so this changes no image; it keeps 677 KB of operator-private material out of a
+#     context that gets handed to a builder. Belt, not the guard: the guard is that nothing copies it.
+local
+
+# --- Repository and tooling metadata. Nothing in the build reads git; VERSION arrives as a
+#     build-arg, and the one `git apply` runs inside the builder against deploy/patches. ---
+.git
+.github
+.claude
+
+# --- Editor / OS noise. ---
+.DS_Store
+._*
+*.swp
