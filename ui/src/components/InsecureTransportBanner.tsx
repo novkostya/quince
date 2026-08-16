@@ -1,4 +1,16 @@
-import { useInsecureTransportAllowed } from "@/lib/health";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { api } from "@/lib/api";
+import { configKey } from "@/lib/config";
+import { healthKey, useInsecureTransportAllowed } from "@/lib/health";
 
 // WHILE `sessions.allow_insecure_transport` IS ON, EVERY SCREEN SAYS SO — quince#446's third
 // channel, filed as quince#539, and required by the Operator's ruling on quince#908 slice 6.
@@ -27,9 +39,74 @@ import { useInsecureTransportAllowed } from "@/lib/health";
 // `false` here. The hook carries the same warning, because this is a one-line change somebody will
 // be tempted to make.
 export function InsecureTransportBanner() {
+  // LOCAL STATE, NOT `useDialogRoute`, AND THIS IS THE ONE PLACE THAT EXCEPTION IS RIGHT. quince#931
+  // routes destructive confirms so Back dismisses them — correct for a dialog belonging to a page.
+  // This one belongs to a BANNER that renders in all three shells, including the pre-auth ones, so a
+  // routed dialog would hang a query param off every route in the product, `/login` included.
+  //
+  // MEASURED COST OF THE ALTERNATIVE, rather than argued: `useDialogRoute` and `useNavigate` both
+  // require a Router, and this component is mounted by surfaces whose tests do not have one — eight
+  // tests in three unrelated files went red on the first attempt. A global banner should not impose
+  // a router on everything that renders it.
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const allowed = useInsecureTransportAllowed();
+
+  async function turnOff() {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.post("/api/config/insecure-transport", { allow: false });
+
+      // THE BANNER REMOVES ITSELF, because it renders off `insecure_transport_allowed` — so
+      // invalidating health IS the receipt, and nothing has to be reloaded to see it happen.
+      //
+      // AND THE CONFIG QUERY, WHICH IS A SEPARATE ONE AND WAS MISSED — Operator, 2026-08-17, from
+      // Settings: *"when you turn off insecure_transport via banner on Settings page, it's not
+      // updated."* True, and the stale panel is the SMALLER half. `ConfigEditor`'s draft follows the
+      // config query (quince#764) and `PUT /api/config` is a FULL-DOCUMENT REPLACE, so a reader who
+      // turned the setting off here and then saved an unrelated field on the same screen would have
+      // shipped a document still carrying `allow_insecure_transport: true` — silently turning a
+      // security setting back on, from a form that never mentions it.
+      //
+      // BOTH KEYS, EVERY TIME THIS ROUTE IS CALLED. It writes config, so config is stale; health
+      // derives from it, so health is stale too. One without the other is a screen disagreeing with
+      // itself.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: healthKey }),
+        qc.invalidateQueries({ queryKey: configKey }),
+      ]);
+
+      // IT DOES NOT SIGN THE READER OUT, AND THAT IS A CORRECTION RATHER THAN A DEFAULT —
+      // Operator, 2026-08-16, having walked the version that did: *"it redirects to `/login` (which
+      // will fail) … in this case it's impossible to re-enable insecure_transport on
+      // `/onboarding/https`, so the whole idea doesn't really work."*
+      //
+      // Exactly right, and it is a LOCKOUT rather than an inconvenience. With the setting off and a
+      // plain-http address: `POST /api/auth/login` answers 426; the pre-auth route answers 409 to
+      // anybody without a session; and the first-run confirm on `/onboarding/https` does not render
+      // in `needs_login`, deliberately — an unauthenticated control that RELAXES transport is the
+      // downgrade primitive quince#908 §3 refuses. The way back was ssh and a text editor, which is
+      // the dead end quince#908 exists to remove, rebuilt by the control meant to help.
+      //
+      // SO THE SESSION STAYS. The setting governs sign-ins from here on; the reader keeps the one
+      // they already have, and `PlainHTTPSetting` on Settings → Sign-in is the reversal path they
+      // can still reach. Every other live session keeping working is quince#1080's question, and it
+      // is the server's to answer — a client that signs ITSELF out fixes nothing there and strands
+      // the one person who was trying to tighten the install.
+      setOpen(false);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // RENDERS NOTHING WHEN OFF, which is the shipping default and almost every install. A permanent
   // element that merely changed wording would train people to stop reading it.
-  if (!useInsecureTransportAllowed()) return null;
+  if (!allowed) return null;
   return (
     <div
       role="alert"
@@ -58,8 +135,51 @@ export function InsecureTransportBanner() {
           The setting is global, so a reader can be on a perfectly good HTTPS address while it is on
           — "this connection is not encrypted" would be a lie to exactly that reader. */}
       <strong className="text-danger">quince is allowing plain HTTP.</strong> Your sign-in travels in
-      the clear, so anyone who can see the traffic can sign in as you. Turn this off once you can
-      reach quince over HTTPS.
+      the clear, so anyone who can see the traffic can sign in as you.{" "}
+      {/* THE INSTRUCTION IS THE CONTROL — Operator direction, 2026-08-16, correcting the first
+          attempt at quince#1069, which put a separate button under the sentence and then opened an
+          inline confirm box beside it: *"I don't like how it looks … what I meant is making 'Turn
+          this off' a link."* A banner is a sentence; the words that name the act are the place to
+          press, and a second element repeating them is furniture. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <button type="button" className="underline underline-offset-2 hover:no-underline">
+            Turn this off
+          </button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogTitle>Turn off plain HTTP</DialogTitle>
+          {/* ONE SENTENCE FOR EVERY READER, because before the write quince cannot tell them apart:
+              this branched on `useInsecureOrigin()`, which is false for everybody who can see this
+              banner, so the half that mattered never rendered.
+
+              AND IT SAYS WHERE THE WAY BACK IS. Somebody about to close their own door should be
+              told the door reopens from the inside — Settings → Sign-in, while they are still
+              signed in. That sentence is only honest because `PlainHTTPSetting` exists; if it is
+              ever removed, this copy is a lie and the act becomes a lockout again. */}
+          <DialogDescription>
+            quince will stop accepting sign-ins over plain HTTP. You stay signed in here, and anyone
+            signing in at this address will need HTTPS from now on. You can allow it again in
+            Settings → Sign-in.
+          </DialogDescription>
+          <div className="mt-4 flex items-center gap-2">
+            <Button variant="destructive" onClick={() => void turnOff()} disabled={busy}>
+              {busy ? "Turning it off…" : "Turn it off"}
+            </Button>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+          {failed ? (
+            // THE SERVER'S OWN SENTENCE, as every other confirm in this codebase shows: a 409 here
+            // means this browser holds no session, and "sign in to change this" is the useful fact.
+            <p role="alert" className="mt-3 text-sm text-danger">
+              {failed}
+            </p>
+          ) : null}
+        </DialogContent>
+      </Dialog>{" "}
+      once you can reach quince over HTTPS.
     </div>
   );
 }
