@@ -33,6 +33,35 @@ type Loaded struct {
 	Errors   []wire.ConfigError
 	Source   Source
 	OK       bool
+	// Failure says WHY this load fell back to Default(), TYPED, and nil when it did not
+	// (quince#544). It exists because `Config` cannot answer the question: every failing path
+	// yields `Default()`, whose nil `Storage` is indistinguishable from a file that genuinely
+	// declares nothing — so `CheckStorages` was re-deriving the cause by matching the prose prefix
+	// `"invalid YAML: "` off a Warning this same function composed. A string contract between two
+	// functions in one package that nothing asserted stays in step: reword the Warning and
+	// detection stops silently, with every test green.
+	Failure *LoadFailure
+}
+
+// LoadFaultKind names the ways Load can fail to read a document. The zero value is deliberately not
+// one of them, so a LoadFailure that was never populated cannot read as a real fault.
+type LoadFaultKind int
+
+const (
+	// LoadUnreadable — the file exists (Stat succeeded) and could not be READ: a permission error,
+	// an I/O error, a `/data` bind that did not mount over a directory of that name. Distinct from
+	// no-file-at-all, which is the ordinary first run and is not a failure.
+	LoadUnreadable LoadFaultKind = iota + 1
+	// LoadUnparsable — the bytes were read and are not YAML quince can decode.
+	LoadUnparsable
+)
+
+// LoadFailure is a typed cause plus the underlying sentence. Detail is the OS's or the parser's own
+// words — it names the path, the errno, or the line and type, and nothing a caller composes can
+// improve on it (quince#508's finding, kept).
+type LoadFailure struct {
+	Kind   LoadFaultKind
+	Detail string
 }
 
 // Parse decodes YAML over the defaults (missing keys keep their default) and collects
@@ -164,11 +193,15 @@ func Load(path string) Loaded {
 	}
 	src.Mtime = info.ModTime().UTC().Format(time.RFC3339)
 
+	// THE WARNINGS STAY AND THE FAULT IS CARRIED BESIDE THEM (quince#544). The prose is what a user
+	// reads in Settings; `Failure` is what code branches on. Deriving the second from the first is
+	// what this fixes, so the two must not be collapsed back into one.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Loaded{
 			Config: Default(), Source: src, OK: false,
 			Warnings: []Warning{{Path: path, Message: "cannot read config: " + err.Error()}},
+			Failure:  &LoadFailure{Kind: LoadUnreadable, Detail: err.Error()},
 		}
 	}
 	cfg, declared, warnings, perr := Parse(data)
@@ -176,6 +209,7 @@ func Load(path string) Loaded {
 		return Loaded{
 			Config: Default(), Source: src, OK: false,
 			Warnings: append(warnings, Warning{Path: "", Message: "invalid YAML: " + perr.Error()}),
+			Failure:  &LoadFailure{Kind: LoadUnparsable, Detail: perr.Error()},
 		}
 	}
 	if errs := Validate(cfg); len(errs) > 0 {
@@ -305,6 +339,12 @@ type Service struct {
 	// today's startup path and this is a property of the write.
 	discarded bool
 
+	// loadFailure is the TYPED cause of a discard, when there was one (quince#544). Distinct from
+	// `loadErrs`, which is `Validate`'s per-key findings about a document that PARSED: this covers
+	// the two states where there is no document to have findings about, because the bytes could not
+	// be read or could not be decoded. nil whenever the file was usable.
+	loadFailure *LoadFailure
+
 	// appliers is written ONLY at wiring time and read under mu on every write.
 	//
 	// Registration is deliberately not a runtime operation (spec decision 3): a fixed list cannot
@@ -410,8 +450,21 @@ func NewService(path string, log *slog.Logger) *Service {
 	}
 	return &Service{
 		path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings,
-		source: l.Source, loadErrs: loadErrs, discarded: !l.OK,
+		source: l.Source, loadErrs: loadErrs, discarded: !l.OK, loadFailure: l.Failure,
 	}
+}
+
+// LoadFailure reports the TYPED cause of a startup discard, or nil (quince#544). It exists so
+// `CheckStorages` can be told WHY the live document is `Default()` without re-deriving it from
+// prose — see that function, and `Loaded.Failure`.
+//
+// NOT FOLDED INTO Snapshot(), whose three returns are the GET /api/config payload and have a
+// contract of their own. This is a startup-refusal input with one caller, and widening a served
+// shape to carry it would put an internal fault kind on the wire by accident.
+func (s *Service) LoadFailure() *LoadFailure {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadFailure
 }
 
 // Snapshot returns the live config, its warnings, and its source (for GET /api/config).
@@ -712,10 +765,13 @@ func (s *Service) replaceLocked(c Config, source string) ([]wire.ConfigError, []
 	// refusing for the lifetime of the process — a guard that cannot be cleared by fixing the thing
 	// it guards against.
 	//
-	// BOTH FIELDS, and the condition matters more than the detail: clearing only `loadErrs` would
-	// leave `discarded` true forever on the two paths that never set errors in the first place.
+	// ALL THREE FIELDS, and the condition matters more than the detail: clearing only `loadErrs`
+	// would leave `discarded` true forever on the two paths that never set errors in the first
+	// place — and those two paths are exactly the ones `loadFailure` describes (quince#544), so it
+	// is cleared here for the same reason and would otherwise outlive the state it reports.
 	s.loadErrs = nil
 	s.discarded = false
+	s.loadFailure = nil
 	s.source = Source{Path: s.path, Mtime: mtime}
 	s.mu.Unlock()
 

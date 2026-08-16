@@ -56,10 +56,26 @@ type StorageRequirement struct {
 	// MalformedDetail is the parser's own sentence, which names the line and the type. It is the
 	// thing the old message threw away while the information sat one log line above it.
 	MalformedDetail string
+
+	// Unreadable is true when config.yml EXISTS AND COULD NOT BE READ, so `Missing` would be an
+	// artifact for the second time (quince#544). It is the branch quince#508 did not walk: that fix
+	// taught this type to recognise a PARSE failure, and a READ failure fell through the same nil to
+	// the same false sentence.
+	//
+	// IT IS ARGUABLY THE MORE MISLEADING OF THE TWO. A parse failure at least means quince read the
+	// file; this one can mean quince never saw the operator's config AT ALL, and the message sent
+	// them to edit a file the daemon cannot see. `Load` stats before reading, so this is never the
+	// ordinary no-file-yet first run — it is a permission error, an I/O error, or a `/data` bind that
+	// did not mount. That last one is a plausible container mistake rather than an exotic state.
+	Unreadable bool
+	// UnreadableDetail is the OS's own sentence — it names the path and the errno.
+	UnreadableDetail string
 }
 
 // OK reports whether the process may serve.
-func (r StorageRequirement) OK() bool { return !r.Missing && !r.Empty && !r.Malformed }
+func (r StorageRequirement) OK() bool {
+	return !r.Missing && !r.Empty && !r.Malformed && !r.Unreadable
+}
 
 // declaredStorage counts the storages a document declares. Nil and empty both count zero — the
 // distinction `StorageRequirement` keeps as `Missing` versus `Empty` is worth two different
@@ -79,11 +95,18 @@ func declaredStorage(c Config) int {
 // CheckStorages evaluates the requirement. environ is os.Environ()-style; it is read ONLY to
 // detect a retired variable for the explanation, never to resolve a path.
 //
-// `warnings` are the load's own, and they are how a PARSE FAILURE reaches this decision
-// (quince#508). It cannot be inferred from the Config: a failed parse yields `Default()`, whose
-// nil `Storage` is indistinguishable from a file that genuinely declares nothing. Passing nil is
-// correct for a caller that did not load from disk — `Service.Replace` validates a document that
-// already parsed, so there is no parse failure it could be hiding.
+// `failure` is the load's own TYPED cause, and it is how a document quince could not use reaches
+// this decision (quince#508, quince#544). It cannot be inferred from the Config: every failing load
+// yields `Default()`, whose nil `Storage` is indistinguishable from a file that genuinely declares
+// nothing. Passing nil is correct for a caller that did not load from disk — `Service.Replace`
+// validates a document that already parsed, so there is no load failure it could be hiding.
+//
+// IT USED TO BE `warnings []Warning`, AND THAT WAS THE DEFECT quince#544 NAMES AS THE SHARPER HALF.
+// This function recognised a parse failure by matching the prose prefix `"invalid YAML: "` off a
+// Warning that `Load` composes — a string contract between two functions in the same package that
+// NOTHING ASSERTED STAYS IN STEP. Reword the Warning and detection stops silently: the old false
+// "no storage: key" message returns, with every test green. A typed cause cannot drift, and it made
+// the READ branch expressible at the same time, which prose-matching never did.
 //
 // IT IS A STATIC PREDICATE OVER ONE DOCUMENT, AND IT STAYS ONE. That is half of the Operator's
 // ruling of 2026-08-14 (quince#908) rather than an accident of how it was written. Its two callers
@@ -98,18 +121,20 @@ func declaredStorage(c Config) int {
 // check"* is a sentence that reads as licence to edit this predicate, and doing so would silently
 // delete the startup refusal `qn.6e` and quince#508 both rest on — a daemon booting on defaults with
 // no storage and no error, which is the exact failure gap 3's ruling forbade.
-func CheckStorages(c Config, environ []string, warnings []Warning) StorageRequirement {
+func CheckStorages(c Config, environ []string, failure *LoadFailure) StorageRequirement {
 	r := StorageRequirement{}
-	// THE PARSE FAILURE OUTRANKS EVERYTHING BELOW, because everything below is read off a Config
-	// that parsing did not produce. Reporting "no storage key" about `Default()` is reporting on a
+	// A LOAD FAILURE OUTRANKS EVERYTHING BELOW, because everything below is read off a Config that
+	// the file did not produce. Reporting "no storage key" about `Default()` is reporting on a
 	// document nobody wrote.
-	for _, w := range warnings {
-		if detail, found := strings.CutPrefix(w.Message, "invalid YAML: "); found {
-			r.Malformed, r.MalformedDetail = true, detail
-			break
+	if failure != nil {
+		switch failure.Kind {
+		case LoadUnparsable:
+			r.Malformed, r.MalformedDetail = true, failure.Detail
+		case LoadUnreadable:
+			r.Unreadable, r.UnreadableDetail = true, failure.Detail
 		}
 	}
-	if !r.Malformed {
+	if !r.Malformed && !r.Unreadable {
 		switch {
 		case c.Storage == nil:
 			r.Missing = true
@@ -137,6 +162,26 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, "quince: "+format+"\n", a...) }
 
 	switch {
+	case r.Unreadable:
+		// THE OS'S OWN SENTENCE, for the same reason the parser's is kept below: it names the path
+		// and the errno, and nothing this function knows improves on it (quince#544).
+		//
+		// THE REMEDY BLOCK BELOW IS SKIPPED FOR THIS CASE, and that is the point of the branch. "Add
+		// this to config.yml, then start again" is advice quince cannot honour when it cannot read
+		// the file — and the old behaviour gave exactly that advice, because a read failure fell
+		// through nil to `Missing`. Telling an operator whose bind mount is missing to edit a file
+		// the daemon cannot see is worse than saying nothing.
+		p("%s could not be READ — quince cannot tell what storage you declared.", configPath)
+		p("")
+		p("    %s", r.UnreadableDetail)
+		p("")
+		p("The file EXISTS — quince found it and then failed to open it — so this is a permission")
+		p("problem, an I/O error, or a mount that is not there. In a container the usual cause is a")
+		p("`/data` bind that did not mount: check the volume before editing anything.")
+		p("")
+		p("REFUSING to start. quince will not serve on defaults while a config it cannot read sits")
+		p("at that path — that would silently ignore whatever you actually wrote.")
+		return fmt.Errorf("config could not be read: %s: %s", configPath, r.UnreadableDetail)
 	case r.Malformed:
 		// THE PARSER'S OWN SENTENCE, because it names the line and the type and nothing this
 		// function knows can improve on it (quince#508). Saying "no storage key" here — which is

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -135,14 +137,26 @@ func TestExplainWritesNothingWhenSatisfied(t *testing.T) {
 func TestAParseFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
 	// The exact shape every pre-quince#473 deployment has.
 	raw := "storage:\n    storages:\n        - name: local\n          path: /backups\n          default: true\n    backend: zfs\n"
-	cfg, _, warnings, perr := Parse([]byte(raw))
-	if perr == nil {
+	// DRIVEN THROUGH THE REAL Load, which is what quince#544 made possible. This test used to
+	// `Parse`, then MIRROR the warning Load composes — `Warning{Message: "invalid YAML: " + …}` —
+	// and hand that to CheckStorages. So it asserted against its own copy of a string contract:
+	// rewording Load's warning would have broken detection in production and left this green, which
+	// is the brittleness quince#544 calls the sharper half. A real file through the real Load cannot
+	// drift from Load.
+	path := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	l := Load(path)
+	if l.OK {
 		t.Fatal("the old nested shape must fail to parse against the flattened schema")
 	}
-	// Load composes this warning; mirror it rather than reaching into Load.
-	warnings = append(warnings, Warning{Path: "", Message: "invalid YAML: " + perr.Error()})
+	if l.Failure == nil || l.Failure.Kind != LoadUnparsable {
+		t.Fatalf("Load must report a typed unparsable cause, got %+v", l.Failure)
+	}
+	cfg := l.Config
 
-	req := CheckStorages(cfg, nil, warnings)
+	req := CheckStorages(cfg, nil, l.Failure)
 	if !req.Malformed {
 		t.Fatal("a parse failure must be reported as malformed")
 	}
@@ -180,12 +194,125 @@ func TestAParseFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
 // And the two states it must NOT swallow: a genuinely absent key and a genuinely empty list still
 // say what they always said. A third state that ate the other two would be a worse bug.
 func TestMalformedDoesNotSwallowAbsentOrEmpty(t *testing.T) {
-	absent := CheckStorages(Default(), nil, []Warning{{Path: "x", Message: "unknown config key"}})
-	if absent.Malformed || !absent.Missing {
-		t.Errorf("an unrelated warning must not read as a parse failure: %+v", absent)
+	// A document that PARSED and merely carries warnings has no LoadFailure, so it cannot read as a
+	// parse failure — which is now structural rather than a property of the warning's wording. This
+	// case used to be expressed by passing `[]Warning{{Message: "unknown config key"}}` and trusting
+	// that it did not happen to start with the magic prefix (quince#544).
+	absent := CheckStorages(Default(), nil, nil)
+	if absent.Malformed || absent.Unreadable || !absent.Missing {
+		t.Errorf("a parsed document with no failure must read as Missing: %+v", absent)
 	}
 	empty := CheckStorages(withStorages(), nil, nil)
-	if empty.Malformed || !empty.Empty {
+	if empty.Malformed || empty.Unreadable || !empty.Empty {
 		t.Errorf("an empty list is still Empty: %+v", empty)
+	}
+}
+
+// quince#544 — A READ FAILURE IS NOT AN ABSENT KEY, and this is the branch quince#508 did not walk.
+//
+// It is arguably the more misleading of the two: a parse failure at least means quince READ the
+// file, where this can mean quince never saw the operator's config at all — and the old message
+// sent them to edit a file the daemon cannot open. A `/data` bind that did not mount produces
+// exactly this.
+// THE FIXTURE IS A DIRECTORY AT THE CONFIG PATH, AND THAT IS THE REPORTED SHAPE RATHER THAN A
+// CONVENIENCE. A bind mount whose source does not exist makes the container runtime create a
+// DIRECTORY at the target, so `/data/config.yml` becomes a directory — `Stat` succeeds, `ReadFile`
+// fails with EISDIR, and the operator gets "you have no storage" about a config they wrote.
+//
+// It also runs where a chmod fixture cannot. The first version of this test chmod'ed the file to
+// 0000 and had to skip as root — which is how the gates run, so it would have gated NOTHING in CI
+// while looking green. Mode bits do not stop root; EISDIR stops everyone.
+func TestAReadFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("stage a directory at the config path: %v", err)
+	}
+
+	l := Load(path)
+	if l.OK {
+		t.Fatal("a config that cannot be read must not load as OK")
+	}
+	if l.Failure == nil || l.Failure.Kind != LoadUnreadable {
+		t.Fatalf("Load must report a typed unreadable cause, got %+v", l.Failure)
+	}
+
+	req := CheckStorages(l.Config, nil, l.Failure)
+	if !req.Unreadable {
+		t.Fatal("a read failure must be reported as unreadable")
+	}
+	if req.Missing {
+		t.Error("Missing must be false — quince never saw the file, so it cannot say the key is absent")
+	}
+	if req.OK() {
+		t.Error("a config that could not be read must not be allowed to serve")
+	}
+
+	var sb strings.Builder
+	err := req.Explain(&sb, "/data/config.yml")
+	out := sb.String()
+	if strings.Contains(out, "no `storage:` key") {
+		t.Errorf("the refusal still claims the key is absent:\n%s", out)
+	}
+	// AND IT MUST NOT OFFER THE REMEDY BLOCK. "Add this to config.yml, then start again" is advice
+	// quince cannot honour when it cannot read the file, and it is what the old fall-through gave.
+	if strings.Contains(out, "Add this to") {
+		t.Errorf("the refusal tells the operator to edit a file quince cannot read:\n%s", out)
+	}
+	for _, want := range []string{
+		"could not be READ",       // what actually happened
+		"permission",              // the class of cause
+		"bind that did not mount", // the plausible container mistake
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("refusal missing %q:\n%s", want, out)
+		}
+	}
+	if err == nil || strings.Contains(err.Error(), "no storage declared") {
+		t.Errorf("the short error repeats the false claim: %v", err)
+	}
+}
+
+// THE UNREADABLE BRANCH IS REACHED BY A TYPE, NOT BY A FIXTURE, so the assertion above still has a
+// counterpart on a box where the chmod cannot bite — which since the gates run as root is every box
+// this project actually gates on. Same claim, driven from the cause rather than the disk.
+func TestAnUnreadableCauseRefusesAndDoesNotClaimTheKeyIsAbsent(t *testing.T) {
+	req := CheckStorages(Default(), nil, &LoadFailure{
+		Kind:   LoadUnreadable,
+		Detail: "open /data/config.yml: permission denied",
+	})
+	if !req.Unreadable || req.Missing || req.OK() {
+		t.Fatalf("an unreadable cause must refuse and must not read as Missing: %+v", req)
+	}
+	var sb strings.Builder
+	err := req.Explain(&sb, "/data/config.yml")
+	out := sb.String()
+	if !strings.Contains(out, "permission denied") {
+		t.Errorf("the OS's own sentence is lost:\n%s", out)
+	}
+	if strings.Contains(out, "no `storage:` key") || strings.Contains(out, "Add this to") {
+		t.Errorf("the refusal gives absent-key advice for a file quince could not read:\n%s", out)
+	}
+	if err == nil || !strings.Contains(err.Error(), "could not be read") {
+		t.Errorf("the short error does not name the cause: %v", err)
+	}
+}
+
+// AND THE TWO CAUSES DO NOT COLLAPSE INTO EACH OTHER. Both refuse, so `OK()` cannot tell them
+// apart — the whole point is that the operator is told which one happened.
+func TestUnreadableAndMalformedAreDistinguishable(t *testing.T) {
+	unread := CheckStorages(Default(), nil, &LoadFailure{Kind: LoadUnreadable, Detail: "i/o error"})
+	unparse := CheckStorages(Default(), nil, &LoadFailure{Kind: LoadUnparsable, Detail: "line 3: bad"})
+
+	if unread.Malformed {
+		t.Error("a read failure must not report as malformed — quince never got to the parser")
+	}
+	if unparse.Unreadable {
+		t.Error("a parse failure must not report as unreadable — the bytes were read fine")
+	}
+	var a, b strings.Builder
+	_ = unread.Explain(&a, "/data/config.yml")
+	_ = unparse.Explain(&b, "/data/config.yml")
+	if !strings.Contains(a.String(), "could not be READ") || !strings.Contains(b.String(), "could not be parsed") {
+		t.Errorf("the two refusals do not say which one happened:\n--- unreadable ---\n%s\n--- malformed ---\n%s", a.String(), b.String())
 	}
 }

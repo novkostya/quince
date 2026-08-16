@@ -207,11 +207,12 @@ func serve(args []string) error {
 		// branch would refuse every demo and every ui-e2e run over a subsystem they do not use.
 		// Placed before buildLiveStack so nothing is probed or reconciled on a config that cannot
 		// serve.
-		// THE LOAD'S WARNINGS ARE PASSED, and that is what lets the refusal tell a PARSE FAILURE
-		// from an absent key (quince#508). `Current()` alone cannot: a failed parse yields
-		// `Default()`, and its nil `Storage` reads identically to a file that declares nothing.
-		_, cfgWarnings, _ := cfgSvc.Snapshot()
-		req := config.CheckStorages(cfgSvc.Current(), os.Environ(), cfgWarnings)
+		// THE LOAD'S TYPED FAILURE IS PASSED, and that is what lets the refusal tell a file quince
+		// could not USE from an absent key (quince#508, quince#544). `Current()` alone cannot: every
+		// failing load yields `Default()`, and its nil `Storage` reads identically to a file that
+		// declares nothing. This was `Snapshot()`'s warnings, which `CheckStorages` then re-parsed
+		// by prose prefix — see that function for why the string contract had to go.
+		req := config.CheckStorages(cfgSvc.Current(), os.Environ(), cfgSvc.LoadFailure())
 
 		// RULED 2026-08-07 (quince#502, option (a)): ANY ZERO-STORAGE START IS THE ONBOARDING STATE.
 		// quince serves, refusing every API outside setupAllowed, and renders the storage step.
@@ -235,7 +236,14 @@ func serve(args []string) error {
 		// on a parse failure, so serving here would silently ignore whatever the operator actually
 		// wrote and invite them to add a storage to a document that already has one it cannot read
 		// (quince#508).
-		if req.Malformed {
+		//
+		// AND UNREADABLE JOINS IT, under the same carve-out rather than a new one (quince#544). The
+		// ruling's subject is a ZERO-STORAGE start; a file quince could not read is not a statement
+		// about storage at all, and the carve-out's own argument transfers word for word — arguably
+		// harder, because a parse failure at least means quince read the file. Until now this fell
+		// through nil to `Missing` and produced the onboarding page, which tells an operator whose
+		// bind mount is missing to add their first storage to a file the daemon cannot see.
+		if req.Malformed || req.Unreadable {
 			return req.Explain(os.Stderr, cfgPath)
 		}
 		// LegacyEnv is not fatal and never was — OK() excludes it — so it keeps flowing through as
