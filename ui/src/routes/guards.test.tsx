@@ -67,12 +67,10 @@ describe("SetupGate", () => {
     // THIS GATE'S JOB IS FIRST RUN, and `needs_login` is not it — `SetupGate` sends such a visitor
     // to `/`, which is what this asserts.
     //
-    // ITS COMMENT SAID THE LOGIN FORM KEEPS A LINK RATHER THAN A REDIRECT, AND THAT IS NO LONGER THE
-    // RULING (Operator, 2026-08-16, quince#1069). `LoginGate` now redirects a `needs_login` visitor
-    // on an insecure origin to the same page — see its own tests below. quince#908 §3 is untouched:
-    // the control on that page is `firstRun`-only, so the returning reader arrives at instructions
-    // and no affordance. Corrected rather than deleted, because a stale rule in a test comment is
-    // how the next change to this file gets argued from the wrong premise.
+    // A `needs_login` VISITOR ON AN INSECURE ORIGIN IS `LoginGate`'s TO REDIRECT, NOT THIS GATE'S —
+    // see its tests below (quince#1069). quince#908 §3 is untouched by that: the control on the
+    // destination page is `firstRun`-only, so the returning reader arrives at instructions and no
+    // affordance.
     renderGate({ state: "needs_login", insecure: true });
     expect(screen.getByText("the app")).toBeInTheDocument();
     expect(screen.queryByText("the https page")).not.toBeInTheDocument();
@@ -94,14 +92,12 @@ describe("SetupGate", () => {
   });
 });
 
-// quince#1069 — THE RETURNING-USER HALF OF quince#923's REDIRECT, ruled by the Operator from the rig
-// on 2026-08-16 and left open by qn.6f's spec as *"deliberately NOT settled"* until somebody could
-// see it working.
+// quince#1069 — THE RETURNING-USER HALF OF quince#923's REDIRECT (Operator ruling, 2026-08-16).
 //
 // THE REASON IS WHERE THE PASSWORD GOES, NOT THAT THE FORM WOULD FAIL. `refuseInsecureOrigin`
 // answers 426 BEFORE the credential is examined — but the browser has already put it on the wire in
-// clear. The form invited somebody to hand their admin password to the network in order to be told
-// they could not sign in here.
+// clear, so a form here asks somebody to hand their admin password to the network in order to be
+// told they cannot sign in at this address.
 describe("LoginGate", () => {
   function renderLogin({ state, insecure }: { state: AuthState | undefined; insecure: boolean }) {
     vi.spyOn(auth, "useAuthStatus").mockReturnValue({
