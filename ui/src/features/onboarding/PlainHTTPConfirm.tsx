@@ -60,6 +60,13 @@ export function PlainHTTPConfirm() {
   // IT DOES NOT REPEAT THAT THE WARNING WILL PERSIST — Operator direction, 2026-08-16. The confirm
   // one screen up says it before the press, which is where it changes a decision; saying it again
   // afterwards tells somebody who has already chosen something they cannot act on.
+  //
+  // THE LINK GOES TO `/`, NOT TO `/setup` — Operator direction, same day, and the sibling change on
+  // quince#1070 carries the full reasoning. `RequireAuth` routes on the LIVE auth state, so the root
+  // resolves to setup on first run and to login on a claimed install; naming the step here would
+  // hardcode an order this component has no business knowing. The LABEL still names it, and can:
+  // this state only exists in the pre-credential window, where `POST /api/config/insecure-transport`
+  // is reachable at all — anywhere else the route answers 409 and this never renders.
   if (done) {
     return (
       <div role="status" className="mt-3 rounded-card border border-warn bg-card px-3 py-2">
@@ -67,7 +74,7 @@ export function PlainHTTPConfirm() {
           <strong>Plain HTTP is on.</strong>
         </p>
         <Button asChild className="mt-3">
-          <Link to="/setup">Set your password</Link>
+          <Link to="/">Set your password</Link>
         </Button>
       </div>
     );
