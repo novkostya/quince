@@ -117,9 +117,34 @@ repo is not a message bus, and no human is an RPC layer.
    a squash-merged, deleted predecessor of one and of three commits — clean both times, carrying one
    commit.
 
+   **DELETION FAILS LOUD; THE BRANCH *MOVING* FAILS SILENT** (quince#1046, quince-devlog#255,
+   measured 2026-08-16). Everything above is written for a ref that is **gone**, and that failure
+   stops you: `fatal: invalid upstream`, nothing replayed. The ref also **changes value** under you —
+   routinely, because `strict: true` puts every open PR `BEHIND` on every merge and §5 has the
+   merging seat clear that with `gh pr update-branch --rebase`. **That one does not stop you.** You
+   get a real oid, the rebase succeeds, and the replayed range is wrong.
+
+   Measured: branched at `f9144d7`, the merging seat rebased the PR to `485510b`, and the two slices
+   waiting locally were still children of `f9144d7`. **`--onto` replays what is after the boundary in
+   YOUR object store**, so the pre-rebase oid is the correct one and the new head is in no local
+   slice's ancestry. Rebasing onto it replays commits whose content is already in `main` — the
+   conflict this section already names, whose wrong resolution **ships a silent revert of the slice
+   that just landed**.
+
+   Two failure modes, one habit: take the oid when you branch and it survives both. **Take it even
+   when you are sure the predecessor will not be rebased** — the loud one merely costs you a lookup,
+   and this is the one that does not announce itself.
+
+   **The fallback in the next paragraph routes you to the seat that invalidated the value**, which is
+   why this is a guard rather than a footnote. After a rebase, *"the merging seat can post it"* posts
+   the **current** head — the wrong boundary, in exactly the case that made the rebase necessary.
+   `git log` on your own machine still names the right commit; the forge no longer does.
+
    **If you did not take it**, the tip is the commit below your first, so `git log` still names it,
    and the merging seat can post it — in **full 40 characters**, since GitHub serves an arbitrary
-   full oid and refuses an abbreviation (quince#243). A **local** branch of that name would have
+   full oid and refuses an abbreviation (quince#243) — **but ask for the commit your branch descends
+   from, never "the head of that PR"**: if the PR was rebased, those are different commits. A
+   **local** branch of that name would have
    survived `fetch --prune`, because only the remote-tracking ref goes; that is why this bites some
    authors and not others, and why rung 2's fresh clone cannot rely on it.
 
