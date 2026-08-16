@@ -480,20 +480,20 @@ func TestExternalWithNoDialerSaysSo(t *testing.T) {
 	}
 }
 
-// TestGroupRescanWithoutManagedUSBMuxer: rescan is honestly refused (409 + reason) when quince
-// owns no USB muxer — the manage_muxer:false case and the netmuxd-only case alike.
+// TestGroupRescanWithoutManagedUSBMuxer: a group whose only SUPERVISED daemon is netmuxd still
+// refuses, because restarting netmuxd would tear a live Wi-Fi backup ((bz)) and there is no USB
+// daemon to restart instead.
+//
+// ITS SECOND HALF INVERTED IN qn.6p AND MOVED OUT (D6). It asserted that an external muxer refused
+// rescan with a reason naming `external` — correct while rescan meant *restart a daemon quince
+// owns*, and wrong now that it means *re-read the muxer*. The external case is
+// TestRescanRereadsTheExternalMuxer below; what is left here is the managed-but-not-USB case, which
+// is unchanged and still refuses.
 func TestGroupRescanWithoutManagedUSBMuxer(t *testing.T) {
 	g := NewGroup()
 	g.Supervise(fakeSupervisor(fakeSpec("netmuxd", RoleWiFi, "tcp", freePort(t), "serve"), ""))
 	if accepted, reason := g.Rescan(rescanCtx(t)); accepted || reason == "" {
 		t.Fatalf("rescan = (accepted=%v, reason=%q); want refused with a reason", accepted, reason)
-	}
-
-	external := NewGroup()
-	external.AddUnmanaged("usbmuxd", RoleUSB, "/var/run/usbmuxd", connectedClient())
-	accepted, reason := external.Rescan(rescanCtx(t))
-	if accepted || !strings.Contains(reason, "external") {
-		t.Fatalf("external rescan = (accepted=%v, reason=%q); want refused naming the external muxer", accepted, reason)
 	}
 }
 
