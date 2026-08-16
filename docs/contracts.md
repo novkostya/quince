@@ -757,6 +757,23 @@ could not be **parsed** is not an empty declaration: `Load()` falls back to `Def
 would silently ignore what the operator wrote and invite them to add a storage to a document that
 already has one it cannot read (quince#508).
 
+**AND SO DOES UNREADABLE, under that same carve-out rather than a new one** (quince#544). A file that
+exists and could not be **read** is not a statement about storage at all, so the argument above
+transfers word for word — harder, if anything, because a parse failure at least means quince read the
+file. Until this, a read failure fell through the same nil to `Missing`: **measured on `main`, a
+directory at the config path produced ``no `storage:` key in /data/config.yml``**, which tells an
+operator whose bind mount is missing to edit a file the daemon cannot open. That is the shape a
+container mistake actually takes — a bind whose source does not exist makes the runtime create a
+DIRECTORY at the target. `Load` stats before reading, so this is never the ordinary no-file-yet
+first run.
+
+**The two causes are now TYPED rather than re-derived from prose.** `Loaded.Failure` carries
+`LoadUnreadable | LoadUnparsable` with the OS's or the parser's own sentence, and `CheckStorages`
+takes it instead of scanning the load's warnings for the `"invalid YAML: "` prefix that `Load`
+composes. That prefix was a string contract between two functions in one package with nothing
+asserting they stayed in step: rewording the warning would have stopped detection **silently**,
+restoring the false message with every test green.
+
 **The accepted cost, recorded as accepted:** *onboarding* and *misconfigured* are byte-identical at
 startup, so a config whose `storage:` list someone emptied by hand gets the setup page rather than a
 refusal. Ruled **not** a state-honesty downgrade — the page is true in both cases, and the daemon
