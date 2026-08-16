@@ -24,10 +24,15 @@ beforeEach(() => {
 });
 
 describe("the onboarding HTTPS check", () => {
-  // G1: an already-secure origin completes with NO buttons. The top-tier user — a reverse proxy
-  // or `tailscale serve` — must meet zero friction, so the absence of the options is the
-  // assertion, not an afterthought.
-  it("offers nothing at all when the origin is already encrypted", async () => {
+  // G1: an already-secure origin completes with NO TIERS. The top-tier user — a reverse proxy or
+  // `tailscale serve` — must meet zero friction, so the absence of the options is the assertion,
+  // not an afterthought.
+  //
+  // *"NO BUTTONS"* IS WHAT THIS SAID, AND quince#1070 NARROWED IT: the card now carries one
+  // navigation control, because a page saying "Nothing to do" with no way off it is where the proxy
+  // tier's own success link left people. G1 is about being asked to CHOOSE something; leaving is not
+  // a choice.
+  it("offers no tier at all when the origin is already encrypted", async () => {
     vi.spyOn(api, "get").mockResolvedValue({ complete: true, detected: "forwarded_proto" });
     renderPage();
 
@@ -164,13 +169,47 @@ describe("the onboarding HTTPS check", () => {
 // this page is the whole of what they can see and it must read as a decision; a returning user
 // reading the same URL wants the reference material, which survives unchanged.
 describe("the two modes", () => {
-  function renderAs(state: "needs_setup" | "needs_login" | undefined) {
+  function renderAs(
+    state: "needs_setup" | "needs_login" | undefined,
+    onboarding: object = { complete: false, detected: "none" },
+  ) {
     vi.spyOn(api, "get").mockImplementation(((path: string) =>
       path === "/api/auth/status"
         ? Promise.resolve(state === undefined ? {} : { state, csrf_token: "t" })
-        : Promise.resolve({ complete: false, detected: "none" })) as typeof api.get);
+        : Promise.resolve(onboarding)) as typeof api.get);
     return renderPage();
   }
+
+  // quince#1070 — THE ENCRYPTED CARD HAD NO EXIT, and first run is exactly how somebody arrives at
+  // it: the proxy tier's own "Continue at …" link brings them here at the new address, over a
+  // connection that is now secure, with no password set. `showTiers` is false once the check is
+  // complete, so what they read was "Nothing to do" above nothing at all.
+  //
+  // THE DESTINATION IS ASSERTED, NOT THE STEP. `RequireAuth` routes on the live auth state, so
+  // naming `/setup` here would encode a sequence this page cannot know is still true — on a route
+  // reachable with no guard and from another origin.
+  it("gives a first-run visitor the way on when the origin is already encrypted", async () => {
+    renderAs("needs_setup", { complete: true, detected: "forwarded_proto" });
+
+    expect(await screen.findByRole("link", { name: /Continue to quince/i })).toHaveAttribute(
+      "href",
+      "/",
+    );
+  });
+
+  // EVERY STATE, AND THIS IS THE CASE THAT DECIDED THE LABEL. Make the plain-HTTP banner actionable
+  // by pointing it at this page (quince#1069) and the reader who arrives is SIGNED IN, fixing their
+  // transport — for them the next thing is the app, not a password. A first-run-only exit would
+  // leave that audience in the dead end this test exists about, and a "Set your password" label
+  // would be a promise quince cannot keep for them.
+  it("offers the same way on to a reader who is not in first run", async () => {
+    renderAs("needs_login", { complete: true, detected: "forwarded_proto" });
+
+    expect(await screen.findByRole("link", { name: /Continue to quince/i })).toHaveAttribute(
+      "href",
+      "/",
+    );
+  });
 
   it("tells a first-run visitor that setup cannot be completed, not that sign-in will not work", async () => {
     renderAs("needs_setup");

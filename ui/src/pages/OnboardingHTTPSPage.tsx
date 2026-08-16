@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
 import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
@@ -38,8 +39,10 @@ export function OnboardingHTTPSPage() {
   // "the setup options below are still correct" above nothing at all — to the one audience this
   // page has, somebody whose deployment is already half-broken (review on quince#559).
   //
-  // `Complete` still offers nothing. That is G1 and it stays: an already-secure origin meets zero
-  // friction and is never asked to confirm what quince can see for itself.
+  // `Complete` offers no TIERS, and that is G1: an already-secure origin meets zero friction and is
+  // never asked to confirm what quince can see for itself. It does now offer a way OUT of the page
+  // (quince#1070) — not a choice about transport, and not friction: a card reading "Nothing to do"
+  // with no exit is where the proxy tier's own success link used to leave people.
   const showTiers = q.isError || (q.data !== undefined && !q.data.complete);
 
   return (
@@ -114,6 +117,29 @@ function Complete({ detected }: { detected: "tls" | "forwarded_proto" | "none" }
         <span className="text-sm text-muted">Nothing to do.</span>
       </div>
       <p className="mt-3 text-sm text-muted">{how}</p>
+      {/* "NOTHING TO DO" IS TRUE OF THE TRANSPORT AND FALSE OF EVERYTHING ELSE (quince#1070). The
+          proxy tier's own "Continue at …" link lands here at the new address, `showTiers` is false
+          once the check is complete, and this card rendered no exit — so a first-run user who had
+          just got their proxy working read "Nothing to do" above nothing at all, one step from the
+          password they came to set.
+
+          NEITHER THE DESTINATION NOR THE LABEL NAMES A STEP, and the second half is the Operator's
+          point (2026-08-16): if the plain-HTTP banner is ever made actionable by linking HERE, the
+          reader arriving is SIGNED IN and fixing their transport — for them the next thing is the
+          app, not a password. A card that promised one would be wrong for exactly the audience the
+          link was added for. `/` resolves through `RequireAuth` on the LIVE auth state — `/setup` on
+          first run, `/login` on a claimed install, the app with a session — so this page states no
+          order of its own. Two redirects, one truth.
+
+          RENDERED IN EVERY STATE, which is a reading of quince#908 §2 rather than an exception to
+          it. That ruling keeps this page INSTRUCTIONAL for a returning reader — it is about the
+          page's character, not about whether a reader can leave. A neutral way back is navigation,
+          not a decision, and the audience that needs it most is the signed-in one above. */}
+      <p className="mt-4">
+        <Button asChild>
+          <Link to="/">Continue to quince</Link>
+        </Button>
+      </p>
     </>
   );
 }

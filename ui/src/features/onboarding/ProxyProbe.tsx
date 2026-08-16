@@ -97,9 +97,16 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
           </p>
           {/* A LINK RATHER THAN AN AUTOMATIC NAVIGATION. The probe proves THIS browser can reach the
               name; it does not prove the certificate is trusted here, and a redirect into a warning
-              interstitial would look like quince broke something. Let them take the step. */}
+              interstitial would look like quince broke something. Let them take the step.
+
+              IT LANDS ON THE ROOT, AND IT USED TO LAND ON `/onboarding/https` (quince#1070). At the
+              new address that page says **Encrypted — nothing to do** and offers nothing else, so a
+              first-run user who had just got their proxy working was parked on a page with no exit,
+              one step from the password they came to set. The root goes through `RequireAuth`, which
+              routes on the live auth state — `/setup` on first run, `/login` once claimed — so this
+              card states no step order of its own. Two redirects, one truth. */}
           <p className="mt-2">
-            <a className="underline" href={`${outcome.url}/onboarding/https`}>
+            <a className="underline" href={`${outcome.url}/`}>
               Continue at {outcome.url}
             </a>
           </p>
@@ -148,7 +155,7 @@ function Outcome({ outcome }: { outcome: ProbeOutcome }) {
             wrong — it is the next tier down rather than this one, and it already works.
           </p>
           <p className="mt-2">
-            <a className="underline" href={`${outcome.url}/onboarding/https`}>
+            <a className="underline" href={`${outcome.url}/`}>
               Continue at {outcome.url}
             </a>
           </p>
