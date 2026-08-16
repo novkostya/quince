@@ -145,11 +145,43 @@ type Client struct {
 	ep  muxaddr.Endpoint
 	log *slog.Logger
 
-	// mu guards the health fields, which Run writes and /api/health reads from the HTTP
-	// goroutine. `go test -race` is what keeps this honest.
+	// mu guards the health fields and the live connection, which Run writes and the HTTP
+	// goroutine reads (Health) or closes (Reread). `go test -race` is what keeps this honest.
 	mu        sync.Mutex
 	connected bool
-	detail    string // why not connected: the dial or listen error, in the muxer's own words
+	detail    string   // why not connected: the dial or listen error, in the muxer's own words
+	conn      net.Conn // the live Listen connection, so Reread can drop it from outside Run
+}
+
+// Reread drops the current connection so Run redials and the muxer replays its whole attached
+// set (qn.6p D6). It is what POST /api/devices/rescan does now that quince supervises nothing.
+//
+// IT RESTARTS NOTHING, and the name says so. The old rescan restarted the managed usbmuxd to pick
+// up devices an unprivileged container's absent hotplug never delivered. That problem did not go
+// away — it MOVED to the muxer's own container, which quince cannot restart. What quince can still
+// do is ask the muxer again: closing the connection makes Run reconnect, and a reconnect calls
+// sink.Reset() BEFORE the replay, so the registry drops this source's edges and re-adds only what
+// the muxer still reports. That is a real reconcile against the muxer's current truth, and it is
+// all this may honestly claim.
+//
+// Safe when not connected: there is nothing to close and Run is already redialling.
+func (c *Client) Reread() {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn != nil {
+		// Closing it under Run's feet IS the mechanism: the blocked read in listen() returns an
+		// error, Run treats it as any other dropped connection, and the backoff is already at its
+		// minimum because this connection had succeeded.
+		_ = conn.Close()
+	}
+}
+
+// setConn records the live connection for Reread, or clears it. Called only from Run.
+func (c *Client) setConn(conn net.Conn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conn = conn
 }
 
 // Health reports whether THIS client currently holds a Listen connection, and if not, what the
@@ -209,9 +241,11 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 			continue
 		}
 		c.setHealth(true, "")
+		c.setConn(conn)        // published so Reread (rescan) can drop it from another goroutine
 		delay = backoffInitial // a successful connection resets the backoff
 		sink.Reset()           // (re)connect: drop this source's edges; the replay re-adds live ones
 		err = listen(ctx, conn, c.log, sink.Apply)
+		c.setConn(nil)
 		_ = conn.Close()
 		// The connection is gone whether or not ctx is done, so health says so BEFORE the
 		// shutdown check — otherwise a cancelled serve leaves health claiming a live connection.
