@@ -74,14 +74,23 @@ func (p *muxerPlan) refuseNetmuxd(addr, why string) {
 
 // buildMuxerGroup turns the plan into a runnable group, logging what quince owns, what it merely
 // dials, and every problem it refused to build around.
-func buildMuxerGroup(dcfg config.DevicesConfig, log *slog.Logger) *muxsup.Group {
+// `liveFor` maps a CONFIGURED address to the dialing client's health, or nil when nothing dials
+// it. It is passed in rather than reached for so this function keeps no dependency on how the
+// clients are built, and so plannedMuxers stays the side-effect-free half that tests drive
+// directly.
+func buildMuxerGroup(dcfg config.DevicesConfig, liveFor func(address string) func() (bool, string),
+	log *slog.Logger) *muxsup.Group {
 	plan := plannedMuxers(dcfg)
 	g := muxsup.NewGroup()
 	for _, spec := range plan.supervise {
 		g.Supervise(muxsup.New(spec, log))
 	}
 	for _, e := range plan.external {
-		g.AddUnmanaged(e.name, e.role, e.address)
+		var live func() (bool, string)
+		if liveFor != nil {
+			live = liveFor(e.address)
+		}
+		g.AddUnmanaged(e.name, e.role, e.address, live)
 		log.Info("muxer is external — dialing only", "daemon", e.name, "address", e.address)
 	}
 	for _, problem := range plan.problems {

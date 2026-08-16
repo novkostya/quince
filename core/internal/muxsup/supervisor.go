@@ -28,11 +28,23 @@ import (
 
 // Muxer supervision states surfaced to /api/health (design §10).
 const (
-	StateStarting = "starting" // constructed, not yet running a child
+	StateStarting = "starting" // constructed; no child yet, or no dial attempted yet
 	StateRunning  = "running"  // the daemon's child is up
 	StateDegraded = "degraded" // address externally served, or the child is crash-looping
 	StateStopped  = "stopped"  // serve context cancelled; no child
-	StateExternal = "external" // not managed by quince — dialed only (manage_muxer: false)
+	// StateExternal means quince does not own this daemon AND is connected to it. It is a PROBED
+	// claim as of qn.6p D5: it was asserted from configuration alone until then, so health
+	// reported `external` for an address that had refused every connection quince ever made —
+	// measured against a log simultaneously printing `connection refused` (quince#897 item 2).
+	StateExternal = "external"
+	// StateUnreachable is an external muxer quince is configured for and cannot talk to.
+	//
+	// It is a NEW state rather than a reuse of `degraded`, and the distinction is the honest one:
+	// `degraded` describes a daemon quince RUNS misbehaving, and quince runs nothing here. Under
+	// this profile health is the only muxer signal there is — nothing is supervised, so no child
+	// crash surfaces, and rescan restarts nothing — so "leave it as external" would make the one
+	// available signal incapable of saying anything but fine.
+	StateUnreachable = "unreachable"
 )
 
 // Transport roles a muxer serves (design §3 transports).
@@ -408,7 +420,17 @@ func exitReason(err error) string {
 // MuxerControl seam structurally.
 type Group struct {
 	sups      []*Supervisor
-	unmanaged []Status
+	unmanaged []unmanagedMuxer
+}
+
+// unmanagedMuxer is an external daemon quince only dials. Its state is NOT stored — it is asked
+// for at every Statuses() call, from the connection quince actually depends on, so health cannot
+// go stale between a muxer dying and somebody noticing (qn.6p D5).
+type unmanagedMuxer struct {
+	name, role, address string
+	// live reports the dialing client's current connection state. Nil means nothing is watching
+	// this address, which is itself reported rather than papered over — see Statuses.
+	live func() (connected bool, detail string)
 }
 
 // NewGroup returns an empty group.
@@ -419,11 +441,42 @@ func (g *Group) Supervise(s *Supervisor) { g.sups = append(g.sups, s) }
 
 // AddUnmanaged records a daemon quince only dials (external / manage_muxer: false), so health
 // still shows it — with managed:false, so nobody reads an absent entry as "no muxer".
-func (g *Group) AddUnmanaged(name, role, address string) {
-	g.unmanaged = append(g.unmanaged, Status{
-		Name: name, Role: role, Managed: false, State: StateExternal,
-		Detail: address + " is served by an external muxer — quince does not own it",
-	})
+//
+// `live` is the dialing client's state, asked at read time. Passing nil is legal and means
+// nothing is watching this address; Statuses says so rather than assuming the best.
+func (g *Group) AddUnmanaged(name, role, address string, live func() (bool, string)) {
+	g.unmanaged = append(g.unmanaged, unmanagedMuxer{name: name, role: role, address: address, live: live})
+}
+
+// status renders one external muxer from its dialing client's CURRENT state.
+//
+// This used to be a constant string built at construction — `<addr> is served by an external
+// muxer` — which is a claim about another process made without asking it anything, and it was
+// measured false in exactly the way that matters: reported `external` while the daemon logged
+// `connection refused` against the same address (quince#897 item 2).
+func (u unmanagedMuxer) status() Status {
+	s := Status{Name: u.name, Role: u.role, Managed: false}
+	if u.live == nil {
+		// Configured, dialed by nobody. Honest rather than convenient: this is a wiring bug if it
+		// ever appears, and reporting `external` would hide it behind a healthy-looking word.
+		s.State, s.Detail = StateStarting, u.address+" is configured but nothing is dialing it"
+		return s
+	}
+	connected, detail := u.live()
+	switch {
+	case connected:
+		s.State = StateExternal
+		s.Detail = u.address + " is served by an external muxer — quince does not own it"
+	case detail == "":
+		// Not connected with nothing to report means the first dial has not landed yet — a window
+		// of milliseconds at startup. `unreachable` here would be a failure claim about an attempt
+		// nobody has made, and it would render as "is not answering: " with an empty reason.
+		s.State, s.Detail = StateStarting, u.address+" — no connection attempted yet"
+	default:
+		s.State = StateUnreachable
+		s.Detail = u.address + " is not answering: " + detail
+	}
+	return s
 }
 
 // Run supervises every managed daemon until ctx is cancelled, returning when all have stopped.
@@ -442,7 +495,12 @@ func (g *Group) Statuses() []Status {
 	for _, s := range g.sups {
 		out = append(out, s.Status())
 	}
-	return append(out, g.unmanaged...)
+	// Each external is rendered NOW, from its dialing client, rather than replayed from a slice
+	// built at startup (qn.6p D5).
+	for _, u := range g.unmanaged {
+		out = append(out, u.status())
+	}
+	return out
 }
 
 // Rescan restarts the daemon rescan applies to — the USB muxer, whose restart re-enumerates
