@@ -58,11 +58,34 @@ export function SetupGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// LoginGate holds `/login`, and since quince#1069 it also declines to render a form that cannot
+// succeed — the returning-user half of what `SetupGate` already does for first run.
+//
+// THE ARGUMENT IS NOT "IT WOULD FAIL", IT IS *WHERE THE PASSWORD GOES* — Operator, 2026-08-16.
+// `refuseInsecureOrigin` answers 426 BEFORE the credential is examined, but the browser has already
+// put it on the wire in clear by then. So a reader on plain http types their admin password, hands
+// it to the network, and only then learns they cannot sign in at this address. Redirecting means
+// that keystroke is never sent.
+//
+// IT EXPOSES NO CONTROL, so quince#908 §3 is untouched. The plain-HTTP confirm on that page is
+// `firstRun`-only; a `needs_login` visitor gets the instructional page, which is the version §2 says
+// they should get — and whose copy is already addressed to them (*"a returning user cannot sign in
+// from elsewhere and can still reach quince on localhost"*).
+//
+// AND LOCALHOST STILL GETS THE FORM, which is the recovery path and has to stay open:
+// `insecure_origin` is false on loopback, so an admin at the machine is never sent away from it.
+//
+// AFTER the state checks, for `SetupGate`'s reason — a transport fact must not decide a route while
+// the auth state is unknown. `authenticated` is checked first on purpose: a signed-in reader on
+// plain http keeps working (quince#1080), and bouncing them out of the app would be a second wrong
+// answer to that question rather than a fix for it.
 export function LoginGate({ children }: { children: ReactNode }) {
   const { data, isLoading } = useAuthStatus();
+  const insecureOrigin = useInsecureOrigin();
   if (isLoading) return <Loading />;
   if (data?.state === "needs_setup") return <Navigate to="/setup" replace />;
   if (data?.state === "authenticated") return <Navigate to="/" replace />;
+  if (insecureOrigin) return <Navigate to="/onboarding/https" replace />;
   return <>{children}</>;
 }
 
