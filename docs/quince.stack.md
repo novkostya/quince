@@ -131,8 +131,22 @@ quince supervises netmuxd as
 - **Wi-Fi discovery is mDNS-only**, so a supervised netmuxd is necessary but not sufficient: the
   container must be able to receive multicast from the LAN (`deploy/compose.nas.yml`).
 
-**Consequence.** The container ships `netmuxd` (pinned, source-built) + `usbmuxd`
-(apk, fallback) + **`libimobiledevice` built from source at a pinned tag with in-tree
+**Consequence — AND THE MUXER HALF OF IT IS RETIRED IN v0.1 (qn.6p).** This read *"the container
+ships `netmuxd` (pinned, source-built) + `usbmuxd` (apk, fallback)"* and it now ships **neither**:
+the operator runs the muxer and quince dials it, so a daemon in the image is one nothing could
+start (`devices.manage_muxer: true` is refused). `NETMUXD_REF` and `RUST_IMAGE` left `versions.env`
+with the build stage that consumed them. **Everything this decision RULES is untouched** — usbmuxd
+stays the USB anchor, netmuxd's argv stays verified — it is parked in `muxsup` rather than shipped,
+and the netmuxd-USB audition (quince#326) is still what would change it.
+
+**One trap the removal exposed, and it belongs beside the patches.** `apk add usbmuxd` pulls
+`libimobiledevice`, which **replaces the patched `/usr/lib/libimobiledevice-1.0.so.6` — a
+1,136,400-byte regular file — with a symlink into the stock package** (measured 2026-08-16).
+Whoever restores the in-container profile must add it *above* the `COPY`, or `0001` disappears and
+the symptom is a premature receive error on a slow passcode: the exact bug it fixes, arriving with
+nothing to connect it to a Dockerfile line.
+
+The container ships **`libimobiledevice` built from source at a pinned tag with in-tree
 patches** (qn.6b, `LIBIMOBILEDEVICE_REF` in `versions.env`; `deploy/patches/libimobiledevice/`):
 `0001` raises the 30 s default service receive timeouts to **15 min**
 (`src/property_list_service.c` + `src/service.c` — upstream issue #1413, reproduced in the

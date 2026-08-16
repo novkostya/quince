@@ -1,3 +1,21 @@
+# ##############################################################################################
+# THIS FILE DOES NOT WORK IN v0.1. USE deploy/compose.hardened.yml.
+#
+# It describes the SIMPLE / managed-muxer profile, which qn.6p descoped: quince ships no muxer
+# daemon, and `devices.manage_muxer: true` — which everything below assumes — is REFUSED at
+# startup. Bringing this up gets you a daemon that will not start, not a degraded one.
+#
+# Kept rather than deleted for now, because the NAS shape is a documented deployment target
+# (design §9) and the storage guidance below is still correct. WHETHER THIS BECOMES A
+# NAS-FLAVOURED COPY OF THE HARDENED EXAMPLE OR SIMPLY GOES AWAY IS THE REVIEWER'S CALL — raised
+# in the PR that added this banner rather than decided in it, because it is a question about what
+# a NAS operator should be handed and the answer is not obvious from the code.
+#
+# One thing the split already fixed, worth knowing before choosing: the Wi-Fi warning below is now
+# the MUXER container's business. quince no longer needs host networking to see Wi-Fi devices, so
+# it no longer trades isolation for the primary transport.
+# ##############################################################################################
+#
 # quince — generic NAS deployment (Synology / QNAP / plain Docker host).
 #
 # This is the SIMPLE / managed-muxer profile (qn.2b + qn.4c): quince supervises BOTH muxer

@@ -958,12 +958,27 @@ lands — which is the 2026-08-02 ruling in contracts §1.
   replication are both safe at any instant by construction (stack D5a).
 - **Generic NAS**: docker-compose; `/backups` = shared folder bind mount; USB via device
   mapping; hardlink backend.
-- **Two deployment profiles** (external-review point, accepted): `simple` — everything
-  in one container (v1 default); `hardened` — usbmuxd/netmuxd run separately (host or
-  sidecar container holding the USB privileges) and quince consumes only their sockets,
-  keeping the HTTP-facing, plaintext-handling process free of device privileges. The
-  core already speaks to muxd via configurable sockets, so the split is configuration,
-  not architecture; a `compose.hardened.yml` example ships with qn.6.
+- **ONE deployment profile in v0.1: `hardened`** (qn.6p, Operator 2026-08-16). The muxer runs
+  separately — a host daemon, a sidecar container, or another tool's — and quince consumes only
+  its socket, keeping the HTTP-facing, plaintext-handling process free of device privileges.
+  `deploy/compose.hardened.yml` is the example, and it ships.
+
+  **This read "Two deployment profiles … `simple` — everything in one container (v1 default)".**
+  That `simple` profile is **DESCOPED, NOT ABANDONED**: `devices.manage_muxer: true` is refused at
+  startup, the image ships no muxer daemon, and `muxsup`'s supervision is parked with its tests
+  still running under `make gates`. Bringing it back is deleting one validation branch and
+  restoring two Dockerfile stanzas — which is why none of it was deleted.
+
+  **What decided it was a trade DISAPPEARING rather than being rebalanced.** Wi-Fi discovery is
+  mDNS-only, so under `simple` the muxer lives inside quince's container and *that* container needs
+  host networking — `compose.nas.yml` said so about itself, calling it *"strictly weaker isolation
+  than the bridged default, and at odds with the hardened-profile story."* Wi-Fi is the primary
+  transport, so the recommended path cost isolation by construction. Split out, the **muxer** takes
+  host networking and quince stays bridged, unprivileged, with no `/dev/bus/usb` at all.
+
+  **"The split is configuration, not architecture" survives intact** — and quince#897 is the record
+  of what it cost when that was true of the settings and false of the dialer: `netmuxd_addr` would
+  not take a unix socket, so the shape this profile actually wants could not be configured at all.
 - Compose examples live in `deploy/`; the lab and NAS shapes are release-gate test
   targets (the first manually, per release checklist).
 
