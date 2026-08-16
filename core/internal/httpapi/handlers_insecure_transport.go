@@ -64,24 +64,20 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 			return
 		}
 		// A CLAIMED INSTALL IS NOT CLOSED TO ITS OWN ADMIN — Operator direction, 2026-08-16
-		// (quince#1069). The setting could be turned ON from the UI and could not be turned OFF from
-		// anywhere: `ConfigEditor` does not render the key, and the banner that says "turn this off"
-		// pointed at a text editor on the box. That is stack D12 broken, and the narrow write this
-		// handler already performs is the fix — the route stops being pre-auth-only rather than a
-		// second writer appearing somewhere else.
+		// (quince#1069). This route is the only writer of the key, and `ConfigEditor` does not render
+		// it: refuse every caller on a claimed install and the setting can be turned ON from the UI
+		// and OFF from nowhere, which is stack D12 broken.
 		//
-		// `PUT /api/config` WOULD HAVE BEEN THE CHEAPER-LOOKING ROUTE AND IS THE WRONG ONE: it is a
-		// full-document replace, so a client that does not model every Go key drops the ones it does
-		// not know (quince#493). `SetAllowInsecureTransport` writes one key by name.
+		// `PUT /api/config` IS THE WRONG ALTERNATIVE, and not for style: it is a full-document
+		// replace, so a client that does not model every Go key drops the ones it does not know
+		// (quince#493). `SetAllowInsecureTransport` writes one key by name.
 		//
-		// WHAT THE PRE-AUTH WINDOW RESTED ON, AND WHY THE AUTHENTICATED PATH MAY NOT INHERIT IT: this
-		// route is in `csrfExempt` because before a session exists there is no cookie to
-		// double-submit, and the comment there names `Configured()` as the whole of what protects it —
-		// on a claimed install the route used to refuse before reading the body. Once an authenticated
-		// caller is allowed through, that bound is gone and a cross-site page could otherwise POST
-		// `{allow:true}` with the admin's cookies: the downgrade primitive quince#908 §3 warns about,
-		// arriving through the door added to remove one. So the authenticated path checks the session
-		// AND the token here, explicitly, rather than relying on either list.
+		// THE AUTHENTICATED PATH MUST NOT INHERIT THE `csrfExempt` ENTRY. That entry exists for the
+		// pre-auth caller, who has no session and therefore no cookie to double-submit. Extended to a
+		// caller who HAS one it makes this write forgeable cross-site: any page could POST
+		// `{allow:true}` with the admin's cookies and obtain the downgrade primitive quince#908 §3
+		// refuses. So the session AND the token are checked here, explicitly, rather than by trusting
+		// an exempt list to mean for one caller what it means for the other.
 		if configured {
 			if _, err := d.Auth.Authenticate(sessionCookieValue(r)); err != nil {
 				// THE SAME CODE AND THE SAME SHAPE AS `POST /api/auth/setup`'s one-shot refusal, for
@@ -122,10 +118,10 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 		// afterwards should find the moment somebody changed the transport, not infer it from the
 		// file's mtime.
 		//
-		// IT SAYS WHICH CALLER, because the two are no longer the same event. A pre-auth write is the
-		// stranded first-run user taking the escape hatch; an authenticated one is the admin using the
-		// control in the banner. Reading `PRE-AUTH` about the second would be the log lying about who
-		// did it — and this line is the audit trail for a security setting.
+		// IT SAYS WHICH CALLER, because the two are different events. A pre-auth write is a stranded
+		// first-run user taking the escape hatch; an authenticated one is an admin using the control in
+		// the UI. This line is the audit trail for a security setting, so it must not report one as
+		// the other.
 		d.Log.Warn("sessions.allow_insecure_transport written",
 			"allow", body.Allow, "caller", map[bool]string{true: "authenticated", false: "pre-auth"}[configured],
 			"route", "POST /api/config/insecure-transport")
