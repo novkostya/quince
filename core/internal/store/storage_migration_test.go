@@ -139,11 +139,28 @@ func TestMigration0006IsAdditiveOnly(t *testing.T) {
 // openPre0010 builds a database at the 0009 schema by applying the migrations and then putting
 // `physical_bytes` back, exactly as 0002 declared it. Same discipline as openPre0006: reconstruct
 // by undoing rather than by hand-writing a schema nobody ran.
+//
+// THIS FIXTURE IS ALSO THE GUARD, AND THAT IS THE POINT OF THE CHECK BELOW (quince#1049). `Open()`
+// runs every migration, 0010 included, so by the time this function resumes the column must already
+// be gone. If 0010 stopped dropping it, the test's own
+// `if _, ok := after["physical_bytes"]; ok` would never be reached — the failure lands HERE, two
+// functions from the assertion that names the claim.
+//
+// So the check is explicit rather than left to the raw `ALTER TABLE` error. A bare re-add does fail
+// (`duplicate column name`), which is why the protection is real today; it fails as a SQL error
+// about a fixture, which reads like a broken test rather than like the migration having stopped
+// working. **Do not make this tolerant of an absent drop** — an `IF NOT EXISTS`, or hand-writing the
+// pre-0010 schema instead of undoing, would silently retire this test's primary claim while leaving
+// its assertion looking load-bearing.
 func openPre0010(t *testing.T) *Store {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "quince.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
+	}
+	if _, ok := columns(t, st, "versions")["physical_bytes"]; ok {
+		t.Fatal("0010 did not drop versions.physical_bytes — the migration under test is a no-op, " +
+			"and this fixture is what noticed rather than the assertion named for it (quince#1049)")
 	}
 	if _, err := st.db.Exec(`ALTER TABLE versions ADD COLUMN physical_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
 		t.Fatalf("re-add column: %v", err)
