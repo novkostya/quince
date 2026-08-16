@@ -207,14 +207,47 @@ registered at `22:00:25Z` against a commit seventeen seconds old the reviewer ha
 **Read the oid BEFORE the diff, not after.** Taking it afterwards re-creates the race the flag closes:
 you would be pinning to a head that may already have moved while you read.
 
-**It is a declaration, not a compare-and-swap.** A non-head oid is accepted with no error — so this
-does not *refuse* a mis-timed verdict, it *records honestly* what was reviewed. That is what makes §4's
-staleness comparison mean anything: before this it compared `commit_id` against the head it had been
-defaulted from.
+**On a `--comment` it is a declaration, not a compare-and-swap, and NOTHING validates it.** Measured
+three ways on a throwaway PR (quince-devlog#261, since closed): a previous head still reachable, an oid
+the branch had been force-moved off, and **an oid from another branch that had never been part of the
+PR at all** — all three accepted, all three stored and rendered as the commit reviewed. So it *records*
+what was read rather than *refusing* a mis-timed verdict, which is what makes §4's staleness comparison
+mean anything. It also means a **wrong** pin is silent, and that is why the read-back below is not
+optional.
 
-**And the pin survives a rebase**, where an auto-defaulted one does not: `gh pr update-branch --rebase`
-re-points an auto-set `commit_id` to the new head, and `/architect` §5 makes that rebase the merging
-seat's standing duty. An explicit one stays put. Both measured (quince#110).
+**ON A VERDICT — `--approve` or `--request-changes` — A STALE PIN CAN BE REFUSED OUTRIGHT, AND THE
+VERDICT IS THEN NOT RECORDED AT ALL.** Measured on quince#875 (quince#877): `422 … "This pull request
+has been updated since you started reviewing"`, wrapper exit 1, and `/pulls/875/reviews` **empty**
+afterwards. This paragraph read *"a non-head oid is accepted with no error"* flatly until 2026-08-16 —
+a sentence a session follows while holding a verdict it turns out it cannot cast.
+
+**And a stale pin has also been ACCEPTED on a verdict**, measured this session on quince#1063. So the
+rule is not *"comments accept, verdicts refuse"* either: **two verdict castings with stale pins, one
+refused and one accepted, and nobody has isolated what separates them.** Do not write a general rule
+here from either one — that is how the sentence being corrected got here.
+
+**SO READ THE REVIEW BACK. It is the one step that works under every result:**
+
+```sh
+bin/gh-review api repos/novkostya/quince/pulls/<n>/reviews \
+  -q '.[] | "\(.user.login) \(.state) commit=\(.commit_id[0:8])"'
+```
+
+A refusal is loud, but it exits from a wrapper whose output you may have filtered; an acceptance at the
+wrong oid is silent. One `GET` distinguishes *cast at what I read*, *cast at something else*, and **not
+cast at all** — and only the third is recoverable by simply doing it again.
+
+**The pin's SURVIVAL is split the same way.** `gh pr update-branch --rebase` re-points an auto-set
+`commit_id` to the new head where an explicit one stays put (quince#110), and an explicit pin on a
+**`COMMENT`** survives an append *and* a rebase-and-force-push unchanged (quince-devlog#261 — three
+pins, two head moves). But an explicit pin on an **`APPROVED`** review has been measured **following
+the new head** after an author force-push (quince#775, on quince#774). Both repositories carry
+`dismiss_stale_reviews: true`, which is the natural suspect for the mechanism and is unproven.
+
+**Whatever that turns out to be, take `OLD` by hand and never from `reviews[].commit_id`.** Under the
+case that moves, `OLD == NEW`, so §4's range-diff compares a commit against itself and returns a clean
+`=` from a check that had nothing to compare — the vacuous-check failure this flag exists to close,
+arriving through the path canon called safe.
 
 The body states **what you ran**, not just what you think. If you could not run the gates
 (no container runtime in this session), say that in the body and use `--comment`: an
