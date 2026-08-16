@@ -68,28 +68,36 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// tidy: health reports an external muxer FROM ITS DIALING CLIENT (qn.6p D5), so the group
 	// needs those clients to exist before it can be asked anything true about them.
 	reg := device.NewRegistry(eventBus, log)
-	clients := map[string]*muxd.Client{} // keyed by the address as CONFIGURED, which is what the plan carries
-	for _, c := range []struct {
-		configured string
-		ep         muxaddr.Endpoint
-	}{{dcfg.UsbmuxdSocket, usbEP}, {dcfg.NetmuxdAddr, wifiEP}} {
-		if c.ep.IsZero() {
-			continue
-		}
-		client := muxd.NewClient(c.ep, log)
-		clients[c.configured] = client
-		sink := reg.Sink(c.ep.String())
-		go client.Run(ctx, sink)
+	// ONE CLIENT PER DISTINCT MUXER, not per configured key (qn.6p D4). Pointing both keys at one
+	// daemon is how an operator says "this muxer serves both transports", which is the hardened
+	// shape rather than an edge case — and it used to open two connections to one socket, giving
+	// the registry two sources and duplicating every replay.
+	unique, byConfigured := distinctEndpoints([]muxerBinding{
+		{dcfg.UsbmuxdSocket, usbEP}, {dcfg.NetmuxdAddr, wifiEP},
+	})
+	byEndpoint := make(map[muxaddr.Endpoint]*muxd.Client, len(unique))
+	for _, ep := range unique {
+		client := muxd.NewClient(ep, log)
+		byEndpoint[ep] = client
+		go client.Run(ctx, reg.Sink(ep.String()))
 	}
 	ls.devices = reg
-	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP)
+	if len(unique) == 1 && !usbEP.IsZero() && usbEP == wifiEP {
+		log.Info("one muxer serves both transports", "address", usbEP)
+	}
+	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP, "connections", len(unique))
 
 	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
 	// external (HARDENED / manage_muxer: false — dialed only, and reported in /api/health from
 	// the dialing client's real connection state rather than asserted).
+	// Both configured keys resolve through byConfigured, so when one muxer serves both transports
+	// the two health entries report the SAME connection — which is the truth, rather than two
+	// independent-looking answers about one socket.
 	group := buildMuxerGroup(dcfg, func(address string) func() (bool, string) {
-		if c, ok := clients[address]; ok {
-			return c.Health
+		if ep, ok := byConfigured[address]; ok {
+			if c, ok := byEndpoint[ep]; ok {
+				return c.Health
+			}
 		}
 		return nil // nothing dials it; muxsup reports that rather than assuming the best
 	}, log)
