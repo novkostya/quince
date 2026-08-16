@@ -237,18 +237,29 @@ func serve(args []string) error {
 		// wrote and invite them to add a storage to a document that already has one it cannot read
 		// (quince#508).
 		//
-		// AND UNREADABLE JOINS IT, under the same carve-out rather than a new one (quince#544). The
-		// ruling's subject is a ZERO-STORAGE start; a file quince could not read is not a statement
-		// about storage at all, and the carve-out's own argument transfers word for word — arguably
-		// harder, because a parse failure at least means quince read the file. Until now this fell
-		// through nil to `Missing` and produced the onboarding page, which tells an operator whose
-		// bind mount is missing to add their first storage to a file the daemon cannot see.
-		if req.Malformed || req.Unreadable {
+		// UNREADABLE DOES **NOT** JOIN IT, AND THAT IS GATED RATHER THAN CHOSEN (quince#544). It looks
+		// like the same case — quince cannot tell what the operator declared either way — and this
+		// line refused on it for one CI run before `deploy/storageless-smoke`'s third arm refuted it:
+		// *"it SERVES — so the add endpoint is reachable in this state"*. That arm exists for
+		// quince#852. An unreadable config must SERVE, so `POST /api/config/storage` is reachable and
+		// can answer `422`; refusing at startup removes the only surface from which the state is
+		// repairable, which is the same argument quince#502 made for the zero-storage case.
+		//
+		// So the carve-out stays exactly as wide as it was. What quince#544 changes here is the
+		// PREDICATE, not the behaviour: an unreadable config used to report `Missing`, and now
+		// reports `Unreadable`.
+		if req.Malformed {
 			return req.Explain(os.Stderr, cfgPath)
 		}
 		// LegacyEnv is not fatal and never was — OK() excludes it — so it keeps flowing through as
 		// the warning it is.
-		storageless := req.Missing || req.Empty
+		//
+		// `Unreadable` IS IN THIS SET, and leaving it out is the bug this line would otherwise have
+		// (quince#544). Before the typed cause, an unreadable config reported `Missing` and reached
+		// setup through it. Now that it reports itself, a `Missing || Empty` test would send it PAST
+		// the setup branch into `buildLiveStack` with no declared storage — worse than the false
+		// message the typed cause was added to fix, and invisible until something dereferenced it.
+		storageless := req.Missing || req.Empty || req.Unreadable
 		if storageless {
 			log.Warn("no storage declared — SERVING SETUP ONLY until one is added",
 				"config", cfgPath, "reachable", "auth, onboarding, config and the storage probes")
