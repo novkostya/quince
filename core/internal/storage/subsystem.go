@@ -425,7 +425,7 @@ func (m *Manager) registerCommitted(s Slot, c Committed) error {
 	row := store.VersionRow{
 		ID: c.VersionID, UDID: c.UDID, Backend: c.Backend, ZFSSnapshot: c.ZFSSnapshot,
 		CreatedAt: c.CreatedAt, JobID: c.JobID, Kind: c.Kind, Encrypted: c.Encrypted,
-		IsLatest: true, StructureVerifiedAt: &sv, LogicalBytes: c.LogicalBytes, PhysicalBytes: c.PhysicalBytes,
+		IsLatest: true, StructureVerifiedAt: &sv, LogicalBytes: c.LogicalBytes,
 		// Attributed AT COMMIT. Before this, a freshly committed version was inserted NULL and
 		// only picked up by the next startup sweep — so between a backup and a restart the wire
 		// said "not yet attributed" about a version quince had just written itself.
@@ -694,7 +694,7 @@ func (m *Manager) toWire(r store.VersionRow) wire.Version {
 		ID: r.ID, UDID: r.UDID, Backend: r.Backend, ZFSSnapshot: r.ZFSSnapshot,
 		BrowseRoot: browse,
 		CreatedAt:  fmtRFC(r.CreatedAt), JobID: r.JobID, Kind: r.Kind, Encrypted: r.Encrypted,
-		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes, PhysicalBytes: r.PhysicalBytes,
+		IsLatest: r.IsLatest, LogicalBytes: r.LogicalBytes,
 		Missing: r.Missing, // crossed to the wire so the UI renders a gone artifact dead (qn.6a (cr))
 		// nil until this version's storage has an identity marker (qn.6c). PASSED THROUGH rather
 		// than defaulted: substituting a value here would turn "not yet attributed" into a claim,

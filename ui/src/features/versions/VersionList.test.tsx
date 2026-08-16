@@ -23,7 +23,6 @@ function ver(over: Partial<Version> = {}): Version {
     structure_verified_at: "2026-07-20T00:00:00Z",
     content_verified_at: null,
     logical_bytes: 42_500_000_000,
-    physical_bytes: 260_000_000,
     missing: false,
     storage_id: null,
     ...over,
@@ -37,9 +36,14 @@ describe("VersionList", () => {
     useDevicesStore.setState({ byUdid: {}, order: [] });
   });
 
-  it("renders a live version with sizes and Unlock, and does NOT show the kind label (ck)", () => {
+  it("renders a live version with ONE size and no Unlock, and does NOT show the kind label (ck)", () => {
     render(<VersionList versions={[ver()]} />);
-    expect(screen.getByText(/logical/i)).toBeTruthy();
+    // 42.5 GB, unqualified. The row carried "N logical · N on disk" until quince#442, where both
+    // figures turned out to be the same walk — so the assertion is not just that a size appears
+    // but that the words framing it as one of two measurements are gone.
+    expect(screen.getByText("42.5 GB")).toBeTruthy();
+    expect(screen.queryByText(/logical/i)).toBeNull();
+    expect(screen.queryByText(/on disk/i)).toBeNull();
     // No confusing "Unlock" button (it made no sense for unencrypted versions) — a quiet chevron now.
     expect(screen.queryByRole("button", { name: /unlock/i })).toBeNull();
     expect(screen.queryByText(/unlock/i)).toBeNull();
@@ -53,7 +57,7 @@ describe("VersionList", () => {
     expect(screen.getByText(/missing/i)).toBeTruthy();
     expect(screen.getByText(/artifact gone/i)).toBeTruthy();
     // No size claim and no Unlock on a dead version.
-    expect(screen.queryByText(/logical/i)).toBeNull();
+    expect(screen.queryByText("42.5 GB")).toBeNull();
     expect(screen.queryByRole("button", { name: /unlock/i })).toBeNull();
     expect(screen.getByRole("button", { name: /remove/i })).toBeTruthy();
   });

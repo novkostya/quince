@@ -15,12 +15,12 @@ func TestVersionsInsertListGetDelete(t *testing.T) {
 	older := VersionRow{
 		ID: "01OLDER", UDID: "UDID-A", Backend: "reflink",
 		CreatedAt: base, JobID: strp("job-1"), Kind: "full", Encrypted: true,
-		IsLatest: false, StructureVerifiedAt: &sv, LogicalBytes: 100, PhysicalBytes: 10,
+		IsLatest: false, StructureVerifiedAt: &sv, LogicalBytes: 100,
 	}
 	newer := VersionRow{
 		ID: "01NEWER", UDID: "UDID-A", Backend: "reflink",
 		CreatedAt: base.Add(time.Hour), JobID: strp("job-2"), Kind: "incremental", Encrypted: true,
-		IsLatest: true, StructureVerifiedAt: &sv, LogicalBytes: 120, PhysicalBytes: 5,
+		IsLatest: true, StructureVerifiedAt: &sv, LogicalBytes: 120,
 	}
 	other := VersionRow{
 		ID: "01OTHER", UDID: "UDID-B", Backend: "zfs",

@@ -1,0 +1,24 @@
+-- quince#442: drop versions.physical_bytes. It was never physical.
+--
+-- Both producers computed it with the same `dirSize` walk that produces logical_bytes — the
+-- APPARENT sum of regular-file sizes — so every row held one number stored twice, and the UI
+-- rendered them side by side as two facts. Adopted rows went further and assigned one field from
+-- the other outright (reconcile.go).
+--
+-- REMOVED RATHER THAN MADE NULLABLE. The 2026-08-01 ruling on quince#442 made it nullable and
+-- computed per backend; the Operator superseded that on 2026-08-16, after measurement showed a
+-- per-version physical size is ILL-DEFINED under block sharing rather than merely unmeasured:
+-- a reflink extent counts in full against every file that references it, and a zfs snapshot's
+-- unique bytes are 0 for the newest version because latest/ still holds the blocks. The only
+-- actionable reading — "what would deleting this version free" — is a property of the version
+-- WITHIN THE CURRENT SET, so removing a neighbour changes it and no value can be cached at commit.
+-- A field that cannot be computed here is better absent than present and null.
+--
+-- DROPPING RATHER THAN LEAVING THE COLUMN. A dead column that nothing writes is a tombstone, and
+-- the guard-vs-archaeology ruling (2026-08-03, quince#595) says delete what a reader who never knew
+-- the old state does not need. The values are not preserved anywhere: they were wrong, and the
+-- correct figure is already in logical_bytes on every row by construction.
+--
+-- The column is in no index, no primary key and no view, so SQLite's ALTER TABLE ... DROP COLUMN
+-- applies without a table rebuild.
+ALTER TABLE versions DROP COLUMN physical_bytes;

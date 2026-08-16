@@ -93,11 +93,14 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
         </div>
         {/* kind ("full"/"incremental") is deliberately NOT shown (ck): every quince version is a
             complete, independently-restorable backup — "incremental" would import a false
-            fragile-chain mental model. Sizes are the honest, actionable facts. */}
+            fragile-chain mental model.
+
+            ONE size, unqualified. This read "N logical · N on disk" until quince#442: both figures
+            came from the same walk, so the row printed one number twice and captioned them as two
+            different measurements. The word "logical" went with the second figure — it existed only
+            to tell them apart, and a lone qualified size asks the reader what the other one was. */}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs tabular-nums text-subtle">
-          <span>
-            {formatBytes(version.logical_bytes)} logical · {formatBytes(version.physical_bytes)} on disk
-          </span>
+          <span>{formatBytes(version.logical_bytes)}</span>
           <span>{verifyLabel(version)}</span>
         </div>
       </div>

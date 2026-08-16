@@ -470,7 +470,7 @@ func (b *zfsBackend) Scan(udid string) ([]Artifact, error) {
 		full := b.cli.dataset(udid) + "@" + s
 		snapCopy := full
 		out = append(out, Artifact{UDID: udid, Backend: BackendZFS, ZFSSnapshot: &snapCopy,
-			Marker: m, PhysicalBytes: dirSize(snapRoot)})
+			Marker: m, LogicalBytes: dirSize(snapRoot)})
 		if m.CreatedAt > newest {
 			newest = m.CreatedAt
 		}

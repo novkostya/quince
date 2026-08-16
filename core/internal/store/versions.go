@@ -22,7 +22,6 @@ type VersionRow struct {
 	StructureVerifiedAt *time.Time
 	ContentVerifiedAt   *time.Time
 	LogicalBytes        int64
-	PhysicalBytes       int64
 	Missing             bool
 	// StorageID is which storage this version lives on. nil = NOT YET ATTRIBUTED (qn.6c,
 	// migration 0006). Unlike JobID, whose nil (= adopted) is permanent and correct, this one
@@ -36,12 +35,12 @@ type VersionRow struct {
 func (s *Store) InsertVersion(v VersionRow) error {
 	_, err := s.db.Exec(`INSERT INTO versions
 		(id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted, is_latest,
-		 structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing, storage_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 structure_verified_at, content_verified_at, logical_bytes, missing, storage_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.UDID, v.Backend, nullStr(v.ZFSSnapshot), fmtTime(v.CreatedAt), nullStr(v.JobID),
 		v.Kind, boolInt(v.Encrypted), boolInt(v.IsLatest),
 		nullTime(v.StructureVerifiedAt), nullTime(v.ContentVerifiedAt),
-		v.LogicalBytes, v.PhysicalBytes, boolInt(v.Missing), nullStr(v.StorageID))
+		v.LogicalBytes, boolInt(v.Missing), nullStr(v.StorageID))
 	return err
 }
 
@@ -74,7 +73,7 @@ func (s *Store) ListVersions(udid string) ([]VersionRow, error) {
 		err  error
 	)
 	const sel = `SELECT id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted,
-		is_latest, structure_verified_at, content_verified_at, logical_bytes, physical_bytes, missing,
+		is_latest, structure_verified_at, content_verified_at, logical_bytes, missing,
 		storage_id
 		FROM versions`
 	if udid == "" {
@@ -124,7 +123,7 @@ func (s *Store) UDIDsWithVersions() ([]string, error) {
 func (s *Store) GetVersion(id string) (VersionRow, bool, error) {
 	row := s.db.QueryRow(`SELECT id, udid, backend, zfs_snapshot, created_at, job_id, kind,
 		encrypted, is_latest, structure_verified_at, content_verified_at, logical_bytes,
-		physical_bytes, missing, storage_id FROM versions WHERE id = ?`, id)
+		missing, storage_id FROM versions WHERE id = ?`, id)
 	v, err := scanVersion(row)
 	if err == sql.ErrNoRows {
 		return VersionRow{}, false, nil
@@ -174,7 +173,7 @@ func scanVersion(sc rowScanner) (VersionRow, error) {
 		storage sql.NullString
 	)
 	if err := sc.Scan(&v.ID, &v.UDID, &v.Backend, &snap, &created, &job, &v.Kind, &enc, &latest,
-		&sVer, &cVer, &v.LogicalBytes, &v.PhysicalBytes, &missing, &storage); err != nil {
+		&sVer, &cVer, &v.LogicalBytes, &missing, &storage); err != nil {
 		return VersionRow{}, err
 	}
 	v.ZFSSnapshot = strPtrOrNil(snap)

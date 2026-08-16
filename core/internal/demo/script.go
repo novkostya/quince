@@ -223,7 +223,6 @@ func (p *Provider) commitDemoVersionFor(udid, jid, storageID string) wire.Versio
 		IsLatest:            true,
 		StructureVerifiedAt: &now,
 		LogicalBytes:        42_500_000_000,
-		PhysicalBytes:       260_000_000,
 	}
 	p.mu.Lock()
 	// demote the previous latest for this device
@@ -306,7 +305,7 @@ func (p *Provider) miscEvents(ctx context.Context) {
 			ID: id.New(), UDID: udidPad, Backend: "copy",
 			BrowseRoot: "/backups/" + udidPad + "/latest", CreatedAt: wire.Now(),
 			JobID: strptr(id.New()), Kind: "full", Encrypted: false, IsLatest: true,
-			LogicalBytes: 8_000_000_000, PhysicalBytes: 8_000_000_000,
+			LogicalBytes: 8_000_000_000,
 		}
 		p.bus.PublishEvent(wire.EventVersionCreated, tv)
 		if !sleep(ctx, 5*time.Second) {

@@ -330,7 +330,7 @@ func (p *Provider) seedOnDemandDevice() {
 		BrowseRoot:  "/backups/" + udidOffline + "/.zfs/snapshot/quince-2026-07-18T09-15-" + liveVerID + "/latest",
 		CreatedAt:   "2026-07-18T09:15:00Z", JobID: strptr(id.New()), Kind: "incremental",
 		Encrypted: true, IsLatest: true, StructureVerifiedAt: strptr("2026-07-18T09:15:00Z"),
-		LogicalBytes: 12_400_000_000, PhysicalBytes: 90_000_000,
+		LogicalBytes: 12_400_000_000,
 	}
 	// A DEAD version: its artifact is gone (reconciliation marked it missing). Rendered explicitly
 	// dead — no size, no Unlock, a Remove action (qn.6a (cr)).
@@ -338,7 +338,7 @@ func (p *Provider) seedOnDemandDevice() {
 		ID: deadVerID, UDID: udidOffline, Backend: "zfs", StorageID: strptr(demoStorageInternal),
 		CreatedAt: "2026-07-10T09:15:00Z", JobID: strptr(id.New()), Kind: "full",
 		Encrypted: true, IsLatest: false, Missing: true,
-		LogicalBytes: 11_800_000_000, PhysicalBytes: 11_800_000_000,
+		LogicalBytes: 11_800_000_000,
 	}
 
 	p.mu.Lock()
