@@ -44,10 +44,9 @@ export function InsecureTransportBanner() {
   // This one belongs to a BANNER that renders in all three shells, including the pre-auth ones, so a
   // routed dialog would hang a query param off every route in the product, `/login` included.
   //
-  // MEASURED COST OF THE ALTERNATIVE, rather than argued: `useDialogRoute` and `useNavigate` both
-  // require a Router, and this component is mounted by surfaces whose tests do not have one — eight
-  // tests in three unrelated files went red on the first attempt. A global banner should not impose
-  // a router on everything that renders it.
+  // AND IT WOULD COST MORE THAN A QUERY PARAM: `useDialogRoute` and `useNavigate` both require a
+  // Router, so routing this dialog imposes one on every surface that renders the banner — including
+  // ones whose tests mount it bare. A global banner should not be able to do that to the app.
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -63,13 +62,11 @@ export function InsecureTransportBanner() {
       // THE BANNER REMOVES ITSELF, because it renders off `insecure_transport_allowed` — so
       // invalidating health IS the receipt, and nothing has to be reloaded to see it happen.
       //
-      // AND THE CONFIG QUERY, WHICH IS A SEPARATE ONE AND WAS MISSED — Operator, 2026-08-17, from
-      // Settings: *"when you turn off insecure_transport via banner on Settings page, it's not
-      // updated."* True, and the stale panel is the SMALLER half. `ConfigEditor`'s draft follows the
-      // config query (quince#764) and `PUT /api/config` is a FULL-DOCUMENT REPLACE, so a reader who
-      // turned the setting off here and then saved an unrelated field on the same screen would have
-      // shipped a document still carrying `allow_insecure_transport: true` — silently turning a
-      // security setting back on, from a form that never mentions it.
+      // AND THE CONFIG QUERY, WHICH IS A SEPARATE ONE. The visible cost of missing it is a stale
+      // *Current configuration* panel on Settings; the expensive one is that `ConfigEditor`'s draft
+      // follows that query (quince#764) and `PUT /api/config` is a FULL-DOCUMENT REPLACE — so a
+      // reader who changes this here and then saves an unrelated field on the same screen ships a
+      // document carrying the OLD value and silently puts the setting back.
       //
       // BOTH KEYS, EVERY TIME THIS ROUTE IS CALLED. It writes config, so config is stale; health
       // derives from it, so health is stale too. One without the other is a screen disagreeing with
@@ -79,23 +76,19 @@ export function InsecureTransportBanner() {
         qc.invalidateQueries({ queryKey: configKey }),
       ]);
 
-      // IT DOES NOT SIGN THE READER OUT, AND THAT IS A CORRECTION RATHER THAN A DEFAULT —
-      // Operator, 2026-08-16, having walked the version that did: *"it redirects to `/login` (which
-      // will fail) … in this case it's impossible to re-enable insecure_transport on
-      // `/onboarding/https`, so the whole idea doesn't really work."*
-      //
-      // Exactly right, and it is a LOCKOUT rather than an inconvenience. With the setting off and a
-      // plain-http address: `POST /api/auth/login` answers 426; the pre-auth route answers 409 to
-      // anybody without a session; and the first-run confirm on `/onboarding/https` does not render
-      // in `needs_login`, deliberately — an unauthenticated control that RELAXES transport is the
-      // downgrade primitive quince#908 §3 refuses. The way back was ssh and a text editor, which is
-      // the dead end quince#908 exists to remove, rebuilt by the control meant to help.
+      // IT MUST NOT SIGN THE READER OUT — Operator ruling, 2026-08-16 (quince#1069), and the reason
+      // is a LOCKOUT rather than a preference. With the setting off and a plain-http address:
+      // `POST /api/auth/login` answers 426; this route answers 409 to anybody without a session; and
+      // the first-run confirm on `/onboarding/https` does not render in `needs_login`, because an
+      // unauthenticated control that RELAXES transport is the downgrade primitive quince#908 §3
+      // refuses. Ending the session leaves ssh and a text editor as the only way back — the dead end
+      // quince#908 exists to remove.
       //
       // SO THE SESSION STAYS. The setting governs sign-ins from here on; the reader keeps the one
-      // they already have, and `PlainHTTPSetting` on Settings → Sign-in is the reversal path they
-      // can still reach. Every other live session keeping working is quince#1080's question, and it
-      // is the server's to answer — a client that signs ITSELF out fixes nothing there and strands
-      // the one person who was trying to tighten the install.
+      // they hold, and `PlainHTTPSetting` on Settings → Sign-in is the reversal they can still reach.
+      // Whether OTHER live sessions should end is quince#1080's question and the server's to answer:
+      // a client that signs ITSELF out fixes nothing there and strands the one person who was
+      // tightening the install.
       setOpen(false);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : String(e));
