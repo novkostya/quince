@@ -230,6 +230,17 @@ func TestResetClearsThePasswordEvenWhenALaterStepFails(t *testing.T) {
 		t.Fatalf("seed password: %v", err)
 	}
 	seedPasskey(t, st, "cre1", here)
+	// A LIVE SESSION IS WHAT MAKES THE NEXT ASSERTION ABLE TO FAIL. `out.Sessions` is the only field
+	// a `Reset` that pressed on past the broken statement could still fill — `out.Passkeys` stays 0
+	// either way, because the passkeys delete IS the broken statement. Without a session seeded here
+	// both halves are structurally zero, and a `Reset` that ignored the first error and carried on
+	// would satisfy them (architect, quince#1044: measured against exactly that body).
+	now := time.Now().UTC()
+	if err := st.CreateAuthSession(store.AuthSession{
+		ID: "sess-1", CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
 
 	breakPasskeys(t, path)
 
