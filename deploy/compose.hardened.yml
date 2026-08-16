@@ -91,6 +91,10 @@ services:
   # Bridged. Unprivileged. No /dev/bus/usb, no device_cgroup_rules, no host networking. It reaches
   # devices only through the socket above, which is the point of this profile.
   quince:
+    # ⚠ THIS TAG IS NOT PUBLISHED YET (quince#725, open). `compose up` fails here with a registry
+    # 403, and nothing else in this file is wrong when it does. Until the release pipeline lands
+    # (quince#724), build it yourself from a checkout — `make image` — and point this line at the
+    # local tag it prints. The rest of the file is unaffected either way.
     image: ghcr.io/novkostya/quince:latest
     container_name: quince
     restart: unless-stopped
