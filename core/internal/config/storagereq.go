@@ -163,14 +163,22 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 
 	switch {
 	case r.Unreadable:
-		// THE OS'S OWN SENTENCE, for the same reason the parser's is kept below: it names the path
-		// and the errno, and nothing this function knows improves on it (quince#544).
+		// NOT REACHED BY THE DAEMON TODAY, AND KEPT DELIBERATELY (quince#544). `main.go` calls Explain
+		// only on `Malformed`, because `deploy/storageless-smoke`'s third arm requires an unreadable
+		// config to SERVE — the add endpoint must be reachable so it can refuse with 422 (quince#852).
+		// This branch printed at startup for exactly one CI run before that arm refuted it.
 		//
-		// THE REMEDY BLOCK BELOW IS SKIPPED FOR THIS CASE, and that is the point of the branch. "Add
-		// this to config.yml, then start again" is advice quince cannot honour when it cannot read
-		// the file — and the old behaviour gave exactly that advice, because a read failure fell
-		// through nil to `Missing`. Telling an operator whose bind mount is missing to edit a file
-		// the daemon cannot see is worse than saying nothing.
+		// IT IS A GUARD RATHER THAN DEAD CODE, and the distinction is which sentence a future caller
+		// gets. `Unreadable` makes `OK()` false, so any NEW caller of Explain — a CLI, a preflight —
+		// lands in this switch; without this arm it falls to `default:` and prints *"`storage:` …
+		// declares no storages"*, which is the exact false claim quince#544 exists to remove, from a
+		// path added later by somebody who never read the issue.
+		//
+		// THE OS'S OWN SENTENCE, for the same reason the parser's is kept below: it names the path
+		// and the errno, and nothing this function knows improves on it.
+		//
+		// AND THE REMEDY BLOCK BELOW IS SKIPPED. "Add this to config.yml, then start again" is advice
+		// quince cannot honour about a file it cannot open.
 		p("%s could not be READ — quince cannot tell what storage you declared.", configPath)
 		p("")
 		p("    %s", r.UnreadableDetail)
@@ -179,8 +187,7 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 		p("problem, an I/O error, or a mount that is not there. In a container the usual cause is a")
 		p("`/data` bind that did not mount: check the volume before editing anything.")
 		p("")
-		p("REFUSING to start. quince will not serve on defaults while a config it cannot read sits")
-		p("at that path — that would silently ignore whatever you actually wrote.")
+		p("quince cannot act on a config it cannot read, so nothing it declares is in effect.")
 		return fmt.Errorf("config could not be read: %s: %s", configPath, r.UnreadableDetail)
 	case r.Malformed:
 		// THE PARSER'S OWN SENTENCE, because it names the line and the type and nothing this

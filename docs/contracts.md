@@ -757,15 +757,22 @@ could not be **parsed** is not an empty declaration: `Load()` falls back to `Def
 would silently ignore what the operator wrote and invite them to add a storage to a document that
 already has one it cannot read (quince#508).
 
-**AND SO DOES UNREADABLE, under that same carve-out rather than a new one** (quince#544). A file that
-exists and could not be **read** is not a statement about storage at all, so the argument above
-transfers word for word — harder, if anything, because a parse failure at least means quince read the
-file. Until this, a read failure fell through the same nil to `Missing`: **measured on `main`, a
-directory at the config path produced ``no `storage:` key in /data/config.yml``**, which tells an
-operator whose bind mount is missing to edit a file the daemon cannot open. That is the shape a
-container mistake actually takes — a bind whose source does not exist makes the runtime create a
-DIRECTORY at the target. `Load` stats before reading, so this is never the ordinary no-file-yet
-first run.
+**UNREADABLE DOES NOT JOIN IT, AND THAT IS GATED RATHER THAN CHOSEN** (quince#544). It reads like the
+same case — quince cannot tell what the operator declared either way — and quince#544 first extended
+the carve-out to cover it. **`deploy/storageless-smoke`'s third arm refuted that within one CI run**:
+*"it SERVES — so the add endpoint is reachable in this state"*. That arm exists for quince#852, and
+its reason generalises the zero-storage ruling rather than sitting beside it — **refusing at startup
+removes the only surface from which the state is repairable.** So an unreadable config serves, and
+`POST /api/config/storage` answers `422` rather than writing over a file quince could not read.
+
+**What quince#544 changes is the PREDICATE, not the behaviour.** A read failure used to fall through
+the same nil as an absent key and report `Missing`; it now reports `Unreadable`. `Load` stats before
+reading, so this is never the ordinary no-file-yet first run — it is a permission error, an I/O
+error, or the shape a container mistake actually takes, since a bind mount whose source does not
+exist makes the runtime create a **directory** at the target. Both states still reach the onboarding
+page, which is why `main.go`'s storageless test counts `Unreadable` alongside `Missing` and `Empty`:
+a predicate that starts reporting itself honestly, and is then left out of that set, would send the
+daemon **past** setup with no declared storage.
 
 **The two causes are now TYPED rather than re-derived from prose.** `Loaded.Failure` carries
 `LoadUnreadable | LoadUnparsable` with the OS's or the parser's own sentence, and `CheckStorages`

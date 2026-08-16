@@ -243,8 +243,13 @@ func TestAReadFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
 	if req.Missing {
 		t.Error("Missing must be false — quince never saw the file, so it cannot say the key is absent")
 	}
+	// `OK()` FALSE MEANS "THE REQUIREMENT IS NOT SATISFIED", NOT "DO NOT SERVE" — and conflating the
+	// two is what `deploy/storageless-smoke`'s third arm caught. quince#544 first made this state
+	// refuse at startup; that arm requires it to SERVE, so the add endpoint is reachable and can
+	// answer 422 (quince#852). `main.go` counts Unreadable as storageless and shows setup, exactly as
+	// it did when this state reported Missing.
 	if req.OK() {
-		t.Error("a config that could not be read must not be allowed to serve")
+		t.Error("an unreadable config does not satisfy the storage requirement")
 	}
 
 	var sb strings.Builder
