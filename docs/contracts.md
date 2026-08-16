@@ -2254,7 +2254,13 @@ Storage: {
                                // this file.
   "unreachable_reason": null,  // set when reachable is false; SHOWN, never thrown — an unreachable
                                // storage must not block backups to any other (epic point 5).
-                               // FOUR distinguishable causes, because the remedy differs:
+                               // FIVE DECLARED VALUES: four CAUSES, because the remedy differs,
+                               // and one that is not a cause at all. The total is stated first, and
+                               // every value sits in ONE list, because the review of quince#569 read
+                               // a "FOUR causes" heading above four bullets as a closed set and
+                               // missed the fifth in a sub-block below it. A count and a list that
+                               // disagree is quince#409's defect — the part describing the whole
+                               // going stale — and here it made a DECLARED value read as undeclared.
                                //   path_unreachable  the path itself cannot be read
                                //   missing_medium    the path reads, the marker is GONE, and the DB
                                //                     knows this storage — an unplugged disk's bare
@@ -2273,11 +2279,11 @@ Storage: {
                                //                     OBVIOUS AND MUST NOT BE OFFERED AS ONE CLICK:
                                //                     recreating a marker wrongly attaches the wrong
                                //                     storage.
-                               //
-                               // And one value that is not a cause:
-                               //   unmapped          NEVER EXPECTED. The daemon reached an internal
-                               //                     resolution with no declared code here, logged an
-                               //                     error, and emitted this rather than guessing a
+                               //   unmapped          THE FIFTH VALUE, AND NOT A CAUSE — it says
+                               //                     nothing about the disk. NEVER EXPECTED: the
+                               //                     daemon reached an internal resolution with no
+                               //                     declared code here, logged an error naming it,
+                               //                     and emitted this rather than guessing a
                                //                     neighbour. It is a quince bug, and it is
                                //                     deliberately implausible so a client fails
                                //                     visibly instead of rendering a confident wrong
