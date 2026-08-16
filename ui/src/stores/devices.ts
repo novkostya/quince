@@ -1,12 +1,19 @@
 import { create } from "zustand";
-import type { Device } from "@/lib/types";
+import type { Device, Pairing } from "@/lib/types";
 
 interface DevicesState {
   byUdid: Record<string, Device>;
   order: string[];
   upsert: (d: Device) => void;
   removeTransport: (udid: string, transport: string) => void;
-  replaceAll: (devices: Device[]) => void;
+  // pairing is the SYSTEM capability from the same envelope (qn.6p D7). It lives here rather
+  // than on each Device because there is one lockdown directory behind all of them, and
+  // copying it per row would be one fact stored N times.
+  //
+  // Defaults to writable: a fresh store has not asked yet, and starting from `false` would
+  // grey out Pair on every first paint before the first refresh lands.
+  pairing: Pairing;
+  replaceAll: (devices: Device[], pairing?: Pairing) => void;
 }
 
 export const useDevicesStore = create<DevicesState>((set) => ({
@@ -32,9 +39,13 @@ export const useDevicesStore = create<DevicesState>((set) => ({
       }
       return { byUdid: { ...s.byUdid, [udid]: { ...dev, transports } } };
     }),
-  replaceAll: (devices) =>
+  pairing: { writable: true },
+  replaceAll: (devices, pairing) =>
     set(() => ({
       byUdid: Object.fromEntries(devices.map((d) => [d.udid, d])),
       order: devices.map((d) => d.udid),
+      // An absent envelope field leaves the last known answer alone rather than inventing
+      // one: a partial refresh must not silently re-enable a control it knows nothing about.
+      ...(pairing ? { pairing } : {}),
     })),
 }));
