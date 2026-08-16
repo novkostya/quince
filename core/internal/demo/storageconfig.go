@@ -49,6 +49,14 @@ func StorageEntries() []config.StorageEntry {
 		//
 		// NOT `zfs`: that would oblige the demo to invent a whole zfs block (mode, seed) it has no
 		// business having an opinion about.
-		{Name: "shuttle", Path: "/mnt/shuttle", Backend: "auto"},
+		//
+		// THE PATH IS DELIBERATELY LONG, AND MUST STAY IN STEP WITH Storages() — quince#1042 relies on
+		// it to give `story12` and `story5` a storage card wide enough to overflow if the card ever
+		// loses `min-w-0` again. Storages() carries the measurement and the reason.
+		//
+		// TestDemoStoragesAgreeWithConfigEntries enforces the agreement, and that is exactly why the
+		// hazard is worth naming HERE: shortening BOTH sides keeps that test green and silently
+		// disarms two e2e gates. The test guards that the two match, not that either is long enough.
+		{Name: "shuttle", Path: "/mnt/usb/external-8tb-offsite-rotation/quince-backups-and-archives-2026-q3", Backend: "auto"},
 	})
 }
