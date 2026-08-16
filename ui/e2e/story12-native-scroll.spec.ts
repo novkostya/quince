@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 // quince#838 — THE DOCUMENT IS THE SCROLLER, AND BACK RETURNS YOU TO WHERE YOU WERE.
 //
@@ -194,7 +194,7 @@ test("the phone nav bar stays put, and stays clear of the notch while it does", 
   const before = await bar.boundingBox();
   expect(before).not.toBeNull();
 
-  await expectCanHold(page, "Home");
+  await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
   await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
 
@@ -383,7 +383,7 @@ test("the desktop sidebar fits the viewport it is pinned to, inset and all", asy
 // to assert.
 test("the in-page back link restores the scroll position", async ({ page }) => {
   await authenticate(page);
-  await expectCanHold(page, "Home");
+  await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
   await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
 
@@ -430,7 +430,23 @@ const OFFSET = 200;
 // measurement taken at the wrong moment reports a page that is briefly too short and fails a test
 // about something else entirely. Measured: this test passed only on the retry until the read below
 // became a poll. `poll` also keeps the failure honest — it reports the height it settled on.
-async function expectCanHold(page: Page, where: string): Promise<void> {
+//
+// AND IT MUST NAME WHICH PAGE IT MEASURED, WHICH IS `arrived` (quince#1048). The height is read off
+// `document`, so the guard is satisfied by WHATEVER is rendered — including the page you have just
+// navigated away from. `toHaveURL` does not close that: `history.pushState` sets the address
+// synchronously, while the re-render that follows is a react-router `startTransition` and can commit
+// a task later. In that window the address says the destination and the DOM is still the origin,
+// which at this viewport is comfortably scrollable — so the guard passes about the wrong page, the
+// `scrollTo` that follows lands on the wrong page, and `useScrollReset` sends the destination to the
+// top the moment it finally mounts. One reset pins `scrollY` at 0 for the whole of the poll that
+// follows, because `expect.poll` re-reads the value without re-issuing the scroll.
+//
+// That is quince#1048 — five red trunk runs in eight, on a test that had already refuted the
+// obvious "the page had not laid out tall enough yet" reading with this very guard. It refuted it
+// correctly; the guard was simply never asserting WHOSE height it had. Waiting on something only
+// the destination renders is what makes the measurement a claim about a page.
+async function expectCanHold(page: Page, where: string, arrived: Locator): Promise<void> {
+  await expect(arrived, `${where} must have rendered before its height means anything`).toBeVisible();
   await expect
     .poll(
       () => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight),
@@ -441,7 +457,7 @@ async function expectCanHold(page: Page, where: string): Promise<void> {
 
 test("a new screen opens at the top, and Back returns to where you were", async ({ page }) => {
   await authenticate(page);
-  await expectCanHold(page, "Home");
+  await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
 
   // Read back rather than assumed: `scrollTo` is clamped silently, and asserting against the number
   // we asked for rather than the one we got is how a test passes about a page that never moved.
@@ -451,8 +467,14 @@ test("a new screen opens at the top, and Back returns to where you were", async 
   // INTO the details page, from a scrolled position and without Playwright moving it for us.
   await clickWithoutScrolling(page, "attic-ipad");
   await expect(page).toHaveURL(/\/devices\//);
-  await expect(page.getByRole("heading", { name: "attic-ipad" })).toBeVisible();
-  await expectCanHold(page, "the device details page");
+  // The heading is the arrival proof AND the guard's, in one act rather than two lines that can
+  // drift apart — which is how they drifted in the dialog test below, where the second navigation
+  // got the guard and never got the wait (quince#1048).
+  await expectCanHold(
+    page,
+    "the device details page",
+    page.getByRole("heading", { name: "attic-ipad" }),
+  );
 
   // A NEW SCREEN STARTS AT THE TOP. Without `useScrollReset` the offset simply survives the
   // navigation — an SPA never loads a new document to start one at zero — and the details page opens
@@ -484,7 +506,11 @@ test("opening a dialog is a push, and closing it restores the page behind it", a
   await authenticate(page);
   await page.getByRole("link", { name: "family-iphone" }).click();
   await expect(page).toHaveURL(/\/devices\//);
-  await expectCanHold(page, "the device details page");
+  await expectCanHold(
+    page,
+    "the device details page",
+    page.getByRole("heading", { name: "family-iphone" }),
+  );
 
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
   await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
