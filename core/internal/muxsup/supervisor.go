@@ -418,6 +418,17 @@ func exitReason(err error) string {
 // (external muxers under manage_muxer: false), so /api/health reports each daemon honestly
 // instead of one ambiguous aggregate (clean break ruled (bz)). It satisfies the httpapi
 // MuxerControl seam structurally.
+//
+// THE SUPERVISED HALF IS PARKED IN v0.1 — PARKED, NOT BROKEN, AND NOT DEAD (qn.6p D1/D2).
+// `devices.manage_muxer: true` is refused by config validation, so nothing calls Supervise on a
+// shipping build and `sups` is always empty. Everything below still compiles, still runs under
+// `make gates`, and is still correct: it is hardware-proven supervision (qn.2b, qn.4c) kept
+// against the return of the all-in-one profile, which the Operator descoped rather than abandoned
+// — "I want it to be back in future versions, I'm not giving up on all-in-one" (2026-08-16).
+//
+// So do not read the unreachable arms as scaffolding and do not delete them to satisfy a coverage
+// number. Reintroducing the profile is deleting one branch in config.validateDevices; deleting
+// this code would mean re-earning proof that already exists.
 type Group struct {
 	sups      []*Supervisor
 	unmanaged []unmanagedMuxer

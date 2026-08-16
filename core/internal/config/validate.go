@@ -55,6 +55,21 @@ func Validate(c Config) []wire.ConfigError {
 // again and refuses to start. Two checks, because they catch two different failures: this one
 // answers the user typing into the UI, that one stops a typo in config.yml being ignored.
 func validateDevices(d DevicesConfig, add func(path, msg string)) {
+	// `manage_muxer: true` asks for a profile v0.1 does not ship (qn.6p D1/D2). It is REFUSED
+	// rather than ignored, because yaml.Unmarshal drops unknown keys silently and deleting the
+	// key would turn an existing all-in-one install into a muxerless one without a word.
+	//
+	// REFUSED HERE RATHER THAN ON THE SERVE PATH, which is a real trade and the PR that added it
+	// said so. Validate is the PUT gate, so this is what stops an operator writing a setting that
+	// would refuse at their next restart. The cost is that Load() DISCARDS the whole config and
+	// falls back to Default() — so an upgrader with this key set loses the rest of their file
+	// until they remove it, and reads the reason in the warning rather than in the fatal line
+	// that follows it. `quince config check` prints it verbatim.
+	if d.ManageMuxer {
+		add("devices.manage_muxer", "quince ships no muxer daemon in v0.1 — remove this key and point "+
+			"devices.usbmuxd_socket (and devices.netmuxd_addr, for Wi-Fi) at the muxer you run. "+
+			"The in-container profile is descoped, not abandoned; see quince#897")
+	}
 	for _, f := range []struct{ path, value string }{
 		{"devices.usbmuxd_socket", d.UsbmuxdSocket},
 		{"devices.netmuxd_addr", d.NetmuxdAddr},

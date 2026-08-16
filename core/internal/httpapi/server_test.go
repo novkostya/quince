@@ -335,7 +335,7 @@ func TestCSRFRequiredOnMutations(t *testing.T) {
 		`"storage":[{"name":"local","path":"/backups","default":true,"backend":"auto",` +
 		`"zfs":{"parent_dataset":"","mode":"hook","hook_cmd":"","ssh_user":"","ssh_host":"","ssh_port":0,"ssh_key":"","seed":"auto"},` +
 		`"retention":{"keep_recent":10,"keep_daily":30,"keep_weekly":12}}],` +
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 
@@ -379,7 +379,7 @@ func TestConfigPutRejectsRemovingTheLastStorage(t *testing.T) {
 
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":[],` + // the user removed their last storage
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 
@@ -413,7 +413,7 @@ func TestConfigPutAcceptsAStoragelessDocumentThatWasAlreadyStorageless(t *testin
 
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":[],` + // nothing was declared before this write either
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"sessions":{"allow_insecure_transport":true},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 

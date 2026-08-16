@@ -2873,18 +2873,28 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
       keep_daily: 30
       keep_weekly: 12
 devices:
-  manage_muxer: true        # true = SIMPLE profile: quince owns the lifecycle of EVERY muxer
-                            # daemon it is configured to reach — usbmuxd (USB) and netmuxd
-                            # (Wi-Fi) — as supervised subprocesses with restart-w/-backoff,
-                            # each refusing loudly at startup if its address is already served
-                            # (no silent adoption). false = HARDENED/external: quince only
-                            # dials both and reports them `external` in /api/health.
-                            # ONE flag for both daemons (D12; qn.4c ruling (bz)).
-  usbmuxd_socket: /var/run/usbmuxd    # authoritative: the managed usbmuxd gets -S <this>
-  netmuxd_addr: 127.0.0.1:27015       # authoritative: the managed netmuxd gets --host/--port
-                            # from this (plus a private --socket-path and --disable-usb).
-                            # Wi-Fi discovery is mDNS-only, so the container must be on the
-                            # LAN — see deploy/compose.nas.yml.
+  manage_muxer: false       # v0.1 SHIPS NO MUXER DAEMON: the operator runs one — a host
+                            # usbmuxd, a sidecar, or another tool's — and quince dials it.
+                            # `true` is REFUSED at validation, not ignored: yaml.Unmarshal
+                            # drops unknown keys silently, so deleting the key would turn an
+                            # existing all-in-one install into a muxerless one without a word.
+                            # The in-container profile is DESCOPED, not abandoned (qn.6p,
+                            # Operator 2026-08-16); qn.4c's ruling (bz) is parked with it.
+  usbmuxd_socket: /var/run/usbmuxd    # where the USB muxer answers. Default, and usbmuxd's
+                            # own default path, so a host already running one needs no
+                            # config.yml at all.
+  netmuxd_addr: ""          # where the Wi-Fi muxer answers. EMPTY BY DEFAULT: a default here
+                            # dialed a port nothing listened on, forever (quince#897 item 3).
+                            # Wi-Fi discovery is mDNS-only, so the muxer must be on the LAN —
+                            # which in the hardened shape is the MUXER's container, not
+                            # quince's, so quince stays bridged and unprivileged.
+                            #
+                            # BOTH KEYS TAKE THREE FORMS (qn.6p D3, internal/muxaddr):
+                            #   /run/mux/usbmuxd        a unix socket path
+                            #   UNIX:/run/mux/usbmuxd   the same, libusbmuxd's own spelling
+                            #   127.0.0.1:27015         TCP
+                            # Point BOTH at one address when a single muxer serves both
+                            # transports; quince opens one connection, not two.
 tls:                        # qn.6f — the certificate quince serves ITSELF, for the tier with no
                             # reverse proxy in front of it. BOTH EMPTY (the default) MEANS TLS IS
                             # OFF, and that is a correct configuration, not a degraded one: it is

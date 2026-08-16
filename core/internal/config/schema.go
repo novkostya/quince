@@ -256,13 +256,22 @@ type RetentionConfig struct {
 // DevicesConfig is the `devices:` section (muxer supervision + sockets, stack D2). Field
 // order is the canonical YAML key order (contracts §6): manage_muxer first.
 type DevicesConfig struct {
-	// ManageMuxer true (SIMPLE profile) = quince owns the lifecycle of EVERY muxer daemon it is
-	// configured to reach (qn.4c): usbmuxd when UsbmuxdSocket is set, netmuxd when NetmuxdAddr is
-	// set — each a supervised subprocess, restart w/ backoff; each refuses loudly at startup if
-	// its address is already served (no silent adoption). false (HARDENED/external) = quince only
-	// dials both, and reports them as `external` in /api/health. ONE flag governs both daemons on
-	// purpose (D12 config tidiness): the mixed topology still degrades honestly through
-	// refuse-loudly. Applied at process start; live re-supervision on an edit is qn.7.
+	// ManageMuxer is FALSE IN v0.1 AND `true` IS REFUSED. quince ships no muxer daemon: the
+	// operator runs one — a host usbmuxd, a sidecar, or another tool's — and quince dials it
+	// (qn.6p D1/D2, Operator 2026-08-16, quince#897).
+	//
+	// THE KEY SURVIVES ITS OWN PROFILE ON PURPOSE, and deleting it would be the worse bug.
+	// Config load uses plain yaml.Unmarshal, which drops unknown keys SILENTLY — this repo has
+	// that incident on record at storages_validate_test.go:162, where a mistyped `pathh:` "was
+	// dropped by yaml.Unmarshal and reported by nothing". So removing the key would upgrade an
+	// existing `manage_muxer: true` install into a muxerless quince with no muxer configured,
+	// without a word, and the operator would watch every device vanish with nothing to read.
+	// Refusing it loudly is the no-silent-fallbacks rule applied to a config key.
+	//
+	// ALL-IN-ONE IS DESCOPED, NOT ABANDONED (Operator: "I want it to be back in future versions,
+	// I'm not giving up on all-in-one"). Reintroducing it is deleting one validation branch and
+	// unparking muxsup — which is why the supervision path is parked rather than deleted, and why
+	// UsbmuxdSocket/NetmuxdAddr keep their daemon-shaped names.
 	ManageMuxer bool `yaml:"manage_muxer" json:"manage_muxer"`
 	// UsbmuxdSocket is where the USB muxer answers — authoritative: a managed usbmuxd is started
 	// with `-S <this>`, and POST /api/devices/rescan restarts THIS daemon (USB hotplug is what
@@ -385,10 +394,25 @@ func Default() Config {
 			PreferredTransport: "usb",
 			RequireEncryption:  true,
 		},
+		// The muxer defaults are the HARDENED profile's (qn.6p D1/D4), and each is a decision:
+		//
+		//   ManageMuxer false — quince ships no muxer daemon. Default() must not carry a value
+		//     Validate refuses, or the fallback an invalid config lands on would itself be invalid.
+		//
+		//   UsbmuxdSocket "/var/run/usbmuxd" — unchanged, and it is usbmuxd's OWN default (measured
+		//     from the shipped binary: `-S … Default: /var/run/usbmuxd`). So a host that already
+		//     runs usbmuxd works with no config.yml at all, which is the case quince#897 was filed
+		//     about. Rung-local decision; the alternative was a shared-volume path matching
+		//     compose.hardened.yml, and only one can be the default.
+		//
+		//   NetmuxdAddr "" — the dead `127.0.0.1:27015` is GONE (quince#897 item 3). Defaulting it
+		//     made quince dial a port nothing listened on, forever, ~1 warning/second backing off,
+		//     and made "no Wi-Fi muxer" inexpressible except by knowing that an explicit `""`
+		//     differs from an absent key. Empty means empty now.
 		Devices: DevicesConfig{
-			ManageMuxer:   true,
+			ManageMuxer:   false,
 			UsbmuxdSocket: "/var/run/usbmuxd",
-			NetmuxdAddr:   "127.0.0.1:27015",
+			NetmuxdAddr:   "",
 		},
 		Reconcile: ReconcileConfig{
 			IntervalMinutes: 360,
