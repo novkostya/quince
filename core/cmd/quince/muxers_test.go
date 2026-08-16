@@ -105,25 +105,56 @@ func TestPlannedMuxers(t *testing.T) {
 	}
 }
 
-// TestPlannedMuxersDefaultConfig: the shipped defaults (manage_muxer true, both addresses set)
-// supervise both daemons — i.e. `compose up` alone brings Wi-Fi up, which is the whole point of
-// this rung ((by): without it nothing starts netmuxd and Wi-Fi is silently dead after a restart).
+// TestPlannedMuxersDefaultConfig: the shipped defaults SUPERVISE NOTHING (qn.6p D1). quince runs
+// no muxer daemon in v0.1 — the operator runs one and quince dials it.
+//
+// This asserted the opposite until qn.6p: `manage_muxer` defaulted true and the default plan
+// supervised both daemons. That was qn.2b/(by)'s answer to "nothing starts netmuxd, so Wi-Fi is
+// silently dead after a restart", and it was right for the profile it shipped in. The profile
+// changed and the assertion follows it, rather than the test being deleted.
 func TestPlannedMuxersDefaultConfig(t *testing.T) {
 	plan := plannedMuxers(config.Default().Devices)
-	if names(plan.supervise) != "usbmuxd,netmuxd" {
-		t.Fatalf("default config supervises %q; want usbmuxd,netmuxd", names(plan.supervise))
+	if got := names(plan.supervise); got != "" {
+		t.Fatalf("default config supervises %q; want nothing — quince ships no muxer daemon", got)
 	}
 	if len(plan.problems) != 0 {
 		t.Fatalf("default config has problems: %q", plan.problems)
 	}
-	// And the netmuxd child must not be pointed at usbmuxd's socket by default.
+	// The USB muxer is still REACHED, just not owned. An absent external entry would leave health
+	// with nothing to report, and design §10 says an absent entry reads as "no muxer".
+	if len(plan.external) != 1 || plan.external[0].name != "usbmuxd" {
+		t.Fatalf("default externals = %+v; want exactly usbmuxd dialed", plan.external)
+	}
+}
+
+// TestPlannedMuxersManagedProfileIsParked keeps the all-in-one plan proven while nothing ships it.
+//
+// `devices.manage_muxer: true` is refused by config validation (qn.6p D2), so this configuration
+// cannot reach production — but the profile is DESCOPED, NOT ABANDONED, and reintroducing it is
+// deleting one validation branch. If that branch returns and this behaviour has rotted meanwhile,
+// the rung that brings it back has to re-earn proof that already exists. So the managed plan keeps
+// its test, driven from an explicit config rather than from Default().
+func TestPlannedMuxersManagedProfileIsParked(t *testing.T) {
+	dcfg := config.Default().Devices
+	dcfg.ManageMuxer = true
+	dcfg.NetmuxdAddr = "127.0.0.1:27015" // no longer a default; named here because this plan needs one
+
+	plan := plannedMuxers(dcfg)
+	if names(plan.supervise) != "usbmuxd,netmuxd" {
+		t.Fatalf("managed profile supervises %q; want usbmuxd,netmuxd", names(plan.supervise))
+	}
+	if len(plan.problems) != 0 {
+		t.Fatalf("managed profile has problems: %q", plan.problems)
+	}
+	// The netmuxd child must never be pointed at usbmuxd's socket: netmuxd DELETES and rebinds
+	// whatever --socket-path names, which is a silent USB blackout (stack D2, measured twice).
 	for _, spec := range plan.supervise {
 		if spec.Name != "netmuxd" {
 			continue
 		}
 		for _, a := range spec.Args {
-			if a == config.Default().Devices.UsbmuxdSocket {
-				t.Fatal("default netmuxd argv points at the usbmuxd socket")
+			if a == dcfg.UsbmuxdSocket {
+				t.Fatal("netmuxd argv points at the usbmuxd socket — it would delete and rebind it")
 			}
 		}
 	}

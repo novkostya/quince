@@ -66,7 +66,7 @@ func TestConfigResponsesNeverSendNullWarnings(t *testing.T) {
 	// responses" and listed three (quince#729 review).
 	putBody := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":` + oneStorage + `,` +
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 	put := newReq(t, http.MethodPut, srv.URL+"/api/config", putBody)

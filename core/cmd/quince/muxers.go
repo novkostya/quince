@@ -10,6 +10,12 @@ import (
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
 
+// THE MANAGED ARMS BELOW ARE PARKED IN v0.1, NOT BROKEN (qn.6p D1/D2). `devices.manage_muxer:
+// true` is refused by config validation, so on a shipping build plannedMuxers only ever takes its
+// external arms and `plan.supervise` is always empty. They are kept — with their tests — against
+// the return of the all-in-one profile, which the Operator descoped rather than abandoned. Read
+// them as waiting, not as scaffolding, and do not delete them to satisfy a coverage number.
+//
 // The muxer topology quince runs (stack D2, qn.2b + qn.4c). `devices.manage_muxer: true` means
 // "quince owns the muxers it is configured to reach" — ONE flag governing every daemon, not one
 // flag per daemon (D12 config tidiness; ruled (bz)-2): usbmuxd when devices.usbmuxd_socket is set,

@@ -80,7 +80,7 @@ func TestConfigRoundTripPreservesTLS(t *testing.T) {
 	c := authedClient(t, srv)
 
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
@@ -119,7 +119,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	c := authedClient(t, srv)
 
 	withTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
@@ -130,7 +130,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	}
 
 	withoutTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 		`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 		`"ui":{"theme":"system"}}`
 	resp2 := putConfig(t, c, srv, withoutTLS)
@@ -163,7 +163,7 @@ func TestConfigPutRejectsAHalfSetTLSPair(t *testing.T) {
 			c := authedClient(t, srv)
 
 			body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-				`"devices":{"manage_muxer":true,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":"127.0.0.1:27015"},` +
+				`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
 				tc.tlsJSON +
 				`"sessions":{"allow_insecure_transport":false},"automation":{"staleness_days":3,"reminder_cooldown_hours":24},` +
 				`"ui":{"theme":"system"}}`
