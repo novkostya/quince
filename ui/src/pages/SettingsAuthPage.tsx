@@ -3,6 +3,7 @@ import { BackLink } from "@/components/BackLink";
 import { ChevronLeft } from "lucide-react";
 import { Passkeys } from "@/features/settings/Passkeys";
 import { PasswordControls } from "@/features/settings/PasswordControls";
+import { PlainHTTPSetting } from "@/features/settings/PlainHTTPSetting";
 
 // The auth surface as A PAGE OF ITS OWN — quince#841 ruling A, qn.6m D2.
 //
@@ -51,6 +52,11 @@ export function SettingsAuthPage() {
             the thing that replaces it. It also puts the DESTRUCTIVE action (removing the password)
             furthest from the top of the page. */}
         <PasswordControls />
+        {/* TRANSPORT LAST, because it is the least often changed and the most dangerous to change
+            by accident — and because it is the reversal path for the banner's own control
+            (quince#1069), so it belongs where somebody signed in can find it rather than where
+            somebody is choosing a password. */}
+        <PlainHTTPSetting />
       </div>
     </section>
   );
