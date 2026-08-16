@@ -42,11 +42,12 @@ Go core daemon ─── REST + WebSocket ───► React web UI (embedded)
   ├─ device tracking      (usbmuxd / netmuxd socket protocol, live events)
   ├─ backup jobs          (idevicebackup2 supervisor, state machine)
   ├─ storage backends     (zfs snapshot-native | reflink | hardlink | copy)
-  └─ vault                (swappable sidecar, Python today: reuses open-source backup
-                           decryption; lazy session-scoped reads, no persistent index)
+  └─ vault                (swappable seam over quince's own Go decryption/parsing
+                           libraries; lazy session-scoped reads, no persistent index)
 ```
 
-One container, multi-arch (amd64/arm64), designed to also run on modest NAS hardware.
+One container, multi-arch (amd64/arm64), designed to also run on modest NAS hardware —
+one static Go binary with the UI embedded in it, and no language runtime alongside.
 
 ## Docs
 

@@ -11,7 +11,7 @@ with byte-identical toolchains. All versions are pinned in one place: `versions.
 - `make`
 - a container runtime with BuildKit: **nerdctl** (containerd) or **Docker**. The Makefile
   autodetects which one you have.
-- that's it — no Go, Node, Python, pnpm, or uv on your host.
+- that's it — no Go, Node or pnpm on your host.
 
 > Why: a daemon whose whole job is "never lie about state" should be reproducible to the
 > byte. Host toolchain drift is exactly the class of "works on my machine" bug we refuse
@@ -62,36 +62,12 @@ to avoid. (`bin/gh-coder` uses `openssl base64 -A` anyway, which is portable and
 Three of four held; the fourth would have taught the next reader to work around a problem that does
 not exist.
 
-**Python is deliberately absent from the BOX, and it is very much present in the image.** Both facts
-matter and the first draft of this section got the second one wrong — see the correction below.
-
-The reason not to install it on a session box is **host surface**, not scarcity: a session box is a
+**Python is absent from the box AND from the image, and nothing in quince is written in it.** The
+reason not to install it on a session box is **host surface**, not scarcity: a session box is a
 driver and a container host, the toolchain-container design exists precisely so language runtimes
 live in containers rather than on hosts, and nothing a *session* does needs Python — `jq` covers the
 JSON use, and the cost of absence is a loud, self-correcting `127`. Do not install it to make an
 error go away; write the `jq` form.
-
-> **CORRECTION (quince#246 follow-up).** This paragraph used to say the cost of presence was "a host
-> package that exists on the session boxes but **not** in the pinned toolchain containers or the
-> release image — which invites committed tooling that depends on it and then fails where it
-> matters." **That is false, and it merged.** `deploy/Dockerfile` installs `python3` in *both*:
-> `:38` (`toolchain-uv`: `apk add --no-cache git make python3`) and `:147` (the shipping `runtime`
-> stage, for the vault venv). `:108` even says so outright — *"the same Alpine (3.24) base the
-> runtime uses (identical `/usr/bin/python3`)"*.
->
-> So committed tooling that depends on Python does **not** fail where it matters; the vault is
-> written in it. The conclusion — don't install it on a box — survives, but on the host-surface
-> argument the original issue actually made, not on the invented one. Recorded rather than quietly
-> rewritten, because a section whose whole subject is *"verify the trap on the box before writing it
-> down"* asserted a fact about the image without opening the Dockerfile, and got it past a review.
->
-> **AND THIS CORRECTION IS ITSELF TIME-SCOPED, deliberately.** It describes the tree at this commit:
-> `vault/pyproject.toml` requires Python ≥3.12 and `deploy/Dockerfile` installs `python3` for it.
-> `CLAUDE.md` says *"swappable vault sidecar (Python **today**…)"* — the word is load-bearing. If the
-> sidecar is replaced by a Go implementation, `python3`, the `toolchain-uv` stage, `uv` and
-> `gates-vault` all become removable, and **this paragraph becomes wrong in the other direction.**
-> Tracked separately rather than predicted here. Writing an undated claim about the image is the
-> mistake this box is standing in.
 
 **And do not "fix" a box towards GNU.** `deploy/Dockerfile`'s runtime stage is `FROM
 ${ALPINE_IMAGE}`, so **BusyBox is the production truth** and the boxes match the shipped image.
@@ -111,14 +87,13 @@ wrong in the image.
 ```sh
 make gates        # the whole ladder (below), each step in its toolchain container
 make gates-go     # gofmt + go vet + golangci-lint + go test -race     (core/)
-make gates-vault  # ruff + ruff format --check + mypy --strict + pytest (vault/)
 make gates-ui     # tsc + eslint + vitest + vite build                  (ui/)
 make image        # build the production container (proves go:embed of the built UI)
 make push REGISTRY=host[:port]/repo   # push (registry + creds via env only)
 ```
 
 First run builds the toolchain images (a few minutes); afterwards, named cache volumes
-(`quince-go-build`, `quince-go-mod`, `quince-pnpm-store`, `quince-uv-cache`) keep runs
+(`quince-go-build`, `quince-go-mod`, `quince-pnpm-store`) keep runs
 fast. `make clean` drops those volumes and the local images.
 
 ### Targeting one Go test
@@ -158,7 +133,6 @@ that; the refusal above only covers the correctly-spelled name on a target that 
 | Path | What |
 | --- | --- |
 | `core/` | Go daemon (`quince`) — device tracking, jobs, storage, HTTP/WS API, UI host |
-| `vault/` | Python sidecar (`quince-vault`) — session-scoped encrypted-backup reader |
 | `ui/` | React + Vite + TS web app, embedded into the Go binary at build time |
 | `deploy/` | `Dockerfile`, compose examples, this guide, and `devct/` (dev-container provisioning) |
 | `docs/` | canon: stack decisions, architecture, frozen contracts, rung specs |
@@ -181,4 +155,4 @@ work just uses `make gates-ui`.
 Bump the pin in `versions.env` (only there), rebuild the toolchain image
 (`make toolchains`), and re-run the gates. The Dockerfile and CI pick up the same value
 via build-args. Language deps live in each track's manifest (`core/go.mod`,
-`vault/pyproject.toml`, `ui/package.json`) with a committed lockfile.
+`ui/package.json`) with a committed lockfile.

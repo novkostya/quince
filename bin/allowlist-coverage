@@ -2,7 +2,7 @@
 # allowlist-coverage — the `make` allowlist is TOTAL, in both directions.
 #
 # THE DEFECT (quince#256). `.claude/settings.json` allowlisted the LANGUAGE gates — `gates-go`,
-# `gates-ui`, `gates-ui-e2e`, `gates-vault`, `image` — and not one of the shell test suites. Those
+# `gates-ui`, `gates-ui-e2e`, `image` — and not one of the shell test suites. Those
 # arrived incrementally, each in a PR that touched no settings file, so the gap was drift rather
 # than a decision. Measured on 2026-07-30: **19 of 34 documented targets had no entry**, and they
 # were almost exactly the sub-targets `make gates-sh` invokes — i.e. the suites a session runs while
@@ -25,17 +25,18 @@
 #   1. every DOCUMENTED target (one carrying a `## ` help string) must have an allow entry;
 #   2. every `Bash(make …)` entry must name a REAL target (any `.PHONY` declaration).
 #
-# Not the same set, and using one for both is wrong in both directions. Measured here:
+# Not the same set, and using one for both is wrong in both directions. Measured 2026-08-16:
 #
-#   .PHONY targets                38
-#   documented (`## `) targets    34
-#   real but undocumented         preflight  tc-go  tc-node  tc-uv
+#   .PHONY targets                61
+#   documented (`## `) targets    55
+#   real but undocumented         gates-announce  preflight  print-all-gates
+#                                 print-sh-suite-image  tc-go  tc-node
 #
 # `make preflight` IS allowlisted and is NOT documented — a real target with no `## ` text. A
-# direction-2 check keyed on documented targets would report that rule **dead**. Meanwhile `tc-go`,
-# `tc-node` and `tc-uv` are real, undocumented, and correctly *not* allowlisted: they are internal
+# direction-2 check keyed on documented targets would report that rule **dead**. Meanwhile `tc-go`
+# and `tc-node` are real, undocumented, and correctly *not* allowlisted: they are internal
 # toolchain build steps nobody invokes by hand, so a direction-1 check keyed on real targets would
-# demand three entries nobody wants. The ruling on quince#256 said "every `make help` target has an
+# demand two entries nobody wants. The ruling on quince#256 said "every `make help` target has an
 # entry, and every entry names a real target", and that precision is load-bearing rather than loose.
 #
 # Direction 2 is the one that catches a RENAMED target leaving a dead allow rule behind, which is how

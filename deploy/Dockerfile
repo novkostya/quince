@@ -8,8 +8,6 @@ ARG GO_IMAGE=golang:1.26.5-alpine3.24
 ARG NODE_IMAGE=node:22.23.1-alpine3.24
 ARG RUST_IMAGE=rust:1.97.1-alpine3.24
 ARG ALPINE_IMAGE=alpine:3.24
-# uv publishes no -alpine3.24 tag; toolchain-uv is built FROM alpine and copies this in.
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine
 
 # =============================================================================
 # Toolchain stages — reused verbatim by the Makefile gate targets.
@@ -26,18 +24,6 @@ FROM ${NODE_IMAGE} AS toolchain-node
 ARG PNPM_VERSION
 RUN apk add --no-cache git
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-WORKDIR /src
-
-# Alias the uv image as a stage so COPY --from can reference it (buildkit forbids
-# variable expansion directly in --from).
-FROM ${UV_IMAGE} AS uv-bin
-
-# toolchain-uv is built on the same Alpine line as everything else; uv (a static binary)
-# is copied in from astral's image, and the python that runs the vault is Alpine's own.
-FROM ${ALPINE_IMAGE} AS toolchain-uv
-RUN apk add --no-cache git make python3
-COPY --from=uv-bin /usr/local/bin/uv /usr/local/bin/uv
-ENV UV_CACHE_DIR=/uv-cache UV_PYTHON_DOWNLOADS=never
 WORKDIR /src
 
 # =============================================================================
@@ -115,18 +101,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/novkostya/quince/core/internal/version.Version=${VERSION}" \
       -o /quince ./cmd/quince
 
-# --- vault: locked venv, built at its FINAL path against the runtime's own system
-#     python. venvs aren't relocatable and hardcode their interpreter — toolchain-uv is
-#     the same Alpine (3.24) base the runtime uses (identical /usr/bin/python3), so
-#     building into /opt/quince/vault here means no path move and no interpreter skew. ---
-FROM toolchain-uv AS vault-build
-ENV UV_PROJECT_ENVIRONMENT=/opt/quince/vault/.venv
-WORKDIR /opt/quince/vault
-COPY vault/ ./
-RUN uv sync --no-dev --frozen --python /usr/bin/python3
-
 # =============================================================================
-# Runtime — Alpine + Apple protocol tooling + python venv + the daemon.
+# Runtime — Alpine + Apple protocol tooling + the daemon. No language runtime (D10).
 # =============================================================================
 FROM ${ALPINE_IMAGE} AS runtime
 # Apple-protocol userland (stack D2). Runtime base is alpine:3.24 because the usbmuxd
@@ -147,7 +123,6 @@ FROM ${ALPINE_IMAGE} AS runtime
 #                            Required whenever storage.zfs.mode: hook; harmless otherwise.
 #                            (qn.4a gate-15 finding #2: hook mode was proven on a hand-`apk
 #                            add`ed container; codified here so it survives a compose recreate.)
-# python3 runs the vault venv.
 RUN apk add --no-cache \
       ca-certificates tzdata \
       usbmuxd \
@@ -155,18 +130,14 @@ RUN apk add --no-cache \
       libimobiledevice-glue \
       libusbmuxd \
       libtatsu \
-      openssh-client \
-      python3
+      openssh-client
 
-COPY --from=vault-build /opt/quince/vault /opt/quince/vault
 COPY --from=netmuxd-build /netmuxd /usr/local/bin/netmuxd
 # The patched libimobiledevice: the CLIs + the shared lib (shared object glob covers .so + soname).
 COPY --from=libimobiledevice-build /stage/usr/bin/ /usr/bin/
 COPY --from=libimobiledevice-build /stage/usr/lib/libimobiledevice-1.0.so* /usr/lib/
 COPY --from=core-build /quince /usr/local/bin/quince
 
-# The vault venv's console script (quince-vault) on PATH.
-ENV PATH="/opt/quince/vault/.venv/bin:${PATH}"
 ENV QUINCE_DATA=/data QUINCE_CACHE=/cache QUINCE_LISTEN=:8968
 
 # THE IMAGE MUST CONTAIN THE DIRECTORIES IT DECLARES. Without this, `docker run quince` cannot

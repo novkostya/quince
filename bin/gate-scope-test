@@ -38,8 +38,8 @@ R="$WORK/repo"
 mkdir -p "$R"
 git init -q "$R"
 git -C "$R" symbolic-ref HEAD refs/heads/main
-mkdir -p "$R/core" "$R/ui" "$R/vault" "$R/bin" "$R/docs" "$R/deploy"
-for f in core/a.go ui/a.ts vault/a.py bin/a docs/a.md deploy/Dockerfile versions.env Makefile; do
+mkdir -p "$R/core" "$R/ui" "$R/bin" "$R/docs" "$R/deploy"
+for f in core/a.go ui/a.ts bin/a docs/a.md deploy/Dockerfile versions.env Makefile; do
 	printf 'x\n' >"$R/$f"
 done
 cp "$GS" "$R/bin/gate-scope"
@@ -56,7 +56,7 @@ needed() { (set +e; cd "$R"; ./bin/gate-scope --needed "$1" "$2" >/dev/null 2>&1
 # --- 1. THE DEFAULT IS EVERYTHING -------------------------------------------------------------
 # No range is the offline case, the fresh-clone case, and the did-not-opt-in case. It must never be
 # read as "nothing changed".
-if [ "$(scoped '')" = "gates-go gates-vault gates-ui gates-sh" ]; then
+if [ "$(scoped '')" = "gates-go gates-ui gates-sh" ]; then
 	ok "no range runs every gate — the offline default"
 else
 	bad "no range did not run every gate: $(scoped '')"
@@ -100,7 +100,7 @@ for g in image e2e gates-go; do
 done
 out=$( (cd "$R" && ./bin/gate-scope --list 'main...HEAD' 2>&1) || true )
 case "$out" in
-*"says nothing"*gates-go*gates-vault*gates-ui*gates-sh*)
+*"says nothing"*gates-go*gates-ui*gates-sh*)
 	ok "--list on an empty range prints EVERY gate AND says why"
 	;;
 *)
@@ -127,7 +127,7 @@ fi
 # --- 4. POSITIVE CONTROLS — every gate is reachable --------------------------------------------
 # Without these, a gate-scope that answered "gates-sh" to everything would pass part 3.
 git -C "$R" checkout -q main
-for pair in 'core/a.go:gates-go' 'ui/a.ts:gates-ui' 'vault/a.py:gates-vault'; do
+for pair in 'core/a.go:gates-go' 'ui/a.ts:gates-ui'; do
 	f=${pair%:*}
 	g=${pair#*:}
 	git -C "$R" checkout -q -B "t-$g" main
@@ -148,7 +148,7 @@ for f in versions.env deploy/Dockerfile Makefile; do
 	git -C "$R" checkout -q -B "t-shared" main
 	printf 'more\n' >>"$R/$f"
 	git -C "$R" commit -qam "touch $f"
-	if [ "$(scoped 'main...HEAD')" = "gates-go gates-vault gates-ui gates-sh" ]; then
+	if [ "$(scoped 'main...HEAD')" = "gates-go gates-ui gates-sh" ]; then
 		ok "$f requires every gate"
 	else
 		bad "$f did not require every gate: $(scoped 'main...HEAD')"
@@ -183,17 +183,17 @@ fi
 # covered by gates-sh alone.
 #
 # This list is a DECISION, not a description: each entry is a path whose changes genuinely need no
-# Go/UI/vault gate. Adding to it should be as deliberate as adding a gate.
+# Go or UI gate. Adding to it should be as deliberate as adding a gate.
 # CLAUDE.md is canon and .claude/ is the process tree: a change to either cannot break a Go
-# build, a vitest run or a mypy pass. bin/ and docs/ likewise. Each of these was checked
+# build or a vitest run. bin/ and docs/ likewise. Each of these was checked
 # against the full tracked list rather than added to make the suite green — CLAUDE.md was in fact
 # added BECAUSE this assertion failed on it the first time it ran, which is the guard working.
 #
 # fly.toml is the SECOND entry added because this assertion failed on it (quince#494), and it is
 # the first one that is not obviously process. It configures the public DEMO deployment — the app,
 # region, machine size and the `--public-demo` flag fly passes to the image. It is product-adjacent
-# and still belongs here, by this list's own criterion: a change to it cannot break a Go build, a
-# vitest run or a mypy pass, because nothing in the tree reads it. Only fly does, at deploy time.
+# and still belongs here, by this list's own criterion: a change to it cannot break a Go build or a
+# vitest run, because nothing in the tree reads it. Only fly does, at deploy time.
 #
 # It is deliberately NOT in product_covered. Putting it there would make an edit to it trigger an
 # image rebuild and the e2e suite, which test the image — and fly.toml does not change the image.
@@ -204,7 +204,7 @@ fi
 # accepted rather than overlooked — see deploy/demo.md, which says the same thing where an operator
 # will meet it.
 PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml'
-product_covered='core ui vault deploy versions.env Makefile'
+product_covered='core ui deploy versions.env Makefile'
 uncovered=''
 for top in $(git ls-files | awk -F/ '{print $1}' | sort -u); do
 	found=no
@@ -352,9 +352,9 @@ fi
 # THE SELECTION IS CONSTRUCTED, NOT READ, AND THAT IS THE WHOLE OF THIS BLOCK'S CORRECTNESS.
 #
 # The first version passed `SCOPE=origin/main~2...origin/main` — a real range over live history —
-# and asserted that `gates-vault` came back SKIPPED. **That reddened `main` within the hour.** The
+# and asserted that one named gate came back SKIPPED. **That reddened `main` within the hour.** The
 # range means a different pair of commits every time anything merges, and on CI it resolved to a set
-# that required all four gates, so there was no SKIPPED line and the assertion failed. Nothing was
+# that required every gate, so there was no SKIPPED line and the assertion failed. Nothing was
 # wrong with the code it was testing.
 #
 # It is the FOURTH time this file has been bitten by the same thing, and part 9 above says so in as
@@ -376,9 +376,15 @@ fi
 # asserts exactly it), and cannot affect this assertion**, because the value it computes is the one
 # the command line overrides. Said here so a reader meeting it in a passing suite does not go
 # looking for a fault.
-out=$(make gates-announce SCOPED_GATES='gates-go gates-sh' SCOPE='<constructed>' 2>&1 || true)
+#
+# THE SELECTION IS `gates-sh` ALONE, so that TWO gates are missing from it. One would be satisfied
+# by a `filter-out` that returned a partial set, which is the bug the second assertion is for — and
+# with three gates in the ladder, only a single-gate selection leaves two behind. It is also the
+# realistic case rather than a contrived one: a docs-only diff is exactly what selects `gates-sh`
+# and nothing else.
+out=$(make gates-announce SCOPED_GATES='gates-sh' SCOPE='<constructed>' 2>&1 || true)
 case $out in
-*"gates: running gates-go gates-sh"*) ok "a scoped ladder names the gates it is about to run" ;;
+*"gates: running gates-sh"*) ok "a scoped ladder names the gates it is about to run" ;;
 *)
 	bad "no 'gates: running' line — the ladder does not say what it selected"
 	printf '%s\n' "$out" | sed 's/^/    | /'
@@ -387,9 +393,9 @@ esac
 # BOTH missing gates, not just one: `filter-out` returning a partial set would satisfy a check for
 # either name alone.
 case $out in
-*SKIPPED*gates-vault*gates-ui*) ok "…and names BOTH gates it SKIPPED, in the ALL_GATES order" ;;
+*SKIPPED*gates-go*gates-ui*) ok "…and names BOTH gates it SKIPPED, in the ALL_GATES order" ;;
 *)
-	bad "the SKIPPED line does not name both gates-vault and gates-ui"
+	bad "the SKIPPED line does not name both gates-go and gates-ui"
 	printf '%s\n' "$out" | sed 's/^/    | /'
 	;;
 esac
