@@ -20,6 +20,30 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>quince</title>
+    <!-- SET THE THEME CLASS BEFORE THE FIRST PAINT (quince#1074). `:root` is light in tokens.css and
+         dark is a `.dark` class, which main.tsx applies — but the app is a `type="module"` script,
+         deferred by definition, so the browser had a fully-styled LIGHT page to paint before any of
+         it ran. Opening quince on a dark system flashed white for a frame.
+
+         INLINE AND BLOCKING, ABOVE VITE'S INJECTED TAGS, ON PURPOSE. An external file is another
+         round trip before paint, and `defer`/`async` would put it back after the moment it exists to
+         precede.
+
+         IT RESOLVES `system` ITSELF rather than trusting a cached light/dark, so changing the system
+         theme while quince is closed still paints correctly the first time. The key and the
+         resolution mirror `lib/theme.ts` — change both together. A mismatch fails SILENTLY: the
+         cache never hits, the flash returns, and every test stays green. -->
+    <script>
+      try {
+        var t = localStorage.getItem("quince.theme") || "system";
+        if (t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {
+        /* Storage throws in some privacy modes. Falling through leaves the pre-quince#1074
+           behaviour — a light first paint — rather than breaking the page. */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
