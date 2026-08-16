@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/store"
 )
 
@@ -60,10 +61,15 @@ func TestPreAuthCallerCanAllowInsecureTransport(t *testing.T) {
 	// chain runs: route → file → applier → cookie.
 }
 
-// THE GUARD. This is the security claim of the whole slice, and it is asserted on the STATE as well
-// as on the status: a 409 that had already written the setting would be worse than no guard, because
-// it would look refused.
-func TestAClaimedInstallRefusesTheRouteEntirely(t *testing.T) {
+// THE GUARD, NOW ABOUT THE CALLER RATHER THAN ABOUT THE INSTALL — quince#1069. This was called
+// *"a claimed install refuses the route entirely"*, and every case below still sends NO COOKIE OF
+// ANY KIND, which is what it was really asserting: once somebody owns the install, an ANONYMOUS
+// caller gets nothing here. What changed is that an authenticated admin now may, because the setting
+// could be turned ON from the UI and turned off from nowhere at all.
+//
+// Asserted on the STATE as well as on the status: a 409 that had already written the setting would
+// be worse than no guard, because it would look refused.
+func TestAClaimedInstallRefusesAnAnonymousCaller(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"turning it on", `{"allow":true}`},
 		// BOTH DIRECTIONS ARE CLOSED. `false` looks harmless — it re-tightens transport — but an
@@ -178,5 +184,66 @@ func TestAMalformedBodyIsRefusedRatherThanDefaulted(t *testing.T) {
 	}
 	if deps.Config.Current().Sessions.AllowInsecureTransport {
 		t.Errorf("a setting was written from a request that did not parse")
+	}
+}
+
+// THE ADMIN'S OWN DOOR — quince#1069. The banner tells a reader to turn this off; until this landed,
+// nothing in the product could. `ConfigEditor` does not render the key, and the only other writer is
+// the first-run confirm, which writes `true` and only `true` — so the remedy was a text editor on the
+// box, which is stack D12 broken.
+//
+// THE NARROW WRITE IS THE POINT. `PUT /api/config` would also have done it and is a full-document
+// replace: a client that does not model every Go key drops the ones it does not know (quince#493).
+// This route writes one key by name, which is why it is the one that was opened rather than a second
+// writer appearing somewhere else.
+func TestAnAuthenticatedAdminCanTurnItOff(t *testing.T) {
+	deps := testDeps(t)
+	if err := deps.Auth.SetPassword("test", "127.0.0.1"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if _, _, err := deps.Config.SetAllowInsecureTransport(true); err != nil {
+		t.Fatalf("arrange: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://quince.example:8968"+route, strings.NewReader(`{"allow":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	NewRouter(deps).ServeHTTP(rec, authed(t, deps.Store, req))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 — body %s", rec.Code, rec.Body.String())
+	}
+	if deps.Config.Current().Sessions.AllowInsecureTransport {
+		t.Error("the setting is still on after an authenticated caller turned it off")
+	}
+}
+
+// AND IT STILL NEEDS ITS TOKEN. This route sits in `csrfExempt` because a first-run caller has no
+// cookie to double-submit, and the comment there names `Configured()` as the whole of what protects
+// it — true while a claimed install refused everyone. Opening the door to a session without checking
+// the token would hand a cross-site page `{"allow":true}` with the admin's cookies: the downgrade
+// primitive quince#908 §3 warns about, arriving through the door added to remove one.
+//
+// SO THE HANDLER CHECKS IT ITSELF rather than relying on either list, and this is the test that says
+// so. It fails if somebody "simplifies" that check away on the grounds that the path is exempt.
+func TestAnAuthenticatedCallerStillNeedsItsCSRFToken(t *testing.T) {
+	deps := testDeps(t)
+	if err := deps.Auth.SetPassword("test", "127.0.0.1"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://quince.example:8968"+route, strings.NewReader(`{"allow":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = authed(t, deps.Store, req)
+	req.Header.Del(auth.CSRFHeaderName)
+
+	rec := httptest.NewRecorder()
+	NewRouter(deps).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 — body %s", rec.Code, rec.Body.String())
+	}
+	if deps.Config.Current().Sessions.AllowInsecureTransport {
+		t.Error("the setting was written by a request with no CSRF token")
 	}
 }

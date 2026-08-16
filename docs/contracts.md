@@ -193,12 +193,23 @@ banner — it is FALSE exactly when the opt-in is ON.** `insecure_transport_allo
 can, and the table under `GET /api/health` in this section sets the two side by side.
 
 **What the ruling does NOT license.** No generalisation to `needs_login`: §3's bound is the whole
-safety argument, and a configured install must never expose this route. No other key. And the bound
-is the **server's** to enforce — a client-side gate is not a control, because an attacker does not
-use the UI. Without the `Configured()` check the route is an unauthenticated *turn off the transport
-requirement* primitive on a configured install: flip it, wait for the admin to sign in over plain
-http, read the cookie. That failure arrives by implementing the ruling carelessly rather than by
-disagreeing with it, which is why the guard is named in the ruling instead of left to the diff.
+safety argument, and a configured install must never expose this route **to a caller with no
+session**. No other key. And the bound is the **server's** to enforce — a client-side gate is not a
+control, because an attacker does not use the UI. Without the `Configured()` check the route is an
+unauthenticated *turn off the transport requirement* primitive on a configured install: flip it,
+wait for the admin to sign in over plain http, read the cookie. That failure arrives by implementing
+the ruling carelessly rather than by disagreeing with it, which is why the guard is named in the
+ruling instead of left to the diff.
+
+**THAT SENTENCE READ *"must never expose this route"* UNTIL 2026-08-16, AND THE MISSING WORDS WERE
+"to an anonymous caller"** (quince#1069). An **authenticated admin** may now write this key on a
+claimed install, because the setting could be turned ON from the UI and turned OFF from nowhere —
+`ConfigEditor` does not render it, and the banner's *turn this off* pointed at a text editor on the
+box. The correction is narrow and the safety argument is untouched: §3 is about what a **stranger on
+the LAN** can reach, and a session is exactly what such a stranger does not have. The handler
+therefore checks the session *and* the CSRF token itself rather than inheriting this path's
+`csrfExempt` entry, which exists for the pre-auth case and would otherwise make the authenticated
+write forgeable cross-site.
 
 **The reasoning that was put to the Operator is kept below**, because the ruling turned on it. The
 rest of the proposal — the shape it guessed at, and the three questions it left open — is gone: the
@@ -1551,11 +1562,20 @@ POST /api/config/storage  {StorageEntry, zfs_key_fingerprint?}
                     splice would replace a config quince could not read. See below.
 POST /api/config/insecure-transport
                   → {allow} writes sessions.allow_insecure_transport AND NOTHING
-                    ELSE: 200 {config, warnings, source} | 400 | 409 | 422.
+                    ELSE: 200 {config, warnings, source} | 400 | 403 | 409 | 422.
                     PRE-AUTH, and the only mutating route in this product that is
                     exempt without being about obtaining a credential.
-                    409 once auth.Configured() — the SAME call POST /api/auth/setup
-                    makes — and the 409 is decided BEFORE the body is read.
+                    409 once auth.Configured() FOR AN ANONYMOUS CALLER — the SAME
+                    call POST /api/auth/setup makes — decided BEFORE the body is read.
+                    AN AUTHENTICATED CALLER MAY WRITE IT ON A CLAIMED INSTALL
+                    (quince#1069): the setting could be turned ON from the UI and off
+                    from nowhere at all, which is D12 broken, and the alternative was
+                    routing a security setting through PUT /api/config's full-document
+                    replace. The handler checks the session AND CheckCSRF ITSELF,
+                    because the path is in csrfExempt for the pre-auth case and
+                    inheriting that exemption would make an authenticated write
+                    forgeable cross-site — the downgrade primitive §3 warns about,
+                    arriving through the door added to remove one. 403 is that refusal.
 DELETE /api/config/storage/{name}
                   → forget one storage: 200 {config, warnings, source} | 404 | 422.
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
@@ -2747,7 +2767,7 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 | `tls.cert_file` · `.key_file` | **live** | Rotation was always live — `tlsx.Keeper` re-reads the files. The *paths* became live in quince#900: the mux is bound on every start, so the TLS half exists whether or not a certificate does, and the `tls` applier hands the `Keeper` the new pair. **Turning TLS on and off are both live**, which is what an apply-and-revert flow needs. **An unusable pair is SAVED, WARNED and NOT APPLIED** — an `Applier` runs after the write and structurally cannot refuse it, so the daemon keeps serving the certificate it had and says so in the `PUT` response; it picks the new pair up with no restart once both files are readable. That is deliberately *unlike* startup, where `config.CheckTLS` **refuses to start** — coming up on plain http for somebody who asked for https is a silent downgrade, and there is no response to warn into. A bad edit cannot lock anyone out: the plain half redirects on a certificate being **loaded**, not configured. |
 | `sessions.allow_insecure_transport` | **live** | `qn.6g`'s fifth consumer (quince#900). **Both** consumers moved, and moving one would have been worse than moving neither: the plain half of the mux now reads it **per request** rather than choosing its handler at bind, and the `sessions` applier calls the auth service's setter with **whatever the file says** — including `false`. It was `restart` for two reasons and they were different: the handler choice was fixed at bind, and `applyInsecureTransportOptIn` returned before its setter when the opt-in was off, so a settable field was a **one-way latch** that nothing in a running process could lower. Turning it **on** returns the degraded-mode warning with the `PUT`, which `DegradedModeWarnings` used to emit on load only. |
 | `automation.staleness_days` · `.reminder_cooldown_hours` | **nothing reads it (declared)** | `qn.12`'s — declared debt rather than a defect. |
-| `ui.theme` | **live on save · NOT on a hand-edit** | Client-side, applied from the `PUT` response — `setTheme` has exactly one caller, `ConfigEditor`'s save handler. **The FIRST PAINT is decided by a `localStorage` cache of the preference, not by this key** (quince#1074): `:root` is light and dark is a class, so a theme applied by JavaScript paints light for a frame first, and an inline script in `index.html` sets the class from that cache before the stylesheet. It caches `system` \| `light` \| `dark` — the preference, not the resolved value — so `system` re-resolves through `matchMedia` at boot. **A HAND-EDIT OF THIS KEY IS NOT PICKED UP, by a live apply OR by a restart**, because nothing reads it at boot: `main.tsx` calls `initTheme()`, which adopts the cache. That is a gap against D12's hand-editable premise rather than a design; it PREDATES quince#1074 — boot hardcoded `system` and ignored the key just as completely — and is tracked as quince#1079. A server read cannot replace the cache as things stand: `GET /api/config` is behind auth and the login screen renders before anyone is authenticated. |
+| `ui.theme` | **already live** | Client-side, applied from the `PUT` response. |
 
 **`backup.transport` IS ABSENT BECAUSE THE KEY NO LONGER EXISTS.** `qn.6g`'s spec listed it as
 *"nothing reads it"*, true when written and false four days later: quince#654 renamed it
