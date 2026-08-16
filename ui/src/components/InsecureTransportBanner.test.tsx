@@ -43,10 +43,9 @@ describe("InsecureTransportBanner", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByText(CONSEQUENCE)).toBeInTheDocument();
     // NAMES WHAT IS UNPROTECTED, which is quince#446's ruling — in words rather than in mechanism.
-    // This asserted `/sign-in cookie and CSRF token/` until quince#1069: the ruling asks for what is
-    // unprotected, and "your sign-in travels in the clear" is that, for a reader who does not know
-    // what a CSRF token is. A test pinned to the mechanism makes the human version look like a
-    // regression, which is how copy written for insiders survives review.
+    // Assert the CONSEQUENCE, never the cookie and the token: a test pinned to the mechanism makes a
+    // rewrite into plain English look like a regression, which is how copy written for insiders
+    // survives review.
     expect(screen.getByText(/your sign-in travels in the clear/i)).toBeInTheDocument();
   });
 
@@ -64,10 +63,9 @@ describe("InsecureTransportBanner", () => {
   });
 
   // NON-DISMISSIBLE IS THE RULING (quince#446): a degraded mode that can be hidden stops being
-  // surfaced. This asserted the ABSENCE OF ANY CONTROL until quince#1069 — stricter than the ruling
-  // says, and it would have failed the control that makes the banner's own instruction followable.
-  // The line the ruling draws is between HIDING THE WARNING and REMOVING THE CONDITION: the first is
-  // forbidden, the second is the whole point. So this now asserts what the controls DO.
+  // surfaced. The line it draws is between HIDING THE WARNING and REMOVING THE CONDITION: the first
+  // is forbidden, the second is the point of the control. So this asserts what the controls DO —
+  // nothing here dismisses, and cancelling leaves the warning standing.
   it("offers nothing that hides it while the setting is on", async () => {
     vi.spyOn(api, "get").mockResolvedValue({ ...OK, insecure_transport_allowed: true });
     renderIn(<InsecureTransportBanner />);
@@ -106,10 +104,10 @@ describe("InsecureTransportBanner", () => {
     );
   });
 
-  // ONE SENTENCE, TRUE FOR BOTH READERS. It branched on `useInsecureOrigin()` for a day, and that
-  // field is false for everybody who can see this banner — so the branch that mattered never
-  // rendered. The copy now states the rule and the personal consequence together, which needs no
-  // knowledge the client does not have before the write.
+  // ONE SENTENCE, TRUE FOR BOTH READERS, because before the write the client cannot tell them apart:
+  // `insecure_origin` is FALSE for everybody who can see this banner (`health.ts` — the two fields
+  // are inverses on the install that matters), so a sentence branching on it would never render the
+  // half that counts. The copy states the rule and the personal consequence together instead.
   it("names the cost in one sentence, whatever the reader is standing on", async () => {
     vi.spyOn(api, "get").mockResolvedValue({
       ...OK,
@@ -127,16 +125,12 @@ describe("InsecureTransportBanner", () => {
     expect(screen.getByText(/allow it again in Settings/i)).toBeInTheDocument();
   });
 
-  // IT DOES NOT SIGN THE READER OUT, AND THAT IS THE WHOLE LESSON OF THIS ROUND — Operator,
-  // 2026-08-16, having walked a build that did: *"it redirects to `/login` (which will fail) … in
-  // this case it's impossible to re-enable insecure_transport on `/onboarding/https`, so the whole
-  // idea doesn't really work."*
+  // IT MUST NOT SIGN THE READER OUT — Operator ruling, 2026-08-16 (quince#1069). With the setting off
+  // and a plain-http address, login answers 426, this route answers 409 without a session, and the
+  // first-run confirm does not render in `needs_login` — so ending the session leaves ssh as the only
+  // way back, which is the dead end quince#908 exists to remove.
   //
-  // With the setting off and a plain-http address, login answers 426, the pre-auth route answers 409
-  // without a session, and the first-run confirm does not render in `needs_login`. Signing the reader
-  // out therefore left ssh as the only way back — the dead end quince#908 exists to remove, rebuilt
-  // by the control meant to help. Asserted as the ABSENCE of a logout so it cannot come back as a
-  // tidy-up.
+  // Asserted as the ABSENCE of a logout, so it cannot return as a tidy-up.
   it("does not sign the reader out, because that was a lockout", async () => {
     let flipped = false;
     vi.spyOn(api, "get").mockImplementation((async () =>
