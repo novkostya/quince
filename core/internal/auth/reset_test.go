@@ -284,6 +284,18 @@ func TestResetIsRecoverableByRunningItAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the second run did not succeed: %v", err)
 	}
+	// THE SECOND RUN DID THE WORK THE FIRST ONE COULD NOT. Without this the test passes for the wrong
+	// reason: a run that found nothing left to do satisfies every other assertion here, so *"it
+	// completed"* and *"it completed the remaining work"* were indistinguishable.
+	//
+	// Added on the architect's retirement note against this PR — *a PR adding partial-failure
+	// coverage is exactly where to ask whether the NEW assertions can pass for the reason they
+	// state.* This one could not, and the passkey the failed run left behind is what tells them
+	// apart.
+	if out.Passkeys != 1 {
+		t.Fatalf("the second run removed %d passkeys, want the 1 the failed run left behind: %+v",
+			out.Passkeys, out)
+	}
 	// THE PASSWORD IS NOT REPORTED TWICE. It went in the first run, so a second `HadPassword` would
 	// mean the first had lied about what it did.
 	if out.HadPassword {
