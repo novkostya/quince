@@ -260,7 +260,7 @@ func (b *namespaceBackend) scanDir(udid, dir string, isLatest bool) (Artifact, b
 	if err != nil {
 		return Artifact{}, false
 	}
-	return Artifact{UDID: udid, Backend: b.name, Marker: m, IsLatest: isLatest, PhysicalBytes: dirSize(dir)}, true
+	return Artifact{UDID: udid, Backend: b.name, Marker: m, IsLatest: isLatest, LogicalBytes: dirSize(dir)}, true
 }
 
 func (b *namespaceBackend) PendingJournals() ([]Journal, error) { return scanJournals(b.backups) }
@@ -280,14 +280,14 @@ func (b *namespaceBackend) committedFromLatest(udid string) (Committed, error) {
 	return committedFromMarker(m, dirSize(latest)), nil
 }
 
-func committedFromMarker(m Marker, physical int64) Committed {
+func committedFromMarker(m Marker, logical int64) Committed {
 	created, _ := parseRFC(m.CreatedAt)
 	sv, _ := parseRFC(m.StructureVerifiedAt)
 	var snap *string
 	c := Committed{
 		VersionID: m.VersionID, UDID: m.UDID, Backend: m.Backend, ZFSSnapshot: snap,
 		CreatedAt: created, Kind: m.Kind, Encrypted: m.Encrypted, StructureVerifiedAt: sv,
-		LogicalBytes: physical, PhysicalBytes: physical,
+		LogicalBytes: logical,
 	}
 	if m.JobID != "" {
 		j := m.JobID

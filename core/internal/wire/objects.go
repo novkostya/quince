@@ -101,8 +101,19 @@ type Version struct {
 	IsLatest            bool    `json:"is_latest"`
 	StructureVerifiedAt *string `json:"structure_verified_at"` // set at commit
 	ContentVerifiedAt   *string `json:"content_verified_at"`   // set on a later unlock
-	LogicalBytes        int64   `json:"logical_bytes"`
-	PhysicalBytes       int64   `json:"physical_bytes"`
+	// LogicalBytes is the APPARENT size of the version's tree — the sum of its regular files.
+	// It is the only size a version carries, and it is the same figure on every backend.
+	//
+	// There is no companion "physical" figure. `physical_bytes` shipped beside this until
+	// quince#442 and was the same `dirSize` walk under a second name, so the UI rendered two
+	// identical numbers as two facts. A per-version physical size is not merely unmeasured but
+	// ILL-DEFINED wherever blocks are shared: on reflink a shared extent counts in full against
+	// every file that references it, and on zfs the newest snapshot's unique bytes are 0 because
+	// latest/ still holds them. What a user could act on — "what would deleting this version free"
+	// — is a property of the version WITHIN THE CURRENT SET, not of the version: removing a
+	// neighbour changes it, so it cannot be computed at commit and stored. If it ever ships it is
+	// computed on demand at the point of decision, not carried in a list row.
+	LogicalBytes int64 `json:"logical_bytes"`
 	// Missing = the registry row survives but its on-disk artifact is GONE (reconciliation could not
 	// find the snapshot/dir; roll-forward keeps the row, never drops it — contracts §2, qn.6a
 	// (cr)(a)/(cv)). The UI renders such a version explicitly dead (no size claim, no Unlock, an

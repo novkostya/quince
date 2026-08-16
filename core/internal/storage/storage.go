@@ -51,17 +51,16 @@ type Committed struct {
 	Encrypted           bool
 	StructureVerifiedAt time.Time
 	LogicalBytes        int64
-	PhysicalBytes       int64
 }
 
 // Artifact is a version discovered on disk by Scan (for reconciliation / adoption).
 type Artifact struct {
-	UDID          string
-	Backend       string
-	ZFSSnapshot   *string
-	Marker        Marker
-	IsLatest      bool
-	PhysicalBytes int64
+	UDID         string
+	Backend      string
+	ZFSSnapshot  *string
+	Marker       Marker
+	IsLatest     bool
+	LogicalBytes int64
 }
 
 // Backend is one version model. All operations are idempotent and log their real commands

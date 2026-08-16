@@ -134,7 +134,6 @@ func (p *Provider) seed() {
 		StructureVerifiedAt: strptr(tVerZFS),
 		ContentVerifiedAt:   strptr("2026-07-18T08:00:00Z"),
 		LogicalBytes:        42_400_000_000,
-		PhysicalBytes:       3_400_000_000,
 	}
 	p.versions[verHL] = wire.Version{
 		ID:                  verHL,
@@ -150,7 +149,6 @@ func (p *Provider) seed() {
 		StructureVerifiedAt: strptr(tVerHL),
 		ContentVerifiedAt:   nil,
 		LogicalBytes:        41_900_000_000,
-		PhysicalBytes:       520_000_000,
 	}
 	p.versions[verADOP] = wire.Version{
 		ID:                  verADOP,
@@ -166,7 +164,6 @@ func (p *Provider) seed() {
 		StructureVerifiedAt: strptr(tVerAdopted),
 		ContentVerifiedAt:   nil,
 		LogicalBytes:        40_100_000_000,
-		PhysicalBytes:       40_100_000_000,
 	}
 	p.verOrder = []string{verZFS, verHL, verADOP}
 
@@ -233,7 +230,6 @@ func (p *Provider) seedStorageHistory(udid, storageID, backend string, n, startD
 			StructureVerifiedAt: strptr(at),
 			ContentVerifiedAt:   nil,
 			LogicalBytes:        41_000_000_000 + int64(i)*17_000_000,
-			PhysicalBytes:       180_000_000 + int64(i)*11_000_000,
 			StorageID:           strptr(storageID),
 		}
 		p.verOrder = append(p.verOrder, vid)

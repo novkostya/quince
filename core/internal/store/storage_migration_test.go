@@ -18,6 +18,12 @@ import (
 // qn.6c actually has — by applying the migrations and then undoing 0006. Undoing rather than
 // hand-writing the old schema keeps this honest: a hand-rolled fixture drifts from what the
 // earlier migrations really produced, and would then be testing a shape nobody ever ran.
+//
+// It undoes 0006 ONLY, so every later migration stays recorded and the `migrate()` under test
+// applies exactly one. That scoping is load-bearing: both tests below assert a property OF 0006
+// ("no row changed", "exactly one new column"), and 0010 drops a column — left pending, it would
+// be measured as 0006's doing and the second test would fail on a claim it never made. 0010 has
+// its own test, which reconstructs its own predecessor shape the same way.
 func openPre0006(t *testing.T) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "quince.db")
@@ -51,14 +57,14 @@ func TestMigration0006UpgradesAnExistingDatabaseWithoutTouchingItsRows(t *testin
 		ID: "01J0V0000000000000000000", UDID: "00008140-000A1B2C3D4E5F60",
 		Backend: "zfs", ZFSSnapshot: &snap, CreatedAt: created, JobID: &job,
 		Kind: "full", Encrypted: true, IsLatest: true,
-		LogicalBytes: 42400000000, PhysicalBytes: 3400000000,
+		LogicalBytes: 42400000000,
 	}
 	if _, err := st.db.Exec(`INSERT INTO versions
 		(id, udid, backend, zfs_snapshot, created_at, job_id, kind, encrypted, is_latest,
-		 logical_bytes, physical_bytes, missing)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,0)`,
+		 logical_bytes, missing)
+		VALUES (?,?,?,?,?,?,?,?,?,?,0)`,
 		want.ID, want.UDID, want.Backend, snap, fmtTime(created), job, want.Kind,
-		1, 1, want.LogicalBytes, want.PhysicalBytes); err != nil {
+		1, 1, want.LogicalBytes); err != nil {
 		t.Fatalf("seed version: %v", err)
 	}
 
@@ -74,8 +80,7 @@ func TestMigration0006UpgradesAnExistingDatabaseWithoutTouchingItsRows(t *testin
 	// Every pre-existing field is byte-for-byte what it was. This is the data-at-rest claim.
 	if got.UDID != want.UDID || got.Backend != want.Backend || got.Kind != want.Kind ||
 		got.Encrypted != want.Encrypted || got.IsLatest != want.IsLatest ||
-		got.LogicalBytes != want.LogicalBytes || got.PhysicalBytes != want.PhysicalBytes ||
-		got.Missing {
+		got.LogicalBytes != want.LogicalBytes || got.Missing {
 		t.Errorf("migration altered an existing row:\n got %+v\nwant %+v", got, want)
 	}
 	if got.ZFSSnapshot == nil || *got.ZFSSnapshot != snap {
@@ -128,6 +133,91 @@ func TestMigration0006IsAdditiveOnly(t *testing.T) {
 	}
 	if tableSQL(t, st, "storages") == "" {
 		t.Error("storages table was not created")
+	}
+}
+
+// openPre0010 builds a database at the 0009 schema by applying the migrations and then putting
+// `physical_bytes` back, exactly as 0002 declared it. Same discipline as openPre0006: reconstruct
+// by undoing rather than by hand-writing a schema nobody ran.
+func openPre0010(t *testing.T) *Store {
+	t.Helper()
+	st, err := Open(filepath.Join(t.TempDir(), "quince.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := st.db.Exec(`ALTER TABLE versions ADD COLUMN physical_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("re-add column: %v", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM schema_migrations WHERE version = '0010_drop_physical_bytes'`); err != nil {
+		t.Fatalf("unrecord: %v", err)
+	}
+	return st
+}
+
+// quince#442. 0010 drops a column that HOLDS DATA on every existing install, so the claim is the
+// same one G6 makes for 0006 read from the other side: the column goes, and nothing else moves.
+// A version row behind a committed backup has no commit to ship with, so "breaking is cheap here"
+// does not reach it (contracts.md) — a migration that took a neighbouring value with it would be
+// destroying the record of a real backup.
+func TestMigration0010DropsPhysicalBytesAndTouchesNothingElse(t *testing.T) {
+	st := openPre0010(t)
+
+	created := time.Date(2026, 7, 20, 3, 30, 0, 0, time.UTC)
+	job := "01J0B0000000000000000000"
+	want := VersionRow{
+		ID: "01J0V0000000000000000000", UDID: "00008140-000A1B2C3D4E5F60",
+		Backend: "reflink", CreatedAt: created, JobID: &job,
+		Kind: "full", Encrypted: true, IsLatest: true, LogicalBytes: 42400000000,
+	}
+	// physical_bytes seeded with the value a real install holds: THE SAME NUMBER AS logical_bytes,
+	// because both came from one dirSize walk. That equality is the bug, and seeding a distinct
+	// number would let a mix-up between the two columns pass unnoticed here.
+	if _, err := st.db.Exec(`INSERT INTO versions
+		(id, udid, backend, created_at, job_id, kind, encrypted, is_latest,
+		 logical_bytes, physical_bytes, missing)
+		VALUES (?,?,?,?,?,?,?,?,?,?,0)`,
+		want.ID, want.UDID, want.Backend, fmtTime(created), job, want.Kind,
+		1, 1, want.LogicalBytes, want.LogicalBytes); err != nil {
+		t.Fatalf("seed version: %v", err)
+	}
+
+	before := columns(t, st, "versions")
+	if err := st.migrate(); err != nil {
+		t.Fatalf("migrate to 0010: %v", err)
+	}
+	after := columns(t, st, "versions")
+
+	if _, ok := after["physical_bytes"]; ok {
+		t.Error("physical_bytes survived the migration")
+	}
+	if len(after) != len(before)-1 {
+		t.Errorf("want exactly one column removed, got %d → %d", len(before), len(after))
+	}
+	for name, def := range before {
+		if name == "physical_bytes" {
+			continue
+		}
+		got, ok := after[name]
+		if !ok {
+			t.Errorf("column %q disappeared alongside physical_bytes", name)
+			continue
+		}
+		if got != def {
+			t.Errorf("column %q changed definition: %q → %q", name, def, got)
+		}
+	}
+
+	got, ok, err := st.GetVersion(want.ID)
+	if err != nil || !ok {
+		t.Fatalf("version gone after migrate: ok=%v err=%v", ok, err)
+	}
+	if got.UDID != want.UDID || got.Backend != want.Backend || got.Kind != want.Kind ||
+		got.Encrypted != want.Encrypted || got.IsLatest != want.IsLatest ||
+		got.LogicalBytes != want.LogicalBytes || got.Missing {
+		t.Errorf("migration altered an existing row:\n got %+v\nwant %+v", got, want)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("created_at changed: %v want %v", got.CreatedAt, created)
 	}
 }
 

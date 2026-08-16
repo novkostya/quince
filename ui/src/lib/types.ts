@@ -94,8 +94,10 @@ export interface Version {
   is_latest: boolean;
   structure_verified_at: string | null;
   content_verified_at: string | null;
+  // The apparent tree size, and the ONLY size a version carries. A `physical_bytes` shipped beside
+  // it until quince#442, where it was measured to be the same walk under a second name — do not
+  // reintroduce a second size figure, and do not derive one (contracts §2).
   logical_bytes: number;
-  physical_bytes: number;
   // missing = the artifact is GONE (reconciliation couldn't find it); the row survives so history
   // isn't silently shrunk. Rendered explicitly dead — no size, no Unlock, an "artifact gone — remove?"
   // action on DELETE (qn.6a (cr)).

@@ -27,7 +27,6 @@ function version(over: Partial<Version> = {}): Version {
     structure_verified_at: null,
     content_verified_at: null,
     logical_bytes: 1000,
-    physical_bytes: 1000,
     missing: false,
     storage_id: "01JSTORAGE-A",
     ...over,

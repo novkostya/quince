@@ -361,7 +361,7 @@ func (m *Manager) adopt(s Slot, udid string, a Artifact) {
 	row := store.VersionRow{
 		ID: a.Marker.VersionID, UDID: udid, Backend: a.Backend, ZFSSnapshot: a.ZFSSnapshot,
 		CreatedAt: created, JobID: nil, Kind: a.Marker.Kind, Encrypted: a.Marker.Encrypted,
-		IsLatest: a.IsLatest, LogicalBytes: a.PhysicalBytes, PhysicalBytes: a.PhysicalBytes,
+		IsLatest: a.IsLatest, LogicalBytes: a.LogicalBytes,
 		// Attributed to the storage it was SCANNED FROM. An adopted version is found by walking a
 		// specific root, so which storage it lives on is known here and never needs guessing.
 		StorageID: slotIDPtr(s),

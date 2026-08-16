@@ -2058,7 +2058,21 @@ Version: {
   // at all, which is the same unresolvable browse_root reached from the other side.
   "structure_verified_at": "..." | null,   // set at commit (structural verification)
   "content_verified_at": "..." | null,     // set by verify_canary on a later unlock
-  "logical_bytes": 42400000000, "physical_bytes": 3400000000,  // best-effort
+  "logical_bytes": 42400000000,  // best-effort; the APPARENT tree size, and the only size a version has
+  // THERE IS NO `physical_bytes`. It shipped beside logical_bytes until quince#442, where it was
+  // measured to be the same `dirSize` walk under a second name on every backend — so the UI rendered
+  // one number twice and called them two facts. Removed rather than made nullable (Operator ruling,
+  // 2026-08-16, superseding the nullable ruling of 2026-08-01 on the same issue): a per-version
+  // physical size is ILL-DEFINED wherever blocks are shared, not merely unmeasured. A reflink extent
+  // counts in full against every file referencing it, and a zfs snapshot's unique bytes are 0 for the
+  // newest version because latest/ still holds the blocks.
+  //
+  // A CLIENT MUST NOT REINTRODUCE IT BY SUMMING OR INFERRING. The actionable question — "what would
+  // deleting this version free" — is a property of the version WITHIN THE CURRENT SET: removing a
+  // neighbour changes it, so it can be neither cached at commit nor listed. On zfs it is also
+  // non-additive (blocks shared by two snapshots but not the live head are unique to neither, so the
+  // per-snapshot figures sum to LESS than the dataset holds) and is perturbed by snapshots the
+  // operator took themselves. If it ever ships it is computed on demand at the point of decision.
   "missing": false
   // qn.6a (cr(a) / cv): true = the registry row survives but its on-disk artifact is GONE
   // (reconciliation could not find the snapshot/dir — roll-forward keeps the row, never drops it).

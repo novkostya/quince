@@ -17,7 +17,6 @@ function ver(id: string, udid: string, isLatest: boolean): Version {
     structure_verified_at: null,
     content_verified_at: null,
     logical_bytes: 1,
-    physical_bytes: 1,
     missing: false,
     storage_id: null,
   };

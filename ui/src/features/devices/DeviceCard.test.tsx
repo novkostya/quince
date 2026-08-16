@@ -168,7 +168,6 @@ function ver(id: string, udid: string) {
     structure_verified_at: "2026-07-20T00:00:00Z",
     content_verified_at: null,
     logical_bytes: 100,
-    physical_bytes: 10,
     missing: false,
     storage_id: null,
   };
