@@ -201,15 +201,15 @@ wait for the admin to sign in over plain http, read the cookie. That failure arr
 the ruling carelessly rather than by disagreeing with it, which is why the guard is named in the
 ruling instead of left to the diff.
 
-**THAT SENTENCE READ *"must never expose this route"* UNTIL 2026-08-16, AND THE MISSING WORDS WERE
-"to an anonymous caller"** (quince#1069). An **authenticated admin** may now write this key on a
-claimed install, because the setting could be turned ON from the UI and turned OFF from nowhere —
-`ConfigEditor` does not render it, and the banner's *turn this off* pointed at a text editor on the
-box. The correction is narrow and the safety argument is untouched: §3 is about what a **stranger on
-the LAN** can reach, and a session is exactly what such a stranger does not have. The handler
-therefore checks the session *and* the CSRF token itself rather than inheriting this path's
-`csrfExempt` entry, which exists for the pre-auth case and would otherwise make the authenticated
-write forgeable cross-site.
+**AN AUTHENTICATED ADMIN MAY WRITE THIS KEY ON A CLAIMED INSTALL** (quince#1069, Operator
+2026-08-16), and that does not widen §3: the bound is about what a **stranger on the LAN** can reach,
+and a session is exactly what such a stranger does not have. Refusing the admin as well would make the
+setting turn-on-only from the UI — `ConfigEditor` does not render it, and the first-run confirm writes
+`true` and only `true` — which is stack D12 broken.
+
+**The handler checks the session AND the CSRF token itself** rather than inheriting this path's
+`csrfExempt` entry. That entry is for the pre-auth caller, who has no cookie to double-submit;
+extended to a caller who has one, it would make this write forgeable cross-site.
 
 **The reasoning that was put to the Operator is kept below**, because the ruling turned on it. The
 rest of the proposal — the shape it guessed at, and the three questions it left open — is gone: the

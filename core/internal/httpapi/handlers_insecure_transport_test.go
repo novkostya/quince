@@ -61,11 +61,10 @@ func TestPreAuthCallerCanAllowInsecureTransport(t *testing.T) {
 	// chain runs: route → file → applier → cookie.
 }
 
-// THE GUARD, NOW ABOUT THE CALLER RATHER THAN ABOUT THE INSTALL — quince#1069. This was called
-// *"a claimed install refuses the route entirely"*, and every case below still sends NO COOKIE OF
-// ANY KIND, which is what it was really asserting: once somebody owns the install, an ANONYMOUS
-// caller gets nothing here. What changed is that an authenticated admin now may, because the setting
-// could be turned ON from the UI and turned off from nowhere at all.
+// THE GUARD IS ABOUT THE CALLER, NOT ABOUT THE INSTALL (quince#1069). Every case below sends NO
+// COOKIE OF ANY KIND: once somebody owns the install, an ANONYMOUS caller gets nothing here. An
+// authenticated admin may write it — `TestAnAuthenticatedAdminCanTurnItOff` — which is what keeps the
+// setting from being turn-on-only from the UI.
 //
 // Asserted on the STATE as well as on the status: a 409 that had already written the setting would
 // be worse than no guard, because it would look refused.
@@ -187,15 +186,14 @@ func TestAMalformedBodyIsRefusedRatherThanDefaulted(t *testing.T) {
 	}
 }
 
-// THE ADMIN'S OWN DOOR — quince#1069. The banner tells a reader to turn this off; until this landed,
-// nothing in the product could. `ConfigEditor` does not render the key, and the only other writer is
-// the first-run confirm, which writes `true` and only `true` — so the remedy was a text editor on the
-// box, which is stack D12 broken.
+// THE ADMIN'S OWN DOOR — quince#1069. The banner tells a reader to turn this off, and this route is
+// the only writer that can: `ConfigEditor` does not render the key, and the first-run confirm writes
+// `true` and only `true`. Without this case the setting is turn-on-only from the UI, which is stack
+// D12 broken.
 //
-// THE NARROW WRITE IS THE POINT. `PUT /api/config` would also have done it and is a full-document
-// replace: a client that does not model every Go key drops the ones it does not know (quince#493).
-// This route writes one key by name, which is why it is the one that was opened rather than a second
-// writer appearing somewhere else.
+// THE NARROW WRITE IS THE POINT. `PUT /api/config` would also do it and is a full-document replace:
+// a client that does not model every Go key drops the ones it does not know (quince#493). This route
+// writes one key by name, which is why the fix belongs here rather than in a second writer.
 func TestAnAuthenticatedAdminCanTurnItOff(t *testing.T) {
 	deps := testDeps(t)
 	if err := deps.Auth.SetPassword("test", "127.0.0.1"); err != nil {
