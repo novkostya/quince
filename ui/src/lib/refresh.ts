@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Device, Job, Version } from "./types";
+import type { Device, Job, Pairing, Version } from "./types";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore, isRunning } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
@@ -12,11 +12,11 @@ import { useVersionsStore } from "@/stores/versions";
 export async function refreshAll(): Promise<void> {
   try {
     const [devices, jobs, versions] = await Promise.all([
-      api.get<{ devices: Device[] }>("/api/devices"),
+      api.get<{ devices: Device[]; pairing?: Pairing }>("/api/devices"),
       api.get<{ jobs: Job[]; next_cursor: string | null }>("/api/jobs"),
       api.get<{ versions: Version[] }>("/api/versions"),
     ]);
-    useDevicesStore.getState().replaceAll(devices.devices);
+    useDevicesStore.getState().replaceAll(devices.devices, devices.pairing);
     useJobsStore.getState().replaceAll(jobs.jobs);
     useVersionsStore.getState().replaceAll(versions.versions);
     await recoverRunningLogs(jobs.jobs);

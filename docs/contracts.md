@@ -1018,7 +1018,16 @@ and this sentence is the note that says so.
 ### Devices
 
 ```
-GET  /api/devices                      → {devices: Device[]}
+GET  /api/devices                      → {devices: Device[], pairing: {writable, reason?}}
+     // `pairing` is a SYSTEM capability, not a per-device one, which is why it sits on
+     // the envelope: there is ONE lockdown directory, and repeating its writability on
+     // every device would state one fact N times. It rides with this response because
+     // this is what renders the Pair control (qn.6p D7).
+     // writable false ⇒ a pairing would not survive being made; `reason` says why, and
+     // the UI renders the control UNAVAILABLE WITH IT rather than hiding the control —
+     // an absent button explains nothing, which is the complaint this answers.
+     // A HINT, NOT THE GUARD: this is the answer as of the request, and the pair route
+     // re-checks. A disk fills and a mount changes between a render and a click.
 GET  /api/devices/{udid}               → Device
 POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
      // 409: device not present on USB — pairing is USB-only at the protocol floor,
@@ -1026,6 +1035,12 @@ POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
      // "tap Trust on the phone" / "enter the passcode on the device".
      // 409 ALSO: another device op is already in flight for this udid — the
      // single-flight rule, stated once under wifi-sync below. The action is *wait*.
+     // 409 ALSO: the pairing record cannot be WRITTEN (qn.6p D7) — a read-only
+     // lockdown mount, a permissions problem, or a full filesystem. Checked BEFORE the
+     // op starts, because otherwise idevicepair runs, the phone shows Trust, somebody
+     // taps it, and the record fails to write. The reason names the path and says
+     // another tool may own these records — quince can still READ them, so a device
+     // paired elsewhere still lists and still backs up.
 POST /api/devices/{udid}/pair/validate → {paired: bool} | 404 | 409
      // paired == "a pairing is CONFIRMED valid right now". A locked device cannot be
      // confirmed (`idevicepair validate` reports "passcode set" for ANY locked device,
