@@ -10,9 +10,18 @@ Operator ruling, 2026-08-16, taken in session across five exchanges and recorded
 **relayed by the implementer seat, not posted by the Operator**, which is the open question of
 quince-devlog#254. Each decision is attributed at the point it is recorded below.
 
-**One clause is weaker than the rest and the record says so:** the profile decision arrived as
+**That clause was weaker than the rest, and is not any more.** The profile decision arrived as
 *"leaning towards"* rather than as a flat ruling, and the exchanges after it proceeded on that
-basis. If it is going to be reversed, this rung is where it is cheapest.
+basis — recorded here as a disclosure rather than tidied away. The architect put the question to
+the Operator directly (*"confirm or reverse: does quince ship with no muxer, hardened-only, for
+v0.1?"*) and the answer was **"Yes, confirm"** — relayed by the **architect** seat at
+[quince#897 (comment)](https://github.com/novkostya/quince/issues/897#issuecomment-5306693531),
+which is the citation to use. It is a flat ruling now.
+
+**The confirmation is narrow, and reading it wider is the mistake to avoid.** It settles the
+profile and the canon edits D8 names. It does **not** touch story 4, which stays blocked on a
+measurement rather than a decision; it does not rule quince#326; and it does not discharge G8,
+because a ruling is not a gate.
 
 ---
 
