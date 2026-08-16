@@ -16,7 +16,6 @@ import (
 	"github.com/novkostya/quince/core/internal/id"
 	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/muxd"
-	"github.com/novkostya/quince/core/internal/muxsup"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
@@ -102,16 +101,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// Both configured keys resolve through byConfigured, so when one muxer serves both transports
 	// the two health entries report the SAME connection — which is the truth, rather than two
 	// independent-looking answers about one socket.
-	group := buildMuxerGroup(dcfg, func(address string) muxsup.Dialer {
-		if ep, ok := byConfigured[address]; ok {
-			if c, ok := byEndpoint[ep]; ok {
-				return c
-			}
-		}
-		// LITERAL nil, never a nil *muxd.Client: a typed nil in an interface is not nil, so
-		// muxsup would call Health() on nothing instead of reporting the wiring bug.
-		return nil
-	}, log)
+	group := buildMuxerGroup(dcfg, dialerLookup(byConfigured, byEndpoint), log)
 	go group.Run(ctx)
 	ls.muxer = muxerHealth{group}
 
