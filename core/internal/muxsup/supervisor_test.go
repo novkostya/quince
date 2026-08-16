@@ -397,7 +397,7 @@ func TestGroupRescanRestartsOnlyTheUSBMuxer(t *testing.T) {
 func TestGroupStatuses(t *testing.T) {
 	g := NewGroup()
 	g.Supervise(fakeSupervisor(fakeSpec("usbmuxd", RoleUSB, "unix", filepath.Join(t.TempDir(), "m.sock"), "serve"), ""))
-	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", connectedClient)
+	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", connectedClient())
 
 	got := g.Statuses()
 	if len(got) != 2 {
@@ -411,7 +411,17 @@ func TestGroupStatuses(t *testing.T) {
 	}
 }
 
-func connectedClient() (bool, string) { return true, "" }
+// fakeDialer is a muxsup.Dialer under test control: what health says, and whether Reread ran.
+type fakeDialer struct {
+	connected bool
+	detail    string
+	rereads   int
+}
+
+func (f *fakeDialer) Health() (bool, string) { return f.connected, f.detail }
+func (f *fakeDialer) Reread()                { f.rereads++ }
+
+func connectedClient() Dialer { return &fakeDialer{connected: true} }
 
 // TestExternalStateFollowsTheDialingClient is quince#897 item 2's regression, and the whole of
 // qn.6p D5. `external` was a constant string built at construction, so health reported a muxer as
@@ -420,10 +430,9 @@ func connectedClient() (bool, string) { return true, "" }
 // The state is re-read at every Statuses() call, so ONE group answers differently as the
 // connection comes and goes — which is what "continuing rather than one-shot" means in practice.
 func TestExternalStateFollowsTheDialingClient(t *testing.T) {
-	var connected bool
-	var detail string
 	g := NewGroup()
-	g.AddUnmanaged("netmuxd", RoleWiFi, "/run/mux/usbmuxd", func() (bool, string) { return connected, detail })
+	dialer := &fakeDialer{}
+	g.AddUnmanaged("netmuxd", RoleWiFi, "/run/mux/usbmuxd", dialer)
 
 	// Before the first dial lands: not connected, nothing to report. `unreachable` here would be
 	// a failure claim about an attempt nobody has made.
@@ -431,14 +440,14 @@ func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 		t.Errorf("before the first dial: state = %q, want %q (detail %q)", got.State, StateStarting, got.Detail)
 	}
 
-	connected, detail = true, ""
+	dialer.connected, dialer.detail = true, ""
 	if got := g.Statuses()[0]; got.State != StateExternal {
 		t.Errorf("connected: state = %q, want %q", got.State, StateExternal)
 	}
 
 	// The muxer dies. Health must follow WITHOUT the group being rebuilt, and must carry the
 	// dialer's own words rather than a generic phrase.
-	connected, detail = false, "dial unix /run/mux/usbmuxd: connect: connection refused"
+	dialer.connected, dialer.detail = false, "dial unix /run/mux/usbmuxd: connect: connection refused"
 	got := g.Statuses()[0]
 	if got.State != StateUnreachable {
 		t.Errorf("after the muxer died: state = %q, want %q", got.State, StateUnreachable)
@@ -451,7 +460,7 @@ func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 	}
 
 	// And back, because an external muxer that restarts must stop being reported as broken.
-	connected, detail = true, ""
+	dialer.connected, dialer.detail = true, ""
 	if got := g.Statuses()[0]; got.State != StateExternal {
 		t.Errorf("after the muxer came back: state = %q, want %q", got.State, StateExternal)
 	}
@@ -481,7 +490,7 @@ func TestGroupRescanWithoutManagedUSBMuxer(t *testing.T) {
 	}
 
 	external := NewGroup()
-	external.AddUnmanaged("usbmuxd", RoleUSB, "/var/run/usbmuxd", connectedClient)
+	external.AddUnmanaged("usbmuxd", RoleUSB, "/var/run/usbmuxd", connectedClient())
 	accepted, reason := external.Rescan(rescanCtx(t))
 	if accepted || !strings.Contains(reason, "external") {
 		t.Fatalf("external rescan = (accepted=%v, reason=%q); want refused naming the external muxer", accepted, reason)
@@ -547,5 +556,51 @@ func TestHelperProcess(t *testing.T) {
 		}
 	default:
 		os.Exit(0)
+	}
+}
+
+// TestRescanRereadsTheExternalMuxer is qn.6p D6. With nothing supervised, rescan used to be a flat
+// 409 — "quince does not own it" — which was true and useless: the problem rescan exists for did
+// not go away when the daemon moved out of quince's container, only the remedy did.
+//
+// It now drops the connection so the muxer replays its attached set, which reconciles the device
+// table against the muxer's current truth. Every dialed muxer is re-read, not just one, because
+// there is no daemon whose restart would cover the others.
+func TestRescanRereadsTheExternalMuxer(t *testing.T) {
+	usb, wifi := &fakeDialer{connected: true}, &fakeDialer{connected: true}
+	g := NewGroup()
+	g.AddUnmanaged("usbmuxd", RoleUSB, "/run/mux/usbmuxd", usb)
+	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", wifi)
+
+	accepted, reason := g.Rescan(rescanCtx(t))
+	if !accepted {
+		t.Fatalf("rescan refused with %q; want it to re-read the external muxers", reason)
+	}
+	if usb.rereads != 1 || wifi.rereads != 1 {
+		t.Errorf("rereads = usb:%d wifi:%d; want 1 each — no daemon restart covers the others",
+			usb.rereads, wifi.rereads)
+	}
+	// It must NOT start anything: there is no daemon here to start, and claiming otherwise is the
+	// dishonesty this change exists to remove.
+	if g.Names() != "" {
+		t.Errorf("rescan produced supervised daemons %q; it must restart nothing", g.Names())
+	}
+}
+
+// A muxer configured with no dialer cannot be re-read, and rescan says which of the two nothings
+// it met rather than collapsing them into one refusal (Operator, quince#940: a diagnostic that
+// collapses distinguishable causes is a defect even when every word of it is true).
+func TestRescanDistinguishesUndialedFromUnconfigured(t *testing.T) {
+	undialed := NewGroup()
+	undialed.AddUnmanaged("usbmuxd", RoleUSB, "/run/mux/usbmuxd", nil)
+	accepted, reason := undialed.Rescan(rescanCtx(t))
+	if accepted || !strings.Contains(reason, "no dialer") {
+		t.Errorf("undialed rescan = (%v, %q); want a refusal naming the missing dialer", accepted, reason)
+	}
+
+	empty := NewGroup()
+	accepted, reason = empty.Rescan(rescanCtx(t))
+	if accepted || !strings.Contains(reason, "no muxer is configured") {
+		t.Errorf("unconfigured rescan = (%v, %q); want a refusal naming the absent config", accepted, reason)
 	}
 }

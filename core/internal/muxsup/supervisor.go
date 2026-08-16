@@ -4,12 +4,16 @@
 // muxer daemon quince is configured to reach — usbmuxd for USB, netmuxd for Wi-Fi: each a
 // supervised subprocess in its own process group under the serve context, restarted on crash with
 // capped backoff, killed on shutdown — and it refuses loudly at startup if something already
-// serves that daemon's address (no silent adoption). It powers POST /api/devices/rescan by
-// restarting the USB daemon, which re-enumerates USB devices an unprivileged container's absent
-// hotplug never delivered; the muxd client's existing reconnect→Reset→replay reconcile does the
-// rest (no new device-table code). Rescan is deliberately USB-only: restarting netmuxd would tear
-// a live Wi-Fi backup (ruled (bz)). Restart-policy config, liveness tuning and a live UI
-// muxer-health panel remain qn.7.
+// serves that daemon's address (no silent adoption).
+//
+// RESCAN NO LONGER RESTARTS ANYTHING (qn.6p D6). It powered POST /api/devices/rescan by
+// restarting the USB daemon, which re-enumerated devices an unprivileged container's absent
+// hotplug never delivered. v0.1 supervises no daemon, so rescan drops the muxd client's
+// connection instead and lets the muxer replay — the same reconnect→Reset→replay reconcile,
+// aimed at a daemon quince does not own. It is weaker, and (bz)'s USB-only rule is retired
+// with the restart it was about: re-reading tears no Wi-Fi backup.
+//
+// Restart-policy config, liveness tuning and a live UI muxer-health panel remain qn.7.
 package muxsup
 
 import (
@@ -439,9 +443,24 @@ type Group struct {
 // go stale between a muxer dying and somebody noticing (qn.6p D5).
 type unmanagedMuxer struct {
 	name, role, address string
-	// live reports the dialing client's current connection state. Nil means nothing is watching
-	// this address, which is itself reported rather than papered over — see Statuses.
-	live func() (connected bool, detail string)
+	// dialer is the client holding the connection. Nil means nothing is watching this address,
+	// which is itself reported rather than papered over — see status().
+	dialer Dialer
+}
+
+// Dialer is the muxd client as this package needs it: the connection quince holds to an external
+// muxer. Structural, so muxsup keeps no import of package muxd, and small enough for a test to
+// implement in three lines.
+//
+// It replaced a bare `func() (bool, string)` when rescan arrived (qn.6p D6): two capabilities
+// about one connection belong on one value, and a second function parameter would have let a
+// caller wire health from one client and rescan from another.
+type Dialer interface {
+	// Health is the CURRENT connection state, asked at read time (qn.6p D5).
+	Health() (connected bool, detail string)
+	// Reread drops the connection so the client redials and the muxer replays its attached set —
+	// what rescan does when there is no daemon to restart (qn.6p D6).
+	Reread()
 }
 
 // NewGroup returns an empty group.
@@ -453,10 +472,10 @@ func (g *Group) Supervise(s *Supervisor) { g.sups = append(g.sups, s) }
 // AddUnmanaged records a daemon quince only dials (external / manage_muxer: false), so health
 // still shows it — with managed:false, so nobody reads an absent entry as "no muxer".
 //
-// `live` is the dialing client's state, asked at read time. Passing nil is legal and means
-// nothing is watching this address; Statuses says so rather than assuming the best.
-func (g *Group) AddUnmanaged(name, role, address string, live func() (bool, string)) {
-	g.unmanaged = append(g.unmanaged, unmanagedMuxer{name: name, role: role, address: address, live: live})
+// `dialer` is the client holding the connection to this address. Passing nil is legal and means
+// nothing is watching it; status() says so rather than assuming the best.
+func (g *Group) AddUnmanaged(name, role, address string, dialer Dialer) {
+	g.unmanaged = append(g.unmanaged, unmanagedMuxer{name: name, role: role, address: address, dialer: dialer})
 }
 
 // status renders one external muxer from its dialing client's CURRENT state.
@@ -467,13 +486,13 @@ func (g *Group) AddUnmanaged(name, role, address string, live func() (bool, stri
 // `connection refused` against the same address (quince#897 item 2).
 func (u unmanagedMuxer) status() Status {
 	s := Status{Name: u.name, Role: u.role, Managed: false}
-	if u.live == nil {
+	if u.dialer == nil {
 		// Configured, dialed by nobody. Honest rather than convenient: this is a wiring bug if it
 		// ever appears, and reporting `external` would hide it behind a healthy-looking word.
 		s.State, s.Detail = StateStarting, u.address+" is configured but nothing is dialing it"
 		return s
 	}
-	connected, detail := u.live()
+	connected, detail := u.dialer.Health()
 	switch {
 	case connected:
 		s.State = StateExternal
@@ -524,10 +543,34 @@ func (g *Group) Rescan(ctx context.Context) (accepted bool, reason string) {
 			return s.Rescan(ctx)
 		}
 	}
-	if len(g.unmanaged) > 0 {
-		return false, "the USB muxer is external (devices.manage_muxer: false) — quince does not own it"
+
+	// NOTHING IS SUPERVISED, SO RESCAN RE-READS THE MUXER INSTEAD OF RESTARTING ONE (qn.6p D6).
+	//
+	// This returned a flat 409 — "quince does not own it" — which was true and useless. The
+	// problem rescan exists for did not go away when the daemon moved out of quince's container:
+	// an unprivileged container still receives no USB hotplug, so a device plugged in after the
+	// muxer started can be invisible. What MOVED is the remedy. quince cannot restart somebody
+	// else's container, but it can drop its connection and make the muxer replay its whole
+	// attached set, which reconciles the device table against the muxer's current truth.
+	//
+	// It is weaker than a restart and must not be described as one: if the MUXER has not seen the
+	// device, re-reading tells us so and nothing more. That case is the operator's — restart the
+	// muxer container — and the honest answer names it rather than implying quince tried.
+	var reread int
+	for _, u := range g.unmanaged {
+		if u.dialer != nil {
+			u.dialer.Reread()
+			reread++
+		}
 	}
-	return false, "no managed USB muxer to restart"
+	switch {
+	case reread > 0:
+		return true, ""
+	case len(g.unmanaged) > 0:
+		// Configured but undialed — the wiring bug status() also refuses to hide.
+		return false, "no muxer connection to re-read: the configured muxers have no dialer"
+	}
+	return false, "no muxer is configured, so there is nothing to re-read"
 }
 
 // Names lists the configured daemons for logging ("usbmuxd, netmuxd").

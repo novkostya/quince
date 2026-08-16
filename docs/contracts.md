@@ -1032,14 +1032,24 @@ POST /api/devices/{udid}/pair/validate → {paired: bool} | 404 | 409
      // paired or not — qn.3 hardware finding), so Device.paired shows "unknown" until
      // an unlocked validate succeeds; the endpoint's bool is the confirmed check only.
 POST /api/devices/rescan               → 202 | 409
-     // Restarts the MANAGED in-container USB muxer (devices.manage_muxer: true) so USB
-     // devices missed by an unprivileged container's absent hotplug re-enumerate;
-     // reuses the client's reconnect→Reset→replay reconcile (no new table semantics).
-     // 409 when the muxer is external (manage_muxer: false) — quince doesn't own it.
-     // Ruled from qn.2's gap capture; landed by qn.2b.
-     // USB-ONLY by design (qn.4c, ruled (bz)): quince may also supervise netmuxd, but
-     // rescan never restarts it — Wi-Fi has no hotplug problem to solve, and a restart
-     // would tear a live Wi-Fi backup. Per-daemon state lives in GET /api/health.
+     // RE-READS THE MUXER (qn.6p D6). quince supervises no daemon in v0.1, so this drops
+     // its Listen connection and lets the muxer replay its whole attached set — the
+     // client's existing reconnect→Reset→replay reconcile, run against the muxer's
+     // current truth. No new table semantics, and NOTHING IS RESTARTED.
+     // 409 only when there is nothing to re-read, and the two causes are distinguished:
+     // a configured muxer with no dialer, versus no muxer configured at all.
+     //
+     // IT IS WEAKER THAN WHAT IT REPLACES, and no surface may claim otherwise. Until
+     // qn.6p this restarted the MANAGED in-container usbmuxd, re-enumerating devices an
+     // unprivileged container's absent hotplug never delivered. That problem did not go
+     // away — it MOVED to the muxer's own container, which quince cannot restart. If the
+     // MUXER has not seen the device, re-reading reports that and nothing more; the
+     // remedy is then the operator's (restart the muxer container).
+     // Ruled from qn.2's gap capture; landed by qn.2b; re-aimed by qn.6p.
+     // NO LONGER USB-ONLY, and the reason it was is gone: (bz) excluded netmuxd because
+     // RESTARTING it would tear a live Wi-Fi backup. Re-reading restarts nothing, so
+     // every dialed muxer is re-read — there is no daemon whose restart covers the
+     // others. Per-daemon state lives in GET /api/health.
 POST /api/devices/{udid}/encryption
      {action: "enable" | "change_password" | "disable",
       password?, old_password?, new_password?}     → 202 {op_id} | 404 | 409 | 422

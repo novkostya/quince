@@ -81,11 +81,16 @@ func (p *muxerPlan) refuseNetmuxd(addr, why string) {
 
 // buildMuxerGroup turns the plan into a runnable group, logging what quince owns, what it merely
 // dials, and every problem it refused to build around.
-// `liveFor` maps a CONFIGURED address to the dialing client's health, or nil when nothing dials
-// it. It is passed in rather than reached for so this function keeps no dependency on how the
-// clients are built, and so plannedMuxers stays the side-effect-free half that tests drive
-// directly.
-func buildMuxerGroup(dcfg config.DevicesConfig, liveFor func(address string) func() (bool, string),
+// `dialerFor` maps a CONFIGURED address to the client holding that connection, or nil when
+// nothing dials it. It is passed in rather than reached for so this function keeps no
+// dependency on how the clients are built, and so plannedMuxers stays the side-effect-free
+// half that tests drive directly.
+//
+// IT MUST RETURN AN UNTYPED NIL when there is no client. Returning a nil *muxd.Client would
+// yield a NON-nil interface holding a nil pointer, so muxsup's `dialer == nil` check would
+// pass and it would call Health() on nothing — turning the wiring bug status() is careful to
+// REPORT into a panic. live.go's lookup returns a literal nil for exactly this reason.
+func buildMuxerGroup(dcfg config.DevicesConfig, dialerFor func(address string) muxsup.Dialer,
 	log *slog.Logger) *muxsup.Group {
 	plan := plannedMuxers(dcfg)
 	g := muxsup.NewGroup()
@@ -93,11 +98,11 @@ func buildMuxerGroup(dcfg config.DevicesConfig, liveFor func(address string) fun
 		g.Supervise(muxsup.New(spec, log))
 	}
 	for _, e := range plan.external {
-		var live func() (bool, string)
-		if liveFor != nil {
-			live = liveFor(e.address)
+		var dialer muxsup.Dialer
+		if dialerFor != nil {
+			dialer = dialerFor(e.address)
 		}
-		g.AddUnmanaged(e.name, e.role, e.address, live)
+		g.AddUnmanaged(e.name, e.role, e.address, dialer)
 		log.Info("muxer is external — dialing only", "daemon", e.name, "address", e.address)
 	}
 	for _, problem := range plan.problems {
