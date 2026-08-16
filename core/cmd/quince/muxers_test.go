@@ -6,6 +6,7 @@ import (
 
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/muxaddr"
+	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
 
@@ -212,5 +213,32 @@ func TestDistinctEndpointsCollapsesOneMuxerServingBoth(t *testing.T) {
 					byConfigured[tc.usb], byConfigured[tc.wifi])
 			}
 		})
+	}
+}
+
+// TestDialerLookupReturnsAnUntypedNil pins the typed-nil trap (architect, quince#1060).
+//
+// `var c *muxd.Client; return c` compiles, reads correctly, and is WRONG: an interface holding a
+// nil pointer is not nil, so muxsup's `dialer == nil` check would pass and it would call Health()
+// on nothing. That turns the wiring bug status() deliberately reports — "configured but nothing is
+// dialing it" — into a panic at the moment somebody opens /api/health to find out what is wrong.
+//
+// Comments in two files said so and nothing enforced it. This does.
+func TestDialerLookupReturnsAnUntypedNil(t *testing.T) {
+	ep, err := muxaddr.Parse("/run/mux/usbmuxd")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	lookup := dialerLookup(
+		map[string]muxaddr.Endpoint{"/run/mux/usbmuxd": ep},
+		map[muxaddr.Endpoint]*muxd.Client{}, // the endpoint resolves; NO client was built for it
+	)
+
+	if got := lookup("/run/mux/usbmuxd"); got != nil {
+		t.Errorf("a configured address with no client returned %#v; want an untyped nil, or "+
+			"muxsup calls Health() on nothing instead of reporting the wiring bug", got)
+	}
+	if got := lookup("never-configured"); got != nil {
+		t.Errorf("an unconfigured address returned %#v; want an untyped nil", got)
 	}
 }

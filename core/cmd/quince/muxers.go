@@ -7,6 +7,7 @@ import (
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/muxaddr"
+	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
 
@@ -165,4 +166,26 @@ func distinctEndpoints(bindings []muxerBinding) (unique []muxaddr.Endpoint, byCo
 		unique = append(unique, b.ep)
 	}
 	return unique, byConfigured
+}
+
+// dialerLookup maps a configured address to the client holding that connection, for
+// buildMuxerGroup. Both keys resolve through byConfigured, so when one muxer serves both transports
+// the two health entries report the SAME connection — the truth about one socket, rather than two
+// independent-looking answers.
+//
+// A NAMED FUNCTION RATHER THAN A CLOSURE, so the nil case can be tested (architect, quince#1060).
+// It must return a LITERAL nil when nothing dials the address: returning a nil *muxd.Client would
+// give muxsup a non-nil interface holding a nil pointer, its `dialer == nil` check would pass, and
+// it would call Health() on nothing — turning the wiring bug status() is careful to REPORT into a
+// panic. The comment was the only thing holding that before; now a test does.
+func dialerLookup(byConfigured map[string]muxaddr.Endpoint,
+	byEndpoint map[muxaddr.Endpoint]*muxd.Client) func(address string) muxsup.Dialer {
+	return func(address string) muxsup.Dialer {
+		if ep, ok := byConfigured[address]; ok {
+			if c, ok := byEndpoint[ep]; ok {
+				return c
+			}
+		}
+		return nil
+	}
 }
