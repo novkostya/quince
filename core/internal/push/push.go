@@ -358,3 +358,30 @@ func redactEndpoint(endpoint string) string {
 // RedactEndpoint is redactEndpoint for callers outside this package — the delivery client and
 // anything that logs about a subscription.
 func RedactEndpoint(endpoint string) string { return redactEndpoint(endpoint) }
+
+// ParseSubscriptionKeys validates the two keys a browser hands over, returning the decoded UA public
+// point and auth secret.
+//
+// IT EXISTS SO A BAD SUBSCRIPTION IS REFUSED AT THE DOOR. `Encrypt` would reject the same input, but
+// it runs at SEND time — days later, on a schedule, with nobody watching — where the only symptom is
+// a notification that never arrives. Validating when the subscription is created turns that into an
+// error on the request that caused it.
+func ParseSubscriptionKeys(p256dh, auth string) (uaPublic []byte, authSecret []byte, err error) {
+	uaPublic, err = b64.DecodeString(p256dh)
+	if err != nil {
+		return nil, nil, fmt.Errorf("push: p256dh is not base64url: %w", err)
+	}
+	if _, err := ecdh.P256().NewPublicKey(uaPublic); err != nil {
+		return nil, nil, fmt.Errorf("push: p256dh is not a P-256 point: %w", err)
+	}
+	authSecret, err = b64.DecodeString(auth)
+	if err != nil {
+		return nil, nil, fmt.Errorf("push: auth is not base64url: %w", err)
+	}
+	// RFC 8291 §3.2 fixes the authentication secret at 16 octets. A shorter one changes the key
+	// derivation and yields a body the device cannot decrypt — silently, at send time.
+	if len(authSecret) != 16 {
+		return nil, nil, fmt.Errorf("push: auth secret is %d octets, want 16", len(authSecret))
+	}
+	return uaPublic, authSecret, nil
+}

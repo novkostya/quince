@@ -876,3 +876,21 @@ type StorageZFSHostKeyTrustResponse struct {
 type ReauthFinish struct {
 	Proof string `json:"proof"`
 }
+
+// PushSubscription is one device's Web Push registration AS THE UI SEES IT (qn.12, contracts §1).
+//
+// THE ENDPOINT AND THE KEYS ARE ABSENT, AND THAT IS THE POINT. They are capability-grade — anyone
+// holding them can push to that phone — so the wire shape carries what a person needs to recognise
+// and manage a device, and nothing anyone could send with. A field added here that could be used to
+// deliver a push would put a capability behind an ordinary session read.
+type PushSubscription struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// State is `live` | `expired`. EXPIRED ROWS ARE LISTED rather than hidden: a device that stopped
+	// receiving must be nameable, or the failure is invisible and its first symptom is a missed
+	// backup (qn.12 spec D8).
+	State      string `json:"state"`
+	CreatedAt  string `json:"created_at"`
+	ExpiredAt  string `json:"expired_at,omitempty"`
+	LastSentAt string `json:"last_sent_at,omitempty"`
+}
