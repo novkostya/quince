@@ -280,15 +280,13 @@ export interface ConfigResponse {
    * `discarded` — the file on disk was REFUSED, so the running configuration is not what the file
    * says (Operator ruling 2026-08-12, quince#849, AMENDED 2026-08-17, quince#1130).
    *
-   * THIS SAID "quince is running on its defaults" UNTIL `qn.6q`, and that was true while the only
-   * route here was a refusal AT LOAD. A hand-edit refused at RELOAD leaves quince on last-good —
-   * storage running, backups continuing — so the defaults clause goes false, and the shorter sentence
-   * is what covers both doors. contracts §1 carries the amendment.
+   * DO NOT RENDER THIS AS "running on its defaults" — that is true of only one of the two routes.
+   * A refusal AT LOAD leaves quince on defaults; a hand-edit refused at RELOAD leaves it on
+   * last-good, with storage running and backups continuing.
    *
-   * A CLIENT NEEDING THE DISTINCTION READS IT OFF `config.storage`, which is the RUNNING
-   * configuration: no storage means `Default()` and nothing is backing up; storage present means
-   * last-good and backups continue. That is why the amendment added no second boolean, and
-   * `ConfigView` is the reference implementation.
+   * READ `config.storage` TO TELL THEM APART — it is the RUNNING configuration: no storage means
+   * defaults and nothing is backing up; storage present means last-good and backups continue. That
+   * is why there is no second boolean, and `ConfigView` is the reference implementation.
    *
    * IT CARRIES THE FATALITY, NOT THE CAUSE, which is why it has to exist. The cause is in
    * `warnings` and always is — but `warnings` is non-empty in two states that want OPPOSITE

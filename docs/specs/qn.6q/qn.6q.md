@@ -16,11 +16,8 @@ half — *"edited by the UI and by hand equally"*.
   **Relayed by the implementer seat, not posted by the Operator** — quince-devlog#254's open question,
   and the shape quince-devlog#274 was filed about — so it is recorded on the forge and the docs PR
   carrying it asks for the Operator's own artifact.
-- **This SUPERSEDES two rulings**, both kept below rather than deleted, because a citation is only
-  worth something if the text it points at is the text that was there: *post-v0.1* (Operator,
-  2026-08-08, relayed on quince#727 — *"two rungs because I want 728 pre-v0.1 while file-watch
-  post-v0.1"*) and *unallocated* (Operator, 2026-08-17, quince#1130, item 4). Split out of `qn.6g` by
-  Operator ruling 2026-08-04, option (a), on
+- **It supersedes the *post-v0.1* ruling (quince#727) and the *unallocated* one (quince#1130 item 4).**
+  Split out of `qn.6g` by Operator ruling 2026-08-04, option (a), on
   [quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911).
 - **The prerequisite is discharged.** quince#764 closed 2026-08-09.
 - **quince#1130's tracker job is DISCHARGED** — all five questions are ruled, the last of them
@@ -34,10 +31,9 @@ half — *"edited by the UI and by hand equally"*.
 quince#841, and `qn.6m` explicitly declined to take it for that reason — so the next free letter is
 `qn.6q`. Confirmed by the architect on quince#1094.
 
-**This file lived at `docs/specs/config-file-watch/` until the allocation**, as a topic directory
-precedented by `public-demo/`, `dev-deploy/`, `devct/`, `rung-loop/` and `runner/` — because naming a
-rung nobody had agreed to is *"this file asserting a plan that does not exist"* (D12). That reasoning
-was right and is now spent.
+**A rung with no allocation gets a topic directory, not a guessed letter** — `public-demo/`,
+`dev-deploy/`, `devct/`, `rung-loop/` and `runner/` are the precedent, and naming a rung nobody has
+agreed to is *"this file asserting a plan that does not exist"* (D12).
 
 ---
 
@@ -466,11 +462,9 @@ without a restart, so the loss read as *how it works*; after, it reads as a defe
 quince can silently lose an edit and shipping anyway is an acceptance under `no silent caps or
 fallbacks`, and this project rules those rather than assuming them.
 
-**4. RULED — unallocated STANDS. ~~The spec stays at `docs/specs/config-file-watch/`~~ — SUPERSEDED
-the same day.** The 2026-08-17 in-session ruling recorded on quince#1094 put file-watch inside v0.1,
-which allocated the rung; this file moved to `docs/specs/qn.6q/qn.6q.md` in the docs slice, which is
-what that ruling's own sentence said would happen. **The superseded half is struck rather than
-deleted** because the *unallocated* ruling was cited elsewhere on the day it held — see Status.
+**4. RULED — unallocated, then SUPERSEDED the same day.** The 2026-08-17 in-session ruling on
+quince#1094 put file-watch inside v0.1, which allocated `qn.6q` and moved this file — which is what
+the unallocated ruling's own sentence said would happen when a rung existed.
 
 ---
 
