@@ -1,0 +1,221 @@
+#!/bin/sh
+# release-image — publish the quince image for one architecture, then merge the architectures.
+#
+#   release-image build    <version> <arch>            build linux/<arch>, push :<version>-<arch>
+#   release-image manifest <version> <arch> [<arch>…]  merge those into :<version> (and :latest)
+#
+# <version> is the release version WITHOUT a leading `v` — `0.1.0`, not `v0.1.0`. The git tag keeps
+# its `v`; the image tag and the binary's own stamp do not. One place converts, and it is the caller.
+#
+# WHY TWO VERBS RATHER THAN ONE `--platform linux/amd64,linux/arm64`. A single buildx invocation
+# would emulate one of the two architectures under QEMU, and this Dockerfile compiles
+# libimobiledevice from C source — the emulation tax lands on exactly the stage least able to
+# afford it. GitHub publishes `ubuntu-24.04-arm` free for public repositories (GA), so each
+# architecture builds NATIVELY on its own runner and `manifest` joins them afterwards. Nothing here
+# needs QEMU, and the guard below refuses rather than silently falling back to it.
+#
+# WHY PER-ARCH TAGS RATHER THAN PUSH-BY-DIGEST. The digest recipe is the one docker documents, and
+# it leaves no stray tags — but it carries digests between jobs, which on GitHub Actions means
+# upload-artifact/download-artifact plumbing whose failure mode is an empty manifest list. Per-arch
+# tags need nothing between the jobs but the version string the tag already supplies. The cost,
+# stated rather than hidden: `:<version>-amd64` and `:<version>-arm64` stay in the registry
+# alongside `:<version>`. They are pullable and honest, and pruning them is a later choice, not a
+# correctness one.
+#
+# CREDENTIALS ARE THE CALLER'S. This script never logs in, never reads a token, and never names
+# one. In CI that is `docker login ghcr.io` with the job's own GITHUB_TOKEN; by hand it is whatever
+# you already have. A push against a registry you are not logged into fails at the push, loudly,
+# which is the right place for it to fail.
+set -eu
+
+usage() {
+	cat >&2 <<'EOF'
+usage: release-image build    <version> <arch>
+       release-image manifest <version> <arch> [<arch>...]
+
+  <version>  release version with no leading v, e.g. 0.1.0 or 0.2.0-rc1
+  <arch>     amd64 | arm64
+
+environment:
+  QUINCE_IMAGE    image repository (default: ghcr.io/novkostya/quince)
+  QUINCE_RUNTIME  container runtime providing buildx (default: docker)
+  QUINCE_RELEASE_ALLOW_FOREIGN_ARCH=1
+                  build an architecture this host is not, via whatever emulation is
+                  configured. Announced loudly; never the default.
+EOF
+	exit 2
+}
+
+cd "$(dirname "$0")/.."
+
+IMAGE=${QUINCE_IMAGE:-ghcr.io/novkostya/quince}
+RUNTIME=${QUINCE_RUNTIME:-docker}
+# A NAMED builder, passed explicitly rather than left to `--use` global state, so two jobs on one
+# host cannot inherit each other's. `docker-container` is the driver: the default `docker` driver
+# does not do multi-arch work, and while each build here is single-platform, the manifest step is
+# not — keeping one driver across both verbs means the release never depends on which of the two a
+# runner happened to default to.
+BUILDER=quince-release
+
+# `-` is the semver pre-release separator, and it is the only thing standing between an `-rc1` tag
+# and every `docker pull quince` in the world. Everything before it must still look like a version:
+# a bare word would sail through a looser check and tag the registry with a typo.
+valid_version() {
+	printf '%s' "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+}
+prerelease() {
+	case $1 in *-*) return 0 ;; *) return 1 ;; esac
+}
+
+check_version() {
+	case $1 in
+	v[0-9]*)
+		printf 'release-image: %s carries a leading v.\n' "$1" >&2
+		printf '               The git TAG keeps its v; the image tag and the version the\n' >&2
+		printf '               binary reports do not. Pass %s.\n' "${1#v}" >&2
+		exit 2
+		;;
+	esac
+	valid_version "$1" || {
+		printf 'release-image: %s is not a release version (want 0.1.0, or 0.2.0-rc1).\n' "$1" >&2
+		exit 2
+	}
+}
+
+check_arch() {
+	case $1 in
+	amd64 | arm64) ;;
+	*)
+		printf 'release-image: unknown architecture %s — this pipeline builds amd64 and arm64.\n' "$1" >&2
+		exit 2
+		;;
+	esac
+}
+
+# THE NATIVE-BUILD GUARD, and it is the reason the two-verb shape is safe. Asking for arm64 on an
+# amd64 host does not fail — buildx reaches for QEMU, and either produces a correct image after an
+# hour of emulated C compilation or dies deep inside a stage for reasons that read as a source bug.
+# Both outcomes cost more to diagnose than this refusal costs to read.
+check_native() {
+	want=$1
+	case $(uname -m) in
+	x86_64 | amd64) host=amd64 ;;
+	aarch64 | arm64) host=arm64 ;;
+	*) host=$(uname -m) ;;
+	esac
+	[ "$want" = "$host" ] && return 0
+	if [ "${QUINCE_RELEASE_ALLOW_FOREIGN_ARCH:-}" = 1 ]; then
+		printf 'release-image: BUILDING %s ON A %s HOST — emulated, not native.\n' "$want" "$host" >&2
+		printf '               QUINCE_RELEASE_ALLOW_FOREIGN_ARCH=1 asked for this. A release\n' >&2
+		printf '               built this way is slow and is not what CI produces.\n' >&2
+		return 0
+	fi
+	printf 'release-image: asked to build %s on a %s host.\n' "$want" "$host" >&2
+	printf '               Each architecture builds natively on its own runner — see this\n' >&2
+	printf '               file'"'"'s header. Refusing rather than falling back to emulation.\n' >&2
+	printf '               QUINCE_RELEASE_ALLOW_FOREIGN_ARCH=1 overrides, loudly.\n' >&2
+	exit 1
+}
+
+need_buildx() {
+	"$RUNTIME" buildx version >/dev/null 2>&1 || {
+		printf 'release-image: %s buildx is not available.\n' "$RUNTIME" >&2
+		printf '               This runs where buildx does — a GitHub runner ships it; a\n' >&2
+		printf '               session box may not. Set QUINCE_RUNTIME if it is elsewhere.\n' >&2
+		exit 2
+	}
+	"$RUNTIME" buildx inspect "$BUILDER" >/dev/null 2>&1 ||
+		"$RUNTIME" buildx create --name "$BUILDER" --driver docker-container >/dev/null
+}
+
+cmd_build() {
+	version=$1
+	arch=$2
+	check_version "$version"
+	check_arch "$arch"
+	check_native "$arch"
+	need_buildx
+
+	# Captured FIRST so a refusal from build-args ends the release. Inlining it in the here-doc
+	# body would swallow its exit status — a redirection's command substitution does not trip
+	# `set -e` — and build an image on Dockerfile defaults alone (quince#494).
+	values=$(deploy/build-args)
+	set --
+	while IFS= read -r kv; do
+		[ -n "$kv" ] || continue
+		set -- "$@" --build-arg "$kv"
+	done <<EOF
+$values
+EOF
+	# VERSION comes from the TAG and from nowhere else. deploy/build-args deliberately does not
+	# supply it: a pin in versions.env would stamp every image with a fixed number, which is
+	# quince#615 (the demo reporting 0.0.0-dev) wearing the opposite face.
+	set -- "$@" --build-arg "VERSION=$version"
+
+	# --provenance/--sbom off, deliberately. With the docker-container driver both default ON for
+	# a pushed build, and each adds an attestation manifest carrying platform `unknown/unknown`.
+	# That turns every per-arch tag into an index, which the manifest step below would then be
+	# merging rather than composing. Attestations are worth having and are a follow-on with its
+	# own verification; shipping them by accident, unverified, is not the way to acquire them.
+	printf 'release-image: building linux/%s as %s:%s-%s\n' "$arch" "$IMAGE" "$version" "$arch" >&2
+	exec "$RUNTIME" buildx build \
+		--builder "$BUILDER" \
+		--platform "linux/$arch" \
+		--target runtime \
+		--provenance=false \
+		--sbom=false \
+		"$@" \
+		-t "$IMAGE:$version-$arch" \
+		-f deploy/Dockerfile \
+		--push \
+		.
+}
+
+cmd_manifest() {
+	version=$1
+	shift
+	check_version "$version"
+	[ $# -gt 0 ] || {
+		printf 'release-image: manifest needs at least one architecture.\n' >&2
+		exit 2
+	}
+	need_buildx
+
+	refs=''
+	for arch in "$@"; do
+		check_arch "$arch"
+		refs="$refs $IMAGE:$version-$arch"
+	done
+
+	tags="-t $IMAGE:$version"
+	# `latest` MUST NOT FOLLOW A PRE-RELEASE. `docker pull quince` resolves to `latest`, so an
+	# rc tagged latest ships a release candidate to everyone who did not name a version — the
+	# single most consequential line in this file, and the cheapest to get wrong.
+	if prerelease "$version"; then
+		printf 'release-image: %s is a pre-release — publishing :%s only, NOT :latest.\n' \
+			"$version" "$version" >&2
+	else
+		tags="$tags -t $IMAGE:latest"
+	fi
+
+	printf 'release-image: joining%s into %s:%s\n' "$refs" "$IMAGE" "$version" >&2
+	# `tags` and `refs` are deliberately unquoted: both are argument lists this script built from
+	# already-validated input, not data from outside it. SC2086 is about the opposite case.
+	# shellcheck disable=SC2086
+	exec "$RUNTIME" buildx imagetools create --builder "$BUILDER" $tags $refs
+}
+
+[ $# -ge 1 ] || usage
+verb=$1
+shift
+case $verb in
+build)
+	[ $# -eq 2 ] || usage
+	cmd_build "$@"
+	;;
+manifest)
+	[ $# -ge 2 ] || usage
+	cmd_manifest "$@"
+	;;
+*) usage ;;
+esac

@@ -1,0 +1,176 @@
+#!/bin/sh
+# release-image-test — the release build's refusals, and the argv it actually produces.
+#
+# WHY A STUBBED RUNTIME RATHER THAN A DRY-RUN FLAG. A `--dry-run` branch tests the dry-run branch.
+# Pointing QUINCE_RUNTIME at a stub that records its argv exercises the REAL code path and then
+# asserts on what a real `docker` would have received — the same trick `bin/gates-sh-exit-test` uses,
+# and for the same reason: the thing under test must not know it is being tested.
+#
+# WHAT THIS SUITE CANNOT SEE, said here rather than left for a reader to assume. It never builds an
+# image, never contacts a registry, and never proves the Dockerfile compiles on either architecture.
+# It proves the flags, the tags, and every refusal. The arm64 build itself is owed to the pipeline's
+# first run on a native arm64 runner.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+RI="${QUINCE_RELEASE_IMAGE_BIN:-$HERE/release-image}"
+[ -x "$RI" ] || { printf 'release-image-test: %s is not executable\n' "$RI" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+# The stub. `buildx version` and `buildx inspect` must succeed so the script gets past its
+# preflight; everything else is appended to a log the assertions read.
+mkdir -p "$TMP/bin"
+cat >"$TMP/bin/fake-runtime" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+"buildx version") exit 0 ;;
+"buildx inspect") exit 0 ;;
+esac
+printf '%s\n' "\$*" >>"$TMP/argv.log"
+EOF
+chmod +x "$TMP/bin/fake-runtime"
+
+# HOST ARCH IS AN INPUT TO THIS SCRIPT, so the suite must know which of the two is native here and
+# which is foreign. Hard-coding either would pass on one box and fail on the other.
+case $(uname -m) in
+x86_64 | amd64) NATIVE=amd64 FOREIGN=arm64 ;;
+aarch64 | arm64) NATIVE=arm64 FOREIGN=amd64 ;;
+*)
+	printf 'release-image-test: DID NOT RUN — %s is neither amd64 nor arm64, and every\n' "$(uname -m)" >&2
+	printf '                    case below is written against the native/foreign split.\n' >&2
+	exit 2
+	;;
+esac
+
+run() { # <args...> — returns the script's exit code, output on stdout+stderr
+	: >"$TMP/argv.log"
+	QUINCE_RUNTIME="$TMP/bin/fake-runtime" \
+		QUINCE_IMAGE=ghcr.io/example/quince \
+		"$RI" "$@" 2>&1
+}
+argv() { cat "$TMP/argv.log" 2>/dev/null; }
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	if ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+check() { # <name> <want-substring> — assert on the recorded argv of the last run
+	if argv | grep -qF -- "$2"; then
+		printf 'ok    %s\n' "$1"
+		pass=$((pass + 1))
+	else
+		printf 'FAIL %s\n  recorded argv does not contain: %s\n' "$1" "$2"
+		argv | sed 's/^/    | /'
+		fail=$((fail + 1))
+	fi
+}
+refute() { # <name> <unwanted-substring>
+	if argv | grep -qF -- "$2"; then
+		printf 'FAIL %s\n  recorded argv should NOT contain: %s\n' "$1" "$2"
+		argv | sed 's/^/    | /'
+		fail=$((fail + 1))
+	else
+		printf 'ok    %s\n' "$1"
+		pass=$((pass + 1))
+	fi
+}
+
+# --- usage --------------------------------------------------------------------------------------
+expect "no arguments is a usage error" 2 "usage: release-image" -- run
+expect "an unknown verb is a usage error" 2 "usage: release-image" -- run publish 0.1.0 amd64
+expect "build with one argument is a usage error" 2 "usage: release-image" -- run build 0.1.0
+
+# --- the version contract -------------------------------------------------------------------------
+# THE `v` CASE IS THE ONE A HUMAN HITS, because the git tag really is `v0.1.0` and the muscle memory
+# is to paste it. A refusal that names the corrected string costs one read; a `v0.1.0-amd64` tag in
+# a public registry is permanent.
+expect "a leading v is refused, and the fix is named" 2 "Pass 0.1.0." -- run build v0.1.0 "$NATIVE"
+expect "a non-version is refused" 2 "is not a release version" -- run build latest "$NATIVE"
+expect "a two-part version is refused" 2 "is not a release version" -- run build 0.1 "$NATIVE"
+expect "a pre-release version is accepted" 0 "building linux/$NATIVE" -- run build 0.2.0-rc1 "$NATIVE"
+
+# --- the architecture contract --------------------------------------------------------------------
+expect "an unknown architecture is refused" 2 "unknown architecture" -- run build 0.1.0 riscv64
+expect "the foreign architecture is REFUSED rather than emulated" 1 "Refusing rather than falling back" -- \
+	run build 0.1.0 "$FOREIGN"
+expect "...and the refusal names the override" 1 "QUINCE_RELEASE_ALLOW_FOREIGN_ARCH=1" -- \
+	run build 0.1.0 "$FOREIGN"
+out=$(QUINCE_RUNTIME="$TMP/bin/fake-runtime" QUINCE_IMAGE=ghcr.io/example/quince \
+	QUINCE_RELEASE_ALLOW_FOREIGN_ARCH=1 "$RI" build 0.1.0 "$FOREIGN" 2>&1) || true
+if printf '%s' "$out" | grep -qF "emulated, not native"; then
+	printf 'ok    the override works and ANNOUNCES itself\n'
+	pass=$((pass + 1))
+else
+	printf 'FAIL the override works and ANNOUNCES itself\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+fi
+
+# --- what a real build actually receives ----------------------------------------------------------
+run build 0.1.0 "$NATIVE" >/dev/null 2>&1 || true
+check "the platform is pinned to the requested arch" "--platform linux/$NATIVE"
+check "the per-arch tag carries version and arch" "-t ghcr.io/example/quince:0.1.0-$NATIVE"
+check "it builds the runtime stage, not a toolchain stage" "--target runtime"
+check "it pushes" "--push"
+check "the Dockerfile is named explicitly" "-f deploy/Dockerfile"
+# VERSION reaches the ldflags stamp from HERE and nowhere else. Without it the image reports
+# 0.0.0-dev — which is quince#615, and the whole reason the tag has to reach the build.
+check "VERSION is threaded from the version argument" "--build-arg VERSION=0.1.0"
+# The pins from versions.env still arrive: this script adds VERSION to build-args' output rather
+# than replacing it. A release built without them is quince#494.
+check "the versions.env pins arrive alongside it" "--build-arg ALPINE_IMAGE="
+# Attestations default ON for a pushed docker-container build and would make each per-arch tag an
+# index carrying an unknown/unknown entry — which the manifest step composes rather than merges.
+check "provenance is off, so a per-arch tag is a plain manifest" "--provenance=false"
+check "and so is sbom" "--sbom=false"
+refute "no per-arch build claims :latest" ":latest"
+
+# --- the manifest step ------------------------------------------------------------------------------
+run manifest 0.1.0 amd64 arm64 >/dev/null 2>&1 || true
+check "the merge names the version tag" "-t ghcr.io/example/quince:0.1.0"
+check "a release moves latest" "-t ghcr.io/example/quince:latest"
+check "it merges the amd64 per-arch tag" "ghcr.io/example/quince:0.1.0-amd64"
+check "it merges the arm64 per-arch tag" "ghcr.io/example/quince:0.1.0-arm64"
+check "via imagetools create" "buildx imagetools create"
+
+# THE SINGLE MOST CONSEQUENTIAL LINE IN THE SCRIPT. `docker pull quince` resolves to :latest, so an
+# rc that moved it would ship a release candidate to everyone who did not name a version.
+out=$(run manifest 0.2.0-rc1 amd64 arm64 2>&1) || true
+refute "a PRE-RELEASE does not move :latest" ":latest"
+check "...and it still publishes its own version tag" "-t ghcr.io/example/quince:0.2.0-rc1"
+if printf '%s' "$out" | grep -qF "NOT :latest"; then
+	printf 'ok    ...and says so rather than doing it silently\n'
+	pass=$((pass + 1))
+else
+	printf 'FAIL ...and says so rather than doing it silently\n'
+	printf '%s\n' "$out" | sed 's/^/    | /'
+	fail=$((fail + 1))
+fi
+
+expect "manifest with no architecture is a usage error" 2 "usage: release-image" -- run manifest 0.1.0
+expect "manifest refuses an unknown architecture too" 2 "unknown architecture" -- \
+	run manifest 0.1.0 amd64 sparc
+
+printf '\nrelease-image-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
