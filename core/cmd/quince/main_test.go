@@ -637,7 +637,7 @@ func TestRedirectToHTTPSPreservesHostPortAndPath(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
 			req.Host = tc.host
 			rec := httptest.NewRecorder()
-			redirectToHTTPS()(rec, req)
+			redirectToHTTPS(func() bool { return true })(rec, req)
 
 			if rec.Code != http.StatusMovedPermanently {
 				t.Fatalf("status = %d, want 301", rec.Code)
@@ -716,7 +716,7 @@ func TestPlainHalfDecidesPerRequest(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h := plainHalf(app, keeper, func() bool { return tc.optIn })
+			h := plainHalf(app, keeper, func() bool { return tc.optIn }, func() bool { return true })
 
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/devices", nil))
@@ -748,7 +748,7 @@ func TestPlainHalfFollowsBothInputsWithoutRebuilding(t *testing.T) {
 
 	keeper := tlsx.NewEmptyKeeper()
 	optIn := false
-	h := plainHalf(app, keeper, func() bool { return optIn })
+	h := plainHalf(app, keeper, func() bool { return optIn }, func() bool { return true })
 
 	code := func() int {
 		rec := httptest.NewRecorder()
@@ -809,7 +809,8 @@ func TestServeBothProtocolsBindsTheMuxWithNoCertificate(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- serveBothProtocols(ctx, ln, addr, app, tlsx.NewEmptyKeeper(),
-			func() bool { return false }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			func() bool { return false }, func() bool { return false },
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
 	}()
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -980,7 +981,7 @@ func TestCertificateAppliedThenOptInWithdrawnWithoutARestart(t *testing.T) {
 	subscribeInsecureTransport(cfgSvc, authSvc, quiet)
 
 	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
-	plain := plainHalf(app, keeper, func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport })
+	plain := plainHalf(app, keeper, func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport }, func() bool { return cfgSvc.Current().TLS.Enabled() })
 	code := func() int {
 		rec := httptest.NewRecorder()
 		plain.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/", nil))
@@ -1148,4 +1149,84 @@ func tlsWarning(t *testing.T, warns []config.Warning) string {
 		t.Fatalf("want exactly one tls warning, got %d: %+v", len(found), warns)
 	}
 	return found[0]
+}
+
+// A CERTIFICATE TRIAL MUST NOT EMIT 301 — Operator ruling 2026-08-17 (quince#1157), amending the
+// ruling that chose an unconditional permanent redirect.
+//
+// WHY IT NEEDS A GATE RATHER THAN A WALK, in the ruling's own words: the regression is invisible in
+// a browser until ten minutes later. A trial serves a certificate and rolls it back BY ITSELF, and
+// a browser that cached a permanent upgrade in between keeps upgrading to an origin that has
+// stopped existing — with no error naming a cause, because from the browser's side the connection
+// simply fails.
+//
+// THE TRIAL IS REPRODUCED THE WAY `certTrial` PERFORMS ONE: point the keeper at a pair and leave
+// `config.yml` alone. That is not a shortcut for the test's convenience — it is the whole mechanism
+// (*"we're not going to actually write tls setting entry to config.yml for that"*), and it is why
+// the config is the right predicate.
+func TestATrialRedirectsTemporarilyAndAConfirmedPairPermanently(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeTestPair(t, dir, "trial")
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cfgSvc := config.NewService(filepath.Join(dir, "config.yml"), quiet)
+	keeper := tlsx.NewEmptyKeeper()
+	subscribeTLS(cfgSvc, keeper, quiet)
+
+	app := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "app") })
+	plain := plainHalf(app, keeper,
+		func() bool { return false },
+		func() bool { return cfgSvc.Current().TLS.Enabled() })
+	code := func() int {
+		rec := httptest.NewRecorder()
+		plain.ServeHTTP(rec, httptest.NewRequest("GET", "http://quince.example:8968/devices", nil))
+		return rec.Code
+	}
+
+	base := cfgSvc.Current()
+	base.Storage = &[]config.StorageEntry{{Name: "test", Path: filepath.Join(dir, "backups"), Default: true, Backend: "copy"}}
+	if _, _, err := cfgSvc.Replace(base, "test"); err != nil {
+		t.Fatal(err)
+	}
+	// The control at the bottom: no certificate at all, so nothing redirects and a status
+	// assertion below cannot pass because the handler is inert.
+	if got := code(); got != http.StatusOK {
+		t.Fatalf("status %d with no certificate, want 200 — the app should be served, not redirected", got)
+	}
+
+	// THE TRIAL. `SetFiles` directly, with `config.yml` untouched — exactly what `certTrial` does.
+	if err := keeper.SetFiles(certFile, keyFile); err != nil {
+		t.Fatalf("applying the trial pair: %v", err)
+	}
+	if !keeper.HasCertificate() {
+		t.Fatal("the trial pair did not load, so the redirect below would be proving nothing")
+	}
+	if got := code(); got != http.StatusTemporaryRedirect {
+		t.Errorf("a live trial redirected with %d, want 307. A 301 here is cached permanently, and "+
+			"the trial rolls back by itself ten minutes later — leaving the browser upgrading to an "+
+			"origin that no longer answers (quince#1157)", got)
+	}
+
+	// THE CONFIRM. Now `config.yml` names the pair, which is the ruling's predicate — and the
+	// state is permanent, so the permanent redirect is correct again.
+	confirmed := base
+	confirmed.TLS.CertFile, confirmed.TLS.KeyFile = certFile, keyFile
+	if _, _, err := cfgSvc.Replace(confirmed, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusMovedPermanently {
+		t.Errorf("a configured pair redirected with %d, want 301 — the self-upgrading bookmark is a "+
+			"benefit the ruling kept, not one it retreated from", got)
+	}
+
+	// AND THE ROLLBACK DIRECTION, because the predicate must move BOTH ways. Clearing the pair
+	// from the config puts this back to temporary while the certificate is still loaded, which is
+	// the state an unconfirmed pair sits in.
+	if _, _, err := cfgSvc.Replace(base, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := code(); got != http.StatusOK {
+		t.Fatalf("status %d after clearing the pair, want 200 — subscribeTLS should have dropped "+
+			"the certificate, so this test's last assertion is about the right thing", got)
+	}
 }

@@ -3452,10 +3452,18 @@ at `docs/specs/qn.6e/qn.6e.md`), and **`auto` removal happens in neither place**
 *absorbed* rather than removed, above.
 
 **RULED and IMPLEMENTED (was `PROPOSED (gap)`): ONE port, both protocols, routed by the first byte
-of the connection, vendored rather than `cmux`. Plain HTTP gets a `301` to `https://<same host>:<same
+of the connection, vendored rather than `cmux`. Plain HTTP is redirected to `https://<same host>:<same
 port>` — EXCEPT when `sessions.allow_insecure_transport` is on, where quince serves it.** Operator
 ruling 2026-08-02, relayed by architect session `arch1` on quince#446 — option (c) — and built in
 slice 4.
+
+**THE REDIRECT'S STATUS CODE IS `301` ONLY WHERE `config.yml` NAMES A CERTIFICATE PAIR, and `307`
+otherwise** — Operator ruling 2026-08-17 (quince#1157), amending the above. A certificate **trial**
+deliberately does not write the file, so it redirects temporarily; a confirm writes the pair and the
+permanent upgrade returns. The reasoning is in design §6, beside the opt-in it interacts with. What
+matters at this contract's level is the client-visible half: **an upgrade may not be assumed
+permanent unless it was issued against a configured pair**, because quince can withdraw TLS by
+itself on a timer.
 
 `core/internal/tlsx` carries it: a per-connection peek goroutine, two channel-backed
 `net.Listener`s, a `Conn` that replays the peeked byte, and an idempotent `Close` so two

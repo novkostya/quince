@@ -407,7 +407,13 @@ func serve(args []string) error {
 	// deciding from the value the process started with while the auth service had already
 	// moved on: two halves of one setting disagreeing, which is worse than either answer.
 	return runHTTP(ctx, listen, handler, keeper,
-		func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport }, log)
+		func() bool { return cfgSvc.Current().Sessions.AllowInsecureTransport },
+		// LIVE FOR THE SAME REASON, and it is the predicate the redirect's PERMANENCE turns on
+		// (Operator ruling 2026-08-17, quince#1157). `TLS.Enabled()` is *`config.yml` names a
+		// pair*, which a certificate trial deliberately does not do: a trial points the keeper at
+		// files and leaves the file untouched, so this reads false throughout one and true the
+		// moment a confirm writes the pair.
+		func() bool { return cfgSvc.Current().TLS.Enabled() }, log)
 }
 
 // runHTTP runs BOTH protocols on the single port QUINCE_LISTEN names (gap A, Operator ruling
@@ -424,7 +430,7 @@ func serve(args []string) error {
 // carries `peekTimeout` for a client that connects and sends nothing. The trade is that TLS
 // becomes reachable at runtime, which is what makes an apply-and-revert flow possible in
 // memory instead of as an on-disk two-phase commit across a restart.
-func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool, log *slog.Logger) error {
+func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure, tlsDeclared func() bool, log *slog.Logger) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		// A BIND FAILURE IS A LOUD NAMED ERROR, NEVER A FALLBACK TO ANOTHER PORT. Under
@@ -432,7 +438,7 @@ func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *t
 		// moving would leave quince at an address the user will never guess.
 		return fmt.Errorf("listen on %s: %w", listen, err)
 	}
-	return serveBothProtocols(ctx, ln, listen, handler, keeper, allowInsecure, log)
+	return serveBothProtocols(ctx, ln, listen, handler, keeper, allowInsecure, tlsDeclared, log)
 }
 
 // serveBothProtocols is runHTTP's body once the port is bound, split out so a test can drive
@@ -443,13 +449,13 @@ func runHTTP(ctx context.Context, listen string, handler http.Handler, keeper *t
 // claims to cover has changed underneath it. `listen` still rides along because
 // `newHTTPServer` records it as `Addr`; nothing serves from it once `Serve` is handed a
 // listener.
-func serveBothProtocols(ctx context.Context, ln net.Listener, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool, log *slog.Logger) error {
+func serveBothProtocols(ctx context.Context, ln net.Listener, listen string, handler http.Handler, keeper *tlsx.Keeper, allowInsecure, tlsDeclared func() bool, log *slog.Logger) error {
 	mux := tlsx.NewMux(ln)
 
 	tlsSrv := newHTTPServer(listen, handler)
 	tlsSrv.TLSConfig = &tls.Config{GetCertificate: keeper.GetCertificate, MinVersion: tls.VersionTLS12}
 
-	plainSrv := newHTTPServer(listen, plainHalf(handler, keeper, allowInsecure))
+	plainSrv := newHTTPServer(listen, plainHalf(handler, keeper, allowInsecure, tlsDeclared))
 
 	errCh := make(chan error, 2)
 	serveHalf := func(name string, f func() error) {
@@ -487,7 +493,7 @@ func serveBothProtocols(ctx context.Context, ln net.Listener, listen string, han
 // applied or cleared through `PUT /api/config`, and so can the opt-in — so a choice made at
 // bind time would be a third copy of the setting, going stale the moment either moves.
 //
-// TWO INPUTS, AND THE ORDER OF THE TEST IS THE SAFETY PROPERTY.
+// TWO INPUTS DECIDE WHETHER TO REDIRECT, AND THE ORDER OF THE TEST IS THE SAFETY PROPERTY.
 //
 //   - `keeper.HasCertificate()` — LOADED, not merely configured. Redirecting when nothing can
 //     complete a handshake is the trap this whole feature exists inside: once the plain half
@@ -499,8 +505,12 @@ func serveBothProtocols(ctx context.Context, ln net.Listener, listen string, han
 //     overriding an explicit, off-by-default, surfaced opt-in would make that setting
 //     undeclarable on exactly the deployments that want it — every one where a certificate
 //     also exists.
-func plainHalf(app http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool) http.Handler {
-	redirect := redirectToHTTPS()
+//
+// A THIRD DECIDES HOW LONG THE ANSWER LASTS, and it is a different question from both of
+// those: `tlsDeclared()` is *`config.yml` names a pair*, and it chooses 301 over 307. See
+// `redirectToHTTPS`.
+func plainHalf(app http.Handler, keeper *tlsx.Keeper, allowInsecure, tlsDeclared func() bool) http.Handler {
+	redirect := redirectToHTTPS(tlsDeclared)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if keeper.HasCertificate() && !allowInsecure() {
 			redirect.ServeHTTP(w, r)
@@ -513,19 +523,49 @@ func plainHalf(app http.Handler, keeper *tlsx.Keeper, allowInsecure func() bool)
 // redirectToHTTPS sends plain-http callers to the same host and port over https, which is
 // what makes one-port routing worth having: the URL the user typed keeps working.
 //
-// 301 PERMANENT, per the ruling, and it is cacheable on purpose — a bookmark upgrades itself
-// once and stays upgraded. The cost is that it stays cached if the user later removes the
-// certificate, sending them to an https URL that no longer answers. That is the recorded
-// trade against `307`, and it is why turning TLS off is a config edit rather than something
-// quince ever decides on its own.
-func redirectToHTTPS() http.HandlerFunc {
+// PERMANENT ONLY WHEN THE STATE IS PERMANENT — Operator ruling 2026-08-17 (quince#1157),
+// amending the ruling that chose an unconditional 301.
+//
+//	tlsDeclared()   `config.yml` names a pair   →  301 Moved Permanently
+//	!tlsDeclared()  serving TLS it did not ask for  →  307 Temporary Redirect
+//
+// THE 301 IS STILL WORTH HAVING AND IS NOT BEING RETREATED FROM: it is cacheable on purpose, so
+// a bookmark upgrades itself once and stays upgraded. Its recorded cost was that it stays cached
+// if the user later removes the certificate, and the ruling accepted that because removing one
+// was a hand edit — *"turning TLS off is a config edit rather than something quince ever decides
+// on its own."*
+//
+// `certTrial` FALSIFIED THAT CLAUSE, WHICH IS WHY THIS IS AN AMENDMENT RATHER THAN A FIX. A
+// trial serves a certificate for ten minutes and then puts the previous one back BY ITSELF —
+// quince deciding, on a timer, to stop serving TLS, the one event the ruling assumed could not
+// happen. The trial landed after the ruling and nothing pointed back at it.
+//
+// WHAT IT COSTS THE USER IT STRANDS, since that is what decides it. Someone whose certificate
+// works never sees this. It lands on the one whose certificate did NOT work — already the user
+// being asked to trust the ten-minute rollback as a safety net. The browser holds a permanent
+// upgrade to an origin that stopped existing, quince answers plain http, and the failure NAMES
+// NO CAUSE: from the browser's side the connection simply fails. Recovery is clearing the
+// cached redirect for that host, which the product does not mention and a first-run user will
+// not guess.
+//
+// THE PREDICATE IS THE CONFIG, NOT `is a trial running`. Those differ in the state that
+// matters — a pair loaded and unconfirmed with no trial in flight — and a trial-shaped test
+// would need revisiting the moment anything else can withdraw TLS.
+//
+// ALREADY-POISONED CACHES ARE OUT OF REACH and the ruling says so: anyone who ran a trial on an
+// earlier build still holds the 301, and no server-side change reaches them.
+func redirectToHTTPS(tlsDeclared func() bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// r.Host is the host:port the client actually asked for, which is what makes "same
 		// URL, upgraded in place" true — including a non-default port, the normal case here
 		// now that the default is :8968.
 		u := *r.URL
 		u.Scheme, u.Host = "https", r.Host
-		http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
+		code := http.StatusTemporaryRedirect
+		if tlsDeclared() {
+			code = http.StatusMovedPermanently
+		}
+		http.Redirect(w, r, u.String(), code)
 	}
 }
 

@@ -786,9 +786,32 @@ narrows which requests get a usable cookie without changing who can read the wir
 machinery that reads as security it does not provide. **The banner is NOT dismissible** — a degraded
 mode that can be hidden stops being surfaced.
 
-**AND IT WINS OVER THE REDIRECT.** Gap A (contracts §6) routes one port by first byte and sends
-plain-HTTP connections a `301` to `https://<same host>:<same port>` — **except when this setting is
+**AND IT WINS OVER THE REDIRECT.** Gap A (contracts §6) routes one port by first byte and redirects
+plain-HTTP connections to `https://<same host>:<same port>` — **except when this setting is
 enabled, where quince serves them.** Operator, 2026-08-02 (quince#446).
+
+**THE REDIRECT IS `301` ONLY WHEN `config.yml` NAMES A PAIR; otherwise it is `307`.** Operator,
+2026-08-17 (quince#1157), **amending** the 2026-08-02 ruling rather than correcting an oversight in
+it — the same shape quince#1152 used for quince#849: one ruling, revisited because a mechanism
+arrived that its premise excluded.
+
+The `301` was chosen because it is cacheable, so a bookmark upgrades itself once and stays upgraded.
+Its recorded cost was that it stays cached if the certificate later goes away, and that was accepted
+on one clause: *"turning TLS off is a config edit rather than something quince ever decides on its
+own."* **`certTrial` falsified it.** A trial serves a certificate for ten minutes and then puts the
+previous one back **by itself** — quince deciding, on a timer, to stop serving TLS. The trial landed
+after the ruling and nothing pointed back at it.
+
+**The predicate is the CONFIG, not *"a trial is running"*.** Those differ in the state that matters —
+a pair loaded and unconfirmed with no trial in flight — and a trial-shaped test would need revisiting
+the moment anything else can withdraw TLS. *Permanent only when the state is permanent* is what the
+`301` was chosen for; only the assumption about who could make the state impermanent broke.
+
+**Who it strands is why this is not cosmetic.** A user whose certificate works never sees it. It
+lands on the one whose certificate did **not** work — already the user being asked to trust the
+ten-minute rollback as a safety net — and **the failure names no cause**, because from the browser's
+side the connection simply fails. Already-cached `301`s are out of reach of any server-side change,
+which the ruling states rather than tries to fix.
 
 The reason is the case that inverted this question to begin with: over WireGuard or Tailscale the
 transport is *already* encrypted, and a user who configured a certificate for one path should not be
