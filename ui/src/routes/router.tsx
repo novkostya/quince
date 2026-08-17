@@ -11,6 +11,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { DeviceDetailsPage } from "@/pages/DeviceDetailsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SettingsAuthPage } from "@/pages/SettingsAuthPage";
+import { NotificationsInstallPage } from "@/pages/NotificationsInstallPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
 
@@ -126,6 +127,12 @@ export const router = createBrowserRouter([
       // the authed shell, unlike its onboarding sibling, which is a top-level route: one has a
       // session and one does not, which is the whole of qn.6m D2.
       { path: "settings/auth", element: <SettingsAuthPage /> },
+      // The notifications install step (qn.12, spec D1). INSIDE the authed shell, unlike the
+      // `/onboarding/*` routes at the top of this file: nothing here is a prerequisite of logging
+      // in, so it needs none of their exemptions and must not acquire one. What it reports is a
+      // property of the visitor's own browser, and an unauthenticated caller has no business
+      // learning what this install can do.
+      { path: "settings/notifications", element: <NotificationsInstallPage /> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
