@@ -189,13 +189,21 @@ are the same thing here**, which is what makes D1 easy.
 - **The keys nothing reads** (`sessions.ttl_minutes`, `automation.*`). quince#656 and `qn.12`'s.
   Live-reload cannot make an unread field take effect, and folding it in would let this rung claim a
   key works when nothing consumes it.
-- **A WebSocket event for config changes.** `qn.6g` rung-ruled decision 4 declined one for the write
-  path, and a reload has no better claim.
-  **NOTHING REFETCHES AN OPEN SETTINGS PAGE, so a hand-edit applies while the screen keeps showing
-  the old value** — `refetchOnWindowFocus` is `false` app-wide (`ui/src/lib/queryClient.ts:9`),
-  `useConfig` sets no `refetchInterval`, and there is no event. `staleTime: 5_000` means it refreshes
-  on remount, so navigating away and back is current; **staying on the page is the case that never
-  updates**, which is what testing a hand-edit looks like. Filed as quince#1162 and NOT fixed here.
+- **~~A WebSocket event for config changes.~~ OVERTURNED — it is IN SCOPE and built.** Operator
+  ruling 2026-08-17, [quince#1162](https://github.com/novkostya/quince/issues/1162), option C:
+  `config.updated`, empty payload, fired on a write, an applied hand-edit and a **refused** one.
+  contracts §3 carries it.
+
+  **The rung declined it on a premise that was never true** — *"the Settings page already re-reads on
+  focus"*. It does not: `refetchOnWindowFocus` is `false` app-wide (`ui/src/lib/queryClient.ts`),
+  `useConfig` sets no `refetchInterval`, and there was no event. So **nothing refetched an open page**
+  and a hand-edit applied while the screen kept showing the old document. `staleTime: 5_000` refreshes
+  on remount, so navigating away and back was current; **staying on the page was the case that never
+  updated** — which is exactly what testing a hand-edit looks like, and how the Operator found it.
+
+  **Kept as an overturned bullet rather than deleted**, because this rung shipped without the event
+  and a reader comparing `qn.6q` against the code needs to know which side of the ruling each part
+  landed on.
 - **The lost-update interleaving.** Operator hand-edits while a UI save is in flight: the save wins
   and the hand-edit is overwritten. That is true **today** and is a property of two writers with no
   lock between them, not of the watcher. **RULED as an acceptance** (question 3 below): named in
