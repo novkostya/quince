@@ -254,6 +254,7 @@ func NewRouter(deps Deps) http.Handler {
 		apiMux.HandleFunc("GET /api/notifications", deps.handleNotificationsGet())
 		apiMux.HandleFunc("POST /api/notifications/subscriptions", deps.handleNotificationsSubscribe())
 		apiMux.HandleFunc("DELETE /api/notifications/subscriptions/{id}", deps.handleNotificationsUnsubscribe())
+		apiMux.HandleFunc("POST /api/notifications/test", deps.handleNotificationsTest())
 	}
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())

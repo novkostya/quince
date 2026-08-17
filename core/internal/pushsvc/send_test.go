@@ -300,3 +300,79 @@ func decryptAsUserAgentHere(t *testing.T, uaPriv *ecdh.PrivateKey, authSecret, b
 }
 
 var errShort = errors.New("body is shorter than an aes128gcm header")
+
+// SEND-TEST IS THE ONLY WAY ANYONE CAN ANSWER "IS THIS WORKING?" without waiting three days for a
+// device to go stale. It has to reach a real subscription and report per-device outcomes.
+func TestSendTestDeliversAndReportsPerDevice(t *testing.T) {
+	staged := &stagedPush{status: http.StatusCreated}
+	srv := staged.server(t)
+	s, _ := senderWith(t, srv.URL+"/push/token")
+	s = s.WithHTTPClient(srv.Client())
+
+	results, err := s.SendTest(context.Background())
+	if err != nil {
+		t.Fatalf("send test: %v", err)
+	}
+	if len(results) != 1 || results[0].State != "sent" {
+		t.Fatalf("test send did not report a delivery: %+v", results)
+	}
+	if results[0].Label != "iPhone" {
+		t.Errorf("the result is not addressed by label: %+v", results[0])
+	}
+	// THE COPY MUST READ AS A TEST. Somebody is looking at the button they just tapped, and a
+	// notification indistinguishable from a real reminder would be worse than none.
+	uaPriv, err := ecdh.P256().NewPrivateKey(mustB64(t, rfcUAPrivate))
+	if err != nil {
+		t.Fatalf("ua key: %v", err)
+	}
+	plain, err := decryptAsUserAgentHere(t, uaPriv, mustB64(t, rfcAuth), staged.body)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if !strings.Contains(string(plain), "test") {
+		t.Errorf("the test notification does not say it is a test:\n%s", plain)
+	}
+	// AND IT DOES NOT DEEP-LINK TO A DEVICE. A test belongs to no device, and pointing at one would
+	// be a lie about why it arrived.
+	if strings.Contains(string(plain), "/devices/") {
+		t.Errorf("the test notification deep-links to a device page:\n%s", plain)
+	}
+}
+
+// A DEAD SUBSCRIPTION IS REPORTED AS `expired`, NOT `error`. They have different remedies —
+// re-subscribe on that device, versus try again — and the screen has to be able to say which.
+func TestSendTestDistinguishesExpiredFromError(t *testing.T) {
+	for status, want := range map[int]string{
+		http.StatusGone:                "expired",
+		http.StatusInternalServerError: "error",
+	} {
+		staged := &stagedPush{status: status}
+		srv := staged.server(t)
+		s, _ := senderWith(t, srv.URL+"/push/token")
+		s = s.WithHTTPClient(srv.Client())
+
+		results, err := s.SendTest(context.Background())
+		if err != nil {
+			t.Fatalf("status %d: %v", status, err)
+		}
+		if len(results) != 1 || results[0].State != want {
+			t.Errorf("status %d → %+v, want state %q", status, results, want)
+		}
+	}
+}
+
+// NO SUBSCRIPTIONS IS AN EMPTY RESULT, NOT AN ERROR. "Nobody is subscribed" is a true answer the
+// screen must be able to give, and an error would make it look like something broke.
+func TestSendTestWithNoSubscriptionsIsNotAnError(t *testing.T) {
+	s, _ := svc(t)
+	if _, err := s.VAPIDPublicKey(); err != nil {
+		t.Fatalf("key: %v", err)
+	}
+	results, err := s.SendTest(context.Background())
+	if err != nil {
+		t.Fatalf("send test with no subscriptions errored: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %d results with nobody subscribed", len(results))
+	}
+}

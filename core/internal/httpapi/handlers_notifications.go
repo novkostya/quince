@@ -112,3 +112,32 @@ func (d Deps) handleNotificationsUnsubscribe() http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+// handleNotificationsTest sends one notification to every live subscription. → 202 | 500.
+//
+// IT EXISTS BECAUSE "IS THIS WORKING?" IS OTHERWISE UNANSWERABLE without waiting for a device to go
+// stale — three days by default (spec D10). It is what the rung's click-list uses and what a support
+// conversation starts with.
+//
+// 202 WITH THE OUTCOMES IN THE BODY, not 200 and not a bare 204. Delivery is per-device and partial
+// success is the NORMAL case — one phone live, one gone — so a single status could only be true of
+// one of them. The body names each device by label; an endpoint never appears, because this response
+// is the kind of thing that gets pasted into an issue.
+func (d Deps) handleNotificationsTest() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		results, err := d.Notifications.SendTest(r.Context())
+		if err != nil {
+			writeError(w, d.Log, http.StatusInternalServerError, "internal",
+				"could not send the test notification")
+			return
+		}
+		if results == nil {
+			// A NON-NIL SLICE so the field is `[]` rather than `null` — and `[]` is a real answer
+			// here: it means there is nobody subscribed, which the screen must be able to say.
+			results = []wire.PushDeliveryResult{}
+		}
+		writeJSON(w, d.Log, http.StatusAccepted, struct {
+			Results []wire.PushDeliveryResult `json:"results"`
+		}{Results: results})
+	}
+}

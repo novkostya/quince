@@ -37,10 +37,15 @@ type Service struct {
 	store Store
 	newID IDFunc
 	now   func() time.Time
+	// subject is RFC 8292's `sub` claim — a contact a push service may use to reach whoever operates
+	// this quince when its deliveries misbehave. A mailto with no mailbox behind it is the honest
+	// default for a self-hosted install: the claim must be a mailto: or https: URI, and inventing an
+	// address the operator does not own would be worse than a local one.
+	subject string
 }
 
 func New(s Store, newID IDFunc, now func() time.Time) *Service {
-	return &Service{store: s, newID: newID, now: now}
+	return &Service{store: s, newID: newID, now: now, subject: "mailto:quince@localhost"}
 }
 
 // WithHTTPClient points deliveries at a specific client.

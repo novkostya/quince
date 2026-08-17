@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,14 +17,16 @@ import (
 // about STATUS CODES AND SHAPE — `pushsvc` has its own suite for the key's lifecycle, and driving a
 // real SQLite store here would test that twice and this once.
 type fakeNotifications struct {
-	key     string
-	keyErr  error
-	subs    []wire.PushSubscription
-	subErr  error
-	newID   string
-	subsErr error
-	gone    bool
-	delErr  error
+	key         string
+	keyErr      error
+	subs        []wire.PushSubscription
+	subErr      error
+	newID       string
+	subsErr     error
+	gone        bool
+	delErr      error
+	testResults []wire.PushDeliveryResult
+	testErr     error
 }
 
 func (f *fakeNotifications) VAPIDPublicKey() (string, error) { return f.key, f.keyErr }
@@ -32,6 +35,9 @@ func (f *fakeNotifications) Subscriptions() ([]wire.PushSubscription, error) {
 }
 func (f *fakeNotifications) Subscribe(_, _, _, _ string) (string, error) { return f.newID, f.subErr }
 func (f *fakeNotifications) Unsubscribe(string) (bool, error)            { return f.gone, f.delErr }
+func (f *fakeNotifications) SendTest(context.Context) ([]wire.PushDeliveryResult, error) {
+	return f.testResults, f.testErr
+}
 
 // THE SURFACE IS BEHIND EVERY GUARD, AND `authExempt` DOES NOT GROW.
 //
@@ -189,4 +195,50 @@ func depsWithNotifications(t *testing.T, n NotificationReader) Deps {
 	d := testDeps(t)
 	d.Notifications = n
 	return d
+}
+
+// THE TEST ENDPOINT ANSWERS 202 WITH PER-DEVICE OUTCOMES. Partial success is the normal case — one
+// phone live, one gone — so a single status could only be true of one of them.
+func TestTheTestEndpointReportsEveryDevice(t *testing.T) {
+	d := depsWithNotifications(t, &fakeNotifications{testResults: []wire.PushDeliveryResult{
+		{Label: "iPhone", State: "sent"},
+		{Label: "old iPad", State: "expired"},
+	}})
+	rec := httptest.NewRecorder()
+	d.handleNotificationsTest()(rec, httptest.NewRequest(http.MethodPost, "/api/notifications/test", nil))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"iPhone", `"state":"sent"`, "old iPad", `"state":"expired"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the response is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// NOBODY SUBSCRIBED IS `[]` AND STILL A 202. It is a true answer the screen must be able to render,
+// and an error would make it look like something broke.
+func TestTheTestEndpointWithNoSubscriptionsIsStillAccepted(t *testing.T) {
+	d := depsWithNotifications(t, &fakeNotifications{})
+	rec := httptest.NewRecorder()
+	d.handleNotificationsTest()(rec, httptest.NewRequest(http.MethodPost, "/api/notifications/test", nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"results":[]`) {
+		t.Errorf("an empty result did not render as []:\n%s", rec.Body.String())
+	}
+}
+
+// AND IT IS BEHIND EVERY GUARD, like its three siblings.
+func TestTheTestEndpointIsNotPreAuth(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/notifications/test", nil)
+	if authExempt(r) {
+		t.Errorf("POST /api/notifications/test is pre-auth — anyone reaching the port could make quince send")
+	}
+	if csrfExempt(r) {
+		t.Errorf("POST /api/notifications/test is CSRF-exempt while mutating")
+	}
 }

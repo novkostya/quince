@@ -908,3 +908,20 @@ type NotificationsResponse struct {
 	VAPIDPublicKey string             `json:"vapid_public_key"`
 	Subscriptions  []PushSubscription `json:"subscriptions"`
 }
+
+// PushDeliveryResult is what happened to one device on a send (qn.12).
+//
+// BY LABEL, NEVER BY ENDPOINT. This is the shape that ends up in a log line or pasted into an issue,
+// and an endpoint plus its keys is a capability against that phone.
+//
+// THREE STATES, NOT A BOOLEAN. `sent`, `expired` and `error` are distinct because "the push service
+// was unreachable" and "the phone is gone" are different facts with different remedies — re-subscribe
+// on that device, versus try again — and a caller that cannot tell them apart cannot report either
+// honestly.
+type PushDeliveryResult struct {
+	Label string `json:"label"`
+	// State is `sent` | `expired` | `error`.
+	State string `json:"state"`
+	// Error is present only for `error`, and never carries an endpoint path.
+	Error string `json:"error,omitempty"`
+}
