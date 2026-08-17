@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { ConfigView } from "./ConfigView";
 import type { ConfigResponse } from "@/lib/types";
 
@@ -103,5 +103,86 @@ describe("ConfigView shows the file rather than the parsed document", () => {
   it("says so when there is no file yet", () => {
     const { container } = render(<ConfigView data={response({ file_text: "" })} />);
     expect(container.querySelector("pre")?.textContent).toContain("No config.yml yet");
+  });
+});
+
+// THE DISCARDED BANNER (qn.6q slice 2b). Until file-watch, `discarded` could only be reached by a
+// startup refusal, which `RequireStorage` sent to the first-run screen for an unrelated reason — so
+// no client here branched on it and nothing noticed. A hand-edit refused at runtime reaches neither,
+// which is what these cover.
+// A discarded response whose RUNNING config carries the given storage list. It MERGES into the base
+// fixture rather than replacing `config`, which the spread in `response()` would do — the banner
+// reads `config.storage` and the type demands every other section be present.
+function discarded(storage: ConfigResponse["config"]["storage"]): ConfigResponse {
+  const base = response();
+  return {
+    ...base,
+    discarded: true,
+    warnings: [{ path: "", message: "invalid YAML: line 3" }],
+    config: { ...base.config, storage },
+  };
+}
+
+describe("ConfigView branches its headline on discarded", () => {
+  it("says nothing at all when the config is in force", () => {
+    render(<ConfigView data={response()} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // THE STARTUP CASE — no storage in the RUNNING config, so quince is on Default(). The strong
+  // sentence is the true one and must survive.
+  it("says no backups are being made when quince is running on its defaults", () => {
+    render(<ConfigView data={discarded(null)} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not read your configuration/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/No backups are being made/i);
+  });
+
+  // THE HAND-EDIT CASE — storage IS running, from last-good. Claiming "no backups are being made"
+  // here would be false, and it is the sentence the startup copy would have carried over.
+  it("does not claim backups have stopped when last-good is still running", () => {
+    render(
+      <ConfigView
+        data={discarded([
+          {
+            name: "main",
+            path: "/backups",
+            default: true,
+            backend: "copy",
+            zfs: {
+              parent_dataset: "",
+              mode: "hook",
+              hook_cmd: "",
+              ssh_user: "",
+              ssh_host: "",
+              ssh_port: 22,
+              ssh_key: "",
+              seed: "auto",
+            },
+            retention: null,
+          },
+        ])}
+      />,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/not in force/i);
+    expect(alert).toHaveTextContent(/still running the last configuration that loaded/i);
+    expect(alert).not.toHaveTextContent(/No backups are being made/i);
+    expect(alert).not.toHaveTextContent(/running on its defaults/i);
+    // The recovery promise is the half that makes the banner escapable, and it is only true
+    // because something is polling the file.
+    expect(alert).toHaveTextContent(/no restart needed/i);
+  });
+
+  // The banner must not be mistaken for the warnings box directly under it — that similarity is the
+  // defect it exists to fix, so the two must not share a treatment.
+  it("is visually distinct from the warnings list", () => {
+    const { container } = render(
+      <ConfigView data={discarded(null)} />,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.className).toContain("border-danger");
+    const warnBox = container.querySelector(".bg-accent-soft");
+    expect(warnBox).not.toBeNull();
+    expect(warnBox?.className).not.toContain("border-danger");
   });
 });

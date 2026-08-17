@@ -12,9 +12,67 @@ import { formatDateTime } from "@/lib/format";
 // `file_text` is NOT a rendering of `data.config`, and since qn.6j they are genuinely different
 // documents: `config` is the RESOLVED configuration with every key filled, `file_text` is only what
 // the user set. Rendering the former here would show a document the file does not contain.
+// DiscardedBanner says what is actually true, and WHICH of the two true things it is.
+//
+// ONE FLAG SERVES TWO SENTENCES, AND THE STORAGE LIST IS WHAT SEPARATES THEM. That needs saying,
+// because a reader meeting this will ask why `discarded` alone is not enough and conclude a second
+// boolean was forgotten. It was not — it was declined, deliberately (Operator, 2026-08-17,
+// quince#1130), on the grounds that a boolean no client branches on differently costs every client
+// and buys nothing. This IS a client that branches differently, and it needs no new field:
+//
+//   - `discarded` + NO storage → the file was refused AT LOAD, so quince is on `Default()`. Nothing
+//     declared is in effect and nothing is being backed up. The strong sentence is correct.
+//   - `discarded` + storage present → the file was refused at RELOAD, so quince is on the last
+//     document that loaded. Storage is running and backups continue; saying "no backups are being
+//     made" here would be false.
+//
+// `data.config` is the RUNNING configuration rather than the file (see `file_text`'s own note), so
+// its storage list is a fact about what quince is doing — which is exactly the question. Verified
+// against `RequireStorage`, which derives the same state the same way from the same field.
+//
+// THE SECOND CASE IS THE COMMON ONE ONCE FILE-WATCH SHIPS, and the pair is near-exhaustive rather
+// than merely tidy: a reload refusal implies quince was already running, and quince does not run
+// without storage — so `discarded` with a non-empty list is the hand-edit case in practice, and the
+// degenerate overlap collapses harmlessly because neither case is backing anything up.
+function DiscardedBanner({ data }: { data: ConfigResponse }) {
+  const storages = data.config.storage;
+  const runningOnDefaults = storages === null || storages === undefined || storages.length === 0;
+  return (
+    // `border-danger` on `bg-card`, matching `InsecureTransportBanner` — the house idiom for a
+    // banner that must not be mistaken for the warning box directly below it. Deliberately NOT the
+    // `bg-accent-soft`/`text-warn` treatment the warnings list uses: that similarity is the whole
+    // defect this banner exists to fix.
+    <div role="alert" className="mb-4 rounded-card border border-danger bg-card px-3 py-2 text-sm text-fg">
+      <div className="font-medium text-danger">
+        {runningOnDefaults
+          ? "quince could not read your configuration"
+          : "Your configuration file is not in force"}
+      </div>
+      <p className="mt-1">
+        {runningOnDefaults
+          ? "quince is running on its defaults, so nothing your file declares is in effect — including any storage. No backups are being made."
+          : "quince could not read the file on disk, so it is still running the last configuration that loaded. Your recent edit has not taken effect. Fix the problem below and it will be picked up on its own — no restart needed."}
+      </p>
+    </div>
+  );
+}
+
 export function ConfigView({ data }: { data: ConfigResponse }) {
   return (
     <div>
+      {/* THE FATALITY GETS ITS OWN HEADLINE (contracts §1's consumer rule: "branch the HEADLINE on
+          this, render `warnings` either way"). Until file-watch, no client here branched on
+          `discarded` and that was harmless by accident — the only route to it was a startup refusal,
+          which `RequireStorage` caught for an unrelated reason and sent to the first-run screen. A
+          hand-edit refused at runtime reaches neither, so without this the operator's file is out of
+          force and the only thing on screen is a line in a warnings list, at the weight of an
+          ignored typo.
+
+          The trade this closes, worth stating because it is not obviously the right way round:
+          BEFORE file-watch a bad hand-edit was invisible until a restart and then very loud; AFTER,
+          it is caught in two seconds and would have been quiet. */}
+      {data.discarded ? <DiscardedBanner data={data} /> : null}
+
       {data.warnings.length > 0 ? (
         <div className="mb-4 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn">
           <div className="font-medium">Configuration warnings</div>
