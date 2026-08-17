@@ -246,7 +246,7 @@ for (const empty of [null, []]) {
     await page.goto("/");
     await page.waitForURL(/\/onboarding\/storage/);
   
-    await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^add storage$/i })).toBeVisible();
   
     // THE SAME FORM, not a second copy — the probe, its three branches and the helper check all come
     // from `AddStorageForm`. Asserted by driving it here: a divergent copy would not answer.
@@ -441,7 +441,7 @@ test("a config quince could not use is explained, not reported as 'you have no s
     body.file_text = "storage:\n  - path: /backups\n    backend: zfs\n    zfs:\n      mode: exec\n";
     // THE FATALITY, which is what makes this the DISCARDED case rather than a merely-warned one
     // (quince#849). Without it this fixture becomes the state in the test below, where
-    // "Add your first storage" is the CORRECT headline.
+    // "Add storage" is the CORRECT headline.
     body.discarded = true;
     await route.fulfill({ response: res, json: body });
   });
@@ -450,7 +450,7 @@ test("a config quince could not use is explained, not reported as 'you have no s
   await page.waitForURL(/\/onboarding\/storage/);
 
   // THE FALSE CLAIM IS GONE. This is the assertion the issue was filed for.
-  await expect(page.getByRole("heading", { name: /add your first storage/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^add storage$/i })).toHaveCount(0);
   await expect(page.getByText(/needs somewhere to keep backups before/i)).toHaveCount(0);
 
   // AND THE SHARPER CLAIM THE BIT BUYS — not "there is a problem", but that nothing is being backed
@@ -481,7 +481,7 @@ test("a config quince could not use is explained, not reported as 'you have no s
 // THE ORDINARY FIRST RUN IS UNCHANGED, which is what stops the test above from passing on a screen
 // that has simply lost its heading. No warnings — the overwhelmingly common case — still reads as
 // the first-run step it is.
-test("a clean first run still says 'Add your first storage'", async ({ page }) => {
+test("a clean first run still says 'Add storage'", async ({ page }) => {
   await authenticate(page);
 
   await page.route("**/api/config", async (route) => {
@@ -495,7 +495,7 @@ test("a clean first run still says 'Add your first storage'", async ({ page }) =
   await page.goto("/");
   await page.waitForURL(/\/onboarding\/storage/);
 
-  await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^add storage$/i })).toBeVisible();
   await expect(page.getByTestId("config-warnings")).toHaveCount(0);
 });
 
@@ -530,7 +530,7 @@ test("a config that merely carries warnings still reads as first run, with the w
 
   // THE FIRST-RUN HEADLINE IS CORRECT HERE, and claiming the config could not be read would be the
   // same state-honesty defect pointed the other way.
-  await expect(page.getByRole("heading", { name: /add your first storage/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^add storage$/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /could not read your configuration/i })).toHaveCount(0);
   await expect(page.getByText(/no backups are being made/i)).toHaveCount(0);
 
