@@ -70,7 +70,8 @@ both on the same day and either sequence builds.
 - **Fixing the fields nothing reads.** `backup.transport` is quince#654; `sessions.ttl_minutes` is
   quince#656, filed while writing this spec. Live-apply cannot make an unread field take effect, and
   folding the fix in here would let this rung's table claim a key works when nothing consumes it.
-- **A new WebSocket event for config changes.** Rung-ruled decision 4.
+- **A new WebSocket event for config changes.** Rung-ruled decision 4 — **deferred to file-watch,
+  which minted it as `config.updated` in `qn.6q`** (quince#1162). Out of scope *here*, not declined.
 
 ---
 
@@ -570,6 +571,13 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
    file-watch serves — so the event belongs with the gap's answer, not ahead of it. Recorded because
    *not* minting a `config.updated` kind is a decision, and the cheap-looking moment to mint one is
    the same PR that adds the notify.
+
+   **DISCHARGED EXACTLY AS THIS DECISION SPECIFIED: `config.updated` is minted by `qn.6q`** —
+   Operator ruling 2026-08-17, [quince#1162](https://github.com/novkostya/quince/issues/1162),
+   option C. The kind was deferred to *"the gap's answer"*, and file-watch is that answer, so this
+   ran as written rather than being overturned. **What it did not foresee:** the event also fires
+   when a hand-edit is **REFUSED** — the running configuration is unchanged there, `discarded` has
+   flipped, and no applier runs. contracts §3 carries the three transitions.
 5. **`renderSlot` takes a name, not an index.** Narrowing the two windows of fact 6 would leave a
    race that is rare rather than absent; re-finding under the lock removes them.
 
