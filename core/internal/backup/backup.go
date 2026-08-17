@@ -73,6 +73,22 @@ const (
 	ErrCancelled          = "cancelled"
 )
 
+// AllErrorCodes is every code the block above declares, in declaration order.
+//
+// IT EXISTS SO A CONSUMER CAN BE TOTAL OVER THEM, and `qn.12`'s notifier is the first: it routes
+// each code to a push kind, and a code routed to nothing sends nothing — a failure with no error,
+// no log line, and no symptom except a user who was never told. Go cannot enumerate a constant block
+// at runtime, so the list is written out and a test in this package asserts it matches the source.
+// **Adding a code without adding it here fails that test**, which is what makes the downstream
+// totality gate a live rule rather than a snapshot of one afternoon.
+func AllErrorCodes() []string {
+	return []string{
+		ErrDeviceDisconnected, ErrDeviceNotVisible, ErrNotPaired, ErrEncryptionRequired,
+		ErrDiskLow, ErrVerifyFailed, ErrCommitFailed, ErrBackupFailed,
+		ErrInterrupted, ErrCancelled,
+	}
+}
+
 // Config holds the engine's tunables — code constants (design §4; NOT v0.1 config keys, D12).
 // Tests inject small durations. Values are the Named constants recorded in the qn.4a spec.
 type Config struct {
