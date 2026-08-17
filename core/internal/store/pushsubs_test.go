@@ -142,6 +142,48 @@ func TestTheVAPIDKeyRoundTripsAndCannotBeReplaced(t *testing.T) {
 	if err := s.SetVAPIDPrivateKey(other); err == nil {
 		t.Errorf("a second write replaced the key — every existing subscription would be silently unsignable")
 	}
+	// AND THE KEY IS UNCHANGED, not merely the second call refused. A guard that returns an error
+	// after writing would satisfy the line above and still have destroyed the thing it guards.
+	after, _, err := s.VAPIDPrivateKey()
+	if err != nil {
+		t.Fatalf("read after refusal: %v", err)
+	}
+	if string(after) != string(key) {
+		t.Errorf("the refused write changed the stored key anyway")
+	}
+}
+
+// WHAT THIS FILE DOES NOT PROVE, stated so a green suite does not imply it.
+//
+// `SetVAPIDPrivateKey` is safe against a genuine RACE because it uses `ON CONFLICT DO NOTHING` —
+// the database decides, not this process. **The test above does not distinguish that from
+// check-then-act**: it calls twice in sequence, and a read-then-write implementation passes it
+// identically. A real interleaving needs two connections hitting the row at once, which is a
+// different kind of test from anything else in this package.
+//
+// So the guarantee rests on the SQL rather than on this suite, and the comment at the function is
+// where the argument lives. Recorded because the first version of this code WAS check-then-act, this
+// test passed against it, and a reviewer caught it by reading — not by running anything.
+func TestTheOverwriteGuardIsAtomicNotCheckThenAct(t *testing.T) {
+	s := pushStore(t)
+	key := make([]byte, 32)
+	key[0] = 1
+	if err := s.SetVAPIDPrivateKey(key); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// The best this level can assert: the write goes through `SetSettingIfAbsent`, so a second
+	// insert of the same key reports NOT inserted rather than updating.
+	inserted, err := s.SetSettingIfAbsent(VAPIDKeySetting, "anything-else")
+	if err != nil {
+		t.Fatalf("if-absent: %v", err)
+	}
+	if inserted {
+		t.Errorf("the settings row was inserted twice — ON CONFLICT DO NOTHING is not in force")
+	}
+	got, _, _ := s.VAPIDPrivateKey()
+	if string(got) != string(key) {
+		t.Errorf("the row was overwritten by a second insert")
+	}
 }
 
 // A CORRUPTED STORED KEY FAILS TO DECODE RATHER THAN ARRIVING SHORT. A short key would produce
