@@ -89,7 +89,11 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 				return
 			}
 			if !auth.CheckCSRF(r) {
-				writeError(w, d.Log, http.StatusForbidden, "csrf", "missing or invalid CSRF token")
+				// THE SAME SENTENCE THE MIDDLEWARE GIVES, from the same function. This branch is
+				// reached only by a caller that HAS a session, so the plain-http arm cannot fire —
+				// but sharing the source is what keeps the product saying one thing in one way if
+				// either half moves.
+				writeError(w, d.Log, http.StatusForbidden, "csrf", d.csrfRefusal(r))
 				return
 			}
 		}
