@@ -237,12 +237,19 @@ A refusal is loud, but it exits from a wrapper whose output you may have filtere
 wrong oid is silent. One `GET` distinguishes *cast at what I read*, *cast at something else*, and **not
 cast at all** — and only the third is recoverable by simply doing it again.
 
-**The pin's SURVIVAL is split the same way.** `gh pr update-branch --rebase` re-points an auto-set
-`commit_id` to the new head where an explicit one stays put (quince#110), and an explicit pin on a
-**`COMMENT`** survives an append *and* a rebase-and-force-push unchanged (quince-devlog#261 — three
-pins, two head moves). But an explicit pin on an **`APPROVED`** review has been measured **following
-the new head** after an author force-push (quince#775, on quince#774). Both repositories carry
-`dismiss_stale_reviews: true`, which is the natural suspect for the mechanism and is unproven.
+**The pin's SURVIVAL splits too, and NOT along the same line.** `gh pr update-branch --rebase`
+re-points an auto-set `commit_id` to the new head where an explicit one stays put (quince#110). An
+explicit pin on a **`COMMENT`** survives an append *and* a rebase-and-force-push unchanged
+(quince-devlog#261 — three pins, two head moves). An explicit pin on a **`CHANGES_REQUESTED`** also
+stays put across an author rebase-and-force-push (quince#1087, 2026-08-17: the verdict still reads
+`commit=f642b789` after the head moved to `80a317d6`). But an explicit pin on an **`APPROVED`**
+review has been measured **following the new head** after that same act (quince#775, on quince#774).
+
+**So the line is not `verdict` vs `comment` — one verdict state moves and the other does not.** The
+suspect is `dismiss_stale_reviews: true`, set on both repositories: dismissal is the only process
+that re-touches an existing review when the head moves, and it applies to **approvals**. Three
+states, two behaviours, and a mechanism that predicts the split — but nobody has tested it by
+turning the setting off, so it stays a hypothesis here rather than a rule.
 
 **Whatever that turns out to be, take `OLD` by hand and never from `reviews[].commit_id`.** Under the
 case that moves, `OLD == NEW`, so §4's range-diff compares a commit against itself and returns a clean
