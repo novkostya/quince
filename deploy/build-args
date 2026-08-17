@@ -1,0 +1,104 @@
+#!/bin/sh
+# build-args — the build-arg values deploy/Dockerfile needs, DERIVED rather than hand-listed.
+#
+# Prints one `NAME=VALUE` line on stdout for every ARG the Dockerfile declares that versions.env
+# supplies a value for. Callers turn those into whatever their builder wants; today both want
+# `--build-arg NAME=VALUE`, and both are container builds of the same Dockerfile.
+#
+# THE ARG LIST IS READ FROM THE DOCKERFILE, NEVER WRITTEN DOWN. A hand-written list is how this
+# recurs: someone adds an ARG, every other build path supplies it, and one path is silently short a
+# value. That is not hypothetical — quince#494 is the incident, and the failure does not name
+# anything that is actually wrong:
+#
+#   RUN git clone --depth 1 --branch ${NETMUXD_REF} https://github.com/jkcoxson/netmuxd /src/netmuxd
+#   fatal: repository '/src/netmuxd' does not exist
+#
+# With the ARG empty, `--branch` swallows the URL and git reads the DESTINATION as the repository to
+# clone. So an unset build-arg presents as "that repository does not exist", pointing at the one
+# path in the line that is not the problem. Four ARGs were empty that day; the image-ref ones carry
+# Dockerfile defaults and so worked silently, which is why the build got far enough to look healthy
+# before it failed.
+#
+# WHY THIS IS ITS OWN FILE. It was `deploy/fly-deploy`'s private loop until the release pipeline
+# became a second consumer (quince#724). Copying twenty lines of first-match-wins `sed` and a
+# here-doc loop into a second script is exactly what versions.env's own header forbids — "add a
+# consumer here in the same change that adds it" only works if there is ONE derivation to consume.
+#
+# THE CONSUMPTION FORM, written once here because both of its traps are silent:
+#
+#   kv=$(deploy/build-args) || exit $?          # <- capture FIRST; see below
+#   set --
+#   while IFS= read -r line; do
+#           [ -n "$line" ] || continue
+#           set -- "$@" --build-arg "$line"
+#   done <<EOF
+#   $kv
+#   EOF
+#
+# CAPTURE FIRST, because `$(...)` inside a here-doc BODY is a redirection, and a redirection's
+# command substitution does not trip `set -e`. Feeding this script directly into the here-doc would
+# turn a refusal below into an empty build-arg list — silently reproducing the exact incident this
+# file exists to prevent, one level up.
+#
+# HERE-DOC, NOT A PIPE, because `… | while read` runs the loop body in a SUBSHELL, so every
+# `set --` is discarded at the `done` and the caller carries no build-args at all. That was this
+# code's own bug once, reintroduced by the obvious fix for shellcheck's SC2013. Here-doc
+# redirection keeps the loop in the caller's shell, and satisfies SC2013 honestly rather than by
+# silencing it.
+#
+# Usage: build-args [DOCKERFILE [VERSIONS_ENV]]
+# Both arguments exist so the suite can drive synthetic inputs; every real caller passes neither.
+set -eu
+
+cd "$(dirname "$0")/.."
+
+DOCKERFILE=${1:-deploy/Dockerfile}
+VERSIONS=${2:-versions.env}
+
+[ -f "$DOCKERFILE" ] || {
+	printf 'build-args: %s not found — run this from a quince checkout\n' "$DOCKERFILE" >&2
+	exit 2
+}
+[ -f "$VERSIONS" ] || {
+	printf 'build-args: %s not found — run this from a quince checkout\n' "$VERSIONS" >&2
+	exit 2
+}
+
+emitted=0
+defaulted=''
+while IFS= read -r name; do
+	[ -n "$name" ] || continue
+	# The first match wins, matching `.`-sourcing semantics; the pattern is not anchored past
+	# `=`, so a value that itself contains `=` survives intact.
+	value=$(sed -n "s/^${name}=//p" "$VERSIONS" | head -n 1)
+	if [ -n "$value" ]; then
+		printf '%s=%s\n' "$name" "$value"
+		emitted=$((emitted + 1))
+	else
+		defaulted="$defaulted $name"
+	fi
+done <<EOF
+$(sed -n 's/^ARG \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$DOCKERFILE" | sort -u)
+EOF
+
+# An ARG with no versions.env entry keeps the Dockerfile's own default, which is correct for the
+# image refs and for VERSION — the release build supplies that one itself, from the git tag.
+# Announced rather than passed over in silence: an empty build-arg is exactly what caused the
+# failure this script exists to prevent, so the one remaining way to get one is the one thing that
+# gets printed.
+if [ -n "$defaulted" ]; then
+	printf 'build-args: using the Dockerfile default for:%s\n' "$defaulted" >&2
+fi
+
+# REFUSE rather than emit nothing. Zero values means the two files no longer agree on a single ARG
+# name — a renamed ARG, a versions.env that lost its pins, a caller invoking this from the wrong
+# tree. Every one of those is a build that would proceed on Dockerfile defaults alone, which is the
+# state quince#494 was: plausible, green for a while, and wrong.
+if [ "$emitted" -eq 0 ]; then
+	printf 'build-args: NOTHING MATCHED — %s declares ARGs that %s supplies no value for.\n' \
+		"$DOCKERFILE" "$VERSIONS" >&2
+	printf '            Refusing rather than letting the build fall back to defaults.\n' >&2
+	exit 1
+fi
+
+printf 'build-args: %s value(s) from %s\n' "$emitted" "$VERSIONS" >&2

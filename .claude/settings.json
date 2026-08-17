@@ -159,7 +159,8 @@
       "Bash(make gap-heading-check)",
       "Bash(make gap-heading-check-test)",
       "Bash(make demo-block-check)",
-      "Bash(make demo-block-check-test)"
+      "Bash(make demo-block-check-test)",
+      "Bash(make build-args-test)"
     ]
   }
 }

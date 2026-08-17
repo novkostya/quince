@@ -227,6 +227,10 @@ demo-block-check: ## deploy/demo.md's yaml block must still be demo-deploy.yml; 
 privacy-check-test: ## The privacy gate's own failure-path suite (synthetic — needs no private layer)
 	@deploy/privacy/privacy-check-test
 
+.PHONY: build-args-test
+build-args-test: ## The Dockerfile-ARG derivation every container build depends on (quince#494)
+	@deploy/build-args-test
+
 # ---------------------------------------------------------------------------
 # Toolchain images — built once from the Dockerfile stages, reused by gates.
 # ---------------------------------------------------------------------------
@@ -341,7 +345,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
-                   demo-block-check-test
+                   demo-block-check-test build-args-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -404,7 +408,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
                    core/internal/storage/zfshelper/quince-zfs-helper \
                    deploy/storageless-smoke \
-                   deploy/fly-deploy \
+                   deploy/fly-deploy deploy/build-args deploy/build-args-test \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \
