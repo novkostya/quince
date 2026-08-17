@@ -173,6 +173,36 @@ func TestAnOversizePayloadIsRefused(t *testing.T) {
 	}
 }
 
+// THE BODY A PUSH SERVICE MUST ACCEPT IS 4096 OCTETS, AND THIS IS THE ONE ASSERTION THAT DOES NOT
+// FOLLOW THE CONSTANTS (RFC 8030 §7.2, relayed by RFC 8291 §4; quince#1149).
+//
+// Every other size test here compares against `maxPayload`, so it moves with whatever `maxPayload`
+// is defined as and cannot see a derivation that has drifted. `rs` and the body ceiling are
+// different quantities from different RFCs that coincide at 4096 today: raise `recordSize` to 8192,
+// a legal `rs`, and a maxPayload derived from it goes to 8089 with the whole suite still green.
+//
+// So this measures the ACTUAL ENCRYPTED BODY of the largest accepted payload against the literal
+// ceiling. It is the only thing here that fails if the derivation is re-attached to the wrong limit.
+func TestTheLargestAcceptedPayloadStillFitsTheBodyCeiling(t *testing.T) {
+	const rfc8030BodyCeiling = 4096 // §7.2, written out rather than referenced on purpose
+
+	body, err := Encrypt(Subscription{P256DH: rfcUAPublic, Auth: rfcAuthSecret},
+		make([]byte, maxPayload), nil, nil)
+	if err != nil {
+		t.Fatalf("the largest legal payload was refused: %v", err)
+	}
+	if len(body) > rfc8030BodyCeiling {
+		t.Fatalf("the largest accepted payload encrypts to %d octets, over the %d a push service "+
+			"must accept — maxPayload is derived from the wrong limit", len(body), rfc8030BodyCeiling)
+	}
+	// And it is not needlessly small either: the ceiling is meant to be reached, so a maxPayload
+	// left far under it would be a silent cap of its own.
+	if len(body) != rfc8030BodyCeiling {
+		t.Errorf("the largest accepted payload encrypts to %d octets, not the full %d — the framing "+
+			"arithmetic and the ceiling disagree", len(body), rfc8030BodyCeiling)
+	}
+}
+
 // ---------------------------------------------------------------------------------------------
 // RFC 8292 — VAPID.
 //
