@@ -45,11 +45,20 @@ func TestWatcherAppliesAHandEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitFor(t, 3*time.Second, "the hand-edit to be applied", func() bool {
-		return svc.Current().Backup.RequireEncryption != before
-	})
-	if got := a.count(); got != 1 {
-		t.Errorf("applier ran %d times, want 1", got)
+	// WAIT ON THE APPLIER, NOT ON THE SNAPSHOT — the two are not simultaneous, and waiting on the
+	// wrong one is a race this test lost in CI (`applier ran 0 times, want 1`, after 0.01s).
+	//
+	// `Reload` swaps `s.cfg` under `mu` and then calls `notify` OUTSIDE it, deliberately: an applier
+	// reaching into another subsystem while `mu` is held deadlocks the moment it calls back into
+	// `Current()`. So there is a real window where the snapshot has moved and no applier has run
+	// yet. Polling `Current()` and then asserting the count reads inside that window whenever the
+	// scheduler puts it there — never on an idle box, intermittently on a loaded one.
+	//
+	// The applier is the LAST of the two, so waiting on it makes the snapshot assertion below safe
+	// rather than lucky.
+	waitFor(t, 3*time.Second, "the appliers to be told", func() bool { return a.count() == 1 })
+	if got := svc.Current().Backup.RequireEncryption; got == before {
+		t.Errorf("require_encryption = %v, unchanged — the hand-edit did not reach the snapshot", got)
 	}
 }
 
