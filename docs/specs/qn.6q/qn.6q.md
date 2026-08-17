@@ -190,7 +190,15 @@ are the same thing here**, which is what makes D1 easy.
   Live-reload cannot make an unread field take effect, and folding it in would let this rung claim a
   key works when nothing consumes it.
 - **A WebSocket event for config changes.** `qn.6g` rung-ruled decision 4 declined one for the write
-  path; a reload has no better claim, and the Settings page already re-reads on focus.
+  path, and a reload has no better claim.
+  **NOTHING REFETCHES AN OPEN SETTINGS PAGE, so a hand-edit applies while the screen keeps showing
+  the old value** — `refetchOnWindowFocus` is `false` app-wide (`ui/src/lib/queryClient.ts:9`),
+  `useConfig` sets no `refetchInterval`, and there is no event. `staleTime: 5_000` means it refreshes
+  on remount, so navigating away and back is current; **staying on the page is the case that never
+  updates**, which is what testing a hand-edit looks like. Filed as quince#1162 and NOT fixed here.
+  *(This bullet read "the Settings page already re-reads on focus" until 2026-08-17 — a decision that
+  is still right, resting on a premise that was never true. Corrected rather than deleted because the
+  premise is what a later reader would have relied on.)*
 - **The lost-update interleaving.** Operator hand-edits while a UI save is in flight: the save wins
   and the hand-edit is overwritten. That is true **today** and is a property of two writers with no
   lock between them, not of the watcher. **RULED as an acceptance** (question 3 below): named in
