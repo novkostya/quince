@@ -1723,3 +1723,101 @@ func TestStartBackupNamesTeardownRatherThanClaimingItRuns(t *testing.T) {
 		})
 	}
 }
+
+// quince#808. The tool's size pair is per-PROTOCOL-MESSAGE — `backup_real_size` is a local in
+// `mb2_handle_receive_files`, reset on every DLMessageUploadFiles — so publishing it raw produced a
+// figure that fell as often as it rose: 20 downward steps in one measured run, worst
+// 2,684,354,560 -> 73,216. `Receiving files` marks each boundary, which is what makes banking the
+// finished batch possible.
+//
+// Driven through handleLine directly rather than through a transcript: the property under test is
+// the accumulation across boundaries, and a synthetic sequence states the boundaries outright.
+func TestBytesDoneIsCumulativeAndMonotonic(t *testing.T) {
+	h := newHarness(t, fakeParams{}, TransportUSB)
+	row := store.JobRow{
+		ID: "ACC1", UDID: testUDID, Kind: "backup", Transport: "usb", State: StateBackingUp,
+		Phase: PhaseReceiving, Liveness: LivenessActive, StartedAt: time.Now().UTC(),
+		IntentID: "ACC1", Attempt: 1,
+	}
+	if err := h.st.InsertJob(row); err != nil {
+		t.Fatal(err)
+	}
+	lj := &liveJob{row: row, cancel: func() {}}
+	ss := &superviseState{}
+
+	// Four batches, each announced by its own `Receiving files`, exactly as the tool emits them.
+	lines := []string{
+		"Receiving files",
+		"[==================================================] 100% (15.8 MB/15.8 MB)",
+		"Receiving files",
+		"[==================================================] 100% (12.1 MB/12.1 MB)",
+		"Receiving files",
+		"[==================================================] 100% (17.4 MB/17.4 MB)",
+		"Receiving files",
+		"[==================================================] 100% (5.5 MB/5.5 MB)",
+	}
+	var prev int64
+	for i, line := range lines {
+		h.eng.handleLine(lj, ss, line)
+		lj.mu.Lock()
+		got, total := lj.row.BytesDone, lj.row.BytesTotal
+		lj.mu.Unlock()
+		if got < prev {
+			t.Fatalf("line %d (%q): bytes_done went BACKWARDS %d -> %d — the defect this fixes",
+				i, line, prev, got)
+		}
+		// No whole-job total exists, so the denominator must never carry a per-batch figure beside a
+		// cumulative numerator: that lets `done` exceed `total`, which reads as a bug.
+		if total != 0 {
+			t.Fatalf("line %d: bytes_total = %d, want 0 (unknown)", i, total)
+		}
+		prev = got
+	}
+
+	want := parseSize("15.8", "MB") + parseSize("12.1", "MB") + parseSize("17.4", "MB") + parseSize("5.5", "MB")
+	if prev != want {
+		t.Fatalf("final bytes_done = %d, want the sum of every batch %d", prev, want)
+	}
+	// The control: the largest single batch is 17.4 MB, so a final figure equal to any one batch
+	// would mean the accumulator never ran and this test would pass on the old behaviour.
+	if prev <= parseSize("17.4", "MB") {
+		t.Fatalf("final %d is not larger than the biggest single batch — nothing accumulated", prev)
+	}
+}
+
+// The file count comes from the tool's own closing line, and ONLY from there (quince#808). It used
+// to increment per `Receiving files`, which is why it read 38 for a 5.9 GB backup and 735 for a
+// 94,034-file one — it was counting protocol messages.
+func TestFilesReceivedComesFromTheToolsOwnCount(t *testing.T) {
+	h := newHarness(t, fakeParams{}, TransportUSB)
+	row := store.JobRow{
+		ID: "ACC2", UDID: testUDID, Kind: "backup", Transport: "usb", State: StateBackingUp,
+		Phase: PhaseReceiving, Liveness: LivenessActive, StartedAt: time.Now().UTC(),
+		IntentID: "ACC2", Attempt: 1,
+	}
+	if err := h.st.InsertJob(row); err != nil {
+		t.Fatal(err)
+	}
+	lj := &liveJob{row: row, cancel: func() {}}
+	ss := &superviseState{}
+
+	for i := 0; i < 735; i++ {
+		h.eng.handleLine(lj, ss, "Receiving files")
+	}
+	lj.mu.Lock()
+	mid := lj.row.FilesReceived
+	lj.mu.Unlock()
+	// UNKNOWN, not wrong. There is no per-file line on the receive path, so nothing can be counted
+	// while the job runs — and 735 message headers are exactly what the old code published.
+	if mid != 0 {
+		t.Fatalf("files_received = %d mid-run, want 0 — the tool emits no running count", mid)
+	}
+
+	h.eng.handleLine(lj, ss, "Received 94035 files from device.")
+	lj.mu.Lock()
+	final := lj.row.FilesReceived
+	lj.mu.Unlock()
+	if final != 94035 {
+		t.Fatalf("files_received = %d, want the tool's own 94035", final)
+	}
+}

@@ -150,3 +150,36 @@ func TestBytesUnitIsCapturedWhole(t *testing.T) {
 			"so a partial capture would let a per-file counter reach bytes_done", m[2])
 	}
 }
+
+// quince#808. The tool's own closing count is the ONLY true file count it emits — `file_count` is
+// incremented per file and summed across messages, then printed once (idevicebackup2.c:1134/2309/
+// 2568). Nothing on the receive path prints per file, so a running count does not exist to parse.
+func TestParseReceivedFilesCount(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want int64
+		ok   bool
+	}{
+		{"Received 94035 files from device.", 94035, true},
+		{"Received 1 file from device.", 1, true}, // singular — a one-file backup must not be skipped
+		{"Received 0 files from device.", 0, true},
+		// The per-message header this field USED to be counted from. It carries no number, and
+		// mistaking it for one is the whole of the defect.
+		{"Receiving files", 0, false},
+		{"Backup Successful.", 0, false},
+	} {
+		p := parseLine(tc.line)
+		if tc.ok {
+			if p.receivedFiles == nil {
+				t.Fatalf("%q: no count parsed", tc.line)
+			}
+			if *p.receivedFiles != tc.want {
+				t.Fatalf("%q: got %d want %d", tc.line, *p.receivedFiles, tc.want)
+			}
+			continue
+		}
+		if p.receivedFiles != nil {
+			t.Fatalf("%q: parsed %d, want no count", tc.line, *p.receivedFiles)
+		}
+	}
+}

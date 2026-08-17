@@ -13,36 +13,34 @@ function noteClass(note: JobNote): string {
   return note.tone === "muted" ? "text-muted" : "text-warn";
 }
 
-// currentTransfer renders the tool's own size pair. It is NOT whole-backup progress and never was:
-// `backup_total_size` is item 3 of the CURRENT DLMessageUploadFiles message and `backup_real_size`
-// is a local reset per message (idevicebackup2.c:1017, tag 1.4.0), so the pair describes one batch.
-// Measured 2026-08-16, it fell 20 times in one backup — worst 2,684,354,560 → 73,216 (quince#808).
+// received renders how much has arrived so far. `bytes_done` is CUMULATIVE and monotonic as of
+// quince#808 — the engine banks each finished batch — so it is finally a fact about the job rather
+// than about whichever protocol message happened to be in flight.
 //
-// SHOWN ANYWAY, BUT ONLY HERE AND ONLY WHILE A TRANSFER IS RUNNING. Two Operator rulings, a day
-// apart, and both are needed to land where this is:
+// NO DENOMINATOR, and that is the protocol's limit rather than a UI choice: every total
+// idevicebackup2 exposes is per-message (`backup_total_size` is item 3 of the current
+// DLMessageUploadFiles), so `bytes_total` is now 0 = unknown and there is nothing honest to divide
+// by. A bare rising figure says exactly what is known.
 //
-//   2026-08-16 — the first draft DELETED it as dishonest. Reversed: it is the only figure that
-//     MOVES while one large item transfers, so removing it would have deepened the "seems stuck"
-//     reading this whole change exists to fix. Measured next day: a 2.68 GB batch ran 3m20s while
-//     the overall percent sat at 1. Do not delete it again on purity grounds.
-//   2026-08-17 — it came OFF the card. Beside a whole-job percentage it reads as a second,
-//     contradictory progress ("57.3 MB / 2.7 GB" next to "1%"), and the extra row made the card
-//     taller than its neighbours in the grid.
+// SHOWN AT ALL, AND ONLY HERE. Three Operator rulings, and all three are needed to land where this
+// is — the shape is worth keeping because each reversal was for a different reason:
 //
-// The defect was never the number; it was presenting a per-batch figure as if it were the job's,
-// and leaving it on screen after the batch it describes has ended.
-function currentTransfer(job: Job): string | null {
-  // NOT WHILE FINISHING, AND NOT ONCE TERMINAL (Operator, 2026-08-17: "super confusing").
-  // These fields are never cleared, so the last batch's pair sits there frozen — "2.0 GB / 2.1 GB"
-  // beside "Finishing up", which reads as a transfer still running at 95%. Nothing is
-  // transferring: the tool is moving and removing files, and quince has verify and commit to do.
-  //
-  // Same rule as `displayPercent` withholding the 100: a figure that was true of a finished step
-  // is not a claim about the current one. The elapsed clock keeps the surface alive instead.
+//   2026-08-16 — the first draft DELETED this as dishonest. Reversed: it is the only figure that
+//     MOVES while one large item transfers, so removing it deepened the "seems stuck" reading the
+//     work exists to fix. A 2.68 GB batch once ran 3m20s while the overall percent sat at 1.
+//     Do not delete it again on purity grounds.
+//   2026-08-17 — it came OFF the card. Beside a whole-job percentage it read as a second,
+//     contradictory progress, and the extra row made the card taller than its neighbours.
+//   2026-08-17 — the pair became a single cumulative figure, once the numbers themselves were
+//     fixed rather than merely presented more carefully.
+function received(job: Job): string | null {
+  // NOT WHILE FINISHING, AND NOT ONCE TERMINAL. The field is never cleared, so it would sit frozen
+  // beside "Finishing up" and read as a transfer still running. Nothing is transferring then: the
+  // tool is moving and removing files, and quince has verify and commit to do.
   if (isFinishingUp(job) || isTerminalJob(job)) return null;
-  const { bytes_done, bytes_total } = job.progress;
-  if (bytes_total <= 0) return null;
-  return `${formatBytes(bytes_done)} / ${formatBytes(bytes_total)}`;
+  const { bytes_done } = job.progress;
+  if (bytes_done <= 0) return null;
+  return `${formatBytes(bytes_done)} received`;
 }
 
 // The live age of a running job. This is the honest motion for every window where quince has no
@@ -95,7 +93,7 @@ export function JobProgressFull({ job }: { job: Job }) {
   const note = useJobNote(job, "full");
   const pct = displayPercent(job);
   const elapsed = useElapsedLabel(job);
-  const transfer = currentTransfer(job);
+  const transferred = received(job);
   return (
     <div className="rounded-card border border-line bg-card p-5">
       <div className="flex items-center justify-between">
@@ -108,13 +106,13 @@ export function JobProgressFull({ job }: { job: Job }) {
         )}
       </div>
       <Progress percent={pct} className="mt-3" />
-      {/* THIS is where the per-transfer figure lives — the page you open when you suspect a stall.
-          Labelled, because unlabelled it competes with the percentage above it: on 2026-08-17 a
-          2.68 GB batch ran for 3m20s while the overall percent stayed at 1, and the pair climbing
-          from 57 MB to 1.7 GB was the only true motion on screen. */}
+      {/* THIS is where the received figure lives — the page you open when you suspect a stall.
+          It carries its own word rather than competing with the percentage above it: on 2026-08-17
+          a 2.68 GB batch ran 3m20s while the overall percent stayed at 1, and this figure was the
+          only true motion on screen. It is now cumulative, so it also never falls. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs tabular-nums text-subtle">
         {elapsed ? <span>{elapsed}</span> : null}
-        {transfer ? <span>current transfer {transfer}</span> : null}
+        {transferred ? <span>{transferred}</span> : null}
       </div>
       {note ? <div className={`mt-2 text-xs ${noteClass(note)}`}>{note.text}</div> : null}
     </div>
