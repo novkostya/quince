@@ -750,6 +750,62 @@ func (ec *eventCollector) logContains(s string) bool {
 	return false
 }
 
+// waitPhase and waitLog POLL THE COLLECTOR. Read once, these assertions are a race with no
+// happens-before, and quince#1115 is the instance that surfaced.
+//
+// `waitTerminal` waits on the ENGINE'S OWN JOB ROW. The collector is a different party: a separate
+// bus subscription, drained by its own goroutine. Publishing `job.updated{Phase: done}` and that
+// goroutine RECORDING it are two events, and the engine reaching terminal orders neither of them
+// against an assertion here. So `if !ec.sawPhase(PhaseDone)` asks whether a goroutine has been
+// scheduled yet, and on a loaded runner the answer is sometimes no.
+//
+// MEASURED — and the shape of the measurement is the argument for converting EVERY call site rather
+// than only the one that failed. Under `-cpu=1 -race -count=150`, which starves exactly this
+// goroutine:
+//
+//	TestStoryJobsReadAndEvents          54 / 150 FAIL   ← PhaseDone, asserted with zero slack
+//	TestSeedingPhaseEmitted              0 / 150
+//	TestStoryWaitingForPasscode          0 / 150
+//	TestStoryDiskLowWarnsDuringBackup    0 / 150
+//
+// The clean three are not correct, they are LUCKY: `seeding` and `waiting_for_passcode` are published
+// early so the collector has the rest of the job to catch up, and `low on space` likewise. Only
+// `done` is the last event before an assertion that waits on its own publication. A test whose
+// happens-before is supplied by "there was other work afterwards" passes until the work gets shorter.
+//
+// AND NOT `waitSettled`, WHICH IS THE TRAP HERE. It exists for this shape (quince#427) so it is the
+// obvious reach, and it waits for the ENGINE to release the job — a different unsynchronised party
+// from the one that is actually unsynchronised. Swapping it in narrows the window and leaves the
+// race, turning a 36% flake into a rare one nobody can attribute.
+func (ec *eventCollector) waitPhase(t *testing.T, p string, d time.Duration) {
+	t.Helper()
+	ec.await(t, d, func() bool { return ec.sawPhase(p) },
+		"no job.updated carried the %s phase within %v", p, d)
+}
+
+func (ec *eventCollector) waitLog(t *testing.T, s string, d time.Duration) {
+	t.Helper()
+	ec.await(t, d, func() bool { return ec.logContains(s) },
+		"no job.log chunk carried %q within %v", s, d)
+}
+
+// await is the shared bounded poll. Deliberately NOT built on `newWaitTracker`: that carries the
+// engine's stall-ceiling reasoning for a job which may legitimately take minutes, and this is a
+// goroutine that has either been scheduled or has not.
+func (ec *eventCollector) await(t *testing.T, d time.Duration, seen func() bool, format string, args ...any) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		if seen() {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf(format, args...)
+		}
+		time.Sleep(2 * time.Millisecond) // matches waitSettled's cadence
+	}
+}
+
 // ============================ Stories ============================
 
 // qn.6a ((cu)/(cv)): the backup passes through the `seeding` phase — quince cloning latest/ → working/
@@ -765,9 +821,7 @@ func TestSeedingPhaseEmitted(t *testing.T) {
 	if final.State != StateSucceeded {
 		t.Fatalf("state=%s error=%v", final.State, final.Error)
 	}
-	if !ec.sawPhase(PhaseSeeding) {
-		t.Fatal("no job.updated carried the seeding phase (between preflight and backing_up)")
-	}
+	ec.waitPhase(t, PhaseSeeding, 5*time.Second) // the clone wait, between preflight and backing_up
 }
 
 // Story 2: a clean full encrypted USB backup drives the state machine to a committed, verified
@@ -813,9 +867,7 @@ func TestStoryWaitingForPasscode(t *testing.T) {
 	if final.State != StateSucceeded {
 		t.Fatalf("state=%s error=%v (the passcode pause did not hold)", final.State, final.Error)
 	}
-	if !ec.sawPhase(PhaseWaitingForPasscode) {
-		t.Fatal("never surfaced the waiting_for_passcode phase")
-	}
+	ec.waitPhase(t, PhaseWaitingForPasscode, 5*time.Second)
 }
 
 // Story 4 (headline): a Wi-Fi torn session freezes → the engine ends connection_lost via the
@@ -1203,12 +1255,8 @@ func TestStoryJobsReadAndEvents(t *testing.T) {
 	if len(list) != 1 || list[0].ID != job.ID {
 		t.Fatalf("Jobs() = %d rows", len(list))
 	}
-	if !ec.sawPhase(PhaseDone) {
-		t.Fatal("no terminal job.updated event")
-	}
-	if !ec.logContains("Backup Successful") {
-		t.Fatal("no job.log chunk carried the success line")
-	}
+	ec.waitPhase(t, PhaseDone, 5*time.Second)
+	ec.waitLog(t, "Backup Successful", 5*time.Second)
 	if _, ok := h.eng.JobLog("no-such-job"); ok {
 		t.Fatal("JobLog of an unknown job must report not-found")
 	}
@@ -1327,9 +1375,7 @@ func TestStoryDiskLowWarnsDuringBackup(t *testing.T) {
 	if final.State != StateSucceeded {
 		t.Fatalf("state=%s — a disk_low warning must not kill the backup", final.State)
 	}
-	if !ec.logContains("low on space") {
-		t.Fatal("no disk_low warning reached the job.log stream")
-	}
+	ec.waitLog(t, "low on space", 5*time.Second) // the disk_low warning on the job.log stream
 }
 
 // Story 11: the CLI driver runs one job to success, streams its state changes, and exits 0.
