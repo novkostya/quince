@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -228,7 +229,7 @@ export function Passkeys() {
 
   return (
     <div className="mt-8">
-      <h2 className="text-sm font-semibold text-muted">Passkeys</h2>
+      <SectionHeading>Passkeys</SectionHeading>
       <p className="mt-3 text-sm text-muted">
         Sign in with Face ID or Touch ID instead of typing your password. Your password keeps working
         — a passkey is an addition, never a replacement.

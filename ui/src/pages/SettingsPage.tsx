@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useConfig } from "@/lib/config";
 import { ConfigView } from "@/features/settings/ConfigView";
 import { ConfigEditor } from "@/features/settings/ConfigEditor";
@@ -89,7 +90,7 @@ export function SettingsPage() {
 
           {data ? (
             <div className="mt-6">
-              <h2 className="text-sm font-semibold text-muted">Edit</h2>
+              <SectionHeading>Edit</SectionHeading>
               <div className="mt-3">
                 <ConfigEditor config={data.config} />
               </div>
@@ -103,7 +104,7 @@ export function SettingsPage() {
         <div className="min-w-0">
           {data ? (
             <>
-              <h2 className="text-sm font-semibold text-muted">Current configuration</h2>
+              <SectionHeading>Current configuration</SectionHeading>
               <div className="mt-3">
                 <ConfigView data={data} />
               </div>

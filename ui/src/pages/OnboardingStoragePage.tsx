@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { AddStorageForm } from "@/features/storage/AddStorageForm";
@@ -146,7 +147,7 @@ export function OnboardingStoragePage() {
                 e2e assertion, which was written against the ruling and failed on this paragraph. */}
             {discarded ? (
               <>
-                <h2 className="mt-8 text-sm font-semibold text-muted">Add a storage</h2>
+                <SectionHeading className="mt-8">Add a storage</SectionHeading>
                 <p className="mt-2 text-sm text-muted">
                   If you meant to declare a storage in the file, fixing the problem above is the thing
                   to do — adding one here will not clear it.

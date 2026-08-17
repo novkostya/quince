@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -214,14 +215,14 @@ export function DeviceDetailsPage() {
           ) : null}
 
           <div className="mt-8">
-            <h2 className="text-sm font-semibold text-muted">Backup history</h2>
+            <SectionHeading>Backup history</SectionHeading>
             <div className="mt-3">
               <JobHistory jobs={jobs} onRetry={(latest) => void backup.start("auto", { retryOf: latest.id })} />
             </div>
           </div>
 
           <div className="mt-8">
-            <h2 className="text-sm font-semibold text-muted">Versions</h2>
+            <SectionHeading>Versions</SectionHeading>
             <div className="mt-3">
               <VersionList versions={versions} />
             </div>

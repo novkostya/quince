@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { Plus } from "lucide-react";
@@ -47,7 +48,7 @@ export function DashboardPage() {
           page's name the moment storage joined it, which is the defect the rename fixes. It sits
           beside `Storage` and `Recent backups` in the same rhythm rather than being implied by the
           page title. */}
-      <h2 className="mt-8 text-sm font-semibold text-muted">Devices</h2>
+      <SectionHeading className="mt-8">Devices</SectionHeading>
 
       {order.length === 0 ? (
         <div className="mt-3 rounded-card border border-dashed border-line bg-card p-10 text-center">
@@ -97,7 +98,7 @@ export function DashboardPage() {
           list being non-empty; those were the same condition until this rung and are not any more. */}
       {storages.state.status === "loaded" ? (
         <div className="mt-8">
-          <h2 className="text-sm font-semibold text-muted">Storage</h2>
+          <SectionHeading>Storage</SectionHeading>
           {loadedStorages.length > 0 ? (
             <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {loadedStorages.map((s) => (
@@ -136,7 +137,7 @@ export function DashboardPage() {
 
       {recent.length > 0 ? (
         <div className="mt-8">
-          <h2 className="text-sm font-semibold text-muted">Recent backups</h2>
+          <SectionHeading>Recent backups</SectionHeading>
           <div className="mt-3">
             {/* showDevice: this list mixes devices, so each row names its device (qn.6a #3). */}
             <VersionList versions={recent} showDevice />
