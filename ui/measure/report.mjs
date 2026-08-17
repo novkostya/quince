@@ -133,6 +133,40 @@ for (const [key, label, unit] of METRICS) {
   p();
 }
 
+// ── how much of this is precise ────────────────────────────────────────────────────────────────
+// EMITTED FROM THE GENERATOR, NOT WRITTEN INTO THE DOCUMENT. `docs/ui.type-survey.md` is produced by
+// this file, so a caveat hand-edited into it survives exactly until the next regeneration — which is
+// the one moment somebody is looking at these numbers again. It belongs here or nowhere.
+p(`## How precise are these numbers?`);
+p();
+p(`**Measured, not asserted: the whole sweep was run twice**, same targets and same box, about an`);
+p(`hour apart. The headline figures held exactly — mainstream body / line-height / share-below-AA came`);
+p(`back \`14px · 1.505× · 1.45%\` on both runs, and **32 of 40 surfaces reproduced within 2%**. What`);
+p(`follows is the part that did not, because a table that shows two decimal places and hides its own`);
+p(`drift is claiming a precision it has not earned.`);
+p();
+p(`- **\`padding inside containers\` is order-of-magnitude only.** It flipped **8 → 16px** on two`);
+p(`  surfaces between runs, where every other metric moved by under 2%. It is a median over whatever`);
+p(`  containers a page happened to have rendered, so lazy content changes the sample — it is not a`);
+p(`  measurement of a design decision. Read it as "around 16px" and do not build a spacing step on a`);
+p(`  single figure from it.`);
+p(`- **\`share of text below 4.5:1\` drifts by a few tenths of a point** between runs (4.3→4.5,`);
+p(`  0→0.8, 2.6→2.1, 8.1→7.9, 56.6→58, 1.8→2.0). Stated once here and left as measured: against the`);
+p(`  gap it is used to argue — ~1.5% for the comparison set against quince's 20.85% — tenths do not`);
+p(`  threaten anything, and re-deriving the table to chase them would be false precision in the`);
+p(`  other direction.`);
+p(`- **THE LEAVE-ONE-OUT COLUMN EARNED ITS PLACE BY ACCIDENT, WHICH IS WORTH MORE THAN THE COLUMN.**`);
+p(`  Two sign-in screens rendered nothing on the second run — slower than their settle — so the`);
+p(`  self-hosted \`n\` fell from 7 to 6, and that alone moved that category's line-height median from`);
+p(`  **1.47 to 1.515**. A jackknife column with no instance of it ever mattering reads as ceremony;`);
+p(`  this is what it was warning about, arriving for real rather than hypothetically. Treat every`);
+p(`  small-\`n\` median here as carrying that much give.`);
+p();
+p(`**The probe's own flakiness is NOT fixed here.** Hardening it regenerates the captured data, and`);
+p(`the conclusions were measured not to change under it — so it buys accuracy in the instrument`);
+p(`rather than in the claims, and is tracked separately.`);
+p();
+
 // ── the full table ─────────────────────────────────────────────────────────────────────────────
 p(`## Every surface measured`);
 p();

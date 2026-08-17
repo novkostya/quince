@@ -96,6 +96,35 @@ the prose figures and reported separately.
 | Self-hosted admin UIs | 7 | 12 | 16 | **16** | 16 | 40 | ±0 |
 | quince, today | 6 | 12 | 16 | **16** | 20 | 20 | ±0 |
 
+## How precise are these numbers?
+
+**Measured, not asserted: the whole sweep was run twice**, same targets and same box, about an
+hour apart. The headline figures held exactly — mainstream body / line-height / share-below-AA came
+back `14px · 1.505× · 1.45%` on both runs, and **32 of 40 surfaces reproduced within 2%**. What
+follows is the part that did not, because a table that shows two decimal places and hides its own
+drift is claiming a precision it has not earned.
+
+- **`padding inside containers` is order-of-magnitude only.** It flipped **8 → 16px** on two
+  surfaces between runs, where every other metric moved by under 2%. It is a median over whatever
+  containers a page happened to have rendered, so lazy content changes the sample — it is not a
+  measurement of a design decision. Read it as "around 16px" and do not build a spacing step on a
+  single figure from it.
+- **`share of text below 4.5:1` drifts by a few tenths of a point** between runs (4.3→4.5,
+  0→0.8, 2.6→2.1, 8.1→7.9, 56.6→58, 1.8→2.0). Stated once here and left as measured: against the
+  gap it is used to argue — ~1.5% for the comparison set against quince's 20.85% — tenths do not
+  threaten anything, and re-deriving the table to chase them would be false precision in the
+  other direction.
+- **THE LEAVE-ONE-OUT COLUMN EARNED ITS PLACE BY ACCIDENT, WHICH IS WORTH MORE THAN THE COLUMN.**
+  Two sign-in screens rendered nothing on the second run — slower than their settle — so the
+  self-hosted `n` fell from 7 to 6, and that alone moved that category's line-height median from
+  **1.47 to 1.515**. A jackknife column with no instance of it ever mattering reads as ceremony;
+  this is what it was warning about, arriving for real rather than hypothetically. Treat every
+  small-`n` median here as carrying that much give.
+
+**The probe's own flakiness is NOT fixed here.** Hardening it regenerates the captured data, and
+the conclusions were measured not to change under it — so it buys accuracy in the instrument
+rather than in the claims, and is tracked separately.
+
 ## Every surface measured
 
 `fg` / `bg` are the colours as **rendered**, after compositing every translucent layer above the
