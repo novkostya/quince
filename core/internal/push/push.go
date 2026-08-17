@@ -43,19 +43,34 @@ var b64 = base64.RawURLEncoding
 
 const (
 	// recordSize is the `rs` parameter written into the aes128gcm header — the record length a
-	// receiver should frame on, matching RFC 8291 §5's worked example and RFC 8291 §4's floor for
-	// what a push service must accept. quince always sends exactly ONE record, which is allowed to
-	// be shorter than this; see the header assembly in Encrypt for why writing the record's actual
-	// length instead is a near-invisible bug.
+	// receiver should frame on, matching RFC 8291 §5's worked example. RFC 8291 §4 constrains it
+	// from BELOW only: `rs` MUST exceed plaintext + padding delimiter + padding + the 16-octet tag.
+	// quince always sends exactly ONE record, which is allowed to be shorter than this; see the
+	// header assembly in Encrypt for why writing the record's actual length instead is a
+	// near-invisible bug.
 	recordSize = 4096
 
-	// maxPayload is the plaintext ceiling. Working backwards from recordSize through the aes128gcm
-	// framing — an 86-octet header (16 salt + 4 rs + 1 idlen + 65 keyid), one padding delimiter and
-	// a 16-octet GCM tag — leaves 3993 octets.
+	// maxBodyOctets is the PAYLOAD BODY ceiling, and it is a different quantity from `rs`. RFC 8030
+	// §7.2: "Push services MUST NOT return a 413 status code in responses to an entity body that is
+	// 4096 bytes or less in size" — relayed by RFC 8291 §4 as "a push service is not required to
+	// support more than 4096 octets of payload body". It bounds the WHOLE request body: header,
+	// ciphertext and tag. Both sentences read from the RFCs, not recalled.
+	//
+	// IT IS A SEPARATE CONSTANT THAT HAPPENS TO EQUAL recordSize TODAY, and writing them as one is
+	// the trap this exists to remove (quince#1149). Derive maxPayload from `rs` and raising `rs` to
+	// 8192 — a perfectly legal widening — silently takes maxPayload to 8089, over the body ceiling,
+	// with NOTHING local failing: the refusal test asserts against maxPayload, so it follows the
+	// constant and stays green. What breaks is real deliveries, at push services, indistinguishable
+	// from the dead-subscription case D8 was careful to make loud.
+	maxBodyOctets = 4096
+
+	// maxPayload is the plaintext ceiling. Working backwards from the BODY ceiling through the
+	// aes128gcm framing — an 86-octet header (16 salt + 4 rs + 1 idlen + 65 keyid), one padding
+	// delimiter and a 16-octet GCM tag — leaves 3993 octets.
 	//
 	// IT IS A REFUSAL, NEVER A TRUNCATION. Silently cutting a notification to fit is the *no silent
 	// caps* failure in its purest form: the user gets a message that reads complete and is not.
-	maxPayload = recordSize - 86 - 1 - 16
+	maxPayload = maxBodyOctets - 86 - 1 - 16
 )
 
 // Subscription is what a browser's PushSubscription serialises to, and what the client POSTs.
