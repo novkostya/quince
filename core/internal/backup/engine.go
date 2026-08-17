@@ -655,6 +655,19 @@ type superviseState struct {
 	outputSince bool
 	success     bool
 	failReason  string // the tool's own last error line, for an honest failure message
+
+	// THE BYTE ACCUMULATOR (quince#808). The tool's size pair is per-PROTOCOL-MESSAGE —
+	// `backup_real_size` is a local in `mb2_handle_receive_files`, reset every
+	// DLMessageUploadFiles — so publishing it raw gave a figure that fell as often as it rose.
+	// `bytesBanked` holds every completed batch; `batchBytes` is the one in flight; the published
+	// `bytes_done` is their sum, which is monotonic by construction.
+	//
+	// NOT GUARDED BY `mu`, unlike the fields above, and the difference is real: these are written
+	// only from the progress mutator, which `Engine.progress` runs while holding the JOB's lock, and
+	// both stdout and stderr scanners funnel through it. The fields above are touched by the
+	// liveness sampler on its own goroutine, which is why they need one.
+	bytesBanked int64
+	batchBytes  int64
 }
 
 // gated-seed rendezvous constants (candidate C).
@@ -997,7 +1010,8 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 	}
 	ss.mu.Unlock()
 
-	if !p.waitingPasscode && !p.phaseReceiving && p.overallPercent == nil && !p.hasBytes {
+	if !p.waitingPasscode && !p.phaseReceiving && p.overallPercent == nil && !p.hasBytes &&
+		p.receivedFiles == nil {
 		return // pure log line: no progress change
 	}
 	e.progress(lj, func(r *store.JobRow) {
@@ -1006,13 +1020,37 @@ func (e *Engine) handleLine(lj *liveJob, ss *superviseState, line string) {
 		}
 		if p.phaseReceiving {
 			r.Phase = PhaseReceiving
-			r.FilesReceived++
+			// A BATCH BOUNDARY, and that is what makes the accumulation below possible (quince#808).
+			// `Receiving files` prints once per DLMessageUploadFiles, and `backup_real_size` is a
+			// LOCAL in the handler that message runs — so the figures restart here. Banking the
+			// finished batch is the whole mechanism.
+			//
+			// This line used to be `r.FilesReceived++`, which is exactly why that field read 38 for a
+			// 5.9 GB backup and 735 for a 94,034-file one: it was counting these lines, not files.
+			ss.bytesBanked += ss.batchBytes
+			ss.batchBytes = 0
 		}
 		if p.overallPercent != nil {
 			r.Percent = p.overallPercent
 		}
+		if p.receivedFiles != nil {
+			// THE TOOL'S OWN COUNT — the only true one it emits, and it arrives once as the job
+			// finishes. So this field is 0 until then rather than wrong throughout: there is no
+			// per-file line on the receive path to build a running count from.
+			r.FilesReceived = *p.receivedFiles
+		}
 		if p.hasBytes {
-			r.BytesDone, r.BytesTotal = p.bytesDone, p.bytesTotal
+			ss.batchBytes = p.bytesDone
+			// CUMULATIVE, and therefore monotonic. Published = every completed batch plus the one in
+			// flight. The raw pair fell 20 times in one measured run, worst 2,684,354,560 -> 73,216,
+			// because each value described a different message.
+			r.BytesDone = ss.bytesBanked + ss.batchBytes
+			// NO WHOLE-JOB TOTAL EXISTS. `backup_total_size` is item 3 of the CURRENT message, so
+			// pairing it with a cumulative numerator would let `done` exceed `total` — nonsense in
+			// the direction that reads as a bug. The protocol offers nothing better, so this is
+			// 0 = unknown rather than a denominator describing a different quantity from its
+			// numerator. quince#808 records why a real percentage is unreachable.
+			r.BytesTotal = 0
 		}
 	})
 }

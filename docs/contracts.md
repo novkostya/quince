@@ -2028,9 +2028,29 @@ Job: {
   // (non-terminal) state.
   "progress": {"phase": "receiving",                          // incl. "waiting_for_passcode"
                "percent": 63.0,                               // percent nullable
-               "bytes_done": 2400000000, "bytes_total": 3600000000,
-               "files_received": 149,
+               "bytes_done": 2400000000, "bytes_total": 0,    // cumulative; total 0 == UNKNOWN
+               "files_received": 94035,                       // 0 until the job ends — see below
                "liveness": "active"},   // "" | active | silent_but_connected | suspected_stall
+  // THESE THREE FIGURES NOW DESCRIBE WHAT THE PROTOCOL ACTUALLY OFFERS (Operator ruling 2026-08-17,
+  // quince#808). Read them as a set — the shape only makes sense together:
+  //
+  //   • `bytes_done` is CUMULATIVE over the whole job, and MONOTONIC. It used to carry
+  //     idevicebackup2's per-message figure — `backup_real_size` is a local reset on every
+  //     DLMessageUploadFiles — so it fell as often as it rose: 20 downward steps in one measured
+  //     run, worst 2,684,354,560 → 73,216. The engine banks each finished batch at the tool's own
+  //     `Receiving files` boundary.
+  //   • `bytes_total` is 0, meaning UNKNOWN, and stays 0. Every total the protocol exposes is
+  //     per-message (item 3 of the current DLMessageUploadFiles), so there is nothing whole-job to
+  //     put here. A per-batch denominator beside a cumulative numerator lets `done` exceed `total`,
+  //     which reads as a bug rather than as an absence.
+  //   • `files_received` is the tool's OWN closing count (`Received N files from device.`), so it
+  //     is 0 until the job ends. It used to increment once per `Receiving files` line — a
+  //     PROTOCOL-MESSAGE header — and so read 38 for a 5.9 GB backup and 735 for a 94,034-file one.
+  //     Nothing on the receive path prints per file, so a running count does not exist to publish.
+  //
+  // A CLIENT MUST NOT DERIVE A PERCENTAGE FROM THESE. `percent` stays the device's own figure and is
+  // the only whole-job one — coarse, and measured sitting at 1% for 3m20s across a single 2.68 GB
+  // batch before jumping to 48. quince#808 records why a better one is unreachable.
   // A TERMINAL JOB CARRIES NO LIVE PROCESS CLAIM (qn.4a, corrected by quince#313). Once `state` is
   // terminal — succeeded | failed | cancelled | connection_lost:
   //   • `liveness` is `""` for EVERY terminal state, succeeded included. The other three values are

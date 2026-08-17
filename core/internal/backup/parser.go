@@ -50,8 +50,15 @@ type parsed struct {
 	success         bool     // "Backup Successful."
 	failReason      string   // the tool's OWN words for a failure (see reErrorCode)
 	overallPercent  *float64 // from "NN% Finished" (the only trustworthy OVERALL percent)
-	bytesDone       int64    // best-effort current-transfer bytes from "(X/Y)"
+	bytesDone       int64    // THIS MESSAGE's bytes from "(X/Y)" — the engine accumulates them
 	bytesTotal      int64
+
+	// receivedFiles is the tool's OWN closing count — the only true one it emits (quince#808).
+	// nil on every other line. `file_count` is incremented per file inside mb2_handle_receive_files
+	// and summed across messages by its caller, then printed once at the end
+	// (idevicebackup2.c:1134/2309/2568). Nothing on the receive path prints per file, so there is no
+	// running count to parse and this necessarily arrives only as the job finishes.
+	receivedFiles *int64
 
 	// TWO FLAGS, BECAUSE ONE PREDICATE WAS ANSWERING TWO QUESTIONS (quince#809 review).
 	//
@@ -97,6 +104,9 @@ var (
 	// went wrong instead of "exit status 151" (qn.4c lab finding: 151 == MBErrorDomain 105, and
 	// the bare exit code told the Operator nothing). Also matches a plain "ERROR: <text>" line.
 	reErrorCode = regexp.MustCompile(`^(?:ErrorCode \d+: |ERROR: )(.+)$`)
+	// "Received 94035 files from device." — the tool's own closing count, and the only true one it
+	// emits (quince#808). Tolerates the singular so a one-file backup is not silently skipped.
+	reReceivedFiles = regexp.MustCompile(`Received (\d+) files? from device`)
 )
 
 // parseLine classifies one line of idevicebackup2 output.
@@ -135,6 +145,11 @@ func parseLine(line string) parsed {
 	}
 	if m := reErrorCode.FindStringSubmatch(l); m != nil {
 		p.failReason = strings.TrimSpace(m[1])
+	}
+	if m := reReceivedFiles.FindStringSubmatch(l); m != nil {
+		if v, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			p.receivedFiles = &v
+		}
 	}
 	return p
 }
