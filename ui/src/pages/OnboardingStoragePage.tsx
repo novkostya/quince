@@ -81,7 +81,7 @@ export function OnboardingStoragePage() {
           </>
         ) : (
           <>
-            <h1 className="mt-4 text-xl font-semibold tracking-tight">Add your first storage</h1>
+            <h1 className="mt-4 text-xl font-semibold tracking-tight">Add storage</h1>
             <p className="mt-2 text-sm text-muted">
               quince needs somewhere to keep backups before it can do anything else. Point it at a
               folder it can reach from inside its container — a mounted disk, a NAS share, or a ZFS
