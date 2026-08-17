@@ -2893,6 +2893,23 @@ quince#1130); `stack.md` D12 carries the paragraph.
 with, and re-reading underneath one would let a `backup` run change transport or storage half way
 through because somebody saved in another window.
 
+**ACCEPTED AND NOT FIXED: A HAND-EDIT MADE WHILE A SAVE IS IN FLIGHT IS LOST, SILENTLY** — Operator
+ruling 2026-08-17, [quince#1130](https://github.com/novkostya/quince/issues/1130). Edit `config.yml`
+by hand in the window where the UI is writing, and the save's `AtomicWrite` renames over your edit;
+the next poll then reads quince's own bytes, finds them equal to the ones it recorded, and correctly
+suppresses. **Nothing reports the loss, and nothing will.**
+
+**The window is a save in flight, and that is the whole of the exposure** — two writers with no lock
+between them. Stated concretely rather than as a caution, because *"this is pre-existing"* alone is
+true and useless to somebody it has just happened to.
+
+**File-watch does not cause it and does make it surprising, which is why it is written down rather
+than left as folklore.** The save has always overwritten a concurrent hand-edit; what changed is the
+expectation. Before `qn.6q` nobody expected a hand-edit to be picked up without a restart, so the
+loss read as *how it works*; after, it reads as a defect. **Closing it means a file lock, or an mtime
+precondition on `PUT` that refuses a stale save** — a contract change several times the size of the
+rung that surfaced it, and deliberately not `qn.6q`'s to make.
+
 ### Which settings apply live — the per-key answer
 
 **THREE BINS, NOT TWO, and the third is why this is a table rather than a sentence.** *Live* and
