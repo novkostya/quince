@@ -18,6 +18,10 @@ half — *"edited by the UI and by hand equally"*.
 - **The frontier is `qn.6`, and `qn.6` IS v0.1.** So this spec exists so that the rung can start from
   one when it is scheduled — canon §8 — and not because the work is next.
 - **The prerequisite is discharged.** quince#764 closed 2026-08-09.
+- **UNALLOCATED IS NOT UNOWNED.** [quince#1130](https://github.com/novkostya/quince/issues/1130) is
+  this rung's tracker until a rung exists, and carries the 2026-08-17 rulings reproduced below.
+  Stated here because *unallocated* reads like *unowned*, and because a ruling that lives only inside
+  a merged doc is a park nobody can see.
 
 **Why this file is not `docs/specs/qn.6n/`.** Two reasons, and the second is canon quoting itself.
 `qn.6` is the v0.1 shape and this is ruled *post*-v0.1, so a `qn.6` letter would assert the opposite
@@ -166,7 +170,8 @@ are the same thing here**, which is what makes D1 easy.
 | --- | --- |
 | `core/internal/config/` | a `Reload` path on `Service`, the poller that drives it, and the last-bytes record that suppresses self-writes |
 | `core/cmd/quince/live.go` | start the poller at the wiring seam that already registers the appliers; stop it on shutdown |
-| `docs/contracts.md` | §6's *"a hand-edit still needs a restart"* paragraph is discharged; §1's `discarded` definition widens (open question 1) |
+| `docs/contracts.md` | §6's *"a hand-edit still needs a restart"* paragraph is discharged; §1's `discarded` definition widens **as ruled** (question 1) — recorded as an **amendment to quince#849**, not a wording change |
+| `ui/src/lib/types.ts` | `:280`'s *"quince is running on its defaults"* goes false with the same ruling — the widening is client work too, not only canon work |
 | `docs/quince.stack.md` | D12's *"file-watch pickup"* stops being a destination |
 | `core/internal/config/*_test.go` | the reload suite: valid edit, invalid edit, self-write, no-op edit, delete, restore |
 
@@ -184,7 +189,8 @@ are the same thing here**, which is what makes D1 easy.
   path; a reload has no better claim, and the Settings page already re-reads on focus.
 - **The lost-update interleaving.** Operator hand-edits while a UI save is in flight: the save wins
   and the hand-edit is overwritten. That is true **today** and is a property of two writers with no
-  lock between them, not of the watcher. Named in open question 3 rather than silently inherited.
+  lock between them, not of the watcher. **Question 3 below, still OPEN with the Operator** — named
+  rather than silently inherited, and the §6 sentence does not land until it is ruled.
 - **`quince config validate` as a pre-flight.** D12 lists it; it is a CLI surface with its own scope
   and is not made necessary by this rung.
 
@@ -249,7 +255,8 @@ additive and is not this rung's.
 file and compares. Equal → nothing happened. Different → this is a change quince did not make, and
 it reloads.
 
-**This is what answers the issue's question 1, and it answers it without a debounce.** F4 proves the
+**This is what answers quince#1094's question 1** — the tracker's numbering, not this spec's —
+**and it answers it without a debounce.** F4 proves the
 event stream cannot identify the writer. A timing window ("ignore events for 200 ms after our own
 write") is a guess that is wrong in both directions: it drops a hand-edit that lands inside the
 window, and it lets a slow write through outside it. Content comparison has no window.
@@ -281,7 +288,8 @@ A tick that finds changed bytes calls `Load`. On `!OK`:
   happened.
 - **`s.warnings` becomes the load's warnings**, which is where `Load` already puts the cause on all
   three of its discard paths.
-- **`s.discarded` becomes `true`** — see open question 1, because this widens a served field.
+- **`s.discarded` becomes `true`** — under the **ruled** widened definition (question 1): *the file on
+  disk was refused; the running configuration is not what the file says.*
 - **`s.source` is updated** to the new mtime, so `GET /api/config` does not claim the running config
   came from a file that has since changed.
 - **The record from D2 is updated to the bad bytes.** Otherwise every subsequent tick re-reads the
@@ -377,7 +385,7 @@ tests already carry.
 | **No silent caps or fallbacks** | The invalid-edit path is the *whole* of D3, and it surfaces through `warnings` + `discarded` rather than a log line. The poll interval is a stated ceiling, not a hidden one. **This row does NOT rest on D1** — D1's load-bearing leg is cost, not the network-filesystem case (see D1 leg 3). |
 | **State honesty** | A reload that fails applies nothing and says so; `s.cfg` is not touched on `!OK`. `source.mtime` is updated on both paths so `GET /api/config` never implies the running config came from the file currently on disk when it did not. |
 | **Docs are part of the diff** | contracts §6's *"a hand-edit still needs a restart"* paragraph and §1's `discarded` definition, and D12's *"file-watch pickup"* — all three named in Boundary, all three land with the code. |
-| **Don't improvise architecture** | Two calls are architectural and are **open questions below, not decisions**: the `discarded` widening (a served field) and the poll-vs-inotify choice as a D-level matter. D1/D2/D4/D5 are rung-local — inside `core/internal/config`, changing no contract surface. |
+| **Don't improvise architecture** | Both architectural calls were routed and are now **RULED** (Operator, 2026-08-17, quince#1130): the `discarded` widening, and whether the poll choice owes a `D<N>`. **One question remains OPEN and is the Operator's** — the lost-update acceptance, question 3 below; the §6 sentence does not land until it is ruled. D1/D2/D4/D5 are rung-local — inside `core/internal/config`, changing no contract surface. |
 | **Interface facts looked up live** | F1–F7 are measured at `ebc8219` on 2026-08-17. F3 corrects the issue's own framing; F5 sharpens it. Nothing here is recalled. |
 | **Config tidiness (D12)** | The interval is deliberately **not** a config key — D1. Reload adds no key, and D4 forbids the reload path from writing, so a hand-edited file is never re-tidied behind the operator's back. |
 | **Secrets discipline** | Untouched. `config.yml` carries no secrets by D12 and this rung adds none; the poller reads a file it already has open at startup. |
@@ -388,37 +396,82 @@ tests already carry.
 
 ---
 
-## Open questions — for the Operator / architect, before code
+## Questions 1, 2 and 4 are RULED. Question 3 is OPEN and is the Operator's
 
-**1. `discarded` widens, and it is a served field.** `docs/contracts.md` §1 defines it as *"quince is
-running on `Default()` and nothing the file declares is in effect"*. After a bad **hand-edit**, the
-first clause is false — quince runs on last-good, which may be a perfectly good file it loaded at
-startup — while the second stays true.
+Operator ruling, 2026-08-17, relayed by the architect on
+[quince#1130](https://github.com/novkostya/quince/issues/1130). **quince#1130 is this rung's tracker
+until a rung exists** — recorded because *unallocated* reads like *unowned*.
 
-*Recommendation:* keep the name, keep the consumer rule (*"branch the HEADLINE on this, render
-`warnings` either way"*), and restate the definition as **the file on disk was refused; the running
-configuration is not what the file says**. That is what the field is *for*, and it covers both the
-startup case and the reload case without a second boolean.
+**1. RULED — `discarded` WIDENS. The recommendation was accepted as written.** Keep the name, keep
+the consumer rule (*"branch the HEADLINE on this, render `warnings` either way"*), and restate the
+definition as **the file on disk was refused; the running configuration is not what the file says.**
 
-One consequence is a **strengthening** and should be weighed as such: `AddStorage` refuses while
-`discarded`, so after a bad hand-edit an add is refused rather than splicing defaults over an
-unparseable file — quince#852's hazard, arriving through a new door and already guarded.
+No second boolean: *"the two situations differ in what the operator should do, and `warnings` already
+carries that — a boolean that no client branches on differently is a distinction that costs every
+client and buys nothing."*
 
-**2. Is D1 a D-level decision, and does it need a `D<N>`?** quince#1094 calls the choice *"a D-level
-call given how few dependencies the core carries"*. The recommended option **adds no dependency**
-(F3, F7) and no platform split, so on its own terms it needs no ruling to permit. The
-*rejected* options are the ones that would. *Recommendation:* no new `D<N>`; a paragraph under D12
-recording that file-watch is a poll and why, so a later reader does not re-derive it.
+The `AddStorage` consequence was accepted as a **strengthening**, and named the strongest argument in
+the issue: under the widened definition a bad hand-edit means an add is refused rather than splicing
+defaults over an unparseable file — quince#852's hazard arriving through a new door and already
+guarded, for free.
 
-**3. The lost-update interleaving is inherited, not created.** Operator hand-edits `config.yml` while
-a UI save is in flight; the save's `AtomicWrite` overwrites the hand-edit, and the tick then sees
-quince's own bytes and suppresses. The edit is lost silently. **This is true today** — the save
-overwrites it either way — so the watcher neither causes nor worsens it, and closing it means a
-file lock or a mtime precondition on `PUT`, which is a contract change well beyond this rung.
-*Recommendation:* name it in contracts §6 and do not build for it.
+**Two consequences the issue did NOT name, found while ruling, and they make this larger than a
+definition edit:**
 
-**4. Rung allocation.** This spec is a topic directory by the reasoning in *Status*. Allocating a
-letter is the Operator's; the first PR of the rung moves the file.
+- **It AMENDS A PRIOR OPERATOR RULING.** `docs/contracts.md:1641` reads `RULED and IMPLEMENTED:
+  discarded — THE FILE ON DISK WAS REFUSED AT LOAD` (Operator, 2026-08-12, quince#849), spelling the
+  definition as *"quince is running on `Default()` and nothing the file declares is in effect"*. The
+  first clause is what goes false. **The rung's PR must record this as an amendment to quince#849**,
+  not as a wording change — the same ruling, revisited because a new door was opened.
+- **It FALSIFIES LIVE UI COPY.** `ui/src/lib/types.ts:280` says *"the file on disk was REFUSED at
+  load, so quince is running on its defaults and …"*. That second clause becomes wrong the moment
+  file-watch ships. **So the widening creates work in the rung, not only in `contracts.md`**, and
+  whoever slices it carries both.
+
+**2. RULED — no new `D<N>`. A paragraph under D12, and it must carry the MEASUREMENT.** The
+dependency argument is what would have made this D-level, and F3/F7 close it: no option costs a
+dependency, `golang.org/x/sys` is already a direct requirement, and the `_linux.go`/`_other.go`
+pattern is in the tree three times. *"A `D<N>` is for a choice that constrains the stack; this one
+constrains nothing."*
+
+**The condition on that paragraph is not optional.** *"We chose poll"* invites reopening on exactly
+the dependency grounds the measurement already closed. It must carry **12.19 µs per tick** over a
+218-byte config, and **F5** — a watch on the file *path* is dead after write #1, so a correct inotify
+implementation is a directory watch plus name filtering plus requeue handling in front of the content
+comparison you were writing anyway. Those two facts are the whole argument.
+
+**3. OPEN — the lost-update interleaving is inherited, not created. WITH THE OPERATOR.** A hand-edit
+made while a UI save is in flight is overwritten by the save's `AtomicWrite`; the next tick then sees
+quince's own bytes and suppresses (D2), so nothing surfaces. **This is true at this head, with no
+watcher anywhere near it** — the save overwrites the hand-edit either way — so file-watch neither
+causes it nor worsens it. Closing it means a file lock, or an mtime precondition on `PUT`, which is a
+contract change several times the size of this rung.
+
+*Recommendation, unchanged:* name it in contracts §6 and do not build for it.
+
+**Why it is a ruling and not a formality:** writing down that quince can silently lose an edit, and
+shipping anyway, is an acceptance under `no silent caps or fallbacks` — and this project rules those
+rather than assuming them. **The architect's reading is that the recommendation is plainly right, and
+has said so; that is a reading, not a ruling.** The §6 sentence does not land until the ruling exists.
+
+**4. RULED — unallocated STANDS.** The spec stays at `docs/specs/config-file-watch/`; the first build
+PR moves it to `docs/specs/qn.N/qn.N.md` when a rung exists.
+
+---
+
+### A fifth question was asked here that the spec never had, and the swap is worth recording
+
+quince#1130 carried **four** of this spec's **five** questions. Its slot 3 was *"where does the
+`PROPOSED (gap)` block go, and when"* — a question invented while filing, which displaced the
+lost-update question above. **That question is answered: it DISSOLVED**, because ruling question 1
+removed its subject — there is no gap block to place, because there is no gap. Nothing goes into
+`contracts.md` §1 now; what is owed is the ruled definition, and it lands when the behaviour lands,
+under *docs are part of the diff*.
+
+**The swap is recorded rather than quietly repaired, because of how it hid.** The count matched at
+four, the numbering matched, and slot 3 was occupied — **a substitution leaves no gap to notice**,
+where an omission is caught by counting. The check when carrying a document's open questions to a
+tracker is therefore not *are there four*, it is ***are they the same four***.
 
 ---
 
