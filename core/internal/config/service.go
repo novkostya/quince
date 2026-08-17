@@ -108,6 +108,13 @@ func unknownKeys(raw map[string]any, t reflect.Type, prefix string) []Warning {
 		f, ok := known[k]
 		if !ok {
 			path := prefix + k
+			// A RENAMED KEY GETS ITS SUCCESSOR AND ITS VALUE, not just "unknown" (quince#401). The
+			// typo guard's sentence is correct for a key nobody ever knew and unhelpful for one that
+			// was renamed: the user's setting is not in force and nothing says so. See renames.go.
+			if msg, renamed := renameWarning(path, v); renamed {
+				warnings = append(warnings, Warning{Path: path, Message: msg})
+				continue
+			}
 			warnings = append(warnings, Warning{Path: path, Message: fmt.Sprintf("unknown config key %q (ignored)", path)})
 			continue
 		}
