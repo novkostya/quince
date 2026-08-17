@@ -106,7 +106,7 @@ func TestInspectClassifiesACandidatePair(t *testing.T) {
 		{"a file that is not PEM", garbage, goodKey, "quince.example", OutcomeMalformed, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Inspect(tc.cert, tc.key, tc.host, now)
+			got := Inspect(tc.cert, tc.key, tc.host, "", now)
 
 			if got.Outcome != tc.wantOutcome {
 				t.Fatalf("outcome = %q, want %q — reason %q", got.Outcome, tc.wantOutcome, got.Reason)
@@ -142,7 +142,7 @@ func TestInspectReportsTheNamesDatesAndChainLength(t *testing.T) {
 		NotAfter:    now.Add(24 * time.Hour),
 	})
 
-	got := Inspect(cert, key, "quince.example", now)
+	got := Inspect(cert, key, "quince.example", "", now)
 
 	if got.Outcome != OutcomeUsable {
 		t.Fatalf("outcome = %q, want usable — %s", got.Outcome, got.Reason)
@@ -176,7 +176,7 @@ func TestExpiryOutranksTheHostname(t *testing.T) {
 		NotAfter:  now.Add(-time.Hour),
 	})
 
-	if got := Inspect(cert, key, "quince.example", now); got.Outcome != OutcomeExpired {
+	if got := Inspect(cert, key, "quince.example", "", now); got.Outcome != OutcomeExpired {
 		t.Errorf("outcome = %q, want expired — a dead certificate is dead for every name", got.Outcome)
 	}
 }
@@ -194,7 +194,7 @@ func TestInspectTouchesNoNetwork(t *testing.T) {
 	})
 
 	done := make(chan Report, 1)
-	go func() { done <- Inspect(cert, key, "nothing.invalid", now) }()
+	go func() { done <- Inspect(cert, key, "nothing.invalid", "", now) }()
 	select {
 	case got := <-done:
 		if got.Outcome != OutcomeUsable {
@@ -202,5 +202,50 @@ func TestInspectTouchesNoNetwork(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Inspect did not return within 5s — something is dialling the network")
+	}
+}
+
+// THE SECOND COVERAGE QUESTION, AND IT NEVER MOVES THE OUTCOME. `hostname` decides `wrong_host`;
+// `currentHost` decides only `CoversCurrentHost`, because a certificate reached at an address it does
+// not cover is a browser warning to accept — a self-signed pair, or a LAN with no names — and not
+// something this product may refuse.
+func TestInspectReportsWhetherItCoversTheAddressInPlay(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	cert, key := pairFor(t, dir, "current", x509.Certificate{
+		DNSNames:  []string{"*.quince.example"},
+		NotBefore: now.Add(-time.Hour),
+		NotAfter:  now.Add(24 * time.Hour),
+	})
+
+	for _, tc := range []struct {
+		name        string
+		hostname    string
+		currentHost string
+		wantOutcome string
+		wantCovered bool
+	}{
+		// THE CASE THE FEATURE EXISTS FOR: no name typed, so the address in play is where the caller
+		// already is — and a wildcard does not cover an IP.
+		{"an IP with no name typed", "", "192.0.2.10", OutcomeUsable, false},
+		{"a covered name with no name typed", "", "box.quince.example", OutcomeUsable, true},
+		// A WILDCARD MATCHES ONE LABEL, WHICH IS WHY THIS ASKS THE LIBRARY RATHER THAN COMPARING
+		// STRINGS. `a.b.quince.example` looks like a match and is not one.
+		{"a name two labels deep", "", "a.b.quince.example", OutcomeUsable, false},
+		// AND IT IS ORTHOGONAL TO THE VERDICT, in both directions.
+		{"wrong_host still reports the address", "nothing.invalid", "box.quince.example", OutcomeWrongHost, true},
+		{"usable can sit beside an uncovered address", "box.quince.example", "192.0.2.10", OutcomeUsable, false},
+		// ASKED NOTHING, ANSWERED FALSE — the zero value means "no question", not "not covered".
+		{"no address in play", "box.quince.example", "", OutcomeUsable, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Inspect(cert, key, tc.hostname, tc.currentHost, now)
+			if got.Outcome != tc.wantOutcome {
+				t.Errorf("outcome = %q, want %q — %s", got.Outcome, tc.wantOutcome, got.Reason)
+			}
+			if got.CoversCurrentHost != tc.wantCovered {
+				t.Errorf("CoversCurrentHost = %v, want %v", got.CoversCurrentHost, tc.wantCovered)
+			}
+		})
 	}
 }

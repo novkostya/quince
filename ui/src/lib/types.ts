@@ -468,6 +468,14 @@ export interface CertificateProbe {
   not_before: string;
   not_after: string;
   chain_length: number;
+  // `current_host` is the address this request arrived at, without its port, and
+  // `current_host_covered` is whether the leaf covers it — the SECOND coverage question. `outcome`
+  // answers *does it cover the name they typed*, which is unanswerable while that field is empty;
+  // and empty means *keep using the address I am on*, so this is the answer for exactly that case.
+  // It never changes `outcome`: an address the certificate does not cover is a browser warning to
+  // accept, not a refusal to make.
+  current_host: string;
+  current_host_covered: boolean;
 }
 
 // CertificateApplied is POST /api/onboarding/certificate/apply (quince#908 §5, slice 5). The pair is
@@ -483,6 +491,11 @@ export interface CertificateProbe {
 // bare scheme swap would aim the browser at 443 where nothing is listening.
 export interface CertificateApplied {
   confirm_origin: string;
+  // Whether the certificate now being served covers the host inside `confirm_origin`. FALSE IS NOT A
+  // FAILURE — the trial is running either way and the browser will offer an interstitial the user
+  // can accept, which is how a self-signed pair or an IP-only install is meant to work. It is here
+  // so the trial screen can stop claiming coverage it never checked.
+  confirm_host_covered: boolean;
   confirm_token: string;
   expires_at: string;
   expires_seconds: number;

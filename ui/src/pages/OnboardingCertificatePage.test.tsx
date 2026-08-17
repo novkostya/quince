@@ -17,6 +17,9 @@ function renderPage() {
   );
 }
 
+// THE DEFAULT FIXTURE HAS A NAME TYPED, so the "where you are standing" line stays out of the tests
+// that are about something else — it renders only while the hostname field is empty, which is the
+// one case where leaving it empty decides anything.
 const USABLE: CertificateProbe = {
   cert_file: "/tls/fullchain.pem",
   key_file: "/tls/privkey.pem",
@@ -27,6 +30,8 @@ const USABLE: CertificateProbe = {
   not_before: "2026-01-01T00:00:00Z",
   not_after: "2027-01-01T00:00:00Z",
   chain_length: 2,
+  current_host: "quince.example",
+  current_host_covered: true,
 };
 
 function fill(cert = "/tls/fullchain.pem", key = "/tls/privkey.pem", host = "") {
@@ -183,6 +188,64 @@ describe("the certificate step", () => {
     expect(screen.getByRole("button", { name: /Check these files/i })).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Key file/i), { target: { value: "/a.key" } });
     expect(screen.getByRole("button", { name: /Check these files/i })).toBeEnabled();
+  });
+
+  // WHAT LEAVING THE NAME EMPTY WILL MEAN — the answer to the question the field's own label used to
+  // dodge. Empty means *keep using the address I am on*, so whether that certificate covers that
+  // address is the only thing that decides whether empty is a good idea.
+  it("says the address you are on is covered, when the name is left empty", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      hostname: "",
+      current_host: "quince.example",
+      current_host_covered: true,
+    });
+
+    renderPage();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/leaving the name empty keeps you there/i)).toBeInTheDocument();
+  });
+
+  // THE CASE THE WALK FOUND: a wildcard for somewhere else, checked from an IP, called usable with
+  // nothing said about the address in play — and a browser interstitial two screens later.
+  it("warns when the address you are on is not covered, and still calls the files usable", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      hostname: "",
+      current_host: "192.0.2.10",
+      current_host_covered: false,
+    });
+
+    renderPage();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/your browser will warn you about the certificate/i)).toBeInTheDocument();
+    // NOT A REFUSAL. An IP-only LAN install is legitimate and the trial is still offered.
+    expect(screen.getByText("The files are usable")).toBeInTheDocument();
+  });
+
+  // AND IT STAYS QUIET ONCE A NAME IS TYPED. The address in play is then that name, `outcome` already
+  // answers coverage for it, and a note about the address they are leaving is noise.
+  it("says nothing about the current address once a name is typed", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      hostname: "quince.example",
+      current_host: "192.0.2.10",
+      current_host_covered: false,
+    });
+
+    renderPage();
+    fill("/tls/fullchain.pem", "/tls/privkey.pem", "quince.example");
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    await screen.findByText("The files are usable");
+    // ASSERTED ON THE ADDRESS ITSELF rather than on the sentence: the field's own hint says "the
+    // address you are on now" whatever is typed, so a phrase match would find that instead and pass
+    // for the wrong reason.
+    expect(screen.queryByText("192.0.2.10")).not.toBeInTheDocument();
   });
 
   // THE VERDICT RENDERS EVEN IF `names` ARRIVES AS `null`. The server now sends `[]` on every

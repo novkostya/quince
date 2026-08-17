@@ -563,3 +563,40 @@ func TestHealthReportsALiveTrial(t *testing.T) {
 		t.Fatalf("health still advertises a closed window: %q", after.TLSTrialExpiresAt)
 	}
 }
+
+// THE APPLY SAYS WHETHER THE PAIR COVERS THE ADDRESS IT IS SENDING THE USER TO, and it composes that
+// address from the same two inputs — so it always could, and never did.
+//
+// FALSE IS NOT A REFUSAL. The trial still starts: a browser interstitial the user accepts is a
+// legitimate install (a self-signed pair, an IP-only LAN), and the ten-minute rollback is what makes
+// trying one safe. The field exists so the trial screen can stop asserting coverage it never checked.
+func TestTheApplyReportsWhetherTheConfirmOriginIsCovered(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+
+	for _, tc := range []struct {
+		name, host, hostname, wantOrigin string
+		wantCovered                      bool
+	}{
+		// THE CASE FROM THE WALK: a certificate for a name, applied from an IP with the field left
+		// empty, so the confirm link points at an address it cannot cover.
+		{"no name given, standing on an IP", "192.0.2.5:8968", "", "https://192.0.2.5:8968", false},
+		// AND THE CASE THE FIELD IS OPTIONAL FOR: already on a covered name, nothing to type.
+		{"no name given, standing on a covered name", "quince.example:8968", "", "https://quince.example:8968", true},
+		{"a covered name typed", "192.0.2.5:8968", "quince.example", "https://quince.example:8968", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _, _ := certApplyDeps(t)
+			got := decodeApplied(t, postCertJSON(t, NewRouter(deps), "http://"+tc.host+certApplyPath,
+				applyBody(certFile, keyFile, tc.hostname)))
+
+			if got.ConfirmOrigin != tc.wantOrigin {
+				t.Fatalf("confirm_origin = %q, want %q", got.ConfirmOrigin, tc.wantOrigin)
+			}
+			if got.ConfirmHostCovered != tc.wantCovered {
+				t.Errorf("confirm_host_covered = %v, want %v for %s",
+					got.ConfirmHostCovered, tc.wantCovered, tc.wantOrigin)
+			}
+		})
+	}
+}

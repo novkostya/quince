@@ -563,6 +563,17 @@ type CertificateProbe struct {
 	// phone that does not. Reported rather than judged, because whether it matters depends on the
 	// issuer.
 	ChainLength int `json:"chain_length"`
+
+	// CurrentHost is the host this request arrived on, without its port, and CurrentHostCovered is
+	// whether the leaf covers it. THE SECOND COVERAGE QUESTION, and the one nobody was asking:
+	// `Outcome` answers *does it cover the name they typed*, which is unanswerable while that field
+	// is empty — and empty means *keep using the address I am on*, so this is the answer for exactly
+	// that case.
+	//
+	// IT NEVER CHANGES `Outcome`. A pair reached by IP is a legitimate install and this product must
+	// not refuse one; the fact is here so a client can say what leaving the name empty will mean.
+	CurrentHost        string `json:"current_host"`
+	CurrentHostCovered bool   `json:"current_host_covered"`
 }
 
 // CertificateConfirmRequest is POST /api/onboarding/certificate/confirm (quince#908 §5, slice 5).

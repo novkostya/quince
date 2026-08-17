@@ -24,6 +24,12 @@ type certificateApplied struct {
 	//
 	// AN ORIGIN RATHER THAN A URL, so the path belongs to whoever renders the page.
 	ConfirmOrigin string `json:"confirm_origin"`
+	// ConfirmHostCovered reports whether the certificate now being served covers the host inside
+	// `ConfirmOrigin`. FALSE IS NOT A REFUSAL: the trial runs either way, and the browser will show
+	// an interstitial the user can accept — which is a legitimate install (a self-signed pair, or a
+	// LAN reached only by IP) and the ceremony was built to allow it. What it is for is the sentence
+	// on the trial screen, which claimed coverage unconditionally and could be simply false.
+	ConfirmHostCovered bool `json:"confirm_host_covered"`
 	// ConfirmToken names THIS trial. Not a credential — see certTrial.confirm.
 	ConfirmToken string `json:"confirm_token"`
 	// ExpiresAt is when the trial ends and the previous certificate comes back, RFC3339 UTC.
@@ -124,7 +130,14 @@ func (d Deps) handleCertificateApply() http.HandlerFunc {
 		}
 
 		// RE-CHECKED HERE RATHER THAN TAKEN FROM THE CLIENT — see the doc comment.
-		if rep := tlsx.Inspect(body.CertFile, body.KeyFile, body.Hostname, time.Now()); rep.Outcome != tlsx.OutcomeUsable {
+		//
+		// AND CHECKED AGAINST THE HOST THIS APPLY IS ABOUT TO SEND THE USER TO, which is the question
+		// this route was building an answer to and never asking. `ConfirmOrigin` is composed below
+		// from the same two inputs; quince holds the leaf's names at the same instant, and until now
+		// it compared them to nothing and told the client the link was "at the name the certificate
+		// covers" regardless.
+		rep := tlsx.Inspect(body.CertFile, body.KeyFile, body.Hostname, confirmHost(r, body.Hostname), time.Now())
+		if rep.Outcome != tlsx.OutcomeUsable {
 			writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
 				Errors  []wire.ConfigError `json:"errors"`
 				Outcome string             `json:"outcome"`
@@ -168,11 +181,12 @@ func (d Deps) handleCertificateApply() http.HandlerFunc {
 		}
 
 		writeJSON(w, d.Log, http.StatusOK, certificateApplied{
-			ConfirmOrigin:  httpsOrigin(r, body.Hostname),
-			ConfirmToken:   token,
-			ExpiresAt:      deadline.UTC().Format(time.RFC3339),
-			ExpiresSeconds: int(certTrialWindow / time.Second),
-			ConfigWritten:  false,
+			ConfirmOrigin:      httpsOrigin(r, body.Hostname),
+			ConfirmHostCovered: rep.CoversCurrentHost,
+			ConfirmToken:       token,
+			ExpiresAt:          deadline.UTC().Format(time.RFC3339),
+			ExpiresSeconds:     int(certTrialWindow / time.Second),
+			ConfigWritten:      false,
 		})
 	}
 }
@@ -285,16 +299,29 @@ func (d Deps) handleCertificateConfirm() http.HandlerFunc {
 // about to use is the name the certificate covers, and sending them to the IP they are on now would
 // produce a name mismatch in the browser for a certificate that is perfectly good.
 func httpsOrigin(r *http.Request, hostname string) string {
-	host, port, err := net.SplitHostPort(r.Host)
+	_, port, err := net.SplitHostPort(r.Host)
 	if err != nil {
 		// No port in the Host header, so it is the scheme's default. This request reached the plain
 		// half, so that is 80 — and 80 is where the TLS half is too.
-		host, port = r.Host, "80"
+		port = "80"
 	}
+	return "https://" + net.JoinHostPort(confirmHost(r, hostname), port)
+}
+
+// confirmHost is the HOST HALF of the origin above, on its own, because two things need it and one
+// of them is a certificate check rather than a URL.
+//
+// AN EMPTY `hostname` MEANS *the address the caller is already on*, and that is the whole meaning of
+// the field being optional: somebody already reaching quince at a covered name has nothing to type.
+// It is the caller's own `Host`, never a configured value — this runs before any of that exists.
+func confirmHost(r *http.Request, hostname string) string {
 	if hostname != "" {
-		host = hostname
+		return hostname
 	}
-	return "https://" + net.JoinHostPort(host, port)
+	if host, _, err := net.SplitHostPort(r.Host); err == nil {
+		return host
+	}
+	return r.Host
 }
 
 // newConfirmToken mints the opaque name of one trial. Same shape as a probe nonce: 32 random bytes,

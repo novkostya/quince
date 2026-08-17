@@ -542,15 +542,27 @@ POST /api/onboarding/certificate  → {cert_file, key_file, hostname} → Certif
      // as POST /api/config/insecure-transport. The OFFLINE half: NO NETWORK, EVER.
      // Every refusal is carried IN the body; only a missing or relative path is a
      // 422. NOT csrfExempt — a pre-auth page already holds a token.
+     // `names` is ALWAYS AN ARRAY — `[]`, never null, on the outcomes that fail
+     // before there is a leaf to read names from.
+     // `current_host` + `current_host_covered` are the SECOND coverage question:
+     // does this pair cover the address the CALLER arrived at. `outcome` answers it
+     // for the name they TYPED, which is unanswerable while that field is empty —
+     // and empty MEANS keep using the address they are on. It never moves
+     // `outcome`: an uncovered address is a browser warning to accept, and an
+     // IP-only or self-signed install is legitimate.
 
 POST /api/onboarding/certificate/apply   → {cert_file, key_file, hostname}
-     → 200 {confirm_origin, confirm_token, expires_at, expires_seconds,
-            config_written: false}
+     → 200 {confirm_origin, confirm_host_covered, confirm_token, expires_at,
+            expires_seconds, config_written: false}
      // PRE-AUTH, 409 once auth.Configured() — decided BEFORE the body is read.
      // IT WRITES NO CONFIGURATION. It points the running tlsx.Keeper at the pair,
      // so TLS is live immediately, and schedules a return to the pair config.yml
      // still names. Refuses anything tlsx.Inspect does not call `usable`,
      // re-checked here and never trusted from the client.
+     // `confirm_host_covered` says whether the pair covers the host inside
+     // confirm_origin — composed from the same two inputs, so it always could.
+     // FALSE IS NOT A REFUSAL: the trial runs, and the interstitial the user
+     // accepts is how a self-signed or IP-only install is meant to work.
      // NOT csrfExempt: same-origin with the page that sends it.
      // 503 when this quince has no TLS listener (--demo, a test router).
 POST /api/onboarding/certificate/confirm → {token}

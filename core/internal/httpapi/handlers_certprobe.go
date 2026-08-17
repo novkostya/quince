@@ -81,7 +81,16 @@ func (d Deps) handleCertificateProbe() http.HandlerFunc {
 			}
 		}
 
-		rep := tlsx.Inspect(body.CertFile, body.KeyFile, body.Hostname, time.Now())
+		// THE ADDRESS THE CALLER IS STANDING ON IS THE SECOND COVERAGE QUESTION, and quince holds both
+		// halves of it right here: the `Host` this request arrived on, and the names it is about to
+		// read out of the leaf. It compared them to nothing, so somebody on an IP could be told a
+		// wildcard was usable and learn otherwise from a browser interstitial two screens later.
+		//
+		// THIS IS NOT THE PRE-FILL §5 REFUSES. That ruling governs what goes IN the hostname field —
+		// the name they are LEAVING must not be typed there on their behalf. Stating a fact about
+		// where they are standing leaves the field empty and the choice theirs.
+		current := confirmHost(r, "")
+		rep := tlsx.Inspect(body.CertFile, body.KeyFile, body.Hostname, current, time.Now())
 
 		// `names` IS AN ARRAY ON THE WIRE, NEVER `null`, AND THE FAILURE PATHS ARE WHY IT NEEDS
 		// SAYING. A nil Go slice marshals to `null`, and `Inspect` returns before it has a leaf to
@@ -103,6 +112,9 @@ func (d Deps) handleCertificateProbe() http.HandlerFunc {
 			NotBefore:   rep.NotBefore,
 			NotAfter:    rep.NotAfter,
 			ChainLength: rep.ChainLength,
+
+			CurrentHost:        current,
+			CurrentHostCovered: rep.CoversCurrentHost,
 		})
 	}
 }
