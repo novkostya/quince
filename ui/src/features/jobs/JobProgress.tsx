@@ -34,13 +34,19 @@ function noteClass(note: JobNote): string {
 //   2026-08-17 — the pair became a single cumulative figure, once the numbers themselves were
 //     fixed rather than merely presented more carefully.
 function received(job: Job): string | null {
-  // NOT WHILE FINISHING, AND NOT ONCE TERMINAL. The field is never cleared, so it would sit frozen
-  // beside "Finishing up" and read as a transfer still running. Nothing is transferring then: the
-  // tool is moving and removing files, and quince has verify and commit to do.
-  if (isFinishingUp(job) || isTerminalJob(job)) return null;
+  // ONLY WHILE BYTES CAN STILL ARRIVE. `backing_up` is the one state where they can; `verifying`,
+  // `committing` and every terminal state describe work that happens AFTER the transfer, and this
+  // field is never cleared — so it would sit frozen beside them and read as a transfer still
+  // running. Written as one positive condition rather than a list of exclusions, so a state added
+  // later is silently EXCLUDED rather than silently included.
+  if (job.state !== "backing_up" || isFinishingUp(job)) return null;
   const { bytes_done } = job.progress;
   if (bytes_done <= 0) return null;
-  return `${formatBytes(bytes_done)} received`;
+  // TWO DECIMALS, which is legibility rather than precision theatre (Operator, 2026-08-17). The
+  // underlying figure updates up to twice a second, but at GB scale ONE decimal only changes every
+  // few seconds — so the number sat still while gigabytes were arriving, which is the exact
+  // impression this line exists to dispel.
+  return `${formatBytes(bytes_done, 2)} received`;
 }
 
 // The live age of a running job. This is the honest motion for every window where quince has no

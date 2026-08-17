@@ -4,7 +4,17 @@
 
 const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
 
-export function formatBytes(n: number): string {
+// `digits` overrides the fractional precision, and exists for ONE caller: the live received figure
+// on a running backup (Operator, 2026-08-17 — "more precision to make it feel more alive").
+//
+// A PARAMETER RATHER THAN A NEW DEFAULT, because precision is a property of the READING and not of
+// the unit. A storage card reading "531.10 GB free of 646.20 GB" is noisier for no gain — that
+// figure moves once an hour. A figure that updates twice a second wants the extra digit precisely
+// because it is what makes the movement visible: at GB scale one decimal only changes every few
+// seconds, so the display looks stuck while bytes are pouring in.
+//
+// Whole BYTES take no fraction whatever is asked — there is no such thing as half a byte.
+export function formatBytes(n: number, digits?: number): string {
   if (!Number.isFinite(n) || n < 0) return "—";
   let v = n;
   let i = 0;
@@ -12,7 +22,7 @@ export function formatBytes(n: number): string {
     v /= 1000;
     i += 1;
   }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${SIZE_UNITS[i]}`;
+  return `${v.toFixed(i === 0 ? 0 : (digits ?? 1))} ${SIZE_UNITS[i]}`;
 }
 
 export function formatSpeed(bytesPerSec: number): string {
