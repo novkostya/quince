@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -135,5 +137,56 @@ func TestAnUnreadablePairIsAnAnswerRatherThanAnError(t *testing.T) {
 	// AND THE REQUEST IS ECHOED, so a form can show the verdict beside the user's own typing.
 	if got.CertFile != "/nonexistent/quince.pem" || got.Hostname != "quince.example" {
 		t.Errorf("request not echoed: %+v", got)
+	}
+}
+
+// `names` IS AN ARRAY ON EVERY OUTCOME, AND THIS ASSERTS THE BYTES RATHER THAN THE DECODED VALUE.
+//
+// THAT IS THE WHOLE POINT OF THE TEST. `json.Unmarshal` into a `[]string` cannot tell `null` from
+// `[]` — both leave the field empty — so a Go test that decodes the response agrees with a client
+// that crashes on it. The test directly above this one already covered the unreadable pair and was
+// green while the page it serves died on `names.length`.
+//
+// The cases are the outcomes that return before there is a leaf to read names from: the pair does
+// not load, and the pair loads as PEM but is not a certificate.
+func TestTheProbeReportsNamesAsAnArrayOnEveryFailure(t *testing.T) {
+	dir := t.TempDir()
+	junkCert := filepath.Join(dir, "junk.pem")
+	junkKey := filepath.Join(dir, "junk.key")
+	for _, f := range []string{junkCert, junkKey} {
+		if err := os.WriteFile(f, []byte("not pem at all\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	for _, tc := range []struct{ name, body, wantOutcome string }{
+		{
+			"a pair that is not there",
+			`{"cert_file":"/nonexistent/quince.pem","key_file":"/nonexistent/quince.key"}`,
+			"unreadable",
+		},
+		{
+			"files that hold no PEM",
+			`{"cert_file":"` + junkCert + `","key_file":"` + junkKey + `"}`,
+			"malformed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := postCertProbe(t, NewRouter(testDeps(t)), tc.body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200 — %s", rec.Code, rec.Body.String())
+			}
+
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode: %v — %s", err, rec.Body.String())
+			}
+			if got := string(raw["outcome"]); got != `"`+tc.wantOutcome+`"` {
+				t.Errorf("outcome = %s, want %q", got, tc.wantOutcome)
+			}
+			if got := string(raw["names"]); got != "[]" {
+				t.Errorf("names = %s, want [] — a client reading this as a list gets nothing to read", got)
+			}
+		})
 	}
 }

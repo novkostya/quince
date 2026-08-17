@@ -112,4 +112,20 @@ describe("the certificate confirmation page", () => {
     renderPage();
     expect(await screen.findByText(/nothing was written, nothing is lost/i)).toBeInTheDocument();
   });
+
+  // A TERMINAL STATE NEEDS A WAY ON. Keeping the certificate ends the last OPTIONAL step, not the
+  // setup — there is still a password to set and a storage to declare — and the only link on this
+  // screen pointed backwards, into the step that had just finished.
+  it("offers a way forward once the certificate is kept, and stops offering the way back", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ confirmed: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /keep it/i }));
+
+    const onward = await screen.findByRole("link", { name: /continue setting up quince/i });
+    expect(onward).toHaveAttribute("href", "/");
+    expect(
+      screen.queryByRole("link", { name: /back to the certificate step/i }),
+    ).not.toBeInTheDocument();
+  });
 });
