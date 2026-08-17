@@ -58,8 +58,16 @@ one static Go binary with the UI embedded in it, and no language runtime alongsi
 | [`docs/contracts.md`](docs/contracts.md) | REST/WS API, vault RPC, cache rules |
 | [`docs/ui.design.md`](docs/ui.design.md) | Visual direction and frontend conventions |
 | [`docs/specs/`](docs/specs/) | Per-rung specs |
+| [`CREDITS.md`](CREDITS.md) | The projects quince stands on, and the licence position |
 | [quince-devlog](https://github.com/novkostya/quince-devlog) | Progress dashboard, decisions log, roadmap |
 
 Historical references in the docs (`qn.N` rungs, lettered decisions) resolve in the
 [devlog](https://github.com/novkostya/quince-devlog) — kept as citations rather than
 scrubbed, so the record stays traceable.
+
+## Licence
+
+[MIT](LICENSE). The container image also ships LGPL-2.1 tooling that quince patches, and
+unmodified GPL-2.0 Alpine packages; [`CREDITS.md`](CREDITS.md) enumerates every dependency,
+records where each licence was read from, and states how the source-availability obligations
+are met. Not affiliated with Apple Inc.
