@@ -108,6 +108,25 @@ make gates-go GO_TEST_ARGS="-count=1 -run TestSomething ./internal/deviceops/...
 `-count=1` is what busts the test cache; without it a re-run prints `(cached)` and cannot re-provoke
 an intermittent failure.
 
+**Your shell quoting is honoured, so `-run` alternation works** — `-run 'TestA|TestB'` is the
+documented Go idiom for "these tests" and is the ordinary reason to reach for this at all:
+
+```sh
+make gates-go GO_TEST_ARGS="-run 'TestSeeding|TestPasscode' -count=150 -cpu=1 ./internal/backup/"
+```
+
+**A literal `$` still needs doubling** — `-run 'TestExact$$'` for an anchored regex — because `$` is
+make's own escape and is consumed before this recipe ever sees the value.
+
+**Both of those were broken until quince#1134, and the shape of the failure is why they are written
+down rather than left obvious.** The value was pasted *inside* the recipe's quoted shell script, so a
+caller's own quotes closed it early and the rest was parsed as shell source. It surfaced two ways:
+`Error 127` naming a *test* as a command not found, and — hit independently, same day — **no output
+at all with `make` exiting 0**. The second is the one to know about, because a filter like
+`grep -c FAIL` renders it as "0 failures", and a suite that never ran reaches PR evidence as green.
+`bin/go-test-args-test` is the gate; it drives the real recipe against a stub runtime and asserts the
+argv `go test` would have received.
+
 **A targeted run announces itself and is not a gate.** It prints a `PARTIAL RUN` banner naming what
 it actually ran, because the expensive failure here is not the wasted time — it is writing *"I ran
 just this test"* into PR evidence when something else happened (quince#368).
