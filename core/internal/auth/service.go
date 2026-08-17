@@ -126,6 +126,38 @@ func (s *Service) Secure(r *http.Request) bool {
 	return secureCookie(r, s.allowInsecureTransport.Load(), s.proxies)
 }
 
+// CSRFSecure decides the Secure flag for the DOUBLE-SUBMIT cookie, which is a different decision
+// from `Secure` above — Operator ruling 2026-08-17, quince#1156.
+//
+// THE CSRF TOKEN IS NOT A CREDENTIAL. Its security property is that a FOREIGN ORIGIN cannot read it,
+// and that is carried by the same-origin policy plus `SameSite=Strict` — neither of which consults
+// `Secure`. On an origin where the flag makes the cookie undeliverable it therefore buys nothing and
+// costs everything: the page reads no token, echoes no header, and EVERY CSRF-guarded mutation is
+// refused — including the certificate step, which is how a user gets off plain http in the first
+// place.
+//
+// AND UNDELIVERABLE IS NOT THE SAME AS UNSTORED, which is what made this hard to see: a `Secure`
+// cookie is only ever SENT to a secure origin, and `document.cookie` exposes only what would be
+// sent, so the token is unavailable to the page even where the browser KEPT it — measured in Chrome
+// stable at a LAN IP, cookie visible in DevTools, mutation still 403. Chromium 141, Firefox 142 and
+// WebKit 26 agreed at every address tried.
+//
+// THE SESSION COOKIE KEEPS ITS FLAG, and that is this ruling's boundary. quince#497 is untouched:
+// credential routes still answer 426 on an insecure origin, so nobody signs in over plain http by
+// accident. What a LAN attacker gains is a token on a wire where they can already read the whole
+// session — nothing new.
+//
+// THROUGH `CookieWillBeDiscarded` RATHER THAN A SECOND PREDICATE, per the ruling: that method
+// already guards quince#497's login loop and already shapes `csrfRefusal`'s wording, and a second
+// copy of a security predicate drifts from the first.
+//
+// SO THE FLAG SURVIVES ON LOOPBACK. `http://127.0.0.1` is a trustworthy origin, the browser keeps
+// the cookie, nothing is broken there — and dropping it there would be a widening this deadlock does
+// not require.
+func (s *Service) CSRFSecure(r *http.Request) bool {
+	return s.Secure(r) && !s.CookieWillBeDiscarded(r)
+}
+
 // CookieWillBeDiscarded reports whether a session cookie issued for THIS request would be
 // marked Secure and then dropped by the browser for arriving over an insecure origin — the
 // login-loop condition of quince#497. It is true for exactly one case: plain http to a
