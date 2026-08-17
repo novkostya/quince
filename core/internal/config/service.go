@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -33,6 +34,19 @@ type Loaded struct {
 	Errors   []wire.ConfigError
 	Source   Source
 	OK       bool
+	// Raw is the exact bytes this load read, and it rides out with the parsed result SO THAT THE
+	// SELF-WRITE RECORD CANNOT DISAGREE WITH THE DOCUMENT IT DESCRIBES (qn.6q).
+	//
+	// A caller could re-read the file instead. It must not: between `Load`'s read and that one the
+	// file may have changed, so the process would hold a snapshot parsed from one document and a
+	// `lastBytes` taken from another — and the next poll would compare against bytes nothing in
+	// memory came from. Handing them back together makes that unrepresentable.
+	//
+	// Populated on EVERY path that read bytes, including the ones that then discarded them: a
+	// document that failed to parse is still the document on disk, and suppressing the next poll's
+	// re-`Load` of the same broken file is exactly what stops a 2-second re-parse loop forever.
+	// nil only when nothing was read — no file, or an unreadable one.
+	Raw []byte
 	// Failure says WHY this load fell back to Default(), TYPED, and nil when it did not
 	// (quince#544). It exists because `Config` cannot answer the question: every failing path
 	// yields `Default()`, whose nil `Storage` is indistinguishable from a file that genuinely
@@ -217,7 +231,7 @@ func Load(path string) Loaded {
 	cfg, declared, warnings, perr := Parse(data)
 	if perr != nil {
 		return Loaded{
-			Config: Default(), Source: src, OK: false,
+			Config: Default(), Source: src, OK: false, Raw: data,
 			Warnings: append(warnings, Warning{Path: "", Message: "invalid YAML: " + perr.Error()}),
 			Failure:  &LoadFailure{Kind: LoadUnparsable, Detail: perr.Error()},
 		}
@@ -226,9 +240,9 @@ func Load(path string) Loaded {
 		for _, e := range errs {
 			warnings = append(warnings, Warning{Path: e.Path, Message: "invalid value: " + e.Message})
 		}
-		return Loaded{Config: Default(), Warnings: warnings, Errors: errs, Source: src, OK: false}
+		return Loaded{Config: Default(), Warnings: warnings, Errors: errs, Source: src, OK: false, Raw: data}
 	}
-	return Loaded{Config: cfg, Declared: declared, Warnings: append(warnings, DegradedModeWarnings(cfg)...), Source: src, OK: true}
+	return Loaded{Config: cfg, Declared: declared, Warnings: append(warnings, DegradedModeWarnings(cfg)...), Source: src, OK: true, Raw: data}
 }
 
 // DegradedModeWarnings surfaces settings that are VALID and deliberately weaker than the
@@ -292,19 +306,53 @@ type Service struct {
 	cfg  Config
 	// declared is the file's own record of what the user set (qn.6j).
 	//
-	// SET ONCE, AT CONSTRUCTION, AND NOTHING MAINTAINS IT YET. `NewService` takes it from `Load`
-	// and no assignment to it exists anywhere in this package. Stated exactly because the next
-	// author is the one who has to change that:
+	// MAINTAINED ON BOTH PATHS. `replaceLocked` unions the previous set with the keys this write
+	// changes, because a `PUT` carries a full document with no record of intent. `Reload` simply
+	// takes `Loaded.Declared`, which is derived from the document that was parsed — so after a
+	// hand-edit, *what the user set* is what the hand-edited file says, for free.
 	//
-	//   - THE WRITE HALF IS PR 4. `replaceLocked` must update this when it writes, or the second
-	//     save re-inflates the file the first one tidied.
-	//   - THERE IS NO RELOAD PATH AT ALL. `Load` runs at construction and nothing re-reads the
-	//     file, so a hand-edit is invisible to a running quince — quince#727, post-`v0.1`.
+	// A HAND-EDIT THEREFORE RE-TIDIES THE FILE AT THE NEXT UI SAVE, and that is correct rather than
+	// surprising: keys the operator deleted by hand stay deleted.
 	//
 	// Read under `mu`, like `cfg`. Nothing outside this package needs it.
 	declared Declared
 	warnings []Warning
 	source   Source
+
+	// lastBytes is THE DOCUMENT THIS PROCESS LAST READ OR WROTE, and it is how a reload tells a
+	// hand-edit from quince's own write (qn.6q, spec decision D2).
+	//
+	// THE EVENT STREAM CANNOT ANSWER THAT QUESTION, which is why the answer is bytes. Measured
+	// 2026-08-17: `AtomicWrite` and a hand-run `printf > tmp; mv tmp config.yml` produce identical
+	// inotify sequences apart from the temp file's NAME — same `CREATE`/`MODIFY`/`CLOSE_WRITE` on
+	// the temp, same `MOVED_FROM` then `MOVED_TO config.yml`. There is no actor on the event and no
+	// cookie that survives the rename, so any suppression keyed on the event is keyed on nothing.
+	//
+	// A CONTENT COMPARISON HAS NO TIMING WINDOW, which a debounce does. "Ignore events for 200ms
+	// after our own write" is wrong in both directions at once: it drops a hand-edit that lands
+	// inside the window, and it lets a slow write through outside it.
+	//
+	// Three properties worth the field:
+	//
+	//   - A hand-edit that reproduces quince's own bytes is suppressed, and that is CORRECT — it is
+	//     a no-op edit, and reloading it would apply nothing.
+	//   - It COALESCES for free. However many writes land between two polls, the poll reads the file
+	//     once and decides once, so there is no burst to debounce.
+	//   - It is self-healing across a restart, being seeded from the same `Load` the process starts
+	//     on.
+	//
+	// IT IS THE BYTES ACTUALLY WRITTEN, not the tidy attempt — see `replaceLocked`, where the
+	// round-trip guard may widen `data` to the full document. Recording the attempt would make that
+	// guard's own degradation look like a hand-edit on the very next poll.
+	//
+	// nil means "nothing read or written yet", which is a fresh install with no file on disk. A
+	// later poll that finds one is a change, and that is right: somebody created it.
+	lastBytes []byte
+
+	// fileGone latches the "config.yml has vanished" report so it is made once per disappearance
+	// rather than once per poll. Nothing else reads it: it is a log-rate guard, not state anybody
+	// branches on, and `Reload` clears it the moment the file is readable again.
+	fileGone bool
 
 	// loadErrs is WHY the file on disk was discarded, and until quince#852 it was recorded nowhere.
 	// `Load` returns `OK: false` with these errors and `Config: Default()`; `NewService` logged them
@@ -382,9 +430,11 @@ type applier struct {
 // An Applier that cannot complete its work says so in a Warning and leaves its subsystem on its
 // last-good state — which is D12's own rule for a bad edit, one layer down.
 //
-// AN APPLIER MUST NOT CALL Replace OR ForgetStorage. Both hold `writeMu` for the whole write, so a
-// re-entrant call deadlocks. It may freely call Current()/Snapshot(), which take `mu` only — and
-// `next` is already the configuration Current() would return, so there is no reason to.
+// AN APPLIER MUST NOT CALL Replace, ForgetStorage OR Reload. All three hold `writeMu` for the whole
+// sequence, so a re-entrant call deadlocks. `Reload` is named explicitly because it is the newest
+// producer (qn.6q) and an applier reached from it looks, from inside, exactly like one reached from a
+// `PUT`. It may freely call Current()/Snapshot(), which take `mu` only — and `next` is already the
+// configuration Current() would return, so there is no reason to.
 //
 // `old` is the configuration that was live until this write; `next` is what has just been written.
 // Both are passed because most consumers only care about their own section, and comparing is how
@@ -461,6 +511,9 @@ func NewService(path string, log *slog.Logger) *Service {
 	return &Service{
 		path: path, log: log, cfg: l.Config, declared: l.Declared, warnings: l.Warnings,
 		source: l.Source, loadErrs: loadErrs, discarded: !l.OK, loadFailure: l.Failure,
+		// SEEDED FROM THE SAME LOAD, not from a second read — see Loaded.Raw. Seeding it here is what
+		// stops the FIRST poll from treating the startup document as a hand-edit.
+		lastBytes: l.Raw,
 	}
 }
 
@@ -557,6 +610,133 @@ func (s *Service) Replace(c Config, source string) ([]wire.ConfigError, []Warnin
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	return s.replaceLocked(c, source)
+}
+
+// ReloadOutcome says what a single Reload did, so a caller can log the interesting cases and stay
+// silent on the ordinary one. A poll that finds nothing is the ordinary one, several times a minute,
+// forever.
+type ReloadOutcome int
+
+const (
+	// ReloadUnchanged — the bytes on disk are the bytes this process last read or wrote. Nothing was
+	// parsed, nothing was applied, no applier ran. This is the answer almost every time.
+	ReloadUnchanged ReloadOutcome = iota
+	// ReloadApplied — the file changed, parsed and validated, and the appliers were told.
+	ReloadApplied
+	// ReloadRefused — the file changed and `Load` refused it. The running configuration is UNTOUCHED
+	// and the reason is in the service's warnings. D12: "an invalid edit never crashes the app —
+	// keep running on last-good, show a UI banner naming the bad key."
+	ReloadRefused
+)
+
+// Reload re-reads config.yml and, if somebody OTHER than quince changed it, applies the result
+// (qn.6q). It is the second producer feeding the appliers `qn.6g` built, which is what that rung's
+// ruling predicted: "a file-watcher later becomes a second producer feeding the same appliers."
+//
+// IT NEVER WRITES, and that is the decision most likely to be undone by a well-meaning refactor
+// (spec D4). A reload that "tidied" the file — re-marshalling through `MarshalDeclared` — would
+// rewrite the operator's document behind their back, on a path with no request and no response to
+// carry the warning. `Replace` writes; this does not.
+//
+// IT HOLDS writeMu FOR THE WHOLE SEQUENCE, exactly as `replaceLocked` does, so the two producers
+// have one ordering rather than none. That costs a file read and a parse under the lock, which is
+// microseconds on a document this size and is the same shape the write path already pays.
+//
+// AN APPLIER MUST NOT CALL THIS, for the reason it must not call Replace: writeMu is held for the
+// whole sequence, so a re-entrant call deadlocks. See Applier.
+//
+// THE COMPARISON IS THE WHOLE MECHANISM — see the `lastBytes` field for why it is bytes rather than
+// an event, a timestamp or a debounce.
+func (s *Service) Reload() (ReloadOutcome, []Warning) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.RLock()
+	path, prevBytes := s.path, s.lastBytes
+	s.mu.RUnlock()
+
+	// READ FIRST AND COMPARE, rather than stat-and-maybe-read. A stat costs 2.33µs and a full read
+	// plus compare costs 12.19µs on a realistic 218-byte config (measured 2026-08-17), so the saving
+	// is nothing and the cost is a whole class of reasoning about mtime granularity: on a filesystem
+	// with 1-second timestamps, a rewrite inside the same tick with the same size is invisible to a
+	// stat and obvious to a comparison.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// A DISAPPEARED FILE IS NOT AN INSTRUCTION TO FALL BACK TO DEFAULTS (spec story 7). It is
+		// almost certainly an accident mid-edit, and adopting Default() would silently disable every
+		// declared storage. Keep last-good, say so once, and let the next poll pick up the restored
+		// file. Reported once per transition, not once per poll: `lastBytes` is left alone, so the
+		// unchanged branch cannot fire, but the log line is what would repeat — hence the guard.
+		if prevBytes != nil {
+			s.mu.Lock()
+			alreadySaid := s.fileGone
+			s.fileGone = true
+			s.mu.Unlock()
+			if !alreadySaid {
+				s.log.Warn("config: the file is gone — quince keeps running on the configuration it "+
+					"already loaded, and will pick up a replacement when one appears",
+					"path", path, "error", err)
+			}
+		}
+		return ReloadUnchanged, nil
+	}
+	s.mu.Lock()
+	s.fileGone = false
+	s.mu.Unlock()
+
+	if bytes.Equal(data, prevBytes) {
+		return ReloadUnchanged, nil
+	}
+
+	l := Load(path)
+
+	if !l.OK {
+		// LAST-GOOD STANDS. `s.cfg` is not touched and NO APPLIER RUNS — there is nothing to apply,
+		// and calling them with old == next would be a lie about what happened.
+		s.mu.Lock()
+		s.warnings = l.Warnings
+		s.loadErrs = l.Errors
+		s.loadFailure = l.Failure
+		// `discarded` UNDER ITS WIDENED, RULED DEFINITION (Operator, 2026-08-17, quince#1130,
+		// amending quince#849): *the file on disk was refused; the running configuration is not what
+		// the file says.* The older wording — "quince is running on Default()" — is what this path
+		// falsifies: after a bad hand-edit quince runs on last-good, which may be a perfectly good
+		// document it loaded at startup. The second clause is what survives and it is the one every
+		// client branches on.
+		s.discarded = true
+		s.source = l.Source
+		// RECORD THE BAD BYTES, or every later poll re-reads the same broken file, re-`Load`s it and
+		// re-logs — once per interval, forever. Recording them means the refusal is reported once,
+		// and fixing the file makes the next poll differ again.
+		s.lastBytes = l.Raw
+		s.mu.Unlock()
+		s.log.Warn("config: the file on disk was edited and REFUSED — quince keeps running on the "+
+			"configuration it already had", "path", path, "errors", len(l.Errors))
+		return ReloadRefused, l.Warnings
+	}
+
+	s.mu.Lock()
+	old := s.cfg
+	s.cfg = l.Config
+	// STRAIGHT FROM THE FILE, and this is the half that is simpler than the write path: `Declared` is
+	// derived from the document that was parsed, so after a hand-edit *what the user set* is what the
+	// hand-edited file says. No union, no changed-key computation.
+	s.declared = l.Declared
+	s.warnings = l.Warnings
+	s.loadErrs = nil
+	s.discarded = false
+	s.loadFailure = nil
+	s.source = l.Source
+	s.lastBytes = l.Raw
+	s.mu.Unlock()
+
+	s.log.Info("config: the file on disk changed and was applied — no restart needed", "path", path)
+
+	// AFTER the swap and OUTSIDE `mu`, for the two reasons notify already documents: an applier that
+	// observed the old snapshot beside the new file would see a state that never existed, and an
+	// applier reaching into another subsystem while `mu` is held deadlocks the moment it calls back
+	// into Current().
+	return ReloadApplied, s.notify(old, l.Config)
 }
 
 // replaceLocked is Replace's body. CALLER MUST HOLD writeMu.
@@ -783,6 +963,14 @@ func (s *Service) replaceLocked(c Config, source string) ([]wire.ConfigError, []
 	s.discarded = false
 	s.loadFailure = nil
 	s.source = Source{Path: s.path, Mtime: mtime}
+	// THE SELF-WRITE RECORD MOVES WITH THE FILE (qn.6q). Without this the next poll reads bytes it
+	// has never seen, calls quince's own save a hand-edit, and re-applies the configuration that was
+	// just applied — the defect every file-watch implementation ships first.
+	//
+	// `data`, not the tidy attempt: the round-trip guard above may have replaced it with the full
+	// document, and recording what was ATTEMPTED rather than what LANDED would make that degradation
+	// indistinguishable from somebody editing the file.
+	s.lastBytes = data
 	s.mu.Unlock()
 
 	// THE SUBSYSTEMS ARE TOLD, AFTER the write and after the snapshot swap (qn.6g).
