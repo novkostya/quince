@@ -863,6 +863,50 @@ this.
 route as well as the endpoint, and what the page renders to a visitor who is not yet authenticated —
 the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 1 it is.
 
+**PROPOSED (gap): where the VAPID keypair lives.** `qn.12`, quince#1124; routed here by the architect
+on that issue at `13:11:15Z`. **Nothing is built on this until the Operator rules.** It blocks
+`qn.12`'s slices 3 and 4 — the code that touches key material — and nothing else in that rung.
+
+**Why it is a gap and not a schema line.** Web Push signs every delivery with a VAPID keypair
+(RFC 8292). The **No secrets at rest** bullet above is about the *backup password* and does not decide
+this, because a VAPID private key is quince's own credential rather than the user's — and D12's rule
+is absolute in the other direction: **no secret ever enters `config.yml`.** So the one place every
+other setting lives is closed, and what remains is a security-model question.
+
+**The constraint that makes it a real question rather than a filing preference: the keypair is
+PERSISTENT, and losing it is silent.** The public half is the `applicationServerKey` baked into every
+subscription a phone has ever created. Regenerating it does not fail loudly — it leaves every
+subscribed device holding a subscription quince can no longer sign for, and the first symptom is a
+notification that never arrives. A container rebuild, a volume that was not persisted, or a "reset to
+defaults" must not be able to cause that quietly.
+
+**Option (a) — the app DB.** It already holds the argon2id admin hash and the audit trail, it is
+already inside the backed-up `/data`, and it is already the thing the *backup-your-appdata* docs tell
+people to keep. Generated on first use; nothing for the operator to do. **Cost:** the app DB stops
+being *"no secrets at rest"* in the loose sense some readers take that bullet to have, so the bullet
+needs a sentence either way.
+
+**Option (b) — a `0600` file under `/data`, beside the pairing records.** The precedent is directly
+above: pairing records are private-key-grade, live at `0600`, are backed up into `/data`, are never
+served and never logged. A PEM file is inspectable and replaceable with ordinary tools, which the DB
+is not. **Cost:** a second secret-bearing artifact with its own permissions to get right, where (a)
+inherits the DB's.
+
+**Option (c) — operator-supplied**, by env var or a path in `config.yml` pointing at a key file (the
+shape `tls.key_file` already uses — a **path** in the config, never a key body). **Cost:** it makes
+push require setup, against this project's Plex-grade-setup promise, and there is no reason a user
+should have to author a keypair whose only consumer is quince itself.
+
+**What the spec is written NOT to assume.** No `qn.12` story's acceptance criteria depend on the
+answer — that was the condition the architect attached when ruling that this blocks the build and not
+the spec. Whichever option is taken, the key is generated or loaded once at startup, and its **public**
+half is served by `GET /api/notifications`, because a subscription cannot be created without it.
+
+**Related and NOT part of this question:** the per-subscription `p256dh`/`auth` keys are the *phone's*,
+arrive over the API, and go in the app DB with the rest of the subscription row. They are
+capability-grade — anyone holding one can push to that phone — so they are never logged and never
+served to another session. That is `qn.12`'s to build under existing canon.
+
 ## 7. Vault: lazy, session-scoped reading behind a swappable seam
 
 - **Lazy is the model** (Operator decision): backup content is read only inside an
