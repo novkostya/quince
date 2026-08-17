@@ -1227,9 +1227,14 @@ func TestStoryRetryChainFields(t *testing.T) {
 	// A job's ROW goes terminal before its work is discarded and the per-UDID single-flight slot
 	// is released (release is deferred past discard — correct: a new job must not race the old
 	// one's work dir). So an instant retry can legitimately see 409 for a moment; wait it out
-	// rather than asserting on teardown timing. NOTE (qn.4c, filed): the 409 message a user would
-	// see in that window says "a backup is already running for this device", which reads as wrong
-	// right after the UI announced a failure — worth a friendlier reason for the one-tap Retry.
+	// rather than asserting on teardown timing.
+	//
+	// The NOTE that stood here — that the 409 in this window says "a backup is already running for
+	// this device", which reads as wrong right after the UI announced a failure — is FIXED. It now
+	// says the previous backup is still finishing. Measured on the staging stand 2026-08-17: 14 s
+	// of that window per cancel, during which every tap was refused with the wrong sentence.
+	// Asserted deterministically in TestStartBackupNamesTeardownRatherThanClaimingItRuns; this test
+	// still waits the window out rather than racing it, for the reason above.
 	j2, s2, reason := startWhenReleased(t, h.eng, m.Transport, j1.ID)
 	if s2 != 202 {
 		t.Fatalf("retry start = %d (%s)", s2, reason)
@@ -1667,5 +1672,54 @@ func TestJobLogDropsEmptyTokensAndCollapsesRepeatedNarration(t *testing.T) {
 			t.Errorf("a progress frame reached the log: %s — the redraw filter does not recognise "+
 				"it (quince#809 for the Bytes units, a regression for the MB one)\n---\n%s", frame, logtxt)
 		}
+	}
+}
+
+// A CANCELLED OR FAILED JOB IS STILL IN e.running WHILE IT TEARS DOWN, and what the user is told in
+// that window used to contradict what they had just watched happen.
+//
+// The single-flight slot is released after `discard`, deliberately — a new job must not race the
+// old one's work dir — so the row goes terminal first and the slot stays held. Measured on the
+// staging stand 2026-08-17: cancel terminal at 05:33:47, work discarded at 05:34:01, so for 14 s
+// every "Back up now" was refused with "a backup is already running for this device" about a backup
+// the user had just cancelled. TestStoryRetryChainFields carried this as a filed NOTE.
+//
+// The map is seeded directly rather than raced for: the window is real but short, and a test that
+// tried to catch it would assert on teardown timing, which is exactly what that NOTE warns against.
+func TestStartBackupNamesTeardownRatherThanClaimingItRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state string
+		want  string
+	}{
+		{"cancelled", StateCancelled, "the previous backup is still finishing — try again in a moment"},
+		{"failed", StateFailed, "the previous backup is still finishing — try again in a moment"},
+		{"genuinely running", StateBackingUp, "a backup is already running for this device"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, fakeParams{}, TransportUSB)
+			// The slot is seeded and then released again: there is no run goroutine behind this
+			// entry, and the harness's cleanup cancels everything still live — which would
+			// dereference a nil cancel func.
+			h.eng.mu.Lock()
+			h.eng.running[testUDID] = &liveJob{
+				row:    store.JobRow{ID: "HELD", UDID: testUDID, State: tc.state, Transport: "usb"},
+				cancel: func() {},
+			}
+			h.eng.mu.Unlock()
+			defer func() {
+				h.eng.mu.Lock()
+				delete(h.eng.running, testUDID)
+				h.eng.mu.Unlock()
+			}()
+
+			_, status, reason := h.eng.StartBackup(testUDID, TransportUSB, "", "")
+			if status != 409 {
+				t.Fatalf("status = %d, want 409", status)
+			}
+			if reason != tc.want {
+				t.Fatalf("reason = %q, want %q", reason, tc.want)
+			}
+		})
 	}
 }

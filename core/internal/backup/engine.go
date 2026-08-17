@@ -251,8 +251,23 @@ func (e *Engine) StartBackup(udid, transport, storageID, retryOf string) (wire.J
 	}
 
 	e.mu.Lock()
-	if _, busy := e.running[udid]; busy {
+	if lj, busy := e.running[udid]; busy {
 		e.mu.Unlock()
+		// A CANCELLED JOB IS STILL IN THIS MAP WHILE IT TEARS DOWN, and answering "already running"
+		// about it is false in the way that matters most: the user has just cancelled that backup
+		// and is being told it is running. Measured 2026-08-17 — cancel terminal at 05:33:47, work
+		// discarded at 05:34:01 — so for 14 s every Back up now was refused with a sentence that
+		// contradicted what the user had just watched happen.
+		//
+		// The state is read under the JOB's lock, not the engine's: `e.mu` guards the map, and the
+		// row inside a liveJob is mutated by its supervising goroutine under `lj.mu`.
+		lj.mu.Lock()
+		state := lj.row.State
+		lj.mu.Unlock()
+		if store.JobIsTerminal(state) {
+			return wire.Job{}, http.StatusConflict,
+				"the previous backup is still finishing — try again in a moment"
+		}
 		return wire.Job{}, http.StatusConflict, "a backup is already running for this device"
 	}
 	id := e.newID()
