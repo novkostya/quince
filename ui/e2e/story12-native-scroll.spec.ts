@@ -196,7 +196,7 @@ test("the phone nav bar stays put, and stays clear of the notch while it does", 
 
   await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "Home, scrolled by hand");
 
   const after = await bar.boundingBox();
   expect(after).not.toBeNull();
@@ -385,12 +385,12 @@ test("the in-page back link restores the scroll position", async ({ page }) => {
   await authenticate(page);
   await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "Home, scrolled by hand");
 
   await clickWithoutScrolling(page, "attic-ipad");
   await expect(page).toHaveURL(/\/devices\//);
   await expect(page.getByRole("heading", { name: "attic-ipad" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+  await expectScrollY(page, 0, "the device details page, newly opened");
 
   // TAP `< Home` — the IN-PAGE control, scoped to `main` because the nav bar has a `Home` link too
   // and they are deliberately different acts: the nav item is a destination and pushes, this one is
@@ -401,7 +401,7 @@ test("the in-page back link restores the scroll position", async ({ page }) => {
     .getByRole("link", { name: "Home" })
     .dispatchEvent("click", { bubbles: true, cancelable: true });
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "Home, after the in-page back link traversed");
 
   // AND IT LEFT NO ENTRY BEHIND, which is the half that says it was a traversal rather than a push
   // that happened to land well. If it had pushed, going back once would return to the DEVICE page;
@@ -455,6 +455,45 @@ async function expectCanHold(page: Page, where: string, arrived: Locator): Promi
     .toBeGreaterThanOrEqual(OFFSET);
 }
 
+// AND THE OFFSET ASSERTION SAYS WHAT IT MEASURED, FOR THE SAME REASON THE HEIGHT ONE DOES —
+// quince#974 / quince#975.
+//
+// `expect.poll(() => window.scrollY).toBe(200)` reports `Received: 948` and NOTHING ELSE. Not which
+// page it was on, not whether the document could still hold 200 at that moment, not which history
+// entry it had landed on. Every one of those decides which bug it is, and none of them survives to
+// the reader.
+//
+// WHAT THAT COST, MEASURED RATHER THAN ASSERTED. quince#974 has been open since 2026-08-14 on one
+// observation of `948`, and this file has TWO `toBe(OFFSET)` assertions that could have produced it
+// — the setup scroll and the restore the test is named for, which are DIFFERENT BUGS. Three
+// sessions could not tell them apart from the output, and nobody has caught it a second time: not
+// in thirteen days of CI, not in 60 throttled repetitions of the sequence, not in 15 whole-file runs
+// against the very commit that failed. A failure this rare has to be readable the first time.
+//
+// SO THE POLLED VALUE CARRIES ITS CONTEXT AND THE COMPARISON IS STILL ON THE OFFSET ALONE. Nothing
+// here re-issues the scroll: a poll that scrolled again would paper over exactly the "set, then
+// undone" class quince#1048 turned out to be, which is the one thing this must not do.
+async function expectScrollY(page: Page, want: number, where: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const h1 = document.querySelector("h1")?.textContent ?? "(no h1)";
+          const idx = (window.history.state as { idx?: number } | null)?.idx ?? -1;
+          return [
+            `y=${Math.round(window.scrollY)}`,
+            `max=${document.documentElement.scrollHeight - window.innerHeight}`,
+            `page=${JSON.stringify(h1)}`,
+            `path=${location.pathname}${location.search}`,
+            `idx=${idx}`,
+          ].join(" ");
+        }),
+      { message: `${where} must sit at ${want}px` },
+    )
+    // `\b` rather than a bare prefix, so `y=200` cannot be satisfied by `y=2000`.
+    .toMatch(new RegExp(`^y=${want}\\b`));
+}
+
 test("a new screen opens at the top, and Back returns to where you were", async ({ page }) => {
   await authenticate(page);
   await expectCanHold(page, "Home", page.getByRole("heading", { name: "Home", level: 1 }));
@@ -462,7 +501,7 @@ test("a new screen opens at the top, and Back returns to where you were", async 
   // Read back rather than assumed: `scrollTo` is clamped silently, and asserting against the number
   // we asked for rather than the one we got is how a test passes about a page that never moved.
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "Home, scrolled by hand");
 
   // INTO the details page, from a scrolled position and without Playwright moving it for us.
   await clickWithoutScrolling(page, "attic-ipad");
@@ -479,14 +518,14 @@ test("a new screen opens at the top, and Back returns to where you were", async 
   // A NEW SCREEN STARTS AT THE TOP. Without `useScrollReset` the offset simply survives the
   // navigation — an SPA never loads a new document to start one at zero — and the details page opens
   // part-way down, which is the second symptom reported on quince#838.
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+  await expectScrollY(page, 0, "the device details page, newly opened");
 
   // AND BACK LANDS WHERE WE LEFT. This is the browser's own restoration, which is the whole reason
   // the shell stopped owning the scroll: a history entry records `window.scrollY` and has no way to
   // record an element's `scrollTop`.
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "Home, after the browser traversed back");
 });
 
 // A DIALOG IS A NAVIGATION, AND CLOSING ONE PUTS THE PAGE BACK WHERE IT WAS — quince#931.
@@ -513,7 +552,7 @@ test("opening a dialog is a push, and closing it restores the page behind it", a
   );
 
   await page.evaluate((to) => window.scrollTo(0, to), OFFSET);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "the device details page, scrolled by hand");
 
   // OPENING IS A NAVIGATION, and the address says which dialog. A query param rather than a path
   // segment on purpose: `useScrollReset` sends a new PATHNAME to the top, so a path-shaped dialog
@@ -521,17 +560,17 @@ test("opening a dialog is a push, and closing it restores the page behind it", a
   await page.getByRole("button", { name: /manage encryption/i }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page).toHaveURL(/[?&]dialog=encryption/);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "the device details page, with the dialog open");
 
   // WHAT THE KEYBOARD DOES ON A DEVICE, performed by hand: the document moves under the open dialog.
   await page.evaluate(() => window.scrollTo(0, 0));
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+  await expectScrollY(page, 0, "the device details page, moved under the open dialog");
 
   // CLOSING IS A POP, so the browser puts the offset back. Nothing in quince restores it.
   await page.getByRole("button", { name: /^cancel$/i }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page).not.toHaveURL(/dialog=/);
-  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(OFFSET);
+  await expectScrollY(page, OFFSET, "the device details page, after the dialog closed");
 });
 
 // AND BACK CLOSES IT, which is what the gesture on a phone actually is. Without a history entry the
