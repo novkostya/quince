@@ -651,6 +651,27 @@ screen that offers passwordless.
 
 - **Transport**: HTTPS via user's reverse proxy or built-in self-signed fallback; Web
   Push (later) requires a real cert — documented, not solved by us.
+- **THE TWO COOKIES DIFFER IN ONE FLAG, ON PURPOSE** (Operator ruling 2026-08-17, quince#1156). The
+  session cookie is `Secure` by the rule in the **Auth** bullet below. The **CSRF** cookie is not, on
+  an origin where a browser would discard it: `Service.CSRFSecure` is
+  `Secure(r) && !CookieWillBeDiscarded(r)`, which drops the flag for exactly one case — plain http to
+  a **non-loopback** host.
+  **Why it was worth nothing there.** A double-submit token is not a credential. Its property is that
+  a *foreign origin* cannot read it, and the same-origin policy plus `SameSite=Strict` enforce that
+  without reference to `Secure`. A LAN attacker who could read the token on plain http can already
+  read the whole session on plain http, so the flag defended nothing on the only origins it applied
+  to.
+  **What it cost.** Everything on those origins. A `Secure` cookie is only ever *sent* to a secure
+  origin, and `document.cookie` exposes only what would be sent — so the page held no token, echoed
+  no header, and every CSRF-guarded mutation was refused, **including the certificate step, which is
+  how a user gets off plain http**. Measured across Chromium 141, Firefox 142, WebKit 26 and Chrome
+  stable at an IP and at a hostname; Chrome *stored* it at the IP and still would not send it, so
+  storage was never the question.
+  **The boundary, both ways.** quince#497 is untouched — credential routes still answer **426** on an
+  insecure origin, so nobody signs in over plain http by accident, and relaxing *that* stays behind
+  the explicit opt-in ruled below. Loopback is untouched too, in the other direction: plain-http
+  loopback has never carried the flag on either cookie, which is what lets `--demo` and the e2e suite
+  run over http at all.
 - **Auth**: single admin password (argon2id hash in app DB), cookie sessions
   (`HttpOnly` + `Secure` + `SameSite=Strict`; `Secure` relaxed only for loopback-http and
   `--demo`, so local/e2e over plain http still work — never in production; **whether a user

@@ -151,7 +151,10 @@ func (d Deps) authGuard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		next.ServeHTTP(w, ensureCSRF(w, r, d.Auth.Secure(r)))
+		// `CSRFSecure`, NOT `Secure` — the double-submit cookie's flag is a different decision from
+		// the session cookie's (Operator ruling 2026-08-17, quince#1156). The reasoning is at that
+		// method; what matters here is that these two lines must not be collapsed back into one.
+		next.ServeHTTP(w, ensureCSRF(w, r, d.Auth.CSRFSecure(r)))
 	})
 }
 
@@ -242,12 +245,22 @@ const csrfCtxKey ctxKey = iota
 
 // ensureCSRF guarantees a CSRF cookie exists, minting one if absent, and stashes the token
 // in the request context so a handler (e.g. auth/status) can echo it in its body.
+//
+// THE COOKIE IS RE-SENT EVERY TIME, NOT ONLY WHEN MINTED, AND THE FLAG IS WHY. A browser tells the
+// server nothing about a cookie's attributes — only its value comes back — so a token minted while
+// the origin was insecure would keep the flag it was born with for as long as it survives, however
+// the origin changes underneath it. That is a live sequence rather than a hypothetical: this product
+// exists to move an install from http to https, and it can happen without a restart the moment a
+// certificate is confirmed.
+//
+// The VALUE is minted once and reused; only the attributes are refreshed, so nothing depends on the
+// token staying put across a scheme change.
 func ensureCSRF(w http.ResponseWriter, r *http.Request, secure bool) *http.Request {
 	tok := auth.CSRFTokenFromRequest(r)
 	if tok == "" {
 		tok = auth.NewCSRFToken()
-		http.SetCookie(w, auth.CSRFCookie(tok, secure))
 	}
+	http.SetCookie(w, auth.CSRFCookie(tok, secure))
 	return r.WithContext(context.WithValue(r.Context(), csrfCtxKey, tok))
 }
 
