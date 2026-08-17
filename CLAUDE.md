@@ -391,6 +391,9 @@ repo is not a message bus, and no human is an RPC layer.
   parent — the operation a PAT's missing `workflow` scope refuses. **So the conclusion a blocked
   session needs is settled: the App is NOT refused under that path**, and *"only the Operator can
   push a workflow"* is false.
+  **`workflows: write` IS PER-APP — do not infer it from being an App.** `quince-review[bot]` and
+  `quince-coder` hold it; `quince-analyst` does not (quince#375). For a seat not in the table below,
+  push and read the result back rather than guessing either way.
   **The `PUT /repos/…/contents/.github/workflows/…` is STILL UNRUN, and now for a recorded reason
   rather than for want of trying.** Attempted 2026-08-13 from an architect session, on a throwaway
   branch since deleted: the **Claude Code permission classifier** refused it, so nothing reached
@@ -606,10 +609,10 @@ around a refusal. The table runs in one direction with **three** exceptions, all
 
 | identity | cannot |
 | --- | --- |
-| **`quince-bot`** — implementer, on the runner | push under `.github/workflows/**` (no `workflow` scope, quince#113) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — RETIRED 2026-07-31, Discussions disabled; see below (devlog#30) |
+| **`quince-coder`** — implementer, on the runner | **`CAN` push under `.github/workflows/**`** — `workflows: write`, granted 2026-08-17 and measured by pushing one (quince#1116) · `gh pr edit` (needs `read:org`, whichever flag you pass; use `gh api -X PATCH`, which works because REST does not consult the org-scoped GraphQL fields the porcelain resolves — devlog#23) · `--add-reviewer`, i.e. **re-request a review** (same root, devlog#48) · **re-run a workflow run** — it alone could, and that ended when the identity moved to an App; see below (quince#141) · **`CAN` delete any discussion in `quince-devlog`** — RETIRED 2026-07-31, Discussions disabled; see below (devlog#30) |
 | **`quince-review[bot]`** — the reviewer, a GitHub App | be a user: `api user` returns `403 Resource not accessible by integration`, because an installation token has no user context. That is not a broken credential and the check that answers "can this box cast a verdict" is `api /installation/repositories` · **re-run a workflow run** — same refusal, worded for an integration; the installation has no `actions: write` (quince#141) |
 | **`quince-analyst`** — the supervisor seat, a GitHub App | push under `.github/workflows/**` — measured at the ceremony, 2026-07-31: `403` while an ordinary write to the same branch succeeded seconds later, so quince#113's rule holds for a third identity · **merge** — it holds no `administration`. It **`CAN`** author code and open pull requests (`contents: write` + `pull_requests: write`, quince#375), which is what distinguishes it from every earlier description of this seat |
-| **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope; since 2026-07-27 `quince-review[bot]` can too, holding `workflows: write` |
+| **Operator** | — **`CAN`** always push a workflow: an SSH push consults no OAuth scope. So can `quince-review[bot]` and `quince-coder`, holding `workflows: write`; `quince-analyst` is the only agent seat that cannot |
 
 **THIS TABLE LOST A ROW ON 2026-08-07, AND THE SEAT IT DESCRIBED DID NOT GO WITH IT.** There was an
 **architect** row here, for a personal access token used through `bin/gh-arch`. The Operator deleted
