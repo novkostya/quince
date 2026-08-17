@@ -185,13 +185,27 @@ func (s *Store) VAPIDPrivateKey() (key []byte, ok bool, err error) {
 // The guard is here rather than left to callers because "generate if absent" is the only correct
 // use, and a second caller racing the first — two startups, a retried request — would otherwise
 // replace a key that subscriptions already depend on.
+//
+// `SetSettingIfAbsent`, NOT `SetSetting`, AND THAT IS THE WHOLE GUARD. `SetSetting` is
+// `ON CONFLICT DO UPDATE` — an upsert — so a read-then-write here would be check-then-act: two
+// callers both see *not found*, both proceed, and the loser silently replaces the winner's key.
+// That is precisely the outcome the sentence above claims to prevent, and the atomic form is what
+// actually prevents it: `ON CONFLICT DO NOTHING`, decided by the database rather than by this
+// process.
+//
+// The identical hazard and the identical remedy are one package over, at `auth/passkey.go` —
+// *"two concurrent first registrations must not each mint a handle and have the second overwrite the
+// first"*. A VAPID key has the worse loss profile of the two: overwriting it silently unsigns every
+// subscription every phone has ever created (quince#1128).
 func (s *Store) SetVAPIDPrivateKey(key []byte) error {
-	if _, found, err := s.GetSetting(VAPIDKeySetting); err != nil {
+	inserted, err := s.SetSettingIfAbsent(VAPIDKeySetting, encodeVAPID(key))
+	if err != nil {
 		return err
-	} else if found {
+	}
+	if !inserted {
 		return errors.New("store: a VAPID key already exists; replacing it would invalidate every subscription")
 	}
-	return s.SetSetting(VAPIDKeySetting, encodeVAPID(key))
+	return nil
 }
 
 // encodeVAPID / decodeVAPID move the 32-octet scalar through a TEXT column.
