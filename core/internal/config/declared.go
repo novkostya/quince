@@ -92,8 +92,9 @@ func entryKey(raw map[string]any) string {
 }
 
 // MarshalDeclared serializes config carrying ONLY what the user set, plus what the file could not be
-// re-parsed without. NOTHING CALLS IT YET — `replaceLocked` still writes the full document, so this
-// PR changes no behaviour; the switch is its own change with its own proof (spec PR 4).
+// re-parsed without. IT IS THE WRITE PATH: `replaceLocked` marshals through it, and what it returns
+// is what lands on disk — so this function is the mechanism D12's headline clause rests on, and a
+// change here is a change to every `config.yml` quince writes.
 //
 // IT PRUNES A MARSHALLED NODE TREE RATHER THAN EMITTING FROM A REFLECT WALK. Marshalling first is
 // what preserves canonical key order for free — struct field order IS the key order — and a prune

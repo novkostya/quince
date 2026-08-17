@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-// The declared set and the marshaller that reads it (qn.6j, quince#728). NOTHING IN PRODUCTION
-// CALLS MarshalDeclared YET — replaceLocked still writes the full document — so these drive it
-// directly. The switch is spec PR 4 and carries its own proof.
+// The declared set and the marshaller that reads it (qn.6j, quince#728). These drive MarshalDeclared
+// DIRECTLY, which is narrower than the write path it serves: `replaceLocked` calls it with a declared
+// set it has already unioned and filtered, and that assembly is asserted next door in
+// writedeclared_test.go. What is covered here is the marshaller's own contract, given a set.
 
 func parseDeclared(t *testing.T, raw string) (Config, Declared) {
 	t.Helper()
