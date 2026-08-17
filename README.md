@@ -65,6 +65,13 @@ Historical references in the docs (`qn.N` rungs, lettered decisions) resolve in 
 [devlog](https://github.com/novkostya/quince-devlog) — kept as citations rather than
 scrubbed, so the record stays traceable.
 
+## Security
+
+quince holds a phone's entire contents, and `docs/quince.design.md` §6 is the security model.
+Found something? [`SECURITY.md`](SECURITY.md) — report it privately rather than as a public issue,
+and read its *already known and accepted* list first: several sharp edges are deliberate and it
+says why.
+
 ## Licence
 
 [MIT](LICENSE). The container image also ships LGPL-2.1 tooling that quince patches, and
