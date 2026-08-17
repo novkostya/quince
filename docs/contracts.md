@@ -2005,7 +2005,23 @@ POST   /api/notifications/subscriptions {endpoint, keys: {p256dh, auth}, label}
        → 201 {id} | 400 bad body | 422 invalid_subscription
 DELETE /api/notifications/subscriptions/{id}
        → 204 | 404
+POST   /api/notifications/test
+       → 202 {results: [{label, state: "sent"|"expired"|"error", error?}]}
 ```
+
+**`POST /test` answers 202 with per-device outcomes rather than a single status**, because delivery is
+per-device and **partial success is the normal case** — one phone live, one gone — so one status could
+only ever be true of one of them. It exists because *"are notifications working?"* is otherwise
+answerable only by waiting for a device to go stale, three days by default.
+
+**A result names the device by LABEL and never by endpoint.** This response is the kind of thing that
+gets pasted into an issue, and an endpoint plus its keys is a capability against that phone. The three
+states are distinct for the same reason the delivery layer keeps them apart: `expired` means
+re-subscribe on that device, `error` means try again, and a caller that cannot tell them apart cannot
+report either honestly.
+
+**No subscriptions is `results: []` and still a 202.** *"Nobody is subscribed"* is a true answer the
+screen must be able to render; an error there would look like a fault.
 
 **Every route is behind `authGuard` and the CSRF guard; `authExempt` does not grow.** Each of its
 fifteen entries exists because it is reachable BEFORE a session can be — obtaining a credential, or

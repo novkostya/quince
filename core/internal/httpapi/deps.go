@@ -384,4 +384,7 @@ type NotificationReader interface {
 	Subscriptions() ([]wire.PushSubscription, error)
 	Subscribe(endpoint, p256dh, auth, label string) (string, error)
 	Unsubscribe(id string) (bool, error)
+	// SendTest delivers one notification to every live subscription, so "is this working?" is
+	// answerable without waiting three days for a device to go stale.
+	SendTest(ctx context.Context) ([]wire.PushDeliveryResult, error)
 }
