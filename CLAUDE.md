@@ -879,6 +879,12 @@ stops being true, and an acknowledged norm ages better than an implied guarantee
 - product bugs and feature work → issues **here**, **sanitized at filing** (no LAN IPs,
   hostnames, serials, UDIDs, personal paths — the commit privacy gate shifted left);
 - process and workflow friction → issues in the **devlog** repo, label `process`;
+- **an unfixed security finding → NEITHER. It goes in a private draft advisory** (`SECURITY.md`),
+  and that is an exception to the first bullet rather than a stylistic preference: *sanitized at
+  filing* removes the Operator's data from a public issue and does nothing about a finding whose
+  **body is the exploit**. Public history is permanent, so it stays readable after the fix lands.
+  **This binds a finding a SESSION makes about quince**, not only one arriving from outside — the
+  first bullet otherwise reads as covering it;
 - labels: `bug`, `enhancement`, `soak-finding`, `documentation`, `process`.
 
 ### The journal
