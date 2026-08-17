@@ -29,11 +29,26 @@ func Validate(c Config) []wire.ConfigError {
 	if c.Reconcile.IntervalMinutes < 0 {
 		add("reconcile.interval_minutes", "must be >= 0 (0 disables the scheduled pass)")
 	}
-	if c.Automation.StalenessDays < 0 {
-		add("automation.staleness_days", "must be >= 0")
+	if c.Notifications.StalenessDays < 0 {
+		add("notifications.staleness_days", "must be >= 0")
 	}
-	if c.Automation.ReminderCooldownHours < 0 {
-		add("automation.reminder_cooldown_hours", "must be >= 0")
+	if c.Notifications.ReminderCooldownHours < 0 {
+		add("notifications.reminder_cooldown_hours", "must be >= 0")
+	}
+	if c.Notifications.OverdueDays < 0 {
+		add("notifications.overdue_days", "must be >= 0")
+	}
+	// OVERDUE MUST NOT PRECEDE STALE. The reminder track ranks by these two, so an inverted pair makes
+	// every first reminder a `backup_overdue` — a device one day past its threshold greeted as a
+	// reproach rather than invited. Refused rather than silently clamped: a clamp would honour
+	// neither number and say nothing, which is the *no silent caps* failure inside a validator.
+	//
+	// Only checked when both are individually sane, so one mistake produces one error.
+	if c.Notifications.OverdueDays >= 0 && c.Notifications.StalenessDays >= 0 &&
+		c.Notifications.OverdueDays < c.Notifications.StalenessDays {
+		add("notifications.overdue_days", fmt.Sprintf(
+			"must be >= notifications.staleness_days (%d) — a device cannot be overdue before it is stale",
+			c.Notifications.StalenessDays))
 	}
 	if !oneOf(c.UI.Theme, "system", "light", "dark") {
 		add("ui.theme", enumMsg(c.UI.Theme, "system", "light", "dark"))

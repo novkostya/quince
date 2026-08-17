@@ -26,16 +26,18 @@ type Config struct {
 	// `storage:` key stays distinguishable from `storage: []` — no key and declared none want the
 	// same refusal for different reasons, and Parse unmarshals over Default(), which would
 	// otherwise make absent and zero-value identical.
-	Storage    *[]StorageEntry  `yaml:"storage" json:"storage"`
-	Devices    DevicesConfig    `yaml:"devices" json:"devices"`
-	TLS        TLSConfig        `yaml:"tls" json:"tls"`
-	Sessions   SessionsConfig   `yaml:"sessions" json:"sessions"`
-	Automation AutomationConfig `yaml:"automation" json:"automation"`
+	Storage       *[]StorageEntry     `yaml:"storage" json:"storage"`
+	Devices       DevicesConfig       `yaml:"devices" json:"devices"`
+	TLS           TLSConfig           `yaml:"tls" json:"tls"`
+	Sessions      SessionsConfig      `yaml:"sessions" json:"sessions"`
+	Notifications NotificationsConfig `yaml:"notifications" json:"notifications"`
 	// Reconcile is the qn.6i scheduled reconciliation pass. A TOP-LEVEL SECTION because there is
 	// nowhere else for it: `storage:` is a LIST, not a section, so a daemon-wide key placed there
 	// would have to become a property of every declared storage — a different setting with a
-	// different meaning. `automation:` was the other candidate and is declared as qn.12's debt in
-	// contracts §6, so putting a LIVE key in it would make that row false.
+	// different meaning. `notifications:` — `automation:` when this was written — was the other
+	// candidate and was qn.12's declared debt, so putting a LIVE key in it would have made that
+	// row false. The debt is discharged and the section is live; the reasoning against sharing it
+	// is unchanged, because a reconciliation interval is still not a notification policy.
 	Reconcile ReconcileConfig `yaml:"reconcile" json:"reconcile"`
 	UI        UIConfig        `yaml:"ui" json:"ui"`
 }
@@ -378,10 +380,45 @@ type SessionsConfig struct {
 	AllowInsecureTransport bool `yaml:"allow_insecure_transport" json:"allow_insecure_transport"`
 }
 
-// AutomationConfig is the `automation:` section (assisted-backup policy, consumed in qn.12).
-type AutomationConfig struct {
-	StalenessDays         int `yaml:"staleness_days" json:"staleness_days"`
+// NotificationsConfig is the `notifications:` section — the assisted-backup notification policy.
+//
+// IT WAS `automation:`, AND THE RENAME IS PART OF THE RUNG RATHER THAN TIDYING (qn.12, quince#1124).
+// Both original keys exist only to answer *notify or not*, so the old name stopped being accurate
+// the moment the iOS Shortcut opportunity signal left this rung's scope. Renaming was cheap exactly
+// once — while both keys were still inert, read by nobody — and that window closes here, because
+// this is the change that gives them consumers.
+//
+// A hand-written `automation:` block therefore becomes an unknown SECTION. That is handled loudly
+// rather than silently: see `renamedSections` in renames.go, which is the half of quince#401 this
+// rename had to build.
+type NotificationsConfig struct {
+	// StalenessDays is how old the last good backup must be before a device is worth a reminder.
+	StalenessDays int `yaml:"staleness_days" json:"staleness_days"`
+	// ReminderCooldownHours bounds the reminder TRACK, not either kind on it — so escalating from
+	// `backup_available` to `backup_overdue` does not reset it and cannot produce a second push for
+	// one lapse. That is the structural half of the spec's D5.
 	ReminderCooldownHours int `yaml:"reminder_cooldown_hours" json:"reminder_cooldown_hours"`
+	// OverdueDays is when a reminder stops being an invitation and becomes a reproach.
+	//
+	// A DECLARED KEY RATHER THAN A MULTIPLE OF StalenessDays. *Overdue* is a claim about the user's
+	// own tolerance, and a derived threshold is a policy nobody can see or change. The alternative
+	// considered and rejected was `StalenessDays * 3` with no key (spec D5).
+	OverdueDays int `yaml:"overdue_days" json:"overdue_days"`
+
+	// The per-category switches. Flat and global by ruling — the Operator asked for *"at least some
+	// simplified version … just global settings by category"* (2026-08-17). They are the DEFAULTS a
+	// later per-principal layer puts exceptions on, so nothing here renames when that rung lands.
+	BackupAvailable bool `yaml:"backup_available" json:"backup_available"`
+	BackupOverdue   bool `yaml:"backup_overdue" json:"backup_overdue"`
+	ActionRequired  bool `yaml:"action_required" json:"action_required"`
+	// BackupFailed is the fifth kind, added to the frozen four by quince#1124 scope item 4. It
+	// carries the failures the USER cannot fix from the phone — storage unreachable, verify failed,
+	// commit failed — which `action_required` was telling people to go and unlock a device for.
+	BackupFailed bool `yaml:"backup_failed" json:"backup_failed"`
+	// BackupCompleted defaults OFF, and that is the one default that is not "on". A push per
+	// successful nightly backup is the noise that teaches a person to swipe without reading, which
+	// costs the four kinds that matter.
+	BackupCompleted bool `yaml:"backup_completed" json:"backup_completed"`
 }
 
 // UIConfig is the `ui:` section.
@@ -428,9 +465,15 @@ func Default() Config {
 		Reconcile: ReconcileConfig{
 			IntervalMinutes: 360,
 		},
-		Automation: AutomationConfig{
+		Notifications: NotificationsConfig{
 			StalenessDays:         3,
 			ReminderCooldownHours: 24,
+			OverdueDays:           14,
+			BackupAvailable:       true,
+			BackupOverdue:         true,
+			ActionRequired:        true,
+			BackupFailed:          true,
+			BackupCompleted:       false,
 		},
 		UI: UIConfig{
 			Theme: "system",
@@ -458,7 +501,7 @@ type ReconcileConfig struct {
 	// is not, and one key should not do both.
 	//
 	// INTEGER MINUTES RATHER THAN A DURATION STRING, following the document rather than expressiveness:
-	// `automation.staleness_days` and `automation.reminder_cooldown_hours` are
+	// `notifications.staleness_days`, `.reminder_cooldown_hours` and `.overdue_days` are
 	// all bare numbers with the unit in the name. `6h` would be the first duration string in the file.
 	//
 	// IT IS LIVE (contracts §6): the runner reads it when it schedules the NEXT pass, so an edit takes

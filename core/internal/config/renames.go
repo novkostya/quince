@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 // RENAMED KEYS, AND WHY THE TYPO GUARD IS NOT ENOUGH ON ITS OWN (quince#401).
@@ -44,8 +46,11 @@ type renamedKey struct {
 //
 //   - `backup.transport` → `preferred_transport` (quince#654). The old key sat under a `backup:`
 //     section that no longer exists, so what `unknownKeys` reports is the unknown PARENT — `backup`
-//     — and a row keyed on the leaf would never match. Whoever adds it has to decide what a renamed
-//     SECTION should say, which is a different shape from a renamed leaf and wants its own thinking.
+//     — and a row keyed on the leaf would never match. **THE SHAPE THIS ASKED FOR NOW EXISTS** —
+//     `renamedSections` below, built by qn.12 for `automation:` → `notifications:`. This row is
+//     still absent, and now for a smaller reason: nobody has checked whether `backup:` is reported
+//     as an unknown parent in a real config, and an entry here is a claim that it reaches this code
+//     path. The thinking is done; the measurement is not.
 //   - `storage.zfs.hook_cmd` and `storage.zfs.mode` (quince#818). Both are RETIRED rather than
 //     renamed, and both are deliberately still declared in the schema so `Validate` refuses them
 //     against their exact path — see their field comments. They never reach the typo guard at all,
@@ -73,7 +78,7 @@ func keyIndex(path string) string { return keyIndexRe.ReplaceAllString(path, "")
 func renameWarning(path string, value any) (string, bool) {
 	r, ok := renamedKeys[keyIndex(path)]
 	if !ok {
-		return "", false
+		return renameSectionWarning(path, value)
 	}
 	// The successor is spelled at the SCHEMA path, and the reported path may be indexed. Naming the
 	// indexed successor would be more precise and is not worth the string surgery: an operator
@@ -81,6 +86,65 @@ func renameWarning(path string, value any) (string, bool) {
 	// about which entry they are editing, because they are looking at it.
 	return fmt.Sprintf("`%s` was renamed to `%s` in %s and is IGNORED — your value %v is NOT in "+
 		"force; move it to `%s`.", path, r.successor, r.since, quoteValue(value), r.successor), true
+}
+
+// RENAMED SECTIONS — the shape the table above named as unsolved, built by qn.12 (quince#1124).
+//
+// A renamed SECTION is not a renamed key with a longer path, and reusing `renamedKeys` for one
+// produces a warning nobody can act on. `unknownKeys` never recurses into a key it does not
+// recognise, so for a section the only path it ever offers is the PARENT — and the `value` it hands
+// over is the whole `map[string]any` beneath it. Rendering that with `%v` yields Go map syntax in
+// nondeterministic order, which is the opposite of the thing the echo exists to do: tell the
+// operator, in their own words, which of their settings stopped happening.
+//
+// So the section form echoes the CHILD KEYS, sorted, each with its value.
+var renamedSections = map[string]renamedSection{
+	// qn.12. Both keys existed only to answer *notify or not*, so the name stopped being accurate
+	// when the Shortcut opportunity signal left the rung's scope (quince#1124).
+	"automation": {successor: "notifications", since: "qn.12"},
+}
+
+type renamedSection struct {
+	successor string
+	since     string
+}
+
+// renameSectionWarning is renameWarning's counterpart for a whole section.
+//
+// DELIBERATELY NOT AUTO-MIGRATING, for the same reason stated at the top of this file: silently
+// rewriting a config to mean what quince guesses is a bigger promise than this is worth, and
+// `config.yml` holds only what the user set.
+//
+// IT DOES NOT CLAIM EVERY CHILD SURVIVED THE RENAME. It says the section moved and lists what the
+// file carried; whether a particular child still exists under the successor is `unknownKeys`'
+// business once the operator has moved the block, and telling them here would be a second claim
+// this table has no way to check.
+func renameSectionWarning(path string, value any) (string, bool) {
+	r, ok := renamedSections[keyIndex(path)]
+	if !ok {
+		return "", false
+	}
+	children, _ := value.(map[string]any)
+	if len(children) == 0 {
+		// An empty or non-mapping section: there is nothing to echo, so the sentence is the move
+		// alone rather than a dangling "your keys ".
+		return fmt.Sprintf("`%s:` was renamed to `%s:` in %s and the whole section is IGNORED; "+
+			"move it to `%s:`.", path, r.successor, r.since, r.successor), true
+	}
+	names := make([]string, 0, len(children))
+	for k := range children {
+		names = append(names, k)
+	}
+	// SORTED, because Go map iteration is randomised per run and a warning whose text changes between
+	// two loads of the same file is one a reader cannot diff or grep for.
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, k := range names {
+		parts = append(parts, fmt.Sprintf("%s: %v", k, quoteValue(children[k])))
+	}
+	return fmt.Sprintf("`%s:` was renamed to `%s:` in %s and the whole section is IGNORED — your "+
+		"settings %s are NOT in force; move them under `%s:`.",
+		path, r.successor, r.since, strings.Join(parts, ", "), r.successor), true
 }
 
 // quoteValue renders a scalar the way it appeared, and says so plainly when there is nothing to

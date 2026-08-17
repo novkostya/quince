@@ -174,3 +174,122 @@ func yamlForPath(path, value string) (string, bool) {
 	}
 	return "", false
 }
+
+// qn.12 — A RENAMED SECTION SAYS SO, AND ECHOES THE CHILD KEYS.
+//
+// This is the shape `renames.go` recorded as unsolved: `unknownKeys` never recurses into a key it
+// does not recognise, so for a section the only path it ever offers is the PARENT and the only value
+// is the whole map beneath it. A leaf-keyed row can never match, and reusing the leaf FORMATTER
+// would render Go map syntax at the operator.
+//
+// Driven through a real Parse for the same reason as the test above: calling the helper directly
+// would pass whether or not `unknownKeys` consults it.
+func TestARenamedSectionNamesItsSuccessorAndEchoesItsChildren(t *testing.T) {
+	_, _, warnings, err := Parse([]byte("automation:\n  staleness_days: 7\n  reminder_cooldown_hours: 12\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var msg string
+	for _, w := range warnings {
+		if w.Path == "automation" {
+			msg = w.Message
+		}
+	}
+	if msg == "" {
+		t.Fatalf("no warning is reported against the renamed section at all; got %+v", warnings)
+	}
+	for _, want := range []string{
+		"notifications",           // the successor section — without it the reader cannot act
+		"staleness_days: \"7\"",   // THE CHILDREN AND THEIR VALUES, which is what says something was lost
+		"reminder_cooldown_hours", // both of them, not just the first
+		"NOT in force",
+		"qn.12",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the renamed-section warning is missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "unknown config key") {
+		t.Errorf("the warning still reads as an unrecognised key:\n%s", msg)
+	}
+	// THE FAILURE THAT WOULD OTHERWISE SHIP: `%v` over a map[string]any prints Go syntax in
+	// randomised order. Either would make the echo useless, and neither is visible without asserting.
+	if strings.Contains(msg, "map[") {
+		t.Errorf("the section's value was rendered as a Go map rather than as the user's keys:\n%s", msg)
+	}
+}
+
+// SORTED, BECAUSE GO RANDOMISES MAP ITERATION PER RUN. An unsorted echo produces a different warning
+// on every load of the SAME file, which a reader cannot diff and a test cannot pin. Asserting the
+// order once here is cheaper than a flake nobody can reproduce.
+func TestTheRenamedSectionEchoIsDeterministicallyOrdered(t *testing.T) {
+	in := []byte("automation:\n  staleness_days: 7\n  reminder_cooldown_hours: 12\n  zz_unknown: 1\n")
+	first := ""
+	for i := 0; i < 8; i++ {
+		_, _, warnings, err := Parse(in)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		var msg string
+		for _, w := range warnings {
+			if w.Path == "automation" {
+				msg = w.Message
+			}
+		}
+		if i == 0 {
+			first = msg
+			continue
+		}
+		if msg != first {
+			t.Fatalf("the same file produced two different warnings:\n%s\n%s", first, msg)
+		}
+	}
+	if !strings.Contains(first, "reminder_cooldown_hours") ||
+		strings.Index(first, "reminder_cooldown_hours") > strings.Index(first, "staleness_days") {
+		t.Errorf("children are not in sorted order:\n%s", first)
+	}
+}
+
+// AN EMPTY SECTION STILL GETS A SENTENCE, and not a dangling one. `automation:` with nothing under it
+// is a real thing to find in a file somebody has been editing, and the successor is still the thing
+// they need to know.
+func TestARenamedSectionWithNoChildrenStillNamesTheSuccessor(t *testing.T) {
+	msg, ok := renameSectionWarning("automation", nil)
+	if !ok {
+		t.Fatalf("an empty renamed section produced no warning")
+	}
+	if !strings.Contains(msg, "notifications") || !strings.Contains(msg, "IGNORED") {
+		t.Errorf("the empty-section sentence does not carry the successor:\n%s", msg)
+	}
+	if strings.Contains(msg, "your settings  are") {
+		t.Errorf("the empty-section sentence has a dangling echo:\n%s", msg)
+	}
+}
+
+// THE RENAME MUST NOT HAVE LEFT THE NEW SECTION UNREACHABLE. A rename that spells the successor
+// wrong in the struct tag would produce a perfect warning pointing at a key that is ALSO unknown —
+// the defect one level down, and invisible to every test above.
+func TestTheSuccessorSectionActuallyParses(t *testing.T) {
+	cfg, _, warnings, err := Parse([]byte("notifications:\n  staleness_days: 9\n  backup_completed: true\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, w := range warnings {
+		if strings.Contains(w.Path, "notifications") {
+			t.Errorf("the successor section is itself unknown: %+v", w)
+		}
+	}
+	if cfg.Notifications.StalenessDays != 9 {
+		t.Errorf("staleness_days = %d, want 9", cfg.Notifications.StalenessDays)
+	}
+	if !cfg.Notifications.BackupCompleted {
+		t.Errorf("backup_completed was not read back as true")
+	}
+	// The keys the file did NOT carry keep their defaults rather than zeroing.
+	if cfg.Notifications.OverdueDays != 14 {
+		t.Errorf("overdue_days = %d, want the default 14", cfg.Notifications.OverdueDays)
+	}
+	if !cfg.Notifications.ActionRequired {
+		t.Errorf("action_required defaulted to false; the four that matter default ON")
+	}
+}
