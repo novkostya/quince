@@ -40,14 +40,25 @@ func recoverMW(log *slog.Logger) middleware {
 
 // securityHeaders sets the baseline headers on every response (design §6): a strict CSP,
 // frame denial, nosniff, no-referrer. connect-src allows same-origin ws/wss for /api/ws;
-// style-src allows inline styles (React style attributes) — script-src stays 'self' only.
-// The exact CSP is verified against the real Vite/Tailwind bundle at integration.
+// style-src allows inline styles (React style attributes).
+//
+// script-src IS 'self' PLUS ONE HASH, AND THE HASH IS NOT A RELAXATION. `index.html` carries a
+// single inline script — the theme class applied before the first paint — which is inline on
+// purpose: an external file is a second round trip before paint and `defer`/`async` would land it
+// after the moment it exists to precede. A hash admits exactly that script and nothing else; adding
+// 'unsafe-inline' would admit every one, including any an injection manages to plant.
+//
+// THE HASH IS PINNED IN A TEST RATHER THAN TRUSTED, and that is the load-bearing half.
+// `TestTheCSPAdmitsEveryInlineScriptTheUIShips` recomputes it from `ui/index.html` and fails with
+// the correct value when the script changes. Without it the failure mode is the one this whole
+// paragraph exists because of: the browser blocks the script, the page still renders, tests stay
+// green, and only a console nobody reads says so.
 func securityHeaders(next http.Handler) http.Handler {
 	const csp = "default-src 'self'; " +
 		"connect-src 'self' ws: wss:; " +
 		"img-src 'self' data:; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"script-src 'self'; " +
+		"script-src 'self' 'sha256-MhkbBEF74pAaMUPN+tJQk2wgEbqcEzfZwpr8GnphCgY='; " +
 		"base-uri 'self'; " +
 		"frame-ancestors 'none'; " +
 		"object-src 'none'"
