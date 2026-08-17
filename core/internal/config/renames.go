@@ -93,11 +93,17 @@ func renameWarning(path string, value any) (string, bool) {
 // A renamed SECTION is not a renamed key with a longer path, and reusing `renamedKeys` for one
 // produces a warning nobody can act on. `unknownKeys` never recurses into a key it does not
 // recognise, so for a section the only path it ever offers is the PARENT — and the `value` it hands
-// over is the whole `map[string]any` beneath it. Rendering that with `%v` yields Go map syntax in
-// nondeterministic order, which is the opposite of the thing the echo exists to do: tell the
-// operator, in their own words, which of their settings stopped happening.
+// over is the whole `map[string]any` beneath it. Rendering that with `%v` yields **Go map syntax**,
+// which is the opposite of the thing the echo exists to do: tell the operator, in their own words,
+// which of their settings stopped happening.
 //
 // So the section form echoes the CHILD KEYS, sorted, each with its value.
+//
+// `%v` IS NOT THE UNORDERED PART, AND THIS COMMENT SAID IT WAS. `fmt` has sorted map keys since Go
+// 1.12 — measured in the pinned toolchain at `go1.26.5`, five identical prints of one map. What IS
+// randomised is `for k := range`, three lines below, which is what `sort.Strings` actually defends.
+// Corrected rather than deleted because the wrong version made a maintainer a promise: simplify to
+// `%v` and you will see a flake. They would not, and they would go looking.
 var renamedSections = map[string]renamedSection{
 	// qn.12. Both keys existed only to answer *notify or not*, so the name stopped being accurate
 	// when the Shortcut opportunity signal left the rung's scope (quince#1124).
@@ -135,16 +141,37 @@ func renameSectionWarning(path string, value any) (string, bool) {
 	for k := range children {
 		names = append(names, k)
 	}
-	// SORTED, because Go map iteration is randomised per run and a warning whose text changes between
-	// two loads of the same file is one a reader cannot diff or grep for.
+	// SORTED, because the `range` above is randomised per iteration — measured, not assumed — and a
+	// warning whose text changes between two loads of the same file is one a reader cannot diff or
+	// grep for.
 	sort.Strings(names)
 	parts := make([]string, 0, len(names))
 	for _, k := range names {
-		parts = append(parts, fmt.Sprintf("%s: %v", k, quoteValue(children[k])))
+		parts = append(parts, fmt.Sprintf("%s: %v", k, childValue(children[k])))
 	}
 	return fmt.Sprintf("`%s:` was renamed to `%s:` in %s and the whole section is IGNORED — your "+
 		"settings %s are NOT in force; move them under `%s:`.",
 		path, r.successor, r.since, strings.Join(parts, ", "), r.successor), true
+}
+
+// childValue renders one child of a renamed section.
+//
+// A CHILD THAT IS ITSELF A MAPPING OR A LIST GETS A MARKER, NOT ITS CONTENTS. `quoteValue` falls
+// through to `%v`, which on a nested mapping prints `map[a:1 b:2]` — Go syntax at the operator,
+// which is the exact failure `renameSectionWarning` exists to prevent, arriving one level down.
+// Nothing under `automation:` was ever nested, but `renamedSections` is a general mechanism and the
+// next section put in it may be; the doc comment above has to stay true for that one too.
+//
+// The marker names the SHAPE rather than eliding silently, because *"you set something here and it
+// is not in force"* is the whole claim, and a child the warning refused to describe would undercut it.
+func childValue(value any) string {
+	switch value.(type) {
+	case map[string]any:
+		return "(a nested section)"
+	case []any:
+		return "(a list)"
+	}
+	return quoteValue(value)
 }
 
 // quoteValue renders a scalar the way it appeared, and says so plainly when there is nothing to

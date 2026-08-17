@@ -212,8 +212,10 @@ func TestARenamedSectionNamesItsSuccessorAndEchoesItsChildren(t *testing.T) {
 	if strings.Contains(msg, "unknown config key") {
 		t.Errorf("the warning still reads as an unrecognised key:\n%s", msg)
 	}
-	// THE FAILURE THAT WOULD OTHERWISE SHIP: `%v` over a map[string]any prints Go syntax in
-	// randomised order. Either would make the echo useless, and neither is visible without asserting.
+	// THE FAILURE THAT WOULD OTHERWISE SHIP: `%v` over a map[string]any prints GO MAP SYNTAX at the
+	// operator. (It is SORTED -- fmt has sorted map keys since Go 1.12, measured at go1.26.5 -- so the
+	// hazard is the syntax, not the order. The ordering hazard is real and lives in the `range` loop
+	// that builds the name list, which the test below pins.)
 	if strings.Contains(msg, "map[") {
 		t.Errorf("the section's value was rendered as a Go map rather than as the user's keys:\n%s", msg)
 	}
@@ -291,5 +293,28 @@ func TestTheSuccessorSectionActuallyParses(t *testing.T) {
 	}
 	if !cfg.Notifications.ActionRequired {
 		t.Errorf("action_required defaulted to false; the four that matter default ON")
+	}
+}
+
+// A NESTED CHILD MUST NOT RENDER AS A GO MAP. `quoteValue` falls through to `%v`, which on a nested
+// mapping prints `map[a:1 b:2]` — the exact failure the section form exists to prevent, arriving one
+// level down. `automation:` never had a nested child; `renamedSections` is a general mechanism and
+// the next section put in it may.
+func TestANestedChildIsNamedRatherThanDumpedAsAGoMap(t *testing.T) {
+	msg, ok := renameSectionWarning("automation", map[string]any{
+		"staleness_days": 7,
+		"nested":         map[string]any{"a": 1, "b": 2},
+		"a_list":         []any{1, 2},
+	})
+	if !ok {
+		t.Fatalf("no warning for a section with a nested child")
+	}
+	if strings.Contains(msg, "map[") {
+		t.Errorf("a nested child was dumped as Go map syntax:\n%s", msg)
+	}
+	for _, want := range []string{"nested: (a nested section)", "a_list: (a list)", "staleness_days"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q:\n%s", want, msg)
+		}
 	}
 }

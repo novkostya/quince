@@ -2874,11 +2874,12 @@ config key "sessions.ttl_minutes" (ignored)` and loses a value that never had an
 does not apply, because there is no successor to name.
 
 **A key in the third bin is not made to work by a restart**, which is the whole reason that bin
-exists. **The bin is now EMPTY of declared debt.** Its remaining occupant was the `automation.*`
-pair, and `qn.12` discharged it by giving those keys a consumer — the reason the pair sat there was
-never that live-apply was hard, it was that live-apply cannot make an *unread* field take effect.
-`sessions.ttl_minutes` (quince#656) is still in this bin and is a **defect** rather than debt, which
-is the distinction the bin was drawn to keep visible.
+exists. **THE BIN IS NOW EMPTY.** Its last occupant was the `automation.*` pair, and `qn.12`
+discharged it by giving those keys a consumer — the reason they sat there was never that live-apply
+was hard, it was that live-apply cannot make an *unread* field take effect. The other way out of
+this bin is deletion, which is the paragraph above: `sessions.ttl_minutes` left by being **removed**
+rather than wired. Two exits, both now taken, and which one a key deserves is the distinction that
+paragraph draws.
 
 **THE UI RENDERS THIS VERDICT AND STORES NOTHING.** *"Restart to apply"* appears where this table
 says **restart** and nowhere else — which today means it appears on no field the Settings form
