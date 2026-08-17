@@ -19,6 +19,32 @@
   --color-danger: var(--danger);
   --radius-card: var(--radius);
   --font-mono: var(--mono);
+
+  /* THE MEASURED TYPE SCALE REPLACES TAILWIND'S DEFAULT ONE (quince#1155).
+   *
+   * `tokens.css` carries the values and the evidence behind them; this block is the mapping, and it
+   * OVERRIDES `--text-*` rather than adding a parallel set. Tailwind v4 pairs each size with a
+   * line-height under `--text-<n>--line-height`, so both halves are declared — the leading was half
+   * the finding (quince measured 1.38× against a set at 1.51×) and a size override alone would have
+   * shipped the smaller half of the fix.
+   *
+   * `text-2xs` is a NEW step that resolves to the same 14px floor as `text-xs`. It exists so the
+   * places that genuinely meant "smaller than the small one" have somewhere to go that is not 12px,
+   * and so a later decision to separate them is one line here rather than a sweep. */
+  --text-2xs: var(--type-2xs);
+  --text-2xs--line-height: var(--type-2xs-line);
+  --text-xs: var(--type-xs);
+  --text-xs--line-height: var(--type-xs-line);
+  --text-sm: var(--type-sm);
+  --text-sm--line-height: var(--type-sm-line);
+  --text-base: var(--type-base);
+  --text-base--line-height: var(--type-base-line);
+  --text-lg: var(--type-lg);
+  --text-lg--line-height: var(--type-lg-line);
+  --text-xl: var(--type-xl);
+  --text-xl--line-height: var(--type-xl-line);
+  --text-2xl: var(--type-2xl);
+  --text-2xl--line-height: var(--type-2xl-line);
 }
 
 /* Dark mode is driven by the `.dark` class on <html> (system-follow set in main.tsx). */

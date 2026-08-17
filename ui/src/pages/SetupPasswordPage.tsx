@@ -186,21 +186,31 @@ export function SetupPasswordPage() {
       extra={
         offer ? (
           <label className="mt-4 flex items-start gap-2.5 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={wantPasskey}
-              onChange={(e) => setWantPasskey(e.target.checked)}
-            />
+            {/* THE BOX IS CENTRED IN THE LABEL'S FIRST LINE BOX, NOT NUDGED BY A FIXED MARGIN.
+                It was `mt-0.5` — 2px, correct against a 14px/20px label and wrong the moment the
+                type scale moved to 16px/24px (quince#1155). Half of a 4px line-height change is
+                2px, and 2px was the entire nudge, so the control ended up sitting above its own
+                text. Caught on the lab rather than by the survey, because the survey measures TEXT
+                and this is geometry.
+
+                A magic number tuned against one scale is a defect waiting for the next scale
+                change, so the line box is derived from the SAME tokens this label's `text-sm`
+                resolves to. Move the scale and this follows; there is nothing left to re-tune. */}
+            <span className="flex h-[calc(var(--type-sm)*var(--type-sm-line))] shrink-0 items-center">
+              <input
+                type="checkbox"
+                checked={wantPasskey}
+                onChange={(e) => setWantPasskey(e.target.checked)}
+              />
+            </span>
             <span>
               <span className="font-medium">Also set up a passkey on this device</span>
-              {/* CHECKED BY DEFAULT, and that is a recommendation rather than a default nobody
-                  chose. quince#841's destination is a phone-first, password-optional install, and
-                  the whole reason qn.6k exists is that typing an admin password on a phone keyboard
-                  is the worst part of using quince. Opting OUT is one tap and the password works
-                  either way, so the cost of the default being wrong is negligible — where the cost
-                  of the feature going unfound is the entire rung, which is exactly what happened to
-                  conditional mediation on hardware. */}
+              {/* UNTICKED, and the paragraph that used to sit here argued the opposite in capitals
+                  — "CHECKED BY DEFAULT, and that is a recommendation rather than a default nobody
+                  chose." The code has said `useState(false)` since a2cfbb5, which changed it
+                  deliberately ("offers it unticked"); the comment was left behind arguing for the
+                  state it had just stopped being. Deleted rather than annotated: a reader needs the
+                  current default, not the case for a former one. */}
               <span className="mt-0.5 block text-muted">
                 Sign in with Face ID or Touch ID instead of typing your password. You will be asked
                 right after the password is set.
