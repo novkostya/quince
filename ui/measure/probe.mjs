@@ -18,6 +18,7 @@
 // same browser handles.
 import { chromium, devices } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 // `{NAME}` in a target's URL is read from the environment, and that is a PRIVACY mechanism as much
 // as a convenience. quince's own address is one case; the others are admin UIs on a LAN, whose
@@ -575,8 +576,18 @@ function summarise(raw) {
   };
 }
 
-// ── driver ─────────────────────────────────────────────────────────────────────────────────────
+// EXPORTED SO `validate.mjs` CAN ASSERT THEM AGAINST DECLARED GROUND TRUTH, and imported rather
+// than copied on purpose: a validator carrying its own reimplementation of this logic proves the
+// copy correct and nothing else.
+export { collect, summarise };
 
+// ── driver ─────────────────────────────────────────────────────────────────────────────────────
+// Guarded, so importing this module does not launch a browser and start sweeping the open web.
+
+// Only when RUN, never when imported. `process.argv[1]` is the entry script; comparing it to this
+// module's own URL is the ESM form of a main-module check.
+const RUN_AS_SCRIPT = import.meta.url === pathToFileURL(process.argv[1]).href;
+if (RUN_AS_SCRIPT) {
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 
 const browser = await chromium.launch({ args: ["--ignore-certificate-errors"] });
@@ -685,3 +696,4 @@ for (const name of ["QUINCE_BASE", "PVE_URL", "LUCI_URL", "KUMA_URL", "COCKPIT_U
   if (v) text = text.replaceAll(v, `{${name}}`);
 }
 process.stdout.write(text);
+}

@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  GROUND TRUTH FOR THE PROBE — every number on this page is declared, so what `probe.mjs` reports
+  about it is either right or wrong with no judgement in between (quince#1155, quince#1184).
+
+  Re-running a sweep proves a probe is CONSISTENT. It cannot prove the probe measures the right
+  thing, because a probe that is consistently wrong reproduces perfectly. That gap is what this
+  closes: each block below is built so that one specific claim in the survey has a known answer.
+
+  DO NOT "TIDY" THE ODD-LOOKING CHOICES HERE. The 900 a's, the translucent card, the icon glyph and
+  the shadow host are each load-bearing for one assertion in `validate.mjs`.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>probe fixture</title>
+    <style>
+      html { font-size: 16px; }
+      body { margin: 0; background: #0b0d10; color: #e8eaed; font-family: system-ui, sans-serif; }
+
+      /* THE CHARACTER-WEIGHTING CLAIM. The survey's central method is that a page's "body size" is
+         the size most of its TEXT is set at, not the size that appears in the most PLACES. So the
+         14px block holds one long run and the 24px block holds many short ones: a probe counting
+         elements reports 24, a probe counting characters reports 14. */
+      .body-size { font-size: 14px; line-height: 1.5; }        /* 900 chars, one element  */
+      .heading   { font-size: 24px; line-height: 1.25; }        /* 12 chars x 12 elements */
+
+      /* THE COMPOSITING CLAIM. Text sits on a translucent card over the body, so the effective
+         background is a blend and NOT what `background-color` reports on any single ancestor. */
+      .card { background: rgba(255, 255, 255, 0.06); padding: 20px; }
+      .on-card { color: #9aa1ab; font-size: 14px; line-height: 1.5; }
+
+      /* THE MONOSPACE CLAIM. Excluded from the prose tally, reported separately. Set LARGER than the
+         body so that wrongly pooling it would move the body size upward and be detectable. */
+      .mono { font-family: ui-monospace, monospace; font-size: 20px; line-height: 1.5; }
+
+      /* THE INVISIBLE-TEXT CLAIMS. A screen-reader-only label is a real 1x1 box with real computed
+         styles; an off-screen block is fully styled and unreadable. Neither is on the screen, so
+         neither may reach the tally. */
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+      .offscreen { position: absolute; left: -9999px; font-size: 40px; }
+
+      /* An icon glyph in an icon font: not prose, and short enough to distort a small tally. */
+      .icon { font-family: "Material Symbols Outlined", monospace; font-size: 48px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- 900 characters at 14px. -->
+      <p class="body-size" id="long">
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      </p>
+
+      <!-- 12 headings of 12 characters each: 144 characters over 12 elements. -->
+      <h2 class="heading">HeadingAAAA1</h2>
+      <h2 class="heading">HeadingAAAA2</h2>
+      <h2 class="heading">HeadingAAAA3</h2>
+      <h2 class="heading">HeadingAAAA4</h2>
+      <h2 class="heading">HeadingAAAA5</h2>
+      <h2 class="heading">HeadingAAAA6</h2>
+      <h2 class="heading">HeadingAAAA7</h2>
+      <h2 class="heading">HeadingAAAA8</h2>
+      <h2 class="heading">HeadingAAAA9</h2>
+      <h2 class="heading">HeadingAAA10</h2>
+      <h2 class="heading">HeadingAAA11</h2>
+      <h2 class="heading">HeadingAAA12</h2>
+
+      <div class="card">
+        <p class="on-card" id="composited">
+          bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        </p>
+      </div>
+
+      <pre class="mono" id="code">cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc</pre>
+
+      <span class="sr-only">ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd</span>
+      <div class="offscreen">eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee</div>
+      <span class="icon">&#xe5cd;</span>
+
+      <!-- A shadow root. Home Assistant's entire frontend is custom elements, and a walker that
+           stops at the boundary reported one of its pages as having no text at all. -->
+      <div id="shadow-host"></div>
+      <script>
+        const host = document.getElementById("shadow-host");
+        const root = host.attachShadow({ mode: "open" });
+        root.innerHTML =
+          '<p style="font-size:14px;line-height:1.5;color:#e8eaed;background:#0b0d10;margin:0">' +
+          "f".repeat(120) +
+          "</p>";
+      </script>
+    </main>
+  </body>
+</html>
