@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { DeviceCard } from "./DeviceCard";
+import type { DueState } from "@/lib/backupDue";
 import { useJobsStore } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
 import type { Device, Job } from "@/lib/types";
@@ -53,10 +54,10 @@ function job(state: Job["state"], percent: number | null): Job {
   };
 }
 
-function renderCard(dev: Device) {
+function renderCard(dev: Device, due?: DueState) {
   return render(
     <MemoryRouter>
-      <DeviceCard device={dev} />
+      <DeviceCard device={dev} due={due} />
     </MemoryRouter>,
   );
 }
@@ -319,5 +320,48 @@ describe("DeviceCard grid containment", () => {
     const subtitle = container.querySelector<HTMLElement>(".truncate");
     expect(subtitle?.textContent).toBe("iPad Pro 11-inch (3rd generation) · iOS 26.0.1");
     expect(subtitle?.parentElement?.className.split(/\s+/)).toContain("min-w-0");
+  });
+});
+
+// qn.12 D7.2 — THE DUE BADGE, which is the assisted model's in-app half.
+//
+// For a Lockdown Mode user this is the whole loop: WebKit disables Web Push declaratively on any
+// certificate, so no notification can reach them (quince#510) and the card is all there is. For
+// everyone else it is a second way to see what the notifier already decided.
+describe("DeviceCard due badge", () => {
+  it("says nothing about a device that is fresh, or when quince has no thresholds yet", () => {
+    renderCard(device({ last_backup: { at: "2026-07-21T00:00:00Z", job_id: "J1", status: "succeeded" } }), "fresh");
+    expect(screen.queryByText(/^Due$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Overdue$/)).not.toBeInTheDocument();
+
+    cleanup();
+    // No `due` prop at all — config still loading, or the request failed. Silence, not a guess.
+    renderCard(device({ last_backup: { at: "2026-07-21T00:00:00Z", job_id: "J1", status: "succeeded" } }));
+    expect(screen.queryByText(/^Due$/)).not.toBeInTheDocument();
+  });
+
+  it("marks a due device and an overdue one differently", () => {
+    renderCard(device({}), "due");
+    expect(screen.getByText(/^Due$/)).toBeInTheDocument();
+    cleanup();
+    renderCard(device({}), "overdue");
+    expect(screen.getByText(/^Overdue$/)).toBeInTheDocument();
+  });
+
+  // NEVER-BACKED-UP IS NOT OVERDUE. It is the ordinary state of a device somebody just paired, and
+  // colouring it as a problem would make first run look broken.
+  it("does not call a never-backed-up device overdue", () => {
+    renderCard(device({ last_backup: null }), "never");
+    expect(screen.getByText(/Not backed up/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Overdue$/)).not.toBeInTheDocument();
+  });
+
+  // AN UNREADABLE TIMESTAMP IS THE ABSENCE OF A CLAIM. The card still shows whatever it has under
+  // the transports; it just does not judge it.
+  it("does not judge a device whose last-backup time it cannot read", () => {
+    renderCard(device({}), "unknown");
+    expect(screen.queryByText(/^Due$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Overdue$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not backed up/)).not.toBeInTheDocument();
   });
 });

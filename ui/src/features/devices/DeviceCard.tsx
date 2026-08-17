@@ -10,6 +10,7 @@ import { newestRunningJob, useJobsStore } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
 import { useBackup } from "@/features/jobs/useBackup";
+import type { DueState } from "@/lib/backupDue";
 
 // THE CARD IS SILENT WHEN THINGS ARE FINE AND SPEAKS WHEN THEY ARE NOT (quince#625, Operator).
 //
@@ -54,13 +55,49 @@ function BackupStatus({ device }: { device: Device }) {
   return <>{device.paired === "yes" ? "No backups yet" : "Not set up yet"}</>;
 }
 
+// DueBadge is the assisted model's in-app half (qn.12, spec D7.2): the same judgement the notifier
+// makes, on the screen, for the person whose phone can never receive a push.
+//
+// IT FOLLOWS THE CARD'S OWN RULE — silent when things are fine, speaking when they are not. `fresh`
+// renders nothing, which is why this is not another always-on badge in the slot the eye reaches
+// first (quince#625).
+//
+// `never` IS NOT `overdue`, and the distinction is the notifier's: a device paired ninety seconds
+// ago has unbounded age, so the naive rule greets it with a reproach.
+//
+// THE STATE ARRIVES AS A PROP AND IS NOT FETCHED HERE. The first version called `useConfig` inside
+// this component, which broke all eighteen of the card's own tests — `No QueryClient set` — and the
+// breakage was the honest signal: `DeviceCard` is presentational, rendered N times in a grid, and a
+// query per card is both a new dependency for every test that renders one and N subscriptions for
+// one answer. The list reads the config once (`DashboardPage`) and passes the verdict down.
+//
+// `undefined` RENDERS NOTHING, which is what a caller with no config yet should produce. Inventing a
+// threshold to judge against would make this a claim quince does not have the inputs for.
+function DueBadge({ due }: { due?: DueState }) {
+  switch (due) {
+    case "overdue":
+      return <Badge tone="danger">Overdue</Badge>;
+    case "due":
+      return <Badge tone="warn">Due</Badge>;
+    case "never":
+      // NOT a warning tone. Never-backed-up is the ordinary state of a device somebody just paired,
+      // and colouring it as a problem would make first run look broken.
+      return <Badge tone="accent">Not backed up</Badge>;
+    // `fresh`, `unknown` and absent render nothing — the first because there is nothing to say, the
+    // second because quince does not know and must not guess. `BackupStatus` still shows whatever
+    // timestamp exists, so an unreadable one stays visible without being judged.
+    default:
+      return null;
+  }
+}
+
 // isFailed marks a terminal attempt the user should act on (assisted model — a failed newest attempt
 // must be visible or the soak is worthless, gate-11 finding #6, (cj)).
 function isFailed(state: Job["state"]): boolean {
   return state === "failed" || state === "connection_lost";
 }
 
-export function DeviceCard({ device }: { device: Device }) {
+export function DeviceCard({ device, due }: { device: Device; due?: DueState }) {
   const jobsForDevice = (s: { byId: Record<string, Job> }) =>
     Object.values(s.byId).filter((j) => j.udid === device.udid);
   const activeJob = useJobsStore((s) => newestRunningJob(jobsForDevice(s)));
@@ -105,7 +142,12 @@ export function DeviceCard({ device }: { device: Device }) {
             </Link>
             {subtitle ? <div className="truncate text-xs text-muted">{subtitle}</div> : null}
           </div>
-          <EncryptionBadge state={device.backup_encryption} />
+          {/* Both badges sit in the card's "speaks when things are not fine" slot, and both are
+              silent in the healthy case — so a card with nothing wrong is unchanged. */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <DueBadge due={due} />
+            <EncryptionBadge state={device.backup_encryption} />
+          </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">

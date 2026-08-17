@@ -9,6 +9,8 @@ import { RescanButton } from "@/features/devices/RescanButton";
 import { VersionList } from "@/features/versions/VersionList";
 import { StorageCard } from "@/features/storage/StorageCard";
 import { useStorages } from "@/features/jobs/useStorages";
+import { dueState } from "@/lib/backupDue";
+import { useConfig } from "@/lib/config";
 
 export function DashboardPage() {
   const order = useDevicesStore(useShallow((s) => s.order));
@@ -21,6 +23,11 @@ export function DashboardPage() {
   // "" is the DEVICE-INDEPENDENT list: storage counts and capacity are properties of the storage,
   // and only `will_be_full` needs a device. Home is not about one device, so it does not ask.
   const storages = useStorages("");
+  // The thresholds the DUE badge is judged against, read once for the whole list.
+  const notifications = useConfig().data?.config.notifications;
+  // ONE `now` FOR THE WHOLE RENDER, so two cards can never land on opposite sides of a day boundary
+  // within one paint — which would show two devices backed up seconds apart as `due` and `fresh`.
+  const now = new Date();
   const loadedStorages = storages.state.status === "loaded" ? storages.state.storages : [];
 
   return (
@@ -53,7 +60,16 @@ export function DashboardPage() {
         <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {order.map((udid) => {
             const device = byUdid[udid];
-            return device ? <DeviceCard key={udid} device={device} /> : null;
+            if (!device) return null;
+            // THE JUDGEMENT IS MADE ONCE, HERE, AND PASSED DOWN (qn.12, spec D7.2). The card is
+            // presentational and rendered N times; reading the config inside it would be N
+            // subscriptions for one answer, and a query dependency for every test that renders a
+            // card. `notifications` absent — config still loading, or the request failed — gives
+            // `undefined` and no badge, which is the honest answer rather than a guessed threshold.
+            const due = notifications
+              ? dueState(device, notifications.staleness_days, notifications.overdue_days, now)
+              : undefined;
+            return <DeviceCard key={udid} device={device} due={due} />;
           })}
         </div>
       )}
