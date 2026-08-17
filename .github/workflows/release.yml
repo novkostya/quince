@@ -1,0 +1,141 @@
+name: release
+
+# quince#724. Tag -> two NATIVE builds -> one manifest -> a GitHub Release.
+#
+# NO LOGIC HERE, as in ci.yml and pr-title.yml: every step calls `deploy/release-image`, which is
+# shellchecked, covered by `make release-image-test` (31 assertions), and runnable by hand. What
+# stays in this file is the trigger, the matrix, and the permissions — the three things a script
+# cannot express.
+#
+# TAGS ONLY, AND NO `workflow_dispatch`. A dispatch would let a release be cut from an arbitrary ref
+# with an arbitrary version, which is exactly the input `release-image` refuses to guess at. The tag
+# IS the version; there is no second way to name one.
+#
+# `v*` IS DELIBERATELY WIDE, AND A NARROW PATTERN HERE WAS A BUG (@novkostya, quince#1112). This
+# read `v[0-9]+.[0-9]+.[0-9]+` — which admits `v0.1.0` and rejects `v0.1`. Rejecting `v0.1` is
+# correct; doing it HERE is not, because a tag that matches no filter fires no workflow, produces no
+# run, and reports nothing. You push a tag and the silence is indistinguishable from success until
+# somebody goes looking for a package that was never built. That is a silent failure, which this
+# project's hard rules forbid outright.
+#
+# So the filter is wide and the JUDGEMENT lives one layer down: `deploy/release-image` refuses
+# anything that is not `<major>.<minor>.<patch>[-prerelease]`, names the corrected string, and exits
+# non-zero — a RED RUN on the tag. Loud and wrong beats quiet and wrong.
+#
+# It also removes a dependency this file should never have had. GitHub's filter patterns are globs
+# with their own `+`/`[]` semantics, documented in a cheat sheet that could not be retrieved from
+# three separate doc routes on 2026-08-17. The narrow pattern was therefore resting on a syntax
+# nobody here has verified; `v*` needs no such table to be read correctly, and the real check is in
+# a script with 31 assertions against it.
+#
+# The cost, stated: `v-anything` starts a run that fails in its first job in seconds, before any
+# build. That is the intended signal, not waste.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Least privilege at the TOP, widened per job. The build jobs need `packages: write` and the release
+# job needs `contents: write`; neither needs the other's, and a top-level grant would hand both to
+# all three.
+permissions:
+  contents: read
+
+# NEVER cancel-in-progress. A cancelled release leaves per-arch tags pushed and no manifest, which
+# is recoverable, but cancelling the `release` job halfway is not something to invite for a run that
+# only ever fires once per tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ONE JOB PER ARCHITECTURE, ON ITS OWN NATIVE RUNNER. `ubuntu-24.04-arm` is generally available
+  # and free for public repositories, and `novkostya/quince` is public. That is what makes multi-arch
+  # cheap here: this Dockerfile compiles libimobiledevice from C source, and QEMU emulation would
+  # land squarely on that stage. deploy/release-image REFUSES a non-native build rather than
+  # silently falling back to it, so a runner label typo fails fast instead of taking an hour.
+  #
+  # fail-fast: false, deliberately. If arm64 fails, amd64's per-arch tag is still published and the
+  # `manifest` job does not run — so `:<version>` and `:latest` are never a half-populated manifest
+  # list. The partial state is two per-arch tags nobody is pointed at.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      # THE TOKEN ARRIVES AS AN ENV VALUE AND IS NEVER INTERPOLATED INTO `run:`. Same discipline as
+      # pr-title.yml's PR_TITLE, for a stronger reason: a `${{ secrets.* }}` inside a run body is
+      # substituted into the script text before the shell sees it. `--password-stdin` keeps it off
+      # the process table too.
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      # `${GITHUB_REF_NAME#v}` is the one place the v is stripped: the git tag keeps it, the image
+      # tag and the binary's own version stamp do not. release-image refuses a leading v and names
+      # the corrected string, so getting this wrong is a fast, readable failure rather than a
+      # `v0.1.0-amd64` tag in a public registry forever.
+      - name: Build and push linux/${{ matrix.arch }}
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: ./deploy/release-image build "${GITHUB_REF_NAME#v}" "$ARCH"
+
+  # The two per-arch tags become one multi-arch `:<version>`, plus `:latest` unless the tag is a
+  # pre-release. release-image owns that rule and announces when it declines to move `:latest`.
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      - name: Join the architectures
+        run: ./deploy/release-image manifest "${GITHUB_REF_NAME#v}" amd64 arm64
+
+  # LAST, so a Release never announces an image that failed to publish. `gh` is preinstalled on the
+  # runner; no action is needed and none is used.
+  release:
+    needs: manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # fetch-depth: 0 so --generate-notes can see the history it is summarising.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          version=${GITHUB_REF_NAME#v}
+          # A pre-release tag makes a pre-release Release, matching the `:latest` rule one job up.
+          # The two decisions have to agree, and they are made from the same `-` in the same string.
+          prerelease=''
+          case "$GITHUB_REF_NAME" in *-*) prerelease='--prerelease' ;; esac
+          notes="Container image: \`ghcr.io/novkostya/quince:${version}\` (linux/amd64, linux/arm64)"
+          # --notes is PREPENDED to --generate-notes, so the pull line leads and the generated
+          # changelog follows. --verify-tag refuses if the tag is somehow not on the remote.
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            --notes "$notes" \
+            $prerelease
