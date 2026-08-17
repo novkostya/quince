@@ -155,12 +155,23 @@ describe("the two windows with no percentage to show", () => {
     expect(displayPercent(j)).toBeNull();
   });
 
-  it("leaves verifying and committing alone — they say more than 'finishing up' does", () => {
+  it("keeps the verifying and committing LABELS, but withholds the full bar too", () => {
+    // Operator, 2026-08-17, on seeing 100% next to Committing. These states name the ACTIVITY,
+    // which is why they keep their own labels — but the full bar beside them still claimed
+    // COMPLETION, and both were on screen together. That contradiction is the defect, not
+    // either half of it.
     for (const state of ["verifying", "committing"] as const) {
       const j = mkJob({ state, progress: { ...mkJob({}).progress, percent: 100 } });
       expect(isFinishingUp(j)).toBe(false);
-      expect(displayPercent(j)).toBe(100);
+      expect(jobStatusLabel(j)).toBe(state === "verifying" ? "Verifying" : "Committing");
+      expect(displayPercent(j)).toBeNull();
     }
+  });
+
+  it("still shows 100% once the job has actually finished", () => {
+    // The one place 100 is a true statement about the job rather than about a step of it.
+    const j = mkJob({ state: "succeeded", progress: { ...mkJob({}).progress, phase: "done", percent: 100, liveness: "" } });
+    expect(displayPercent(j)).toBe(100);
   });
 
   it("does not call a FINISHED job preparing, whatever phase it carries", () => {
