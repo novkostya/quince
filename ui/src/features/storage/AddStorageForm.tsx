@@ -865,6 +865,7 @@ export function AddStorageForm({
                     className="mt-2"
                     value={helper.script}
                     label="Copy the script"
+                    wider
                     wrap="none"
                     testId="zfs-helper-script"
                   />

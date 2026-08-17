@@ -19,13 +19,14 @@ import { AddStorageForm } from "@/features/storage/AddStorageForm";
 // path IS, which backends are offered and whether the zfs helper answered cannot drift between
 // containers. This file is chrome — a back link, a heading, and a footer with one action.
 //
-// `max-w-4xl` MATCHES THE FIRST-RUN PAGE, and the number moved with it. The shell puts no width
+// `max-w-2xl` MATCHES THE FIRST-RUN PAGE, and the number moves with it. The shell puts no width
 // limit on its pages, so without one these fields stretch the width of a desktop; the dialog got
 // that constraint from `DialogContent` and it was not to be lost in the move.
 //
-// IT IS `4xl` RATHER THAN `xl` BECAUSE THE HELPER SCRIPT SETS THE FLOOR (Operator, 2026-08-14): it
-// is 113 characters at its longest and was being clipped mid-line. The CONTROLS do not follow the
-// page out — `AddStorageForm` caps them itself — so what widened is the code, not the fields.
+// THE HELPER SCRIPT NO LONGER SETS THE FLOOR (Operator direction, 2026-08-17). It is 113 characters
+// at its longest and used to widen every page that renders this form; it GROWS RIGHTWARDS out of its
+// column instead (`CodeBlock wider`), so this page is sized for its fields and prose like any other.
+// CONTROLS were never the reason for the width anyway — `AddStorageForm` caps them itself.
 export function AddStoragePage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,7 +47,7 @@ export function AddStoragePage() {
         you save.
       </p>
 
-      <div className="mt-6 max-w-4xl">
+      <div className="mt-6 max-w-2xl">
         <AddStorageForm
           // A CLEAN SHEET ON EVERY VISIT, which the dialog got from remounting on open and a page
           // does NOT get for free. Keyed on the navigation entry rather than on the path: Home →

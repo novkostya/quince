@@ -42,10 +42,10 @@ describe("the two shapes", () => {
       </AuthPage>,
     );
     const b = box(container);
-    // `max-w-4xl` since 2026-08-14 (Operator): the onboarding flow is sized by its widest step,
-    // which is the storage one — it renders the whole helper script, which does not wrap and was
-    // still clipping at `2xl`. Same width on all three so the flow reads as one.
-    expect(b.className).toContain("max-w-4xl");
+    // `max-w-2xl` (Operator, 2026-08-17), the same on all three onboarding steps so the flow reads
+    // as one and the wordmark lands in the same place. It is a readable measure for a form and its
+    // prose; the helper script — the only thing that wants more — breaks out of its column instead.
+    expect(b.className).toContain("max-w-2xl");
     expect(b.className).not.toContain("rounded-card");
     expect(b.className).not.toContain("max-w-sm");
   });
@@ -118,7 +118,7 @@ describe("which surface gets which shape", () => {
 
   it("setup is a PAGE — ruling A", () => {
     const { container } = renderPage(<SetupPasswordPage />);
-    expect(box(container).className).toContain("max-w-4xl");
+    expect(box(container).className).toContain("max-w-2xl");
     expect(box(container).className).not.toContain("rounded-card");
   });
 
