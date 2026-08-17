@@ -600,9 +600,16 @@ Apple-protocol userland and nothing else executable.
   `docs/`. Two languages. The vault has no tree of its own: in-process or as a second
   binary, it is Go under `core/` either way, so D4's open process-model question does not
   move this line.
-- Licenses: MIT for quince; all Apple-protocol heavy lifting stays in subprocesses
-  (libimobiledevice is LGPL — invoked, not linked). A license audit is part of the first
-  public release rung.
+- Licenses: MIT for quince (`LICENSE`); all Apple-protocol heavy lifting stays in
+  subprocesses. **The audit is done and lives in `CREDITS.md`** — enumerated from the built
+  image rather than quoted, with the command that re-derives each list. *Invoked, not
+  linked* is now **verified** (`CGO_ENABLED=0`, no `import "C"` in `core/`, no C source in
+  the repo), and it was the smaller half of the question: the **image** distributes
+  ~20 **patched** LGPL-2.1 libimobiledevice binaries plus the patched shared library, which
+  is a source-availability obligation quince meets through `LIBIMOBILEDEVICE_REF`,
+  `deploy/patches/libimobiledevice/` and the Dockerfile. It also ships unmodified GPL-2.0
+  Alpine base packages (busybox, apk-tools, …), met by Alpine's published aports. Neither
+  reaches quince's own code.
 
 ## D12. Operations UX: Plex-grade setup, OpenWrt-grade config
 
