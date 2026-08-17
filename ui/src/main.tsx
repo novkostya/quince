@@ -6,6 +6,7 @@ import { queryClient } from "@/lib/queryClient";
 import { router } from "@/routes/router";
 import { initTheme } from "@/lib/theme";
 import { setUnauthorizedHandler } from "@/lib/api";
+import { registerServiceWorker } from "@/lib/pwa";
 import { authStatusKey } from "@/lib/auth";
 import "./index.css";
 
@@ -29,6 +30,17 @@ initTheme();
 setUnauthorizedHandler(() => {
   void queryClient.invalidateQueries({ queryKey: authStatusKey });
 });
+
+// The push service worker (qn.12, spec D2). FIRE AND FORGET, and never blocking: quince works
+// without notifications, so a platform that has none — or a registration that fails — must not keep
+// the app from rendering. `registerServiceWorker` resolves to null rather than throwing on the
+// first, and logs rather than swallowing on the second.
+//
+// REGISTERED AT BOOT, NOT WHEN THE USER ENABLES NOTIFICATIONS. Registration is not the permission
+// prompt — that must hang off a real tap, which is a platform requirement and arrives with the
+// subscribe control — and having the worker already installed is what lets a subscription be created
+// the instant somebody asks for one.
+void registerServiceWorker();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

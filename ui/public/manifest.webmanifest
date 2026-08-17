@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "quince",
   "short_name": "quince",
   "description": "Self-hosted iPhone backup manager",

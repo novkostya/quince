@@ -779,7 +779,15 @@ gates-ui: tc-node ## UI: typecheck + lint + vitest + build
 	    pnpm run typecheck; \
 	    pnpm run lint; \
 	    pnpm run test; \
-	    pnpm run build'
+	    pnpm run build; \
+	    test -s dist/sw.js || { \
+	      echo "gates-ui: dist/sw.js is MISSING or empty after a build (qn.12 G4)."; \
+	      echo "  The service worker is what delivers push notifications. Vite copies it from"; \
+	      echo "  ui/public, so an absent one means the file moved or publicDir changed."; \
+	      echo "  IT IS A GATE BECAUSE THE FAILURE IS SILENT: core/internal/webui serves index.html"; \
+	      echo "  for any path it cannot stat, so a missing worker is a MIME error in one browser"; \
+	      echo "  console and nothing at all on the server."; \
+	      exit 1; }'
 
 # ---------------------------------------------------------------------------
 # Production image + registry push.
