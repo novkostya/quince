@@ -396,6 +396,7 @@ print-sh-suite-image:
 # The same variable is what the container sets for itself, so the recipe cannot recurse into another
 # container: inside, the suites are already in the right environment and run directly.
 SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
+                   ui/measure/run \
                    deploy/runner/preflight-test deploy/runner/provision-guard-test \
                    deploy/runner/pre-push-shim deploy/runner/pre-push-shim-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \

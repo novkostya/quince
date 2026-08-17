@@ -1,0 +1,5803 @@
+{
+  "measuredAt": "2026-08-17T21:36:28.482Z",
+  "profile": "phone",
+  "viewport": {
+    "width": 393,
+    "height": 660
+  },
+  "results": [
+    {
+      "id": "quince-home",
+      "category": "quince",
+      "name": "quince — Home",
+      "url": "{QUINCE_BASE}/",
+      "scheme": "dark",
+      "title": "quince",
+      "finalUrl": "{QUINCE_BASE}/",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 21,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        14,
+        16,
+        20
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 66.9,
+          "lineHeight": 21,
+          "ratio": 1.5
+        },
+        {
+          "size": 16,
+          "share": 29.6,
+          "lineHeight": 24,
+          "ratio": 1.5
+        },
+        {
+          "size": 20,
+          "share": 2.6,
+          "lineHeight": 28,
+          "ratio": 1.4
+        },
+        {
+          "size": 18,
+          "share": 0.6,
+          "lineHeight": 26.1,
+          "ratio": 1.45
+        },
+        {
+          "size": 24,
+          "share": 0.4,
+          "lineHeight": 31.2,
+          "ratio": 1.3
+        }
+      ],
+      "charsPerLineMedian": 35,
+      "charsPerLineP90": 35,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.35,
+          "contrast": 6.35,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.35,
+          "contrast": 6.35,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.35,
+          "contrast": 6.35,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": 14,
+      "monoShare": 3.4,
+      "primary": {
+        "fg": "#b0b7c1",
+        "bg": "#14171c",
+        "share": 39.1,
+        "chars": 440,
+        "contrast": 8.89,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#8b93a0",
+        "bg": "#14171c",
+        "share": 18.4,
+        "chars": 207,
+        "contrast": 5.8,
+        "medianSize": 14
+      },
+      "secondaryContrast": 5.8,
+      "contrastWeightedMean": 9.18,
+      "contrastWorstSignificant": {
+        "fg": "#7196f8",
+        "bg": "#1b2436",
+        "share": 3.2,
+        "chars": 36,
+        "contrast": 5.49,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 25.1,
+      "topPairs": [
+        {
+          "fg": "#b0b7c1",
+          "bg": "#14171c",
+          "share": 39.1,
+          "contrast": 8.89,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8b93a0",
+          "bg": "#14171c",
+          "share": 18.4,
+          "contrast": 5.8,
+          "medianSize": 14
+        },
+        {
+          "fg": "#e8eaed",
+          "bg": "#14171c",
+          "share": 13.8,
+          "contrast": 14.9,
+          "medianSize": 16
+        },
+        {
+          "fg": "#e2b04a",
+          "bg": "#14171c",
+          "share": 9.4,
+          "contrast": 9.02,
+          "medianSize": 14
+        },
+        {
+          "fg": "#b0b7c1",
+          "bg": "#0b0d10",
+          "share": 5.2,
+          "contrast": 9.63,
+          "medianSize": 16
+        },
+        {
+          "fg": "#7196f8",
+          "bg": "#1b2436",
+          "share": 3.2,
+          "contrast": 5.49,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 327,
+      "contentWidthP90": 327,
+      "landmarkWidth": 361,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 36,
+      "buttonHeightP90": 40,
+      "buttonCount": 5,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 12,
+      "sectionGapP75": 32,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 1126,
+      "runsMeasured": 90,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 12805
+    },
+    {
+      "id": "quince-settings-auth",
+      "category": "quince",
+      "name": "quince — Settings ▸ Sign-in (the page the Operator finds readable)",
+      "url": "{QUINCE_BASE}/settings/auth",
+      "scheme": "dark",
+      "title": "quince",
+      "finalUrl": "{QUINCE_BASE}/settings/auth",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 16,
+      "bodyLineHeight": 24,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        16,
+        20
+      ],
+      "sizeShares": [
+        {
+          "size": 16,
+          "share": 93.2,
+          "lineHeight": 24,
+          "ratio": 1.5
+        },
+        {
+          "size": 20,
+          "share": 5.9,
+          "lineHeight": 28,
+          "ratio": 1.4
+        },
+        {
+          "size": 24,
+          "share": 0.5,
+          "lineHeight": 31.2,
+          "ratio": 1.3
+        },
+        {
+          "size": 18,
+          "share": 0.4,
+          "lineHeight": 26.1,
+          "ratio": 1.45
+        }
+      ],
+      "charsPerLineMedian": 34,
+      "charsPerLineP90": 43,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "INPUT",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.88,
+          "contrast": 6.88,
+          "foundBy": "fill"
+        },
+        {
+          "control": "INPUT[text]",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        },
+        {
+          "control": "INPUT[password]",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        },
+        {
+          "control": "INPUT[password]",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[submit]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.88,
+          "contrast": 6.88,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1.08,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.37,
+          "fillContrast": 1.08,
+          "contrast": 1.37,
+          "foundBy": "edge"
+        }
+      ],
+      "monoSize": 16,
+      "monoShare": 3,
+      "primary": {
+        "fg": "#b0b7c1",
+        "bg": "#0b0d10",
+        "share": 72.4,
+        "chars": 1033,
+        "contrast": 9.63,
+        "medianSize": 16
+      },
+      "secondary": {
+        "fg": "#e2b04a",
+        "bg": "#0b0d10",
+        "share": 11.8,
+        "chars": 168,
+        "contrast": 9.77,
+        "medianSize": 16
+      },
+      "secondaryContrast": 9.77,
+      "contrastWeightedMean": 10.44,
+      "contrastWorstSignificant": {
+        "fg": "#b0b7c1",
+        "bg": "#0b0d10",
+        "share": 72.4,
+        "chars": 1033,
+        "contrast": 9.63,
+        "medianSize": 16
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 1.8,
+      "topPairs": [
+        {
+          "fg": "#b0b7c1",
+          "bg": "#0b0d10",
+          "share": 72.4,
+          "contrast": 9.63,
+          "medianSize": 16
+        },
+        {
+          "fg": "#e2b04a",
+          "bg": "#0b0d10",
+          "share": 11.8,
+          "contrast": 9.77,
+          "medianSize": 16
+        },
+        {
+          "fg": "#e8eaed",
+          "bg": "#0b0d10",
+          "share": 11.1,
+          "contrast": 16.14,
+          "medianSize": 20
+        },
+        {
+          "fg": "#e8eaed",
+          "bg": "#14171c",
+          "share": 2.6,
+          "contrast": 14.9,
+          "medianSize": 16
+        },
+        {
+          "fg": "#0b0d10",
+          "bg": "#7196f8",
+          "share": 1.3,
+          "contrast": 6.88,
+          "medianSize": 16
+        },
+        {
+          "fg": "#7196f8",
+          "bg": "#1b2436",
+          "share": 0.6,
+          "contrast": 5.49,
+          "medianSize": 16
+        }
+      ],
+      "contentWidth": 361,
+      "contentWidthP90": 361,
+      "landmarkWidth": 361,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 40,
+      "buttonHeightP90": 40,
+      "buttonCount": 5,
+      "inputHeightMedian": 40,
+      "inputCount": 4,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 12,
+      "sectionGapP75": 12,
+      "containerPadMedian": 12,
+      "containerPadP75": 20,
+      "charsMeasured": 1426,
+      "runsMeasured": 35,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 9918
+    },
+    {
+      "id": "quince-storage",
+      "category": "quince",
+      "name": "quince — Storage details",
+      "url": "{QUINCE_BASE}/",
+      "scheme": "dark",
+      "title": "quince",
+      "finalUrl": "{QUINCE_BASE}/storage/internal",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 16,
+      "bodyLineHeight": 24,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        14,
+        16,
+        20
+      ],
+      "sizeShares": [
+        {
+          "size": 16,
+          "share": 71.4,
+          "lineHeight": 24,
+          "ratio": 1.5
+        },
+        {
+          "size": 14,
+          "share": 24.9,
+          "lineHeight": 21,
+          "ratio": 1.5
+        },
+        {
+          "size": 20,
+          "share": 2.5,
+          "lineHeight": 28,
+          "ratio": 1.4
+        },
+        {
+          "size": 24,
+          "share": 0.7,
+          "lineHeight": 31.2,
+          "ratio": 1.3
+        },
+        {
+          "size": 18,
+          "share": 0.5,
+          "lineHeight": 26.1,
+          "ratio": 1.45
+        }
+      ],
+      "charsPerLineMedian": 30,
+      "charsPerLineP90": 30,
+      "monoToBodyRatio": 0.88,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.26,
+          "fillContrast": 1,
+          "contrast": 1.26,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.26,
+          "fillContrast": 1,
+          "contrast": 1.26,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.26,
+          "fillContrast": 1,
+          "contrast": 1.26,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.26,
+          "fillContrast": 1,
+          "contrast": 1.26,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.39,
+          "contrast": 6.39,
+          "foundBy": "fill"
+        }
+      ],
+      "monoSize": 14,
+      "monoShare": 14,
+      "primary": {
+        "fg": "#8b93a0",
+        "bg": "#14171c",
+        "share": 38,
+        "chars": 522,
+        "contrast": 5.8,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#e8eaed",
+        "bg": "#14171c",
+        "share": 27.5,
+        "chars": 378,
+        "contrast": 14.9,
+        "medianSize": 16
+      },
+      "secondaryContrast": 14.9,
+      "contrastWeightedMean": 9.62,
+      "contrastWorstSignificant": {
+        "fg": "#8b93a0",
+        "bg": "#14171c",
+        "share": 38,
+        "chars": 522,
+        "contrast": 5.8,
+        "medianSize": 14
+      },
+      "shareBelow3": 1.4,
+      "shareBelow4_5": 1.4,
+      "shareBelow7": 40.2,
+      "topPairs": [
+        {
+          "fg": "#8b93a0",
+          "bg": "#14171c",
+          "share": 38,
+          "contrast": 5.8,
+          "medianSize": 14
+        },
+        {
+          "fg": "#e8eaed",
+          "bg": "#14171c",
+          "share": 27.5,
+          "contrast": 14.9,
+          "medianSize": 16
+        },
+        {
+          "fg": "#b0b7c1",
+          "bg": "#14171c",
+          "share": 22.6,
+          "contrast": 8.89,
+          "medianSize": 14
+        },
+        {
+          "fg": "#e8eaed",
+          "bg": "#0b0d10",
+          "share": 4.9,
+          "contrast": 16.14,
+          "medianSize": 20
+        },
+        {
+          "fg": "#b0b7c1",
+          "bg": "#0b0d10",
+          "share": 2.5,
+          "contrast": 9.63,
+          "medianSize": 16
+        },
+        {
+          "fg": "#b0b7c1",
+          "bg": "#191d23",
+          "share": 1.5,
+          "contrast": 8.37,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 327,
+      "contentWidthP90": 327,
+      "landmarkWidth": 361,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 36,
+      "buttonHeightP90": 40,
+      "buttonCount": 6,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 8,
+      "sectionGapP75": 16,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 1375,
+      "runsMeasured": 114,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 17165
+    },
+    {
+      "id": "quince-home-light",
+      "category": "quince",
+      "name": "quince — Home (light theme)",
+      "url": "{QUINCE_BASE}/",
+      "scheme": "light",
+      "title": "quince",
+      "finalUrl": "{QUINCE_BASE}/",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 21,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        14,
+        16,
+        20
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 66.3,
+          "lineHeight": 21,
+          "ratio": 1.5
+        },
+        {
+          "size": 16,
+          "share": 30.2,
+          "lineHeight": 24,
+          "ratio": 1.5
+        },
+        {
+          "size": 20,
+          "share": 2.6,
+          "lineHeight": 28,
+          "ratio": 1.4
+        },
+        {
+          "size": 18,
+          "share": 0.6,
+          "lineHeight": 26.1,
+          "ratio": 1.45
+        },
+        {
+          "size": 24,
+          "share": 0.4,
+          "lineHeight": 31.2,
+          "ratio": 1.3
+        }
+      ],
+      "charsPerLineMedian": 35,
+      "charsPerLineP90": 35,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.32,
+          "contrast": 6.32,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.32,
+          "contrast": 6.32,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.32,
+          "contrast": 6.32,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 6.32,
+          "contrast": 6.32,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": 14,
+      "monoShare": 3.1,
+      "primary": {
+        "fg": "#4f555f",
+        "bg": "#ffffff",
+        "share": 39.3,
+        "chars": 440,
+        "contrast": 7.51,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#60646b",
+        "bg": "#ffffff",
+        "share": 18.2,
+        "chars": 204,
+        "contrast": 5.94,
+        "medianSize": 14
+      },
+      "secondaryContrast": 5.94,
+      "contrastWeightedMean": 8.3,
+      "contrastWorstSignificant": {
+        "fg": "#166e3c",
+        "bg": "#eaf0fe",
+        "share": 2.1,
+        "chars": 24,
+        "contrast": 5.52,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 40,
+      "topPairs": [
+        {
+          "fg": "#4f555f",
+          "bg": "#ffffff",
+          "share": 39.3,
+          "contrast": 7.51,
+          "medianSize": 14
+        },
+        {
+          "fg": "#60646b",
+          "bg": "#ffffff",
+          "share": 18.2,
+          "contrast": 5.94,
+          "medianSize": 14
+        },
+        {
+          "fg": "#1a1d21",
+          "bg": "#ffffff",
+          "share": 12.6,
+          "contrast": 16.91,
+          "medianSize": 16
+        },
+        {
+          "fg": "#835716",
+          "bg": "#ffffff",
+          "share": 9.5,
+          "contrast": 6.29,
+          "medianSize": 14
+        },
+        {
+          "fg": "#4f555f",
+          "bg": "#f6f7f8",
+          "share": 5.3,
+          "contrast": 7,
+          "medianSize": 16
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#2f58c5",
+          "share": 3.9,
+          "contrast": 6.32,
+          "medianSize": 16
+        }
+      ],
+      "contentWidth": 327,
+      "contentWidthP90": 327,
+      "landmarkWidth": 361,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 36,
+      "buttonHeightP90": 40,
+      "buttonCount": 6,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 12,
+      "sectionGapP75": 32,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 1120,
+      "runsMeasured": 89,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 12757
+    },
+    {
+      "id": "github-repo",
+      "category": "mainstream",
+      "name": "GitHub — repository code view",
+      "url": "https://github.com/torvalds/linux",
+      "scheme": "dark",
+      "title": "GitHub - torvalds/linux: Linux kernel source tree · GitHub",
+      "finalUrl": "https://github.com/torvalds/linux",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 21.47,
+      "bodyLineRatio": 1.53,
+      "scale": [
+        12,
+        14,
+        16,
+        18
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 57.4,
+          "lineHeight": 21.47,
+          "ratio": 1.53
+        },
+        {
+          "size": 12,
+          "share": 36,
+          "lineHeight": 17.84,
+          "ratio": 1.49
+        },
+        {
+          "size": 16,
+          "share": 4.6,
+          "lineHeight": 24,
+          "ratio": 1.5
+        },
+        {
+          "size": 18,
+          "share": 2.1,
+          "lineHeight": 27,
+          "ratio": 1.5
+        }
+      ],
+      "charsPerLineMedian": null,
+      "charsPerLineP90": null,
+      "monoToBodyRatio": 0.86,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.47,
+          "fillContrast": 1,
+          "contrast": 1.47,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.92,
+          "fillContrast": 1.27,
+          "contrast": 1.92,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.92,
+          "fillContrast": 1.27,
+          "contrast": 1.92,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.53,
+          "fillContrast": 4.09,
+          "contrast": 4.09,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.92,
+          "fillContrast": 1.27,
+          "contrast": 1.92,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": 12,
+      "monoShare": 90.5,
+      "primary": {
+        "fg": "#f0f6fc",
+        "bg": "#0d1117",
+        "share": 90.9,
+        "chars": 6016,
+        "contrast": 17.39,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#9198a1",
+        "bg": "#0d1117",
+        "share": 4,
+        "chars": 267,
+        "contrast": 6.5,
+        "medianSize": 12
+      },
+      "secondaryContrast": 6.5,
+      "contrastWeightedMean": 16.36,
+      "contrastWorstSignificant": {
+        "fg": "#4493f8",
+        "bg": "#0d1117",
+        "share": 2.7,
+        "chars": 181,
+        "contrast": 6.11,
+        "medianSize": 12
+      },
+      "shareBelow3": 1.7,
+      "shareBelow4_5": 1.7,
+      "shareBelow7": 8.7,
+      "topPairs": [
+        {
+          "fg": "#f0f6fc",
+          "bg": "#0d1117",
+          "share": 90.9,
+          "contrast": 17.39,
+          "medianSize": 14
+        },
+        {
+          "fg": "#9198a1",
+          "bg": "#0d1117",
+          "share": 4,
+          "contrast": 6.5,
+          "medianSize": 12
+        },
+        {
+          "fg": "#4493f8",
+          "bg": "#0d1117",
+          "share": 2.7,
+          "contrast": 6.11,
+          "medianSize": 12
+        },
+        {
+          "fg": "#9198a1",
+          "bg": "#ffffff",
+          "share": 1.7,
+          "contrast": 2.91,
+          "medianSize": 14
+        },
+        {
+          "fg": "#9198a1",
+          "bg": "#151b23",
+          "share": 0.2,
+          "contrast": 5.94,
+          "medianSize": 12
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#000000",
+          "share": 0.1,
+          "contrast": 21,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 393,
+      "contentWidthP90": null,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN#js-repo-pjax-container",
+      "buttonHeightMedian": 32,
+      "buttonHeightP90": 32,
+      "buttonCount": 10,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": 32,
+      "rowCount": 48,
+      "sectionGapMedian": 8,
+      "sectionGapP75": 8,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 6619,
+      "runsMeasured": 86,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 9260
+    },
+    {
+      "id": "github-issue",
+      "category": "mainstream",
+      "name": "GitHub — issue thread",
+      "url": "https://github.com/novkostya/quince/issues/1155",
+      "scheme": "dark",
+      "title": "quince reads small, low-contrast and clamped beside mainstream apps — measure the industry standard, then propose a scale · Issue #1155 · novkostya/quince",
+      "finalUrl": "https://github.com/novkostya/quince/issues/1155",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 21.01,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        12,
+        14,
+        21,
+        26
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 88.5,
+          "lineHeight": 21.01,
+          "ratio": 1.5
+        },
+        {
+          "size": 12,
+          "share": 5.4,
+          "lineHeight": 17.81,
+          "ratio": 1.48
+        },
+        {
+          "size": 21,
+          "share": 4,
+          "lineHeight": 26.25,
+          "ratio": 1.25
+        },
+        {
+          "size": 26,
+          "share": 1.7,
+          "lineHeight": 32.5,
+          "ratio": 1.25
+        },
+        {
+          "size": 18,
+          "share": 0.2,
+          "lineHeight": 27,
+          "ratio": 1.5
+        },
+        {
+          "size": 17.5,
+          "share": 0.1,
+          "lineHeight": 21.88,
+          "ratio": 1.25
+        },
+        {
+          "size": 16,
+          "share": 0.1,
+          "lineHeight": 24,
+          "ratio": 1.5
+        }
+      ],
+      "charsPerLineMedian": 32,
+      "charsPerLineP90": 39,
+      "monoToBodyRatio": 0.85,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.47,
+          "fillContrast": 1,
+          "contrast": 1.47,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1.92,
+          "fillContrast": 1.27,
+          "contrast": 1.92,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": 11.9,
+      "monoShare": 2.2,
+      "primary": {
+        "fg": "#f0f6fc",
+        "bg": "#0d1117",
+        "share": 90.3,
+        "chars": 6665,
+        "contrast": 17.39,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#9198a1",
+        "bg": "#0d1117",
+        "share": 4.2,
+        "chars": 309,
+        "contrast": 6.5,
+        "medianSize": 12
+      },
+      "secondaryContrast": 6.5,
+      "contrastWeightedMean": 16.61,
+      "contrastWorstSignificant": {
+        "fg": "#9198a1",
+        "bg": "#0d1117",
+        "share": 4.2,
+        "chars": 309,
+        "contrast": 6.5,
+        "medianSize": 12
+      },
+      "shareBelow3": 0.2,
+      "shareBelow4_5": 0.2,
+      "shareBelow7": 5.9,
+      "topPairs": [
+        {
+          "fg": "#f0f6fc",
+          "bg": "#0d1117",
+          "share": 90.3,
+          "contrast": 17.39,
+          "medianSize": 14
+        },
+        {
+          "fg": "#9198a1",
+          "bg": "#0d1117",
+          "share": 4.2,
+          "contrast": 6.5,
+          "medianSize": 12
+        },
+        {
+          "fg": "#f0f6fc",
+          "bg": "#1f232a",
+          "share": 2.3,
+          "contrast": 14.48,
+          "medianSize": 11.9
+        },
+        {
+          "fg": "#f0f6fc",
+          "bg": "#272215",
+          "share": 0.8,
+          "contrast": 14.55,
+          "medianSize": 14
+        },
+        {
+          "fg": "#9198a1",
+          "bg": "#151b23",
+          "share": 0.5,
+          "contrast": 5.94,
+          "medianSize": 12
+        },
+        {
+          "fg": "#4493f8",
+          "bg": "#0d1117",
+          "share": 0.4,
+          "contrast": 6.11,
+          "medianSize": 18
+        }
+      ],
+      "contentWidth": 327,
+      "contentWidthP90": 327,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN#js-repo-pjax-container",
+      "buttonHeightMedian": 30,
+      "buttonHeightP90": 32,
+      "buttonCount": 8,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": 18,
+      "rowCount": 17,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 24,
+      "containerPadMedian": 16,
+      "containerPadP75": 28,
+      "charsMeasured": 7378,
+      "runsMeasured": 165,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 9013
+    },
+    {
+      "id": "reddit",
+      "category": "mainstream",
+      "name": "Reddit — subreddit feed",
+      "url": "https://www.reddit.com/r/selfhosted/",
+      "scheme": "dark",
+      "title": "Self-Hosted Alternatives to Popular Services",
+      "finalUrl": "https://www.reddit.com/r/selfhosted/?solution=979660b12aa15fbd979660b12aa15fbd&js_challenge=1&token=7afd7253fec22262ff1c52b1703fe9eca1f308b2a875dd5481ed7cc1e02e91e8&jsc_orig_r=",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 20.03,
+      "bodyLineRatio": 1.43,
+      "scale": [
+        12,
+        14,
+        16
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 83.5,
+          "lineHeight": 20.03,
+          "ratio": 1.43
+        },
+        {
+          "size": 16,
+          "share": 9,
+          "lineHeight": 20,
+          "ratio": 1.25
+        },
+        {
+          "size": 12,
+          "share": 7.5,
+          "lineHeight": 16.06,
+          "ratio": 1.34
+        },
+        {
+          "size": 18,
+          "share": 0.1,
+          "lineHeight": 24,
+          "ratio": 1.33
+        }
+      ],
+      "charsPerLineMedian": 35,
+      "charsPerLineP90": 42,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 5.29,
+          "fillContrast": 1,
+          "contrast": 5.29,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1.13,
+          "contrast": 1.13,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 5.74,
+          "contrast": 5.74,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.06,
+          "contrast": 13.06,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        }
+      ],
+      "monoSize": 14,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#b7cad4",
+        "bg": "#0e1113",
+        "share": 84.4,
+        "chars": 16066,
+        "contrast": 11.2,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#eef1f3",
+        "bg": "#0e1113",
+        "share": 9,
+        "chars": 1720,
+        "contrast": 16.7,
+        "medianSize": 16
+      },
+      "secondaryContrast": 16.7,
+      "contrastWeightedMean": 11.62,
+      "contrastWorstSignificant": {
+        "fg": "#b7cad4",
+        "bg": "#0e1113",
+        "share": 84.4,
+        "chars": 16066,
+        "contrast": 11.2,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 1.2,
+      "topPairs": [
+        {
+          "fg": "#b7cad4",
+          "bg": "#0e1113",
+          "share": 84.4,
+          "contrast": 11.2,
+          "medianSize": 14
+        },
+        {
+          "fg": "#eef1f3",
+          "bg": "#0e1113",
+          "share": 9,
+          "contrast": 16.7,
+          "medianSize": 16
+        },
+        {
+          "fg": "#8ba2ad",
+          "bg": "#0e1113",
+          "share": 1.5,
+          "contrast": 7.1,
+          "medianSize": 12
+        },
+        {
+          "fg": "#9e9eff",
+          "bg": "#0e1113",
+          "share": 1.5,
+          "contrast": 7.93,
+          "medianSize": 14
+        },
+        {
+          "fg": "#648efc",
+          "bg": "#0e1113",
+          "share": 1.1,
+          "contrast": 6.15,
+          "medianSize": 12
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#2a3236",
+          "share": 0.6,
+          "contrast": 13.06,
+          "medianSize": 12
+        }
+      ],
+      "contentWidth": 361,
+      "contentWidthP90": 361,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN#main-content",
+      "buttonHeightMedian": 32,
+      "buttonHeightP90": 32,
+      "buttonCount": 141,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 9,
+      "sectionGapP75": 10,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 19042,
+      "runsMeasured": 325,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 8363
+    },
+    {
+      "id": "youtube",
+      "category": "mainstream",
+      "name": "YouTube — watch page",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "scheme": "dark",
+      "stepWarnings": [
+        "{\"click\":\"button[aria-label*='Accept'], button:has-text('Accept all')\"}: locator.click: Timeout 8000ms exceeded."
+      ],
+      "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster) - YouTube",
+      "finalUrl": "https://m.youtube.com/watch?v=dQw4w9WgXcQ&ra=m",
+      "rootFontSize": 10,
+      "declaredBodyFontSize": 12,
+      "bodySize": 14,
+      "bodyLineHeight": 17.99,
+      "bodyLineRatio": 1.29,
+      "scale": [
+        12,
+        14,
+        18
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 59,
+          "lineHeight": 17.99,
+          "ratio": 1.28
+        },
+        {
+          "size": 12,
+          "share": 35,
+          "lineHeight": 15.89,
+          "ratio": 1.32
+        },
+        {
+          "size": 18,
+          "share": 6,
+          "lineHeight": 24,
+          "ratio": 1.33
+        }
+      ],
+      "charsPerLineMedian": null,
+      "charsPerLineP90": null,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 16.97,
+          "contrast": 16.97,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#f1f1f1",
+        "bg": "#0f0f0f",
+        "share": 84.2,
+        "chars": 956,
+        "contrast": 16.97,
+        "medianSize": 12
+      },
+      "secondary": {
+        "fg": "#aaaaaa",
+        "bg": "#0f0f0f",
+        "share": 2.7,
+        "chars": 31,
+        "contrast": 8.25,
+        "medianSize": 12
+      },
+      "secondaryContrast": 8.25,
+      "contrastWeightedMean": 16.56,
+      "contrastWorstSignificant": {
+        "fg": "#aaaaaa",
+        "bg": "#0f0f0f",
+        "share": 2.7,
+        "chars": 31,
+        "contrast": 8.25,
+        "medianSize": 12
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 1.7,
+      "topPairs": [
+        {
+          "fg": "#f1f1f1",
+          "bg": "#0f0f0f",
+          "share": 84.2,
+          "contrast": 16.97,
+          "medianSize": 12
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#060606",
+          "share": 5.2,
+          "contrast": 20.26,
+          "medianSize": 12
+        },
+        {
+          "fg": "#f1f1f1",
+          "bg": "#272727",
+          "share": 4.8,
+          "contrast": 13.23,
+          "medianSize": 14
+        },
+        {
+          "fg": "#aaaaaa",
+          "bg": "#0f0f0f",
+          "share": 2.7,
+          "contrast": 8.25,
+          "medianSize": 12
+        },
+        {
+          "fg": "#aaaaaa",
+          "bg": "#272727",
+          "share": 1.7,
+          "contrast": 6.43,
+          "medianSize": 12
+        },
+        {
+          "fg": "#0f0f0f",
+          "bg": "#f1f1f1",
+          "share": 0.8,
+          "contrast": 16.97,
+          "medianSize": 12
+        }
+      ],
+      "contentWidth": 393,
+      "contentWidthP90": null,
+      "landmarkWidth": 393,
+      "mainTag": "BODY",
+      "buttonHeightMedian": 48,
+      "buttonHeightP90": 48,
+      "buttonCount": 24,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 12,
+      "sectionGapP75": 12,
+      "containerPadMedian": 13,
+      "containerPadP75": 13,
+      "charsMeasured": 1136,
+      "runsMeasured": 64,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 27910
+    },
+    {
+      "id": "mdn",
+      "category": "mainstream",
+      "name": "MDN — reference page",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/font-size",
+      "scheme": "dark",
+      "title": "font-size CSS property - CSS | MDN",
+      "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-size",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 16,
+      "bodyLineHeight": 27.35,
+      "bodyLineRatio": 1.71,
+      "scale": [
+        12.8,
+        13.33,
+        16,
+        32
+      ],
+      "sizeShares": [
+        {
+          "size": 16,
+          "share": 86.5,
+          "lineHeight": 27.35,
+          "ratio": 1.71
+        },
+        {
+          "size": 13.33,
+          "share": 8.1,
+          "lineHeight": 16,
+          "ratio": 1.2
+        },
+        {
+          "size": 12.8,
+          "share": 2.3,
+          "lineHeight": 22.4,
+          "ratio": 1.75
+        },
+        {
+          "size": 32,
+          "share": 1.8,
+          "lineHeight": 40.89,
+          "ratio": 1.28
+        },
+        {
+          "size": 24,
+          "share": 0.6,
+          "lineHeight": 30,
+          "ratio": 1.25
+        },
+        {
+          "size": 20,
+          "share": 0.5,
+          "lineHeight": 28.19,
+          "ratio": 1.41
+        },
+        {
+          "size": 40,
+          "share": 0.3,
+          "lineHeight": 50,
+          "ratio": 1.25
+        },
+        {
+          "size": 10,
+          "share": 0,
+          "lineHeight": 15,
+          "ratio": 1.5
+        }
+      ],
+      "charsPerLineMedian": 27,
+      "charsPerLineP90": 40,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 7.4,
+          "fillContrast": 17.59,
+          "contrast": 17.59,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 13.26,
+          "contrast": 13.26,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1.49,
+          "fillContrast": 1,
+          "contrast": 1.49,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 2.47,
+          "fillContrast": 1,
+          "contrast": 2.47,
+          "foundBy": "edge"
+        }
+      ],
+      "monoSize": 16,
+      "monoShare": 18.7,
+      "primary": {
+        "fg": "#ffffff",
+        "bg": "#18191b",
+        "share": 52.9,
+        "chars": 4966,
+        "contrast": 17.59,
+        "medianSize": 16
+      },
+      "secondary": {
+        "fg": "#a4cefe",
+        "bg": "#18191b",
+        "share": 2.5,
+        "chars": 232,
+        "contrast": 10.75,
+        "medianSize": 16
+      },
+      "secondaryContrast": 10.75,
+      "contrastWeightedMean": 13.51,
+      "contrastWorstSignificant": {
+        "fg": "#ffffff",
+        "bg": "#ffffff",
+        "share": 2.8,
+        "chars": 262,
+        "contrast": 1,
+        "medianSize": 16
+      },
+      "shareBelow3": 10,
+      "shareBelow4_5": 10,
+      "shareBelow7": 17.5,
+      "topPairs": [
+        {
+          "fg": "#ffffff",
+          "bg": "#18191b",
+          "share": 52.9,
+          "contrast": 17.59,
+          "medianSize": 16
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#2d3034",
+          "share": 8.1,
+          "contrast": 13.26,
+          "medianSize": 16
+        },
+        {
+          "fg": "#70eba3",
+          "bg": "#ffffff",
+          "share": 6.6,
+          "contrast": 1.49,
+          "medianSize": 13.33
+        },
+        {
+          "fg": "#c3c7cb",
+          "bg": "#212426",
+          "share": 5,
+          "contrast": 9.18,
+          "medianSize": 16
+        },
+        {
+          "fg": "#ff97a0",
+          "bg": "#2d3034",
+          "share": 4.4,
+          "contrast": 6.43,
+          "medianSize": 16
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#072446",
+          "share": 4.3,
+          "contrast": 15.56,
+          "medianSize": 16
+        }
+      ],
+      "contentWidth": 361,
+      "contentWidthP90": 361,
+      "landmarkWidth": 0,
+      "mainTag": "MAIN#content",
+      "buttonHeightMedian": 18.5,
+      "buttonHeightP90": 33.5,
+      "buttonCount": 64,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": 46.8,
+      "rowCount": 12,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 16,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 9386,
+      "runsMeasured": 588,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 8366
+    },
+    {
+      "id": "stripe-docs",
+      "category": "mainstream",
+      "name": "Stripe — API reference",
+      "url": "https://docs.stripe.com/api",
+      "scheme": "dark",
+      "title": "Stripe API Reference",
+      "finalUrl": "https://docs.stripe.com/api",
+      "rootFontSize": 14,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 21.54,
+      "bodyLineRatio": 1.54,
+      "scale": [
+        12,
+        14
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 91.4,
+          "lineHeight": 21.54,
+          "ratio": 1.54
+        },
+        {
+          "size": 12,
+          "share": 5.5,
+          "lineHeight": 16,
+          "ratio": 1.33
+        },
+        {
+          "size": 24,
+          "share": 1.1,
+          "lineHeight": 32,
+          "ratio": 1.33
+        },
+        {
+          "size": 21,
+          "share": 0.6,
+          "lineHeight": 25.2,
+          "ratio": 1.2
+        },
+        {
+          "size": 13,
+          "share": 0.6,
+          "lineHeight": 19.32,
+          "ratio": 1.49
+        },
+        {
+          "size": 16,
+          "share": 0.4,
+          "lineHeight": 19.2,
+          "ratio": 1.2
+        },
+        {
+          "size": 11.9,
+          "share": 0.2,
+          "lineHeight": 14.28,
+          "ratio": 1.2
+        },
+        {
+          "size": 12.6,
+          "share": 0.1,
+          "lineHeight": 15.12,
+          "ratio": 1.2
+        }
+      ],
+      "charsPerLineMedian": 22,
+      "charsPerLineP90": 41,
+      "monoToBodyRatio": 1,
+      "affordances": [
+        {
+          "control": "SELECT",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": 14,
+      "monoShare": 20.4,
+      "primary": {
+        "fg": "#eceef1",
+        "bg": "#14171d",
+        "share": 61.9,
+        "chars": 15161,
+        "contrast": 15.44,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#8c99ad",
+        "bg": "#14171d",
+        "share": 4.9,
+        "chars": 1204,
+        "contrast": 6.22,
+        "medianSize": 12
+      },
+      "secondaryContrast": 6.22,
+      "contrastWeightedMean": 13.19,
+      "contrastWorstSignificant": {
+        "fg": "#3eae20",
+        "bg": "#1b1e25",
+        "share": 2.8,
+        "chars": 692,
+        "contrast": 5.78,
+        "medianSize": 14
+      },
+      "shareBelow3": 1.2,
+      "shareBelow4_5": 1.9,
+      "shareBelow7": 16.7,
+      "topPairs": [
+        {
+          "fg": "#eceef1",
+          "bg": "#14171d",
+          "share": 61.9,
+          "contrast": 15.44,
+          "medianSize": 14
+        },
+        {
+          "fg": "#eceef1",
+          "bg": "#1b1e25",
+          "share": 12.4,
+          "contrast": 14.35,
+          "medianSize": 11.9
+        },
+        {
+          "fg": "#c9ced8",
+          "bg": "#1b1e25",
+          "share": 5,
+          "contrast": 10.57,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8c99ad",
+          "bg": "#14171d",
+          "share": 4.9,
+          "contrast": 6.22,
+          "medianSize": 12
+        },
+        {
+          "fg": "#9289fe",
+          "bg": "#14171d",
+          "share": 3.6,
+          "contrast": 6.18,
+          "medianSize": 14
+        },
+        {
+          "fg": "#3eae20",
+          "bg": "#1b1e25",
+          "share": 2.8,
+          "contrast": 5.78,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 337,
+      "contentWidthP90": 337,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 22,
+      "buttonHeightP90": 24,
+      "buttonCount": 146,
+      "inputHeightMedian": 40,
+      "inputCount": 1,
+      "rowHeightMedian": 52.4,
+      "rowCount": 55,
+      "sectionGapMedian": 24,
+      "sectionGapP75": 33,
+      "containerPadMedian": 14,
+      "containerPadP75": 28,
+      "charsMeasured": 24498,
+      "runsMeasured": 1053,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 10810
+    },
+    {
+      "id": "linear-docs",
+      "category": "mainstream",
+      "name": "Linear — docs",
+      "url": "https://linear.app/docs",
+      "scheme": "dark",
+      "title": "Linear Docs",
+      "finalUrl": "https://linear.app/docs",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 21,
+      "bodyLineRatio": 1.5,
+      "scale": [
+        14,
+        15,
+        20
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 73,
+          "lineHeight": 21,
+          "ratio": 1.5
+        },
+        {
+          "size": 15,
+          "share": 22.7,
+          "lineHeight": 24,
+          "ratio": 1.6
+        },
+        {
+          "size": 20,
+          "share": 2.1,
+          "lineHeight": 26.6,
+          "ratio": 1.33
+        },
+        {
+          "size": 40,
+          "share": 1.1,
+          "lineHeight": 44,
+          "ratio": 1.1
+        },
+        {
+          "size": 13,
+          "share": 0.7,
+          "lineHeight": 32,
+          "ratio": 2.46
+        },
+        {
+          "size": 17,
+          "share": 0.4,
+          "lineHeight": 27.2,
+          "ratio": 1.6
+        }
+      ],
+      "charsPerLineMedian": 36,
+      "charsPerLineP90": 38,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#8a8f98",
+        "bg": "#141516",
+        "share": 73,
+        "chars": 705,
+        "contrast": 5.63,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#f7f8f8",
+        "bg": "#141516",
+        "share": 15.2,
+        "chars": 147,
+        "contrast": 17.18,
+        "medianSize": 15
+      },
+      "secondaryContrast": 17.18,
+      "contrastWeightedMean": 7.97,
+      "contrastWorstSignificant": {
+        "fg": "#8a8f98",
+        "bg": "#141516",
+        "share": 73,
+        "chars": 705,
+        "contrast": 5.63,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 80.4,
+      "topPairs": [
+        {
+          "fg": "#8a8f98",
+          "bg": "#141516",
+          "share": 73,
+          "contrast": 5.63,
+          "medianSize": 14
+        },
+        {
+          "fg": "#f7f8f8",
+          "bg": "#141516",
+          "share": 15.2,
+          "contrast": 17.18,
+          "medianSize": 15
+        },
+        {
+          "fg": "#8a8f98",
+          "bg": "#08090a",
+          "share": 7.5,
+          "contrast": 6.13,
+          "medianSize": 15
+        },
+        {
+          "fg": "#f7f8f8",
+          "bg": "#08090a",
+          "share": 3.6,
+          "contrast": 18.73,
+          "medianSize": 20
+        },
+        {
+          "fg": "#08090a",
+          "bg": "#e5e5e6",
+          "share": 0.7,
+          "contrast": 15.83,
+          "medianSize": 13
+        }
+      ],
+      "contentWidth": 393,
+      "contentWidthP90": null,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 48,
+      "buttonHeightP90": 48,
+      "buttonCount": 2,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 16,
+      "containerPadMedian": 20,
+      "containerPadP75": 20,
+      "charsMeasured": 966,
+      "runsMeasured": 30,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 8631
+    },
+    {
+      "id": "google-search",
+      "category": "mainstream",
+      "name": "Google — Google Fonts (an app surface Google itself builds)",
+      "url": "https://fonts.google.com/specimen/Inter",
+      "scheme": "dark",
+      "title": "Inter - Google Fonts",
+      "finalUrl": "https://fonts.google.com/specimen/Inter",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 20.17,
+      "bodyLineRatio": 1.44,
+      "scale": [
+        12,
+        14,
+        16,
+        18,
+        21,
+        22,
+        24,
+        32,
+        36,
+        48
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 25.8,
+          "lineHeight": 20.17,
+          "ratio": 1.44
+        },
+        {
+          "size": 48,
+          "share": 12.3,
+          "lineHeight": 57.6,
+          "ratio": 1.2
+        },
+        {
+          "size": 16,
+          "share": 11.5,
+          "lineHeight": 19.86,
+          "ratio": 1.24
+        },
+        {
+          "size": 24,
+          "share": 11.2,
+          "lineHeight": 29.23,
+          "ratio": 1.22
+        },
+        {
+          "size": 18,
+          "share": 9.8,
+          "lineHeight": 21.51,
+          "ratio": 1.19
+        },
+        {
+          "size": 12,
+          "share": 7.9,
+          "lineHeight": 16,
+          "ratio": 1.33
+        },
+        {
+          "size": 22,
+          "share": 7.4,
+          "lineHeight": 26.4,
+          "ratio": 1.2
+        },
+        {
+          "size": 21,
+          "share": 7.4,
+          "lineHeight": 25.2,
+          "ratio": 1.2
+        },
+        {
+          "size": 32,
+          "share": 2.7,
+          "lineHeight": 38.56,
+          "ratio": 1.21
+        },
+        {
+          "size": 36,
+          "share": 1.7,
+          "lineHeight": 43.23,
+          "ratio": 1.2
+        }
+      ],
+      "charsPerLineMedian": 32,
+      "charsPerLineP90": 42,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "INPUT",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": null,
+          "fillContrast": 10.8,
+          "contrast": 10.8,
+          "foundBy": "fill"
+        },
+        {
+          "control": "INPUT",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "INPUT",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "INPUT",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#e3e3e3",
+        "bg": "#131314",
+        "share": 62.8,
+        "chars": 4251,
+        "contrast": 14.47,
+        "medianSize": 24
+      },
+      "secondary": {
+        "fg": "#c4c7c5",
+        "bg": "#131314",
+        "share": 18.6,
+        "chars": 1263,
+        "contrast": 10.9,
+        "medianSize": 14
+      },
+      "secondaryContrast": 10.9,
+      "contrastWeightedMean": 12.71,
+      "contrastWorstSignificant": {
+        "fg": "#e3e3e3",
+        "bg": "#004a77",
+        "share": 6.4,
+        "chars": 431,
+        "contrast": 7.29,
+        "medianSize": 32
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 0.6,
+      "topPairs": [
+        {
+          "fg": "#e3e3e3",
+          "bg": "#131314",
+          "share": 62.8,
+          "contrast": 14.47,
+          "medianSize": 24
+        },
+        {
+          "fg": "#c4c7c5",
+          "bg": "#131314",
+          "share": 18.6,
+          "contrast": 10.9,
+          "medianSize": 14
+        },
+        {
+          "fg": "#e3e3e3",
+          "bg": "#004a77",
+          "share": 6.4,
+          "contrast": 7.29,
+          "medianSize": 32
+        },
+        {
+          "fg": "#c4c7c5",
+          "bg": "#282a2c",
+          "share": 6.1,
+          "contrast": 8.45,
+          "medianSize": 14
+        },
+        {
+          "fg": "#c4c7c5",
+          "bg": "#1e1f20",
+          "share": 1.7,
+          "contrast": 9.69,
+          "medianSize": 20
+        },
+        {
+          "fg": "#131314",
+          "bg": "#a8c7fa",
+          "share": 1.5,
+          "contrast": 10.8,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 329,
+      "contentWidthP90": 361,
+      "landmarkWidth": 361,
+      "mainTag": "MAIN#main-content",
+      "buttonHeightMedian": 48,
+      "buttonHeightP90": 48,
+      "buttonCount": 29,
+      "inputHeightMedian": 24,
+      "inputCount": 4,
+      "rowHeightMedian": 135,
+      "rowCount": 18,
+      "sectionGapMedian": 8,
+      "sectionGapP75": 32,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 6801,
+      "runsMeasured": 169,
+      "bgUnresolvedShare": 0.4,
+      "elapsedMs": 10539
+    },
+    {
+      "id": "grafana",
+      "category": "selfhosted",
+      "name": "Grafana — play instance",
+      "url": "https://play.grafana.org/dashboards",
+      "scheme": "dark",
+      "title": "Dashboards - Grafana",
+      "finalUrl": "https://play.grafana.org/dashboards",
+      "rootFontSize": 14,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 22.91,
+      "bodyLineRatio": 1.64,
+      "scale": [
+        12,
+        14,
+        16,
+        28
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 84.6,
+          "lineHeight": 22.91,
+          "ratio": 1.64
+        },
+        {
+          "size": 16,
+          "share": 7.7,
+          "lineHeight": 22,
+          "ratio": 1.38
+        },
+        {
+          "size": 12,
+          "share": 6,
+          "lineHeight": 18,
+          "ratio": 1.5
+        },
+        {
+          "size": 28,
+          "share": 1.8,
+          "lineHeight": 32,
+          "ratio": 1.14
+        }
+      ],
+      "charsPerLineMedian": 34,
+      "charsPerLineP90": 34,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "INPUT[text]",
+          "uaDrawn": false,
+          "borderContrast": 1.63,
+          "fillContrast": 1.08,
+          "contrast": 1.63,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#ccccdc",
+        "bg": "#181b1f",
+        "share": 40.9,
+        "chars": 233,
+        "contrast": 10.89,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#8d8e9a",
+        "bg": "#181b1f",
+        "share": 10.7,
+        "chars": 61,
+        "contrast": 5.32,
+        "medianSize": 14
+      },
+      "secondaryContrast": 5.32,
+      "contrastWeightedMean": 8.04,
+      "contrastWorstSignificant": {
+        "fg": "#ffffff",
+        "bg": "#3d71d9",
+        "share": 6.8,
+        "chars": 39,
+        "contrast": 4.6,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 47.2,
+      "topPairs": [
+        {
+          "fg": "#ccccdc",
+          "bg": "#181b1f",
+          "share": 40.9,
+          "contrast": 10.89,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8d90a1",
+          "bg": "#182034",
+          "share": 24,
+          "contrast": 5.12,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8d8e9a",
+          "bg": "#181b1f",
+          "share": 10.7,
+          "contrast": 5.32,
+          "medianSize": 14
+        },
+        {
+          "fg": "#ccccdc",
+          "bg": "#182034",
+          "share": 7.7,
+          "contrast": 10.22,
+          "medianSize": 16
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#3d71d9",
+          "share": 6.8,
+          "contrast": 4.6,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8b8b97",
+          "bg": "#111217",
+          "share": 5.6,
+          "contrast": 5.54,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 271,
+      "contentWidthP90": 271,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN#pageContent",
+      "buttonHeightMedian": 16,
+      "buttonHeightP90": 32,
+      "buttonCount": 14,
+      "inputHeightMedian": 32,
+      "inputCount": 1,
+      "rowHeightMedian": 36,
+      "rowCount": 12,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 16,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 570,
+      "runsMeasured": 27,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 12026
+    },
+    {
+      "id": "home-assistant",
+      "category": "selfhosted",
+      "name": "Home Assistant — demo",
+      "url": "https://demo.home-assistant.io/",
+      "scheme": "dark",
+      "title": "Demo – Home Assistant",
+      "finalUrl": "https://demo.home-assistant.io/#/lovelace/home",
+      "rootFontSize": 14,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 21.67,
+      "bodyLineRatio": 1.55,
+      "scale": [
+        11.67,
+        12,
+        14,
+        16
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 48.9,
+          "lineHeight": 21.67,
+          "ratio": 1.55
+        },
+        {
+          "size": 12,
+          "share": 36.1,
+          "lineHeight": 14.4,
+          "ratio": 1.2
+        },
+        {
+          "size": 16,
+          "share": 11.3,
+          "lineHeight": 27.59,
+          "ratio": 1.72
+        },
+        {
+          "size": 11.67,
+          "share": 2.5,
+          "lineHeight": 18.67,
+          "ratio": 1.6
+        },
+        {
+          "size": 20,
+          "share": 0.6,
+          "lineHeight": 32,
+          "ratio": 1.6
+        },
+        {
+          "size": 28,
+          "share": 0.6,
+          "lineHeight": 33.6,
+          "ratio": 1.2
+        }
+      ],
+      "charsPerLineMedian": null,
+      "charsPerLineP90": null,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": false,
+          "borderContrast": 1,
+          "fillContrast": 3.26,
+          "contrast": 3.26,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#141414",
+        "bg": "#ffffff",
+        "share": 92.4,
+        "chars": 597,
+        "contrast": 18.42,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#5e5e5e",
+        "bg": "#ffffff",
+        "share": 5.4,
+        "chars": 35,
+        "contrast": 6.48,
+        "medianSize": 14
+      },
+      "secondaryContrast": 6.48,
+      "contrastWeightedMean": 17.44,
+      "contrastWorstSignificant": {
+        "fg": "#009ac7",
+        "bg": "#ffffff",
+        "share": 2.2,
+        "chars": 14,
+        "contrast": 3.26,
+        "medianSize": 11.67
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 2.2,
+      "shareBelow7": 7.6,
+      "topPairs": [
+        {
+          "fg": "#141414",
+          "bg": "#ffffff",
+          "share": 92.4,
+          "contrast": 18.42,
+          "medianSize": 14
+        },
+        {
+          "fg": "#5e5e5e",
+          "bg": "#ffffff",
+          "share": 5.4,
+          "contrast": 6.48,
+          "medianSize": 14
+        },
+        {
+          "fg": "#009ac7",
+          "bg": "#ffffff",
+          "share": 2.2,
+          "contrast": 3.26,
+          "medianSize": 11.67
+        }
+      ],
+      "contentWidth": 0,
+      "contentWidthP90": null,
+      "landmarkWidth": 0,
+      "mainTag": "DIV",
+      "buttonHeightMedian": 56,
+      "buttonHeightP90": 56,
+      "buttonCount": 53,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 8,
+      "sectionGapP75": 14.6,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 646,
+      "runsMeasured": 95,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 22405
+    },
+    {
+      "id": "forgejo",
+      "category": "selfhosted",
+      "name": "Forgejo — Codeberg (a public instance of the self-hosted forge)",
+      "url": "https://codeberg.org/forgejo/forgejo",
+      "scheme": "dark",
+      "title": "forgejo/forgejo: Beyond coding. We forge. - Codeberg.org",
+      "finalUrl": "https://codeberg.org/forgejo/forgejo",
+      "rootFontSize": 14,
+      "declaredBodyFontSize": 14,
+      "bodySize": 14,
+      "bodyLineHeight": 20.33,
+      "bodyLineRatio": 1.45,
+      "scale": [
+        14,
+        16
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 63.5,
+          "lineHeight": 20.33,
+          "ratio": 1.45
+        },
+        {
+          "size": 16,
+          "share": 34.4,
+          "lineHeight": 23.3,
+          "ratio": 1.46
+        },
+        {
+          "size": 24,
+          "share": 0.8,
+          "lineHeight": 30,
+          "ratio": 1.25
+        },
+        {
+          "size": 28,
+          "share": 0.5,
+          "lineHeight": 20,
+          "ratio": 0.71
+        },
+        {
+          "size": 13,
+          "share": 0.4,
+          "lineHeight": 14.19,
+          "ratio": 1.09
+        },
+        {
+          "size": 32,
+          "share": 0.3,
+          "lineHeight": 40,
+          "ratio": 1.25
+        },
+        {
+          "size": 11,
+          "share": 0.1,
+          "lineHeight": 11,
+          "ratio": 1
+        }
+      ],
+      "charsPerLineMedian": 23,
+      "charsPerLineP90": 28,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1.6,
+          "fillContrast": 1.54,
+          "contrast": 1.6,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[submit]",
+          "uaDrawn": false,
+          "borderContrast": 1.64,
+          "fillContrast": 1.67,
+          "contrast": 1.67,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1.64,
+          "fillContrast": 1.67,
+          "contrast": 1.67,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 2.08,
+          "fillContrast": null,
+          "contrast": 2.08,
+          "foundBy": "edge"
+        },
+        {
+          "control": "INPUT",
+          "uaDrawn": false,
+          "borderContrast": 2.08,
+          "fillContrast": 1.37,
+          "contrast": 2.08,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 2.08,
+          "fillContrast": 1.67,
+          "contrast": 2.08,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 2.08,
+          "fillContrast": 1.67,
+          "contrast": 2.08,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": false,
+          "borderContrast": 1.65,
+          "fillContrast": 1.52,
+          "contrast": 1.65,
+          "foundBy": "edge"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#d2e0f0",
+        "bg": "#1d262f",
+        "share": 47.6,
+        "chars": 3059,
+        "contrast": 11.43,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#c0cfe0",
+        "bg": "#1d262f",
+        "share": 27.9,
+        "chars": 1794,
+        "contrast": 9.66,
+        "medianSize": 14
+      },
+      "secondaryContrast": 9.66,
+      "contrastWeightedMean": 9.35,
+      "contrastWorstSignificant": {
+        "fg": "#c0cfe0",
+        "bg": "#ffffff",
+        "share": 11.5,
+        "chars": 736,
+        "contrast": 1.59,
+        "medianSize": 14
+      },
+      "shareBelow3": 11.5,
+      "shareBelow4_5": 11.5,
+      "shareBelow7": 11.8,
+      "topPairs": [
+        {
+          "fg": "#d2e0f0",
+          "bg": "#1d262f",
+          "share": 47.6,
+          "contrast": 11.43,
+          "medianSize": 14
+        },
+        {
+          "fg": "#c0cfe0",
+          "bg": "#1d262f",
+          "share": 27.9,
+          "contrast": 9.66,
+          "medianSize": 14
+        },
+        {
+          "fg": "#c0cfe0",
+          "bg": "#ffffff",
+          "share": 11.5,
+          "contrast": 1.59,
+          "medianSize": 14
+        },
+        {
+          "fg": "#d2e0f0",
+          "bg": "#171e26",
+          "share": 5.4,
+          "contrast": 12.53,
+          "medianSize": 14
+        },
+        {
+          "fg": "#d2e0f0",
+          "bg": "#2a396b",
+          "share": 2,
+          "contrast": 8.26,
+          "medianSize": 14
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#374351",
+          "share": 0.5,
+          "contrast": 10.08,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 311,
+      "contentWidthP90": 311,
+      "landmarkWidth": 393,
+      "mainTag": "DIV",
+      "buttonHeightMedian": 30,
+      "buttonHeightP90": 36,
+      "buttonCount": 11,
+      "inputHeightMedian": 30,
+      "inputCount": 1,
+      "rowHeightMedian": 44,
+      "rowCount": 69,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 24,
+      "containerPadMedian": 14,
+      "containerPadP75": 32,
+      "charsMeasured": 6422,
+      "runsMeasured": 343,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 12323
+    },
+    {
+      "id": "netdata",
+      "category": "selfhosted",
+      "name": "Netdata — public agent dashboard",
+      "url": "https://london3.my-netdata.io/",
+      "scheme": "dark",
+      "title": "registry.my-netdata.io: Netdata Agent Console",
+      "finalUrl": "https://london3.my-netdata.io/",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 16.8,
+      "bodyLineRatio": 1.2,
+      "scale": [
+        12,
+        14,
+        16,
+        36
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 73.1,
+          "lineHeight": 16.8,
+          "ratio": 1.2
+        },
+        {
+          "size": 16,
+          "share": 12.8,
+          "lineHeight": 19.2,
+          "ratio": 1.2
+        },
+        {
+          "size": 12,
+          "share": 12.1,
+          "lineHeight": 14.4,
+          "ratio": 1.2
+        },
+        {
+          "size": 36,
+          "share": 1.5,
+          "lineHeight": 43.2,
+          "ratio": 1.2
+        },
+        {
+          "size": 68.6,
+          "share": 0.5,
+          "lineHeight": 82.32,
+          "ratio": 1.2
+        }
+      ],
+      "charsPerLineMedian": null,
+      "charsPerLineP90": null,
+      "monoToBodyRatio": 0.86,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1,
+          "contrast": 1,
+          "foundBy": "fill"
+        }
+      ],
+      "monoSize": 12,
+      "monoShare": 4.5,
+      "primary": {
+        "fg": "#93a4a4",
+        "bg": "#000000",
+        "share": 68.6,
+        "chars": 890,
+        "contrast": 8.09,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#8eae9b",
+        "bg": "#000000",
+        "share": 8.3,
+        "chars": 108,
+        "contrast": 8.68,
+        "medianSize": 14
+      },
+      "secondaryContrast": 8.68,
+      "contrastWeightedMean": 9.36,
+      "contrastWorstSignificant": {
+        "fg": "#00ab44",
+        "bg": "#000000",
+        "share": 7.6,
+        "chars": 98,
+        "contrast": 6.91,
+        "medianSize": 12
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 1.9,
+      "shareBelow7": 9.9,
+      "topPairs": [
+        {
+          "fg": "#93a4a4",
+          "bg": "#000000",
+          "share": 68.6,
+          "contrast": 8.09,
+          "medianSize": 14
+        },
+        {
+          "fg": "#8eae9b",
+          "bg": "#000000",
+          "share": 8.3,
+          "contrast": 8.68,
+          "medianSize": 14
+        },
+        {
+          "fg": "#00ab44",
+          "bg": "#000000",
+          "share": 7.6,
+          "contrast": 6.91,
+          "medianSize": 12
+        },
+        {
+          "fg": "#ddffeb",
+          "bg": "#000000",
+          "share": 6.1,
+          "contrast": 19.58,
+          "medianSize": 14
+        },
+        {
+          "fg": "#fcfffd",
+          "bg": "#000000",
+          "share": 3.4,
+          "contrast": 20.86,
+          "medianSize": 36
+        },
+        {
+          "fg": "#00ef5f",
+          "bg": "#000000",
+          "share": 2.2,
+          "contrast": 13.51,
+          "medianSize": 12
+        }
+      ],
+      "contentWidth": 980,
+      "contentWidthP90": null,
+      "landmarkWidth": 980,
+      "mainTag": "BODY",
+      "buttonHeightMedian": 78,
+      "buttonHeightP90": 78,
+      "buttonCount": 4,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": 76,
+      "rowCount": 3,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 16,
+      "containerPadMedian": 16,
+      "containerPadP75": 16,
+      "charsMeasured": 1297,
+      "runsMeasured": 144,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 16667
+    },
+    {
+      "id": "jellyfin",
+      "category": "selfhosted",
+      "name": "Jellyfin — stable demo (signed in)",
+      "url": "https://demo.jellyfin.org/stable/web/",
+      "scheme": "dark",
+      "stepWarnings": [
+        "{\"click\":\".manualLoginForm button[type=submit], .btnSubmit, button:has-text('Sign In')\"}: locator.click: Timeout 8000ms exceeded."
+      ],
+      "title": "Stable Demo",
+      "finalUrl": "https://demo.jellyfin.org/stable/web/#/login?serverid=f0b3381645f04afb9a0e392e74b6a1b0&url=%2Fhome",
+      "rootFontSize": 13.12,
+      "declaredBodyFontSize": 13.12,
+      "bodySize": 13.12,
+      "bodyLineHeight": 17.7,
+      "bodyLineRatio": 1.35,
+      "scale": [
+        13.12,
+        23.62
+      ],
+      "sizeShares": [
+        {
+          "size": 13.12,
+          "share": 97.8,
+          "lineHeight": 17.7,
+          "ratio": 1.35
+        },
+        {
+          "size": 23.62,
+          "share": 2.2,
+          "lineHeight": 31.88,
+          "ratio": 1.35
+        }
+      ],
+      "charsPerLineMedian": 38,
+      "charsPerLineP90": 40,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1.44,
+          "contrast": 1.44,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1.44,
+          "contrast": 1.44,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON[button]",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 1.44,
+          "contrast": 1.44,
+          "foundBy": "fill"
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#cfcfcf",
+        "bg": "#101010",
+        "share": 93.2,
+        "chars": 602,
+        "contrast": 12.24,
+        "medianSize": 13.12
+      },
+      "secondary": {
+        "fg": "#e4e4e4",
+        "bg": "#303030",
+        "share": 6.8,
+        "chars": 44,
+        "contrast": 10.39,
+        "medianSize": 13.12
+      },
+      "secondaryContrast": 10.39,
+      "contrastWeightedMean": 12.11,
+      "contrastWorstSignificant": {
+        "fg": "#e4e4e4",
+        "bg": "#303030",
+        "share": 6.8,
+        "chars": 44,
+        "contrast": 10.39,
+        "medianSize": 13.12
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 0,
+      "topPairs": [
+        {
+          "fg": "#cfcfcf",
+          "bg": "#101010",
+          "share": 93.2,
+          "contrast": 12.24,
+          "medianSize": 13.12
+        },
+        {
+          "fg": "#e4e4e4",
+          "bg": "#303030",
+          "share": 6.8,
+          "contrast": 10.39,
+          "medianSize": 13.12
+        }
+      ],
+      "contentWidth": 367,
+      "contentWidthP90": 367,
+      "landmarkWidth": 393,
+      "mainTag": "BODY",
+      "buttonHeightMedian": 41.3,
+      "buttonHeightP90": 41.3,
+      "buttonCount": 3,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 13.1,
+      "sectionGapP75": 13.1,
+      "containerPadMedian": 13,
+      "containerPadP75": 13,
+      "charsMeasured": 646,
+      "runsMeasured": 10,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 35041
+    },
+    {
+      "id": "immich",
+      "category": "selfhosted",
+      "name": "Immich — demo (signed in)",
+      "url": "https://demo.immich.app/",
+      "scheme": "dark",
+      "title": "Settings - Immich",
+      "finalUrl": "https://demo.immich.app/user-settings",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 14,
+      "bodyLineHeight": 20.41,
+      "bodyLineRatio": 1.46,
+      "scale": [
+        14,
+        16
+      ],
+      "sizeShares": [
+        {
+          "size": 14,
+          "share": 71.5,
+          "lineHeight": 20.41,
+          "ratio": 1.46
+        },
+        {
+          "size": 16,
+          "share": 28.5,
+          "lineHeight": 24,
+          "ratio": 1.5
+        }
+      ],
+      "charsPerLineMedian": null,
+      "charsPerLineP90": null,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        },
+        {
+          "control": "BUTTON[button]",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#e5e7eb",
+        "bg": "#000000",
+        "share": 61.2,
+        "chars": 311,
+        "contrast": 16.96,
+        "medianSize": 14
+      },
+      "secondary": {
+        "fg": "#ffffff",
+        "bg": "#000000",
+        "share": 2.6,
+        "chars": 13,
+        "contrast": 21,
+        "medianSize": 14
+      },
+      "secondaryContrast": 21,
+      "contrastWeightedMean": 10.92,
+      "contrastWorstSignificant": {
+        "fg": "#e5e7eb",
+        "bg": "#000000",
+        "share": 61.2,
+        "chars": 311,
+        "contrast": 16.96,
+        "medianSize": 14
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 0,
+      "topPairs": [
+        {
+          "fg": "#e5e7eb",
+          "bg": "#000000",
+          "share": 61.2,
+          "contrast": 16.96,
+          "medianSize": 14
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#000000",
+          "share": 2.6,
+          "contrast": 21,
+          "medianSize": 14
+        }
+      ],
+      "contentWidth": 393,
+      "contentWidthP90": null,
+      "landmarkWidth": 393,
+      "mainTag": "MAIN",
+      "buttonHeightMedian": 48,
+      "buttonHeightP90": 48,
+      "buttonCount": 19,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": 16,
+      "sectionGapP75": 16,
+      "containerPadMedian": 8,
+      "containerPadP75": 8,
+      "charsMeasured": 508,
+      "runsMeasured": 30,
+      "bgUnresolvedShare": 0,
+      "elapsedMs": 34024
+    },
+    {
+      "id": "synology-dsm",
+      "category": "selfhosted",
+      "name": "Synology DSM — live demo",
+      "url": "https://demo.synology.com/en-global/dsm",
+      "scheme": "dark",
+      "title": "DSM Online Demo",
+      "finalUrl": "https://demo.synology.com/en-global/dsm",
+      "rootFontSize": 16,
+      "declaredBodyFontSize": 16,
+      "bodySize": 18,
+      "bodyLineHeight": 28,
+      "bodyLineRatio": 1.56,
+      "scale": [
+        12,
+        13,
+        15,
+        16,
+        18,
+        22
+      ],
+      "sizeShares": [
+        {
+          "size": 18,
+          "share": 62.6,
+          "lineHeight": 28,
+          "ratio": 1.56
+        },
+        {
+          "size": 13,
+          "share": 11.1,
+          "lineHeight": 18,
+          "ratio": 1.38
+        },
+        {
+          "size": 22,
+          "share": 8.8,
+          "lineHeight": 32,
+          "ratio": 1.45
+        },
+        {
+          "size": 16,
+          "share": 6,
+          "lineHeight": 33.41,
+          "ratio": 2.09
+        },
+        {
+          "size": 12,
+          "share": 5.3,
+          "lineHeight": 24,
+          "ratio": 2
+        },
+        {
+          "size": 15,
+          "share": 3.2,
+          "lineHeight": 18,
+          "ratio": 1.2
+        },
+        {
+          "size": 20,
+          "share": 1.4,
+          "lineHeight": 48,
+          "ratio": 2.4
+        },
+        {
+          "size": 14,
+          "share": 0.8,
+          "lineHeight": 20,
+          "ratio": 1.43
+        },
+        {
+          "size": 30,
+          "share": 0.7,
+          "lineHeight": 42,
+          "ratio": 1.4
+        }
+      ],
+      "charsPerLineMedian": 26,
+      "charsPerLineP90": 37,
+      "monoToBodyRatio": null,
+      "affordances": [
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "uaDrawn": true,
+          "borderContrast": null,
+          "fillContrast": 5.14,
+          "contrast": 5.14,
+          "foundBy": "fill"
+        },
+        {
+          "control": "BUTTON",
+          "noEdge": true,
+          "contrast": null
+        }
+      ],
+      "monoSize": null,
+      "monoShare": 0,
+      "primary": {
+        "fg": "#ffffff",
+        "bg": "#2e2e2e",
+        "share": 64.7,
+        "chars": 1155,
+        "contrast": 13.58,
+        "medianSize": 18
+      },
+      "secondary": {
+        "fg": "#cfcfcf",
+        "bg": "#1c1c1c",
+        "share": 12.7,
+        "chars": 227,
+        "contrast": 10.94,
+        "medianSize": 18
+      },
+      "secondaryContrast": 10.94,
+      "contrastWeightedMean": 13.36,
+      "contrastWorstSignificant": {
+        "fg": "#8f8f8f",
+        "bg": "#272727",
+        "share": 6.1,
+        "chars": 109,
+        "contrast": 4.62,
+        "medianSize": 12
+      },
+      "shareBelow3": 0,
+      "shareBelow4_5": 0,
+      "shareBelow7": 6.1,
+      "topPairs": [
+        {
+          "fg": "#ffffff",
+          "bg": "#2e2e2e",
+          "share": 64.7,
+          "contrast": 13.58,
+          "medianSize": 18
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#0d1824",
+          "share": 12.9,
+          "contrast": 17.9,
+          "medianSize": 13
+        },
+        {
+          "fg": "#cfcfcf",
+          "bg": "#1c1c1c",
+          "share": 12.7,
+          "contrast": 10.94,
+          "medianSize": 18
+        },
+        {
+          "fg": "#8f8f8f",
+          "bg": "#272727",
+          "share": 6.1,
+          "contrast": 4.62,
+          "medianSize": 12
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#080d14",
+          "share": 1.6,
+          "contrast": 19.48,
+          "medianSize": 20
+        },
+        {
+          "fg": "#ffffff",
+          "bg": "#1c1c1c",
+          "share": 1.1,
+          "contrast": 17.04,
+          "medianSize": 16
+        }
+      ],
+      "contentWidth": 353,
+      "contentWidthP90": 353,
+      "landmarkWidth": 393,
+      "mainTag": "BODY#root",
+      "buttonHeightMedian": 36,
+      "buttonHeightP90": 36,
+      "buttonCount": 11,
+      "inputHeightMedian": null,
+      "inputCount": 0,
+      "rowHeightMedian": null,
+      "rowCount": 0,
+      "sectionGapMedian": null,
+      "sectionGapP75": null,
+      "containerPadMedian": 24,
+      "containerPadP75": 24,
+      "charsMeasured": 2070,
+      "runsMeasured": 64,
+      "bgUnresolvedShare": 13.7,
+      "elapsedMs": 19763
+    }
+  ]
+}
