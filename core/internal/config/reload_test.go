@@ -374,3 +374,111 @@ func TestReloadWithNoFileEverIsQuiet(t *testing.T) {
 		t.Errorf("applier ran %d times, want 0", got)
 	}
 }
+
+// THE SURFACE-CHANGE BROADCAST (quince#1162, Operator ruling 2026-08-17 option C).
+//
+// Three transitions must fire it and one must not, and the interesting one is the REFUSED edit —
+// the running configuration is unchanged there, so no applier runs, and an event scoped to
+// "the config changed" would leave the banner state silent.
+
+// countingAnnouncer records how many times the broadcast fired.
+type countingAnnouncer struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (a *countingAnnouncer) fire()      { a.mu.Lock(); a.n++; a.mu.Unlock() }
+func (a *countingAnnouncer) count() int { a.mu.Lock(); defer a.mu.Unlock(); return a.n }
+
+func TestSurfaceChangeFiresOnAnAppliedHandEdit(t *testing.T) {
+	store := t.TempDir()
+	svc, path := newLoadedService(t, oneStorage(store))
+	var a countingAnnouncer
+	svc.OnSurfaceChange(a.fire)
+
+	edited := oneStorage(store) + "reconcile:\n  interval_minutes: 33\n"
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, _ := svc.Reload(); outcome != ReloadApplied {
+		t.Fatalf("outcome = %v, want ReloadApplied", outcome)
+	}
+	if got := a.count(); got != 1 {
+		t.Errorf("broadcast fired %d times, want 1", got)
+	}
+}
+
+// THE ONE THAT WOULD BE MISSED. No applier runs on a refusal, so registering the broadcast as an
+// Applier would leave this silent — and this is the state whose banner an open page must draw.
+func TestSurfaceChangeFiresOnAREFUSEDHandEdit(t *testing.T) {
+	store := t.TempDir()
+	svc, path := newLoadedService(t, oneStorage(store))
+	var applier countingApplier
+	svc.Subscribe("test", applier.apply)
+	var a countingAnnouncer
+	svc.OnSurfaceChange(a.fire)
+
+	if err := os.WriteFile(path, []byte("storage: [ bad: yaml: here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, _ := svc.Reload(); outcome != ReloadRefused {
+		t.Fatalf("outcome = %v, want ReloadRefused", outcome)
+	}
+	if got := applier.count(); got != 0 {
+		t.Fatalf("an applier ran on a refusal (%d) — the premise of this test is gone", got)
+	}
+	if got := a.count(); got != 1 {
+		t.Errorf("broadcast fired %d times on a REFUSED edit, want 1 — the banner state is silent", got)
+	}
+	if !svc.Discarded() {
+		t.Error("Discarded() is false, so there would be nothing for the page to redraw")
+	}
+}
+
+func TestSurfaceChangeFiresOnAWrite(t *testing.T) {
+	store := t.TempDir()
+	svc, _ := newLoadedService(t, oneStorage(store))
+	var a countingAnnouncer
+	svc.OnSurfaceChange(a.fire)
+
+	next := svc.Current()
+	next.Reconcile.IntervalMinutes = 77
+	if errs, _, err := svc.Replace(next, SourcePutConfig); err != nil || len(errs) > 0 {
+		t.Fatalf("Replace: err=%v errs=%v", err, errs)
+	}
+	if got := a.count(); got != 1 {
+		t.Errorf("broadcast fired %d times on a write, want 1", got)
+	}
+}
+
+// AN UNCHANGED FILE IS NOT A SURFACE CHANGE. Without this the poll would broadcast every 2s forever
+// and every open page would refetch on a timer — option A, arrived at by accident.
+func TestSurfaceChangeIsSilentWhenNothingChanged(t *testing.T) {
+	store := t.TempDir()
+	doc := oneStorage(store)
+	svc, path := newLoadedService(t, doc)
+	var a countingAnnouncer
+	svc.OnSurfaceChange(a.fire)
+
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil { // identical bytes
+		t.Fatal(err)
+	}
+	if outcome, _ := svc.Reload(); outcome != ReloadUnchanged {
+		t.Fatal("setup: the no-op edit was not suppressed")
+	}
+	if got := a.count(); got != 0 {
+		t.Errorf("broadcast fired %d times with nothing changed, want 0", got)
+	}
+}
+
+// A Service with no broadcast registered — every CLI — must not panic.
+func TestSurfaceChangeIsOptional(t *testing.T) {
+	store := t.TempDir()
+	svc, path := newLoadedService(t, oneStorage(store))
+	if err := os.WriteFile(path, []byte(oneStorage(store)+"reconcile:\n  interval_minutes: 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, _ := svc.Reload(); outcome != ReloadApplied {
+		t.Errorf("outcome = %v, want ReloadApplied with no announcer registered", outcome)
+	}
+}
