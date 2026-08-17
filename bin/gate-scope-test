@@ -208,7 +208,17 @@ fi
 # in this repository validates fly.toml. A typo in it is found by `fly deploy`, not by CI. That is
 # accepted rather than overlooked — see deploy/demo.md, which says the same thing where an operator
 # will meet it.
-PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml'
+#
+# LICENSE and CREDITS.md are the THIRD and fourth entries added because this assertion failed on
+# them (quince#726), and they qualify the same way README.md does: nothing in the tree reads
+# either, so a change to one cannot break a Go build or a vitest run.
+#
+# WHAT IS THEREFORE UNGATED — sharper here than for fly.toml, because CREDITS.md makes CLAIMS ABOUT
+# THE IMAGE and nothing re-derives them. Add a dependency, bump a pin, or change an apk line, and
+# that file goes stale with every gate still green. It names the command behind each list so a
+# reader can re-run it, which is a habit rather than a gate. A gate diffing the built image's
+# package set against the file would close this, and does not exist.
+PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml LICENSE CREDITS.md'
 # Mirrors gate-scope's own coverage: the three directories plus SHARED. `.dockerignore` is here
 # because it is in SHARED (quince#1031) — NOT because listing it here makes the failure go away.
 # Silencing this check without claiming the path in gate-scope is the one wrong fix available, and
