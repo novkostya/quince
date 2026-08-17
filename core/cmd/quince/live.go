@@ -130,6 +130,30 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.storages = storageMgr
 	ls.reconcile = runner
 
+	// THE CONFIG FILE IS WATCHED — but only where there is something to watch it FOR (qn.6q).
+	//
+	// `serve` is a long-running process whose operator may hand-edit `/data/config.yml` at any
+	// moment, and D12's promise is that the file and the UI are equal editing surfaces. The admin
+	// CLIs are the opposite case: they run for seconds, against the configuration they were invoked
+	// with, and re-reading the file underneath one would mean a `backup` run could change transport
+	// or storage half way through because somebody saved in another window. That is not liveness, it
+	// is a race with a person.
+	//
+	// `scanDeferred` IS THE serve/CLI DISCRIMINATOR THIS FILE ALREADY USES — see scanMode, and the
+	// `reconcile` field's own comment, which is nil for exactly the same set of callers for exactly
+	// the same kind of reason. Reusing it rather than adding a second flag keeps one answer to
+	// "am I the long-running one".
+	//
+	// The appliers are registered by the time this starts: `buildStorage` registers the storage one
+	// above, and the backup applier is registered further down. A poll landing before the rest are
+	// wired would still be correct — it swaps the snapshot and tells whoever has subscribed — but it
+	// starts here, after the subsystem that owns the heaviest applier, rather than at the top of the
+	// function where it would be a promise about wiring that has not happened.
+	if scan == scanDeferred {
+		go config.NewWatcher(cfgSvc, config.PollInterval).Run(ctx)
+		log.Info("config: watching config.yml for hand-edits", "interval", config.PollInterval)
+	}
+
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
 	// committed to, which is now the DEFAULT declared storage rather than the retired
 	// QUINCE_BACKUPS. Read from the same place buildStorage read it so the two cannot drift —
