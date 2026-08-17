@@ -196,9 +196,6 @@ are the same thing here**, which is what makes D1 easy.
   `useConfig` sets no `refetchInterval`, and there is no event. `staleTime: 5_000` means it refreshes
   on remount, so navigating away and back is current; **staying on the page is the case that never
   updates**, which is what testing a hand-edit looks like. Filed as quince#1162 and NOT fixed here.
-  *(This bullet read "the Settings page already re-reads on focus" until 2026-08-17 — a decision that
-  is still right, resting on a premise that was never true. Corrected rather than deleted because the
-  premise is what a later reader would have relied on.)*
 - **The lost-update interleaving.** Operator hand-edits while a UI save is in flight: the save wins
   and the hand-edit is overwritten. That is true **today** and is a property of two writers with no
   lock between them, not of the watcher. **RULED as an acceptance** (question 3 below): named in
