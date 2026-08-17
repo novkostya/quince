@@ -56,19 +56,28 @@ function useElapsedLabel(job: Job): string | null {
 
 // Inline mini-progress for the dashboard device card.
 //
-// THE CARD CARRIES NO PER-TRANSFER FIGURE, and that is a reversal of how this shipped first
-// (Operator, 2026-08-17, after using it on a phone). The size pair is per-batch, so beside a
-// whole-job percentage it reads as a second, contradictory progress — "57.3 MB / 2.7 GB" next to
-// "1%". It belongs on the details page, which is where you go when you suspect a stall anyway.
+// THE CARD CARRIES THE RECEIVED FIGURE AGAIN, and the round trip is worth recording because it was
+// removed deliberately and is back for a reason rather than by drift:
 //
-// Height is the other half of the ruling: these cards sit in a grid, so an extra row here makes
-// one card taller than its neighbours and the row ragged. Elapsed therefore shares the label's
-// row rather than taking its own, and the percentage is omitted entirely when there is none —
-// a "—" where a number goes is noise, and the indeterminate bar already says it.
+//   2026-08-17, REMOVED — as a per-batch PAIR it read as a second, contradictory progress beside
+//     the percentage ("57.3 MB / 2.7 GB" next to "1%"), and it occupied a whole extra row, which
+//     made this card taller than its neighbours in the grid.
+//   2026-08-17, RESTORED (Operator) — quince#808 made the figure cumulative with no denominator, so
+//     it can no longer contradict the percent; and it now shares the label's row, so the height
+//     objection does not apply either. Both reasons for removing it were FIXED, not overruled.
+//
+// ORDER IS THE OVERFLOW POLICY. `truncate` cuts from the end, so on a narrow phone the received
+// figure is dropped first, then the clock, and the state label — the one thing that must always be
+// readable — survives longest. That is the priority anyone would choose, and it is why all three
+// share one truncating span instead of sitting in separate columns.
+//
+// The percentage is still omitted entirely when there is none: a "—" where a number goes is noise,
+// and the indeterminate bar already says it.
 export function JobProgressInline({ job }: { job: Job }) {
   const note = useJobNote(job, "card");
   const pct = displayPercent(job);
   const elapsed = useElapsedLabel(job);
+  const transferred = received(job);
   return (
     <div>
       <div className="flex items-center justify-between gap-2 text-xs">
@@ -76,6 +85,11 @@ export function JobProgressInline({ job }: { job: Job }) {
           {jobStatusLabel(job)}
           {elapsed ? (
             <span className="ml-2 font-mono font-normal tabular-nums text-subtle">{elapsed}</span>
+          ) : null}
+          {transferred ? (
+            <span className="ml-2 font-mono font-normal tabular-nums text-subtle">
+              · {transferred}
+            </span>
           ) : null}
         </span>
         {pct === null ? null : (
