@@ -159,8 +159,11 @@ func deref(t reflect.Type) reflect.Type {
 	return t
 }
 
-// Marshal serializes config canonically (struct field order = key order). qn.6 replaces
-// this with a yaml.Node encoder emitting generated doc-comments.
+// Marshal serializes config canonically (struct field order = key order).
+//
+// NOTHING REPLACES THIS. It said *"qn.6 replaces this with a yaml.Node encoder emitting generated
+// doc-comments"*, and that encoder was CANCELLED (Operator, 2026-08-08 — quince#728, quince#1095).
+// `yaml.Marshal` over the declared field order IS the canonical writer, not a stand-in for one.
 func Marshal(c Config) ([]byte, error) { return yaml.Marshal(c) }
 
 // AtomicWrite writes data to a temp file in the same dir, fsyncs, and renames over path —

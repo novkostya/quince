@@ -2,13 +2,24 @@
 // the bootstrap environment (deployment topology only) and /data/config.yml (the single
 // source of truth for everything else). This rung ships the load-bearing core — typed
 // schema v0 + defaults, validation, atomic canonical writes, last-good-on-invalid, and
-// GET/PUT /api/config — but NOT file-watch live reload or generated doc-comments, which
-// are staged to qn.6. The file-first, no-secrets, no-UI-only-state contract binds now.
+// GET/PUT /api/config — but NOT file-watch live reload, which is post-v0.1 and tracked by
+// quince#1094. The file-first, no-secrets, no-UI-only-state contract binds now.
+//
+// GENERATED DOC-COMMENTS ARE CANCELLED AND ARE NOT COMING (Operator, 2026-08-08 — quince#728;
+// D12 records it as cancelled). This sentence named them beside file-watch as *"staged to qn.6"*
+// until quince#1095: one clause true, one false, in the line an implementer picking that rung up
+// reads first. `config.yml` carries NO generated annotation at all — a file listing every key at
+// its default is noise a reader has to filter, and it makes a hand-edit harder to diff, not easier.
 package config
 
 // Config is schema v0 (contracts §6). Field declaration order IS the canonical key order
-// used by Marshal — keep it aligned with the documented YAML. qn.6 swaps Marshal for a
-// yaml.Node encoder that also emits generated doc-comments; the ordering hook is here now.
+// used by Marshal — keep it aligned with the documented YAML.
+//
+// THE ORDER IS THE WHOLE OF IT, NOT A HOOK FOR SOMETHING LATER. This said *"qn.6 swaps Marshal for
+// a yaml.Node encoder that also emits generated doc-comments; the ordering hook is here now"*, and
+// that encoder was CANCELLED (quince#728, quince#1095) — so there is no later pass for this to be a
+// hook FOR. Keeping the order aligned with the documented YAML is a live obligation rather than a
+// staging step, and it is the only thing producing canonical key order.
 type Config struct {
 	Backup BackupConfig `yaml:"backup" json:"backup"`
 	// Storage IS the list of declared storages (qn.6c, quince#473). A POINTER so an absent
