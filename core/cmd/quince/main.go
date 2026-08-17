@@ -255,29 +255,32 @@ func serve(args []string) error {
 		// wrote and invite them to add a storage to a document that already has one it cannot read
 		// (quince#508).
 		//
-		// UNREADABLE DOES **NOT** JOIN IT, AND THAT IS GATED RATHER THAN CHOSEN (quince#544). It looks
-		// like the same case — quince cannot tell what the operator declared either way — and this
-		// line refused on it for one CI run before `deploy/storageless-smoke`'s third arm refuted it:
-		// *"it SERVES — so the add endpoint is reachable in this state"*. That arm exists for
-		// quince#852. An unreadable config must SERVE, so `POST /api/config/storage` is reachable and
-		// can answer `422`; refusing at startup removes the only surface from which the state is
-		// repairable, which is the same argument quince#502 made for the zero-storage case.
+		// AND UNREADABLE JOINS IT, under the same carve-out rather than a new one — architect ruling
+		// 2026-08-16 (quince#1089). The 2026-08-07 ruling's subject is a ZERO-STORAGE start; a file
+		// quince could not read is not a statement about storage at all, so that ruling has nothing to
+		// operate on, and quince#508's argument transfers word for word — harder, if anything, because
+		// a parse failure at least means quince read the file.
 		//
-		// So the carve-out stays exactly as wide as it was. What quince#544 changes here is the
-		// PREDICATE, not the behaviour: an unreadable config used to report `Missing`, and now
-		// reports `Unreadable`.
-		if req.Malformed {
+		// A REFUSAL CANNOT LOCK OUT A WORKING INSTALL, which is what makes it safe: a working install
+		// has a readable config. The alternative is a running daemon telling an operator to edit a
+		// file it cannot open, which is quince#849's complaint.
+		//
+		// `Unreadable` ALREADY EXISTED as an honest predicate before this line: quince#544 typed the
+		// cause and stopped this state reporting `Missing`. What that PR did not land is the refusal —
+		// an auto-merge fired on a head carrying the opposite behaviour, before the review asking for
+		// it. So the ruling and its implementation are one rung apart, deliberately recorded.
+		if req.Malformed || req.Unreadable {
 			return req.Explain(os.Stderr, cfgPath)
 		}
 		// LegacyEnv is not fatal and never was — OK() excludes it — so it keeps flowing through as
 		// the warning it is.
 		//
-		// `Unreadable` IS IN THIS SET, and leaving it out is the bug this line would otherwise have
-		// (quince#544). Before the typed cause, an unreadable config reported `Missing` and reached
-		// setup through it. Now that it reports itself, a `Missing || Empty` test would send it PAST
-		// the setup branch into `buildLiveStack` with no declared storage — worse than the false
-		// message the typed cause was added to fix, and invisible until something dereferenced it.
-		storageless := req.Missing || req.Empty || req.Unreadable
+		// `Unreadable` IS DELIBERATELY NOT IN THIS SET, and it WAS while the branch above did not
+		// exist. The two are one decision: an unreadable config that SERVES has to reach setup like
+		// any other storageless start, or it falls past this branch into buildLiveStack with nothing
+		// declared — the honest predicate strictly worse than the false one. Now it never gets here.
+		// Re-adding it would be harmless and would read as a live case, which is worse than absent.
+		storageless := req.Missing || req.Empty
 		if storageless {
 			log.Warn("no storage declared — SERVING SETUP ONLY until one is added",
 				"config", cfgPath, "reachable", "auth, onboarding, config and the storage probes")

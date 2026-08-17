@@ -757,22 +757,25 @@ could not be **parsed** is not an empty declaration: `Load()` falls back to `Def
 would silently ignore what the operator wrote and invite them to add a storage to a document that
 already has one it cannot read (quince#508).
 
-**UNREADABLE DOES NOT JOIN IT, AND THAT IS GATED RATHER THAN CHOSEN** (quince#544). It reads like the
-same case — quince cannot tell what the operator declared either way — and quince#544 first extended
-the carve-out to cover it. **`deploy/storageless-smoke`'s third arm refuted that within one CI run**:
-*"it SERVES — so the add endpoint is reachable in this state"*. That arm exists for quince#852, and
-its reason generalises the zero-storage ruling rather than sitting beside it — **refusing at startup
-removes the only surface from which the state is repairable.** So an unreadable config serves, and
-`POST /api/config/storage` answers `422` rather than writing over a file quince could not read.
+**AND SO DOES UNREADABLE, under that same carve-out rather than a new one** — architect ruling
+2026-08-16 on quince#1089. A file that exists and could not be **read** is not a statement about
+storage at all, so the argument above transfers word for word — harder, if anything, because a parse
+failure at least means quince read the file. A refusal also cannot lock out a working install, since
+a working install has a readable config; the alternative is a running daemon telling an operator to
+edit a file it cannot open, which is quince#849's complaint.
 
-**What quince#544 changes is the PREDICATE, not the behaviour.** A read failure used to fall through
-the same nil as an absent key and report `Missing`; it now reports `Unreadable`. `Load` stats before
-reading, so this is never the ordinary no-file-yet first run — it is a permission error, an I/O
-error, or the shape a container mistake actually takes, since a bind mount whose source does not
-exist makes the runtime create a **directory** at the target. Both states still reach the onboarding
-page, which is why `main.go`'s storageless test counts `Unreadable` alongside `Missing` and `Empty`:
-a predicate that starts reporting itself honestly, and is then left out of that set, would send the
-daemon **past** setup with no declared storage.
+`Load` stats before reading, so this is never the ordinary no-file-yet first run. It is a permission
+error, an I/O error, or the shape a container mistake actually takes — a bind mount whose source does
+not exist makes the runtime create a **DIRECTORY** at the target, which is the fixture the third arm
+of `deploy/storageless-smoke` uses, because mode bits cannot deny root and the container runs as root.
+
+**THE RULING AND ITS IMPLEMENTATION LANDED IN DIFFERENT PULL REQUESTS, and the gap was real rather
+than bookkeeping.** quince#1089 shipped the typed cause and — via an auto-merge that fired before the
+review asking for this — **the opposite behaviour**, with a paragraph here saying unreadable does NOT
+refuse. So between quince#1089 and the PR carrying this text, canon stated a rule the daemon did not
+follow, in the direction that reads as settled. Recorded because *ruled* and *built* were separated by
+a merge nobody was watching, which is the one way this project's docs go wrong that a careful reader
+cannot detect from the docs alone.
 
 **The two causes are now TYPED rather than re-derived from prose.** `Loaded.Failure` carries
 `LoadUnreadable | LoadUnparsable` with the OS's or the parser's own sentence, and `CheckStorages`

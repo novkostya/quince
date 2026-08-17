@@ -379,69 +379,89 @@ grep -q 'hook_cmd:' "$WORK/invalid-data/config.yml" \
 $(cat "$WORK/invalid-data/config.yml")"
 echo "  ok  config.yml is untouched — the declaration survives the refusal"
 
-# ── THIRD ARM: A DISCARD WITH NO `Errors` AT ALL ──────────────────────────────────────────────────
+# ── THIRD ARM: AN UNREADABLE CONFIG REFUSES TO START ──────────────────────────────────────────────
 #
-# `Load` has THREE discard paths and only ONE fills `Errors` — an unreadable file and invalid YAML
-# both return `OK: false` with it empty. quince#852's first fix keyed its guard on the error list, so
-# it covered one of the three and let the others through to the write. Measured on a real container
-# before this arm existed: an unreadable `config.yml` served with `errors=0` and the add reached
-# `AtomicWrite`, answering `500` where a refused add answers `422`.
+# THIS ARM ASSERTED THE OPPOSITE UNTIL quince#544, AND THE CHANGE IS A RULING RATHER THAN A REPAIR.
+# It required the daemon to SERVE against an unreadable config, so `POST /api/config/storage` was
+# reachable and could answer `422` — quince#852's guard, because `Load` has three discard paths and
+# only one fills `Errors`, and the first version of that guard keyed on the error list and let the
+# other two through to the write.
+#
+# Architect ruling 2026-08-16 (quince#544): a file quince could not READ falls under quince#508's
+# carve-out, alongside one it could not PARSE. quince#502's *any zero-storage start is the onboarding
+# state* has nothing to operate on here — quince never opened the file, so nothing it says is a claim
+# about `storage:`. A refusal cannot lock out a working install, because a working install has a
+# readable config; the alternative is a running daemon telling an operator to edit a file it cannot
+# open, which is quince#849's complaint.
 #
 # A DIRECTORY AT THE CONFIG PATH is how this is reached honestly: `os.Stat` succeeds, so `Load` gets
 # past the no-file case, and `os.ReadFile` fails. Permissions would not do it — the container runs as
-# root, where a mode of 000 is still readable.
+# root, where a mode of 000 is still readable. It is also the realistic case rather than a contrived
+# one: a bind mount whose source does not exist makes the runtime create a directory at the target.
 #
-# WHAT IS ASSERTED IS THE STATUS, NOT THE FILE, and the difference is the point: on this path the
-# write would fail anyway, since nothing can rename over a directory — so a 500 and a 422 leave the
-# same bytes on disk. **Only the status distinguishes a guard that fired from a write that failed**,
-# and it is the guard that has to hold on the paths where the write WOULD have succeeded.
-echo "storageless-smoke: third arm — a config that cannot be read at all (warnings, no \`Errors\`)"
+# WHAT THIS COSTS, DECLARED RATHER THAN DISCOVERED. quince#852's add-guard is now covered for ONE of
+# the three discard paths instead of two. Both no-`Errors` paths refuse at startup — unreadable here,
+# invalid YAML via `Malformed` — so a serving daemon can no longer BE in a no-`Errors` discard, and
+# the second arm's `zfs.mode: exec` fixture (which fills `Errors`) is the only one that reaches the
+# add. **The hazard is structurally unreachable rather than untested**, which is a better place to be
+# than a live fixture, but it is not the same claim and this file should not pretend otherwise: the
+# `AddStorage` guard for a no-`Errors` discard now has no end-to-end fixture anywhere.
+#
+# WHAT IS ASSERTED IS THE EXIT AND THE SENTENCE. A refusal that exits non-zero with the wrong message
+# is the bug quince#544 fixed wearing the right exit code, so the message is pinned too — including
+# the ABSENCE of the remedy block, which is the part a later "always show the fix" edit would restore.
+echo "storageless-smoke: third arm — a config that cannot be read at all REFUSES to start"
 
 # A DIRECTORY where the config file goes — `os.Stat` succeeds, `os.ReadFile` fails.
 mkdir -p "$WORK/unread-data/config.yml" "$WORK/unread-cache"
 
 LOGFROM="$NAME3"
-# THE THIRD GUESS, AND THE EASIEST ONE TO MISS. This was `PORT + 2` — the same neighbour assumption
-# the other two arms carried, one step further out, and it survived the first run of this fix because
-# `PORT + 2` happened to be free. Found by re-reading the file rather than by trusting a green run,
-# which is the only way a guess that usually works ever gets found.
-PORT3=$(start_free "$NAME3" \
+# NO PORT AND NO start_free, BECAUSE THIS CONTAINER IS NOT MEANT TO LISTEN. The other two arms draw a
+# free port because they serve; a refusal never binds, so drawing one would be ceremony that can fail
+# for reasons unrelated to the claim. The arm ran under `start_free` while it asserted serving.
+#
+# FOREGROUND, AND NOT `--rm`: `fail()` reads `$RUNTIME logs "$LOGFROM"`, so the container has to
+# survive its own exit for a failure to be diagnosable. `cleanup` already removes it.
+#
+# `|| rc=$?` RATHER THAN A BARE RUN, because `set -e` is on and the whole point is a non-zero exit.
+rc=0
+"$RUNTIME" run --name "$NAME3" \
 	-e QUINCE_DATA=/data -e QUINCE_CACHE=/cache -e QUINCE_LISTEN=:8968 \
 	-v "$WORK/unread-data":/data -v "$WORK/unread-cache":/cache \
-	"$IMAGE" serve) || fail "could not start the unreadable-config container in 20 attempts on different ports — the runtime last said: $PORT3"
+	"$IMAGE" serve >"$WORK/unread.out" 2>&1 || rc=$?
 
-i=0
-while [ "$i" -lt 60 ]; do
-	if [ "$(status "http://127.0.0.1:$PORT3/api/health" /dev/null)" = "200" ]; then break; fi
-	i=$((i + 1))
-	sleep 1
-done
-[ "$i" -lt 60 ] || fail "the daemon never answered /api/health with an unreadable config"
-echo "  ok  it SERVES — so the add endpoint is reachable in this state"
+[ "$rc" -ne 0 ] || fail "the daemon STARTED on a config it cannot read — quince#544's refusal is gone,
+and an operator is being told to edit a file the daemon never opened
+$(cat "$WORK/unread.out")"
+echo "  ok  it REFUSES to start, rather than serving on defaults it did not read"
 
-JAR3="$WORK/jar3"
-t3=$(curl -s -b "$JAR3" -c "$JAR3" "http://127.0.0.1:$PORT3/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
-curl -s -b "$JAR3" -c "$JAR3" -o /dev/null -X POST -H 'Content-Type: application/json' \
-	-H "X-CSRF-Token: $t3" -d '{"password":"smoketest1"}' \
-	"http://127.0.0.1:$PORT3/api/auth/setup" || fail "could not set the admin password on the unreadable-config daemon"
-t3=$(curl -s -b "$JAR3" -c "$JAR3" "http://127.0.0.1:$PORT3/api/auth/status" | sed 's/.*"csrf_token":"\([^"]*\)".*/\1/')
+# THE SENTENCE, NOT ONLY THE EXIT. A refusal that exits non-zero with the wrong message is the bug
+# quince#544 fixed wearing the right exit code — the old text said `no storage: key`, which is a claim
+# about a document quince never read.
+grep -q 'could not be READ' "$WORK/unread.out" \
+	|| fail "the refusal does not say the file could not be READ — $(cat "$WORK/unread.out")"
+grep -q 'is a directory' "$WORK/unread.out" \
+	|| fail "the OS's own sentence is lost, so the refusal names no cause — $(cat "$WORK/unread.out")"
+echo "  ok  it names what happened and carries the OS's own sentence"
 
-# THE CAUSE IS IN `warnings` WHILE `Errors` IS EMPTY — the exact shape that defeated the first guard.
-curl -s -b "$JAR3" -o "$WORK/cfg-unread.json" "http://127.0.0.1:$PORT3/api/config" \
-	|| fail "GET /api/config failed on the unreadable-config daemon"
-jq -e '.warnings | length > 0' "$WORK/cfg-unread.json" >/dev/null \
-	|| fail "no warning names the unreadable config — the cause reached the log and nothing else"
-echo "  ok  the cause is carried in warnings, where every discard path puts it"
+# THE CONTAINER HINT. This failure's usual cause is a bind mount that did not mount, and the operator
+# cannot guess that from an errno (quince#940's actionability rule).
+grep -q 'bind that did not mount' "$WORK/unread.out" \
+	|| fail "the refusal does not name the likely container cause — $(cat "$WORK/unread.out")"
+echo "  ok  it names the mount, which is the cause an operator cannot guess"
 
-code=$(curl -s -b "$JAR3" -o "$WORK/add-unread.json" -w '%{http_code}' -X POST \
-	-H 'Content-Type: application/json' -H "X-CSRF-Token: $t3" \
-	-d '{"name":"rescue","path":"/cache","backend":"copy"}' \
-	"http://127.0.0.1:$PORT3/api/config/storage")
-[ "$code" = "422" ] || fail "adding a storage over an UNREADABLE config = $code, want 422 — a 500 means the guard did not fire and the write was attempted
-$(cat "$WORK/add-unread.json")"
-jq -r '.errors[0].message' "$WORK/add-unread.json" | grep -q 'restart' \
-	|| fail "the refusal does not tell the operator what to do — $(cat "$WORK/add-unread.json")"
-echo "  ok  the add is REFUSED on a discard carrying no \`Errors\`, and still names a remedy"
+# AND THE ABSENCE, WHICH IS THE ASSERTION A LATER EDIT WILL BREAK. "Add this to config.yml, then start
+# again" is advice quince cannot honour about a file it could not open, and it is what the old
+# fall-through printed. Asserting an absence is what stops a well-meaning "always show the remedy"
+# change restoring it.
+! grep -q 'Add this to' "$WORK/unread.out" \
+	|| fail "the refusal tells the operator to edit a file quince could not read — $(cat "$WORK/unread.out")"
+# The absent-key message's distinctive tail, matched WITHOUT its backticks: the sentence is
+# "no `storage:` key in … — quince does not know where to keep backups", and a single-quoted pattern
+# carrying backticks trips SC2016 even though they are literal there.
+! grep -q 'does not know where to keep backups' "$WORK/unread.out" \
+	|| fail "the refusal still claims the key is absent, which is quince#544 returning — $(cat "$WORK/unread.out")"
+echo "  ok  it offers NO remedy block and makes no claim about the storage key"
 
-echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart, and
-  every way a config can be DISCARDED refuses the add rather than replacing the file"
+echo "storageless-smoke: clean — a fresh install reaches a working storage without a restart; a config
+  that PARSED but is invalid serves and refuses the add; one that could not be READ refuses to start"
