@@ -106,12 +106,22 @@ export function jobStatusLabel(job: Job): string {
 
 // What the BAR should show, which is not always what the wire says.
 //
-// Null means indeterminate. During `Finishing up` the wire says 100 and 100 is true of the
-// transfer — but the job is not done, and a full bar is read as "done". Withholding the number is
-// the honest move; the label and the elapsed clock carry the reassurance instead.
+// A RUNNING JOB NEVER SHOWS A DETERMINATE 100%. Null means indeterminate, and 100 beside a label
+// that names an activity is read as "done" whatever that label says — so it is withheld through
+// `Finishing up`, `Verifying` AND `Committing` alike (Operator, 2026-08-17, on seeing 100% next to
+// Committing). The number is not capped: 100 is true of the transfer, and 99 would be a lie. It is
+// simply not a claim about the job while the job is still running.
+//
+// This used to stop at `isFinishingUp`, on the reasoning that `Verifying` and `Committing` name
+// what is happening and so say more than "finishing up" does. True — and beside the point: they
+// name the ACTIVITY, while the full bar next to them still claims COMPLETION. Both were on screen
+// together, which is the contradiction rather than either half.
+//
+// Terminal is untouched. A succeeded job at 100% is simply correct.
 export function displayPercent(job: Job): number | null {
-  if (isFinishingUp(job)) return null;
-  return job.progress.percent;
+  if (isTerminalJob(job)) return job.progress.percent;
+  const { percent } = job.progress;
+  return percent !== null && percent >= 100 ? null : percent;
 }
 
 
