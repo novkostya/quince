@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatch } from "./dispatch";
 import type { DeviceEvent } from "./types";
 import type { Device, Job, Version, WSEnvelope } from "@/lib/types";
@@ -6,6 +6,8 @@ import { useConnectionStore } from "@/stores/connection";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
+import { configKey } from "@/lib/config";
+import { queryClient } from "@/lib/queryClient";
 
 function env(type: string, data: unknown): WSEnvelope {
   return { type, ts: "2026-07-18T00:00:00Z", data };
@@ -98,5 +100,38 @@ describe("dispatch", () => {
 
   it("ignores unknown event types", () => {
     expect(() => dispatch(env("something.new", {}))).not.toThrow();
+  });
+});
+
+// `config.updated` IS THE ONLY THING THAT REFRESHES AN OPEN PAGE (quince#1162, Operator ruling
+// 2026-08-17 option C). `refetchOnWindowFocus` is false app-wide and `useConfig` sets no interval,
+// so if this case stops invalidating, a hand-edit applies on the server and every open tab keeps
+// showing the old document until somebody reloads by hand — silently, with every other test green.
+describe("dispatch on config.updated", () => {
+  it("invalidates the config query", () => {
+    const seen: unknown[] = [];
+    const spy = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockImplementation(((args: unknown) => {
+        seen.push(args);
+        return Promise.resolve();
+      }) as typeof queryClient.invalidateQueries);
+
+    dispatch(env("config.updated", {}));
+
+    expect(seen).toEqual([{ queryKey: configKey }]);
+    spy.mockRestore();
+  });
+
+  // THE PAYLOAD IS EMPTY BY RULING and the client must not grow a dependency on it. A dispatcher
+  // that read `env.data` would break the moment the server sends `{}` — which is what it sends.
+  it("does not read the payload", () => {
+    const spy = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockImplementation((() => Promise.resolve()) as typeof queryClient.invalidateQueries);
+
+    expect(() => dispatch(env("config.updated", undefined))).not.toThrow();
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 });
