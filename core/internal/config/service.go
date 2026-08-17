@@ -410,6 +410,21 @@ type Service struct {
 	// `storage.Manager.SetRefresher` is today (a benign startup-only write that stops being benign
 	// the moment anything re-registers).
 	appliers []applier
+
+	// announce is told that the configuration SURFACE changed, so an open page can refetch
+	// (Operator ruling 2026-08-17, quince#1162 option C). Wiring time only, like `appliers`, and nil
+	// in every process that has no socket — the CLIs.
+	//
+	// IT IS NOT AN Applier, AND THAT IS THE WHOLE REASON IT EXISTS SEPARATELY. An Applier is a
+	// subsystem being handed a configuration to TAKE, so it runs only when there is a new one —
+	// which is exactly the case a REFUSED hand-edit is not. On that path `cfg` is deliberately
+	// unchanged while `discarded`, `warnings` and `source` have all flipped, so there is nothing to
+	// apply and a great deal to redraw. Registering this as an applier would leave the one state an
+	// open page most needs to hear about as the one state it is never told about.
+	//
+	// It is called AFTER the swap and OUTSIDE `mu`, for the reason `notify` already gives: a client
+	// that refetched while the lock was held would race the snapshot it is being told to re-read.
+	announce func()
 }
 
 // applier is one registered subsystem, named so a failure can say which one.
@@ -445,6 +460,29 @@ type Applier func(old, next Config) []Warning
 // constraint rather than a convention. Order of registration is order of application; nothing today
 // needs one applier to observe another's effect, and if that ever changes it becomes a dependency
 // graph rather than a slice.
+// OnSurfaceChange registers the broadcast called whenever `GET /api/config` would answer
+// differently — a write, an applied hand-edit, or a REFUSED one. WIRING TIME ONLY, like Subscribe.
+//
+// The callback MUST NOT call back into this Service: it runs outside `mu` but with `writeMu` still
+// held, so `Replace`, `ForgetStorage` or `Reload` from inside it deadlock. Publishing to the event
+// bus is the one intended use and does neither.
+func (s *Service) OnSurfaceChange(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.announce = fn
+}
+
+// announceSurfaceChange fires the broadcast if one is registered. Nil in the CLIs, which have no
+// socket and no client to tell.
+func (s *Service) announceSurfaceChange() {
+	s.mu.RLock()
+	fn := s.announce
+	s.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 func (s *Service) Subscribe(name string, apply Applier) {
 	if apply == nil {
 		return
@@ -712,6 +750,11 @@ func (s *Service) Reload() (ReloadOutcome, []Warning) {
 		s.mu.Unlock()
 		s.log.Warn("config: the file on disk was edited and REFUSED — quince keeps running on the "+
 			"configuration it already had", "path", path, "errors", len(l.Errors))
+		// AND AN OPEN PAGE IS TOLD, which is the case it most needs to hear about: the running
+		// configuration did NOT change, so no applier ran, but `discarded` has gone true and the
+		// banner that says the file is not in force is the thing the screen should now be showing.
+		// Without this the operator breaks their config and finds out at their next page reload.
+		s.announceSurfaceChange()
 		return ReloadRefused, l.Warnings
 	}
 
@@ -736,7 +779,11 @@ func (s *Service) Reload() (ReloadOutcome, []Warning) {
 	// observed the old snapshot beside the new file would see a state that never existed, and an
 	// applier reaching into another subsystem while `mu` is held deadlocks the moment it calls back
 	// into Current().
-	return ReloadApplied, s.notify(old, l.Config)
+	warns := s.notify(old, l.Config)
+	// The subsystems have taken it; now the open pages are told to refetch. After the appliers, so a
+	// client that refetches immediately reads a process that has already finished applying.
+	s.announceSurfaceChange()
+	return ReloadApplied, warns
 }
 
 // replaceLocked is Replace's body. CALLER MUST HOLD writeMu.
@@ -1016,7 +1063,12 @@ func (s *Service) replaceLocked(c Config, source string) ([]wire.ConfigError, []
 		"storages_after", declaredStorage(c),
 	)
 
-	return nil, append(guardWarnings, s.notify(prev, c)...), nil
+	warns := append(guardWarnings, s.notify(prev, c)...)
+	// AND EVERY OPEN PAGE IS TOLD, including the tab that made this write — which refetches anyway,
+	// so one redundant fetch is the cost. The alternative is an event meaning "changed by a route you
+	// did not take", which every client would then have to reason about (ruling obligation 3).
+	s.announceSurfaceChange()
+	return nil, warns, nil
 }
 
 // FileText returns the bytes currently on disk, for the Settings panel's "Current configuration"

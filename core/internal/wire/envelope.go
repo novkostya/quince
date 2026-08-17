@@ -22,6 +22,19 @@ const (
 	EventVersionCreated = "version.created"
 	EventVersionDeleted = "version.deleted"
 	EventSessionLocked  = "session.locked"
+	// EventConfigUpdated says the configuration SURFACE changed — refetch `GET /api/config`
+	// (Operator ruling 2026-08-17, quince#1162, option C).
+	//
+	// IT CARRIES NO DATA, DELIBERATELY. Putting the document on the wire would be a second copy of
+	// what `GET /api/config` already serves, free to drift from it — and to be useful it would have
+	// to carry `warnings`, `source`, `file_text` and `discarded` too, which is the endpoint. The
+	// event says THAT it changed; the client asks WHAT.
+	//
+	// "SURFACE" RATHER THAN "the running configuration", and the word is load-bearing: this also
+	// fires when a hand-edit is REFUSED, where `config` is deliberately unchanged and
+	// `discarded`/`warnings`/`source` have flipped. That is the case an open page most needs to hear
+	// about, because the banner it should be showing is the one saying the file is not in force.
+	EventConfigUpdated = "config.updated"
 )
 
 // Now is the RFC3339 UTC timestamp stamped on envelopes and any live-generated wire time.

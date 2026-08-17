@@ -2729,7 +2729,29 @@ One socket per client, server→client only (commands go via REST). Envelope:
 | `op.updated` | `Op` | pair/encryption op narration + state changes |
 | `version.created` / `version.deleted` | `Version` | includes adopted versions found on disk |
 | `session.locked` | `{session_id, reason: "user" \| "ttl" \| "vault_crash"}` | UI drops decrypted views |
+| `config.updated` | `{}` — **empty by ruling** | the configuration SURFACE changed; refetch `GET /api/config` |
 | `hello` | `{server_version, time}` | first frame after auth |
+
+**`config.updated` carries no data and fires on THREE transitions** — Operator ruling 2026-08-17,
+[quince#1162](https://github.com/novkostya/quince/issues/1162), option C.
+
+**Empty payload:** the document is what `GET /api/config` serves, and to be useful the event would
+have to carry `warnings`, `source`, `file_text` and `discarded` with it — which *is* that endpoint,
+duplicated on the wire and free to drift from it. The event says **that** it changed; the client asks
+**what**.
+
+**The three transitions are a `PUT` (or any narrow write), an APPLIED hand-edit, and a REFUSED
+hand-edit.** The third is the one worth naming: the running configuration is deliberately *unchanged*
+there, so no applier runs — while `discarded` goes true and `warnings` gains the cause. That is
+exactly the state an open page most needs to redraw, because the banner it should then be showing is
+the one saying the file is not in force. An event scoped to *"the running configuration changed"*
+would leave that state silent until somebody reloaded the page by hand.
+
+**It reaches the tab that caused it**, which refetches anyway — one redundant fetch, against an event
+whose meaning would otherwise be *"changed by a route you did not take"* and which every client would
+have to reason about.
+
+**`serve` only.** The admin CLIs have no socket and nobody to tell.
 
 Client contract: reconnect with backoff + `GET` refresh of current views on reconnect
 (events are notifications, not a replayable log).

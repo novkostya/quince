@@ -19,6 +19,7 @@ import (
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/version"
+	"github.com/novkostya/quince/core/internal/wire"
 )
 
 // liveStack is the non-demo subsystem set: everything the HTTP server and the `backup` CLI drive.
@@ -152,6 +153,16 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	if scan == scanDeferred {
 		go config.NewWatcher(cfgSvc, config.PollInterval).Run(ctx)
 		log.Info("config: watching config.yml for hand-edits", "interval", config.PollInterval)
+
+		// AN OPEN PAGE LEARNS THE CONFIGURATION SURFACE CHANGED (quince#1162, Operator ruling
+		// 2026-08-17, option C). Registered beside the watcher and under the same condition: the
+		// CLIs have no socket and nobody to tell, and `announce` stays nil there.
+		//
+		// The payload is empty by ruling — the client refetches `GET /api/config` rather than
+		// reading a second copy of the document off the wire.
+		cfgSvc.OnSurfaceChange(func() {
+			eventBus.PublishEvent(wire.EventConfigUpdated, struct{}{})
+		})
 	}
 
 	// qn.6c: the engine's A3 free-space preflight probes the same root the storage subsystem
