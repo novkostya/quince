@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { isTerminalJob, livenessNote } from "./state";
+import {
+
+  STALL_AFTER_SECONDS,
+  isStalledTransfer,
+  preparingNote,
+  stalledNote,
+  displayPercent,
+  isFinishingUp,
+  isPreparing,
+  isTerminalJob,
+  jobStatusLabel,
+  livenessNote,
+} from "./state";
 import type { Job } from "@/lib/types";
 
 function mkJob(over: Partial<Job>): Job {
@@ -111,5 +123,127 @@ describe("isTerminalJob", () => {
     ] as const) {
       expect(isTerminalJob(mkJob({ state })), `running: ${state}`).toBe(false);
     }
+  });
+});
+
+// quince#376 / quince#808. Both windows below were measured on the lab rig, 2026-08-16, on a
+// 12m42s incremental: 184 s where the card showed "Backing up / — / a still bar", and 50 s where
+// it showed a full bar while the tool was still working. Neither is a stall and neither was
+// narrated, which is the whole of what these assert.
+describe("the two windows with no percentage to show", () => {
+  it("calls the pre-progress window Preparing, not Backing up", () => {
+    const j = mkJob({ progress: { ...mkJob({}).progress, phase: "starting", percent: null } });
+    expect(isPreparing(j)).toBe(true);
+    expect(jobStatusLabel(j)).toBe("Preparing");
+    // Indeterminate rather than 0: quince has no measurement here, and a zero-width bar IS a
+    // measurement claim — the one the issue was filed about.
+    expect(displayPercent(j)).toBeNull();
+  });
+
+  it("leaves the pre-progress window to useJobNote, which knows the device", () => {
+    // `liveness` is `active` throughout that window — idevicebackup2 keeps printing, and the
+    // sampler counts any output as activity — so this function could never narrate it. The note
+    // now needs the device family too, which is not a property of a Job, so it lives in the hook.
+    const j = mkJob({ progress: { ...mkJob({}).progress, phase: "starting", percent: null, liveness: "active" } });
+    expect(livenessNote(j)).toBeNull();
+  });
+
+  it("calls a running job at 100% Finishing up, and withholds the full bar", () => {
+    const j = mkJob({ state: "backing_up", progress: { ...mkJob({}).progress, percent: 100 } });
+    expect(isFinishingUp(j)).toBe(true);
+    expect(jobStatusLabel(j)).toBe("Finishing up");
+    expect(displayPercent(j)).toBeNull();
+  });
+
+  it("leaves verifying and committing alone — they say more than 'finishing up' does", () => {
+    for (const state of ["verifying", "committing"] as const) {
+      const j = mkJob({ state, progress: { ...mkJob({}).progress, percent: 100 } });
+      expect(isFinishingUp(j)).toBe(false);
+      expect(displayPercent(j)).toBe(100);
+    }
+  });
+
+  it("does not call a FINISHED job preparing, whatever phase it carries", () => {
+    // The quince#313 shape: a terminal job holding a live-looking progress block.
+    const j = mkJob({ state: "failed", progress: { ...mkJob({}).progress, phase: "starting", percent: null } });
+    expect(isPreparing(j)).toBe(false);
+    expect(jobStatusLabel(j)).toBe("Failed");
+  });
+
+  it("shows a real percentage untouched", () => {
+    const j = mkJob({ progress: { ...mkJob({}).progress, percent: 63 } });
+    expect(jobStatusLabel(j)).toBe("Backing up");
+    expect(displayPercent(j)).toBe(63);
+  });
+});
+
+
+// The 91 s freeze the Operator watched: zero bytes, zero CPU, zero packets, and `liveness` stayed
+// `active` for the whole run because the server's note needs LivenessTimeout/6 = 3 minutes.
+describe("isStalledTransfer", () => {
+  const receiving = (over: Partial<Job["progress"]> = {}, state: Job["state"] = "backing_up") =>
+    mkJob({ state, progress: { ...mkJob({}).progress, phase: "receiving", liveness: "active", ...over } });
+
+  it("says so once a transfer has been quiet past the threshold", () => {
+    expect(isStalledTransfer(receiving(), STALL_AFTER_SECONDS, true)).toBe(true);
+  });
+
+  it("stays silent through the routine gaps", () => {
+    // Measured distribution: 131 gaps of 1-2 s, 12 of 5-10 s, one of 11-20 s. None of those is news.
+    expect(isStalledTransfer(receiving(), STALL_AFTER_SECONDS - 1, true)).toBe(false);
+    expect(isStalledTransfer(receiving(), 8, true)).toBe(false);
+  });
+
+  it("does not fire while merely preparing — that window has its own note", () => {
+    expect(isStalledTransfer(receiving({ phase: "starting" }), 300, true)).toBe(false);
+  });
+
+  it("yields to the server once IT escalates, so the two never argue", () => {
+    expect(isStalledTransfer(receiving({ liveness: "silent_but_connected" }), 300, true)).toBe(false);
+    expect(isStalledTransfer(receiving({ liveness: "suspected_stall" }), 300, true)).toBe(false);
+  });
+
+  it("blames nothing on the device when OUR socket is the thing that dropped", () => {
+    expect(isStalledTransfer(receiving(), 300, false)).toBe(false);
+  });
+
+  it("says nothing about a finished job", () => {
+    expect(isStalledTransfer(receiving({ phase: "done" }, "succeeded"), 300, true)).toBe(false);
+  });
+
+  it("carries no second counter — the answer does not depend on the number", () => {
+    expect(stalledNote("iPhone", "card")).toBe("Waiting for your iPhone…");
+    expect(stalledNote("iPhone", "full")).not.toMatch(/\d/);
+  });
+});
+
+// Operator, 2026-08-17, in two rounds. First: a fixed "your iPhone will ask for your passcode"
+// stayed up for the whole 191 s window, long after the passcode had been entered, which reads as a
+// bug. Then: a 20 s time box was too short to be seen at all. A CONDITION is true before, during
+// and after, so it needs no expiry — and it is also true on a device with no passcode, which quince
+// cannot detect (`PasswordProtected` reads false on a device that prompts).
+describe("the preparing note", () => {
+  it("states a condition rather than an instruction, so it cannot go stale", () => {
+    for (const v of ["card", "full"] as const) {
+      expect(preparingNote("iPhone", v)).toMatch(/if it asks/i);
+    }
+  });
+
+  it("names the device the user actually has", () => {
+    // design §3: iPhone AND iPad are first-class. Hardcoding "iPhone" here called an iPad an iPhone.
+    expect(preparingNote("iPad", "card")).toBe("Waiting for your iPad — unlock it if it asks");
+    expect(preparingNote("iPhone", "card")).toBe("Waiting for your iPhone — unlock it if it asks");
+    expect(preparingNote("device", "card")).toBe("Waiting for your device — unlock it if it asks");
+  });
+
+  it("keeps the card's version to one line and says the stakes only on details", () => {
+    expect(preparingNote("iPhone", "card").length).toBeLessThan(
+      preparingNote("iPhone", "full").length,
+    );
+    expect(preparingNote("iPhone", "full")).toMatch(/can't start until you do/);
+  });
+
+  it("names the device in the stall note too", () => {
+    expect(stalledNote("iPad", "card")).toBe("Waiting for your iPad…");
   });
 });

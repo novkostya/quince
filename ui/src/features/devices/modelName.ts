@@ -148,3 +148,21 @@ export function modelName(raw: string): string {
 export function modelLine(model: string, iosVersion: string): string {
   return [modelName(model), iosVersion ? `iOS ${iosVersion}` : ""].filter(Boolean).join(" · ");
 }
+
+// The device's FAMILY, for prose that names it. "iPhone 16 Pro" is the right label for a header;
+// a sentence wants "your iPhone".
+//
+// Derived from the identifier prefix rather than a table, because it must not go stale: an
+// unmapped `iPhone19,1` still yields "iPhone". Anything unrecognised falls back to "device", which
+// is always true and never wrong — this file's own rule is that no code is iPhone-string-specific
+// (design §3: iPhone AND iPad are first-class), and hardcoding "iPhone" in a status line broke it
+// on the Operator's iPad (2026-08-17).
+//
+// `DeviceClass` from lockdown carries exactly this and is not on the wire; the identifier prefix
+// agrees with it on every device measured, so this needs no contract change.
+export function deviceFamily(model: string): string {
+  if (model.startsWith("iPhone")) return "iPhone";
+  if (model.startsWith("iPad")) return "iPad";
+  if (model.startsWith("iPod")) return "iPod";
+  return "device";
+}
