@@ -32,6 +32,8 @@ import (
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
 	"github.com/novkostya/quince/core/internal/httpapi"
+	"github.com/novkostya/quince/core/internal/id"
+	"github.com/novkostya/quince/core/internal/pushsvc"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/tlsx"
 	"github.com/novkostya/quince/core/internal/version"
@@ -358,6 +360,15 @@ func serve(args []string) error {
 		Reauth: auth.NewReauthCeremonies(), Proofs: auth.NewProofs(),
 		// Nil in demo mode — the carve-out is the nil, not a branch in a handler (qn.6m D6).
 		PasswordAdmin: passwordAdmin(demoMode, authSvc),
+		// Web Push (qn.12). NIL IN DEMO MODE for the same reason `PasswordAdmin` is: the demo
+		// fabricates its own world and has no real device to notify, and a nil leaves the routes
+		// unregistered rather than putting a mode check inside a handler.
+		//
+		// THE KEYPAIR IS NOT GENERATED HERE. `pushsvc` mints it on the first read of the public half,
+		// so an install that never opens the notifications page never creates one — and the
+		// generation rules, which are the Operator's (quince#1128), stay in one place rather than
+		// being split between startup and a handler.
+		Notifications: notifications(demoMode, st),
 	})
 
 	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
@@ -962,4 +973,19 @@ func passwordAdmin(demoMode bool, authSvc *auth.Service) httpapi.PasswordAdmin {
 		return nil
 	}
 	return authSvc
+}
+
+// notifications wires the Web Push surface, or nil in demo mode (qn.12).
+//
+// A CONSTRUCTOR RATHER THAN AN INLINE CONDITIONAL, following `passwordAdmin` directly above: the
+// carve-out is the nil, so no handler ever has to ask what mode it is running in.
+//
+// THE ID IS A ULID, matching every other id this daemon mints, so a subscription sorts by creation
+// time without a second column. The clock is `time.Now` here and injected in tests, which is what
+// lets the reminder cooldown be asserted at a chosen instant.
+func notifications(demoMode bool, st *store.Store) httpapi.NotificationReader {
+	if demoMode {
+		return nil
+	}
+	return pushsvc.New(st, func() string { return id.New() }, time.Now)
 }

@@ -69,7 +69,9 @@ type Deps struct {
 	StorageRequired func() bool
 	// Proxies decides whether X-Forwarded-For may be believed (quince#464). Nil behaves as
 	// "trust nobody", which is the shipping default and today's behaviour.
-	Proxies *auth.TrustedProxies
+	// Notifications is the qn.12 Web Push surface. NIL means the routes are not registered.
+	Notifications NotificationReader
+	Proxies       *auth.TrustedProxies
 	// ProbeNonces backs the two probe endpoints (Operator ruling 2026-08-14). NewRouter fills it
 	// when a caller left it nil, so a test router and `--demo` both get a working probe rather than
 	// a nil dereference — the store holds no configuration and nothing outside this package needs
@@ -366,3 +368,20 @@ func (d Deps) zfsKeyDir() string {
 // matching every other method on this type, which reports 503 when ASKED to act rather than
 // pre-emptively disabling controls.
 func (UnavailableDeviceOps) PairingWritable() (bool, string) { return true, "" }
+
+// NotificationReader is the Web Push surface's dependency (qn.12). An interface for the same reason
+// every other port here is one: `httpapi` decides shape and status codes, and knows nothing about
+// SQLite or RFC 8291.
+//
+// NIL IS LEGAL AND MEANS THE ROUTES ARE NOT REGISTERED — `--demo` and every test router that does not
+// wire it are unaffected, which is the same shape `Reconcile` uses. A nil here must never produce a
+// route that panics.
+type NotificationReader interface {
+	// VAPIDPublicKey returns the applicationServerKey, generating the pair on first use. It returns
+	// store.ErrVAPIDKeyMissing when subscriptions exist without a key — a state the ruling makes
+	// unreachable by ordinary means, so it is reported rather than repaired.
+	VAPIDPublicKey() (string, error)
+	Subscriptions() ([]wire.PushSubscription, error)
+	Subscribe(endpoint, p256dh, auth, label string) (string, error)
+	Unsubscribe(id string) (bool, error)
+}
