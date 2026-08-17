@@ -863,49 +863,52 @@ this.
 route as well as the endpoint, and what the page renders to a visitor who is not yet authenticated —
 the *"already encrypted ✓, step 1 complete"* state implies knowing whose step 1 it is.
 
-**PROPOSED (gap): where the VAPID keypair lives.** `qn.12`, quince#1124; routed here by the architect
-on that issue at `13:11:15Z`. **Nothing is built on this until the Operator rules.** It blocks
-`qn.12`'s slices 3 and 4 — the code that touches key material — and nothing else in that rung.
+**RULED (was `PROPOSED (gap)`): the VAPID keypair lives in the app DB** — Operator ruling 2026-08-17
+(quince#1128), for `qn.12`. Generated on first use; nothing for the operator to do. Its **public** half
+is served by `GET /api/notifications`, because a subscription cannot be created without it.
 
-**Why it is a gap and not a schema line.** Web Push signs every delivery with a VAPID keypair
-(RFC 8292). The **No secrets at rest** bullet above is about the *backup password* and does not decide
-this, because a VAPID private key is quince's own credential rather than the user's — and D12's rule
-is absolute in the other direction: **no secret ever enters `config.yml`.** So the one place every
-other setting lives is closed, and what remains is a security-model question.
+**Why it needed a ruling rather than a schema line.** Web Push signs every delivery with a VAPID
+keypair (RFC 8292), and D12 forbids a secret entering `config.yml` — so the one place every other
+setting lives is closed by rule. The **No secrets at rest** bullet above does not decide it either:
+that bullet is about the *backup password*, which is the user's, and this key is quince's own
+credential.
 
-**The constraint that makes it a real question rather than a filing preference: the keypair is
-PERSISTENT, and losing it is silent.** The public half is the `applicationServerKey` baked into every
-subscription a phone has ever created. Regenerating it does not fail loudly — it leaves every
-subscribed device holding a subscription quince can no longer sign for, and the first symptom is a
-notification that never arrives. A container rebuild, a volume that was not persisted, or a "reset to
-defaults" must not be able to cause that quietly.
+**The constraint that decided it: the keypair is PERSISTENT, and losing it is silent.** The public
+half is the `applicationServerKey` baked into every subscription a phone has ever created, so
+regenerating it leaves every subscribed device holding a subscription quince can no longer sign for —
+and the first symptom is a notification that never arrives. **The app DB makes that state
+unrepresentable**: the key and the subscriptions are one artifact, lost together or not at all. Losing
+it yields a clean fresh install — new key, no subscriptions, the user re-subscribes, nothing quietly
+broken.
 
-**Option (a) — the app DB.** It already holds the argon2id admin hash and the audit trail, it is
-already inside the backed-up `/data`, and it is already the thing the *backup-your-appdata* docs tell
-people to keep. Generated on first use; nothing for the operator to do. **Cost:** the app DB stops
-being *"no secrets at rest"* in the loose sense some readers take that bullet to have, so the bullet
-needs a sentence either way.
+**A `0600` file under `/data` was the alternative and is REJECTED.** It would have made the dangerous
+state merely detectable rather than impossible: a partial restore, or a backup that took `quince.db`
+and missed a `.pem`, and every subscribed phone goes silent with no signal that it had. Its stated
+advantage inverts here — nobody needs to inspect this key, and replacing it is the only destructive
+act available, so a PEM in a browsable directory makes the one footgun a one-line command. **The
+pairing-record precedent directly above does not transfer**: a lost pairing record is re-obtainable by
+re-pairing the phone; a lost VAPID key is not recoverable without action on every device that ever
+subscribed. **Operator-supplied** — an env var, or a `config.yml` path in the shape `tls.key_file`
+uses — is rejected against the Plex-grade-setup promise: no user should have to author a keypair whose
+only consumer is quince itself.
 
-**Option (b) — a `0600` file under `/data`, beside the pairing records.** The precedent is directly
-above: pairing records are private-key-grade, live at `0600`, are backed up into `/data`, are never
-served and never logged. A PEM file is inspectable and replaceable with ordinary tools, which the DB
-is not. **Cost:** a second secret-bearing artifact with its own permissions to get right, where (a)
-inherits the DB's.
+**What it costs, weighed and accepted.** Under RFC 8292 the push service validates the VAPID JWT
+against the `applicationServerKey` the subscription carries, so a separate file would have kept a
+genuine second factor — an attacker holding the DB alone has every subscription and still cannot push.
+That is given up. It was weighed narrow because both artifacts would have sat in the same directory
+under the same permissions, so it only defends against a vector that reads `quince.db` but not
+`/data/*.pem`. **If that weighting is ever wrong, this paragraph is where to start.**
 
-**Option (c) — operator-supplied**, by env var or a path in `config.yml` pointing at a key file (the
-shape `tls.key_file` already uses — a **path** in the config, never a key body). **Cost:** it makes
-push require setup, against this project's Plex-grade-setup promise, and there is no reason a user
-should have to author a keypair whose only consumer is quince itself.
+**Two things the build must not do.** **Never regenerate silently** — a key absent while subscription
+rows are present is a state this ruling makes unreachable by ordinary means, so it means a tampered or
+partially restored DB. quince holds the inputs to say so, and must name the cause and the remedy
+(*every device must re-subscribe*) rather than minting a fresh key and looking healthy. **Never offer
+rotation** — it is destructive by the constraint above and serves no operator need.
 
-**What the spec is written NOT to assume.** No `qn.12` story's acceptance criteria depend on the
-answer — that was the condition the architect attached when ruling that this blocks the build and not
-the spec. Whichever option is taken, the key is generated or loaded once at startup, and its **public**
-half is served by `GET /api/notifications`, because a subscription cannot be created without it.
-
-**Related and NOT part of this question:** the per-subscription `p256dh`/`auth` keys are the *phone's*,
-arrive over the API, and go in the app DB with the rest of the subscription row. They are
-capability-grade — anyone holding one can push to that phone — so they are never logged and never
-served to another session. That is `qn.12`'s to build under existing canon.
+**The app DB is a secret-bearing store, and `qn.12` makes it one whichever way this had gone.** The
+per-subscription `p256dh`/`auth` keys are the *phone's*, arrive over the API, and live in the
+subscription row. They are capability-grade — anyone holding one can push to that phone — so they are
+never logged and never served to another session.
 
 ## 7. Vault: lazy, session-scoped reading behind a swappable seam
 

@@ -4,10 +4,10 @@
 it, and lands on the device page ready to unlock and confirm — and a person who cannot receive
 notifications is told which of five reasons applies to them and what to do about it.
 
-Rung issue: **quince#1124**, whose scope is the Operator's, settled 2026-08-17. The sequencing answer
-this spec is written under is the architect's, on quince#1124 at `13:11:15Z`: **the VAPID gap blocks
-the BUILD, not the SPEC.** So the keypair's home is a `PROPOSED (gap)` block in design §6 and every
-story below is written to be independent of how it is ruled.
+Rung issue: **quince#1124**, whose scope is the Operator's, settled 2026-08-17. This spec was written
+under the architect's sequencing on quince#1124 at `13:11:15Z` — **the VAPID gap blocks the BUILD, not
+the SPEC** — so every story below is independent of where the keypair lives. **It has since been
+ruled** (Operator, 2026-08-17, quince#1128): the app DB, in design §6. No slice is gated.
 
 **quince#510 is answered here** (D7). It has been open since 2026-08-02 waiting for this rung, and
 its own body says it is a constraint that *"should not be rediscovered"* — so it gets a defined
@@ -378,20 +378,23 @@ Category toggles are **not** a fifth endpoint: they are config, written through 
 
 ---
 
-## PROPOSED (gap): where the VAPID keypair lives
+## RULED: the VAPID keypair lives in the app DB
 
-**Written into `docs/quince.design.md` §6 in this PR, and nothing below is built until it is ruled.**
-Recorded here only so this document is readable on its own; §6 is the canonical copy.
+**Operator ruling 2026-08-17, quince#1128. `docs/quince.design.md` §6 is the canonical copy**; this
+section exists so the spec is readable on its own. **Nothing here is gated any more** — slices 3 and 4
+are unblocked.
 
 The short of it: a VAPID keypair is a **persistent** secret — the public half is baked into every
 subscription, so regenerating it invalidates every subscribed phone silently — and **D12 forbids
-secrets in `config.yml`, ever.** That makes its home a security-model question rather than a
-rung-local one. Three candidate homes (app DB · a `0600` file under `/data` beside the pairing
-records · operator-supplied) with their trade-offs are set out in §6.
+secrets in `config.yml`, ever.** The app DB wins because it makes *subscriptions without a key* an
+unrepresentable state rather than a detectable one; a `0600` file under `/data` and an
+operator-supplied key are rejected, with reasons, in §6.
 
-**Per the architect's ruling on quince#1124, this blocks slice 3 and nothing else.** No story in this
-spec has acceptance criteria that only make sense under one answer, which is the condition that ruling
-attached.
+**Two constraints §6 places on slices 3 and 4, repeated here because they are build instructions:**
+**never regenerate a keypair silently** — key absent with subscription rows present means a tampered
+or partially restored DB, and quince must name that and its remedy (*every device must re-subscribe*)
+rather than minting a fresh key and looking healthy — and **never offer rotation**, which is
+destructive by the constraint above and serves no operator need.
 
 ---
 
@@ -478,11 +481,11 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Never mutate a committed version** | **Comes near and does not touch.** The notifier reads `last_backup`, which design §3 derives from the newest committed version. It is a **reader**; nothing in this rung opens a storage backend for write, and no story changes when quince#591's zfs in-place ruling is built. |
 | **No silent caps or fallbacks** | The whole of D6 and D8. An expired subscription is kept and surfaced rather than pruned; a device with no live subscription is called out on Devices, not only in Settings; there is **no** time-based retention and therefore no cap needing disclosure. The declarative-envelope fallback (D2) is a *platform* fallback that produces the same notification, not a degraded mode. |
 | **Config tidiness (D12)** | Every new key has a default, is UI-editable, and needs no restart. **One key is added** (`overdue_days`) with its reasoning in D5, and one is deliberately **not** added (the evaluation tick). No secret enters `config.yml` — which is what makes the VAPID question a gap rather than a schema line. `config.yml` still contains only what the user set: D9 explicitly does not auto-migrate. |
-| **Secrets discipline** | The VAPID private key is unruled and unbuilt. Subscription keys reach the app DB and nothing else — never argv, never env, never a log line (G6). The backup password is untouched by this rung. |
+| **Secrets discipline** | The VAPID private key is **ruled to the app DB** (quince#1128) and unbuilt; it never reaches argv, env or a log line, and only its public half is served. Subscription keys reach the app DB and nothing else (G6). The backup password is untouched by this rung. |
 | **Subprocesses** | None. This rung spawns no process. |
 | **Every hardware bug becomes a replay fixture** | No hardware path is touched; G7 names what hardware still owes and to what. |
 | **Docs are part of the diff** | Contracts §1 — the frozen kind list at **`:1949-1950`** and the new endpoints; contracts §6 — the `automation.*` live-key row at **`:2843`** and the config block at **`:3073`**; design §4 (terminal → kind) and design §6 (the gap block, in **this** PR). All move with the code that changes them. Coverage and a known-untested list ride each build slice. **quince#1124's own line references — `:1872`, `:2707`, `:2727`, `:2927` — do not resolve in this checkout;** the three above were grepped in **this clone**, at `a784727` and re-checked at `ee34873` after a rebase, and are what the build slices should follow. **The frozen kind list sits directly under `POST /api/automation/backup-opportunity` at `:1941`, which this rung deliberately does not touch** — named because the next reader editing the list is standing next to the endpoint whose deferral is a decision. |
-| **Don't improvise architecture** | VAPID storage is a `PROPOSED (gap)` block and stops that thread. Everything else settled here — D2, D3, D4's `interrupted` row, D5's track, D9's section-rename shape — is inside this rung's boundary and is decided *in the spec*, reviewed before code, which is what §8 asks for. The frozen `/api/automation/backup-opportunity` path is not touched, and its naming question stays deferred. |
+| **Don't improvise architecture** | VAPID storage went to the gap protocol rather than being decided here, and is now ruled in design §6 (quince#1128). Everything else settled here — D2, D3, D4's `interrupted` row, D5's track, D9's section-rename shape — is inside this rung's boundary and is decided *in the spec*, reviewed before code, which is what §8 asks for. The frozen `/api/automation/backup-opportunity` path is not touched, and its naming question stays deferred. |
 | **Approver ≠ author** | This spec is authored by an implementer session and reviewed by the architect, who has already claimed the review on quince#1124. |
 
 ---
@@ -493,7 +496,7 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 
 | | claim | gated on the ruling? |
 | --- | --- | --- |
-| **1** | **this spec** + the `PROPOSED (gap)` block in design §6 | no |
+| **1** | **this spec** + the VAPID gap block in design §6 — **merged**, quince#1127 | no |
 | **2** | `automation:` → `notifications:`, the per-category keys, and the renamed-**section** warning (D9, story 2) | no |
 | **3** | `core/internal/push` — VAPID + RFC 8291, against the RFC vectors (D3, G2) | **yes** |
 | **4** | the subscription store and `/api/notifications/*` (D8, D10) | **yes** |
@@ -501,5 +504,6 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **6** | the notifier — the reminder track and the routing table (D4, D5, G1, G3) | no |
 | **7** | the Settings surface, the five-cause status, and the Devices-page surfaces — the overdue affordance (D7.2) and the no-live-subscription banner (D8) | no |
 
-Slices 2 and 5 can run while the ruling is outstanding, which is the point of the architect's
-sequencing answer.
+**The ruling has landed (quince#1128), so nothing in this table is gated.** The `yes` rows record what
+slices 3 and 4 were waiting on and are kept as provenance: they touch key material, and design §6's
+two build constraints — never regenerate silently, never offer rotation — are theirs to honour.
