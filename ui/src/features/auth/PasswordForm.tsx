@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
-import { signInWithPasskey } from "@/lib/webauthn";
+import { signInWithPasskey, webauthnAvailable } from "@/lib/webauthn";
 import { AuthPage, type AuthVariant } from "./AuthPage";
 
 // Shared password form for first-run setup and login. The BOX it sits in is `AuthPage`'s (qn.6m
@@ -257,8 +257,23 @@ export function PasswordForm({
             sentence, where its absence costs a user WITH one the entire feature.
 
             `type="button"`, because components/ui/button.tsx sets none and a Button inside a form is
-            a submit by default (quince#824, quince#828). Here that would post an empty password. */}
-        {passkeys || passkeyProof ? (
+            a submit by default (quince#824, quince#828). Here that would post an empty password.
+
+            AND NOT WHERE THE BROWSER CANNOT RUN A CEREMONY AT ALL (quince#1076). The paragraph above
+            is about PRESENCE, which is undetectable; `webauthnAvailable()` is about AVAILABILITY,
+            which is one expression. Over plain http there is no `PublicKeyCredential`, so this button
+            threw into the generic catch and answered *"Could not sign in with a passkey."* — which
+            reads as *you have none* to someone who has one, and says nothing about the connection
+            being the reason. The two are different claims and only one of them justifies hiding the
+            button.
+
+            `passkeyProof` IS DELIBERATELY NOT GATED, and the asymmetry is the point. That prop is the
+            REAUTH path — `ReauthChallenge` renders this form inside its dialog — and the server has
+            already said which factors it accepts. Where it accepts only a passkey, hiding the button
+            leaves a dialog asking the reader to confirm with nothing to confirm by, which is a worse
+            failure than a button that explains itself and is quince#1077's subject rather than this
+            one's. quince#1076 names three surfaces; this is the login one. */}
+        {(passkeys && webauthnAvailable()) || passkeyProof ? (
           <Button
             type="button"
             variant="outline"
@@ -268,6 +283,20 @@ export function PasswordForm({
           >
             {passkeyProof ? passkeyProof.cta : "Sign in with a passkey"}
           </Button>
+        ) : null}
+
+        {/* SAID ONCE, IN PLACE OF THE BUTTON — not in addition to it. A reader on a LAN address
+            otherwise has no way to tell "this quince has no passkeys" from "this connection cannot
+            do them", and those want opposite next actions. It is net LESS on the screen than the
+            control it replaces. */}
+        {passkeys && !webauthnAvailable() ? (
+          <p className="mt-3 text-sm text-muted">
+            Passkeys need an https address. Sign in with your password here, or{" "}
+            <Link to="/onboarding/https" className="underline underline-offset-2">
+              set up https
+            </Link>{" "}
+            to use one.
+          </p>
         ) : null}
         {footer}
       </div>

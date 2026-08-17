@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { signInWithPasskey } from "@/lib/webauthn";
+import { signInWithPasskey, webauthnAvailable } from "@/lib/webauthn";
 import { hasPasskeyHint } from "@/lib/passkeyHint";
 import type { AuthStatus } from "@/lib/types";
 
@@ -27,7 +27,10 @@ export function usePasskeyLogin(onSuccess: (status: AuthStatus) => void | Promis
     if (armed.current) return;
     armed.current = true;
 
-    if (typeof window.PublicKeyCredential === "undefined") return;
+    // The same question every visible control now asks, through the same expression — this hook was
+    // the ONLY place in the tree that asked it, which is how three visible surfaces went on offering
+    // ceremonies the browser could not start (quince#1076).
+    if (!webauthnAvailable()) return;
 
     // THE GATE. Only fire an unprompted sheet where a passkey has already been created or used in
     // THIS browser. A device that has never had one never sees a modal — which is the fresh

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PasswordForm } from "./PasswordForm";
 import { APIError } from "@/lib/api";
+import { withoutWebAuthn } from "@/test/webauthn";
 
 // A QUERY CLIENT, BECAUSE `AuthPage` NOW CARRIES THE PLAIN-HTTP WARNING (quince#539) and this form
 // renders inside it. Nothing in this suite is about the banner, which stays silent with no health
@@ -98,5 +99,57 @@ describe("the password form's error", () => {
 
     expect(await screen.findByText(/network is down/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "How to fix this" })).not.toBeInTheDocument();
+  });
+});
+
+// PASSKEYS NEED A SECURE CONTEXT, AND THE LOGIN BUTTON MUST NOT PRETEND OTHERWISE — quince#1076.
+//
+// WHY THE ASSERTION IS ABOUT THE SENTENCE AND NOT ONLY THE BUTTON. Hiding the control alone would
+// leave a reader on a LAN address unable to tell "this quince has no passkeys" from "this connection
+// cannot do them", and those want opposite next actions. The replacement is deliberately net LESS on
+// the screen than what it replaces, so it is asserted as a swap rather than as an addition.
+describe("the passkey button over a connection that cannot run WebAuthn", () => {
+  function renderLogin() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <PasswordForm
+            title="Sign in"
+            subtitle="Enter your admin password."
+            cta="Sign in"
+            passkeys
+            onSubmit={() => Promise.resolve()}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("offers it where WebAuthn is available — the control, so the case below is a change", () => {
+    renderLogin();
+
+    expect(screen.getByRole("button", { name: "Sign in with a passkey" })).toBeInTheDocument();
+    expect(screen.queryByText(/Passkeys need an https address/)).not.toBeInTheDocument();
+  });
+
+  it("hides it where WebAuthn is unavailable, and says why in its place", async () => {
+    await withoutWebAuthn(() => {
+      renderLogin();
+
+      expect(screen.queryByRole("button", { name: "Sign in with a passkey" })).not.toBeInTheDocument();
+      expect(screen.getByText(/Passkeys need an https address/)).toBeInTheDocument();
+    });
+  });
+
+  // The password is the whole point of the screen and must survive the change — a fix that hid a
+  // broken control by breaking the working one would satisfy the assertion above and be worse.
+  it("still offers the password, which is what works on that connection", async () => {
+    await withoutWebAuthn(() => {
+      renderLogin();
+
+      expect(screen.getByLabelText("Password")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    });
   });
 });

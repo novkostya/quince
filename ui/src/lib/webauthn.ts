@@ -18,6 +18,32 @@ import type { BeginRegistration, BeginAssertion } from "@/lib/webauthnWire";
 // names as a defect rather than a convention — two identical strings maintained twice, with nothing
 // connecting them — and it had already reached three. A fourth surface would have copied it again.
 
+/**
+ * webauthnAvailable reports whether this BROWSER, on this connection, can run a ceremony at all.
+ *
+ * IT IS A DIFFERENT QUESTION FROM `passkeysSupported`, AND CONFLATING THEM IS quince#1076. That one
+ * asks the SERVER whether this address can host a credential — false at a bare IP, where an rpId
+ * cannot be a domain and no certificate helps. This asks the CLIENT whether the ceremony can start:
+ * WebAuthn is secure-context-only, so over plain http the browser does not expose
+ * `PublicKeyCredential` at all and every ceremony fails before it reaches the network. A domain
+ * reached over http answers YES to the first question and NO to this one, which is exactly the gap
+ * three surfaces fell into.
+ *
+ * PRESENCE VERSUS AVAILABILITY, which is why this is a bug and not a ruling. Whether this device
+ * HOLDS a credential is undetectable, so `PasswordForm` is right to show its button unconditionally
+ * and let "no passkey here" be the answer. Availability is detectable in one expression, and where
+ * the honest answer is "this connection cannot do passkeys at all", three buttons that fail
+ * differently is the *no silent caps or fallbacks* rule read at the level of a control.
+ *
+ * `isSecureContext` IS NOT CHECKED SEPARATELY, deliberately: it is the CAUSE, and the absence of
+ * `PublicKeyCredential` is the EFFECT this code actually depends on. Testing the effect keeps this
+ * true for any other reason a browser might withhold the API — an old build, a policy, an embedded
+ * view — rather than only for the one we can name.
+ */
+export function webauthnAvailable(): boolean {
+  return typeof window !== "undefined" && typeof window.PublicKeyCredential !== "undefined";
+}
+
 
 
 

@@ -8,6 +8,7 @@ import { acceptsOf, onlyPasskey, proveWithPasskey, type Factor, type Present } f
 import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
 import { AddPasskeyRow } from "./AddPasskeyRow";
 import { forgetPasskey } from "@/lib/passkeyHint";
+import { webauthnAvailable } from "@/lib/webauthn";
 import { RelativeTime } from "@/components/RelativeTime";
 
 // The passkey management surface — qn.6k slice 5b, stories 2, 3, 4 and 8.
@@ -205,6 +206,17 @@ export function Passkeys() {
   // `supported` absent is treated as NOT supported, so the add button stays disabled rather than
   // offering a ceremony this address may not be able to complete.
   const supported = passkeysSupported(data);
+  // THE SECOND QUESTION, AND IT IS NOT THE SAME ONE (quince#1076). `supported` is the SERVER's answer
+  // about this ADDRESS — false at a bare IP, where an rpId cannot be a domain. `available` is the
+  // BROWSER's answer about this CONNECTION: WebAuthn is secure-context-only, so over plain http
+  // there is no `PublicKeyCredential` and every ceremony fails before it starts. A domain reached
+  // over http answers yes to the first and no to the second, which is the gap this card, the add
+  // row, the login button and the passwordless control all fell into.
+  //
+  // NOT MEMOISED AND NOT IN STATE: it is a property of the document this bundle is running in, so it
+  // cannot change without a reload, and holding it in state would add a source of truth that can go
+  // stale for nothing.
+  const available = webauthnAvailable();
   // `has_password` IS NO LONGER READ HERE, AND THAT IS THE SLICE — qn.6o slice 5. It decided whether
   // to offer the removal fallback: *"absent is treated as NO PASSWORD … it withholds the fallback
   // form rather than offering one against an install that may have nothing to type."* Careful, and
@@ -230,6 +242,19 @@ export function Passkeys() {
           Passkeys need a domain name over https, and you have reached quince at{" "}
           <span className="font-mono">{rpID}</span>. A reverse proxy or Tailscale gives you
           one; an address like this cannot hold a passkey.
+        </p>
+      ) : null}
+
+      {/* THE OTHER REASON, SAID ONLY WHEN IT IS THE ONE THAT APPLIES (quince#1076). The banner above
+          already names https, so on a bare IP over plain http — both true at once — this would be
+          the second sentence saying it. It renders where the address is fine and the CONNECTION is
+          not, which is a domain reached over http: the case the banner above cannot describe and the
+          one where the remedy is different, because https is reachable here and a new hostname is
+          not needed. */}
+      {data && supported && !available ? (
+        <p className="mt-3 rounded-card border border-line bg-bg px-3 py-2 text-sm text-warn">
+          Passkeys need an https connection, and you have reached quince over plain http. The
+          controls are hidden rather than shown failing — set up https and they come back.
         </p>
       ) : null}
 
@@ -343,7 +368,10 @@ export function Passkeys() {
           what they do after, and a new passkey then appears directly above the row that created it.
           It replaces an *Add a passkey* button that opened `AddPasskeyDialog`; that dialog is gone,
           and with it the fourth copy of the registration ceremony. */}
-      <AddPasskeyRow supported={supported} onAdded={invalidate} />
+      {/* `supported && available` — BOTH QUESTIONS, ONE PROP. The row's own contract is "can a
+          credential be created here", and until quince#1076 it was answered by the server's half
+          alone, so over plain http it rendered live and threw on submit. */}
+      <AddPasskeyRow supported={supported && available} onAdded={invalidate} />
 
       {/* THE rpId HAZARD, STATED WHERE THE CREDENTIAL IS CREATED — the ruling asks for exactly this,
           and not only in the docs. Nothing in WebAuthn warns about it, and the failure looks like

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor } from "@/lib/api";
 import { changePassword, removePassword } from "@/lib/auth";
+import { webauthnAvailable } from "@/lib/webauthn";
 import { passkeysKey, usePasskeyList, rpIDOf, worksHere, type PasskeyList } from "@/features/settings/Passkeys";
 
 // The password controls on `/settings/auth` — qn.6m slice 6b, D4 and D7.
@@ -458,7 +459,21 @@ export function PasswordControls() {
           </p>
         </section>
       ) : null}
-      {hasPassword ? (
+      {/* AND NOT WHERE A PASSKEY CANNOT BE CREATED AT ALL (quince#1076). This was the sharpest of the
+          three surfaces offering a ceremony the browser cannot start: it is a DESTRUCTIVE change
+          whose replacement credential is unobtainable on the connection the reader is using. Over
+          plain http `navigator.credentials` does not exist, so *"remove the password and use Face ID
+          or Touch ID"* is an offer to lock yourself out.
+
+          IT DOES NOT CONTRADICT THE `NOT DISABLED WHEN IT CANNOT WORK` PARAGRAPH BELOW, which is
+          about the server's rpId rule and stands unchanged. That rule is the server's to enforce and
+          to name addresses for; whether THIS BROWSER exposes WebAuthn is a client fact the server
+          cannot see, so nothing here re-derives a server decision.
+
+          IT SAYS NOTHING IN PLACE OF ITSELF, on purpose: the Passkeys card sits directly above this
+          one on Settings → Auth and carries the single explanation. A second copy here would be the
+          same sentence twice on one screen. */}
+      {hasPassword && webauthnAvailable() ? (
       <section>
         <h2 className="text-sm font-semibold">Sign in with a passkey only</h2>
         <p className="mt-1 max-w-xl text-sm text-muted">
