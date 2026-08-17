@@ -101,7 +101,7 @@ export function AuthPage({
       // Corrected rather than left standing — a documented reason for the middle step to differ is
       // exactly what would send the next reader to re-widen it, or to file a defect against a
       // deliberate change.
-      "min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg"
+      "min-h-dvh overflow-x-clip bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg"
     : // A CARD sits toward the top on a phone so the keyboard / Face ID sheet has room below it
       // (dead-centring looks unbalanced once the sheet slides up), and centres on desktop.
       "flex min-h-dvh items-start justify-center bg-bg pb-6 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(4rem,env(safe-area-inset-top))] text-fg sm:items-center sm:py-6";
@@ -111,8 +111,16 @@ export function AuthPage({
   // safe-area insets; a `min-h-dvh` inside one would push its own content off the bottom.
   const outerClass = isBare ? "" : outer;
 
+  // `max-w-2xl` IS THE ONBOARDING FLOW'S WIDTH, shared with the https and storage steps so the
+  // wordmark, the heading and the left edge land in the same place on all three (Operator direction,
+  // 2026-08-17). It is a READABLE MEASURE for a form and its prose; the one artifact that wants more
+  // — the zfs helper script — grows rightwards out of its column rather than widening every page.
+  //
+  // THE PADDING IS OUTSIDE THIS BOX, which is what makes the number comparable with the storage
+  // step's: `box-sizing: border-box` caps padding as well as content, and two steps once sat 48px
+  // apart from rules that both read `max-w-xl`.
   const box = isPage
-    ? "mx-auto w-full max-w-4xl"
+    ? "mx-auto w-full max-w-2xl"
     : isBare
       ? "w-full"
       : "w-full max-w-sm rounded-card border border-line bg-card p-6";

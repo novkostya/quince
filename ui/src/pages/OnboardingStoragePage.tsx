@@ -46,15 +46,16 @@ export function OnboardingStoragePage() {
     // AuthPage's own comment says it was built to look like THIS page. It could not, because the
     // difference is where the padding sits rather than what either file says the width is.
     //
-    // THE WIDTH IS `max-w-4xl` BECAUSE THIS PAGE SETS THE FLOOR FOR THE FLOW (Operator, 2026-08-13,
-    // raised 2026-08-14): it renders the whole `quince-zfs-helper` script, whose longest line is 113
-    // characters, and at `2xl` it was still clipped — the script does not wrap, it scrolls. The other
-    // two steps followed it up rather than this one being narrowed to them.
+    // THE WIDTH IS `max-w-2xl`, THE SAME ON ALL THREE STEPS (Operator direction, 2026-08-17). This
+    // page no longer sets the floor for the flow: the `quince-zfs-helper` script — 113 characters at
+    // its longest line, and the reason the flow was once sized at `4xl` — now GROWS RIGHTWARDS out of the
+    // column (`CodeBlock wider`) instead of widening every page that shares the flow with it. It
+    // still scrolls horizontally underneath that, since no width fits 113 characters on a phone.
     //
     // The safe-area insets come with it, for the reason AuthPage carries them: this flow is walked
     // from a phone, and `px-6` alone does not clear a notch.
-    <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      <div className="mx-auto w-full max-w-4xl">
+    <div className="min-h-dvh overflow-x-clip bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
+      <div className="mx-auto w-full max-w-2xl">
         {/* THE WORDMARK, which the other two first-run steps carry and this one did not. Onboarding
             is three consecutive full-page steps — password, https, storage — and it was the only
             one that dropped it, so the flow lost its anchor exactly once, in the middle. Same

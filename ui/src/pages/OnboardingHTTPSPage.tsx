@@ -51,18 +51,22 @@ export function OnboardingHTTPSPage() {
     // that does NOT is `lvh` — and this route is a sibling of `AppLayout` rather than a child, so
     // the document scrolls. A transient lag during the toolbar animation costs a brief scroll, not
     // reachability. Do not "unify" this with the authed shell's rule without reading that comment.
-    <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      {/* `max-w-4xl`, AND IT IS THE OTHER TWO STEPS THAT MOVED TO MATCH IT — Operator direction
-          2026-08-13. The first attempt at making the three consistent narrowed THIS page instead,
-          on the argument that 36rem is the better measure for prose. That was the wrong direction,
-          and the storage step is why: it renders the whole `quince-zfs-helper` script, whose lines
-          run past 90 characters, and at 36rem the script was clipped mid-line. A width chosen for
-          prose is not a width that can hold a shell script, and the flow has to fit its widest
-          step rather than its most readable one.
+    <div className="min-h-dvh overflow-x-clip bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
+      {/* `max-w-2xl`, AND ALL THREE ONBOARDING STEPS CARRY IT — Operator direction, 2026-08-17. The
+          flow is a form and prose, and both want a readable measure.
+
+          THE ONE ARTIFACT THAT DOES NOT IS THE ZFS HELPER SCRIPT, and it no longer decides this
+          width: it GROWS RIGHTWARDS out of the column instead (`CodeBlock wider`), so the page stays narrow
+          while the script keeps its natural shape. Sizing three pages around an artifact that sits
+          behind a disclosure is what made the password step read as an essay form.
+
+          `overflow-x-clip` ON THE ROOT IS PART OF THAT rather than decoration: the breakout is
+          measured in `vw`, which includes the scrollbar, so a few pixels of overhang need absorbing
+          without creating a scroll container.
 
           The heading is `text-xl` — AuthPage's own rule is that a PAGE's heading is `text-xl` and a
-          CARD's is `text-base`, and this is a page. That half of the alignment stands. */}
-      <div className="mx-auto w-full max-w-4xl">
+          CARD's is `text-base`, and this is a page. */}
+      <div className="mx-auto w-full max-w-2xl">
         {/* THE THIRD SURFACE. This route sits outside every guard and outside `AuthPage`, so
             neither of the other two placements reaches it — and it is the page a user lands on
             precisely when transport is what they are dealing with. Above the wordmark, as on

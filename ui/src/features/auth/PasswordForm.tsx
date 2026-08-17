@@ -143,7 +143,18 @@ export function PasswordForm({
     // and the two box shapes moved there intact, because they are true of every auth surface and
     // this component is no longer the only one.
     <AuthPage variant={variant} title={title} subtitle={subtitle} notice={notice} onSubmit={submit}>
-      <>
+      {/* THE CONTROLS ARE CAPPED, THE PAGE IS NOT — Operator direction, 2026-08-17, and the same rule
+          `AddStorageForm` follows with its own `fieldWidth`. A username, a password and one button do
+          not get easier to use by being as wide as the prose above them; at the page's full measure
+          they read as essay fields.
+
+          `max-w-md` RATHER THAN THE PAGE'S `2xl`, and rather than the storage form's `xl`: this form
+          holds two short values where that one holds paths and dataset names. Same rule, different
+          content, which is why the number lives with the form and not with the page.
+
+          IT WRAPS THE WHOLE COLUMN, so the submit button and the passkey row cannot drift out of line
+          with the fields the next time one of them is edited on its own. */}
+      <div className="max-w-md">
         {/* THE ANCHOR, NOT A CHOICE THE USER HAS — quince#819. A password manager keys a credential
             on (origin, username). quince asks for two DIFFERENT passwords on one origin — this one
             and the per-device backup password in `EncryptionDialog` — and until this field existed
@@ -259,7 +270,7 @@ export function PasswordForm({
           </Button>
         ) : null}
         {footer}
-      </>
+      </div>
     </AuthPage>
   );
 }
