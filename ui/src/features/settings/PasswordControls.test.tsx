@@ -6,6 +6,7 @@ import { PasswordControls } from "./PasswordControls";
 import { Passkeys } from "./Passkeys";
 import { api, APIError, UnauthorizedError } from "@/lib/api";
 import * as reauth from "@/lib/reauth";
+import { withoutWebAuthn } from "@/test/webauthn";
 
 // qn.6m slice 6b — D4 and D7. The change form is ordinary; everything interesting is on the REMOVE
 // side, where the decision is irreversible without console access and the server is the only thing
@@ -571,5 +572,47 @@ describe("quince#1000 — the fields stop looking full", () => {
     await screen.findByText(/current password is incorrect/i);
     expect(reset).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Current password")).toHaveValue("wrong");
+  });
+});
+
+// THE SHARPEST OF quince#1076's THREE SURFACES: a DESTRUCTIVE change whose replacement credential is
+// unobtainable on the connection the reader is using.
+//
+// Over plain http `navigator.credentials` does not exist, so *"remove the password entirely and use
+// Face ID or Touch ID"* is an offer to lock yourself out. The server cannot refuse it on this
+// ground — whether a browser exposes WebAuthn is not a fact the server has — so nothing but the
+// client can withhold it.
+//
+// IT SAYS NOTHING IN ITS PLACE, WHICH IS ASSERTED RATHER THAN ASSUMED. The Passkeys card sits
+// directly above this one on Settings → Auth and carries the single explanation; a second copy here
+// would be the same sentence twice on one screen.
+describe("removing the password over a connection that cannot run WebAuthn", () => {
+  it("does not offer it at all", async () => {
+    await withoutWebAuthn(async () => {
+      renderControls();
+      // Wait on something the surface renders EITHER way, so this cannot pass by asserting absence
+      // against a tree that has not finished loading.
+      await screen.findByLabelText("Current password");
+
+      expect(screen.queryByRole("heading", { name: "Sign in with a passkey only" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Remove password" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("still offers the password change, which is the control that works there", async () => {
+    await withoutWebAuthn(async () => {
+      renderControls();
+
+      expect(await screen.findByLabelText("Current password")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Change password" })).toBeInTheDocument();
+    });
+  });
+
+  // THE CONTROL. Identical fixture, WebAuthn present — without it "not in the document" cannot tell
+  // a correct withholding from a component that stopped rendering.
+  it("offers it where the browser can run a ceremony", async () => {
+    renderControls();
+
+    expect(await screen.findByRole("button", { name: "Remove password" })).toBeInTheDocument();
   });
 });

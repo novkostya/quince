@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Passkeys } from "./Passkeys";
 import { api, APIError, UnauthorizedError } from "@/lib/api";
 import * as reauth from "@/lib/reauth";
+import { withoutWebAuthn } from "@/test/webauthn";
 
 // Fictional domains throughout — a real one is Operator-private and the privacy gate does not catch
 // a bare domain, so the fixture discipline is the control on this rung.
@@ -423,5 +424,74 @@ describe("a refused proof is not swallowed", () => {
 
     await waitFor(() => expect(screen.getByText("phone")).toBeInTheDocument());
     expect(screen.queryByText(/could not confirm with a passkey/i)).not.toBeInTheDocument();
+  });
+});
+
+// THE SECOND REASON A CEREMONY CANNOT RUN, AND IT IS NOT THE ONE ABOVE — quince#1076.
+//
+// `supported` is the SERVER's answer about the ADDRESS: false at a bare IP, where an rpId cannot be
+// a domain. Availability is the BROWSER's answer about the CONNECTION: WebAuthn is
+// secure-context-only. A DOMAIN reached over plain http answers yes to the first and no to the
+// second, which is the case nothing asked about — so the card offered an add row that threw on
+// submit, and `usePasskeyLogin` was the only code in the tree checking the right question.
+//
+// EVERY ASSERTION SITS INSIDE THE AWAITED SCOPE. This card renders twice — loading, then with data —
+// and `webauthnAvailable()` is read on each render, so an assertion made after the scope closed
+// would be testing a tree that had already re-rendered as if https were on.
+describe("a domain reached over plain http", () => {
+  const listAtADomain = { rp_id: HERE, supported: true, passkeys: [] };
+
+  it("says the connection is the problem, not the address", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(listAtADomain);
+
+    await withoutWebAuthn(async () => {
+      renderCard();
+
+      expect(await screen.findByText(/Passkeys need an https connection/)).toBeInTheDocument();
+      // NOT the bare-IP sentence. The two remedies differ — that one needs a new hostname, this one
+      // needs a certificate at the hostname you already have — so saying both would send a reader
+      // looking for a reverse proxy they do not need.
+      expect(screen.queryByText(/Passkeys need a domain name over https/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("stops offering the add row, which would have thrown on submit", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(listAtADomain);
+
+    await withoutWebAuthn(async () => {
+      renderCard();
+      await screen.findByText(/Passkeys need an https connection/);
+
+      // Both controls, because the row disables them from one prop and a regression that reached
+      // only one of them would still leave a live-looking field.
+      expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+      expect(screen.getByLabelText("Passkey name")).toBeDisabled();
+    });
+  });
+
+  // THE CONTROL, because one direction cannot tell "correctly hidden" from "broken". Same list,
+  // same assertions inverted, with WebAuthn present.
+  it("offers it normally where the browser can run a ceremony", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(listAtADomain);
+
+    renderCard();
+
+    await screen.findByText(/tied to the address you set it up on/i);
+    expect(screen.queryByText(/Passkeys need an https connection/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Passkey name")).not.toBeDisabled();
+  });
+
+  // BOTH WRONG AT ONCE IS ONE SENTENCE, NOT TWO. A bare IP over plain http fails both tests, and the
+  // banner above already names https — a second line under it would say the same thing twice on one
+  // screen, which is the noise this issue is about at the level of copy rather than controls.
+  it("says it once when the address is also a bare IP", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ rp_id: "192.0.2.10", supported: false, passkeys: [] });
+
+    await withoutWebAuthn(async () => {
+      renderCard();
+
+      expect(await screen.findByText(/Passkeys need a domain name over https/)).toBeInTheDocument();
+      expect(screen.queryByText(/Passkeys need an https connection/)).not.toBeInTheDocument();
+    });
   });
 });
