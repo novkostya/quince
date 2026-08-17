@@ -66,6 +66,20 @@ export function CertificateApply({
         be a certificate your browser will not accept — quince goes back to what it was serving, and{" "}
         <code className="font-mono">config.yml</code> was never touched.
       </p>
+      {/* THE COST TO **THIS** PAGE, WHICH NOTHING SAID. The moment a certificate is serving,
+          `plainHalf` starts redirecting http to https, so every request from this page is sent to an
+          origin the browser may refuse — the page goes dark along with everything else. The old copy
+          covered it obliquely ("if the page will not load at all, do nothing"), which reads as being
+          about the new tab.
+
+          AND THE FAST EXIT IS NAMED. `certTrial` calls a mid-window restart fail-safe by design: the
+          trial evaporates and the daemon comes back on what `config.yml` names. Offering only "wait
+          ten minutes" under-sells a guarantee the daemon already makes. */}
+      <p className="mt-2 text-muted">
+        This page stops working while the trial runs — quince starts sending http to https at once,
+        so use the link it gives you. If you want out sooner than ten minutes, restart quince: that
+        cancels the trial immediately and nothing was written.
+      </p>
       <div className="mt-3">
         <Button onClick={() => void apply()} disabled={busy}>
           {busy ? "Starting…" : "Try it now"}
@@ -98,8 +112,16 @@ function ConfirmInstructions({ applied }: { applied: CertificateApplied }) {
       <p>
         <strong>quince is serving it now. Confirm within {formatRemaining(remaining)} to keep it.</strong>
       </p>
+      {/* THE COVERAGE CLAIM IS CONDITIONAL NOW, BECAUSE IT WAS AN ASSERTION QUINCE NEVER CHECKED.
+          This read *"at the name the certificate covers"* unconditionally, and on an apply with the
+          name left empty it pointed at whatever address the user was on — an IP, in the walk that
+          found it — where the sentence was simply false and the next thing they met was
+          "may be impersonating". The daemon now answers the question it was already composing the
+          URL from. */}
       <p className="mt-2">
-        Open this link. It is the same quince, at the name the certificate covers, over https:
+        {applied.confirm_host_covered
+          ? "Open this link. It is the same quince, at a name this certificate covers, over https:"
+          : "Open this link. It is the same quince over https — but at an address this certificate does not cover, so your browser will warn you first:"}
       </p>
       {/* A NEW TAB, DELIBERATELY. This page is the instructions; a user whose https link fails needs
           to still be looking at them, and on a name that does not resolve a same-tab navigation
@@ -109,10 +131,13 @@ function ConfirmInstructions({ applied }: { applied: CertificateApplied }) {
           {confirmURL}
         </a>
       </p>
+      {/* THE TWO WAYS OUT, AND THE FAST ONE IS NAMED. Waiting works and is what the design leans on;
+          a restart does the same thing in seconds, because a trial is held in memory and evaporates
+          with the process — fail-safe by construction rather than by a handler running. */}
       <p className="mt-3 text-muted">
-        Your browser may warn you about the certificate — that is what you are testing. If the page
-        will not load at all, do nothing: quince goes back by itself, nothing was saved, and you can
-        try a different name or a different file.
+        If the page will not load at all, do nothing: quince goes back by itself in a few minutes,
+        nothing was saved, and you can try a different name or a different file. Restarting quince
+        does the same thing straight away.
       </p>
     </div>
   );

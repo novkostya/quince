@@ -166,7 +166,9 @@ func tlsUnusableCode(cfg config.Config, keeper certKeeper, now time.Time) string
 	// which this endpoint has no opinion about — the certificate STEP asks it, with the name the
 	// user typed. Passing `r.Host` here would report `wrong_host` for every operator reaching a
 	// working certificate by IP, which is not a fault and is not what this branch is about.
-	rep := tlsx.Inspect(cfg.TLS.CertFile, cfg.TLS.KeyFile, "", now)
+	// AND NO CURRENT HOST, for the neighbouring reason: this branch reports WHY a configured pair
+	// did not load, and nothing it renders asks about coverage of any address.
+	rep := tlsx.Inspect(cfg.TLS.CertFile, cfg.TLS.KeyFile, "", "", now)
 	if rep.Outcome == tlsx.OutcomeUsable {
 		// CONFIGURED, INSPECTS CLEAN, AND STILL NOT LOADED. Nothing here can say why — the pair was
 		// readable a moment ago and the daemon is not serving it — so this reports the honest

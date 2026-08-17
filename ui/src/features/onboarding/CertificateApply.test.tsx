@@ -12,6 +12,7 @@ import type { CertificateApplied } from "@/lib/types";
 
 const APPLIED: CertificateApplied = {
   confirm_origin: "https://quince.example:8968",
+  confirm_host_covered: true,
   confirm_token: "tok-abc",
   expires_at: "2026-08-14T14:10:00Z",
   expires_seconds: 600,
@@ -93,6 +94,35 @@ describe("the certificate trial", () => {
     fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
 
     await waitFor(() => expect(screen.getByText(/quince goes back by itself/i)).toBeInTheDocument());
+  });
+
+  // THE COST TO THIS PAGE, WHICH NOTHING USED TO STATE. A live trial makes the plain half redirect
+  // to https at once, so the page issuing these instructions loses its own API along with everything
+  // else. A user who is not told reads the silence as a failure they caused.
+  it("says this page stops working, and names the restart as the fast way out", () => {
+    renderApply();
+    expect(screen.getByText(/This page stops working while the trial runs/i)).toBeInTheDocument();
+    expect(screen.getByText(/restart quince: that\s+cancels the trial immediately/i)).toBeInTheDocument();
+  });
+
+  // THE COVERAGE CLAIM FOLLOWS THE SERVER RATHER THAN BEING ASSERTED. With the name left empty the
+  // confirm link points at the address the user is on, which a certificate for somewhere else does
+  // not cover — and the old copy called that "the name the certificate covers" regardless.
+  it("promises coverage only when the daemon says the confirm origin is covered", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, confirm_host_covered: false });
+    renderApply();
+    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
+
+    expect(await screen.findByText(/your browser will warn you first/i)).toBeInTheDocument();
+    expect(screen.queryByText(/at a name this certificate covers/i)).not.toBeInTheDocument();
+  });
+
+  it("says the address is covered when it is", async () => {
+    vi.spyOn(api, "post").mockResolvedValue(APPLIED);
+    renderApply();
+    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
+
+    expect(await screen.findByText(/at a name this certificate covers/i)).toBeInTheDocument();
   });
 });
 

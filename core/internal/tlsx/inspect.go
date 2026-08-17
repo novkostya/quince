@@ -50,6 +50,17 @@ type Report struct {
 	// fails on a phone that does not, which is the single hardest TLS failure for a person to
 	// diagnose. It is reported rather than judged, because whether it matters depends on the issuer.
 	ChainLength int
+
+	// CoversCurrentHost answers the SECOND coverage question: not *does it cover the name they
+	// typed* — that is `Outcome` — but *does it cover the address this request arrived at*. They are
+	// different questions and the second one is the one nobody was asking.
+	//
+	// IT NEVER CHANGES THE OUTCOME, and that separation is the whole design. A pair that loads,
+	// matches and is in date IS usable; whether it covers the address the caller happens to be
+	// standing on is a fact about the caller, and a certificate reached by IP is a legitimate
+	// install — self-signed, or a LAN with no names — that this product must not refuse. Reported,
+	// so a client can warn. Never promoted to a refusal.
+	CoversCurrentHost bool
 }
 
 // Inspect reads a candidate certificate pair and reports what it is. NO NETWORK, EVER — it answers
@@ -63,7 +74,12 @@ type Report struct {
 // different certificate.
 //
 // `now` IS INJECTED so the validity window is testable without waiting for a certificate to expire.
-func Inspect(certFile, keyFile, hostname string, now time.Time) Report {
+//
+// `currentHost` IS THE ADDRESS IN PLAY AND IS NOT THE SAME ARGUMENT AS `hostname`. `hostname` is the
+// name the user typed — the one they are moving TO — and it decides `wrong_host`. `currentHost` is
+// where the caller is standing, or where a confirmation link is about to point, and it decides only
+// `CoversCurrentHost`. Pass it empty to ask nothing.
+func Inspect(certFile, keyFile, hostname, currentHost string, now time.Time) Report {
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		// BOTH FILES ARE NAMED, AND THE FIRST VERSION PASSED THE LIBRARY'S MESSAGE THROUGH VERBATIM.
@@ -98,6 +114,18 @@ func Inspect(certFile, keyFile, hostname string, now time.Time) Report {
 		NotBefore:   leaf.NotBefore.UTC().Format(time.RFC3339),
 		NotAfter:    leaf.NotAfter.UTC().Format(time.RFC3339),
 		ChainLength: len(pair.Certificate),
+	}
+
+	// ANSWERED HERE, BEFORE THE DATE AND NAME BRANCHES RETURN, so it is reported on every outcome
+	// that got as far as a leaf — including `expired` and `wrong_host`. Those are exactly the cases
+	// where a user is deciding what to type next, and "the address you are on is not covered either"
+	// is part of that picture.
+	//
+	// `VerifyHostname` RATHER THAN A STRING COMPARE against `Names`, because wildcard matching is
+	// RFC 6125 and a hand-rolled `*.` check gets `a.b.example` wrong. The library already does it,
+	// and it is the same call the browser will make.
+	if currentHost != "" {
+		r.CoversCurrentHost = leaf.VerifyHostname(currentHost) == nil
 	}
 
 	// DATES BEFORE THE HOSTNAME, deliberately. An expired certificate that also covers the wrong name

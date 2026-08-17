@@ -105,10 +105,16 @@ export function OnboardingCertificatePage() {
           />
           {/* IT STARTS EMPTY AND IS NEVER PRE-FILLED FROM THE CURRENT ADDRESS (§5). That is the name
               they are LEAVING — an IP or a `.local` — and no CA issues for either. Moving them off it
-              is the entire point of the step. */}
+              is the entire point of the step.
+
+              THE LABEL SAYS WHAT EMPTY MEANS, WHICH IS NOT THE SAME AS SAYING IT IS OPTIONAL. It read
+              *(optional for now)* — a note about a later step, from which a reader cannot tell that
+              leaving it blank aims the whole trial at the address they are on. Optional is how it
+              behaves; *keep using this address* is what it does. */}
           <Field
             id="hostname"
-            label="The name you will reach quince at (optional for now)"
+            label="The name you will reach quince at"
+            hint="Leave it empty to keep using the address you are on now."
             placeholder="quince.example.com"
             value={hostname}
             onChange={(v) => {
@@ -159,12 +165,16 @@ export function OnboardingCertificatePage() {
 function Field({
   id,
   label,
+  hint,
   placeholder,
   value,
   onChange,
 }: {
   id: string;
   label: string;
+  // A SENTENCE UNDER THE LABEL, for the one field whose EMPTY state does something. Kept out of the
+  // label itself so the accessible name stays the name of the thing.
+  hint?: string;
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
@@ -174,8 +184,14 @@ function Field({
       <label className="block text-sm" htmlFor={id}>
         {label}
       </label>
+      {hint ? (
+        <p id={`${id}-hint`} className="mt-0.5 text-xs text-muted">
+          {hint}
+        </p>
+      ) : null}
       <input
         id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
         className="mt-1 w-full rounded-card border border-line bg-bg px-3 py-2 font-mono text-sm text-fg"
         placeholder={placeholder}
         autoCapitalize="none"
@@ -225,6 +241,30 @@ function OfflineResult({ probe }: { probe: CertificateProbe }) {
           This file holds one certificate and no intermediate. That is fine for a self-signed
           certificate; from a CA it often means phones reject it while this computer accepts it.
         </p>
+      ) : null}
+
+      {/* WHAT LEAVING THE NAME EMPTY WILL MEAN, said while the user can still act on it. Empty means
+          *keep using the address I am on*, so the only thing that decides whether that is a good
+          idea is whether this certificate covers that address — a comparison the daemon makes and
+          nothing used to report.
+
+          ONLY WHILE THE FIELD IS EMPTY. Once a name is typed, the address in play is that name and
+          `outcome` already answers coverage for it; saying anything about the address they are
+          leaving would be noise about a place they are on their way out of. */}
+      {ok && probe.hostname === "" && probe.current_host !== "" ? (
+        probe.current_host_covered ? (
+          <p className="mt-2 text-xs text-muted">
+            You are on <code className="font-mono">{probe.current_host}</code>, which this
+            certificate covers — leaving the name empty keeps you there.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs">
+            You are on <code className="font-mono">{probe.current_host}</code>, which this
+            certificate does <strong>not</strong> cover. Leaving the name empty keeps you there, and
+            your browser will warn you about the certificate every time. Type a name it covers to
+            move to one instead.
+          </p>
+        )
       ) : null}
 
       {probe.not_after !== "" ? (

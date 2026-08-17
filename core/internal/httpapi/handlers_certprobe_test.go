@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
 	"github.com/novkostya/quince/core/internal/wire"
@@ -188,5 +189,67 @@ func TestTheProbeReportsNamesAsAnArrayOnEveryFailure(t *testing.T) {
 				t.Errorf("names = %s, want [] — a client reading this as a list gets nothing to read", got)
 			}
 		})
+	}
+}
+
+// THE PROBE REPORTS THE ADDRESS THE CALLER IS STANDING ON, AND WHETHER THE PAIR COVERS IT.
+//
+// That is the question an empty `hostname` leaves unanswered — and empty means *keep using the
+// address I am on*, so it is the only case where the answer decides anything. The verdict is
+// untouched by it: a certificate that does not cover the caller's address is still `usable`, because
+// a self-signed pair or an IP-only LAN install is legitimate and this route must not refuse one.
+func TestTheProbeReportsTheAddressTheCallerIsOn(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+
+	body := `{"cert_file":"` + certFile + `","key_file":"` + keyFile + `"}`
+	rec := postCertProbe(t, NewRouter(testDeps(t)), body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 — %s", rec.Code, rec.Body.String())
+	}
+
+	var got wire.CertificateProbe
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v — %s", err, rec.Body.String())
+	}
+	// THE HOST WITHOUT ITS PORT. `postCertProbe` sends to `quince.example:8968`, and a certificate
+	// covers a name rather than a name and a port.
+	if got.CurrentHost != "quince.example" {
+		t.Errorf("current_host = %q, want quince.example", got.CurrentHost)
+	}
+	if !got.CurrentHostCovered {
+		t.Error("current_host_covered = false for a certificate issued to exactly this host")
+	}
+	if got.Outcome != "usable" {
+		t.Errorf("outcome = %q, want usable — %s", got.Outcome, got.Reason)
+	}
+	// AND THE HOSTNAME FIELD IS STILL EMPTY IN THE ECHO. Reporting where they are must not look like
+	// filling in where they are going (quince#908 §5).
+	if got.Hostname != "" {
+		t.Errorf("hostname = %q, want empty — the field was not sent", got.Hostname)
+	}
+}
+
+// AN UNCOVERED ADDRESS IS REPORTED, NOT REFUSED. This is the walk that found it: a wildcard for
+// another domain, checked from an IP, called usable with nothing said about the address in play.
+func TestAnAddressTheCertificateDoesNotCoverIsStillUsable(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeCertPair(t, dir, "nothing.invalid", time.Now().Add(24*time.Hour))
+
+	body := `{"cert_file":"` + certFile + `","key_file":"` + keyFile + `"}`
+	rec := postCertProbe(t, NewRouter(testDeps(t)), body)
+
+	var got wire.CertificateProbe
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v — %s", err, rec.Body.String())
+	}
+	if got.Outcome != "usable" {
+		t.Fatalf("outcome = %q, want usable — coverage of the caller's address is not a refusal", got.Outcome)
+	}
+	if got.CurrentHostCovered {
+		t.Error("current_host_covered = true for a certificate that covers nothing.invalid")
+	}
+	if got.CurrentHost != "quince.example" {
+		t.Errorf("current_host = %q, want quince.example", got.CurrentHost)
 	}
 }
