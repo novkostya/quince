@@ -182,6 +182,15 @@ func Marshal(c Config) ([]byte, error) { return yaml.Marshal(c) }
 
 // AtomicWrite writes data to a temp file in the same dir, fsyncs, and renames over path —
 // so a reader never sees a half-written config, and a crash mid-write leaves the old file.
+//
+// THE RENAME IS WHAT MAKES `FileText`'s UNLOCKED READ SAFE, AND THAT READER IS REAL (quince#768).
+// `GET /api/config` reads this file at request time holding no write lock, including while a save is
+// in flight — so `os.Rename`'s all-or-nothing swap is the only thing between a concurrent `GET` and
+// a torn document. DO NOT simplify this into a truncate-and-write. It would look correct, pass every
+// test that does not race, and serve a partial file only when a request lands inside the write
+// window — presenting as a Settings panel that occasionally shows a truncated config, which reads as
+// a rendering bug rather than as a write bug. `TestAConcurrentReaderNeverSeesATornConfig` is the
+// guard; the sentence above it was a hypothesis until qn.6j PR 7 gave it a caller.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
@@ -1089,6 +1098,13 @@ func (s *Service) replaceLocked(c Config, source string) ([]wire.ConfigError, []
 // An unreadable or absent file is "" and no error: a fresh install has no file yet, and the panel's
 // job is to show what is there rather than to diagnose. `source.mtime` is empty in that case, which
 // is how a client already distinguishes "not written yet".
+//
+// THE READ IS UNLOCKED, AND IT IS SAFE ONLY BECAUSE `AtomicWrite` RENAMES (quince#768). The mutex
+// here guards `s.path`, not the file: a `replaceLocked` may be writing while this reads, and what
+// makes that a non-event is that the writer builds a temp file and swaps it in with `os.Rename`, so
+// this gets the old bytes or the new bytes and never a prefix of either. Taking the write lock here
+// instead would serialise every `GET /api/config` behind every save for no benefit — the guarantee
+// already exists one layer down. See `AtomicWrite`, which now says the same thing from its end.
 func (s *Service) FileText() string {
 	s.mu.RLock()
 	path := s.path
