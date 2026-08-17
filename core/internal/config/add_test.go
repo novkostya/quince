@@ -104,8 +104,8 @@ func TestAddStorageRefusesAnEmptyOrAutoBackend(t *testing.T) {
 	}
 }
 
-// The ADDED entry carries a concrete backend — asserted on the file, because that is this PR's
-// claim.
+// The ADDED entry carries a concrete backend — asserted on the FILE rather than on the returned
+// config, because what a caller can read back is not evidence about what was written.
 func TestAddStorageWritesAConcreteBackendForTheAddedEntry(t *testing.T) {
 	svc, path := serviceOver(t, oneGoodStorage)
 
