@@ -147,6 +147,45 @@ rather than a silently filtered ladder. That is the intended direction, not an o
 misspelling (`GO_TESTARGS=…`) is still accepted and still does nothing, and no guard here can catch
 that; the refusal above only covers the correctly-spelled name on a target that cannot honour it.
 
+### Reproducing a flake that only fails under the whole-tree run
+
+**Reach for `-cpu=1` before paying for a full ladder per sample.** A Go test in this repository that
+passes on its own and fails only when the whole tree runs is usually **a test racing a goroutine it
+never waited on** — a bus subscriber, a supervise path, an engine still tearing down:
+
+```sh
+make gates-go GO_TEST_ARGS="-run TestX -count=150 -cpu=1 -race ./internal/pkg/"
+```
+
+**Measured on `internal/backup` (quince#1135):** `TestStoryJobsReadAndEvents` at `-count=150 -cpu=1`
+produced **54 failures in 150, in about 22 seconds**. The same flake class had previously absorbed
+**63 targeted iterations with zero failures** (quince#644), whose conclusion was that *"targeting the
+test is the wrong way to chase this — what discriminated was running the whole tree at once"*, at a
+full ladder per sample.
+
+**THAT EXACT COMMAND NOW PASSES, AND THE REASON IS THE POINT.** Re-run on 2026-08-18 against `main`:
+**0 failures in 150, 23.4s, exit 0.** The defect it reproduced — quince#1115, an assertion racing the
+collector goroutine — was fixed by `37cdf0a`, *"an assertion about the collector waits for the
+collector"*. So the number above is a record of what the lever found, not something you can reproduce
+today, and a reader who runs it expecting red would draw the wrong conclusion about the flag.
+**A clean `-cpu=1 -count=150` run is what a repaired happens-before looks like**, which makes the
+command useful in both directions: as a reproducer while a flake is live, and as the check that a fix
+actually closed it.
+
+**It is the mechanism rather than a trick**, which is why it generalises within the class. `-cpu=1`
+sets `GOMAXPROCS`, so a goroutine runs only when the main goroutine yields and the assertion almost
+always wins a race it should not be in. **A contended CI runner is a weaker version of the same
+thing** — which is exactly why this class presents as whole-tree-only: locally, the whole-tree run is
+the only configuration that supplies the contention.
+
+**Two bounds, so it is not oversold:**
+
+- **It reproduces one class, and is not a general flake finder.** Missing happens-before, yes. A
+  fixture race, a filesystem-timing seam (quince#786's mtime) or anything in the browser, no.
+- **A `-cpu=1` failure is not automatically a defect.** It proves an ordering is unguaranteed, which
+  is the thing worth fixing — but a test can also be legitimately single-processor-hostile, and that
+  is a judgement rather than a verdict the flag hands you.
+
 ## Repo layout
 
 | Path | What |
