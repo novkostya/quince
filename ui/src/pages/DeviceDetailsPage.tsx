@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
 import type { Device } from "@/lib/types";
 import { api } from "@/lib/api";
-import { isRunning, useJobsStore } from "@/stores/jobs";
+import { newestRunningJob, useJobsStore } from "@/stores/jobs";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { modelLine } from "@/features/devices/modelName";
@@ -54,7 +54,7 @@ export function DeviceDetailsPage() {
   const versions = useVersionsStore(
     useShallow((s) => s.order.map((id) => s.byId[id]).filter((v) => v.udid === udid)),
   );
-  const activeJob = jobs.find((j) => isRunning(j.state));
+  const activeJob = newestRunningJob(jobs);
   const backup = useBackup(udid);
   // LIFTED HERE so the action row's control and the sentences beneath it share one fetch and one
   // selection (quince#325's rule: the row holds controls, prose goes in the block below — which
