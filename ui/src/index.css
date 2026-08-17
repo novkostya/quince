@@ -134,3 +134,30 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* The indeterminate progress track (components/ui/progress.tsx). A segment travels the width of
+ * the bar to say "working, and I cannot tell you how far" — the honest rendering for the window
+ * where idevicebackup2 has not yet emitted a percentage. Measured 2026-08-16: that window was
+ * 184 s of a 12m42s backup, and it rendered as a bar sitting at zero (quince#376).
+ *
+ * A pure transform, so it composites on its own layer and costs no layout per frame — this runs
+ * on a phone browser watching a NAS. */
+@keyframes quince-indeterminate {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+
+.quince-indeterminate {
+  animation: quince-indeterminate 1.6s ease-in-out infinite;
+}
+
+/* Reduced motion still needs to say "running" — falling back to a STILL bar would restore the
+ * exact ambiguity this exists to remove. A dimmed full-width track reads as active-but-unmeasured
+ * without anything moving. */
+@media (prefers-reduced-motion: reduce) {
+  .quince-indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}

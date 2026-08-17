@@ -70,7 +70,14 @@ describe("DeviceCard", () => {
   it("narrates verify and commit instead of lingering on 'Backing up' at 100% (finding iv)", () => {
     useJobsStore.getState().upsert(job("backing_up", 100));
     renderCard(device());
-    expect(screen.getByText("Backing up")).toBeTruthy();
+    // WAS `getByText("Backing up")`, and the new expectation serves this test's own title better
+    // than the old one did. A job at 100% that is still `backing_up` now reads "Finishing up":
+    // idevicebackup2 latches its progress once the device reports 100 and goes on working
+    // (idevicebackup2.c:2523, tag 1.4.0), so "Backing up" beside a full bar WAS the lingering this
+    // test is named for. Measured on the lab rig 2026-08-16: 50 s in that state, of which verify
+    // and commit were 3 s (quince#808).
+    expect(screen.getByText("Finishing up")).toBeTruthy();
+    expect(screen.queryByText("Backing up")).toBeNull();
 
     // The live WS path: a job.updated arrives, the store changes, the card re-renders itself.
     act(() => useJobsStore.getState().upsert(job("verifying", 100)));
