@@ -37,8 +37,9 @@ behaviour rather than a note.
 - **The iOS Shortcut, `POST /api/automation/backup-opportunity`, and its short-lived token.**
   Deferred to a follow-on rung. **The frozen path in contracts §1 is not touched and not renamed** —
   `/api/device/checkin` was floated and explicitly deferred with it.
-- **Scoped per-device access and QR enrollment** — its own rung; it reopens the `qn.1` security
-  baseline (design §6, roadmap *Later*).
+- **Scoped per-device access and QR enrollment** — its own rung, **pre-`v0.1`**; it reopens the
+  `qn.1` security baseline (design §6). Operator ruling 2026-08-17, recorded on quince#1124 — it was
+  banked as *"Later, not soon"* and that is overturned, so no roadmap section is named here.
 - **The per-device × category notification matrix.** It cannot be specified before that rung decides
   what a principal is. Today's flat per-category keys are the **defaults** it will layer exceptions
   over, so nothing here renames or migrates when it lands.
@@ -48,7 +49,7 @@ behaviour rather than a note.
 
 ---
 
-## Interface facts — measured 2026-08-17 in this checkout at `a784727`, not recalled
+## Interface facts — measured 2026-08-17 in this checkout at `a784727`, re-checked at `ee34873`, not recalled
 
 Canon binds interface facts to a live lookup, and quince#1124 item 5 demands it by name for the
 Add-to-Home-Screen precondition. Each fact below says how it was established.
@@ -115,9 +116,13 @@ to assume from a Vite config — G4.
 total over this list, which is what makes `backup_failed`-the-kind a real closure rather than a
 second name for the same thing.
 
-**9. `authExempt` is FOURTEEN routes, not the five the tests' prose says.** Counted at
-`core/internal/httpapi/middleware.go:73-125`. Recorded because the rung's rule check asserts it adds
-none, and an assertion against a stale number proves nothing.
+**9. `authExempt` is FIFTEEN routes, not the five the tests' prose says.** Counted over the whole of
+`authExempt` at `core/internal/httpapi/middleware.go:73-129` — a range that stops short of the
+closing brace undercounts, which is how this fact was wrong at first reading. The fifteenth is
+`POST /api/config/insecure-transport` at `:127`, and it is the least droppable of them: it is the
+**only pre-auth mutation in the list that is not about obtaining a credential** (Operator ruling
+2026-08-14, quince#908 slice 6), and its own comment says so. Recorded because the rung's rule check
+asserts it adds none, and an assertion against a stale number proves nothing.
 
 ---
 
@@ -476,7 +481,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Secrets discipline** | The VAPID private key is unruled and unbuilt. Subscription keys reach the app DB and nothing else — never argv, never env, never a log line (G6). The backup password is untouched by this rung. |
 | **Subprocesses** | None. This rung spawns no process. |
 | **Every hardware bug becomes a replay fixture** | No hardware path is touched; G7 names what hardware still owes and to what. |
-| **Docs are part of the diff** | Contracts §1 — the frozen kind list at `:1040` and the new endpoints; contracts §6 — the `automation.*` live-key row at `:1716` and the config block at `:1925`; design §4 (terminal → kind) and design §6 (the gap block, in **this** PR). All move with the code that changes them. Coverage and a known-untested list ride each build slice. **quince#1124's own line references — `:1872`, `:2707`, `:2727`, `:2927` — do not resolve in this checkout;** the four above were located by grep at `a784727` and are what the build slices should follow. |
+| **Docs are part of the diff** | Contracts §1 — the frozen kind list at **`:1949-1950`** and the new endpoints; contracts §6 — the `automation.*` live-key row at **`:2843`** and the config block at **`:3073`**; design §4 (terminal → kind) and design §6 (the gap block, in **this** PR). All move with the code that changes them. Coverage and a known-untested list ride each build slice. **quince#1124's own line references — `:1872`, `:2707`, `:2727`, `:2927` — do not resolve in this checkout;** the three above were grepped in **this clone**, at `a784727` and re-checked at `ee34873` after a rebase, and are what the build slices should follow. **The frozen kind list sits directly under `POST /api/automation/backup-opportunity` at `:1941`, which this rung deliberately does not touch** — named because the next reader editing the list is standing next to the endpoint whose deferral is a decision. |
 | **Don't improvise architecture** | VAPID storage is a `PROPOSED (gap)` block and stops that thread. Everything else settled here — D2, D3, D4's `interrupted` row, D5's track, D9's section-rename shape — is inside this rung's boundary and is decided *in the spec*, reviewed before code, which is what §8 asks for. The frozen `/api/automation/backup-opportunity` path is not touched, and its naming question stays deferred. |
 | **Approver ≠ author** | This spec is authored by an implementer session and reviewed by the architect, who has already claimed the review on quince#1124. |
 
