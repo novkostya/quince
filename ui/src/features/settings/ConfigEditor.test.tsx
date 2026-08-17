@@ -75,7 +75,16 @@ function config(storage: StorageEntry[] | null): Config {
     devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
     sessions: { allow_insecure_transport: false },
     reconcile: { interval_minutes: 360 },
-    automation: { staleness_days: 3, reminder_cooldown_hours: 24 },
+    notifications: {
+      staleness_days: 3,
+      reminder_cooldown_hours: 24,
+      overdue_days: 14,
+      backup_available: true,
+      backup_overdue: true,
+      action_required: true,
+      backup_failed: true,
+      backup_completed: false,
+    },
     ui: { theme: "system" },
   } as Config;
 }

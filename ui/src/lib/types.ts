@@ -238,7 +238,19 @@ export interface Config {
   // disables the SCHEDULE only — startup, storage-added and job-end still fire. Here for the same
   // full-document-replace reason as everything else in this interface.
   reconcile: { interval_minutes: number };
-  automation: { staleness_days: number; reminder_cooldown_hours: number };
+  // `notifications:` — was `automation:` until qn.12, when these keys stopped being inert. Every
+  // field is spelled out for the same full-document-replace reason as the rest of this interface:
+  // a PUT sends the whole config back, so a field missing HERE is a field zeroed on the server.
+  notifications: {
+    staleness_days: number;
+    reminder_cooldown_hours: number;
+    overdue_days: number;
+    backup_available: boolean;
+    backup_overdue: boolean;
+    action_required: boolean;
+    backup_failed: boolean;
+    backup_completed: boolean;
+  };
   ui: { theme: string };
 }
 

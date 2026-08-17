@@ -1947,7 +1947,21 @@ POST /api/automation/backup-opportunity {udid, trigger: "connected_to_power" | "
 The Shortcut is a dumb opportunity signal (short-lived token auth); ALL policy is
 server-side: device visibility, staleness threshold, active-job check, reminder
 cooldown. Push kinds (Web Push, qn.12): `backup_available`, `action_required`,
-`backup_completed`, `backup_overdue` — each deep-links to the device page.
+`backup_failed`, `backup_completed`, `backup_overdue` — each deep-links to the device page.
+
+**THE FROZEN FOUR ARE FIVE. `backup_failed` was added by Operator scope on quince#1124** (`qn.12`),
+and it closes a gap rather than adding a flavour: the four routed **every** failure to
+`action_required`, which fits the ASSISTED model's own failures — passcode not entered, device
+locked, confirm not tapped — and does not fit storage unreachable, verify failed or commit failed.
+One kind for both tells a user to go and unlock their phone when the disk is full. The line is **who
+can fix it and where they must be standing**: `action_required` is the phone, `backup_failed` is
+quince. The routing from the job engine's ten error codes is `docs/specs/qn.12/qn.12.md` D4 and is
+total over them, so an eleventh code fails a gate rather than silently sending nothing.
+
+**The endpoint above is NOT this rung's**, and its deferral is a decision: `qn.12` drives the
+opportunity signal from device visibility that quince already has, so the Shortcut, its short-lived
+token and this path all move to a follow-on rung. Nothing here is renamed — `/api/device/checkin` was
+floated and explicitly deferred with it.
 
 ### Versions & browsing
 
@@ -2840,7 +2854,7 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 | `devices.manage_muxer` · `.usbmuxd_socket` · `.netmuxd_addr` | **restart** | **D12 requires this sentence:** a netmuxd restart tears a live Wi-Fi backup, and Wi-Fi is the primary transport — so applying these live means first ruling on what happens to a running transfer. Out of scope for `qn.6g`, named rather than silent. |
 | `tls.cert_file` · `.key_file` | **live** | Rotation was always live — `tlsx.Keeper` re-reads the files. The *paths* became live in quince#900: the mux is bound on every start, so the TLS half exists whether or not a certificate does, and the `tls` applier hands the `Keeper` the new pair. **Turning TLS on and off are both live**, which is what an apply-and-revert flow needs. **An unusable pair is SAVED, WARNED and NOT APPLIED** — an `Applier` runs after the write and structurally cannot refuse it, so the daemon keeps serving the certificate it had and says so in the `PUT` response; it picks the new pair up with no restart once both files are readable. That is deliberately *unlike* startup, where `config.CheckTLS` **refuses to start** — coming up on plain http for somebody who asked for https is a silent downgrade, and there is no response to warn into. A bad edit cannot lock anyone out: the plain half redirects on a certificate being **loaded**, not configured. |
 | `sessions.allow_insecure_transport` | **live** | `qn.6g`'s fifth consumer (quince#900). **Both** consumers moved, and moving one would have been worse than moving neither: the plain half of the mux now reads it **per request** rather than choosing its handler at bind, and the `sessions` applier calls the auth service's setter with **whatever the file says** — including `false`. It was `restart` for two reasons and they were different: the handler choice was fixed at bind, and `applyInsecureTransportOptIn` returned before its setter when the opt-in was off, so a settable field was a **one-way latch** that nothing in a running process could lower. Turning it **on** returns the degraded-mode warning with the `PUT`, which `DegradedModeWarnings` used to emit on load only. |
-| `automation.staleness_days` · `.reminder_cooldown_hours` | **nothing reads it (declared)** | `qn.12`'s — declared debt rather than a defect. |
+| `notifications.*` — `staleness_days` · `reminder_cooldown_hours` · `overdue_days` · the five per-category switches | **live** | `qn.12`. The notifier reads them when it evaluates, which is on a device-presence event, a job terminal, or the hourly tick — so an edit is in force by the next evaluation without a restart. **It was `automation.*` and it was the last occupant of the third bin**; the section was renamed in the same change that gave it consumers, which is the only moment renaming was free. |
 | `ui.theme` | **already live** | Client-side, applied from the `PUT` response. |
 
 **`backup.transport` IS ABSENT BECAUSE THE KEY NO LONGER EXISTS.** `qn.6g`'s spec listed it as
@@ -2860,9 +2874,11 @@ config key "sessions.ttl_minutes" (ignored)` and loses a value that never had an
 does not apply, because there is no successor to name.
 
 **A key in the third bin is not made to work by a restart**, which is the whole reason that bin
-exists. Its remaining occupant is the `automation.*` pair, which is **declared debt for `qn.12`**
-rather than a defect: live-apply cannot make an unread field take effect, and folding a fix in would
-let this table claim a key works when nothing consumes it.
+exists. **The bin is now EMPTY of declared debt.** Its remaining occupant was the `automation.*`
+pair, and `qn.12` discharged it by giving those keys a consumer — the reason the pair sat there was
+never that live-apply was hard, it was that live-apply cannot make an *unread* field take effect.
+`sessions.ttl_minutes` (quince#656) is still in this bin and is a **defect** rather than debt, which
+is the distinction the bin was drawn to keep visible.
 
 **THE UI RENDERS THIS VERDICT AND STORES NOTHING.** *"Restart to apply"* appears where this table
 says **restart** and nowhere else — which today means it appears on no field the Settings form
@@ -3070,9 +3086,34 @@ sessions:
                             #
                             # NEVER send HSTS while this is reachable, or a user who enables it
                             # is locked out with no in-browser recovery. quince sends none.
-automation:                 # assisted-backup policy (consumed from qn.12)
-  staleness_days: 3         # last good backup older than this → backup_available push
+notifications:              # qn.12 — the assisted-backup notification policy. WAS `automation:`,
+                            # renamed in the change that gave these keys consumers; a hand-written
+                            # `automation:` block is now an unknown SECTION and says so, naming the
+                            # successor and echoing what is no longer in force (renames.go).
+                            #
+                            # THE FILE WARNS; THE WIRE REFUSES, and the asymmetry is deliberate.
+                            # `PUT /api/config` decodes with DisallowUnknownFields, so a JSON body
+                            # still carrying `automation` is a 400 rather than a warning. A YAML
+                            # file is hand-edited by a person who should be told what they lost; a
+                            # PUT body is machine-generated from a GET, so an unknown field there
+                            # means a stale client sending a document quince cannot honour, and
+                            # accepting it silently would drop a whole section. Do not "fix" the
+                            # inconsistency by softening the wire.
+  staleness_days: 3         # last good backup older than this → the device is worth a reminder
   reminder_cooldown_hours: 24
+                            # bounds the reminder TRACK, not either kind on it — so escalating from
+                            # backup_available to backup_overdue never produces a second push for
+                            # one lapse.
+  overdue_days: 14          # when a reminder stops being an invitation and becomes a reproach.
+                            # A DECLARED KEY rather than a multiple of staleness_days: "overdue" is
+                            # a claim about the user's tolerance, and a derived threshold is a
+                            # policy nobody can see. Refused if < staleness_days.
+  backup_available: true    # the five per-category switches. Flat and global — the per-device ×
+  backup_overdue: true      # category matrix waits on the rung that decides what a principal is,
+  action_required: true     # and these are the DEFAULTS it will layer exceptions over.
+  backup_failed: true
+  backup_completed: false   # OFF, and the only one that is: a push per successful nightly backup
+                            # is the noise that teaches a person to swipe without reading.
 ui:
   theme: system             # system | light | dark
 ```
