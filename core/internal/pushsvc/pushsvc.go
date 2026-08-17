@@ -8,6 +8,7 @@ package pushsvc
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/push"
@@ -30,6 +31,9 @@ type IDFunc func() string
 
 // Service owns the VAPID key's lifecycle and the subscription list.
 type Service struct {
+	// http is the client deliveries use. Nil means http.DefaultClient; a test injects one so the
+	// send path can be driven against an httptest server without reaching the network.
+	http  *http.Client
 	store Store
 	newID IDFunc
 	now   func() time.Time
@@ -38,6 +42,14 @@ type Service struct {
 func New(s Store, newID IDFunc, now func() time.Time) *Service {
 	return &Service{store: s, newID: newID, now: now}
 }
+
+// WithHTTPClient points deliveries at a specific client.
+//
+// FOR TESTS, AND NOT A CONFIGURATION SEAM. The delivery path has to be drivable against an
+// `httptest` server, because the alternative is a suite that either reaches the real internet or
+// never exercises the code that talks to it. Production passes nothing and gets `http.DefaultClient`;
+// the per-request context is what bounds a delivery, so there is no client-level timeout to tune.
+func (s *Service) WithHTTPClient(c *http.Client) *Service { s.http = c; return s }
 
 // VAPIDPublicKey returns the `applicationServerKey` a browser needs to create a subscription,
 // GENERATING THE KEYPAIR ON FIRST USE.
