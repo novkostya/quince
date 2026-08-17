@@ -1,0 +1,400 @@
+[
+  {
+    "id": "quince-onboard-https",
+    "category": "quince",
+    "name": "quince — Onboarding ▸ HTTPS",
+    "url": "{QUINCE_BASE}/onboarding/https",
+    "settle": 4000
+  },
+  {
+    "id": "quince-onboard-cert",
+    "category": "quince",
+    "name": "quince — Onboarding ▸ Certificate",
+    "url": "{QUINCE_BASE}/onboarding/https/certificate",
+    "settle": 4000
+  },
+  {
+    "id": "quince-onboard-cert-confirm",
+    "category": "quince",
+    "name": "quince — Onboarding ▸ Certificate confirm",
+    "url": "{QUINCE_BASE}/onboarding/https/certificate/confirm",
+    "settle": 4000
+  },
+  {
+    "id": "quince-setup",
+    "category": "quince",
+    "name": "quince — First-run setup (set password)",
+    "url": "{QUINCE_BASE}/setup",
+    "settle": 4000
+  },
+  {
+    "id": "quince-login",
+    "category": "quince",
+    "name": "quince — Sign in",
+    "url": "{QUINCE_BASE}/login",
+    "settle": 4000
+  },
+  {
+    "id": "quince-onboard-storage",
+    "category": "quince",
+    "name": "quince — Onboarding ▸ Storage",
+    "url": "{QUINCE_BASE}/onboarding/storage",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 4000
+  },
+  {
+    "id": "quince-add-storage",
+    "category": "quince",
+    "name": "quince — Add storage",
+    "url": "{QUINCE_BASE}/storage/new",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 4000
+  },
+  {
+    "id": "quince-home",
+    "category": "quince",
+    "name": "quince — Home",
+    "url": "{QUINCE_BASE}/",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 6000
+  },
+  {
+    "id": "quince-device",
+    "category": "quince",
+    "name": "quince — Device details",
+    "url": "{QUINCE_BASE}/",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "steps": [{ "wait": 3000 }, { "click": "a:has-text('family-iphone')" }, { "wait": 3000 }],
+    "settle": 4000
+  },
+  {
+    "id": "quince-settings",
+    "category": "quince",
+    "name": "quince — Settings",
+    "url": "{QUINCE_BASE}/settings",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 4000
+  },
+  {
+    "id": "quince-settings-auth",
+    "category": "quince",
+    "name": "quince — Settings ▸ Sign-in (the page the Operator finds readable)",
+    "url": "{QUINCE_BASE}/settings/auth",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 4000
+  },
+
+  {
+    "id": "quince-storage",
+    "category": "quince",
+    "name": "quince — Storage details",
+    "url": "{QUINCE_BASE}/",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "steps": [{ "wait": 3000 }, { "click": "a[href^='/storage/']" }, { "wait": 3000 }],
+    "settle": 4000
+  },
+  {
+    "id": "quince-home-light",
+    "category": "quince",
+    "name": "quince — Home (light theme)",
+    "url": "{QUINCE_BASE}/",
+    "scheme": "light",
+    "pre": {
+      "url": "{QUINCE_BASE}/",
+      "steps": [
+        { "fill": ["#password", "demo"] },
+        { "press": ["#password", "Enter"] },
+        { "wait": 2500 }
+      ]
+    },
+    "settle": 6000
+  },
+
+  {
+    "id": "github-repo",
+    "category": "mainstream",
+    "name": "GitHub — repository code view",
+    "url": "https://github.com/torvalds/linux"
+  },
+  {
+    "id": "github-issue",
+    "category": "mainstream",
+    "name": "GitHub — issue thread",
+    "url": "https://github.com/novkostya/quince/issues/1155"
+  },
+  {
+    "id": "github-pulls",
+    "category": "mainstream",
+    "name": "GitHub — pull request list",
+    "url": "https://github.com/facebook/react/pulls"
+  },
+  {
+    "id": "gitlab-project",
+    "category": "mainstream",
+    "name": "GitLab — project overview",
+    "url": "https://gitlab.com/gitlab-org/gitlab"
+  },
+  {
+    "id": "stackoverflow",
+    "category": "mainstream",
+    "name": "Stack Overflow — tagged questions",
+    "url": "https://stackoverflow.com/questions/tagged/css"
+  },
+  {
+    "id": "reddit",
+    "category": "mainstream",
+    "name": "Reddit — subreddit feed",
+    "url": "https://www.reddit.com/r/selfhosted/"
+  },
+  {
+    "id": "youtube",
+    "category": "mainstream",
+    "name": "YouTube — watch page",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "steps": [
+      { "click": "button[aria-label*='Accept'], button:has-text('Accept all')" },
+      { "wait": 5000 }
+    ],
+    "settle": 8000
+  },
+  {
+    "id": "npm",
+    "category": "mainstream",
+    "name": "npm — package page",
+    "url": "https://www.npmjs.com/package/react"
+  },
+  {
+    "id": "mdn",
+    "category": "mainstream",
+    "name": "MDN — reference page",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/font-size"
+  },
+  {
+    "id": "stripe-docs",
+    "category": "mainstream",
+    "name": "Stripe — API reference",
+    "url": "https://docs.stripe.com/api"
+  },
+  {
+    "id": "vercel-docs",
+    "category": "mainstream",
+    "name": "Vercel — docs",
+    "url": "https://vercel.com/docs"
+  },
+  {
+    "id": "cloudflare-docs",
+    "category": "mainstream",
+    "name": "Cloudflare — developer docs",
+    "url": "https://developers.cloudflare.com/workers/"
+  },
+  {
+    "id": "linear-docs",
+    "category": "mainstream",
+    "name": "Linear — docs",
+    "url": "https://linear.app/docs"
+  },
+  {
+    "id": "tailwind-docs",
+    "category": "mainstream",
+    "name": "Tailwind CSS — docs",
+    "url": "https://tailwindcss.com/docs/font-size"
+  },
+  {
+    "id": "google-search",
+    "category": "mainstream",
+    "name": "Google — Google Fonts (an app surface Google itself builds)",
+    "url": "https://fonts.google.com/specimen/Inter",
+    "settle": 5000
+  },
+  {
+    "id": "supabase-docs",
+    "category": "mainstream",
+    "name": "Supabase — docs",
+    "url": "https://supabase.com/docs/guides/auth",
+    "settle": 5000
+  },
+  {
+    "id": "hackernews",
+    "category": "mainstream",
+    "name": "Hacker News — front page (deliberate outlier)",
+    "url": "https://news.ycombinator.com/",
+    "scheme": "light"
+  },
+
+  {
+    "id": "grafana",
+    "category": "selfhosted",
+    "name": "Grafana — play instance",
+    "url": "https://play.grafana.org/dashboards",
+    "settle": 8000
+  },
+  {
+    "id": "home-assistant",
+    "category": "selfhosted",
+    "name": "Home Assistant — demo",
+    "url": "https://demo.home-assistant.io/",
+    "steps": [{ "wait": 6000 }],
+    "settle": 12000
+  },
+  {
+    "id": "forgejo",
+    "category": "selfhosted",
+    "name": "Forgejo — Codeberg (a public instance of the self-hosted forge)",
+    "url": "https://codeberg.org/forgejo/forgejo",
+    "settle": 6000
+  },
+  {
+    "id": "openhab",
+    "category": "selfhosted",
+    "name": "openHAB — demo",
+    "url": "https://demo.openhab.org/",
+    "settle": 9000
+  },
+  {
+    "id": "netdata",
+    "category": "selfhosted",
+    "name": "Netdata — public agent dashboard",
+    "url": "https://london3.my-netdata.io/",
+    "settle": 12000
+  },
+  {
+    "id": "jellyfin",
+    "category": "selfhosted",
+    "name": "Jellyfin — stable demo (signed in)",
+    "url": "https://demo.jellyfin.org/stable/web/",
+    "steps": [
+      { "wait": 5000 },
+      { "click": ".manualLoginForm button[type=submit], .btnSubmit, button:has-text('Sign In')" },
+      { "wait": 8000 }
+    ],
+    "settle": 8000
+  },
+  {
+    "id": "immich",
+    "category": "selfhosted",
+    "name": "Immich — demo (signed in)",
+    "url": "https://demo.immich.app/",
+    "steps": [
+      { "wait": 4000 },
+      { "fill": ["input[name=email], #email", "demo@immich.app"] },
+      { "fill": ["input[type=password]", "demo"] },
+      { "click": "button[type=submit]" },
+      { "wait": 9000 },
+      { "goto": "https://demo.immich.app/user-settings" },
+      { "wait": 8000 }
+    ],
+    "settle": 8000
+  },
+  {
+    "id": "portainer",
+    "category": "selfhosted",
+    "name": "Portainer — demo (signed in)",
+    "url": "https://demo.portainer.io/",
+    "steps": [
+      { "wait": 4000 },
+      { "fill": ["input[type=text]", "admin"] },
+      { "fill": ["input[type=password]", "tryportainer"] },
+      { "click": "button[type=submit]" },
+      { "wait": 9000 },
+      { "goto": "https://demo.portainer.io/#!/1/docker/containers" },
+      { "wait": 9000 }
+    ],
+    "settle": 6000
+  },
+  {
+    "id": "synology-dsm",
+    "category": "selfhosted",
+    "name": "Synology DSM — live demo",
+    "url": "https://demo.synology.com/en-global/dsm",
+    "settle": 10000
+  },
+  {
+    "id": "proxmox",
+    "category": "selfhosted",
+    "name": "Proxmox VE — web console (local install)",
+    "url": "{PVE_URL}",
+    "settle": 6000
+  },
+  {
+    "id": "openwrt-luci",
+    "category": "selfhosted",
+    "name": "OpenWrt LuCI (local install)",
+    "url": "{LUCI_URL}",
+    "settle": 5000
+  },
+  {
+    "id": "uptime-kuma",
+    "category": "selfhosted",
+    "name": "Uptime Kuma (local instance, signed in)",
+    "url": "{KUMA_URL}",
+    "steps": [
+      { "wait": 4000 },
+      { "click": "button:has-text('Next')" },
+      { "wait": 6000 },
+      { "fill": ["input[type=text]", "quince"] },
+      { "fill": ["#floatingPassword", "measure-1155"] },
+      { "fill": ["#repeat", "measure-1155"] },
+      { "click": "button[type=submit]" },
+      { "wait": 8000 },
+      { "goto": "{KUMA_URL}/settings/general" },
+      { "wait": 6000 }
+    ],
+    "settle": 6000
+  },
+  {
+    "id": "cockpit",
+    "category": "selfhosted",
+    "name": "Cockpit (local instance)",
+    "url": "{COCKPIT_URL}",
+    "settle": 6000
+  }
+]

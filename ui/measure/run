@@ -1,0 +1,43 @@
+#!/bin/sh
+# Drive ui/measure/probe.mjs inside the pinned Playwright image (quince#1155).
+#
+# The same image the e2e gate uses, so nothing new is installed anywhere — the issue's own
+# constraint. `--network host` because the probe reaches BOTH the open web and a quince demo on the
+# loopback of this box, and a bridged container reaches only one of them.
+#
+#   ui/measure/run [target-id-substring …]      > ui/measure/results.json
+#
+# Placeholders in targets.json (`{QUINCE_BASE}`, `{PVE_URL}`, …) are read from the environment and
+# a target whose placeholder is unset is REPORTED AS NOT RUN, never silently dropped. LAN addresses
+# are Operator-private, which is why they arrive that way rather than living in the file.
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+RUNTIME=${RUNTIME:-$(command -v nerdctl 2>/dev/null || command -v docker 2>/dev/null)}
+IMAGE=${PLAYWRIGHT_IMAGE:-$(sed -n 's/^PLAYWRIGHT_IMAGE=//p' "$ROOT/versions.env")}
+
+[ -n "$RUNTIME" ] || { echo "measure: no container runtime — this cannot run on this box" >&2; exit 2; }
+[ -n "$IMAGE" ] || { echo "measure: PLAYWRIGHT_IMAGE is not in versions.env" >&2; exit 2; }
+
+# The Playwright image ships the BROWSERS, not the npm package, so the driver still has to come
+# from somewhere. It comes from `ui/`'s own lockfile, installed into the same isolated volume the
+# e2e gate uses — the alternative, an ad-hoc `npm i playwright` here, would resolve a version
+# nothing pins and could disagree with the image's browsers.
+RUNNER=$(bin/forge-watch runner get 2>/dev/null || true)
+MODULES="quince-e2e-node-modules${RUNNER:+-$RUNNER}"
+PNPM_VERSION=${PNPM_VERSION:-$(sed -n 's/^PNPM_VERSION=//p' "$ROOT/versions.env")}
+
+# shellcheck disable=SC2016  # the single quotes are the point: `$PNPM_VERSION` and `"$@"` below are
+# expanded by the shell INSIDE the container, against the env this passes in with `-e`. Expanding
+# them here would bake this box's values into a string meant to run somewhere else.
+exec "$RUNTIME" run --rm --network host \
+  -v "$ROOT:/src" -v quince-pnpm-store:/pnpm-store -v "$MODULES:/src/ui/node_modules" \
+  -w /src/ui \
+  -e "PNPM_VERSION=$PNPM_VERSION" \
+  -e PROFILE -e QUINCE_BASE -e PVE_URL -e LUCI_URL -e KUMA_URL -e COCKPIT_URL \
+  "$IMAGE" sh -c '
+    corepack enable >/dev/null 2>&1 || true
+    corepack prepare "pnpm@${PNPM_VERSION}" --activate >/dev/null 2>&1 || true
+    pnpm install --frozen-lockfile --store-dir /pnpm-store >&2
+    cd measure && exec node probe.mjs "$@"
+  ' -- "$@"
