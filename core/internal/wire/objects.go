@@ -546,6 +546,11 @@ type CertificateProbe struct {
 	// then: "does not cover quince.example" is a status, "covers quince.lan, not quince.example" is
 	// something a person can act on. The legacy CN is deliberately absent; no browser has honoured
 	// it since 2017, so listing it would show a name that does not work.
+	//
+	// AN ARRAY ALWAYS, `[]` WHEN THERE IS NO LEAF TO READ. The outcomes that fail before the
+	// certificate parses have no names to report, and a client is entitled to treat this as a list on
+	// every one of them — see the handler, which is where the empty slice is supplied, because a nil
+	// Go slice marshals to `null`.
 	Names []string `json:"names"`
 
 	// NotBefore/NotAfter are RFC3339 UTC, empty when the leaf never parsed. Sent on `usable` too — a

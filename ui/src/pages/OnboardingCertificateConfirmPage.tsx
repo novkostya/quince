@@ -67,6 +67,15 @@ export function OnboardingCertificateConfirmPage() {
               You are reading this over https at this address, which is the proof it needed — and the
               first thing in this whole step that changed a file.
             </p>
+            {/* THE WAY ON. A terminal state needs a forward link or it is a dead end, and this one is
+                the end of the LAST optional step — the user still has an admin password to set and a
+                storage to declare. Relative, so it stays on this origin: the certificate that was
+                just kept is what makes this address the right one to carry on at. */}
+            <p className="mt-3">
+              <Link className="underline" to="/">
+                Continue setting up quince
+              </Link>
+            </p>
           </div>
         ) : token === null ? null : (
           <>
@@ -101,11 +110,16 @@ export function OnboardingCertificateConfirmPage() {
           </>
         )}
 
-        <p className="mt-6 text-sm">
-          <Link className="underline" to="/onboarding/https/certificate">
-            Back to the certificate step
-          </Link>
-        </p>
+        {/* BACKWARDS IS OFFERED ONLY WHILE THERE IS SOMETHING TO GO BACK FOR. Once the pair is kept
+            the step is over, and a link labelled *back to the certificate step* on a finished screen
+            reads as the only way out of it — which is how a success state becomes a dead end. */}
+        {state === "done" ? null : (
+          <p className="mt-6 text-sm">
+            <Link className="underline" to="/onboarding/https/certificate">
+              Back to the certificate step
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   );

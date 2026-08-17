@@ -194,6 +194,12 @@ function Field({
 // "/etc/quince/tls/privkey.pem: private key does not match".
 function OfflineResult({ probe }: { probe: CertificateProbe }) {
   const ok = probe.outcome === "usable";
+  // THE LIST IS READ THROUGH A FALLBACK EVEN THOUGH THE TYPE PROMISES ONE. A field this page reads
+  // structurally — `.length`, `.join` — takes the whole flow down with it if the wire ever disagrees
+  // with the declared type, and this page has no error boundary above it: the user lands on
+  // react-router's default screen with a minified stack and no way back to the step they were on.
+  // The cost of not trusting it here is four characters.
+  const names = probe.names ?? [];
   return (
     <div
       role="status"
@@ -204,9 +210,9 @@ function OfflineResult({ probe }: { probe: CertificateProbe }) {
       </div>
       <p className="mt-2">{probe.reason}</p>
 
-      {probe.names.length > 0 ? (
+      {names.length > 0 ? (
         <p className="mt-2 text-xs text-muted">
-          Covers: <code className="font-mono">{probe.names.join(", ")}</code>
+          Covers: <code className="font-mono">{names.join(", ")}</code>
         </p>
       ) : null}
 

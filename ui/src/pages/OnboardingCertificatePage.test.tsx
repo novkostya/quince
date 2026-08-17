@@ -184,4 +184,31 @@ describe("the certificate step", () => {
     fireEvent.change(screen.getByLabelText(/Key file/i), { target: { value: "/a.key" } });
     expect(screen.getByRole("button", { name: /Check these files/i })).toBeEnabled();
   });
+
+  // THE VERDICT RENDERS EVEN IF `names` ARRIVES AS `null`. The server now sends `[]` on every
+  // outcome, so this asserts the page does not depend on that being true — it reads the field
+  // structurally, and this page sits under no error boundary, so one unexpected null replaces the
+  // whole flow with react-router's default screen and a minified stack.
+  //
+  // THE CAST IS THE POINT: `CertificateProbe` declares an array, so a well-typed mock cannot express
+  // the shape being defended against.
+  it("renders a verdict whose names field is null rather than an array", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      outcome: "unreadable",
+      reason: "/tls/fullchain.pem with /tls/privkey.pem: no such file or directory",
+      names: null,
+      not_before: "",
+      not_after: "",
+      chain_length: 0,
+    } as unknown as CertificateProbe);
+
+    renderPage();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/no such file or directory/i)).toBeInTheDocument();
+    expect(screen.getByText("Not usable")).toBeInTheDocument();
+    expect(screen.queryByText(/^Covers:/)).not.toBeInTheDocument();
+  });
 });

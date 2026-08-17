@@ -82,13 +82,24 @@ func (d Deps) handleCertificateProbe() http.HandlerFunc {
 		}
 
 		rep := tlsx.Inspect(body.CertFile, body.KeyFile, body.Hostname, time.Now())
+
+		// `names` IS AN ARRAY ON THE WIRE, NEVER `null`, AND THE FAILURE PATHS ARE WHY IT NEEDS
+		// SAYING. A nil Go slice marshals to `null`, and `Inspect` returns before it has a leaf to
+		// read names from whenever the pair does not load or does not parse — so `unreadable`,
+		// `mismatched` and `malformed` are exactly the outcomes that would emit a shape the contract
+		// forbids. A client that trusts the declared type reads `.length` off it.
+		names := rep.Names
+		if names == nil {
+			names = []string{}
+		}
+
 		writeJSON(w, d.Log, http.StatusOK, wire.CertificateProbe{
 			CertFile:    body.CertFile,
 			KeyFile:     body.KeyFile,
 			Hostname:    body.Hostname,
 			Outcome:     rep.Outcome,
 			Reason:      rep.Reason,
-			Names:       rep.Names,
+			Names:       names,
 			NotBefore:   rep.NotBefore,
 			NotAfter:    rep.NotAfter,
 			ChainLength: rep.ChainLength,
