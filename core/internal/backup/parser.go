@@ -71,8 +71,8 @@ type parsed struct {
 	//
 	//	sizeFrame — a progress redraw, whatever the unit. The LOG FILTER's question.
 	//	hasBytes  — figures the publisher may use. UNCHANGED by quince#809: plain `Bytes` frames
-	//	            still publish nothing, exactly as before. Whether they SHOULD is quince#808's
-	//	            question and is deliberately not answered here.
+	//	            still publish nothing, exactly as before. Whether they SHOULD was quince#808's
+	//	            question and is now ANSWERED — no. See the guard in parseLine for why.
 	sizeFrame bool
 	hasBytes  bool
 }
@@ -131,12 +131,15 @@ func parseLine(line string) parsed {
 		// Every size pair is a redraw frame — that is the log filter's question, and it is the one
 		// quince#809 is about.
 		p.sizeFrame = true
-		// PUBLISHING IS DELIBERATELY UNCHANGED. A frame whose CURRENT figure is in plain `Bytes` is
-		// a per-file counter at the start of a file, three orders of magnitude below the job total;
-		// letting it set the published figures would make `bytes_done` jitter between scales for no
-		// gain, inside quince#808's open question about those numbers being per-message at all.
-		// So these frames stop flooding the log and go on publishing nothing, which is exactly
-		// what they did before — this fix is a strict no-op on r.BytesDone / r.BytesTotal.
+		// `Bytes` FRAMES PUBLISH NOTHING, AND THAT IS SETTLED RATHER THAN PENDING (quince#808,
+		// closed). This deferred to that issue's "open question about those numbers being
+		// per-message at all" — they ARE per-message, which is exactly why the engine now
+		// accumulates them across batch boundaries instead of publishing each one raw.
+		//
+		// They stay excluded, and the accumulation is what settles it: a plain `Bytes` figure is a
+		// per-file counter at the START of a file, three orders of magnitude below the job total.
+		// Banking one as a batch's value would put a partial figure into a cumulative total, in
+		// exchange for sub-KB granularity that is invisible at GB scale.
 		if !strings.EqualFold(m[2], "Bytes") {
 			p.bytesDone = parseSize(m[1], m[2])
 			p.bytesTotal = parseSize(m[3], m[4])
@@ -164,8 +167,14 @@ func parseSize(num, unit string) int64 {
 	// `BYTES` IS UNREACHED TODAY AND IS HERE ON PURPOSE (quince#809). parseLine does not call this
 	// for a `Bytes` frame — those set `sizeFrame` and stop, so nothing publishes their figures. The
 	// arm exists because the alternative to an unreached case is a silent 0: whoever later decides
-	// that `Bytes` frames SHOULD publish (quince#808's question) removes one `if` in parseLine, and
-	// without this they would get zeroes with nothing to say why.
+	// that `Bytes` frames SHOULD publish removes one `if` in parseLine, and without this they would
+	// get zeroes with nothing to say why.
+	//
+	// THAT DECISION IS ALREADY TAKEN, and against (quince#808, closed): a `Bytes` figure is a
+	// per-file counter at the start of a file, and `bytes_done` is now a cumulative whole-job total,
+	// so banking a partial one would corrupt the sum for sub-KB granularity nobody can see. This arm
+	// is kept anyway — an unreached case that explains itself costs one line and a silent 0 costs an
+	// afternoon.
 	case "B", "BYTES":
 		return int64(f)
 	case "KB":
