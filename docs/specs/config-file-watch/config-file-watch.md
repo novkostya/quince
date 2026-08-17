@@ -137,8 +137,9 @@ the issue asked for a measurement is that the class is known and the instance wa
   **Docker Desktop** deployment on macOS or Windows, where the bind mount crosses a VM boundary and
   the host's writes are relayed by a file-sharing layer rather than performed on the watched inode.
 - **Local filesystems only.** inotify does not see writes made by another host, so a `/data` on
-  **NFS or SMB** — an entirely plausible shape for a NAS deployment — reports nothing. This is not a
-  caveat about containers; it is the property that decides D1.
+  NFS or SMB reports nothing. This is a caveat about the *filesystem*, not about containers.
+  **It does NOT decide D1** — see D1 leg 3. Kept as a measured limit of what F6 covers; it is not an
+  argument for anything.
 - **Not measured on the target hardware.** The probes ran on a session box, not on the low-end
   Synology the product targets.
 
@@ -196,17 +197,37 @@ are the same thing here**, which is what makes D1 easy.
 **Read `config.yml` on a fixed interval and compare the bytes.** No inotify, no `fsnotify`, no
 platform split.
 
-The dependency argument does not decide this — F3 shows inotify is free of one. Three things do:
+The dependency argument does not decide this — F3 shows inotify is free of one, so it applies
+symmetrically and separates nothing. **Which leg carries the conclusion is stated explicitly, because
+a merged spec is citable and the next builder needs to know which one to defend:**
 
-1. **inotify is wrong on the deployments this product is for.** A NAS `/data` on NFS or SMB reports
-   nothing (F6). A watcher that is silently correct on one filesystem and silently inert on another
-   is precisely the *silent fallback* the hard rules forbid — and it would fail in the direction
-   nobody notices, because a hand-edit that does not apply looks exactly like the behaviour we have
-   today.
-2. **The content comparison is required either way** (D2). inotify does not remove it; it adds an
-   event source on top of it. So polling is the *subset*, not the alternative.
-3. **It costs 12 µs a second** (F7), and the whole mechanism is one function with no fd, no
+1. **It costs 12 µs a second** (F7), and the whole mechanism is one function with no fd, no
    requeue-on-`IN_IGNORED`, no `IN_Q_OVERFLOW` path, and nothing to do differently on darwin.
+   **This leg alone is sufficient.** A mechanism this cheap does not need a second reason.
+2. **The content comparison is required either way** (D2). inotify does not remove it; it adds an
+   event source on top of it. So polling is the *subset*, not the alternative — and the machinery it
+   would sit on is not small: F5 shows the naive shape is silently dead, so a correct inotify
+   implementation is a directory watch plus name filtering plus requeue handling, in front of the
+   comparison you were going to write anyway.
+3. **A tiebreaker, and thin — do not lean on it.** inotify reports nothing when the write happens on
+   another host, so a `/data` on NFS or SMB sees no events. **The Operator raised the objection, in
+   full: *"who on Earth would place a config on nfs/smb though? but anyway"*** (2026-08-17, relayed
+   by the architect on quince#1094 after quince#1126 merged). It is fair. `config.yml` lives beside
+   the app DB in the data volume, and an operator who puts *that* on a network share has larger
+   problems than inotify semantics.
+
+   **`but anyway` is quoted deliberately, and it is the half that says what this was.** The
+   objection was raised and the thing was waved through — no change was demanded, and **no ruling
+   was given.** The chain has three links and no verdict in it: *Operator raises an objection →
+   architect agrees and re-weights on quince#1094 → this spec writes it down.*
+
+**This spec argued (3) as a `no silent caps or fallbacks` point and ordered it first.** That reads
+stronger than it is for this file in this deployment, and the objection above — with the architect's
+re-weighting on quince#1094, which is where the reasoning actually happened — is why it now reads
+last. D1 itself is rung-local and was never re-ruled. Corrected rather than deleted: a reader who
+takes the network-filesystem argument for the load-bearing one would think D1 falls if that argument
+is rebutted, and it does not — **poll because it is 12 µs and needs nothing, not because of network
+filesystems.**
 
 **The cost is honest and bounded: latency up to one interval.** For a hand-edit — a human at an
 editor — one second is not a perceptible difference from instant, and it is a **guaranteed** ceiling
@@ -353,7 +374,7 @@ tests already carry.
 
 | rule | how this plan complies |
 | --- | --- |
-| **No silent caps or fallbacks** | The invalid-edit path is the *whole* of D3, and it surfaces through `warnings` + `discarded` rather than a log line. The poll interval is a stated ceiling, not a hidden one. D1 rejects inotify **because** its failure on NFS/SMB would be silent. |
+| **No silent caps or fallbacks** | The invalid-edit path is the *whole* of D3, and it surfaces through `warnings` + `discarded` rather than a log line. The poll interval is a stated ceiling, not a hidden one. **This row does NOT rest on D1** — D1's load-bearing leg is cost, not the network-filesystem case (see D1 leg 3). |
 | **State honesty** | A reload that fails applies nothing and says so; `s.cfg` is not touched on `!OK`. `source.mtime` is updated on both paths so `GET /api/config` never implies the running config came from the file currently on disk when it did not. |
 | **Docs are part of the diff** | contracts §6's *"a hand-edit still needs a restart"* paragraph and §1's `discarded` definition, and D12's *"file-watch pickup"* — all three named in Boundary, all three land with the code. |
 | **Don't improvise architecture** | Two calls are architectural and are **open questions below, not decisions**: the `discarded` widening (a served field) and the poll-vs-inotify choice as a D-level matter. D1/D2/D4/D5 are rung-local — inside `core/internal/config`, changing no contract surface. |
