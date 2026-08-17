@@ -225,6 +225,14 @@ fi
 # password off the pty, and the file still asserts the old shape with every gate green — while
 # reading as a maintainer's considered position. Each entry cites design §6 so the two can be
 # compared by hand, which is again a habit rather than a gate.
+#
+# THAT EXPOSURE IS LIVE RATHER THAN HYPOTHETICAL, and it arrived from the direction this comment
+# did not anticipate (quince#1144 review). The paragraph above imagines code MOVING AWAY from a
+# documented shape. What actually happened is that design §6 documents a `BACKUP_PASSWORD` env
+# fallback the code DECLINED TO BUILD — zero Go files reference it, and pty.go says "never an env
+# var" unprompted — and SECURITY.md's first draft transcribed §6 faithfully, claiming an exposure
+# quince does not have. So the failure mode is not only drift-after-the-fact: a doc can be born
+# wrong by copying canon that is wrong, and every gate is green for that too.
 PROCESS_ONLY='bin docs .claude .github .gitignore README.md CLAUDE.md fly.toml LICENSE CREDITS.md SECURITY.md'
 # Mirrors gate-scope's own coverage: the three directories plus SHARED. `.dockerignore` is here
 # because it is in SHARED (quince#1031) — NOT because listing it here makes the failure go away.

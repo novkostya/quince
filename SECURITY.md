@@ -98,9 +98,10 @@ you can argue with.
   `X-Forwarded-For` is ignored until then. The asymmetry is deliberate and design §6 gives the
   reason: disbelieving one falls back to something true, disbelieving the other falls back to
   something false.
-- **The backup password reaches `idevicebackup2` over a pty, or via `BACKUP_PASSWORD` in the
-  environment of a short-lived child.** Same-uid exposure is accepted; argv is forbidden outright,
-  because `/proc` is world-readable.
+- **The backup password reaches `idevicebackup2` over a controlling pty, and by no other route.**
+  Argv is forbidden outright because `/proc/<pid>/cmdline` is world-readable, and so is the
+  environment; `core/internal/deviceops/pty.go` is the load-bearing path and says so itself. The
+  pty fd is private to the process.
 - **Pairing records under `/data` are private-key-grade secrets** and are mode `0600`, not served
   and not logged. Anyone who can read that directory can talk to the phone.
 - **A secure wipe of on-disk session scratch is not achievable** on SSD or ZFS. The compose
