@@ -1,4 +1,4 @@
-# config file-watch — a hand-edit of `config.yml` applies without a restart
+# qn.6q — a hand-edit of `config.yml` applies without a restart
 
 **Goal.** Someone edits `/data/config.yml` by hand — over SSH, in an editor, from a file manager —
 and the change takes effect the way the same change made through the UI already does: no restart. A
@@ -9,27 +9,32 @@ half — *"edited by the UI and by hand equally"*.
 
 ---
 
-## Status — this spec allocates nothing and schedules nothing
+## Status — ALLOCATED, INSIDE v0.1, and built
 
-- **Ruled post-v0.1, its own rung, UNALLOCATED.** Operator, 2026-08-08, relayed on quince#727:
-  *"two rungs because I want 728 pre-v0.1 while file-watch post-v0.1"*. Split out of `qn.6g` by
+- **`qn.6q`, inside v0.1** — Operator ruling 2026-08-17, taken in session and recorded on
+  [quince#1094](https://github.com/novkostya/quince/issues/1094): *file-watch is in v0.1, build it.*
+  **Relayed by the implementer seat, not posted by the Operator** — quince-devlog#254's open question,
+  and the shape quince-devlog#274 was filed about — so it is recorded on the forge and the docs PR
+  carrying it asks for the Operator's own artifact.
+- **This SUPERSEDES two rulings**, both kept below rather than deleted, because a citation is only
+  worth something if the text it points at is the text that was there: *post-v0.1* (Operator,
+  2026-08-08, relayed on quince#727 — *"two rungs because I want 728 pre-v0.1 while file-watch
+  post-v0.1"*) and *unallocated* (Operator, 2026-08-17, quince#1130, item 4). Split out of `qn.6g` by
   Operator ruling 2026-08-04, option (a), on
   [quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911).
-- **The frontier is `qn.6`, and `qn.6` IS v0.1.** So this spec exists so that the rung can start from
-  one when it is scheduled — canon §8 — and not because the work is next.
 - **The prerequisite is discharged.** quince#764 closed 2026-08-09.
-- **UNALLOCATED IS NOT UNOWNED.** [quince#1130](https://github.com/novkostya/quince/issues/1130) is
-  this rung's tracker until a rung exists, and carries the 2026-08-17 rulings reproduced below.
-  Stated here because *unallocated* reads like *unowned*, and because a ruling that lives only inside
-  a merged doc is a park nobody can see.
+- **quince#1130 remains the tracker for the rung's open question** — question 3 below is still with
+  the Operator. Recorded because *allocated* now reads like *finished*, and one question is not.
 
-**Why this file is not `docs/specs/qn.6n/`.** Two reasons, and the second is canon quoting itself.
-`qn.6` is the v0.1 shape and this is ruled *post*-v0.1, so a `qn.6` letter would assert the opposite
-of the ruling. And `docs/quince.stack.md` D12 already refuses the move in as many words —
-*"Unallocated on purpose, not pending a letter. Naming a rung nobody has agreed to would be this
-file asserting a plan that does not exist"*. A topic directory is precedented here five times over:
-`public-demo/`, `dev-deploy/`, `devct/`, `rung-loop/`, `runner/`. **This file moves to
-`docs/specs/qn.N/qn.N.md` in the first PR of the rung, once the Operator allocates one.**
+**The letter, checked rather than counted.** `docs/specs/` holds `qn.6a … qn.6k`, `qn.6m`, `qn.6n`,
+`qn.6o`, `qn.6p`. **`qn.6l` is a deliberate hole**, spoken for by quince#726 at `qn.6k.md:29` and by
+quince#841, and `qn.6m` explicitly declined to take it for that reason — so the next free letter is
+`qn.6q`. Confirmed by the architect on quince#1094.
+
+**This file lived at `docs/specs/config-file-watch/` until the allocation**, as a topic directory
+precedented by `public-demo/`, `dev-deploy/`, `devct/`, `rung-loop/` and `runner/` — because naming a
+rung nobody had agreed to is *"this file asserting a plan that does not exist"* (D12). That reasoning
+was right and is now spent.
 
 ---
 
@@ -454,8 +459,11 @@ shipping anyway, is an acceptance under `no silent caps or fallbacks` — and th
 rather than assuming them. **The architect's reading is that the recommendation is plainly right, and
 has said so; that is a reading, not a ruling.** The §6 sentence does not land until the ruling exists.
 
-**4. RULED — unallocated STANDS.** The spec stays at `docs/specs/config-file-watch/`; the first build
-PR moves it to `docs/specs/qn.N/qn.N.md` when a rung exists.
+**4. RULED — unallocated STANDS. ~~The spec stays at `docs/specs/config-file-watch/`~~ — SUPERSEDED
+the same day.** The 2026-08-17 in-session ruling recorded on quince#1094 put file-watch inside v0.1,
+which allocated the rung; this file moved to `docs/specs/qn.6q/qn.6q.md` in the docs slice, which is
+what that ruling's own sentence said would happen. **The superseded half is struck rather than
+deleted** because the *unallocated* ruling was cited elsewhere on the day it held — see Status.
 
 ---
 

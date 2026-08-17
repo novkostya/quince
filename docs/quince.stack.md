@@ -705,8 +705,9 @@ destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed co
 YAML as source of truth, atomic canonical writes, `config validate`, a small Settings
 page for safe keys, restart-required for the rest. **Generated doc-comments are CANCELLED by the
 ruling above and land nowhere** — this sentence promised them "with qn.6" until 2026-08-08. The rest
-of the transparent-editor UX still lands with qn.6; file-watch is post-v0.1 and unallocated
-(quince#727). The contract (file-first, no secrets, no UI-only state) binds from day one.
+of the transparent-editor UX still lands with qn.6; **file-watch is `qn.6q`, inside v0.1** — this
+clause said *"post-v0.1 and unallocated (quince#727)"* until the 2026-08-17 ruling below moved it. The
+contract (file-first, no secrets, no UI-only state) binds from day one.
 
 **`restart-required for the rest` DESCRIBES qn.1's PAYLOAD AND IS NO LONGER THE STATE OF THE
 PRODUCT.** `qn.6g` (quince#577) built propagation, so D12's *"needs no restart unless the spec says
@@ -735,6 +736,39 @@ condition the recommendation was accepted on: a setting changed through the UI a
 the same setting hand-edited in `config.yml` still needs a restart until file-watch lands. **Deleting
 the clause rather than re-dating it would have been option (c) — dropping file-watch — which was NOT
 ruled.**
+
+**BUILT, AS `qn.6q`, AND BACK INSIDE v0.1** — Operator ruling 2026-08-17, taken in session and
+recorded on [quince#1094](https://github.com/novkostya/quince/issues/1094), which **supersedes the
+post-v0.1 ruling** relayed on quince#727 and the *unallocated* half above. The two paragraphs before
+this one are a true record of what was decided on 2026-08-04 and are kept for that reason; **the
+interim cost they describe no longer exists.** `qn.6l` is a deliberate hole held for quince#726, so
+the letter is `qn.6q`.
+
+**quince POLLS THE FILE. It does not use `inotify`, and the reason is measured rather than
+preferred** — this paragraph carries the numbers deliberately, because *"we chose polling"* invites
+re-opening on the dependency grounds the measurement already closes:
+
+- **Reading and comparing the whole file costs 12.19 µs** on a realistic 218-byte `config.yml`; a
+  bare `stat` costs 2.33 µs. At one tick per two seconds that is roughly 0.0006% of a core, so the
+  cheap option and the correct one are the same option, and the saving from a stat-first check buys
+  nothing while costing a whole class of reasoning about mtime granularity.
+- **A watch on the file PATH is dead after one write**, measured: `ATTRIB`, `DELETE_SELF`, `IGNORED`,
+  and then nothing for any later change including in-place ones. So a correct `inotify`
+  implementation is a directory watch plus name filtering plus requeue handling **in front of the
+  content comparison it would still need**, because quince's own `AtomicWrite` and an editor's
+  write-then-rename produce identical event sequences apart from the temp file's name. Polling is the
+  subset, not the alternative.
+- **No option costs a dependency**, which is what would have made this D-level: `golang.org/x/sys` is
+  already a direct requirement of `core/go.mod` and exports the `inotify` calls, and the
+  `_linux.go`/`_other.go` split is already in this tree three times. **So there is no new `D<N>`** —
+  Operator ruling 2026-08-17, quince#1130. *"A `D<N>` is for a choice that constrains the stack; this
+  one constrains nothing."*
+
+**A network-filesystem argument was made for polling and is NOT the load-bearing one.** `inotify` sees
+nothing when the write happens on another host, so a `/data` on NFS or SMB would be silently inert —
+but the Operator overruled the premise on 2026-08-17 (*"who on Earth would place a config on nfs/smb
+though?"*), and it is fair: `config.yml` lives beside the app DB in the data volume. **Cost carries
+this alone.** Recorded so nobody defends it on the weak leg.
 
 **RULED (was `PROPOSED (gap)`): a value quince only RENDERS is not a setting, and D12 does not reach it.**
 Operator ruling, 2026-08-02, on quince#470. Raised by `docs/specs/public-demo/public-demo.md`.
