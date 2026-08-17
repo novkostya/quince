@@ -1638,10 +1638,39 @@ B's argument against reconstructing the document applies unchanged: a client tha
 storage list from what it rendered drops every surviving entry's `zfs:` and `retention:` keys,
 because no storage card renders them.
 
-**RULED and IMPLEMENTED: `discarded` — THE FILE ON DISK WAS REFUSED AT LOAD** (Operator ruling
-2026-08-12, [quince#849](https://github.com/novkostya/quince/issues/849)). A boolean, from
-`Loaded.OK` and nothing else: quince is running on `Default()` and **nothing the file declares is in
-effect**.
+**RULED and IMPLEMENTED: `discarded` — THE FILE ON DISK WAS REFUSED** (Operator ruling 2026-08-12,
+[quince#849](https://github.com/novkostya/quince/issues/849), **AMENDED 2026-08-17,
+[quince#1130](https://github.com/novkostya/quince/issues/1130)**). A boolean, from `Loaded.OK` and
+nothing else: **the file on disk was refused, and the running configuration is not what the file
+says.**
+
+**THE AMENDMENT IS A NARROWING OF THE OLD WORDING, NOT A NEW FIELD, AND IT IS RECORDED AS AN
+AMENDMENT BECAUSE quince#849 IS ITSELF AN OPERATOR RULING.** The 2026-08-12 text read *"quince is
+running on `Default()` and nothing the file declares is in effect"* — **both clauses true while the
+only route here was a refusal AT LOAD.** `qn.6q` opened a second route: a hand-edit refused at
+*reload* leaves quince running on **last-good**, which may be a perfectly good document it loaded at
+startup. The first clause goes false there; the second stays true and is what every client branches
+on. Hence the shorter sentence, which covers both doors.
+
+**A SECOND BOOLEAN WAS DECLINED, ON THE RULING'S OWN REASONING**: *"a boolean that no client branches
+on differently is a distinction that costs every client and buys nothing."* **A client that needs the
+distinction can see it** — `discarded` **plus the storage list**, which is the *running* configuration
+rather than the file:
+
+| | quince is on | the true sentence |
+| --- | --- | --- |
+| `discarded` + **no** storage | `Default()` | nothing declared is in effect; **no backups are being made** |
+| `discarded` + storage present | last-good | the file is not in force; **storage is running and backups continue** |
+
+**That pair is near-exhaustive rather than merely tidy**: a *reload* refusal implies quince was
+already running, and quince does not run without storage — so the second row is the hand-edit case in
+practice. Where they overlap, neither is backing anything up, so one sentence is true of both.
+`ConfigView` is the reference implementation and `RequireStorage` derives the same state from the same
+field.
+
+**AND THE CONSEQUENCE THAT IS EASY TO MISS IS A STRENGTHENING**: `AddStorage` refuses while
+`discarded`, so a bad hand-edit means an add is **refused** rather than splicing defaults over an
+unparseable file — quince#852's hazard arriving through a new door and already guarded.
 
 **IT CARRIES THE FATALITY; `warnings` CARRIES THE CAUSE.** That split is the whole design. `warnings`
 is non-empty in two states that want **opposite** answers — a discarded config, where the declared
@@ -1659,7 +1688,15 @@ parsed that their storage is fine and a key was ignored — worse than shipping 
 
 **The consumer rule: branch the HEADLINE on this, render `warnings` either way.** Treating it as
 *"should I show the warnings at all"* would put one signal behind a second gate, which is the defect
-quince#849 was filed about. `OnboardingStoragePage` is the reference implementation.
+quince#849 was filed about. `OnboardingStoragePage` and `ConfigView` are the reference
+implementations.
+
+**THAT RULE WENT UNSATISFIED FOR A WHILE AND NOBODY NOTICED, WHICH IS WORTH THE SENTENCE.** Until
+`qn.6q` the only client branching on `discarded` was `OnboardingStoragePage`, reachable only because
+`RequireStorage` redirects when storage is absent — **an accident of the startup case**, not the rule
+being followed. A hand-edit refused at reload reaches neither: last-good has storage, so no redirect,
+and Settings rendered the cause under *"Configuration warnings"* at the weight of an ignored typo. The
+rung that made the state reachable owed the surface, which is why `ConfigView` now carries one.
 
 **Its companion invariant is gated, because the screen now depends on it: EVERY discard path records
 its cause in `warnings`.** All three do deliberately — the validation branch copies each error across
@@ -2820,18 +2857,41 @@ and no generated annotation** — ruled 2026-08-08, quince#728; this line said *
 generated doc-comments"* until then — file-watch pickup, invalid edits keep last-good + UI banner, no
 secrets ever).
 
-**THE TWO EDITING PATHS DIFFER TODAY, AND THAT IS A RULING'S COST RATHER THAN AN OVERSIGHT.**
-A setting changed **through the UI applies immediately**; the **same setting hand-edited in
-`config.yml` still needs a restart**, because nothing watches the file. `qn.6g` (quince#577) builds
-propagation — `config.Service` telling the running subsystems about its own write — and file-watch
-was **split into its own, unallocated rung** by Operator ruling 2026-08-04, option (a), relayed on
-[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911).
+**THE TWO EDITING PATHS NO LONGER DIFFER — `qn.6q` DISCHARGED THIS.** A setting changed through the
+UI applies immediately, and **so does the same setting hand-edited in `config.yml`**: quince re-reads
+the file every **2 seconds** and, when the bytes are not the ones it last read or wrote, loads them
+and tells the same subsystems a `PUT` tells. *"Edited by the UI and by hand equally"* above is a
+description now rather than a destination.
 
-So *"edited by the UI and by hand equally"* above is the **destination**, and *"file-watch pickup"*
-in that list is **not yet built**. Stated here rather than left for a reader to discover: it was the
-condition the ruling was accepted on, and a document describing a wider reality than the one that
-exists is this project's most-filed defect. Until file-watch lands, a hand-edit is picked up at the
-next start.
+**This paragraph said the opposite until 2026-08-17** — *"the same setting hand-edited in `config.yml`
+still needs a restart, because nothing watches the file"* — which was the stated cost of the
+2026-08-04 ruling that split file-watch out of `qn.6g` into its own rung. That rung is `qn.6q`.
+
+**WHAT A HAND-EDIT DOES NOT CHANGE: the per-key table below.** A reload feeds the *same* appliers a UI
+save feeds, so every key's verdict is identical by construction. A hand-edit of a **restart**-bin key
+is picked up into the running snapshot and **still needs a restart to take effect** — exactly as a UI
+save of that key does. That symmetry is the deliverable; no verdict moved.
+
+**AN INVALID HAND-EDIT CHANGES NOTHING AND SAYS SO.** The running configuration is untouched and no
+applier is called — calling them with `old == next` would assert that something happened — while
+`discarded` goes true with the cause in `warnings`. Repairing the file is picked up by the next poll,
+so **nothing has to be restarted to escape the banner**. That is D12's *"an invalid edit never crashes
+the app: keep running on last-good, show a UI banner naming the bad key"*, and it is why the
+`discarded` definition in §1 had to widen — see the amendment there.
+
+**POLL, NOT `inotify`, AND THE MEASUREMENT IS WHY**, recorded so it is not re-opened on grounds
+already settled. Reading and comparing the whole file costs **12.19 µs** on a realistic 218-byte
+config (`stat` alone is 2.33 µs), so at one tick per two seconds the cheap option and the correct one
+are the same. And a watch on the file **path** is *dead* after one write — measured: `ATTRIB`,
+`DELETE_SELF`, `IGNORED`, then nothing for any later change including in-place ones — so a correct
+`inotify` implementation is a directory watch plus name filtering plus requeue handling **in front of
+the content comparison you were going to write anyway**. No option costs a dependency:
+`golang.org/x/sys` is already a direct requirement. Hence no new `D<N>` (Operator, 2026-08-17,
+quince#1130); `stack.md` D12 carries the paragraph.
+
+**Only `serve` polls.** The admin CLIs run for seconds against the configuration they were invoked
+with, and re-reading underneath one would let a `backup` run change transport or storage half way
+through because somebody saved in another window.
 
 ### Which settings apply live — the per-key answer
 
