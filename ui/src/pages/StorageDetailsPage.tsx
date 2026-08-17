@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Link, useParams } from "react-router-dom";
 import { BackLink } from "@/components/BackLink";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
@@ -185,7 +186,7 @@ export function StorageDetailsPage() {
         />
       </dl>
 
-      <h2 className="mt-8 text-sm font-semibold text-muted">Space</h2>
+      <SectionHeading className="mt-8">Space</SectionHeading>
       <div className="mt-3">
         {pct === null || free === null || total === null ? (
           <div className="text-sm text-muted">
@@ -210,7 +211,7 @@ export function StorageDetailsPage() {
         )}
       </div>
 
-      <h2 className="mt-8 text-sm font-semibold text-muted">Devices</h2>
+      <SectionHeading className="mt-8">Devices</SectionHeading>
       {/* CARDS IN A GRID, the same shape Home uses for devices and storages. Full-width rows made
           each device look like a list entry rather than a peer object, and on a wide screen the
           backup count drifted a long way from the name it belongs to — visible on the staging
@@ -287,7 +288,7 @@ export function StorageDetailsPage() {
         )}
       </div>
 
-      <h2 className="mt-8 text-sm font-semibold text-muted">Backups here</h2>
+      <SectionHeading className="mt-8">Backups here</SectionHeading>
       <div className="mt-3">
         {versions.length === 0 ? (
           <div className="text-sm text-muted">No backups on this storage yet.</div>
@@ -309,7 +310,7 @@ export function StorageDetailsPage() {
           the header already says so. */}
       {!storage.default ? (
         <>
-          <h2 className="mt-10 text-sm font-semibold text-muted">Default storage</h2>
+          <SectionHeading className="mt-10">Default storage</SectionHeading>
           <div className="mt-3 rounded-card border border-line bg-card p-4">
             <p className="text-sm text-muted">
               Backups that do not name a storage go to the default. Making this one the default
@@ -324,7 +325,7 @@ export function StorageDetailsPage() {
 
       {/* Forget sits at the BOTTOM, after everything a user might want to check before deciding —
           the version list directly above it is the answer to "what am I about to detach". */}
-      <h2 className="mt-10 text-sm font-semibold text-muted">Forget</h2>
+      <SectionHeading className="mt-10">Forget</SectionHeading>
       <div className="mt-3 rounded-card border border-line bg-card p-4">
         <p className="text-sm text-muted">
           Remove this storage from quince&apos;s configuration. The backups on the disk are not

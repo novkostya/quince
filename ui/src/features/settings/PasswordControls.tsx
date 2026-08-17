@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -273,9 +274,9 @@ export function PasswordControls() {
         {/* THE HEADING IS THE ACTION, and on a passwordless install the action is SET, not change.
             Same form, same endpoint — `PUT /api/auth/password` treats an absent current password as
             "there is none" — so only the words and the one field differ. */}
-        <h2 className="text-sm font-semibold">
+        <SectionHeading>
           {hasPassword ? "Change your password" : "Set a password"}
-        </h2>
+        </SectionHeading>
         {/* ONE SENTENCE PER STATE, and the two that are not `passwordless` are WARNINGS rather than
             explanations: in both, setting a password is not an improvement to a working setup, it is
             the repair for one that cannot sign anybody in at this address. */}
@@ -397,7 +398,7 @@ export function PasswordControls() {
           form above is the way out of it. */}
       {credentials === "passwordless" ? (
         <section>
-          <h2 className="text-sm font-semibold">You sign in with a passkey only</h2>
+          <SectionHeading>You sign in with a passkey only</SectionHeading>
           <p className="mt-1 max-w-xl text-sm text-muted">
             There is no password on this quince. If you lose the device holding your passkey, the
             only way back is <code className="font-mono text-fg">quince auth reset</code> on the
@@ -417,7 +418,7 @@ export function PasswordControls() {
           quince#895 split this section from `passwordless`, correctly, and one split short. */}
       {credentials === "unconfigured" ? (
         <section>
-          <h2 className="text-sm font-semibold">This quince has no way to sign in</h2>
+          <SectionHeading>This quince has no way to sign in</SectionHeading>
           <p className="mt-1 max-w-xl text-sm text-muted">
             Use the form above — you are signed in now, so you can set a password without console
             access. <code className="font-mono text-fg">quince auth reset</code> is not the way back
@@ -441,7 +442,7 @@ export function PasswordControls() {
           rather than promising one that may not exist. */}
       {credentials === "elsewhere-only" ? (
         <section>
-          <h2 className="text-sm font-semibold">No passkey of yours works at this address</h2>
+          <SectionHeading>No passkey of yours works at this address</SectionHeading>
           <p className="mt-1 max-w-xl text-sm text-muted">
             The form above cannot help here: setting a password now requires proving a credential
             that already works, and none of yours does at this address.
@@ -475,7 +476,7 @@ export function PasswordControls() {
           same sentence twice on one screen. */}
       {hasPassword && webauthnAvailable() ? (
       <section>
-        <h2 className="text-sm font-semibold">Sign in with a passkey only</h2>
+        <SectionHeading>Sign in with a passkey only</SectionHeading>
         <p className="mt-1 max-w-xl text-sm text-muted">
           Remove the password entirely and use Face ID or Touch ID to sign in.
         </p>

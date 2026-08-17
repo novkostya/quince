@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,7 @@ export function PlainHTTPSetting() {
 
   return (
     <section className="mt-8">
-      <h2 className="text-sm font-semibold">Signing in over plain HTTP</h2>
+      <SectionHeading>Signing in over plain HTTP</SectionHeading>
       <p className="mt-1 max-w-xl text-sm text-muted">
         {allowed
           ? "Allowed. Sign-ins over plain HTTP work on this network, and the sign-in travels in the clear — anyone who can see the traffic can sign in as you."
