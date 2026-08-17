@@ -1,5 +1,7 @@
 import type { Device, Job, Op, Version, WSEnvelope } from "@/lib/types";
 import type { DeviceEvent, HelloEvent, JobLogEvent, SessionLockedEvent } from "./types";
+import { configKey } from "@/lib/config";
+import { queryClient } from "@/lib/queryClient";
 import { useConnectionStore } from "@/stores/connection";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore } from "@/stores/jobs";
@@ -51,6 +53,23 @@ export function dispatch(env: WSEnvelope): void {
     }
     case "op.updated":
       useOpsStore.getState().upsert(env.data as Op);
+      break;
+    // THE CONFIG SURFACE CHANGED — REFETCH (quince#1162, Operator ruling 2026-08-17 option C).
+    //
+    // The odd one out in this switch, deliberately: every other case carries a payload into a
+    // zustand store, and this one carries nothing and invalidates a react-query key. That asymmetry
+    // IS the ruling — the event says THAT it changed, the client asks WHAT — which is why `env.data`
+    // is not read here at all.
+    //
+    // IT IS THE ONLY THING THAT REFRESHES AN OPEN PAGE. `refetchOnWindowFocus` is `false` app-wide
+    // (`lib/queryClient.ts`) and `useConfig` sets no interval, so before this event a hand-edit
+    // applied on the server while every open tab kept showing the old document until somebody
+    // reloaded by hand. Deleting this case restores that bug, silently.
+    //
+    // `invalidateQueries` rather than `refetchQueries`: an unmounted config query is marked stale
+    // and refetches when it next mounts, so a background tab costs nothing until it is looked at.
+    case "config.updated":
+      void queryClient.invalidateQueries({ queryKey: configKey });
       break;
     default:
       break;

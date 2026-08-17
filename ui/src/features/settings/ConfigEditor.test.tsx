@@ -298,10 +298,18 @@ describe("ConfigEditor follows the server when the config changes underneath it"
 
 // A DIRTY FORM IS NOT OVERWRITTEN, AND THE USER IS TOLD (quince#764 PR 2).
 //
-// PR 1 re-synced only a CLEAN form, which is the right conservative half: React Query refetches on
-// window focus, so an unconditional re-sync would wipe an edit in progress. It left a window open —
-// a dirty form still saved its stale sections silently. This closes it by SAYING SO rather than by
-// choosing for the user.
+// PR 1 re-synced only a CLEAN form, which is the right conservative half: an unconditional re-sync
+// would wipe an edit in progress. It left a window open — a dirty form still saved its stale
+// sections silently. This closes it by SAYING SO rather than by choosing for the user.
+//
+// THE GUARD BECAME LOAD-BEARING AT quince#1162, and its stated reason was wrong before that. It read
+// *"React Query refetches on window focus"* — false app-wide: `refetchOnWindowFocus` is `false`
+// (`lib/queryClient.ts`), so for most of this guard's life almost nothing re-delivered a config
+// while a form sat open, and it was guarding a door that rarely opened.
+//
+// `config.updated` is what opens it. A hand-edit — or another tab's save — now invalidates the query
+// underneath a form somebody is typing into, which is exactly the collision this describes, arriving
+// for real rather than in theory.
 describe("ConfigEditor when the config changes while the form is dirty", () => {
   function rerenderWith(rerender: (ui: React.ReactElement) => void, c: Config) {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
