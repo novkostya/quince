@@ -55,6 +55,28 @@ jobs:
   # land squarely on that stage. deploy/release-image REFUSES a non-native build rather than
   # silently falling back to it, so a runner label typo fails fast instead of taking an hour.
   #
+  # BOTH LEGS ARE PINNED TO 24.04, AND THE SYMMETRY IS THE POINT (@novkostya, quince#1112 — "why is
+  # amd64 latest while arm64 is pinned to 24.04?").
+  #
+  # The asymmetry was FORCED, not chosen: there is no arm64 `-latest` alias. Checked live 2026-08-17
+  # — the arm labels are `ubuntu-24.04-arm` and `ubuntu-22.04-arm`, with `ubuntu-26.04-arm` in public
+  # preview, and every one of them names a version. `ubuntu-latest` resolves to 24.04 today, so the
+  # two legs agree at the moment of writing and the mismatch was invisible.
+  #
+  # THE REASON TO PIN IS NOT TIDINESS. These two jobs build the two halves of ONE manifest list. When
+  # `ubuntu-latest` rolls to 26.04 — and it will, it is already in preview — the amd64 half would be
+  # built on a newer base OS than the arm64 half, silently, in the artifact users pull. A release
+  # whose architectures were built on different distributions is not a thing anyone decided; it is a
+  # thing an alias did while nobody was reading.
+  #
+  # It is also what the rest of the project already does: `versions.env` pins every toolchain and
+  # base image so that "dev, CI, and the release image compile with byte-identical toolchains", and
+  # D11 says pinning anything other than the newest stable needs a stated why. 24.04 IS the newest
+  # stable — 26.04 is public preview on both architectures — so this needs none.
+  #
+  # `ci.yml` keeps `ubuntu-latest` on purpose and should: gates WANT to meet the new image early, and
+  # a gate that breaks on a runner bump is information. A release build wants the opposite.
+  #
   # fail-fast: false, deliberately. If arm64 fails, amd64's per-arch tag is still published and the
   # `manifest` job does not run — so `:<version>` and `:latest` are never a half-populated manifest
   # list. The partial state is two per-arch tags nobody is pointed at.
@@ -64,7 +86,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
@@ -93,6 +115,12 @@ jobs:
 
   # The two per-arch tags become one multi-arch `:<version>`, plus `:latest` unless the tag is a
   # pre-release. release-image owns that rule and announces when it declines to move `:latest`.
+  #
+  # `ubuntu-latest` HERE AND IN `release` IS DELIBERATE, not two the pin above missed. Those two jobs
+  # BUILD the artifact, so the runner's base OS is an input to what users pull. This one composes a
+  # manifest from digests that already exist and the next one calls `gh`; neither compiles anything,
+  # so a runner bump cannot change their output — only whether the tools are present, which is what
+  # `latest` is good at. Pinning them would buy nothing and imply the reason above was tidiness.
   manifest:
     needs: build
     runs-on: ubuntu-latest
