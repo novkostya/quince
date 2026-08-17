@@ -894,3 +894,17 @@ type PushSubscription struct {
 	ExpiredAt  string `json:"expired_at,omitempty"`
 	LastSentAt string `json:"last_sent_at,omitempty"`
 }
+
+// NotificationsResponse is GET /api/notifications (qn.12, contracts §1).
+//
+// THE PUBLIC KEY RIDES WITH THE LIST because a browser needs it BEFORE it can subscribe, and a
+// second round trip to fetch it would be a round trip whose only purpose is tidiness. It is public
+// by construction — the `applicationServerKey` every subscription is created against.
+//
+// THE CATEGORY TOGGLES ARE NOT HERE. They are config, read through GET /api/config and written
+// through PUT, which is what keeps them hand-editable and restart-free (D12). Duplicating them onto
+// this response would create a second source of truth for a setting the config contract owns.
+type NotificationsResponse struct {
+	VAPIDPublicKey string             `json:"vapid_public_key"`
+	Subscriptions  []PushSubscription `json:"subscriptions"`
+}

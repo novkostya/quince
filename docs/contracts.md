@@ -1996,6 +1996,42 @@ opportunity signal from device visibility that quince already has, so the Shortc
 token and this path all move to a follow-on rung. Nothing here is renamed — `/api/device/checkin` was
 floated and explicitly deferred with it.
 
+### Notifications (qn.12 — the Web Push subscription surface)
+
+```
+GET    /api/notifications
+       → {vapid_public_key, subscriptions: [{id, label, state, created_at, expired_at?, last_sent_at?}]}
+POST   /api/notifications/subscriptions {endpoint, keys: {p256dh, auth}, label}
+       → 201 {id} | 400 bad body | 422 invalid_subscription
+DELETE /api/notifications/subscriptions/{id}
+       → 204 | 404
+```
+
+**Every route is behind `authGuard` and the CSRF guard; `authExempt` does not grow.** Each of its
+fifteen entries exists because it is reachable BEFORE a session can be — obtaining a credential, or
+explaining why you cannot get one. A subscription belongs to somebody already logged in, and the list
+is a **capability inventory**.
+
+**`vapid_public_key` is public by construction** — it is the `applicationServerKey` every subscription
+must be created against, so a browser cannot subscribe without it. **Reading it GENERATES the keypair
+on first use**; the rules governing that are the Operator's ruling (quince#1128, design §6) and live
+in `pushsvc`: never regenerate silently, and no rotation exists. When subscriptions exist without a
+key — a partially restored app DB — this answers **500 `vapid_key_missing`**, whose message names the
+remedy, rather than a bare internal error.
+
+**A subscription's endpoint and keys NEVER appear on this surface.** They are what a sender needs, so
+anyone holding them can push to that device; the list carries a label, a state and timestamps. An
+`expired` row is LISTED rather than hidden — a device that stopped receiving has to be nameable, or
+the failure is invisible until a backup is missed.
+
+**The per-category toggles are NOT here.** They are `notifications:` in `config.yml`, read and written
+through `GET`/`PUT /api/config`, which is what keeps them hand-editable and restart-free (D12). A
+second surface would create a second source of truth for a setting the config contract owns.
+
+**The routes are registered only when the daemon wires push.** `--demo` fabricates its own world and
+has no device to notify, so it leaves them absent rather than serving a handler that has to ask what
+mode it is running in.
+
 ### Versions & browsing
 
 A **Version** is one immutable committed backup — on the zfs backend it IS a

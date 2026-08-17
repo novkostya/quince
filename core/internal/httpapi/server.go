@@ -244,6 +244,17 @@ func NewRouter(deps Deps) http.Handler {
 		apiMux.HandleFunc("DELETE /api/auth/passkeys/{id}", deps.handlePasskeyDelete())
 		apiMux.HandleFunc("PATCH /api/auth/passkeys/{id}", deps.handlePasskeyRename())
 	}
+	// The Web Push surface (qn.12 spec D10). REGISTERED ONLY WHEN WIRED — a nil `Notifications` is
+	// `--demo` and every test router that does not need it, and a route that panicked on nil would
+	// turn "this build has no push" into a 500 on a page that merely asked.
+	//
+	// BEHIND EVERY GUARD, and nothing is added to `authExempt`: a subscription belongs to somebody
+	// who is already logged in, and the list is a capability inventory.
+	if deps.Notifications != nil {
+		apiMux.HandleFunc("GET /api/notifications", deps.handleNotificationsGet())
+		apiMux.HandleFunc("POST /api/notifications/subscriptions", deps.handleNotificationsSubscribe())
+		apiMux.HandleFunc("DELETE /api/notifications/subscriptions/{id}", deps.handleNotificationsUnsubscribe())
+	}
 	apiMux.HandleFunc("GET /api/config", deps.handleConfigGet())
 	apiMux.HandleFunc("PUT /api/config", deps.handleConfigPut())
 	apiMux.HandleFunc("POST /api/config/storage", deps.handleConfigStorageAdd())
