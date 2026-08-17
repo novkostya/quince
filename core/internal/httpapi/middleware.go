@@ -154,11 +154,34 @@ func (d Deps) csrfGuard(next http.Handler) http.Handler {
 			return
 		}
 		if !auth.CheckCSRF(r) {
-			writeError(w, d.Log, http.StatusForbidden, "csrf", "missing or invalid CSRF token")
+			writeError(w, d.Log, http.StatusForbidden, "csrf", d.csrfRefusal(r))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// csrfRefusal is the sentence a person reads when the double submit fails, and it is a sentence
+// rather than a constant because quince KNOWS WHY. Naming the mechanism — a token, a cookie, an
+// acronym — tells the reader about machinery they have no view of and hands them no remedy.
+//
+// ONE CAUSE IS KNOWABLE AND IT IS THE ONE THAT BITES. `CookieWillBeDiscarded` is true for exactly
+// plain http to a non-loopback host, where the cookie is issued `Secure` and a browser will not keep
+// it — so every mutation from such a page fails this check, INCLUDING the certificate step, which is
+// how somebody gets off plain http in the first place. Asked here rather than re-derived: it is the
+// same predicate the login loop of quince#497 is guarded by, and a second copy of a security
+// predicate is a thing that drifts.
+//
+// THE REST STAY ONE SENTENCE, deliberately. A stale tab, a rotated token, a request that came from
+// somewhere else entirely — one remedy covers them, and enumerating causes would be guessing in
+// prose about a request quince cannot see the origin of.
+func (d Deps) csrfRefusal(r *http.Request) string {
+	if d.Auth.CookieWillBeDiscarded(r) {
+		return "this page is plain http, so your browser will not keep the cookie quince uses to " +
+			"recognise its own pages — and without it quince cannot tell that this request came " +
+			"from one. Reach quince over https, or allow plain HTTP first"
+	}
+	return "quince could not tell that this request came from one of its own pages — reload the page and try again"
 }
 
 func isSafeMethod(m string) bool {
