@@ -585,12 +585,48 @@ suites. On tag: goreleaser builds binaries, buildx builds `linux/amd64 + linux/a
 images pushed to `ghcr.io` (Docker Hub mirror optional later), GitHub Release with
 changelog. During pre-public development the same image target pushes to the Operator's
 LAN registry via `make image push REGISTRY=...` (registry/creds via env, never committed).
-Base image: Alpine; ships usbmuxd, netmuxd (pinned, built from source in a CI stage),
-libimobiledevice-progs (later: patched-timeout build). **One binary and no language
-runtime** — the daemon is static Go and the UI is embedded in it, so the image carries
-Apple-protocol userland and nothing else executable.
+Base image: Alpine; ships **libimobiledevice built FROM SOURCE** at a pinned tag with quince's
+in-tree patches, plus its runtime link deps and `openssh-client` for the zfs `hook` transport.
+**One binary and no language runtime** — the daemon is static Go and the UI is embedded in it, so
+the image carries Apple-protocol userland and nothing else executable.
+
+**NO MUXER DAEMON, since qn.6p D1 (Operator, 2026-08-16).** This sentence read *"ships usbmuxd,
+netmuxd (pinned, built from source in a CI stage), libimobiledevice-progs (later: patched-timeout
+build)"* and every clause of it has since gone false: the operator runs a muxer and quince dials it,
+so `devices.manage_muxer: true` is refused at startup and a daemon in the image would be one nothing
+could start. `netmuxd` went with it — and with them went the image's only Rust stage. The
+patched-timeout build is no longer *later*: it is what ships, and it is a source build rather than
+the `-progs` package precisely so the patches survive. Corrected rather than deleted because the
+in-container profile is DESCOPED, not abandoned, and `deploy/Dockerfile` carries the note on what
+restoring it costs — `apk add usbmuxd` replaces quince's patched shared library with a symlink into
+the stock package, silently losing patch 0001.
 
 **Why.** Standard, boring, reproducible; multi-arch is what makes the Synology story real.
+
+**PROPOSED (gap): does quince ship BINARIES at all, or only the image?** Raised by
+[quince#724](https://github.com/novkostya/quince/issues/724) while building the release pipeline.
+Open; nothing is built on a guess about it, and the pipeline publishes the image only.
+
+*"goreleaser builds binaries"* above was written before the product's shape settled, and the shape
+has moved twice since. A bare `quince` binary has no `idevicebackup2`, no `idevicepair` and no
+`ideviceinfo` — so it cannot pair, cannot back up, and is not a working install. What it *can* do is
+`quince config validate`, which D12 already asks scripts and CI to run.
+
+**qn.6p narrows the question without settling it.** Dropping the muxer daemon, netmuxd and the Rust
+stage shrank the gap between *the image* and *the binary* considerably. What remains in the gap is
+the patched libimobiledevice — the one part a user cannot supply from their own distribution,
+because the patches are quince's and unreleased upstream.
+
+Three answers are defensible:
+
+- **ship them anyway** — useful for `quince config validate` today, and for the future where the
+  vault is Go rather than a sidecar;
+- **drop the clause** — the unit of delivery is the image, and a binary that cannot take a backup is
+  a support burden shaped like a product;
+- **defer** — decide it when something needs it.
+
+Which one is right is a **D10 amendment**, not a rung-local call, which is why it is here rather
+than in a spec.
 
 ## D11. Language/toolchain versions & conventions
 
