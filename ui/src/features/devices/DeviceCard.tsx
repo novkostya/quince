@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { modelLine } from "./modelName";
 import { RelativeTime } from "@/components/RelativeTime";
-import { isRunning, useJobsStore } from "@/stores/jobs";
+import { newestRunningJob, useJobsStore } from "@/stores/jobs";
 import { useVersionsStore } from "@/stores/versions";
 import { JobProgressInline } from "@/features/jobs/JobProgress";
 import { useBackup } from "@/features/jobs/useBackup";
@@ -63,7 +63,7 @@ function isFailed(state: Job["state"]): boolean {
 export function DeviceCard({ device }: { device: Device }) {
   const jobsForDevice = (s: { byId: Record<string, Job> }) =>
     Object.values(s.byId).filter((j) => j.udid === device.udid);
-  const activeJob = useJobsStore((s) => jobsForDevice(s).find((j) => isRunning(j.state)));
+  const activeJob = useJobsStore((s) => newestRunningJob(jobsForDevice(s)));
   // The newest attempt for the device (by start time) — its failure drives the "needs attention" line.
   const newestJob = useJobsStore((s) =>
     jobsForDevice(s).reduce<Job | undefined>(
