@@ -705,8 +705,7 @@ destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed co
 YAML as source of truth, atomic canonical writes, `config validate`, a small Settings
 page for safe keys, restart-required for the rest. **Generated doc-comments are CANCELLED by the
 ruling above and land nowhere** — this sentence promised them "with qn.6" until 2026-08-08. The rest
-of the transparent-editor UX still lands with qn.6; **file-watch is `qn.6q`, inside v0.1** — this
-clause said *"post-v0.1 and unallocated (quince#727)"* until the 2026-08-17 ruling below moved it. The
+of the transparent-editor UX still lands with qn.6; **file-watch is `qn.6q`, inside v0.1.** The
 contract (file-first, no secrets, no UI-only state) binds from day one.
 
 **`restart-required for the rest` DESCRIBES qn.1's PAYLOAD AND IS NO LONGER THE STATE OF THE
@@ -716,33 +715,17 @@ with the stated why for each key that stays restart-required, and a third bin fo
 nothing reads. Corrected beside the sentence rather than inside it — that sentence is a true record
 of what qn.1 shipped, and this paragraph is a staging decision rather than a status line.
 
-**FILE-WATCH LIVE RELOAD IS SPLIT OUT OF qn.6, AND ITS RUNG IS UNALLOCATED** — Operator ruling
-2026-08-04, option (a), relayed by architect session `arch1` on
-[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911). The sentence
-above named it as landing *"with qn.6"*, and `qn.6g` (quince#577) is the qn.6 rung that would have
-carried it.
+**FILE-WATCH LIVE RELOAD IS `qn.6q`, INSIDE v0.1, AND BUILT.** Split out of `qn.6g` by Operator
+ruling 2026-08-04, option (a), on
+[quince#577](https://github.com/novkostya/quince/issues/577#issuecomment-5182609911); scheduled into
+v0.1 by Operator ruling 2026-08-17 on
+[quince#1094](https://github.com/novkostya/quince/issues/1094).
 
-**What `qn.6g` builds is PROPAGATION**: `config.Service` tells the running subsystems when **it**
-writes the file, so a change made through the UI takes effect. **Detecting a change somebody else
-made — a hand-edit — is a different mechanism**, deferred rather than dropped: D12's *"edited by the
-UI and by hand equally"* stands as the destination.
-
-**Unallocated on purpose, not pending a letter.** `qn.6h` is quince#591's. Naming a rung nobody has
-agreed to would be this file asserting a plan that does not exist, which is the defect this
-correction exists to fix.
-
-**The interim cost is stated in contracts §6 rather than left to be discovered**, and that was the
-condition the recommendation was accepted on: a setting changed through the UI applies immediately;
-the same setting hand-edited in `config.yml` still needs a restart until file-watch lands. **Deleting
-the clause rather than re-dating it would have been option (c) — dropping file-watch — which was NOT
-ruled.**
-
-**BUILT, AS `qn.6q`, AND BACK INSIDE v0.1** — Operator ruling 2026-08-17, taken in session and
-recorded on [quince#1094](https://github.com/novkostya/quince/issues/1094), which **supersedes the
-post-v0.1 ruling** relayed on quince#727 and the *unallocated* half above. The two paragraphs before
-this one are a true record of what was decided on 2026-08-04 and are kept for that reason; **the
-interim cost they describe no longer exists.** `qn.6l` is a deliberate hole held for quince#726, so
-the letter is `qn.6q`.
+**`qn.6g` built PROPAGATION and `qn.6q` built DETECTION, and they are different mechanisms.**
+Propagation is `config.Service` telling the running subsystems when **it** writes the file, so a UI
+change takes effect. Detecting a change somebody **else** made is the second producer feeding those
+same appliers. Both exist, so D12's *"edited by the UI and by hand equally"* is a description rather
+than a destination.
 
 **quince POLLS THE FILE. It does not use `inotify`, and the reason is measured rather than
 preferred** — this paragraph carries the numbers deliberately, because *"we chose polling"* invites

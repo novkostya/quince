@@ -1644,13 +1644,11 @@ because no storage card renders them.
 nothing else: **the file on disk was refused, and the running configuration is not what the file
 says.**
 
-**THE AMENDMENT IS A NARROWING OF THE OLD WORDING, NOT A NEW FIELD, AND IT IS RECORDED AS AN
-AMENDMENT BECAUSE quince#849 IS ITSELF AN OPERATOR RULING.** The 2026-08-12 text read *"quince is
-running on `Default()` and nothing the file declares is in effect"* — **both clauses true while the
-only route here was a refusal AT LOAD.** `qn.6q` opened a second route: a hand-edit refused at
-*reload* leaves quince running on **last-good**, which may be a perfectly good document it loaded at
-startup. The first clause goes false there; the second stays true and is what every client branches
-on. Hence the shorter sentence, which covers both doors.
+**DO NOT READ IT AS "RUNNING ON `Default()`" — THERE ARE TWO ROUTES HERE AND ONLY ONE OF THEM IS.**
+A refusal **at load** leaves quince on `Default()`. A hand-edit refused at **reload** (`qn.6q`) leaves
+it on **last-good**, which may be a perfectly good document it loaded at startup — storage running,
+backups continuing. What both share, and all this field asserts, is that the running configuration is
+not what the file says.
 
 **A SECOND BOOLEAN WAS DECLINED, ON THE RULING'S OWN REASONING**: *"a boolean that no client branches
 on differently is a distinction that costs every client and buys nothing."* **A client that needs the
@@ -1691,12 +1689,10 @@ parsed that their storage is fine and a key was ignored — worse than shipping 
 quince#849 was filed about. `OnboardingStoragePage` and `ConfigView` are the reference
 implementations.
 
-**THAT RULE WENT UNSATISFIED FOR A WHILE AND NOBODY NOTICED, WHICH IS WORTH THE SENTENCE.** Until
-`qn.6q` the only client branching on `discarded` was `OnboardingStoragePage`, reachable only because
-`RequireStorage` redirects when storage is absent — **an accident of the startup case**, not the rule
-being followed. A hand-edit refused at reload reaches neither: last-good has storage, so no redirect,
-and Settings rendered the cause under *"Configuration warnings"* at the weight of an ignored typo. The
-rung that made the state reachable owed the surface, which is why `ConfigView` now carries one.
+**A CLIENT REACHED ONLY BY `RequireStorage` DOES NOT SATISFY THIS RULE.** That redirect fires when
+storage is *absent*, so it catches the load-refusal case and misses the reload one entirely —
+last-good has storage, so nobody is redirected. A surface that must show the fatality has to render
+where the operator already is. `ConfigView` is why Settings carries one.
 
 **Its companion invariant is gated, because the screen now depends on it: EVERY discard path records
 its cause in `warnings`.** All three do deliberately — the validation branch copies each error across
@@ -2862,10 +2858,6 @@ UI applies immediately, and **so does the same setting hand-edited in `config.ym
 the file every **2 seconds** and, when the bytes are not the ones it last read or wrote, loads them
 and tells the same subsystems a `PUT` tells. *"Edited by the UI and by hand equally"* above is a
 description now rather than a destination.
-
-**This paragraph said the opposite until 2026-08-17** — *"the same setting hand-edited in `config.yml`
-still needs a restart, because nothing watches the file"* — which was the stated cost of the
-2026-08-04 ruling that split file-watch out of `qn.6g` into its own rung. That rung is `qn.6q`.
 
 **WHAT A HAND-EDIT DOES NOT CHANGE: the per-key table below.** A reload feeds the *same* appliers a UI
 save feeds, so every key's verdict is identical by construction. A hand-edit of a **restart**-bin key
