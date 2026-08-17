@@ -1,0 +1,202 @@
+#!/bin/sh
+# go-test-args-test — GO_TEST_ARGS reaches `go test` as ARGUMENTS, never as shell source
+# (quince#1134).
+#
+# WHAT THIS IS ABOUT. `gates-go` builds its container step as `sh -euc '<script>'`, and the targeted
+# override was pasted INSIDE that quoted script:
+#
+#     go test -race -cover $(GO_TEST_ARGS)'
+#
+# make strips nothing, so a caller's own quotes CLOSE the script early and the remainder is parsed as
+# shell source by the recipe's `/bin/sh`. `-run 'TestA|TestB'` — the documented Go idiom for "these
+# tests" — became a pipeline. Measured on `main` before the fix:
+#
+#     $ make gates-go GO_TEST_ARGS="-run 'TestAlpha|TestBeta' -count=2 ./internal/config/"
+#     /bin/sh: TestBeta -count=2 ./internal/config/: not found
+#     make: *** [Makefile:750: gates-go] Error 127
+#
+# THE FAILURE WORE TWO FACES AND ONLY ONE OF THEM IS LOUD. Exit 127 naming a TEST as a missing
+# command is the visible one. The other, hit independently on the same issue, was NO OUTPUT AT ALL
+# with make exiting 0 — and that one reaches PR evidence, because a filter like `grep -c FAIL` reads
+# a suite that never ran as "0 failures". This suite therefore asserts the ARGV, not the exit code:
+# an exit 0 is exactly what the dangerous shape produced.
+#
+# BOTH SITES, AND THE SECOND ONE IS WHY A GATE RATHER THAN A ONE-LINE FIX. quince#1134 states that
+# the PARTIAL RUN banner "passes the same value through `printf '%s'` and is therefore fine". It was
+# not: the banner wrapped the expansion in its own single quotes, which the caller's quotes close in
+# exactly the same way. Two sites, one shape, and reading the file is what separated them — so the
+# thing worth gating is the SHAPE at every site, and the banner has an assertion of its own below.
+#
+# WHY IT DRIVES THE REAL RECIPE. A hermetic mini-Makefile reproducing "the pattern" would pass
+# forever while the real recipe rotted — the vacuity this repository keeps filing (quince#104,
+# quince#272). So this invokes the actual `make gates-go`, with `RUNTIME` pointed at a STUB that
+# records its argv and exits 0. No container is started and nothing is downloaded.
+#
+# HOW IT DISCRIMINATES, since there is no second Makefile to run as a control. Case 1 asserts three
+# things about ONE value at once: `TestA|TestB` is a single argv element (so nothing re-parsed it),
+# while `-run` and the package path are SEPARATE elements (so nothing collapsed the value into one
+# argument either). Neither a re-parsing regression nor an over-quoting one can satisfy both halves,
+# which is what a pass/fail pair would otherwise be needed for. The vacuity guard is separate and
+# hard: if the stub recorded no argv at all, this exits 2 rather than passing over an empty set.
+#
+# MEASURED AGAINST THE PRE-FIX RECIPE, because a gate nobody has seen fail is a gate nobody has
+# tested: `git stash` of the Makefile fix alone turns this red, on the sentinel check below.
+#
+# Three exit codes, the same contract as the other gates here (quince#41):
+#
+#   0  every case passed
+#   1  a case failed — INCLUDING "the args never arrived as argv at all", which is a FINDING and
+#      not a DID NOT RUN: the suite looked, and what it saw is the defect's own shape
+#   2  DID NOT RUN — the stub recorded nothing, so every comparison would be vacuous
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# The stub runtime. It starts nothing: it writes one line per argv element, bracketed so that an
+# element containing a space is still one line, and exits 0.
+cat >"$WORK/rt" <<'STUB'
+#!/bin/sh
+for a in "$@"; do printf '[%s]\n' "$a"; done >>"$ARGV_LOG"
+exit 0
+STUB
+chmod +x "$WORK/rt"
+
+# `_` is the $0 the recipe passes ahead of the value, so it is the marker that separates the
+# container's own flags from the arguments under test. Everything after the LAST `[_]` is what
+# `go test` would have received.
+go_test_argv() { # <stdout-of-a-run>
+	awk '/^\[_\]$/ { n = NR } { line[NR] = $0 } END { for (i = n + 1; i <= NR; i++) print line[i] }' "$1"
+}
+
+run() { # <go-test-args-value|"">  → writes $WORK/out, $WORK/argv; sets RC
+	rm -f "$WORK/argv"
+	: >"$WORK/argv"
+	if [ $# -eq 0 ]; then
+		ARGV_LOG="$WORK/argv" make --no-print-directory gates-go RUNTIME="$WORK/rt" \
+			>"$WORK/out" 2>&1
+	else
+		ARGV_LOG="$WORK/argv" make --no-print-directory gates-go RUNTIME="$WORK/rt" \
+			GO_TEST_ARGS="$1" >"$WORK/out" 2>&1
+	fi
+	RC=$?
+	return 0
+}
+
+expect_argv() { # <name> <value> <expected argv, one element per line>
+	name=$1 value=$2 want=$3
+	run "$value"
+	got=$(go_test_argv "$WORK/argv")
+	if [ "$got" != "$want" ]; then
+		bad "$name"
+		printf '    | value:  %s\n    | wanted: %s\n    | got:    %s\n' \
+			"$value" "$(printf '%s' "$want" | tr '\n' ' ')" "$(printf '%s' "$got" | tr '\n' ' ')"
+		[ "$RC" -eq 0 ] || printf '    | make exited %s:\n' "$RC" && tail -3 "$WORK/out" | sed 's/^/    | /'
+		return
+	fi
+	ok "$name"
+}
+
+# ---------------------------------------------------------------------------------------------
+# THE VACUITY GUARD, first. Everything below compares against what the stub recorded, and two empty
+# sets compare equal — so a run that never reached the container step would turn every assertion
+# green. This is exit 2, DID NOT RUN, never a pass.
+run "-run TestNothing ./internal/config/"
+if ! [ -s "$WORK/argv" ]; then
+	cat >&2 <<-'MSG'
+		go-test-args-test: the stub runtime recorded no argv — make gates-go never reached it.
+	MSG
+	printf 'go-test-args-test: DID NOT RUN. make exited %s:\n' "$RC" >&2
+	tail -10 "$WORK/out" | sed 's/^/  | /' >&2
+	exit 2
+fi
+if ! grep -qF '[_]' "$WORK/argv"; then
+	cat >&2 <<-'MSG'
+		go-test-args-test: FAIL — no underscore sentinel in the recorded argv, so GO_TEST_ARGS did
+		go-test-args-test: not reach the container as positional parameters at all.
+		go-test-args-test:
+		go-test-args-test: TWO READINGS, AND THE MESSAGE CANNOT TELL THEM APART — both need a
+		go-test-args-test: human, which is why this is a finding rather than a DID NOT RUN:
+		go-test-args-test:   (a) quince#1134 has regressed — the value is pasted back inside the
+		go-test-args-test:       quoted script, where a caller's quotes re-open it as shell source;
+		go-test-args-test:   (b) the recipe was deliberately reshaped and still passes argv, but
+		go-test-args-test:       under a different zeroth argument — then it is THIS suite's
+		go-test-args-test:       locator to update.
+		go-test-args-test:
+		go-test-args-test: Read the recorded argv below: under (a) the go-test flags appear INSIDE
+		go-test-args-test: the one long sh -euc script element; under (b) they trail it.
+	MSG
+	tail -10 "$WORK/argv" | sed 's/^/  | /' >&2
+	printf '\ngo-test-args-test: 0 passed, 1 failed\n'
+	exit 1
+fi
+
+# ---------------------------------------------------------------------------------------------
+# (1) THE DEFECT ITSELF — alternation, the case quince#1134 was filed on. Three claims in one:
+# the regex survives as ONE element, and the flag and the package path are still SEPARATE ones.
+expect_argv "a -run alternation reaches go test as one argument, pipe intact" \
+	"-run 'TestAlpha|TestBeta' -count=2 ./internal/config/" \
+	"$(printf '[-run]\n[TestAlpha|TestBeta]\n[-count=2]\n[./internal/config/]')"
+
+# (2) THE REST OF THE `sh -euc` METACHARACTER SET. quince#1134 named these as live for the same
+# reason and they were never the reported symptom, so they are the ones a narrow fix would miss.
+# `$$` is make's own escape for a literal `$`, not this recipe's — anchoring a regex is the ordinary
+# reason to want one, and the help text says so.
+expect_argv "a ; in a value is data, not a command separator" \
+	"-run 'TestA;TestB' ./internal/config/" \
+	"$(printf '[-run]\n[TestA;TestB]\n[./internal/config/]')"
+expect_argv "an && in a value is data, not a shell operator" \
+	"-run 'TestA&&TestB' ./internal/config/" \
+	"$(printf '[-run]\n[TestA&&TestB]\n[./internal/config/]')"
+expect_argv "an anchored regex survives as a literal \$" \
+	'-run '"'"'TestExact$$'"'"' ./internal/config/' \
+	"$(printf '[-run]\n[TestExact$]\n[./internal/config/]')"
+
+# (3) THE UNOVERRIDDEN DEFAULT. The whole-tree run is what the gate MEANS, and a fix that got the
+# targeted path right by breaking it would be worse than the defect.
+run
+if [ "$RC" -ne 0 ]; then
+	bad "the default (whole-tree) run still exits 0"
+	tail -5 "$WORK/out" | sed 's/^/    | /'
+else
+	ok "the default (whole-tree) run still exits 0"
+fi
+if [ "$(go_test_argv "$WORK/argv")" = "[./...]" ]; then
+	ok "the default run still hands go test ./... and nothing else"
+else
+	bad "the default run no longer hands go test ./..."
+	printf '    | got: %s\n' "$(go_test_argv "$WORK/argv" | tr '\n' ' ')"
+fi
+if grep -q 'PARTIAL RUN' "$WORK/out"; then
+	bad "the default run printed a PARTIAL RUN banner — it is not a partial run"
+else
+	ok "the default run prints no PARTIAL RUN banner"
+fi
+
+# (4) THE BANNER, WHICH quince#1134 RECORDED AS SAFE AND WAS NOT. It carried the same
+# `'$(GO_TEST_ARGS)'` shape, so the caller's quotes closed its printf argument in exactly the same
+# way. It is asserted separately from the argv above because the two sites can regress apart, and
+# because this one is what a reader sees: a banner that mangles the regex, above a run that used it
+# correctly, is a false statement about what is being tested.
+run "-run 'TestAlpha|TestBeta' ./internal/config/"
+if grep -qF "go test -run TestAlpha|TestBeta ./internal/config/, NOT the whole tree" "$WORK/out"; then
+	ok "the PARTIAL RUN banner prints the value verbatim, pipe intact"
+else
+	bad "the PARTIAL RUN banner did not print the value verbatim"
+	grep -E '^gates-go:' "$WORK/out" | sed 's/^/    | /'
+fi
+
+printf '\ngo-test-args-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

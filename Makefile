@@ -349,7 +349,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
-                   demo-block-check-test build-args-test release-image-test
+                   demo-block-check-test build-args-test release-image-test go-test-args-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -422,7 +422,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/loop-drift bin/loop-drift-test \
                    bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test bin/forge-watch-gh-auth-test \
                    bin/gap-heading-check bin/gap-heading-check-test \
-                   bin/demo-block-check bin/demo-block-check-test
+                   bin/demo-block-check bin/demo-block-check-test bin/go-test-args-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -658,6 +658,10 @@ suite-coverage-test: ## The suite-totality gate's own refusals, all three direct
 gates-sh-exit-test: ## gates-sh must not say `clean` over a failed suite run (quince#274)
 	@bin/gates-sh-exit-test
 
+.PHONY: go-test-args-test
+go-test-args-test: ## GO_TEST_ARGS reaches go test as arguments, never as shell source (quince#1134)
+	@bin/go-test-args-test
+
 .PHONY: allowlist-coverage-test
 allowlist-coverage-test: ## The allowlist totality gate's own refusals, both directions (quince#256)
 	@bin/allowlist-coverage-test
@@ -745,9 +749,23 @@ provision-guard-test: ## provision's identity guard in every credential state (q
 # harnesses that need a real pool, a real device or a real filesystem tier. They skip without their
 # env, so running them would mostly be a slow no-op — but "mostly" is the wrong guarantee for CI,
 # and the defect this catches is a compile error, which vet catches at full strength.
+# GO_TEST_ARGS IS PASSED AS ARGUMENTS, NEVER PASTED INTO THE SCRIPT — `"$$@"` inside the quoted
+# script, the value after it as positional parameters. Do not "tidy" it back to
+# `go test -race -cover $(GO_TEST_ARGS)'`, which is what it was until quince#1134: the caller's own
+# quotes then CLOSE the recipe's single-quoted script early, and the rest of the value is parsed as
+# shell source by the recipe's `/bin/sh`. `-run 'TestA|TestB'` — the documented Go idiom for "these
+# tests" — became a pipeline, and the failure wore two faces, neither of which reads as quoting:
+# `Error 127` naming a TEST as a missing command, and (measured independently, same issue) NO OUTPUT
+# AT ALL with make exiting 0. The second is the dangerous one, because a filter like `grep -c FAIL`
+# turns it into "0 failures" and a suite that never ran reaches PR evidence as green.
+#
+# THE SPLIT IS STILL THE CALLER'S, which is what a caller wants: make pastes the value, the RECIPE's
+# shell splits it once — so quoting works the way the caller wrote it — and the inner `sh` receives
+# argv it never re-parses. A literal `$` still needs `$$` on the make command line; that is make's
+# rule, not this recipe's, and the help text below says so.
 .PHONY: gates-go
-gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race (GO_TEST_ARGS="-run X ./pkg/..." to target)
-	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || printf 'gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n' '$(GO_TEST_ARGS)'
+gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race (GO_TEST_ARGS="-run 'X|Y' ./pkg/..." to target; shell quoting is honoured, a literal $$ must be doubled)
+	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || sh -c 'printf "gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n" "$$*"' _ $(GO_TEST_ARGS)
 	$(RUN) -w /src/core \
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
 	  -e CGO_ENABLED=1 $(TC_GO) sh -euc '\
@@ -756,7 +774,7 @@ gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -
 	    go vet ./...; \
 	    go vet -tags lab ./...; \
 	    golangci-lint run; \
-	    go test -race -cover $(GO_TEST_ARGS)'
+	    go test -race -cover "$$@"' _ $(GO_TEST_ARGS)
 
 .PHONY: fmt
 fmt: tc-go ## Go: gofmt -w (auto-format) + go mod tidy (run after editing core)
