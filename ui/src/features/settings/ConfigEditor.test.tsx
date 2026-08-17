@@ -177,9 +177,17 @@ describe("ConfigEditor labels are associated with their controls", () => {
 describe("ConfigEditor promises no restart", () => {
   // THE FORM'S OWN FIELDS ARE WHAT DECIDE THIS, so they are asserted rather than assumed. The
   // notice was deleted rather than made conditional, on the argument that nothing here is
-  // restart-required — and that argument holds only while the form renders these four. A field
-  // from contracts §6's restart bin (`sessions.allow_insecure_transport`, `devices.*`) appearing
-  // here would make the deletion wrong, and this test is what notices.
+  // restart-required — and that argument holds only while every field the form renders is live. A
+  // field from contracts §6's restart bin appearing here would make the deletion wrong, and this
+  // test is what notices.
+  //
+  // `sessions.allow_insecure_transport` IS NOT RESTART-BIN, and asserting its absence as one was a
+  // guard on a premise that had stopped being true. quince#900 made it live in BOTH directions —
+  // the plain half of the mux reads it per request instead of choosing its handler at bind, and the
+  // `sessions` applier passes whatever the file says to the auth setter, `false` included
+  // (contracts §6; `config/insecure_transport.go`; `main.go`'s `subscribeInsecureTransport`).
+  // So this assertion would have blocked a correct change: that control can go on this form and
+  // needs no restart notice.
   it("renders only LIVE fields — the premise of deleting the notice", () => {
     renderEditor(config([entry()]));
 
@@ -188,9 +196,8 @@ describe("ConfigEditor promises no restart", () => {
     expect(screen.getByText(/^Reconciliation interval \(minutes\)$/)).toBeInTheDocument();
     expect(screen.getByText(/^Theme$/)).toBeInTheDocument();
 
-    // The two restart-bin keys, neither of which this form has ever edited. If either arrives, the
-    // unconditional deletion stops being honest and the notice belongs on THAT field.
-    expect(screen.queryByText(/insecure transport/i)).toBeNull();
+    // `devices.*` is the restart bin. If one arrives, the unconditional deletion stops being honest
+    // and the notice belongs on THAT field.
     expect(screen.queryByText(/netmuxd|usbmuxd/i)).toBeNull();
   });
 

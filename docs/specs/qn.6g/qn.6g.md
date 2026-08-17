@@ -370,7 +370,7 @@ bins impossible to fill honestly.
 | `devices.manage_muxer` / `.usbmuxd_socket` / `.netmuxd_addr` | **restart** — *and D12 requires this sentence:* a netmuxd restart tears a live Wi-Fi backup (`supervisor.go:122`), so applying these live means ruling on what happens to a running transfer. Out of scope, named, not silent. |
 | `tls.cert_file` / `.key_file` | **paths: restart. Contents: already live** | `tlsx.Keeper` re-reads the files on rotation (`keeper.go:79,109`) — renewals already need no restart (`OnboardingHTTPSPage.tsx:141`). Changing the *paths*, or turning TLS on or off, needs a rebind. |
 | `sessions.ttl_minutes` | **nothing reads it** | Filed by this rung. It is the vault-unlock TTL and the label says *"Session TTL"*. |
-| `sessions.allow_insecure_transport` | **restart** | Decides the plain-half handler once at bind (`main.go:300-303`). |
+| `sessions.allow_insecure_transport` | **live since quince#900** — was **restart** in this rung | Decided the plain-half handler once at bind when `qn.6g` shipped. quince#900 moved **both** consumers: the mux reads it per request, and the `sessions` applier passes the file's value — `false` included — to the auth setter. **contracts §6 is the live answer; this row is what this rung shipped.** |
 | `automation.staleness_days` / `.reminder_cooldown_hours` | **nothing reads it (declared)** | qn.12, `schema.go:248`. Declared debt, not a defect. |
 | `ui.theme` | **already live** | Client-side, from the PUT response. |
 
