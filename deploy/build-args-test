@@ -1,0 +1,210 @@
+#!/bin/sh
+# build-args-test — the derivation's failure paths, and the contract its callers depend on.
+#
+# WHY THIS SUITE EXISTS. `deploy/build-args` is the only thing standing between a container build
+# and quince#494: an ARG that reaches the Dockerfile empty, producing an error that names the one
+# path in the line which is not the problem. A derivation with no tests is a derivation whose
+# refusals nobody has ever seen fire, and refusals are most of what this file is.
+#
+# EVERY CASE IS SYNTHETIC — each builds a throwaway tree with its own Dockerfile and versions.env,
+# so nothing here depends on the real pins, which change. The two REAL-TREE cases at the end assert
+# a RELATION between the repository's own files rather than any value in them, so a version bump
+# cannot break them and a renamed ARG can.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$HERE/.." && pwd)
+# Overridable so a reviewer can reproduce the negative control rather than take it on report — the
+# same hook, for the same reason, as sh-lint-coverage-test.
+BA="${QUINCE_BUILD_ARGS_BIN:-$HERE/build-args}"
+[ -x "$BA" ] || { printf 'build-args-test: %s is not executable\n' "$BA" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+expect() { # <name> <want-exit> <want-substring> -- <command...>
+	name=$1 want=$2 substr=$3
+	shift 4
+	out=$("$@" 2>&1) && got=0 || got=$?
+	if [ "$got" -ne "$want" ]; then
+		printf 'FAIL %s\n  wanted exit %s, got %s\n' "$name" "$want" "$got"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	if ! printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  exit %s was right; wanted output containing: %s\n' "$name" "$want" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+refute() { # <name> <unwanted-substring> -- <command...>
+	name=$1 substr=$2
+	shift 3
+	out=$("$@" 2>&1) || true
+	if printf '%s' "$out" | grep -qF "$substr"; then
+		printf 'FAIL %s\n  output should NOT contain: %s\n' "$name" "$substr"
+		printf '%s\n' "$out" | sed 's/^/    | /'
+		fail=$((fail + 1))
+		return
+	fi
+	printf 'ok    %s\n' "$name"
+	pass=$((pass + 1))
+}
+
+# fixture <dir> — a tree shaped like a quince checkout, with build-args where callers expect it.
+fixture() {
+	mkdir -p "$1/deploy"
+	cp "$BA" "$1/deploy/build-args"
+	chmod +x "$1/deploy/build-args"
+}
+# stdout only: the caller contract is that stdout is data and stderr is commentary. A case that
+# read both could not tell an emitted value from a note ABOUT a value.
+values() { # <dir>
+	"$1/deploy/build-args" 2>/dev/null
+}
+
+# --- the ordinary path -------------------------------------------------------------------------
+R="$TMP/plain"
+fixture "$R"
+cat >"$R/deploy/Dockerfile" <<'EOF'
+ARG GO_IMAGE=golang:1-alpine
+ARG PINNED_REF
+FROM ${GO_IMAGE} AS build
+ARG NOT_IN_VERSIONS
+EOF
+cat >"$R/versions.env" <<'EOF'
+# a comment line, and a key nothing declares
+UNDECLARED=should-not-appear
+GO_IMAGE=golang:1.26.5-alpine3.24
+PINNED_REF=1.4.0
+EOF
+
+expect "an ARG with a value is emitted as NAME=VALUE" 0 "PINNED_REF=1.4.0" -- values "$R"
+expect "an ARG carrying a Dockerfile default is still read by name" 0 \
+	"GO_IMAGE=golang:1.26.5-alpine3.24" -- values "$R"
+expect "an ARG with no value is NAMED rather than emitted empty" 0 "NOT_IN_VERSIONS" -- \
+	"$R/deploy/build-args"
+refute "and that ARG is not emitted as an empty value" "NOT_IN_VERSIONS=" -- values "$R"
+# THE DERIVATION RUNS DOCKERFILE-FIRST, and this is the direction that matters: versions.env is
+# also read by the Makefile, which has variables the Dockerfile never sees. Emitting those would
+# hand every builder a pile of args the Dockerfile has no ARG for.
+refute "a versions.env key the Dockerfile does not declare is not emitted" "UNDECLARED" -- \
+	values "$R"
+expect "the count is reported, so a silent short list is visible" 0 "2 value(s)" -- \
+	"$R/deploy/build-args"
+
+# --- values are taken literally ----------------------------------------------------------------
+R2="$TMP/literal"
+fixture "$R2"
+cat >"$R2/deploy/Dockerfile" <<'EOF'
+ARG IMAGE_REF
+ARG DUPED
+FROM alpine
+ARG DUPED
+EOF
+cat >"$R2/versions.env" <<'EOF'
+IMAGE_REF=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine
+DUPED=first
+DUPED=second
+EOF
+# A pinned image ref contains `:` and `/`, and a digest pin would contain `=` in no position — but
+# `sed` is not anchored past the first `=` precisely so that a value which does carry one survives.
+expect "a value with : and / survives intact" 0 \
+	"IMAGE_REF=ghcr.io/astral-sh/uv:0.5.11-python3.12-alpine" -- values "$R2"
+expect "the FIRST versions.env match wins, as . -sourcing would" 0 "DUPED=first" -- values "$R2"
+refute "so the later duplicate does not also appear" "DUPED=second" -- values "$R2"
+# `sort -u` over the ARG names: a multi-stage Dockerfile re-declares an ARG in every stage that
+# needs it, and each would otherwise become a repeated --build-arg token.
+expect "an ARG declared in two stages is emitted once" 0 "1" -- sh -c \
+	"'$R2/deploy/build-args' 2>/dev/null | grep -c '^DUPED='"
+
+# --- the refusals ------------------------------------------------------------------------------
+R3="$TMP/nomatch"
+fixture "$R3"
+cat >"$R3/deploy/Dockerfile" <<'EOF'
+ARG RENAMED_YESTERDAY
+FROM alpine
+EOF
+cat >"$R3/versions.env" <<'EOF'
+ITS_OLD_NAME=1.0.0
+EOF
+# THE GUARD THAT MATTERS MOST. Zero matches means the two files no longer agree on a single name,
+# and the build would proceed on Dockerfile defaults alone — plausible, green for a while, wrong.
+expect "nothing matched is a REFUSAL, not an empty list" 1 "NOTHING MATCHED" -- \
+	"$R3/deploy/build-args"
+expect "and it says what it is refusing to do" 1 "Refusing rather than letting the build" -- \
+	"$R3/deploy/build-args"
+
+R4="$TMP/missing"
+fixture "$R4"
+cat >"$R4/deploy/Dockerfile" <<'EOF'
+ARG X
+EOF
+expect "a missing versions.env is exit 2, not a silent empty list" 2 "versions.env not found" -- \
+	"$R4/deploy/build-args"
+rm "$R4/deploy/Dockerfile"
+printf 'X=1\n' >"$R4/versions.env"
+expect "a missing Dockerfile is exit 2" 2 "Dockerfile not found" -- "$R4/deploy/build-args"
+
+# --- THE CONSUMPTION CONTRACT, which is what callers actually depend on --------------------------
+#
+# Two silent traps live in the caller, not here, and both have bitten this code: a piped `while
+# read` discards the caller's `set --` in a subshell, and `$(build-args)` inline in a here-doc BODY
+# is a redirection whose exit status `set -e` does not see. The cases below pin the documented form
+# against both — a caller written either wrong way fails one of them.
+consume() { # <dir> — the form deploy/build-args' header documents
+	sh -eu -c '
+		cd "$1"
+		values=$(deploy/build-args)
+		set --
+		while IFS= read -r kv; do
+			[ -n "$kv" ] || continue
+			set -- "$@" --build-arg "$kv"
+		done <<EOF
+$values
+EOF
+		echo "tokens=$#"
+	' _ "$1"
+}
+expect "the documented loop yields two --build-arg tokens per value" 0 "tokens=4" -- consume "$R"
+expect "a refusal ends the caller instead of yielding an empty list" 1 "NOTHING MATCHED" -- \
+	consume "$R3"
+
+# --- the two REAL-TREE cases: a relation between this repository's files, never a value ----------
+expect "the real tree derives at least one value" 0 "value(s) from versions.env" -- "$BA"
+# VERSION is the ARG the release build supplies itself, from the git tag — so it must NOT come from
+# versions.env. If someone ever pins it there, every image would ship stamped with that pin instead
+# of its tag, and quince#615 (the demo reporting 0.0.0-dev) would come back wearing a fixed number.
+#
+# ANCHORED, because `VERSION=` as a bare substring also matches GOLANGCI_LINT_VERSION= and
+# PNPM_VERSION= — both legitimately emitted. An unanchored form fails here on a correct tree, which
+# is the failure mode that teaches a reader to weaken the assertion rather than read it.
+if "$BA" 2>/dev/null | grep -q '^VERSION='; then
+	printf 'FAIL VERSION is not supplied by versions.env — the tag supplies it\n'
+	fail=$((fail + 1))
+else
+	printf 'ok    VERSION is not supplied by versions.env — the tag supplies it\n'
+	pass=$((pass + 1))
+fi
+while IFS= read -r kv; do
+	name=${kv%%=*}
+	grep -q "^ARG ${name}" "$ROOT/deploy/Dockerfile" || {
+		printf 'FAIL every emitted name is declared ARG in the real Dockerfile\n  %s is not\n' "$name"
+		fail=$((fail + 1))
+		continue
+	}
+	pass=$((pass + 1))
+done <<EOF
+$("$BA" 2>/dev/null)
+EOF
+
+printf '\nbuild-args-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] || exit 1
