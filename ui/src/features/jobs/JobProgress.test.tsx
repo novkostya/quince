@@ -48,7 +48,7 @@ describe("JobProgressFull states what has arrived", () => {
 
   it("shows a bare cumulative figure with no denominator", () => {
     render(<JobProgressFull job={running()} />);
-    expect(screen.getByText("3.4 GB received")).toBeTruthy();
+    expect(screen.getByText("3.40 GB received")).toBeTruthy();
     // A slash would mean a whole-job total exists. None does.
     expect(screen.queryByText(/\//)).toBeNull();
   });
@@ -73,7 +73,7 @@ describe("JobProgressInline shows what has arrived, beside the clock", () => {
 
   it("puts the figure and the percentage on ONE row, so the card keeps its height", () => {
     const { container } = render(<JobProgressInline job={card()} />);
-    expect(screen.getByText(/3.4 GB received/)).toBeTruthy();
+    expect(screen.getByText(/3.40 GB received/)).toBeTruthy();
     expect(screen.getByText("63%")).toBeTruthy();
     // The label, the clock and the figure share one truncating span — the row count is what made
     // this card taller than its neighbours last time.

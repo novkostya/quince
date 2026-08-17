@@ -88,3 +88,24 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("not-a-date", now)).toBe("—");
   });
 });
+
+// Operator, 2026-08-17: "more precision to make it feel more alive". The live received figure
+// updates up to twice a second, but at GB scale one decimal only changes every few seconds — so the
+// number looked stuck while gigabytes were arriving.
+describe("formatBytes precision", () => {
+  it("keeps one decimal by default, so the figures that move once an hour stay quiet", () => {
+    expect(formatBytes(3_400_000_000)).toBe("3.4 GB");
+    expect(formatBytes(531_100_000_000)).toBe("531.1 GB");
+  });
+
+  it("takes two when asked, which is what makes a live figure visibly move", () => {
+    expect(formatBytes(3_400_000_000, 2)).toBe("3.40 GB");
+    expect(formatBytes(3_412_000_000, 2)).toBe("3.41 GB");
+    // The point of the extra digit: these two differ at 2dp and are identical at 1dp.
+    expect(formatBytes(3_412_000_000)).toBe(formatBytes(3_400_000_000));
+  });
+
+  it("never fractions whole bytes, whatever is asked — there is no half a byte", () => {
+    expect(formatBytes(512, 2)).toBe("512 B");
+  });
+});
