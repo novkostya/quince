@@ -62,6 +62,29 @@ export function NotificationsInstallPage() {
           </Card>
         )}
 
+        {support === "unsupported_ios_version" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                This iPhone or iPad needs a newer iOS
+                <Badge tone="warn">Unavailable</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-fg-muted">
+              {/* NOT the Lockdown Mode copy, and that is the point of this state existing. Lockdown
+                  Mode removes service workers as well, so having one rules it out — naming it here
+                  would send someone to check a setting that is not the cause. */}
+              <p>
+                quince is on your Home Screen, but notifications for web apps need iOS 16.4 or later.
+              </p>
+              <p>
+                Open quince to see which devices are due — the Devices list shows how long it has
+                been since each one was backed up.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {support === "needs_install" && (
           <Card>
             <CardHeader>
@@ -73,30 +96,27 @@ export function NotificationsInstallPage() {
             <CardContent className="space-y-3 text-fg-muted">
               {/* THE LITERAL GESTURE, WITH THE GLYPH NAMED. "Install" is not a word that appears
                   anywhere in iOS, so an instruction using it sends a person looking for a button
-                  that does not exist. */}
-              {ios ? (
-                <>
-                  <p>
-                    On iPhone and iPad, notifications only work once quince has been added to your
-                    Home Screen.
-                  </p>
-                  <ol className="list-decimal space-y-1 pl-5">
-                    <li>
-                      Tap the Share button — the square with an arrow pointing up, in Safari&rsquo;s
-                      toolbar.
-                    </li>
-                    <li>
-                      Scroll down and tap <strong>Add to Home Screen</strong>.
-                    </li>
-                    <li>Open quince from your Home Screen and come back to this page.</li>
-                  </ol>
-                </>
-              ) : (
-                <p>
-                  Install quince from your browser&rsquo;s address bar, then open it from your apps
-                  and come back to this page.
-                </p>
-              )}
+                  that does not exist.
+
+                  NO NON-iOS BRANCH, AND ITS ABSENCE IS THE FIX RATHER THAN AN OMISSION.
+                  `needs_install` now means *installing would help*, which is true only on iOS —
+                  everywhere else push works in an ordinary tab, so a browser without it is not one
+                  installing can rescue. This card previously carried an "install from your address
+                  bar" line that was reachable ONLY when it was wrong. */}
+              <p>
+                On iPhone and iPad, notifications only work once quince has been added to your Home
+                Screen.
+              </p>
+              <ol className="list-decimal space-y-1 pl-5">
+                <li>
+                  Tap the Share button — the square with an arrow pointing up, in Safari&rsquo;s
+                  toolbar.
+                </li>
+                <li>
+                  Scroll down and tap <strong>Add to Home Screen</strong>.
+                </li>
+                <li>Open quince from your Home Screen and come back to this page.</li>
+              </ol>
             </CardContent>
           </Card>
         )}

@@ -11,20 +11,6 @@
 // the call site.
 type SafariNavigator = Navigator & { standalone?: boolean };
 
-/// The install state of THIS browsing context.
-///
-/// `installed` is the precondition for Web Push on iOS — WebKit: *"A web app that has been added to
-/// the Home Screen can request permission to receive push notifications."* It holds for BOTH
-/// mechanisms; Declarative Web Push (18.4+) relaxes the service-worker requirement and not this one.
-export type InstallState =
-  /// Running as a home-screen / standalone web app.
-  | "installed"
-  /// A browser tab that could be installed — the instruction applies.
-  | "installable"
-  /// The platform cannot receive Web Push at all, however it is launched. On iOS this is the
-  /// Lockdown Mode signature; see `pushSupport`.
-  | "unsupported";
-
 /// isStandalone reports whether this context is running as an installed web app.
 ///
 /// TWO CHECKS, BECAUSE NEITHER COVERS EVERYTHING. `display-mode: standalone` is the standard and is
@@ -48,16 +34,6 @@ export function isIOS(): boolean {
   return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
 }
 
-/// installState answers what the install page renders.
-export function installState(): InstallState {
-  if (isStandalone()) return "installed";
-  // A tab on a platform with no Push API is only *installable* if installing would help. On iOS it
-  // would — the API is absent in a tab by design and appears once installed. Anywhere else, an
-  // absent PushManager in a tab means the platform does not have it.
-  if (!("PushManager" in window)) return isIOS() ? "installable" : "unsupported";
-  return "installable";
-}
-
 /// pushSupport distinguishes the two ways a platform can have no Push API, which have different
 /// remedies and must never collapse into one sentence (spec D6, and quince#940's defect).
 export type PushSupport =
@@ -72,12 +48,36 @@ export type PushSupport =
   /// THE HEURISTIC IS UNVERIFIED ON HARDWARE (spec G7). The copy says Lockdown Mode is the LIKELY
   /// cause for that reason; detection cannot prove it, and asserting it would be a state-honesty
   /// failure on a screen.
-  | "unsupported_platform";
+  | "unsupported_platform"
+  /// An INSTALLED iOS web app that has service workers and no Push API — which is iOS older than
+  /// 16.4, when Web Push shipped for home-screen web apps.
+  ///
+  /// IT IS ITS OWN VALUE BECAUSE THE ALTERNATIVE MISATTRIBUTES. Folded into `unsupported_platform`
+  /// it would inherit that state's copy and tell this user Lockdown Mode is the likely cause — but
+  /// Lockdown Mode removes the service worker too, so having one RULES IT OUT. quince can tell these
+  /// apart, and D6's whole claim is that where it can, it must.
+  | "unsupported_ios_version";
 
 export function pushSupport(): PushSupport {
   if (!("serviceWorker" in navigator)) return "unsupported_platform";
   if (!("PushManager" in window)) {
-    return isStandalone() ? "unsupported_platform" : "needs_install";
+    // `needs_install` MEANS INSTALLING WOULD HELP, and that is only true on iOS — where the Push API
+    // is absent from a tab by design and appears once the web app is on the Home Screen. Everywhere
+    // else, push works in an ordinary tab, so an absent `PushManager` is the platform's answer and
+    // installing changes nothing.
+    //
+    // DISCRIMINATING ON `isStandalone()` ALONE IS THE BUG THIS REPLACES. A non-iOS browser with no
+    // Push API was told to install; installing flipped `isStandalone()`, the same predicate then
+    // answered `unsupported_platform`, and the page said quince cannot help — **after** the person
+    // had spent an action on quince's own instruction. That is a dead end reached by following
+    // directions, which is worse than a control that does nothing, and it is exactly the collapse
+    // D6 exists to prevent.
+    if (!isIOS()) return "unsupported_platform";
+    if (!isStandalone()) return "needs_install";
+    // Installed, on iOS, with a service worker and no Push API. Not Lockdown Mode — that removes the
+    // service worker as well, so reaching here rules it out — and not an install problem, since they
+    // have installed. What is left is an iOS older than 16.4.
+    return "unsupported_ios_version";
   }
   return "supported";
 }

@@ -89,4 +89,46 @@ describe("the notifications install page", () => {
     expect(screen.queryByText(/Lockdown Mode/i)).not.toBeInTheDocument();
     expect(screen.getByText(/does not support web notifications/i)).toBeInTheDocument();
   });
+
+  // THE ROW NOTHING REACHED, AND THE ONE THAT WAS BROKEN. A non-iOS browser WITH service workers and
+  // WITHOUT the Push API — Safari on macOS before 16.1, Firefox with `dom.push.enabled=false` — used
+  // to be told to install. Installing flipped `isStandalone()`, the same predicate then answered
+  // `unsupported_platform`, and the page said quince cannot help: a dead end reached by following
+  // quince's own instruction.
+  //
+  // The test above LOOKS like this case and is not — it sets `serviceWorker: false`, which returns on
+  // the first line of `pushSupport` and never reaches the `PushManager` branch. That is why this row
+  // exists separately rather than being folded into it.
+  it("never tells a non-iOS browser to install when installing cannot help", () => {
+    stageBrowser({ ios: false, standalone: false, serviceWorker: true, pushManager: false });
+    render(<NotificationsInstallPage />);
+
+    expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/address bar/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/does not support web notifications/i)).toBeInTheDocument();
+  });
+
+  // AN INSTALLED iOS APP WITH SERVICE WORKERS AND NO PUSH API IS AN OLD iOS, NOT LOCKDOWN MODE —
+  // and naming Lockdown Mode here would send somebody to check a setting that cannot be the cause,
+  // because Lockdown Mode removes the service worker too. quince can tell these apart, so it must.
+  it("does not blame Lockdown Mode when the service worker rules it out", () => {
+    stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: false });
+    render(<NotificationsInstallPage />);
+
+    expect(screen.queryByText(/Lockdown Mode/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/iOS 16\.4 or later/i)).toBeInTheDocument();
+    // And it does not tell somebody who has already installed to install.
+    expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
+  });
+
+  // AND THE SAME BROWSER ONCE INSTALLED SAYS THE SAME THING. The old rule changed its answer when
+  // `isStandalone()` flipped; the fix discriminates on platform, so installing cannot move a user
+  // between two different explanations of one unchanged fact.
+  it("gives an installed non-iOS browser the same answer as a tab", () => {
+    stageBrowser({ ios: false, standalone: true, serviceWorker: true, pushManager: false });
+    render(<NotificationsInstallPage />);
+
+    expect(screen.getByText(/does not support web notifications/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
+  });
 });
