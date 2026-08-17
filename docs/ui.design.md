@@ -92,6 +92,74 @@ that matters. Concretely —
    hand-edit is live. Onboarding is guided checks with plain-language explanations, not
    a wall of fields.
 
+## Type, contrast and rhythm — the numbers, and where they came from
+
+**CANON WAS SILENT HERE, NOT VIOLATED, AND THAT WAS THE FINDING** (quince#1155). The section above
+asks for "generous spacing" and warns against dense surfaces; it named no size, no line-height and
+no contrast floor, so every page picked its own and they drifted. `docs/ui.type-survey.md` is the
+evidence: 34 rendered surfaces — mainstream web apps and self-hosted admin UIs — walked in Chromium
+at desktop and phone widths and tallied by rendered character, plus iOS's own Dynamic Type table read
+live from Apple's HIG.
+
+**Sizes live in `ui/src/styles/tokens.css` and nowhere else.** The scale OVERRIDES Tailwind's own
+`--text-*`, so `text-sm` and `text-xs` resolve to quince's steps rather than Tailwind's defaults;
+that is deliberate, because a parallel set of semantic classes would have left every existing call
+site on the old values. Tune the tokens, never the call sites.
+
+| role | step | where |
+| --- | --- | --- |
+| page title | 24px | one `<h1>` per screen |
+| **section heading** | **20px**, `SectionHeading` | labels a region of a page — one component, not a class string |
+| card title | 18px | `CardTitle` |
+| **body and field labels** | **16px** | every sentence a user reads |
+| dense chrome | 14px | table cells, metadata, badges — **the floor** |
+
+- **14px IS THE FLOOR AND 12px IS GONE**, deliberately: no token produces it. Two thirds of Home's
+  characters were 12px, against a comparison set whose own floor is 14px.
+- **Line-height is 1.5 at body size**, tightening to 1.25 at display size. quince measured 1.38x
+  against a set at 1.51x, and that ratio — not the padding — is what "clamped together" describes.
+  Container padding and block gaps were already inside both measured distributions and did not move.
+- **`--type-sm` MUST STAY AT OR ABOVE 1rem.** iOS Safari zooms the page in when a focused control
+  computes under 16px (quince#616), and `fieldBase` no longer carries a responsive step because the
+  base scale clears the threshold on its own. Tune it lower and the field has to become responsive
+  again in the same change; `field.test.tsx` asserts the token rather than the trick.
+
+**Contrast floors, per role, checked against the WORST surface that role is painted on** — never the
+most flattering one. AA is the floor and not the goal: text can clear 4.5:1 and still be exactly the
+grey-on-grey that was reported.
+
+| token | floor | measured comparison |
+| --- | --- | --- |
+| `--fg` | >= 12:1 | both populations' primary text sits at 12.2-14.9:1 |
+| `--fg-muted` | >= 7:1 | the measured secondary medians, 9.63:1 and 7.58:1 |
+| `--fg-subtle` | >= 5.5:1 | the only role allowed near the floor |
+| state colours (`--ok`, `--warn`, `--danger`, `--accent`) | >= 5.5:1 | all four failed AA on the light theme before this |
+
+**Under 2% of rendered characters below 4.5:1** is the whole-page target, which is what both measured
+populations achieve. quince was at 20.85%, and 41.9% on the light theme.
+
+**BORDERS ARE EXEMPT AND THAT IS RULED, NOT OVERLOOKED.** WCAG 1.4.11 asks 3:1 for a control's
+boundary and `--border` meets neither that nor half of it. Raising it was tried twice on quince#1155
+— a separate 3:1 token for controls, then one shared edge at 2:1 — and the Operator rejected both on
+the deployed build. Nothing in the comparison set complies either (Forgejo 2.08:1, Grafana 1.63:1,
+Immich draws no edge at all and tints the field instead). If a control ever genuinely needs to be
+easier to find, give it a distinct FILL; do not raise `--border`.
+
+**THE SCALE IS NOT RESPONSIVE, AND THAT WAS MEASURED RATHER THAN ASSUMED.** 11 of 13 apps that ship
+both a desktop and a real mobile experience use the SAME body size at both widths, and the two that
+differ go down on the phone, not up. quince follows them.
+
+**WHERE quince DELIBERATELY SITS.** Its 16px body is at the top of the web set's band (median 14px)
+and one point BELOW iOS's own Body style, which is 17pt at the default Dynamic Type size. The web and
+native references disagree; quince sits between them, closer to native, because the iPhone is a
+first-class client here. Operator-confirmed on hardware against a native app, 2026-08-17.
+
+**WHAT IS STILL UNMEASURED, NAMED SO IT IS NOT MISTAKEN FOR SETTLED.** Touch-target size: the apps in
+the set with genuine mobile-first pedigree cluster at 48px, and quince runs 36px stepping to 40px on
+phones. quince#619 recorded this as unmeasured and it is now measured — but nothing has been decided,
+and `field.ts`'s note that **quince meets no 44px bar** still stands. Dynamic Type is the other one:
+a native app follows the reader's system text-size setting and quince follows nothing.
+
 ## Conventions (stack per D7: Tailwind v4 + vendored shadcn-style components + Zustand)
 
 - Tokens live as CSS variables in the Tailwind v4 theme (`ui/src/styles/tokens.css`):

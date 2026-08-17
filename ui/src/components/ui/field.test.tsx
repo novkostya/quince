@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { Input } from "./input";
@@ -16,28 +17,31 @@ import { fieldBase } from "./field";
 // actually likely: someone tidying the string back to a plain `text-sm` months from now, with no
 // iPhone in the room and every gate green. That is worth pinning precisely because the suite is
 // blind to the real symptom — the same shape as quince#512, found by using the product.
-describe("full-width form controls are 16px on mobile", () => {
-  it("Input steps 16px -> 14px at the sm breakpoint", () => {
-    const { container } = render(<Input />);
-    const cls = container.querySelector("input")?.className ?? "";
-    expect(cls).toContain("text-base");
-    expect(cls).toContain("sm:text-sm");
+// WHAT CHANGED, AND WHY THIS FILE NOW ASSERTS THE THRESHOLD INSTEAD OF THE TRICK — quince#1155.
+//
+// The three assertions that stood here pinned `text-base sm:text-sm`, which was the MECHANISM for
+// clearing 16px while desktop stayed at 14px. The measured type scale puts `text-sm` at 16px on
+// every breakpoint, so the mechanism is no longer needed and the property it protected is met by
+// the base scale. Pinning the mechanism would now FAIL the correct code and pass a hypothetical
+// wrong one, which is the wrong way round for a guard.
+//
+// So this reads the token instead. A future edit that tunes the scale back under 16px fails here,
+// naming the reason, rather than shipping the zoom-on-focus bug to a phone nobody has in the room.
+describe("full-width form controls compute at least 16px, however the scale is tuned", () => {
+  // `--type-sm` is what `text-sm` resolves to (`index.css` maps it into Tailwind's `--text-sm`).
+  // Read from the stylesheet rather than from a rendered box, because jsdom computes no cascade —
+  // this asserts the token a real browser would use.
+  // Path from the vitest root (`ui/`), not from `import.meta.url` — Vite serves test modules over a
+  // non-file scheme, so `new URL(…, import.meta.url)` throws `The URL must be of scheme file` here.
+  const tokens = readFileSync("src/styles/tokens.css", "utf8");
+
+  it("the scale's `text-sm` step is at least 1rem, which is iOS Safari's zoom threshold", () => {
+    const m = /--type-sm:\s*([\d.]+)rem/.exec(tokens);
+    expect(m, "tokens.css must declare --type-sm in rem").not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThanOrEqual(1);
   });
 
-  it("Select steps 16px -> 14px at the sm breakpoint", () => {
-    const { container } = render(
-      <Select>
-        <option value="auto">auto</option>
-      </Select>,
-    );
-    const cls = container.querySelector("select")?.className ?? "";
-    expect(cls).toContain("text-base");
-    expect(cls).toContain("sm:text-sm");
-  });
-
-  // A bare `text-sm` is the specific regression: it is what both controls carried, it is what a
-  // reviewer's eye reads as normal, and it is what Tailwind renders as 14px unconditionally.
-  it("neither control carries an unconditional text-sm", () => {
+  it("both controls carry text-sm, with no smaller responsive step below it", () => {
     const { container } = render(
       <div>
         <Input />
@@ -47,7 +51,12 @@ describe("full-width form controls are 16px on mobile", () => {
       </div>,
     );
     for (const el of container.querySelectorAll("input, select")) {
-      expect(el.className.split(/\s+/)).not.toContain("text-sm");
+      const cls = el.className.split(/\s+/);
+      expect(cls).toContain("text-sm");
+      // A responsive step DOWN is the regression now: it would put a breakpoint back under the
+      // threshold that the unconditional class currently clears everywhere.
+      expect(cls).not.toContain("sm:text-xs");
+      expect(cls).not.toContain("sm:text-2xs");
     }
   });
 

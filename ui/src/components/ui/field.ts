@@ -39,6 +39,19 @@
 // one number. Matching `Button` was ruled the answer; **quince meets no 44px bar and this does not
 // change that** — quince#619 records the target-size question as unmeasured, on a device and against
 // platform guidance, and it stays that way.
+// `border-line` is the same edge the cards use, and giving this control a stronger one of its own
+// was tried and rejected on quince#1155 — see `tokens.css` before reaching for WCAG 1.4.11 here.
+//
+// `text-sm` AT EVERY BREAKPOINT, AND THE `text-base sm:text-sm` SPLIT IS RETIRED RATHER THAN
+// FORGOTTEN. That split existed for exactly one reason — the paragraph above — which is that 14px
+// desktop text tripped iOS Safari's zoom-on-focus and 16px did not. The measured type scale now
+// puts `text-sm` at 16px on EVERY breakpoint, so the threshold is cleared by the base scale itself
+// and the responsive half bought nothing but an 18px field on phones, one step off the body size
+// used everywhere else.
+//
+// EVERYTHING THAT PARAGRAPH SAYS ABOUT WHY 16px MATTERS STILL BINDS. If the scale is ever tuned
+// back below 16px this line has to become responsive again, and the reason it would need to is
+// recorded above rather than here.
 export const fieldBase =
-  "h-10 w-full rounded-lg border border-line bg-bg px-3 text-base text-fg sm:h-9 sm:text-sm " +
+  "h-10 w-full rounded-lg border border-line bg-bg px-3 text-sm text-fg sm:h-9 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50";

@@ -58,8 +58,12 @@ export function CardHeader({ className, children }: { className?: string; childr
   return <div className={cn("flex flex-col gap-1 p-5", className)}>{children}</div>;
 }
 
+// A TITLE HAS TO BE A STEP ABOVE THE BODY UNDER IT, AND THIS ONE WAS THE SAME SIZE (quince#1155).
+// `text-sm` is what `CardContent`'s prose is set at, so the only thing separating a card's heading
+// from its contents was font weight — part of why the survey found quince's pages reading as one
+// undifferentiated block. `text-base` is the next rung on the measured ladder.
 export function CardTitle({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("text-sm font-semibold tracking-tight", className)}>{children}</div>;
+  return <div className={cn("text-base font-semibold tracking-tight", className)}>{children}</div>;
 }
 
 export function CardContent({ className, children }: { className?: string; children: ReactNode }) {

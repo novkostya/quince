@@ -2,20 +2,108 @@
  * Light + dark, one variable deep — components consume tokens only, never raw colors.
  * The sing-box reference: light neutral bg, near-monochrome, one soft accent. */
 
+/* THE TYPE SCALE, AND EVERY NUMBER IN IT WAS MEASURED (quince#1155).
+ *
+ * `docs/ui.type-survey.md` is the evidence: 34 rendered surfaces — mainstream web apps and
+ * self-hosted admin UIs — walked in Chromium and tallied by rendered character, because what a
+ * reader experiences is the size most of the text is set at rather than the size a `body` rule
+ * declares. Both populations converge on **14px body at a 1.5 line-height**, with a leave-one-out
+ * swing of ±0 and ±0.01 — that is a standard, not a preference, and quince sat outside it.
+ *
+ * THE LADDER IS THE ONE THE SET ACTUALLY USES: 12 · 14 · 16 · 18 · 20 · 24 carry 18, 26, 21, 7, 5
+ * and 3 of the measured surfaces. Nothing here is invented; the sizes off that ladder (13px, 15px,
+ * 12.8px) appear on four surfaces or fewer and are not worth a step.
+ *
+ * EACH STEP SITS ONE RUNG ABOVE WHERE quince WAS. The product measured 13px median with **two
+ * thirds of Home at 12px**, against a set whose floor is 14px, and 12px is now off the bottom of
+ * the scale entirely — there is no token that produces it, which is the point. That puts quince's
+ * body at 16px (the top of the measured band: npm, MDN, Google Fonts, Uptime Kuma) and its densest
+ * chrome at 14px (the median).
+ *
+ * THE LINE-HEIGHTS ARE THE SECOND HALF AND THE LESS OBVIOUS ONE. quince measured 1.38× against a
+ * set at 1.51× / 1.49×, and that ratio — not the padding — is what "clamped together" describes:
+ * the product's container padding (16-20px) and block gaps (12px) are already INSIDE both measured
+ * distributions. Raising the leading fixes the density complaint that raising the padding would
+ * not.
+ *
+ * THEY OVERRIDE TAILWIND'S OWN SCALE RATHER THAN SITTING BESIDE IT. A second, semantic set of
+ * classes would leave ~300 existing `text-sm` / `text-xs` call sites resolving to the old values,
+ * so the inconsistency this is meant to end would survive in every file nobody edited — which is
+ * the issue's own question about tokens versus a page-by-page pass, answered in the direction that
+ * cannot rot. `text-sm` naming a 16px step is the cost, and it is paid once here rather than in
+ * every component.
+ *
+ * TUNE THESE, NOT THE CALL SITES. One number moves every surface in the product. */
 :root {
+  --type-2xs: 0.875rem; /* 14px — the floor. Was 12px, which the survey puts below every measured surface. */
+  --type-2xs-line: 1.5;
+  --type-xs: 0.875rem; /* 14px — dense chrome: table cells, nav, badges, metadata */
+  --type-xs-line: 1.5;
+  --type-sm: 1rem; /* 16px — THE BODY DEFAULT. Every sentence a user reads. */
+  --type-sm-line: 1.5;
+  --type-base: 1.125rem; /* 18px — card titles, the step above body */
+  --type-base-line: 1.45;
+  --type-lg: 1.25rem; /* 20px — section headings */
+  --type-lg-line: 1.4;
+  --type-xl: 1.5rem; /* 24px — page heading */
+  --type-xl-line: 1.3;
+  --type-2xl: 1.875rem; /* 30px — the one display size */
+  --type-2xl-line: 1.25;
+
   --bg: #f6f7f8;
   --bg-card: #ffffff;
   --bg-elevated: #eff1f4;
+  /* DO NOT RAISE THIS TO MEET WCAG 1.4.11. Its 3:1 for control boundaries is the obvious thing to
+   * reach for — `--border` is 1.13:1 here and 1.37:1 in dark — and it was tried twice on quince#1155
+   * and rejected both times by the Operator on the deployed build: once as a separate 3:1
+   * `--border-control` for fields and outline buttons ("too much"), then as one shared edge at 2:1
+   * ("every border is too loud"). Measured, nothing in the comparison set complies either — Forgejo
+   * 2.08:1, Grafana 1.63:1, Immich draws no edge at all and tints the field instead. If a field ever
+   * genuinely needs to be easier to find, do it Immich's way with a distinct FILL; this number is
+   * settled. */
   --border: #e7e9ec;
   --fg: #1a1d21;
-  --fg-muted: #6b7280;
-  --fg-subtle: #9aa1ab;
-  --accent: #3b6ef5;
+  /* CONTRAST FLOORS, MEASURED RATHER THAN CHOSEN, AND THE LIGHT THEME WAS THE WORSE OF THE TWO.
+   *
+   * The survey's secondary-text medians are 9.63:1 (mainstream) and 7.58:1 (self-hosted), and both
+   * populations render under 2% of their characters below WCAG AA. quince rendered **20.85%** below
+   * it, and on the light theme **41.9%** — `--fg-subtle` was 2.43:1 on the page background, which is
+   * not a marginal miss.
+   *
+   * So the rule is a floor per ROLE, checked against the WORST surface that role is painted on
+   * (elevated in dark, the page in light), never against the most flattering one:
+   *
+   *   --fg          ≥ 12:1     both populations' primaries sit at 12.2-14.9
+   *   --fg-muted    ≥  7:1     the measured secondary medians; AAA, deliberately above AA
+   *   --fg-subtle   ≥ 5.5:1    comfortably over AA, and it is the only role allowed near the floor
+   *
+   * AA IS THE FLOOR AND NOT THE GOAL, which is why `--fg-muted` targets 7 rather than 4.5. Text can
+   * clear AA and still be exactly the grey-on-grey that was reported. */
+  --fg-muted: #4f555f; /* 7.06:1 on --bg · 7.87:1 on --bg-card · was #6b7280, 4.51:1 */
+  --fg-subtle: #60646b; /* 5.51:1 on --bg · 6.15:1 on --bg-card · was #9aa1ab, 2.43:1 */
+  /* THE STATE COLOURS WERE THE WORST TEXT IN THE PRODUCT AND NOBODY HAD LOOKED (quince#1155).
+   *
+   * Measured on the light theme before this change, against white: `--ok` 3.49:1, `--warn` 3.64:1,
+   * `--danger` 4.38:1, `--accent` 4.44:1. **All four fail WCAG AA**, and between them they carried
+   * 16.5% of Home's rendered characters — the single largest remaining block of unreadable text
+   * once the grey roles above were fixed. Held to the same ≥5.5:1 floor as `--fg-subtle`, on every
+   * surface they are painted on (white, page, elevated, and `--accent-soft`, which is what every
+   * badge tone actually sits on).
+   *
+   * ONE TOKEN STILL SERVES BOTH ROLES, AND IT SURVIVES BECAUSE THE TWO WANT THE SAME DIRECTION
+   * HERE. These are used as text (58 call sites) and as fills (20: the primary and destructive
+   * buttons, the progress bar, four connection dots). Splitting text from fill is the usual answer,
+   * and it is not needed: on a light surface a fill's own white label is at exactly the ratio that
+   * failed above — white on `#3b6ef5` is 4.44:1 — so darkening the fill fixes the button at the
+   * same time as the text. The dark theme lightens for the same reason, since its `--accent-fg` is
+   * near-black. If a future surface ever wants a bright fill and readable text from one token, THAT
+   * is when the split is owed. */
+  --accent: #2f58c5; /* 6.29:1 on white · 5.51 on --accent-soft · white label 6.29 · was #3b6ef5, 4.44 */
   --accent-fg: #ffffff;
   --accent-soft: #eaf0fe;
-  --ok: #1f9d55;
-  --warn: #b7791f;
-  --danger: #d64545;
+  --ok: #166e3c; /* 6.29:1 on white · 5.51 on --accent-soft · was #1f9d55, 3.49 */
+  --warn: #835716; /* 6.28:1 on white · 5.50 on --accent-soft · was #b7791f, 3.64 */
+  --danger: #ab3737; /* 6.28:1 on white · 5.50 on --accent-soft · white label 6.28 · was #d64545, 4.38 */
 
   --sidebar-w: 15rem;
   --radius: 0.75rem;
@@ -49,12 +137,17 @@
   --bg-elevated: #191d23;
   --border: #262b33;
   --fg: #e8eaed;
-  --fg-muted: #9aa1ab;
-  --fg-subtle: #6b7280;
-  --accent: #5b86f7;
+  /* The same floors, solved against the dark theme's worst surface (`--bg-elevated`). Kept in the
+   * same hue as before so this is a lightness change and not a repaint. */
+  --fg-muted: #b0b7c1; /* 9.63:1 on --bg · 8.89 on --bg-card · 8.37 on --bg-elevated · was #9aa1ab, 6.49 */
+  --fg-subtle: #8b93a0; /* 6.28:1 on --bg · 5.80 on --bg-card · 5.46 on --bg-elevated · was #6b7280, 3.50 */
+  /* The counterpart to the light theme's state block. `--ok` and `--warn` already cleared the floor
+   * on every dark surface (7.78 and 7.80 at their worst) and are UNCHANGED — a token is moved
+   * because it fails, not to make a diff look symmetrical. */
+  --accent: #7196f8; /* 5.51:1 on --accent-soft · 6.38 on --bg-card · was #5b86f7, 4.58 */
   --accent-fg: #0b0d10;
   --accent-soft: #1b2436;
-  --ok: #3ecf8e;
-  --warn: #e2b04a;
-  --danger: #f16a6a;
+  --ok: #3ecf8e; /* 7.78:1 at its worst (--accent-soft) — already over the floor */
+  --warn: #e2b04a; /* 7.80:1 at its worst (--accent-soft) — already over the floor */
+  --danger: #f27373; /* 5.51:1 on --accent-soft · 6.37 on --bg-card · was #f16a6a, 5.18 */
 }
