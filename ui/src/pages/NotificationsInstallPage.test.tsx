@@ -190,3 +190,22 @@ describe("the page's own layout", () => {
     expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
   });
 });
+
+// `text-fg-muted` IS NOT A CLASS, AND TAILWIND SAYS NOTHING WHEN YOU WRITE ONE (Operator-reported
+// 2026-08-18, third round on this page).
+//
+// The colour roles are exposed as `--color-muted` / `--color-subtle` / `--color-fg`, so the utility
+// is `text-muted`. This page was written with `text-fg-muted` in EIGHT places — every body-text block
+// it had — and an unknown utility is simply dropped: no error, no warning, no build failure. So the
+// text rendered at full `--fg` instead of the muted role, which is a real part of why the page read
+// differently from its neighbours after the layout was already fixed.
+//
+// ASSERTED AS "NO UNDEFINED ROLE CLASS", because the specific typo matters less than the shape: a
+// colour utility that names a CSS variable rather than a Tailwind colour is always dead.
+it("uses no colour utility that Tailwind will silently drop", () => {
+  stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: true });
+  const { container } = renderPage();
+
+  // The role names as they exist in `index.css` are `muted`, `subtle`, `fg` — never `fg-muted`.
+  expect(container.innerHTML).not.toMatch(/\b(?:text|bg|border)-fg-(?:muted|subtle|placeholder)\b/);
+});
