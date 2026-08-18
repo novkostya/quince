@@ -138,6 +138,7 @@ export function NotificationSettings({ config }: { config: Config }) {
     >
       <div>
         <SectionHeading>What quince tells you</SectionHeading>
+        <CategoryCoverageNotice notifications={draft.notifications} />
         <ul className="mt-3 flex flex-col gap-3">
           {CATEGORIES.map((c) => (
             <li key={c.key}>
@@ -264,5 +265,61 @@ export function NotificationSettings({ config }: { config: Config }) {
         {errFor("") ? <span className="text-xs text-danger">{errFor("")}</span> : null}
       </div>
     </form>
+  );
+}
+
+// CategoryCoverageNotice — `category_off`, the fifth status cause, made reachable (quince#1212).
+//
+// THE SPEC'S STATUS TABLE LISTED IT AND NOTHING COULD REPORT IT. Six rows for five causes, and the
+// string `category_off` appeared in this codebase exactly once, in a comment: it was a four-cause
+// surface wearing a five-cause spec. The reason was structural rather than an omission — the cause
+// is a fact about `notifications:`, and until the settings reached a screen there was no client
+// holding that section to notice.
+//
+// IT LIVES ABOVE THE SWITCHES, NOT IN THE STATUS SURFACE ABOVE, and that is a deliberate reading of
+// the spec's own remedy column, which says *"turn it on here"*. The other five causes are facts
+// about this browser and this subscription; this one is a fact about the configuration, true for
+// every device at once. Rendering it beside the controls that fix it makes the remedy the next thing
+// on screen, and means it appears on a browser that cannot receive a push at all — which is correct,
+// because the misconfiguration is not that browser's.
+//
+// IT READS THE DRAFT, NOT THE SAVED DOCUMENT, so unticking the last category says what that will
+// mean before Save is pressed rather than after. The notice describes what quince WILL do with what
+// is on screen; that is the only version of it the user can act on.
+//
+// TWO STATES, NOT ONE, because they are different silences with different remedies:
+//
+//   - EVERYTHING OFF — a live subscription that can never receive anything. This is the honest
+//     `category_off`: quince is set up, the phone is subscribed, and nothing will ever arrive.
+//   - BOTH REMINDERS OFF — quince still reports failures, so notifications visibly "work", and the
+//     one thing the rung exists for silently never happens. That is worse than the first state
+//     rather than milder: the first is obvious the moment you look, and this one is invisible
+//     precisely because the other notifications keep arriving.
+function CategoryCoverageNotice({ notifications }: { notifications: Config["notifications"] }) {
+  const remindersOff = !notifications.backup_available && !notifications.backup_overdue;
+  const everythingOff =
+    remindersOff &&
+    !notifications.action_required &&
+    !notifications.backup_failed &&
+    !notifications.backup_completed;
+
+  if (!everythingOff && !remindersOff) return null;
+
+  return (
+    // `role="status"` and the warn treatment, matching `ConfigStaleNotice` — the house idiom for a
+    // form telling you what your current state means, as against `role="alert"` and `border-danger`,
+    // which this project reserves for a configuration that is not in force.
+    <div role="status" className="mt-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn">
+      <div className="font-medium">
+        {everythingOff
+          ? "quince will not notify you about anything"
+          : "quince will never remind you a backup is due"}
+      </div>
+      <p className="mt-1 text-xs">
+        {everythingOff
+          ? "Every kind below is switched off, so a device that has subscribed will never receive anything. Turn on at least one."
+          : "Both reminders below are off. quince will still tell you when a backup fails or needs you — but it will never tell you one is due, which is what makes Wi-Fi backups happen on their own."}
+      </p>
+    </div>
   );
 }

@@ -23,7 +23,7 @@ behaviour rather than a note.
 | --- | --- |
 | `ui/index.html`, `ui/public/manifest.webmanifest` | the install surface — the manifest **already exists** (interface fact 4); what it gains is what push needs |
 | `ui/public/sw.js` (new) | the service worker, **push and notificationclick only** |
-| `ui/src/features/notifications/` (new) | subscribe/unsubscribe, the five-cause status surface, the per-category toggles |
+| `ui/src/features/notifications/` (new) | subscribe/unsubscribe, the five-cause status surface, the per-category toggles — **all three built; the toggles and `category_off` landed late, in quince#1212, because the rung shipped the config keys with no screen** |
 | `ui/src/pages/` | the Add-to-Home-Screen onboarding page; the Settings → Notifications section |
 | `core/internal/push/` (new) | VAPID (RFC 8292), payload encryption (RFC 8291), the delivery client and its `410`/`404` handling |
 | `core/internal/notify/` (new) | the notifier: what fires, when, and which kind |
@@ -262,12 +262,30 @@ distinguishable states with different fixes. The status surface therefore report
 | `unsupported_platform` | `PushManager` and `serviceWorker` both absent | this browser cannot receive push — D7 covers the Lockdown Mode case |
 | `permission_not_granted` | `Notification.permission === "default"` | tap Enable (and the tap is what the platform requires — D1) |
 | `permission_denied` | `Notification.permission === "denied"` | **iOS Settings → Notifications → quince.** quince cannot re-prompt, and says so |
-| `category_off` | the kind's key in `notifications:` is `false` | turn it on here |
+| `category_off` | the kinds in `notifications:` are `false` | turn one on — the switches are directly below the notice |
 | `subscription_expired` | the endpoint returned `404`/`410` — D8 | re-enable on **this** device; the row names which |
 
 Six rows for five causes, because `unsupported` splits into two with different remedies — and the
 split is the whole value of the surface: *"not installed"* is one gesture away from working and
 *"platform"* is not.
+
+**`category_off` IS NOT REPORTED BESIDE THE OTHER FIVE, AND THAT IS THIS TABLE'S ONE EXCEPTION**
+(quince#1212, built 2026-08-18). Every other row is a fact about **this browser and this
+subscription**, so it belongs in the per-device status surface. This one is a fact about the
+**configuration**, true for every device at once — including for a browser that can never receive a
+push, whose owner is still the right person to fix it. It therefore renders above the category
+switches on `/settings/notifications`, which is also what makes the remedy column literally true:
+*here* is the next thing on screen.
+
+**It splits in two, and the milder-looking half is the worse one.** *Every kind off* is a live
+subscription that can never receive anything, and it is obvious the moment anybody looks. *Both
+reminders off, the rest on* leaves failures arriving, so notifications visibly work — and the one
+thing this rung exists for silently never happens. The second is reported as its own sentence
+rather than folded into the first.
+
+**Reading the DRAFT rather than the saved document is load-bearing**: unticking the last category
+must say what that will mean before Save is pressed. A notice that appears only after the document
+is written is a report, not a warning.
 
 **These are computed client-side and reported honestly.** The server never guesses at a browser's
 capabilities; it knows only whether a live subscription exists.
@@ -363,11 +381,25 @@ what quince guesses is a bigger promise than this is worth."*
 All behind `authGuard` and the CSRF guard; **nothing is added to `authExempt`** (fact 9).
 
 ```
-GET    /api/notifications              → {vapid_public_key, categories{...}, subscriptions:[{id,label,state,created_at,expired_at?}]}
+GET    /api/notifications              → {vapid_public_key, subscriptions:[{id,label,state,created_at,expired_at?,last_sent_at?,fingerprint}]}
 POST   /api/notifications/subscriptions {endpoint, keys:{p256dh,auth}, label} → 201 {id}
 DELETE /api/notifications/subscriptions/{id}                                  → 204
 POST   /api/notifications/test          → 202; sends one push to every live subscription
 ```
+
+**`categories{…}` WAS PLANNED HERE AND IS DELIBERATELY NOT BUILT** (quince#1212, 2026-08-18). This
+line carried it, on the assumption that the client reporting `category_off` would need the per-kind
+switches from the endpoint that is about notifications. It does not: the client that reports
+`category_off` is the one **editing** those switches, so it already holds them from
+`GET /api/config` — the same document it is about to PUT back. Serving them twice would put one set
+of booleans on two endpoints with no rule about which is newer, and the D6 status surface would be
+reading a copy of a document it also writes.
+
+So the cause is computed from the config the settings form already has, and the field is never
+added. Recorded rather than deleted because the plan was reasonable and the reason it is wrong is
+not obvious from the endpoint list — a later reader asking *"why is there no `categories`?"* should
+find this rather than re-derive it. Nothing in `docs/contracts.md` ever carried the field, so no
+frozen interface changes.
 
 `vapid_public_key` is public by construction — it is the `applicationServerKey` every subscription
 must carry. `POST …/test` exists because *"is this working?"* is otherwise unanswerable without
