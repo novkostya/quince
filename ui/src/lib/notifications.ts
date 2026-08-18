@@ -41,9 +41,31 @@ function urlBase64ToUint8Array(base64url: string): Uint8Array {
 // COARSE ON PURPOSE. It has to be recognisable in a list of two or three, and it must never be a
 // UDID or a verbatim User-Agent: the first is Operator-private and the second is a fingerprint
 // nobody asked to store. Platform plus browser family is enough to tell "my phone" from "the iPad".
+// deviceLabel names this device for the settings list.
+//
+// IT MUST NAME A PLATFORM, NOT SAY "This device". The fallback used to be the literal string
+// "This device", so a Mac subscribed as "This device · Safari" — which is meaningless in a list
+// whose whole job is to tell devices apart, and actively wrong when read from a different device.
+// Operator-reported 2026-08-18, with an iPhone and a Mac subscribed at once.
+//
+// COARSE ON PURPOSE (spec D8). This is stored server-side and rendered on a screen, so it is a
+// platform and a browser and never a User-Agent verbatim — a UA string is a fingerprint, and this
+// list is meant to be readable rather than precise.
 function deviceLabel(): string {
   const ua = navigator.userAgent;
-  const platform = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : "This device";
+  const platform = /iPhone/.test(ua)
+    ? "iPhone"
+    : /iPad/.test(ua)
+      ? "iPad"
+      : /Android/.test(ua)
+        ? "Android"
+        : /Macintosh/.test(ua)
+          ? "Mac"
+          : /Windows/.test(ua)
+            ? "Windows PC"
+            : /Linux/.test(ua)
+              ? "Linux"
+              : "Browser";
   const browser = /CriOS|Chrome/.test(ua) ? "Chrome" : /Firefox/.test(ua) ? "Firefox" : "Safari";
   return `${platform} · ${browser}`;
 }
@@ -72,11 +94,15 @@ export function useSubscribe() {
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
       const json = sub.toJSON();
-      return api.post<{ id: string }>("/api/notifications/subscriptions", {
+      const created = await api.post<{ id: string }>("/api/notifications/subscriptions", {
         endpoint: sub.endpoint,
         keys: { p256dh: json.keys?.p256dh ?? "", auth: json.keys?.auth ?? "" },
         label: deviceLabel(),
       });
+      // THE ID IS WHAT MAKES "this device" ANSWERABLE LATER. It is not a capability — the endpoint
+      // and keys never leave this function — so the browser may keep it.
+      rememberSubscription(created.id);
+      return created;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
@@ -93,6 +119,11 @@ export function useUnsubscribe() {
   return useMutation({
     mutationFn: async (id: string) => {
       await api.del<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`);
+      if (id === rememberedSubscription()) {
+        // Only when it is OUR row. Turning off another device from this one must not make this
+        // browser forget its own subscription — which would then render as Off while still live.
+        forgetSubscription();
+      }
       // BEST EFFORT, AND AFTER the server call. If the browser half fails the row is still gone
       // server-side, which is the half that decides whether anything is sent.
       try {
@@ -123,4 +154,75 @@ export function useSendTest() {
     mutationFn: () => api.post<NotificationsTestResponse>("/api/notifications/test", {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
+}
+
+// --- which subscription belongs to THIS browser ---
+//
+// THE PAGE USED TO ANSWER THIS WITH "IS ANY SUBSCRIPTION LIVE", AND THAT IS A LIE ON EVERY DEVICE
+// BUT ONE. Operator-reported 2026-08-18: subscribe on an iPhone, then open quince on a Mac, and the
+// Mac says *"This device — On"* about a device that has no subscription at all. Worse, it is a trap:
+// the only control offered is "Turn off", so the way to enable the Mac was to turn OFF the iPhone —
+// deleting a working subscription — and then turn on. Afterwards the iPhone claimed On, also falsely.
+//
+// The state-honesty rule is explicit that nothing claims more than was proven, and "some device
+// somewhere is subscribed" was being rendered as "this one is".
+//
+// THE SERVER CANNOT ANSWER IT, BY DESIGN. An endpoint is capability-grade and never comes back from
+// the API (spec D8), so there is nothing in the list to compare a browser's own subscription
+// against. The id quince mints at subscribe time is the one non-capability handle both sides hold,
+// so the browser keeps it.
+
+const subscriptionIDKey = "quince.push.subscription-id";
+
+// rememberSubscription records the id quince assigned to THIS browser's subscription.
+//
+// `localStorage` AND NOT A COOKIE OR THE DB: it must be per-browser-profile, survive a reload, and
+// never travel with a request. It holds an opaque id and nothing that could push to anybody.
+function rememberSubscription(id: string) {
+  try {
+    localStorage.setItem(subscriptionIDKey, id);
+  } catch {
+    /* Private browsing can refuse. The consequence is a page that says Off while the browser is
+       subscribed, which is the SAFE direction to be wrong: it offers to turn on, and re-subscribing
+       is idempotent server-side (the row is keyed on endpoint and revived, not duplicated). */
+  }
+}
+
+function forgetSubscription() {
+  try {
+    localStorage.removeItem(subscriptionIDKey);
+  } catch {
+    /* Same as above; a stale id is checked against the server list before it is believed. */
+  }
+}
+
+function rememberedSubscription(): string | null {
+  try {
+    return localStorage.getItem(subscriptionIDKey);
+  } catch {
+    return null;
+  }
+}
+
+// useThisDevice answers whether THIS browser is subscribed, and which row is its own.
+//
+// BOTH HALVES ARE REQUIRED. The browser's own `pushManager` is the only authority on whether this
+// device has a subscription; the server list is the only authority on whether quince still knows
+// about it. A browser holding a registration quince deleted from another device is Off — it will
+// receive nothing — and saying On there is the same lie in the other direction.
+export function useThisDevice() {
+  const q = useNotifications();
+  const browser = useQuery({
+    queryKey: ["push", "browser-subscription"],
+    queryFn: async () => {
+      if (!("serviceWorker" in navigator)) return false;
+      const reg = await navigator.serviceWorker.ready;
+      return (await reg.pushManager.getSubscription()) !== null;
+    },
+    enabled: pushSupport() === "supported",
+  });
+
+  const id = rememberedSubscription();
+  const mine = (q.data?.subscriptions ?? []).find((s) => s.id === id && s.state === "live");
+  return { on: Boolean(browser.data && mine), id: mine?.id ?? null };
 }

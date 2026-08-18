@@ -4,7 +4,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { isIOS, pushSupport } from "@/lib/pwa";
-import { useNotifications, useSendTest, useSubscribe, useUnsubscribe } from "@/lib/notifications";
+import {
+  useNotifications,
+  useSendTest,
+  useSubscribe,
+  useThisDevice,
+  useUnsubscribe,
+} from "@/lib/notifications";
 
 // The install step for notifications (qn.12, spec D1).
 //
@@ -159,6 +165,12 @@ function NotificationsControls() {
   const subscribe = useSubscribe();
   const unsubscribe = useUnsubscribe();
   const sendTest = useSendTest();
+  // THIS DEVICE, NOT ANY DEVICE. `live.length > 0` was answering "is somebody subscribed" and
+  // rendering it as "you are" — see `useThisDevice` for what that cost on a second device.
+  //
+  // WITH THE OTHER HOOKS, ABOVE EVERY EARLY RETURN. Placed where it is used, it sat below the
+  // `permission === "denied"` branch, and a hook called conditionally changes order between renders.
+  const thisDevice = useThisDevice();
   const permission = typeof Notification === "undefined" ? "default" : Notification.permission;
 
   // PERMISSION DENIED IS TERMINAL FROM HERE, and saying so is the honest thing. The platform will
@@ -185,24 +197,27 @@ function NotificationsControls() {
   const live = (q.data?.subscriptions ?? []).filter((s) => s.state === "live");
   const expired = (q.data?.subscriptions ?? []).filter((s) => s.state !== "live");
 
+  // THIS DEVICE, NOT ANY DEVICE. `live.length > 0` was answering "is somebody subscribed" and
+  // rendering it as "you are" — see `useThisDevice` for what that cost on a second device.
+
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             This device
-            {live.length > 0 ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
+            {thisDevice.on ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-fg-muted">
-          {live.length > 0 ? (
+          {thisDevice.on ? (
             <p>quince will notify this device when a backup is due or needs you.</p>
           ) : (
             <p>Turn on notifications to hear when a device is due for a backup, or needs you.</p>
           )}
           {/* THE PROMPT MUST HANG OFF A REAL TAP — a platform requirement, not a preference, which
               is why this is a button and not something the page does on mount. */}
-          {live.length === 0 && (
+          {!thisDevice.on && (
             <Button
               onClick={() => q.data && subscribe.mutate(q.data.vapid_public_key)}
               disabled={!q.data || subscribe.isPending}
@@ -221,7 +236,7 @@ function NotificationsControls() {
               notification is whenever a device next goes stale — three days by default — so without
               this the setup flow ends on "we think that worked". It is placed on the same card as
               the switch, because "turn it on" and "check it arrived" are one task. */}
-          {live.length > 0 && (
+          {thisDevice.on && (
             <div className="space-y-2">
               <Button
                 variant="outline"
@@ -310,7 +325,12 @@ function NotificationsControls() {
             <ul className="space-y-1 text-fg-muted">
               {live.map((s) => (
                 <li key={s.id} className="flex items-center justify-between gap-3">
-                  <span>{s.label}</span>
+                  {/* THE CURRENT DEVICE IS MARKED. Two Macs, or two iPhones, produce the same
+                      label, and "Turn off" beside the wrong one is a destructive misclick. */}
+                  <span>
+                    {s.label}
+                    {s.id === thisDevice.id ? <span className="text-muted"> · this device</span> : null}
+                  </span>
                   <Button variant="ghost" onClick={() => unsubscribe.mutate(s.id)}>
                     Turn off
                   </Button>

@@ -19,18 +19,24 @@ vi.mock("@/lib/api", () => ({
 const mockApi = vi.mocked(api);
 
 function stageInstalledIOS() {
+  // THE BROWSER'S OWN SUBSCRIPTION IS HALF THE ANSWER to "is this device on" — the server list is
+  // the other half. Staging only the server list is what the page used to believe, and it is exactly
+  // the bug: a Mac read an iPhone's subscription as its own.
+  const pushManager = { getSubscription: vi.fn().mockResolvedValue({ endpoint: "https://p.example/x" }) };
   vi.stubGlobal("navigator", {
     userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X)",
     platform: "iPhone",
     maxTouchPoints: 5,
     standalone: true,
-    serviceWorker: { register: vi.fn() },
+    serviceWorker: { register: vi.fn(), ready: Promise.resolve({ pushManager }) },
   });
   vi.stubGlobal("PushManager", function PushManager() {});
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
 }
 
 function stageOneLiveSubscription() {
+  // The id the page will look for in localStorage, matching the row below.
+  localStorage.setItem("quince.push.subscription-id", "s1");
   mockApi.get.mockResolvedValue({
     vapid_public_key: "BFakeKey",
     subscriptions: [{ id: "s1", label: "iPhone", state: "live", created_at: "2026-08-18T00:00:00Z" }],
@@ -45,6 +51,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The remembered id is per-browser state, so it outlives a test unless cleared.
+  localStorage.clear();
 });
 
 describe("sending a test notification", () => {
