@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationsInstallPage } from "./NotificationsInstallPage";
 
@@ -147,7 +148,45 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <NotificationsInstallPage />
+      <MemoryRouter>
+        <NotificationsInstallPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+// THE PAGE IS A CHILD OF THE SHELL AND MUST BE LAID OUT LIKE ONE (Operator-reported 2026-08-18).
+//
+// It was written with the pre-shell onboarding layout — `min-h-dvh`, its own safe-area padding, its
+// own background, its own `mx-auto max-w-2xl` — and routed INSIDE the authed shell, which supplies
+// all four. A full-page layout nested in a full-page layout: doubled horizontal inset, a dead gap
+// above the title, and a column lining up with nothing else in Settings.
+//
+// NOTHING COULD FAIL, which is why this test exists rather than a screenshot. Both layouts render,
+// both pass every behavioural assertion in this file, and jsdom computes no geometry — so the only
+// checkable statement is the one below: the shell-owned classes are not repeated here.
+describe("the page's own layout", () => {
+  it("does not carry the full-page shell its parent already provides", () => {
+    stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: true });
+    const { container } = renderPage();
+
+    const root = container.querySelector("section");
+    expect(root).not.toBeNull();
+    // `min-h-dvh` is the signature of a page that owns the viewport. Inside the shell it forces a
+    // second full-height box into one that is already scrolling.
+    expect(container.innerHTML).not.toContain("min-h-dvh");
+    // The shell owns the safe-area inset. Repeating it doubles the gutter on a notched phone, which
+    // is exactly what was reported.
+    expect(container.innerHTML).not.toContain("env(safe-area-inset-left)");
+  });
+
+  // A HOME SCREEN WEB APP HAS NO BROWSER CHROME, so the back gesture is all a phone user has and
+  // nothing on screen promises it. This page is reachable only from Settings, so it must return
+  // there — the same reason SettingsAuthPage carries one, one degree sharper.
+  it("offers a way back to Settings", () => {
+    stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: true });
+    renderPage();
+
+    expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
+  });
+});
