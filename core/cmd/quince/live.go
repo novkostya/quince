@@ -96,6 +96,33 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	}
 	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP, "connections", len(unique))
 
+	// THE ROUTER (quince#1219 item D). The registry keys presence by (source, udid, transport)
+	// where sourceID is the muxer address; everything downstream used to throw the source away and
+	// re-derive an endpoint from `usb`/`wifi`, which is only correct when one daemon serves each
+	// transport. It is not correct for the hardened shape — one muxer serving both — and it is
+	// wrong outright for two muxers both serving USB.
+	//
+	// A DEVICE NOTHING REPORTS GETS AN ERROR, never a default. libusbmuxd only NULL-checks
+	// USBMUXD_SOCKET_ADDRESS, so the old empty-string answer was USED rather than falling back,
+	// and the CLI failed against nothing with the operator left to guess.
+	sourceEndpoint := make(map[string]muxaddr.Endpoint, len(unique))
+	for _, ep := range unique {
+		sourceEndpoint[ep.String()] = ep
+	}
+	muxerFor := func(udid, transport string) (muxaddr.Endpoint, error) {
+		source, ok := reg.SourceFor(udid, transport)
+		if !ok {
+			return muxaddr.Endpoint{}, fmt.Errorf("no muxer reports this device on %s", transport)
+		}
+		ep, ok := sourceEndpoint[source]
+		if !ok {
+			// Unreachable while the client set is fixed at startup, and named rather than
+			// defaulted so that it stays unreachable when the set becomes live (qn.7).
+			return muxaddr.Endpoint{}, fmt.Errorf("muxer %s reported this device and is not configured", source)
+		}
+		return ep, nil
+	}
+
 	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
 	// external (HARDENED / manage_muxer: false — dialed only, and reported in /api/health from
 	// the dialing client's real connection state rather than asserted).
@@ -107,7 +134,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	ls.muxer = muxerHealth{group}
 
 	// Device ops (qn.3): pair/validate/info + encryption; enrichment overlays lockdown identity.
-	tools := deviceops.NewTools(usbEP, wifiEP, log)
+	tools := deviceops.NewTools(muxerFor, log)
 	lockdown := deviceops.NewLockdownStore(bootstrap.Data, lockdownSystemDir, log)
 	lockdown.Restore()
 	opsMgr := deviceops.NewManager(ctx, tools, reg, eventBus, st, log)
@@ -220,7 +247,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 		Prober: opsMgr, Announcer: reg,
 		Bus: eventBus, Log: log, Config: ecfg, Backups: engineBackupsRoot, NewID: id.New,
 		Tool: backup.ToolConfig{
-			Bin: "idevicebackup2", Usbmuxd: usbEP, Netmuxd: wifiEP,
+			Bin: "idevicebackup2", MuxerFor: muxerFor,
 		},
 	})
 	if err := eng.Reconcile(); err != nil {

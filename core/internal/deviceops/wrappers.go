@@ -15,10 +15,18 @@ import (
 
 // run executes one CLI, capturing stdout/stderr. The child is group-isolated and ctx-killed
 // (setpgid); its only added env is the muxer pointer (never a secret). Short-lived one-shot.
-func (t *Tools) run(ctx context.Context, bin, transport string, args ...string) (stdout, stderr string, err error) {
+//
+// THE ENV IS BUILT FIRST AND CAN REFUSE (quince#1219 item D): the muxer is resolved from the
+// device, so a device no muxer reports has no endpoint to run against. Refusing here beats
+// spawning a CLI that would reach libusbmuxd's compiled-in default socket instead.
+func (t *Tools) run(ctx context.Context, bin, udid, transport string, args ...string) (stdout, stderr string, err error) {
+	env, err := t.childEnv(udid, transport)
+	if err != nil {
+		return "", "", err
+	}
 	cmd := exec.CommandContext(ctx, bin, t.args(args...)...)
 	setpgid(cmd)
-	cmd.Env = t.childEnv(transport)
+	cmd.Env = env
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err = cmd.Run()
@@ -55,7 +63,7 @@ func (t *Tools) validate(ctx context.Context, udid, transport string) (validateR
 		return validateUnknown, ErrBadUDID
 	}
 	args := append(networkArgs(transport), "-u", udid, "validate")
-	out, errOut, err := t.run(ctx, t.Idevicepair, transport, args...)
+	out, errOut, err := t.run(ctx, t.Idevicepair, udid, transport, args...)
 	combined := out + errOut
 	switch {
 	case err == nil && strings.Contains(out, "SUCCESS: Validated"):
@@ -105,7 +113,7 @@ func (t *Tools) info(ctx context.Context, udid, transport string, simple bool) (
 		args = append(args, "-s")
 	}
 	args = append(args, "-u", udid, "-x")
-	out, _, err := t.run(ctx, t.Ideviceinfo, transport, args...)
+	out, _, err := t.run(ctx, t.Ideviceinfo, udid, transport, args...)
 	if err != nil {
 		return "", "", ""
 	}
@@ -122,7 +130,7 @@ func (t *Tools) info(ctx context.Context, udid, transport string, simple bool) (
 // cold or locked lockdown, an unparseable value) — the case where quince really does not know.
 func (t *Tools) willEncrypt(ctx context.Context, udid, transport string) string {
 	args := append(networkArgs(transport), "-u", udid, "-q", backupDomain, "-k", "WillEncrypt")
-	return scalarTriState(t.run(ctx, t.Ideviceinfo, transport, args...))
+	return scalarTriState(t.run(ctx, t.Ideviceinfo, udid, transport, args...))
 }
 
 // Lockdown domains quince reads. Named because a scalar read is dispatched by domain, and a bare
@@ -181,7 +189,7 @@ func (t *Tools) wifiSync(ctx context.Context, udid, transport string) string {
 		return "unknown"
 	}
 	args := append(networkArgs(transport), "-u", udid, "-q", wifiSyncDomain, "-k", t.wifiSyncKey)
-	return scalarTriState(t.run(ctx, t.Ideviceinfo, transport, args...))
+	return scalarTriState(t.run(ctx, t.Ideviceinfo, udid, transport, args...))
 }
 
 // ErrWifiSyncUnverifiable is returned when the key is not known, so quince cannot write it. It is a
@@ -225,7 +233,7 @@ func (t *Tools) SetWifiSync(ctx context.Context, udid, transport string, enable 
 		want = "true"
 	}
 	args := append(networkArgs(transport), "-u", udid, "-q", wifiSyncDomain, "-k", t.wifiSyncKey, "--set-bool", want)
-	if _, stderr, err := t.run(ctx, t.Ideviceinfo, transport, args...); err != nil {
+	if _, stderr, err := t.run(ctx, t.Ideviceinfo, udid, transport, args...); err != nil {
 		return fmt.Errorf("ideviceinfo --set-bool: %w: %s", err, lastLine(stderr))
 	}
 
@@ -303,7 +311,7 @@ func (t *Tools) pairAttempt(ctx context.Context, udid, transport string) (pairOu
 		return pairFailed, "", ErrBadUDID
 	}
 	args := append(networkArgs(transport), "-u", udid, "pair")
-	out, errOut, err := t.run(ctx, t.Idevicepair, transport, args...)
+	out, errOut, err := t.run(ctx, t.Idevicepair, udid, transport, args...)
 	combined := out + errOut
 	switch {
 	case err == nil && strings.Contains(out, "SUCCESS: Paired"):

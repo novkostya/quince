@@ -201,6 +201,38 @@ type sourceSink struct {
 func (s sourceSink) Reset()              { s.reg.reset(s.source) }
 func (s sourceSink) Apply(ev muxd.Event) { s.reg.apply(s.source, ev) }
 
+// --- routing (quince#1219 item D) ---
+
+// SourceFor answers WHICH MUXER reported udid on transport, so a device op can be sent to the
+// muxer that actually sees the device instead of to one guessed from the transport name. The
+// registry has always known this — presence is keyed by (source, udid, transport) — and every
+// consumer threw it away, re-deriving an endpoint from `usb`/`wifi` as though one daemon served
+// each. A muxer serving BOTH transports is the hardened shape (qn.6p D4), and two muxers each
+// serving USB is legitimate and was misrouted outright.
+//
+// Newest last_seen wins, which is mergedLocked's rule for which edge the merged table shows —
+// stated once here so routing cannot disagree with what the UI displays. Ties break on the
+// lexicographically smaller sourceID, because Go randomises map order and routing must not.
+//
+// FALSE MEANS NO SOURCE HOLDS THAT EDGE, and the caller must refuse rather than substitute a
+// default: an op sent to a muxer that cannot see the device fails with a message about the
+// device, which names the wrong thing.
+func (r *Registry) SourceFor(udid, transport string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var best, bestSeen string
+	for source, byUDID := range r.sources {
+		seen, ok := byUDID[udid][transport]
+		if !ok {
+			continue
+		}
+		if seen > bestSeen || (seen == bestSeen && best != "" && source < best) {
+			best, bestSeen = source, seen
+		}
+	}
+	return best, best != ""
+}
+
 // --- event application (demo lock discipline: mutate under lock, publish after unlock) ---
 
 type emission struct {

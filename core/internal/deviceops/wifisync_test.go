@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -50,7 +49,7 @@ func TestWifiSyncWithNoKeyReadsUnknownWithoutQueryingTheDevice(t *testing.T) {
 
 // NewTools must carry the measured key into production, not leave it to a caller to remember.
 func TestNewToolsCarriesTheMeasuredWifiSyncKey(t *testing.T) {
-	if got := NewTools(mustEP("/tmp/usbmuxd.sock"), muxaddr.Endpoint{}, nil).wifiSyncKey; got != "EnableWifiConnections" {
+	if got := NewTools(StaticMuxer(mustEP("/tmp/usbmuxd.sock")), nil).wifiSyncKey; got != "EnableWifiConnections" {
 		t.Fatalf("NewTools wifiSyncKey = %q, want EnableWifiConnections", got)
 	}
 }

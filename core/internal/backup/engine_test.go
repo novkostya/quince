@@ -101,7 +101,7 @@ func newHarness(t *testing.T, p fakeParams, transport string, mods ...func(*Opti
 		Log: log, Config: testCfg(), Backups: backups, NewID: id.New,
 		Now:       func() time.Time { return time.Now().UTC() },
 		FreeSpace: func(string) (uint64, error) { return 100 << 30, nil },
-		Tool:      ToolConfig{Bin: os.Args[0], ArgPrefix: fakeArgPrefix(), Env: fakeToolEnv(p)},
+		Tool:      ToolConfig{Bin: os.Args[0], ArgPrefix: fakeArgPrefix(), Env: fakeToolEnv(p), MuxerFor: StaticMuxer(testEndpoint(t))},
 	}
 	// A permanent hang is the ONLY fixture that must trip the zero-activity backstop; arm a short one
 	// for it. Every other fixture is a healthy or churning run, and for those the backstop stays
@@ -1474,10 +1474,13 @@ func TestBackupTargetIsOnStorageFilesystem(t *testing.T) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tl := &tool{bin: "idevicebackup2"}
+	tl := &tool{bin: "idevicebackup2", muxerFor: StaticMuxer(testEndpoint(t))}
 
 	// The tool is pointed straight at the target — no stub, no symlink derivation.
-	cmd := tl.command(context.Background(), TransportUSB, udid, target, "")
+	cmd, err := tl.command(context.Background(), TransportUSB, udid, target, "")
+	if err != nil {
+		t.Fatalf("command: %v", err)
+	}
 	if got := cmd.Args[len(cmd.Args)-1]; got != target {
 		t.Fatalf("idevicebackup2 target = %q, want the storage working/ parent %q (no stub)", got, target)
 	}

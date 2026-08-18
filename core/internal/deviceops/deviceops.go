@@ -51,11 +51,21 @@ type Tools struct {
 	Idevicepair    string // default "idevicepair"
 	Ideviceinfo    string // default "ideviceinfo"
 	Idevicebackup2 string // default "idevicebackup2"
-	// Usbmuxd and Netmuxd are PARSED endpoints (qn.6p D3), not raw config strings: either may be
-	// a unix socket or a TCP address, and the spelling a subprocess needs is the endpoint's to
-	// give. Holding strings here is what let the two keys disagree about their own grammar.
-	Usbmuxd   muxaddr.Endpoint // devices.usbmuxd_socket — USB muxer
-	Netmuxd   muxaddr.Endpoint // devices.netmuxd_addr  — Wi-Fi muxer
+	// muxerFor answers WHERE to reach the muxer that reported a given device (quince#1219 item D).
+	// It replaces a pair of configured endpoints held here and chosen by TRANSPORT: the registry
+	// keys presence by (source, udid, transport) and this package discarded the source, so an op
+	// on a device seen by muxer B could be dispatched at muxer A because both were labelled `usb`.
+	//
+	// It also closes a latent path that no fallback could close honestly: with no endpoint for a
+	// transport, socketAddr returned "" and libusbmuxd only NULL-checks USBMUXD_SOCKET_ADDRESS —
+	//
+	//	char *usbmuxd_socket_addr = getenv("USBMUXD_SOCKET_ADDRESS");
+	//	if (usbmuxd_socket_addr) { ... }
+	//
+	// — so SET-BUT-EMPTY was used rather than falling back to the compiled-in default, and the CLI
+	// failed somewhere the operator could not read. A resolver returns an ERROR instead, and the op
+	// says which device nothing reports.
+	muxerFor  MuxerFor
 	Log       *slog.Logger
 	env       []string // extra child env (tests only)
 	argPrefix []string // prepended to every argv (tests only: re-exec as the fake CLI)
@@ -77,35 +87,65 @@ func (t *Tools) args(cliArgs ...string) []string {
 	return append(append([]string{}, t.argPrefix...), cliArgs...)
 }
 
-// NewTools returns Tools with the real binary names and the configured muxer endpoints.
-func NewTools(usbmuxd, netmuxd muxaddr.Endpoint, log *slog.Logger) *Tools {
+// MuxerFor resolves the muxer endpoint for one device on one transport. Its two implementations
+// are the live registry (live.go, backed by Registry.SourceFor) and the tests' fixed answer; it is
+// a func rather than an interface so the device package is not imported for one method.
+type MuxerFor func(udid, transport string) (muxaddr.Endpoint, error)
+
+// StaticMuxer is the MuxerFor for a deployment with one muxer address for every device — the
+// answer tests want, and the honest shape of "route by source" when there is only one source.
+// Production does NOT use it: buildLiveStack resolves against the registry.
+func StaticMuxer(ep muxaddr.Endpoint) MuxerFor {
+	return func(string, string) (muxaddr.Endpoint, error) { return ep, nil }
+}
+
+// NewTools returns Tools with the real binary names and the muxer resolver.
+func NewTools(muxerFor MuxerFor, log *slog.Logger) *Tools {
 	return &Tools{
 		Idevicepair:    "idevicepair",
 		Ideviceinfo:    "ideviceinfo",
 		Idevicebackup2: "idevicebackup2",
-		Usbmuxd:        usbmuxd,
-		Netmuxd:        netmuxd,
+		muxerFor:       muxerFor,
 		Log:            log,
 		wifiSyncKey:    wifiSyncKey,
 	}
 }
 
-// socketAddr is the USBMUXD_SOCKET_ADDRESS value for a transport (verified live — qn.3 interface
+// socketAddr is the USBMUXD_SOCKET_ADDRESS value for one device (verified live — qn.3 interface
 // fact 2). The spelling is the ENDPOINT's, not this function's: it used to prefix "UNIX:"
 // unconditionally for USB and return the Wi-Fi address verbatim, so a unix-socket Wi-Fi muxer
 // reached the CLIs as a bare path and libusbmuxd read it as a host:port (quince#897 item 1).
-func (t *Tools) socketAddr(transport string) string {
-	if transport == TransportWiFi {
-		return t.Netmuxd.Env()
+//
+// THE DEVICE, NOT THE TRANSPORT, PICKS THE MUXER (quince#1219 item D). It takes a udid because
+// the transport alone never identified a daemon — it named a kind of connection, and quince
+// assumed one daemon per kind.
+func (t *Tools) socketAddr(udid, transport string) (string, error) {
+	if t.muxerFor == nil {
+		return "", errors.New("deviceops: no muxer resolver wired")
 	}
-	return t.Usbmuxd.Env()
+	ep, err := t.muxerFor(udid, transport)
+	if err != nil {
+		return "", err
+	}
+	if ep.IsZero() {
+		return "", muxaddr.ErrEmpty
+	}
+	return ep.Env(), nil
 }
 
 // childEnv builds the subprocess environment: the inherited env + the muxer pointer + any
 // test-injected extras. Never carries a secret (the encryption password goes over the pty).
-func (t *Tools) childEnv(transport string) []string {
-	env := append(os.Environ(), "USBMUXD_SOCKET_ADDRESS="+t.socketAddr(transport))
-	return append(env, t.env...)
+//
+// IT CAN NOW FAIL, and that is the point: the caller must not run a CLI it cannot point at a
+// muxer. Returning the inherited environment unchanged would let libusbmuxd fall back to its
+// compiled-in default socket — a silent fallback to a daemon the operator never named.
+func (t *Tools) childEnv(udid, transport string) ([]string, error) {
+	addr, err := t.socketAddr(udid, transport)
+	if err != nil {
+		return nil, err
+	}
+	env := append(os.Environ(), "USBMUXD_SOCKET_ADDRESS="+addr)
+	return append(env, t.env...), nil
 }
 
 // networkFlag returns the "-n" argument set for a Wi-Fi (network) device, empty for USB.
