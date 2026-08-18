@@ -22,10 +22,13 @@ func names(specs []muxsup.Spec) string {
 	return strings.Join(out, ",")
 }
 
-func externalNames(ext []externalMuxer) string {
+// externalAddresses joins the plan's dial-only entries. It yielded daemon NAMES until
+// quince#1219 item E, which retired them: a muxer's identity is its address, because the name was
+// only ever a literal chosen by which config key the address came out of.
+func externalAddresses(ext []externalMuxer) string {
 	out := make([]string, 0, len(ext))
 	for _, e := range ext {
-		out = append(out, e.name)
+		out = append(out, e.address)
 	}
 	return strings.Join(out, ",")
 }
@@ -57,7 +60,7 @@ func TestPlannedMuxers(t *testing.T) {
 		{
 			name:     "unmanaged supervises nothing but still reports both as external",
 			cfg:      config.DevicesConfig{UsbmuxdSocket: "/var/run/usbmuxd", NetmuxdAddr: "127.0.0.1:27015"},
-			external: "usbmuxd,netmuxd",
+			external: "/var/run/usbmuxd,127.0.0.1:27015",
 		},
 		{
 			name: "nothing configured plans nothing",
@@ -69,7 +72,7 @@ func TestPlannedMuxers(t *testing.T) {
 			name:             "netmuxd socket colliding with the usbmuxd socket is refused loudly",
 			cfg:              config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/netmuxd", NetmuxdAddr: "127.0.0.1:27015"},
 			supervise:        "usbmuxd",
-			external:         "netmuxd",
+			external:         "127.0.0.1:27015",
 			wantProblem:      true,
 			problemSubstring: "delete and rebind",
 		},
@@ -77,7 +80,7 @@ func TestPlannedMuxers(t *testing.T) {
 			name:             "a netmuxd_addr that is not host:port is refused loudly",
 			cfg:              config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/usbmuxd", NetmuxdAddr: "not-an-address"},
 			supervise:        "usbmuxd",
-			external:         "netmuxd",
+			external:         "not-an-address",
 			wantProblem:      true,
 			problemSubstring: "host:port",
 		},
@@ -89,8 +92,8 @@ func TestPlannedMuxers(t *testing.T) {
 			if names(got.supervise) != tc.supervise {
 				t.Errorf("supervise = %q; want %q", names(got.supervise), tc.supervise)
 			}
-			if externalNames(got.external) != tc.external {
-				t.Errorf("external = %q; want %q", externalNames(got.external), tc.external)
+			if externalAddresses(got.external) != tc.external {
+				t.Errorf("external = %q; want %q", externalAddresses(got.external), tc.external)
 			}
 			if tc.wantProblem {
 				if len(got.problems) == 0 {
@@ -123,8 +126,8 @@ func TestPlannedMuxersDefaultConfig(t *testing.T) {
 	}
 	// The USB muxer is still REACHED, just not owned. An absent external entry would leave health
 	// with nothing to report, and design §10 says an absent entry reads as "no muxer".
-	if len(plan.external) != 1 || plan.external[0].name != "usbmuxd" {
-		t.Fatalf("default externals = %+v; want exactly usbmuxd dialed", plan.external)
+	if len(plan.external) != 1 || plan.external[0].address != "/var/run/usbmuxd" {
+		t.Fatalf("default externals = %+v; want exactly the default muxer address dialed", plan.external)
 	}
 }
 

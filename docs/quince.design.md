@@ -1080,22 +1080,38 @@ streamed over WS live; `/api/health` includes muxd connectivity, backend probe r
 disk headroom; Prometheus `/metrics` is a cheap later rung, not v1.
 
 **`/api/health` muxer shape** (design-level, deliberately NOT frozen in contracts until the
-qn.7 UI panel consumes it). One entry per configured muxer daemon — quince may supervise two:
+qn.7 UI panel consumes it). One entry per configured muxer:
 
 ```jsonc
 {"status": "ok", "version": "…",
  "muxers": [
-   {"name": "usbmuxd", "role": "usb",  "managed": true, "state": "running", "rescan": true},
-   {"name": "netmuxd", "role": "wifi", "managed": true, "state": "degraded",
-    "detail": "netmuxd keeps exiting: exit status 1", "rescan": false}
+   {"address": "/run/mux/usbmuxd", "transports": ["usb", "wifi"], "managed": false,
+    "state": "external", "detail": "/run/mux/usbmuxd is served by an external muxer — quince does not own it",
+    "rescan": false},
+   {"address": "127.0.0.1:27015", "transports": [], "managed": false, "state": "unreachable",
+    "detail": "dial tcp 127.0.0.1:27015: connect: connection refused", "rescan": false}
  ]}
 ```
 
+**IDENTITY IS THE ADDRESS, AND WHAT IT SERVES IS MEASURED** (quince#1219 item E, ruled 2026-08-18).
+This carried `name` ("usbmuxd") and `role` ("usb") until then, and both were *literals chosen by
+which config key the address came out of* — so the payload asserted one daemon per transport. The
+first entry above is why that could not hold: netmuxd serves USB **and** Wi-Fi over one socket,
+which is the hardened shape rather than an edge case, and it has no single `role`. Under the
+`muxers:` list there is no daemon name to report either.
+
+`transports` is read from the device registry **at render time** — the transports that muxer holds a
+live presence edge on, sorted. It is the same freshness rule `state` already follows (D5 below), for
+the same reason: a health payload assembled at startup describes the topology quince was configured
+with rather than the one it has. **`[]` is a measurement, not a gap**: that muxer is reachable and no
+device is coming over it. The key is always present, never omitted, so a client never has to
+distinguish absent from empty.
+
 `state` ∈ `starting | running | degraded | stopped | external | unreachable`; `detail` carries the
 last exit reason / why degraded / why external / why unreachable; `rescan` says whether
-`POST /api/devices/rescan` restarts that daemon (USB only). An external muxer
-(`manage_muxer: false`) appears with `managed: false` rather than being omitted — an absent entry
-would read as "no muxer". `--demo` reports `[]`.
+`POST /api/devices/rescan` restarts that daemon (USB only). An external muxer appears with
+`managed: false` rather than being omitted — an absent entry would read as "no muxer". `--demo`
+reports `[]`.
 qn.2b's singular `muxer` object is **gone** (qn.4c clean break, ruled (bz)): with two daemons a
 single aggregate could not say which one was degraded, and two overlapping representations rot.
 

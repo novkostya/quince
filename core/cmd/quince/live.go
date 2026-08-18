@@ -130,6 +130,9 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// the two health entries report the SAME connection — which is the truth, rather than two
 	// independent-looking answers about one socket.
 	group := buildMuxerGroup(dcfg, dialerLookup(byConfigured, byEndpoint), log)
+	// What each muxer is SERVING is measured from the registry it feeds, not asserted from the
+	// config key its address was written under (quince#1219 item E).
+	group.SetTransports(reg.TransportsForSource)
 	go group.Run(ctx)
 	ls.muxer = muxerHealth{group}
 

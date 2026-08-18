@@ -27,7 +27,7 @@ import (
 
 // externalMuxer is a daemon quince only dials — reported in /api/health so an operator never has
 // to infer a muxer's existence from its absence.
-type externalMuxer struct{ name, role, address string }
+type externalMuxer struct{ address string }
 
 // muxerPlan is what a configuration asks for, computed without side effects so it can be tested
 // directly (the supervisors themselves spawn processes).
@@ -47,14 +47,14 @@ func plannedMuxers(dcfg config.DevicesConfig) muxerPlan {
 		if dcfg.ManageMuxer {
 			p.supervise = append(p.supervise, muxsup.Usbmuxd(dcfg.UsbmuxdSocket))
 		} else {
-			p.external = append(p.external, externalMuxer{"usbmuxd", muxsup.RoleUSB, dcfg.UsbmuxdSocket})
+			p.external = append(p.external, externalMuxer{dcfg.UsbmuxdSocket})
 		}
 	}
 	if dcfg.NetmuxdAddr == "" {
 		return p
 	}
 	if !dcfg.ManageMuxer {
-		p.external = append(p.external, externalMuxer{"netmuxd", muxsup.RoleWiFi, dcfg.NetmuxdAddr})
+		p.external = append(p.external, externalMuxer{dcfg.NetmuxdAddr})
 		return p
 	}
 	socketPath := muxsup.SocketPathFor(dcfg.UsbmuxdSocket)
@@ -77,7 +77,7 @@ func plannedMuxers(dcfg config.DevicesConfig) muxerPlan {
 // it: quince never silently drops a configured muxer, and never starts one it cannot start safely.
 func (p *muxerPlan) refuseNetmuxd(addr, why string) {
 	p.problems = append(p.problems, "refusing to supervise netmuxd: "+why)
-	p.external = append(p.external, externalMuxer{"netmuxd", muxsup.RoleWiFi, addr})
+	p.external = append(p.external, externalMuxer{addr})
 }
 
 // buildMuxerGroup turns the plan into a runnable group, logging what quince owns, what it merely
@@ -103,8 +103,8 @@ func buildMuxerGroup(dcfg config.DevicesConfig, dialerFor func(address string) m
 		if dialerFor != nil {
 			dialer = dialerFor(e.address)
 		}
-		g.AddUnmanaged(e.name, e.role, e.address, dialer)
-		log.Info("muxer is external — dialing only", "daemon", e.name, "address", e.address)
+		g.AddUnmanaged(e.address, dialer)
+		log.Info("muxer is external — dialing only", "address", e.address)
 	}
 	for _, problem := range plan.problems {
 		log.Error("muxsup: " + problem)
@@ -126,11 +126,21 @@ func (m muxerHealth) MuxersHealth() []httpapi.MuxerHealth {
 	out := make([]httpapi.MuxerHealth, 0, len(statuses))
 	for _, s := range statuses {
 		out = append(out, httpapi.MuxerHealth{
-			Name: s.Name, Role: s.Role, Managed: s.Managed,
+			Address: s.Address, Transports: transportsOrEmpty(s.Transports), Managed: s.Managed,
 			State: s.State, Detail: s.Detail, Rescan: s.Rescan,
 		})
 	}
 	return out
+}
+
+// transportsOrEmpty keeps `transports` a LIST in the payload even when a muxer is serving nothing.
+// A nil slice marshals to `null`, which a client reads as "unknown"; `[]` is the measurement —
+// this muxer is reachable and no device is coming over it (quince#1219 item E).
+func transportsOrEmpty(t []string) []string {
+	if t == nil {
+		return []string{}
+	}
+	return t
 }
 
 // muxerBinding is one configured `devices:` key and the endpoint it resolved to.

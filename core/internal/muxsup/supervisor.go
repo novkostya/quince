@@ -153,16 +153,21 @@ func SocketPathFor(usbmuxdSocket string) string {
 	return filepath.Join(filepath.Dir(usbmuxdSocket), "netmuxd")
 }
 
-// Status is one muxer's view for /api/health: which daemon, the transport it serves, whether
-// quince manages it, its state, a human detail (last exit reason / why degraded), and whether
-// rescan applies to it.
+// Status is one muxer's entry in GET /api/health (contracts §10).
+//
+// IDENTITY IS THE ADDRESS, AND WHAT IT SERVES IS MEASURED (quince#1219 item E). This carried
+// `Name` ("usbmuxd") and `Role` ("usb") until then, both of which were literals chosen by WHICH
+// CONFIG KEY the address came out of — so they encoded an assumption of one daemon per transport.
+// A muxer serving both has no single role, and with a `muxers:` list there is no daemon name to
+// report. Transports are read from the device registry at render time: what this muxer is
+// currently serving, rather than what its key was called.
 type Status struct {
-	Name    string
-	Role    string
-	Managed bool
-	State   string
-	Detail  string
-	Rescan  bool
+	Address    string
+	Transports []string // "usb" / "wifi", sorted; empty means nothing is attached over it yet
+	Managed    bool
+	State      string
+	Detail     string
+	Rescan     bool
 }
 
 type rescanReq struct{ resp chan RescanResult }
@@ -198,7 +203,7 @@ func New(spec Spec, log *slog.Logger) *Supervisor {
 		healthyRun: defaultHealthyRun,
 		rescan:     make(chan rescanReq),
 		st: Status{
-			Name: spec.Name, Role: spec.Role, Managed: true,
+			Address: spec.Address, Managed: true,
 			State: StateStarting, Rescan: spec.Rescan,
 		},
 	}
@@ -434,15 +439,17 @@ func exitReason(err error) string {
 // number. Reintroducing the profile is deleting one branch in config.validateDevices; deleting
 // this code would mean re-earning proof that already exists.
 type Group struct {
-	sups      []*Supervisor
-	unmanaged []unmanagedMuxer
+	sups []*Supervisor
+	// transports answers what each muxer is currently serving, read at render time (item E).
+	transports func(address string) []string
+	unmanaged  []unmanagedMuxer
 }
 
 // unmanagedMuxer is an external daemon quince only dials. Its state is NOT stored — it is asked
 // for at every Statuses() call, from the connection quince actually depends on, so health cannot
 // go stale between a muxer dying and somebody noticing (qn.6p D5).
 type unmanagedMuxer struct {
-	name, role, address string
+	address string
 	// dialer is the client holding the connection. Nil means nothing is watching this address,
 	// which is itself reported rather than papered over — see status().
 	dialer Dialer
@@ -466,6 +473,23 @@ type Dialer interface {
 // NewGroup returns an empty group.
 func NewGroup() *Group { return &Group{} }
 
+// SetTransports wires where "what is this muxer serving?" is answered from — the device registry,
+// which keys presence by (source, udid, transport) with sourceID = the muxer address (quince#1219
+// item E). Call once, before serving; nil means every entry reports no transports, which is what
+// --demo and the tests want and is honest there (quince owns no muxer at all).
+//
+// IT IS A FUNC RATHER THAN A REGISTRY IMPORT for the reason Dialer already gives: muxsup reports
+// on muxers and must not learn the device table's types to do it.
+func (g *Group) SetTransports(fn func(address string) []string) { g.transports = fn }
+
+// transportsFor is the nil-safe read. An unwired group says "nothing", never guesses.
+func (g *Group) transportsFor(address string) []string {
+	if g.transports == nil {
+		return nil
+	}
+	return g.transports(address)
+}
+
 // Supervise adds a managed daemon (started by Run).
 func (g *Group) Supervise(s *Supervisor) { g.sups = append(g.sups, s) }
 
@@ -474,8 +498,8 @@ func (g *Group) Supervise(s *Supervisor) { g.sups = append(g.sups, s) }
 //
 // `dialer` is the client holding the connection to this address. Passing nil is legal and means
 // nothing is watching it; status() says so rather than assuming the best.
-func (g *Group) AddUnmanaged(name, role, address string, dialer Dialer) {
-	g.unmanaged = append(g.unmanaged, unmanagedMuxer{name: name, role: role, address: address, dialer: dialer})
+func (g *Group) AddUnmanaged(address string, dialer Dialer) {
+	g.unmanaged = append(g.unmanaged, unmanagedMuxer{address: address, dialer: dialer})
 }
 
 // status renders one external muxer from its dialing client's CURRENT state.
@@ -485,7 +509,7 @@ func (g *Group) AddUnmanaged(name, role, address string, dialer Dialer) {
 // measured false in exactly the way that matters: reported `external` while the daemon logged
 // `connection refused` against the same address (quince#897 item 2).
 func (u unmanagedMuxer) status() Status {
-	s := Status{Name: u.name, Role: u.role, Managed: false}
+	s := Status{Address: u.address, Managed: false}
 	if u.dialer == nil {
 		// Configured, dialed by nobody. Honest rather than convenient: this is a wiring bug if it
 		// ever appears, and reporting `external` would hide it behind a healthy-looking word.
@@ -523,12 +547,16 @@ func (g *Group) Run(ctx context.Context) {
 func (g *Group) Statuses() []Status {
 	out := make([]Status, 0, len(g.sups)+len(g.unmanaged))
 	for _, s := range g.sups {
-		out = append(out, s.Status())
+		st := s.Status()
+		st.Transports = g.transportsFor(st.Address)
+		out = append(out, st)
 	}
 	// Each external is rendered NOW, from its dialing client, rather than replayed from a slice
 	// built at startup (qn.6p D5).
 	for _, u := range g.unmanaged {
-		out = append(out, u.status())
+		st := u.status()
+		st.Transports = g.transportsFor(st.Address)
+		out = append(out, st)
 	}
 	return out
 }
