@@ -44,15 +44,38 @@ function EncryptionBadge({ state }: { state: Device["backup_encryption"] }) {
 
 // BackupStatus is the one line under the transports: real history if any (with a live, hover-exact
 // timestamp), else a state-appropriate placeholder.
-function BackupStatus({ device }: { device: Device }) {
+//
+// IT CARRIES THE FAILED-ATTEMPT MARKER TOO, rather than a line of its own (quince#1195). It used to
+// render as a standalone red span above the Retry button, which cost the card a whole line — and
+// because these cards are a grid row, that line raised every card beside it.
+//
+// THE HEIGHT IS THE SMALLER HALF OF THE ARGUMENT. Operator: *"it also makes sense regardless of
+// card height"* — right, because this IS a status. The slot already ends in the last backup's own
+// outcome (`· succeeded`), so an attempt that needs attention belongs in the same position rather
+// than in a second sentence somewhere else on the card.
+//
+// IT IS A SEPARATE FACT FROM `last_backup.status` AND BOTH CAN SHOW. The newest ATTEMPT is not
+// necessarily the last successful BACKUP: a device can hold `Last backup 2 days ago · succeeded`
+// and still have failed an hour ago. Printing only one of them would drop a fact the assisted model
+// needs visible (qn.6a soak finding #6), so they are joined rather than replaced.
+function BackupStatus({ device, attention }: { device: Device; attention?: boolean }) {
+  const marker = attention ? (
+    <span className="text-danger"> · last attempt needs attention</span>
+  ) : null;
   if (device.last_backup) {
     return (
       <>
         Last backup <RelativeTime iso={device.last_backup.at} /> · {device.last_backup.status}
+        {marker}
       </>
     );
   }
-  return <>{device.paired === "yes" ? "No backups yet" : "Not set up yet"}</>;
+  return (
+    <>
+      {device.paired === "yes" ? "No backups yet" : "Not set up yet"}
+      {marker}
+    </>
+  );
 }
 
 // DueBadge is the assisted model's in-app half (qn.12, spec D7.2): the same judgement the notifier
@@ -79,10 +102,27 @@ function DueBadge({ due }: { due?: DueState }) {
       return <Badge tone="danger">Overdue</Badge>;
     case "due":
       return <Badge tone="warn">Due</Badge>;
+    // `never` RENDERS NOTHING, and it used to render a `Not backed up` badge (quince#1195).
+    //
+    // IT WAS THE SAME SENTENCE TWICE. `BackupStatus`, eight lines up, already writes **No backups
+    // yet** into the card body for exactly this state — so the badge spent the slot the eye reaches
+    // first restating what the body says a moment later.
+    //
+    // WHAT IT COST WAS NOT ONLY THE WORDS. Two badges in the header squeeze the title, so a device
+    // name wrapped to two lines and its model line truncated to `iPhone 17 ...`; and because the
+    // cards sit in a grid row, the taller card raised every card beside it. Operator-reported from
+    // the deployed build: *"two badges make card title and subtitle clamped."*
+    //
+    // `overdue` AND `due` STAY, because those are NOT in the body. `BackupStatus` prints a
+    // timestamp and never judges it, so the badge is the only place that judgement appears — which
+    // is the opposite of this case, where the badge was the only place it appeared TWICE.
+    //
+    // The rule the old comment stated still holds and is why this is a deletion rather than a
+    // recolour: never-backed-up is the ordinary state of a device somebody just paired, so it must
+    // not read as a problem. Saying nothing is the strongest form of that.
     case "never":
-      // NOT a warning tone. Never-backed-up is the ordinary state of a device somebody just paired,
-      // and colouring it as a problem would make first run look broken.
-      return <Badge tone="accent">Not backed up</Badge>;
+      return null;
+
     // `fresh`, `unknown` and absent render nothing — the first because there is nothing to say, the
     // second because quince does not know and must not guess. `BackupStatus` still shows whatever
     // timestamp exists, so an unreadable one stays visible without being judged.
@@ -169,12 +209,24 @@ export function DeviceCard({ device, due }: { device: Device; due?: DueState }) 
         </div>
 
         <div className="mt-3 text-xs text-muted">
-          <BackupStatus device={device} />
+          <BackupStatus device={device} attention={Boolean(attention)} />
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-subtle">
-          <span>
-            {versionCount} {versionCount === 1 ? "backup" : "backups"}
-          </span>
+          {/* THE COUNT IS SUPPRESSED AT ZERO, because `BackupStatus` one line up has already said
+              **No backups yet** and `0 backups` is that same fact a second time (quince#1195).
+
+              IT IS A LAYOUT FIX AS WELL AS A WORDING ONE. These cards are a grid row, so the extra
+              line raised every card beside it — Operator-reported: *"one of them is redundant, and
+              what is worse, it makes the whole row higher."*
+
+              NON-ZERO STILL PRINTS, and that is the whole distinction: `15 backups` beside `Last
+              backup 21 hours ago` are two different facts, where `0 backups` beside `No backups
+              yet` is one fact twice. */}
+          {versionCount > 0 ? (
+            <span>
+              {versionCount} {versionCount === 1 ? "backup" : "backups"}
+            </span>
+          ) : null}
           {!present && device.last_seen ? (
             <span>
               last seen <RelativeTime iso={device.last_seen} />
@@ -241,11 +293,11 @@ export function DeviceCard({ device, due }: { device: Device; due?: DueState }) 
               </Link>
             </Button>
           ) : attention ? (
-            // This branch already led with its message, which is the precedent (a) finishes
-            // applying rather than introduces. What moved is the `error` span: it followed the
-            // button, so a retry that failed dropped this card's baseline below every other one.
+            // THE MESSAGE MOVED UP INTO `BackupStatus`, so this block is now the retry ACTION and
+            // its error, nothing else (quince#1195). The `error` span stays ahead of the button —
+            // that is the qn.6a fix this comment used to describe, and it is unchanged: a retry
+            // that failed must not drop this card's baseline below every other one in the row.
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs text-danger">Last attempt needs attention</span>
               {error ? (
                 <span className="text-xs text-danger" role="alert">
                   {error}
