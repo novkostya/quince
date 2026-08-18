@@ -43,7 +43,8 @@ usage: scratch-reap [--prune] [--root <dir>] [--quiet]
   A clone is deleted only when ALL of: clean tree · every commit reachable from origin/main ·
   branch gone from origin. Anything else is kept, with the reason.
 
-  exit 0 nothing to do or done · 1 usage/refusal
+  exit 0 nothing to do or done · 1 usage/refusal · 2 DID NOT RUN — judged no clones at all while
+         runner roots sit one level down, so the root is too shallow to see anything
 EOF
 }
 
@@ -147,6 +148,45 @@ for d in "$ROOT"/*; do
 done
 
 say ''
+
+# JUDGING NOTHING IS NOT A CLEAN RESULT WHEN THE CLONES ARE ONE LEVEL DOWN (quince#823).
+#
+# THE MEASURED FAILURE: `bin/scratch-reap --root /root/scratch` printed
+# `0 would be reaped, 0 kept, 26 not clones` and exited 0, over 10.3 GB in 119 clones. It judges
+# IMMEDIATE CHILDREN, and on a shared box `$HOME/scratch/` holds RUNNER DIRECTORIES — so every entry
+# is correctly "not a git clone" and the whole answer is vacuous.
+#
+# IT IS THE DOCUMENTED FALLBACK THAT LANDS THERE, which is what makes it worth refusing over. `--help`
+# says the root is `$HOME/scratch` when no runner is declared, so an undeclared session gets a
+# guaranteed silent no-op — a reaper reporting a clean sweep of a disk it never looked at. That is
+# `exit 0 can be true and still wrong`, and quince#41's answer is the one this repo uses everywhere
+# else: refuse, with the head named, rather than exit 0 having swept nothing.
+#
+# THE PREDICATE IS DELIBERATELY NARROW, because "no clones here" is a perfectly ordinary state — a
+# fresh runner root, or one holding only scratch files. What is NOT ordinary is no clones HERE while
+# a child directory contains one, which is the root-of-roots shape and nothing else. A root that is
+# simply empty of clones still exits 0.
+if [ "$((reaped + kept))" -eq 0 ]; then
+	_nested=''
+	for d in "$ROOT"/*; do
+		[ -d "$d" ] || continue
+		for c in "$d"/*; do
+			[ -d "$c/.git" ] || continue
+			_nested="$_nested $(basename "$d")"
+			break
+		done
+	done
+	if [ -n "$_nested" ]; then
+		printf 'scratch-reap: DID NOT RUN — judged 0 clones in %s, but these children hold clones:%s\n' \
+			"$ROOT" "$_nested" >&2
+		printf 'scratch-reap: this root is one level too shallow. It judges immediate children, and\n' >&2
+		printf 'scratch-reap: those are runner roots. Point it at one — --root %s/<runner> — or\n' "$ROOT" >&2
+		printf 'scratch-reap: declare a runner (forge-watch runner set <name>) and pass no --root.\n' >&2
+		printf 'scratch-reap: refusing rather than reporting a clean sweep of a disk it never read.\n' >&2
+		exit 2
+	fi
+fi
+
 if [ "$PRUNE" = yes ]; then
 	printf 'scratch-reap: %s reaped, %s kept, %s not clones\n' "$reaped" "$kept" "$skipped"
 else

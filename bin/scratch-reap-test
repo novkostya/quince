@@ -101,6 +101,72 @@ else
 	bad "--prune removed the wrong set"
 	cat "$out.p"
 fi
+[ "$fail" -eq 0 ]
+
+# ---------------------------------------------------------------------------------------------
+# A ROOT ONE LEVEL TOO SHALLOW IS A REFUSAL, NOT A CLEAN SWEEP — quince#823.
+#
+# THE MEASURED FAILURE: `--root /root/scratch` on the runner box printed `0 would be reaped, 0 kept,
+# 26 not clones` and exited 0, over 10.3 GB in 119 clones. The reaper judges IMMEDIATE CHILDREN, and
+# on a shared box that level holds RUNNER DIRECTORIES — so every entry is honestly "not a git clone"
+# and the whole answer is vacuous. It is also the DOCUMENTED fallback for a session with no runner
+# declared, which is what makes it worth a refusal rather than a caveat.
+#
+# THREE CASES, because the predicate has to be narrow. "No clones here" is an ordinary state — a
+# fresh runner root, or one holding only scratch files — and refusing on it would make the tool cry
+# during normal use, which is worse than not guarding at all.
+NEST=$WORK/nested
+mkdir -p "$NEST/r9"
+git clone -q "$WORK/origin.git" "$NEST/r9/quince"
+
+nout=$WORK/nested.out
+"$REAP" --root "$NEST" >"$nout" 2>&1 && nrc=0 || nrc=$?
+
+if [ "$nrc" -eq 2 ]; then
+	ok "a root whose children hold the clones REFUSES with exit 2"
+else
+	bad "a root one level too shallow exited $nrc, not 2 — it reported a sweep it never made"
+	cat "$nout"
+fi
+# The message has to name the way out, or a refusal is just a different silence.
+if grep -q 'one level too shallow' "$nout" && grep -q -- '--root' "$nout"; then
+	ok "the refusal says why and names the correct invocation"
+else
+	bad "the refusal does not tell the reader what to do instead"
+	cat "$nout"
+fi
+# `DID NOT RUN` is the phrase every other gate in this repo uses for exit 2, and a session greps for
+# it rather than for this tool's wording.
+if grep -q 'DID NOT RUN' "$nout"; then
+	ok "the refusal uses the repo's DID NOT RUN vocabulary"
+else
+	bad "exit 2 without saying DID NOT RUN — the phrase the other gates share"
+fi
+
+# NARROWNESS CONTROL 1: an empty root is still exit 0. Nothing to do is not the same as could not
+# look, and conflating them is the failure this whole block exists to prevent, inverted.
+EMPTY=$WORK/emptyroot
+mkdir -p "$EMPTY"
+"$REAP" --root "$EMPTY" >"$WORK/empty.out" 2>&1 && erc=0 || erc=$?
+if [ "$erc" -eq 0 ]; then
+	ok "an empty root is still exit 0 — nothing to do is not a refusal"
+else
+	bad "an empty root exited $erc; the guard is too wide and will fire during normal use"
+	cat "$WORK/empty.out"
+fi
+
+# NARROWNESS CONTROL 2: a root holding files and directories but NO nested clone is also exit 0.
+# This is the case that separates "the clones are one level down" from "there are no clones".
+FLAT=$WORK/flatroot
+mkdir -p "$FLAT/notes" "$FLAT/empty-dir"
+printf 'body\n' >"$FLAT/pr-body.md"
+"$REAP" --root "$FLAT" >"$WORK/flat.out" 2>&1 && frc=0 || frc=$?
+if [ "$frc" -eq 0 ]; then
+	ok "a root with stray files and no nested clone is exit 0"
+else
+	bad "a root with no clones anywhere exited $frc — the guard fires on an ordinary scratch root"
+	cat "$WORK/flat.out"
+fi
 
 printf '\nscratch-reap-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
