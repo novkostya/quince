@@ -203,6 +203,19 @@ export function Sidebar() {
             // notions of "active" in one element — its `aria-current` from a path match, and the
             // pill from `owns` — which is how a screen reader and a sighted user end up being told
             // different things about the same nav.
+            //
+            // NO WEIGHT CHANGE ON SELECTION, and that is a layout rule rather than a taste one
+            // (quince#1206). A `font-medium` on the current item made its label physically WIDER
+            // than the same label inactive, so every item shifted as you moved between tabs —
+            // Operator: *"I do not like the drift when you change tabs."*
+            //
+            // The pill and the accent colour already say which item is current, twice. Weight was a
+            // third signal none of the others needed, and the only one with a geometry cost.
+            //
+            // IT PREDATES THE TYPE SCALE BUT THE SCALE IS WHAT EXPOSED IT: the same weight step is a
+            // larger absolute width delta at 16px than at the 14px this nav carried before, so a
+            // drift that had always been there became visible. If selection ever needs a third
+            // signal, use one that does not reflow.
             <Link
               key={to}
               to={to}
@@ -210,7 +223,7 @@ export function Sidebar() {
               className={
                 "flex min-h-[40px] items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors " +
                 (current
-                  ? "bg-accent-soft font-medium text-accent"
+                  ? "bg-accent-soft text-accent"
                   : "text-muted hover:bg-elevated hover:text-fg")
               }
             >
