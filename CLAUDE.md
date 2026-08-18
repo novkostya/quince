@@ -1090,11 +1090,42 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
 - **Don't improvise architecture — and don't silently patch holes either.** Canon is
   decided-so-far, so gaps are expected, not exceptional. Rung-local detail: decide it
   within canon, write it into the spec, log one line. Anything touching contracts,
-  storage semantics, security, or user-visible behavior: write a `PROPOSED (gap): …`
-  block into the affected canon doc, file it as an open question, and stop that thread
-  until it is ruled. Forbidden: building on an assumption you never wrote down, and
-  re-litigating what is already ruled. Full protocol, plus the non-blocking proposals
-  channel, in the program doc.
+  storage semantics, security, or user-visible behavior: **file it as an issue and stop
+  that thread until it is ruled.** Forbidden: building on an assumption you never wrote
+  down, and re-litigating what is already ruled. Full protocol, plus the non-blocking
+  proposals channel, in the program doc.
+
+  **THE `PROPOSED (gap)` BLOCK IS RETIRED — Operator ruling, 2026-08-18 (quince#1219).** The
+  protocol used to require a block written into the affected canon doc *as well as* an issue, and
+  that convention predates the forge being the communication substrate: a block plus an issue says
+  the same thing twice, and charges two PR round trips before any code exists.
+
+  **It is retired for a stronger reason than cost: as a guard it had already failed, three times in
+  three days across two seats, and once in the dangerous direction.** The analyst-identity heading
+  still read `PROPOSED (gap)` and *"nothing below is in force"* for a day after that identity was
+  ruled, built, and posting under its own name on five repositories — so a session grepping for what
+  it must not build on was told an active identity was undecided. The other two merely overstated
+  what remained open. A stale marker is read as authority, which is worse than no marker, and
+  quince#408 is the gate for the signature.
+
+  **WHAT DOES NOT CHANGE, AND MUST NOT: THE RULING LANDS IN GIT, WRITTEN OUT IN FULL.** Not a link
+  to an issue — the text. When `quince-bot` was suspended, **196 of its commits stayed readable and
+  0 of its issues and PRs did**: a commit's author is metadata, an issue's author is a visibility
+  key. That is the same evidence that moved the journal to a git branch (devlog#30), and it is why
+  this file already transcribes rulings whose citations have become dead ends. **An issue is where a
+  question is decided; git is where the decision survives.**
+
+  **Put it in the CHEAPEST DURABLE HOME.** The rung spec (`docs/specs/qn.N/`) or the code comment
+  where the decision binds — neither is code-owned, so neither needs a code-owner round trip. Touch
+  one of the four `CODEOWNERS`-owned docs only when the ruling actually changes what that doc says.
+  **And ride it in the PR that implements the work**, which *Docs are part of the diff* already
+  requires; a standalone canon PR is for a ruling no code carries.
+
+  **If a canon doc wants a marker while a question is open, use a POINTER, NEVER AN ASSERTION** —
+  `Open question: quince#1219`, not a block declaring the state. A pointer cannot go stale about the
+  state because it does not claim it: the reader follows it and sees what is true now. That is
+  precisely what the retired block got wrong, and a dead link fails visibly where a stale heading
+  fails silently.
 
 ## The private layer
 
