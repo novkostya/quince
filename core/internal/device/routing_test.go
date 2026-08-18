@@ -63,39 +63,48 @@ func TestSourceForFalseWhenNothingReportsTheDevice(t *testing.T) {
 // both hold the same edge, the merged table shows the NEWEST last_seen and the op must go to that
 // same muxer.
 //
-// THE TIMESTAMPS ARE WRITTEN, NOT APPLIED, AND THAT IS THE POINT OF THIS TEST EXISTING (quince#1232
-// review). It read *"the second attach is the newer edge"* and drove both edges through `Apply`,
-// which stamps `wire.Now()` — `time.RFC3339`, SECOND resolution, no fractional part. Two calls
-// microseconds apart therefore produce byte-identical strings, so `won != *dev.Transports.USB`
-// compared a string to itself whichever source `SourceFor` happened to pick, and the assertion
-// passed for an implementation that returned EITHER holder. The rule the comment named was never
-// exercised: a green that could not have failed (quince-devlog#260).
+// THE TIMESTAMPS ARE WRITTEN, NOT APPLIED (quince#1232 review, round 1). It read "the second attach
+// is the newer edge" and drove both through `Apply`, which stamps `wire.Now()` — `time.RFC3339`,
+// SECOND resolution, no fractional part. Two calls microseconds apart produce byte-identical
+// strings, so the assertion compared a string to itself whichever source won and passed for an
+// implementation returning EITHER holder. Writing `reg.sources` under the lock is the same move the
+// assertion already makes to read it, and needs no clock injection for a rule about ordering.
 //
-// Writing `reg.sources` under the lock is the same move the assertion already makes to read it, and
-// it needs no clock injection for a rule that is about ordering rather than about time.
+// AND THE NEWER EDGE GOES TO THE LEXICOGRAPHICALLY LARGER ID, DERIVED RATHER THAN ASSUMED — which
+// is the whole of what makes this able to fail, and round 2 of the same review is why it is
+// computed. The first fix hardcoded that role to `srcOther`, on the belief that `srcUSB` was
+// `/run/mux/usbmuxd`; it is `/var/run/usbmuxd`, so `srcOther` is the SMALLER id and the newer edge
+// sat on the source the TIE-BREAK would have picked anyway. Both rules then agreed, and a
+// `SourceFor` with no timestamp comparison at all still passed — the same could-not-fail defect,
+// one layer in, inside its own fix.
+//
+// Deriving the roles from the constants is what stops that recurring: rename either source, or
+// change its path, and the test still puts the newer edge where only newest-wins can find it.
 func TestSourceForAgreesWithTheMergedTable(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	const srcOther = "/run/mux/second-usbmuxd"
 	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
 	reg.Sink(srcOther).Apply(attach(udidA, muxd.TransportUSB))
 
-	// srcOther is made strictly newer. It is also the lexicographically LARGER sourceID, so the
-	// tie-break below would pick the other one — which is what makes this test able to fail: an
-	// implementation that ignored the timestamp and fell straight to `source < best` returns srcUSB
-	// and is caught here.
+	// The larger id is the one the tie-break would NOT pick, so giving it the newer edge means only
+	// the timestamp comparison can produce the expected answer.
+	newerSrc, olderSrc := srcUSB, srcOther
+	if srcOther > srcUSB {
+		newerSrc, olderSrc = srcOther, srcUSB
+	}
 	const older, newer = "2026-08-18T09:00:00Z", "2026-08-18T09:00:01Z"
 	reg.mu.Lock()
-	reg.sources[srcUSB][udidA][muxd.TransportUSB] = older
-	reg.sources[srcOther][udidA][muxd.TransportUSB] = newer
+	reg.sources[newerSrc][udidA][muxd.TransportUSB] = newer
+	reg.sources[olderSrc][udidA][muxd.TransportUSB] = older
 	reg.mu.Unlock()
 
 	source, ok := reg.SourceFor(udidA, muxd.TransportUSB)
 	if !ok {
 		t.Fatal("SourceFor = no answer; both muxers report this device")
 	}
-	if source != srcOther {
-		t.Fatalf("SourceFor = %q; want %q, which holds the newer edge (%s vs %s). Routing must send the op to the muxer whose reading the merged table shows",
-			source, srcOther, newer, older)
+	if source != newerSrc {
+		t.Fatalf("SourceFor = %q; want %q, which holds the newer edge (%s vs %s on %q). Routing must send the op to the muxer whose reading the merged table shows — and %q is the lexicographically larger id, so a tie-break answer cannot pass here",
+			source, newerSrc, newer, older, olderSrc, newerSrc)
 	}
 	dev, ok := reg.Device(udidA)
 	if !ok || dev.Transports.USB == nil {
@@ -139,7 +148,7 @@ func TestSourceForBreaksTiesStably(t *testing.T) {
 	reg.sources[srcOther][udidA][muxd.TransportUSB] = same
 	reg.mu.Unlock()
 
-	// srcOther sorts BEFORE srcUSB ("/run/mux/second-usbmuxd" < "/run/mux/usbmuxd"), so the expected
+	// srcOther sorts BEFORE srcUSB ("/run/mux/second-usbmuxd" < "/var/run/usbmuxd"), so the expected
 	// winner is the one the timestamp cannot choose — asserting the tie-break rather than an
 	// accident of insertion order.
 	want := srcOther
