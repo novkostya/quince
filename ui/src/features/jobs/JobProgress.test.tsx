@@ -73,11 +73,17 @@ describe("JobProgressInline shows what has arrived, beside the clock", () => {
 
   it("puts the figure and the percentage on ONE row, so the card keeps its height", () => {
     const { container } = render(<JobProgressInline job={card()} />);
-    expect(screen.getByText(/3.40 GB received/)).toBeTruthy();
+    // The figure is BARE here since 2026-08-18 — the word is the full panel's (the ledger in
+    // JobProgress.tsx, and the "details-page word" describe below pins the split both ways).
+    expect(screen.getByText(/3\.40 GB/)).toBeTruthy();
     expect(screen.getByText("63%")).toBeTruthy();
-    // The label, the clock and the figure share one truncating span — the row count is what made
-    // this card taller than its neighbours last time.
+    // ONE truncating span and it holds ONLY the label (quince#1228): the numbers live in a
+    // `shrink-0` cluster on the right, so no digit can be clipped — the row count staying at one
+    // is what keeps this card the same height as its neighbours.
     expect(container.querySelectorAll(".truncate").length).toBe(1);
+    // The truncating span must carry NO numbers — a number that can truncate is the bug the split
+    // exists to prevent, and this is the assertion that fails if someone folds them back in.
+    expect(container.querySelector(".truncate")?.textContent).not.toMatch(/GB|%|\ds/);
   });
 
   it("cannot contradict the percentage, because it carries no denominator", () => {
@@ -132,5 +138,31 @@ describe("the received figure stops when bytes stop arriving", () => {
     // assertion above — which is how a "fix" removes the feature and still looks tested.
     render(<JobProgressFull job={{ ...mid("backing_up"), progress: { ...mid("backing_up").progress, percent: 42 } }} />);
     expect(screen.getByText(/3.40 GB received/)).toBeTruthy();
+  });
+});
+
+// 2026-08-18, Operator: the WORD came off the card and stayed on the full panel — the ledger in
+// JobProgress.tsx carries the ruling. BOTH HALVES ARE THE TEST: asserting only the card's bare
+// figure would pass if the full panel lost its label too, and the label is load-bearing THERE —
+// with no denominator on the wire, `received` is what stops a bare figure reading as the backup's
+// total size on the one page you open to investigate a stall.
+describe("the received label is a details-page word, not a card word", () => {
+  const running = (): Job => ({
+    id: "J", udid: "u", kind: "backup", transport: "wifi", state: "backing_up",
+    progress: { phase: "receiving", percent: 52, bytes_done: 3_400_000_000, bytes_total: 0,
+                files_received: 0, liveness: "active" },
+    started_at: new Date(Date.now() - 60_000).toISOString(), finished_at: null, error: null,
+    retry_of: null, intent_id: "i", attempt: 1, version_id: null, storage_id: null,
+  });
+
+  it("the card shows the bare figure and no label", () => {
+    render(<JobProgressInline job={running()} />);
+    expect(screen.getByText(/3\.40 GB/)).toBeTruthy();
+    expect(screen.queryByText(/received/)).toBeNull();
+  });
+
+  it("the full panel keeps the word", () => {
+    render(<JobProgressFull job={running()} />);
+    expect(screen.getByText("3.40 GB received")).toBeTruthy();
   });
 });

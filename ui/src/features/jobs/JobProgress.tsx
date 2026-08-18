@@ -22,7 +22,7 @@ function noteClass(note: JobNote): string {
 // DLMessageUploadFiles), so `bytes_total` is now 0 = unknown and there is nothing honest to divide
 // by. A bare rising figure says exactly what is known.
 //
-// SHOWN AT ALL, AND ONLY HERE. Three Operator rulings, and all three are needed to land where this
+// SHOWN AT ALL, AND ONLY HERE. Four Operator rulings, and every one is needed to land where this
 // is — the shape is worth keeping because each reversal was for a different reason:
 //
 //   2026-08-16 — the first draft DELETED this as dishonest. Reversed: it is the only figure that
@@ -33,6 +33,14 @@ function noteClass(note: JobNote): string {
 //     contradictory progress, and the extra row made the card taller than its neighbours.
 //   2026-08-17 — the pair became a single cumulative figure, once the numbers themselves were
 //     fixed rather than merely presented more carefully.
+//   2026-08-18 — the WORD came off the card, and the figure joined the other numbers in a
+//     right-aligned cluster the same day (quince#1228). On the card every other
+//     token is data (`11s · 1.87 GB` beside `52%`) and `received` was the one English word in a
+//     monospace data run — Operator: *"I don't quite like long received word on this card."* The
+//     full panel KEEPS the word at its own call site: with no denominator on the wire, `received`
+//     is what stops a bare figure reading as the backup's total size, and that panel is the
+//     stall-investigation page where the label earns its room. So this function now returns the
+//     bare figure and the caller that wants the word attaches it.
 function received(job: Job): string | null {
   // ONLY WHILE BYTES CAN STILL ARRIVE. `backing_up` is the one state where they can; `verifying`,
   // `committing` and every terminal state describe work that happens AFTER the transfer, and this
@@ -46,7 +54,7 @@ function received(job: Job): string | null {
   // underlying figure updates up to twice a second, but at GB scale ONE decimal only changes every
   // few seconds — so the number sat still while gigabytes were arriving, which is the exact
   // impression this line exists to dispel.
-  return `${formatBytes(bytes_done, 2)} received`;
+  return formatBytes(bytes_done, 2);
 }
 
 // The live age of a running job. This is the honest motion for every window where quince has no
@@ -72,10 +80,11 @@ function useElapsedLabel(job: Job): string | null {
 //     it can no longer contradict the percent; and it now shares the label's row, so the height
 //     objection does not apply either. Both reasons for removing it were FIXED, not overruled.
 //
-// ORDER IS THE OVERFLOW POLICY. `truncate` cuts from the end, so on a narrow phone the received
-// figure is dropped first, then the clock, and the state label — the one thing that must always be
-// readable — survives longest. That is the priority anyone would choose, and it is why all three
-// share one truncating span instead of sitting in separate columns.
+// THE OVERFLOW POLICY IS THE SPLIT ITSELF (quince#1228). The label is the only prose on the row and
+// the only thing allowed to truncate; the numbers — clock, received figure, percent — are a
+// `shrink-0` cluster on the right that can never clip. Earlier shapes had all four in one
+// truncating span and chose which token the ellipsis ate first; splitting by KIND removes the
+// question, because a clipped word reads as a cut corner and a clipped digit reads as a bug.
 //
 // The percentage is still omitted entirely when there is none: a "—" where a number goes is noise,
 // and the indeterminate bar already says it.
@@ -87,20 +96,23 @@ export function JobProgressInline({ job }: { job: Job }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="min-w-0 truncate font-medium text-fg">
-          {jobStatusLabel(job)}
-          {elapsed ? (
-            <span className="ml-2 font-mono font-normal tabular-nums text-subtle">{elapsed}</span>
-          ) : null}
-          {transferred ? (
-            <span className="ml-2 font-mono font-normal tabular-nums text-subtle">
-              · {transferred}
-            </span>
-          ) : null}
-        </span>
-        {pct === null ? null : (
-          <span className="shrink-0 font-mono tabular-nums text-muted">{formatPercent(pct)}</span>
-        )}
+        {/* THE LABEL ALONE TRUNCATES; EVERY NUMBER SITS IN A `shrink-0` CLUSTER ON THE RIGHT
+            (quince#1228, Operator: *"align all numbers together to the right"*). This also retires
+            the digit-clipping trade recorded here earlier the same day: when the numbers shared the
+            label's truncating span, a narrow card clipped them mid-number — now nothing numeric can
+            clip, and the label, the one token that is prose, is the one that gives way.
+
+            NO `·` INSIDE THE CLUSTER: the gap separates mono tokens on its own, and the Operator's
+            sketch — `12s 1.87GB 52%` — has plain spaces. The percent keeps the stronger tone; it is
+            the figure derived from the tool's own progress, where the other two are quince's.  */}
+        <span className="min-w-0 truncate font-medium text-fg">{jobStatusLabel(job)}</span>
+        {elapsed || transferred || pct !== null ? (
+          <span className="flex shrink-0 items-center gap-2 font-mono tabular-nums">
+            {elapsed ? <span className="text-subtle">{elapsed}</span> : null}
+            {transferred ? <span className="text-subtle">{transferred}</span> : null}
+            {pct === null ? null : <span className="text-muted">{formatPercent(pct)}</span>}
+          </span>
+        ) : null}
       </div>
       <Progress percent={pct} className="mt-1.5" />
       {note ? <div className={`mt-1.5 text-xs ${noteClass(note)}`}>{note.text}</div> : null}
@@ -132,7 +144,7 @@ export function JobProgressFull({ job }: { job: Job }) {
           only true motion on screen. It is now cumulative, so it also never falls. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs tabular-nums text-subtle">
         {elapsed ? <span>{elapsed}</span> : null}
-        {transferred ? <span>{transferred}</span> : null}
+        {transferred ? <span>{transferred} received</span> : null}
       </div>
       {note ? <div className={`mt-2 text-xs ${noteClass(note)}`}>{note.text}</div> : null}
     </div>
