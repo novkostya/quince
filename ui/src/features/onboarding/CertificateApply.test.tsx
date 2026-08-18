@@ -148,7 +148,9 @@ describe("the dead-end guard", () => {
     renderApply({ blocked: "This certificate does not cover 192.0.2.10. Enter a name it covers above, then check again." });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
-    expect(screen.getByText(/does not cover 192\.0\.2\.10/i)).toBeInTheDocument();
+    // THE POINTER, NOT THE REASON — that sentence is already on screen above this card.
+    expect(screen.getByText(/Fix the problem above/i)).toBeInTheDocument();
+    expect(screen.queryByText(/does not cover 192\.0\.2\.10/i)).not.toBeInTheDocument();
   });
 
   // THE JOURNEY THE OPERATOR RULED VALID IS UNAFFECTED — a certificate that covers a reachable
@@ -158,7 +160,7 @@ describe("the dead-end guard", () => {
     renderApply({ blocked: null });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
-    expect(screen.queryByText(/check again/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Fix the problem above/i)).not.toBeInTheDocument();
   });
 });
 

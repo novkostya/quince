@@ -53,8 +53,6 @@ export function OnboardingCertificatePage() {
         key_file: keyFile.trim(),
         hostname: hostname.trim(),
       });
-      setOffline(got);
-
       // THE REACHABILITY HALF RUNS ONLY IF THE PAIR IS USABLE AND A NAME WAS GIVEN. Probing a name
       // whose certificate is already known to be expired would ask the user to debug DNS for a
       // certificate that was never going to work.
@@ -63,9 +61,28 @@ export function OnboardingCertificatePage() {
       // name yet, so probing https would fail by construction and say nothing; it IS serving http
       // there if the name reaches it at all, which is exactly the precondition the trial needs.
       const target = reachTargetURL(hostname, window.location.port);
+      let outcome: ProbeOutcome | null = null;
       if (got.outcome === "usable" && target) {
-        setReach(await runProbe(target));
+        // ITS OWN CATCH, so a probe that cannot even start — the nonce mint failing — does not throw
+        // away a verdict about the FILES that already arrived and is still worth showing.
+        try {
+          outcome = await runProbe(target);
+        } catch {
+          outcome = { kind: "unreachable", url: target.origin };
+        }
       }
+
+      // BOTH RESULTS, ONE RENDER, AND THAT IS THE WHOLE POINT OF THE ORDER HERE. Setting the verdict
+      // as soon as it arrives showed the trial card with a LIVE button, then a moment later inserted
+      // the reachability refusal above it and disabled the button — a screen that offered an action
+      // and withdrew it while the user was looking at it. React batches these two, so the results
+      // appear together or not at all.
+      //
+      // THE COST IS A LONGER WAIT WITH NOTHING ON SCREEN, and it is paid deliberately: the button
+      // says "Checking…" throughout, and a slow answer is better than a wrong one that corrects
+      // itself.
+      setOffline(got);
+      setReach(outcome);
     } catch (e) {
       // A 422 names the field; anything else is the server's own sentence. Either way it is shown
       // rather than replaced with "something went wrong".
