@@ -1,3 +1,5 @@
+import { ChevronLeft } from "lucide-react";
+import { BackLink } from "@/components/BackLink";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,17 +22,33 @@ export function NotificationsInstallPage() {
   const ios = isIOS();
 
   return (
-    // `min-h-dvh` and the safe-area padding follow the other pre-shell pages; `OnboardingHTTPSPage`
-    // carries the full reasoning for `dvh` over `lvh`.
-    <div className="min-h-dvh overflow-x-clip bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
-      <div className="mx-auto max-w-2xl space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold">Notifications</h1>
-          <p className="text-fg-muted">
-            quince can tell you when a device is due for a backup, and when one needs you.
-          </p>
-        </header>
+    // A CHILD OF THE AUTHED SHELL, LAID OUT LIKE ONE. This page was built with the pre-shell
+    // onboarding layout — `min-h-dvh`, its own safe-area padding, its own background and its own
+    // `mx-auto max-w-2xl` — and then routed INSIDE the shell, which supplies all four already. The
+    // result was a full-page layout nested in a full-page layout: doubled horizontal inset, a large
+    // dead gap above the title, and a column that did not line up with any other settings page.
+    // Operator-reported 2026-08-18 against the staging stand.
+    //
+    // The router knew and the component did not — `router.tsx` says "INSIDE the authed shell, unlike
+    // the `/onboarding/*` routes" three lines from the comment here that claimed to follow them.
+    // `SettingsAuthPage` is the pattern this now matches, because it is the other settings sub-page.
+    <section>
+      {/* A WAY BACK, for the reason SettingsAuthPage gives and one more: on a Home Screen web app
+          there is no browser chrome, so the back gesture is all a phone user has and nothing on
+          screen promises it. This page is reachable only from Settings, so it must return there. */}
+      <BackLink
+        to="/settings"
+        className="-ml-1 inline-flex items-center gap-1 text-sm text-muted transition-colors hover:text-fg"
+      >
+        <ChevronLeft size={16} strokeWidth={1.75} />
+        Settings
+      </BackLink>
+      <h1 className="mt-2 text-xl font-semibold tracking-tight">Notifications</h1>
+      <p className="mt-1 text-sm text-muted">
+        quince can tell you when a device is due for a backup, and when one needs you.
+      </p>
 
+      <div className="mt-6 max-w-xl space-y-6">
         {support === "unsupported_platform" && (
           <Card>
             <CardHeader>
@@ -125,7 +143,7 @@ export function NotificationsInstallPage() {
 
         {support === "supported" && <NotificationsControls />}
       </div>
-    </div>
+    </section>
   );
 }
 

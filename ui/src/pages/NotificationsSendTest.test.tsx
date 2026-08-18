@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationsInstallPage } from "./NotificationsInstallPage";
 import { api } from "@/lib/api";
@@ -113,7 +114,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <NotificationsInstallPage />
+      <MemoryRouter>
+        <NotificationsInstallPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
