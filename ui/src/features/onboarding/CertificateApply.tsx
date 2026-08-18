@@ -74,7 +74,7 @@ export function CertificateApply({
   // that vanishes teaches nothing.
   const deadEnd = currentHost !== "" && hostname === "" && !currentHostCovered;
 
-  if (applied) return <ConfirmInstructions applied={applied} />;
+  if (applied) return <ConfirmInstructions applied={applied} onRestart={() => setApplied(null)} />;
 
   return (
     <div className="mt-6 rounded-card border border-line bg-card px-3 py-3 text-sm">
@@ -128,7 +128,13 @@ export function CertificateApply({
 
 // WHAT THE USER SEES WHILE THE WINDOW IS OPEN. This page cannot confirm on their behalf: it is on
 // http, and the proof must arrive on the TLS half.
-function ConfirmInstructions({ applied }: { applied: CertificateApplied }) {
+function ConfirmInstructions({
+  applied,
+  onRestart,
+}: {
+  applied: CertificateApplied;
+  onRestart: () => void;
+}) {
   const remaining = useCountdown(applied.expires_at);
   // THE TOKEN GOES IN THE FRAGMENT, NOT THE QUERY STRING (quince#979 review). A fragment is never
   // sent to the server, so it stays out of access logs and out of any `Referer` a later navigation
@@ -138,6 +144,34 @@ function ConfirmInstructions({ applied }: { applied: CertificateApplied }) {
   const confirmURL = `${applied.confirm_origin}/onboarding/https/certificate/confirm#t=${encodeURIComponent(
     applied.confirm_token,
   )}`;
+
+  // THE WINDOW CLOSES WHILE THIS PAGE IS OPEN, AND UNTIL NOW NOTHING SAID SO. The countdown reached
+  // zero, `formatRemaining` returned its defensive string, and it landed in a sentence built to
+  // assume time remained: *"quince is serving it now. Confirm within no time left to keep it."* Three
+  // false claims at once — the pair is no longer served, there is nothing to confirm, and the advice
+  // to wait describes something that has already happened.
+  //
+  // THE DEADLINE IS THE SERVER'S, SO THIS IS A CLAIM ABOUT TIME RATHER THAN ABOUT THE DAEMON. A
+  // client whose clock runs slow could still be counting while the trial is gone; that user presses
+  // the link and meets the 409, whose copy already names both causes. What this branch must not do is
+  // keep asserting a live trial once the moment it was promised for has passed.
+  if (remaining <= 0) {
+    return (
+      <div role="status" className="mt-6 rounded-card border border-line bg-card px-3 py-3 text-sm">
+        <p>
+          <strong>The ten minutes are up, so quince has gone back to what it was serving.</strong>
+        </p>
+        <p className="mt-2 text-muted">
+          Nothing was written — <code className="font-mono">config.yml</code> is exactly as it was.
+          The link from this trial no longer works; start another when you are ready, with the same
+          files or different ones.
+        </p>
+        <div className="mt-3">
+          <Button onClick={onRestart}>Try again</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div role="status" className="mt-6 rounded-card border border-warn bg-card px-3 py-3 text-sm">
@@ -192,8 +226,10 @@ function useCountdown(deadline: string): number {
   return Math.max(0, Math.round((end - now) / 1000));
 }
 
+// ONLY EVER CALLED WITH TIME ON THE CLOCK. Zero is a different screen — see the expired branch in
+// `ConfirmInstructions` — so this no longer carries a phrase for it. The one it had, "no time left",
+// is what made the expired card read *"Confirm within no time left to keep it."*
 function formatRemaining(seconds: number): string {
-  if (seconds <= 0) return "no time left";
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   if (m === 0) return `${s}s`;
