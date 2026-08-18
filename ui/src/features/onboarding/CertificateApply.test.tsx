@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CertificateApply } from "./CertificateApply";
@@ -23,9 +24,18 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderApply() {
+// THE DEFAULT IS A NAME THE USER TYPED, so the dead-end gate stays out of the tests that are about
+// something else — it fires only when the field is empty AND the address in play is uncovered.
+function renderApply(props: Partial<ComponentProps<typeof CertificateApply>> = {}) {
   return render(
-    <CertificateApply certFile="/tls/fullchain.pem" keyFile="/tls/privkey.pem" hostname="quince.example" />,
+    <CertificateApply
+      certFile="/tls/fullchain.pem"
+      keyFile="/tls/privkey.pem"
+      hostname="quince.example"
+      currentHost="192.0.2.10"
+      currentHostCovered={false}
+      {...props}
+    />,
   );
 }
 
@@ -123,6 +133,38 @@ describe("the certificate trial", () => {
     fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
 
     expect(await screen.findByText(/at a name this certificate covers/i)).toBeInTheDocument();
+  });
+});
+
+// THE BUTTON IS NOT OFFERED WHEN THE LINK COULD ONLY POINT SOMEWHERE UNCOVERED — Operator
+// direction 2026-08-18. With the name left empty the confirm origin is the address this page is on,
+// so a pair that does not cover it produces a browser warning on every visit, for as long as the
+// install stands. The remedy is one field away, so the control stays visible and says which.
+describe("the dead-end guard", () => {
+  it("refuses to offer a trial that would point at an uncovered address", () => {
+    renderApply({ hostname: "", currentHost: "192.0.2.10", currentHostCovered: false });
+
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
+    expect(screen.getByText(/Not from this address/i)).toBeInTheDocument();
+    expect(screen.getByText(/192\.0\.2\.10/)).toBeInTheDocument();
+  });
+
+  // THE JOURNEY THE OPERATOR RULED VALID IS UNAFFECTED — a certificate that DOES cover where you
+  // are, which is what a self-signed pair or an internal CA gives you. The browser warns about the
+  // issuer, trusting it once ends the warnings, and quince must not stand in the way.
+  it("offers the trial when the address you are on is covered, name or no name", () => {
+    renderApply({ hostname: "", currentHost: "quince.lan", currentHostCovered: true });
+
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
+    expect(screen.queryByText(/Not from this address/i)).not.toBeInTheDocument();
+  });
+
+  // AND TYPING A NAME CLEARS IT. The address in play becomes that name, whose coverage `outcome`
+  // has already answered — the trial is not offered at all for anything but `usable`.
+  it("offers the trial once a name is typed, whatever the current address is", () => {
+    renderApply({ hostname: "quince.example", currentHost: "192.0.2.10", currentHostCovered: false });
+
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
   });
 });
 

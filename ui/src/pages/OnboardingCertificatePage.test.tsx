@@ -248,6 +248,25 @@ describe("the certificate step", () => {
     expect(screen.queryByText("192.0.2.10")).not.toBeInTheDocument();
   });
 
+  // THE PAGE HANDS THE TRIAL THE DAEMON'S ANSWER, which is what lets the button be gated before it
+  // can be pressed. A page deriving the address from `window.location` would be a second answer to a
+  // question the daemon already answered, free to disagree with the sentence right above the button.
+  it("gates the trial on the address the daemon reported, not on the browser's own", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      ...USABLE,
+      hostname: "",
+      current_host: "192.0.2.10",
+      current_host_covered: false,
+    });
+
+    renderPage();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/Not from this address/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
+  });
+
   // THE VERDICT RENDERS EVEN IF `names` ARRIVES AS `null`. The server now sends `[]` on every
   // outcome, so this asserts the page does not depend on that being true — it reads the field
   // structurally, and this page sits under no error boundary, so one unexpected null replaces the

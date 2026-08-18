@@ -23,10 +23,17 @@ export function CertificateApply({
   certFile,
   keyFile,
   hostname,
+  currentHost,
+  currentHostCovered,
 }: {
   certFile: string;
   keyFile: string;
   hostname: string;
+  // WHERE THE CONFIRM LINK WOULD POINT IF THE NAME IS LEFT EMPTY, and whether this pair covers it.
+  // The apply answers the same question in `confirm_host_covered` — one press too late to stop
+  // anybody. This is the CHECK's answer, already on screen before the button is reachable.
+  currentHost: string;
+  currentHostCovered: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState<CertificateApplied | null>(null);
@@ -49,6 +56,23 @@ export function CertificateApply({
       setBusy(false);
     }
   }
+
+  // THE TRIAL IS NOT OFFERED WHEN THE ADDRESS IT WOULD USE CANNOT MATCH — Operator direction,
+  // 2026-08-18: *"there should be no way to tap Try it now — this is guaranteed dead end."*
+  //
+  // WITH THE NAME LEFT EMPTY the confirm link is built from the address this request arrived on. A
+  // pair that does not cover that address produces a name mismatch there — not once, but on every
+  // visit for as long as the install stands, because confirming writes exactly this pair for exactly
+  // this address. A user CAN click through it; what they get is an install that warns every time.
+  //
+  // IT DOES NOT TOUCH THE JOURNEY THE OPERATOR RULED VALID — *"this is also a valid test case"* —
+  // because that one is a certificate that DOES cover where you are: self-signed for this host, or
+  // an internal CA. There `currentHostCovered` is true, the button stays live, the browser warns
+  // about the ISSUER rather than the name, and trusting it once ends the warnings.
+  //
+  // A DISABLED BUTTON WITH A REASON, not a hidden one: the remedy is one field away, and a control
+  // that vanishes teaches nothing.
+  const deadEnd = currentHost !== "" && hostname === "" && !currentHostCovered;
 
   if (applied) return <ConfirmInstructions applied={applied} />;
 
@@ -80,8 +104,16 @@ export function CertificateApply({
         so use the link it gives you. If you want out sooner than ten minutes, restart quince: that
         cancels the trial immediately and nothing was written.
       </p>
+      {deadEnd ? (
+        <p role="status" className="mt-3 rounded-card border border-warn bg-bg px-3 py-2">
+          <strong>Not from this address.</strong> The link would point at{" "}
+          <code className="font-mono">{currentHost}</code>, which this certificate does not cover, so
+          your browser would warn you there every time. Put a name it covers in the field above and
+          check again.
+        </p>
+      ) : null}
       <div className="mt-3">
-        <Button onClick={() => void apply()} disabled={busy}>
+        <Button onClick={() => void apply()} disabled={busy || deadEnd}>
           {busy ? "Starting…" : "Try it now"}
         </Button>
       </div>
