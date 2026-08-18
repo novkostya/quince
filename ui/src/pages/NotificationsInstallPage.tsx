@@ -230,7 +230,15 @@ function NotificationsControls() {
                       )}
                       {r.state === "error" && (
                         <span className="text-danger">
-                          {r.label} did not receive it. Try again in a moment.
+                          {r.label} did not receive it.
+                          {/* THE REASON, NOT A REASSURANCE. The server already redacts this — it is
+                              built through `push.RedactEndpoint`, so it carries an origin at most —
+                              and it is the ONLY diagnosis that exists anywhere: `SendTest` returns
+                              it to the caller and logs nothing. Rendering "try again in a moment"
+                              over the top of it threw away the one fact a person could act on, and
+                              made a permanent misconfiguration look like a transient blip. Found on
+                              the first real hardware send, 2026-08-18. */}
+                          {r.error ? <> {r.error}</> : <> Try again in a moment.</>}
                         </span>
                       )}
                     </li>
