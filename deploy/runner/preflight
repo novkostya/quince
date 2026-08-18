@@ -292,59 +292,48 @@ esac
 #    reach the layer and may not report which. Guessing sends the next reader off to recreate a
 #    repo when the real fix is a one-click collaborator grant — which is exactly the wrong turn
 #    taken on quince#44 before the grant was found.
-# THE SUPERVISOR SEAT RUNS NO PRIVACY GATE, so it needs no private layer. It commits nothing — it
-# holds no forge credential to commit with — and the sweep belongs to the seat that publishes, which
-# is the seat that can be held to it. Requiring the layer here would put a second copy of the
-# Operator's private material on a third box to satisfy a check that seat can never fail meaningfully.
+# THE SUPERVISOR SEAT CARRIES THE LAYER LIKE EVERY OTHER BOX — RULED 2026-08-02 (Operator,
+# quince#375), OVERTURNING 2026-08-01. The two paragraphs that stood here argued the exemption and
+# then defended it after its premise was withdrawn; both are gone, because the ruling they described
+# is not the ruling in force and a reader needs the current one.
 #
-# THE PREMISE OF THE PARAGRAPH ABOVE IS WITHDRAWN, AND THE EXEMPTION SURVIVES IT — RULED, not owed.
-# Operator ruling 2026-08-01, relayed by the architect on quince#375: **the supervisor box does NOT
-# require the private layer to start; the journal pre-push hook carries the control instead.**
+# The overturned argument ran: the supervisor runs no privacy gate, commits nothing, and holds no
+# credential to commit with, so requiring the layer would put a third copy of the Operator's private
+# material on a box to satisfy a check that seat can never fail meaningfully. Its premise died when
+# the analyst App landed with `contents: write` on five repositories — the seat publishes.
 #
-# WHAT WENT FALSE. *"It commits nothing — it holds no forge credential to commit with"* stopped being
-# true when the analyst App landed with `contents: write` on all five repositories. The seat now
-# publishes: it can push a branch and open a pull request from a box with no pattern list, where
-# `make privacy-check` exits **2 — DID NOT RUN** — and it can push `refs/heads/journal`, which has no
-# pull request and therefore no reviewer, and which `CLAUDE.md` says the privacy gate is the ONLY
-# guard on.
+# THE FALLBACK POSITION DIED TOO, ON ONE WORD. *"The journal pre-push hook carries the control
+# instead"* is true of LEAKAGE and false of FUNCTION: `privacy-check` exits 2 — DID NOT RUN —
+# without the pattern list, so the hook refuses every push forever. The choice was never
+# *layer vs. hook*; it was *layer vs. no journal from that seat*.
 #
-# WHY THE EXEMPTION STANDS ANYWAY, and the reasoning is kept because the outcome alone would read as
-# the cheap answer. The trade looked symmetric — a third copy of the private record against an
-# unguarded push path — and is not:
+# WHAT IS ACCEPTED, RATHER THAN AVOIDED: `pr.6`'s concentration concern is now paid deliberately.
+# The box holding root ssh into the other two also holds a complete copy of the private record. That
+# is the price of a seat that can publish the narrative record, and the control gets SIMPLER for it —
+# "every working box carries the private layer" is a sentence anyone can check, where the allowlist
+# it replaces was a list that could drift.
+# WHAT THE OVERTURNED EXEMPTION COST THE SEAT, kept because it is what decided the ruling against it:
+# a box with no pattern list cannot push the journal branch AT ALL. `privacy-check` exits 2 without
+# the list, so `bin/pre-push-journal` refuses every push forever. The seat holds `contents: write`
+# on five repositories and its two artefact types are an issue and a journal entry — so the
+# exemption did not cost it a convenience, it cost it one of the two things it exists to produce.
 #
-#   1. Requiring the layer makes the gate RUNNABLE; it does not make it RUN. Nothing invokes
-#      `privacy-check` on a journal push except `bin/pre-push-journal`. Requiring the layer alone
-#      would have bought a satisfied checklist item and no new guard.
-#   2. The hook NEEDS the pattern list, so on a box without one it REFUSES the push — fail-closed,
-#      which is the direction this project wants. The arm further down already reports exactly that.
-#   3. So the hook closes the exposure WITHOUT putting the lab topology and the external review
-#      transcripts on a third machine — `pr.6`'s concentration concern, on the box that already holds
-#      root ssh into the other two.
-#   4. The PULL REQUEST path was never the exposure: a PR has a reviewer, and the reviewer sweeps.
-#      Only `refs/heads/journal` has none, and that is the path the hook closes.
-#
-# WHAT THE SEAT LOSES: it cannot push the journal branch. That costs it nothing it needs — it files
-# issues and opens pull requests, and journal entries are written by the seats that hold the layer.
-#
-# WHAT THIS OBLIGATES, and it must not be dropped: the journal pre-push hook IS the control now,
-# rather than provisioning hygiene. quince#308 is CLOSED — `provision` §4c already installs it via
-# `init.templateDir` and sets `quince.privacy-check`, unconditionally across roles — so nothing needs
-# building, and any box provisioned since that landed carries the guard.
-#
-# EXCEPT ON THIS SEAT, AND THAT IS MEASURED RATHER THAN INFERRED. `provision` accepts `--role
-# implementer` and `--role arch` and nothing else:
+# WHAT IS OWED HERE, AND IT IS THE LAST ITEM OF quince#375. `provision` accepts `--role implementer`
+# and `--role arch` and nothing else:
 #
 #     $ sh deploy/runner/provision --role supervisor --check-credentials
 #     provision: unknown role supervisor                              (exit 2)
 #
-# So §4c is UNREACHABLE on a supervisor box, and *"re-run provision on each box"* — the remedy the
-# ruling leans on — cannot be performed on the one seat the ruling is about. Until `provision` learns
-# the role, the hook and `quince.privacy-check` must be placed HERE BY HAND.
+# So §4c is UNREACHABLE on a supervisor box, and every route onto it — the layer, the git template,
+# the journal pre-push hook, `quince.privacy-check` — is closed. *"Re-run provision on each box"*,
+# the remedy the ruling leans on, cannot be performed on the one seat the ruling is about.
 #
-# It is fail-CLOSED meanwhile, which is why this is a gap rather than an incident: with
-# `quince.privacy-check` unset the hook REFUSES the push instead of sweeping nothing. The journal-hook
-# arm further down reports which state this box is actually in — read that rather than this comment,
-# which can only say what is true of the design.
+# AND IT IS NOT FAIL-CLOSED MEANWHILE. This comment claimed it was, on the argument that an unset
+# `quince.privacy-check` makes the hook refuse. **A hook can only refuse if it is INSTALLED**, and
+# it arrives through the §4c that never runs for this role. Measured on the supervisor box
+# 2026-08-09: no git template, no `pre-push` hook, `quince.privacy-check` unset, and no
+# `quince-devlog` clone to push from. The guard is ABSENT, not fail-closed, and what stands in for
+# it is the seat's restraint. Read the journal-hook arm further down for this box's actual state.
 #
 # The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
 # re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
@@ -663,7 +652,37 @@ else
 fi
 
 else
-	ok "role supervisor: no private layer required — RULED 2026-08-01 (quince#375), not merely unchecked. This seat can publish (analyst App, contents: write), and the control is the journal pre-push hook rather than the layer: without a pattern list the hook REFUSES the push, which is fail-closed and needs no third copy of the private record here. The pull-request path has a reviewer and was never the exposure. Read the journal-hook lines below: they, not this one, say whether the control is INSTALLED."
+	# THE RULING THIS LINE CITED WAS OVERTURNED THE NEXT DAY, AND THE LINE OUTLIVED IT BY WEEKS.
+	#
+	# It read: *"role supervisor: no private layer required — RULED 2026-08-01 (quince#375) … the
+	# control is the journal pre-push hook rather than the layer: without a pattern list the hook
+	# REFUSES the push, which is fail-closed."* Every clause of that is now false, and it was
+	# printed as an `ok` — the one severity a reader does not stop on.
+	#
+	# RULED 2026-08-02 (Operator, quince#375): the supervisor box gets the FULL private layer, which
+	# OVERTURNS 2026-08-01. CLAUDE.md states it without an exception to remember: **every working
+	# box carries the layer.**
+	#
+	# THE OVERTURNED REASONING FAILED ON ONE WORD, and it is worth keeping because somebody will
+	# re-propose it. *"The hook alone closes the exposure"* is true of LEAKAGE and false of
+	# FUNCTION: `privacy-check` exits **2 — DID NOT RUN** without the pattern list, so the hook
+	# refuses every push FOREVER. It does not close the exposure so much as close the branch. A seat
+	# holding `contents: write` on five repositories, whose two artefact types include the journal,
+	# could then never write one. So the choice was never *layer vs. hook* — it was *layer vs. no
+	# journal from that seat*, and framed that way the earlier answer does not survive.
+	#
+	# AND `fail-closed` WAS FALSE ABOUT THIS BOX IN PARTICULAR. Measured on the supervisor box
+	# 2026-08-09: no git template, no `pre-push` hook, `quince.privacy-check` unset, and no
+	# `quince-devlog` clone to push from. **The guard is ABSENT rather than fail-closed** — nothing
+	# refuses, because nothing is installed. What has stood in for it is the seat's restraint.
+	#
+	# A `note`, NOT `bad`, AND THAT IS A LIMIT RATHER THAN A JUDGEMENT. The layer is ruled and
+	# UNBUILT here: `provision:27` accepts `implementer|arch` and refuses this role with exit 2, so
+	# there is no command that would place it. Refusing to start would brick the box over a state no
+	# operator can currently fix, which is the opposite of `preflight`'s bargain — refuse what a
+	# session can repair, report what it cannot. It becomes `bad` in the same change that gives
+	# `provision` the role, and quince#375 is where that ruling sits.
+	note "role supervisor: the private layer is REQUIRED here and is not asserted — RULED 2026-08-02 (quince#375), overturning 2026-08-01. Every working box carries it. This box cannot yet be given it: deploy/runner/provision accepts only implementer|arch, so the layer, the git template, the journal pre-push hook and quince.privacy-check all have no route here. Until that lands, nothing on this box refuses an unswept journal push — the guard is ABSENT, not fail-closed, and what stands in for it is this seat's restraint."
 fi
 
 # --- the journal pre-push hook (quince#308) ---------------------------------------------------
