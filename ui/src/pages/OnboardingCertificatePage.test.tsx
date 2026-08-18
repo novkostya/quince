@@ -150,7 +150,7 @@ describe("the certificate step", () => {
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
     expect(await screen.findByRole("button", { name: /Try it now/i })).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing has been saved/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was saved/i)).not.toBeInTheDocument();
   });
 
   it("does not offer the trial for a pair the check refused", async () => {
@@ -164,7 +164,7 @@ describe("the certificate step", () => {
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/Nothing has been saved/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing was saved/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Try it now/i })).not.toBeInTheDocument();
   });
 
@@ -204,6 +204,30 @@ describe("the certificate step", () => {
     await waitFor(() => expect(screen.queryByText("The files are usable")).not.toBeInTheDocument());
   });
 
+  // RETURN RUNS THE CHECK. Reported three times on this flow, once per field-and-button screen, so
+  // it is asserted here rather than left to the markup: on a phone the key is labelled "go", and a
+  // page that does nothing when it is pressed reads as broken.
+  it("runs the check when Return is pressed in a field", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(USABLE);
+    renderPage();
+    fill();
+
+    fireEvent.submit(screen.getByLabelText(/Certificate file/i).closest("form")!);
+
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/onboarding/certificate", expect.anything()));
+  });
+
+  // AND DOES NOTHING WHILE A FIELD IS EMPTY, from the same rule that greys the button: a disabled
+  // default button is what makes implicit submission a no-op, so there is no second condition to
+  // keep in step.
+  it("does nothing on Return until both files are named", () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(USABLE);
+    renderPage();
+
+    fireEvent.submit(screen.getByLabelText(/Certificate file/i).closest("form")!);
+    expect(post).not.toHaveBeenCalled();
+  });
+
   // THE CHECK CANNOT RUN WITHOUT BOTH FILES — the 422 exists on the server, and asking for it is a
   // round trip that tells the user nothing they could not be told immediately.
   it("will not check until both files are named", () => {
@@ -230,7 +254,7 @@ describe("the certificate step", () => {
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/leaving the name empty keeps you there/i)).toBeInTheDocument();
+    expect(await screen.findByText(/you can leave the name empty/i)).toBeInTheDocument();
   });
 
   // THE CASE THE WALK FOUND: a wildcard for somewhere else, checked from an IP, called usable with
@@ -247,7 +271,7 @@ describe("the certificate step", () => {
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/your browser will warn you about the certificate/i)).toBeInTheDocument();
+    expect(await screen.findByText(/browser will warn you every visit/i)).toBeInTheDocument();
     // NOT A REFUSAL. An IP-only LAN install is legitimate and the trial is still offered.
     expect(screen.getByText("The files are usable")).toBeInTheDocument();
   });
@@ -288,7 +312,7 @@ describe("the certificate step", () => {
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/Not from this address/i)).toBeInTheDocument();
+    expect(await screen.findByText(/does not cover/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
   });
 
@@ -304,10 +328,11 @@ describe("the certificate step", () => {
     fill("/certs/quince.pem", "/certs/quince.key", "quince.example");
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/could not reach quince at/i)).toBeInTheDocument();
-    // AND IT SAYS WHY THAT MATTERS RATHER THAN CALLING IT EXPECTED: the address is live right now, so
-    // a name that worked would have answered.
-    expect(screen.getByText(/serving that\s+address right now/i)).toBeInTheDocument();
+    // TWICE, DELIBERATELY: the result box reports it, and the trial card repeats it as the reason its
+    // button is dead. Both are the same finding and the second is what stops a pointless ten minutes.
+    expect((await screen.findAllByText(/cannot reach quince at/i)).length).toBeGreaterThan(1);
+    expect(screen.getByText(/Check that the name points/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
   });
 
   // AND A NAME THAT DOES REACH THIS QUINCE IS REPORTED AS THE PRECONDITION IT IS — not as a promise
@@ -327,8 +352,8 @@ describe("the certificate step", () => {
     fill("/certs/quince.pem", "/certs/quince.key", "quince.example");
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/This browser reached quince at/i)).toBeInTheDocument();
-    expect(screen.getByText(/trusts the certificate itself is what the\s+trial will show/i)).toBeInTheDocument();
+    expect(await screen.findByText(/That name reaches quince/i)).toBeInTheDocument();
+    expect(screen.getByText(/move it to https/i)).toBeInTheDocument();
   });
 
   // THE VERDICT RENDERS EVEN IF `names` ARRIVES AS `null`. The server now sends `[]` on every

@@ -36,8 +36,7 @@ function renderApply(props: Partial<ComponentProps<typeof CertificateApply>> = {
       certFile="/tls/fullchain.pem"
       keyFile="/tls/privkey.pem"
       hostname="quince.example"
-      currentHost="192.0.2.10"
-      currentHostCovered={false}
+      blocked={null}
       {...props}
     />,
   );
@@ -48,9 +47,9 @@ describe("the certificate trial", () => {
   // nothing is written after pressing has already taken the risk they were being reassured about.
   it("says nothing is written, before anything is applied", () => {
     renderApply();
-    expect(screen.getByText(/writes nothing to configuration yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/saves nothing yet/i)).toBeInTheDocument();
     // The sentence is split by a `<code>` element, so it is matched on its own clause.
-    expect(screen.getByText(/was never touched/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing is saved/i)).toBeInTheDocument();
   });
 
   it("sends the pair and shows the link the SERVER named, with the token in the fragment", async () => {
@@ -107,7 +106,7 @@ describe("the certificate trial", () => {
     renderApply();
     fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
 
-    await waitFor(() => expect(screen.getByText(/quince goes back by itself/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/goes back on its own/i)).toBeInTheDocument());
   });
 
   // THE COST TO THIS PAGE, WHICH NOTHING USED TO STATE. A live trial makes the plain half redirect
@@ -115,8 +114,8 @@ describe("the certificate trial", () => {
   // else. A user who is not told reads the silence as a failure they caused.
   it("says this page stops working, and names the restart as the fast way out", () => {
     renderApply();
-    expect(screen.getByText(/This page stops working while the trial runs/i)).toBeInTheDocument();
-    expect(screen.getByText(/restart quince: that\s+cancels the trial immediately/i)).toBeInTheDocument();
+    expect(screen.getByText(/This page will stop working/i)).toBeInTheDocument();
+    expect(screen.getByText(/Restarting quince\s+cancels the whole thing/i)).toBeInTheDocument();
   });
 
   // THE COVERAGE CLAIM FOLLOWS THE SERVER RATHER THAN BEING ASSERTED. With the name left empty the
@@ -127,8 +126,8 @@ describe("the certificate trial", () => {
     renderApply();
     fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
 
-    expect(await screen.findByText(/your browser will warn you first/i)).toBeInTheDocument();
-    expect(screen.queryByText(/at a name this certificate covers/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/browser will warn you first/i)).toBeInTheDocument();
+    expect(screen.queryByText(/It is this quince, over https/i)).not.toBeInTheDocument();
   });
 
   it("says the address is covered when it is", async () => {
@@ -136,81 +135,30 @@ describe("the certificate trial", () => {
     renderApply();
     fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
 
-    expect(await screen.findByText(/at a name this certificate covers/i)).toBeInTheDocument();
+    expect(await screen.findByText(/It is this quince, over https/i)).toBeInTheDocument();
   });
 });
 
-// THE BUTTON IS NOT OFFERED WHEN THE LINK COULD ONLY POINT SOMEWHERE UNCOVERED — Operator
-// direction 2026-08-18. With the name left empty the confirm origin is the address this page is on,
-// so a pair that does not cover it produces a browser warning on every visit, for as long as the
-// install stands. The remedy is one field away, so the control stays visible and says which.
-// THE WINDOW CLOSING IS A STATE, NOT A NUMBER REACHING ZERO. Found on the rig, 2026-08-18: a page
-// left open past ten minutes read *"quince is serving it now. Confirm within no time left to keep
-// it."* — the pair had rolled back, there was nothing to confirm, and the advice to wait described
-// something that had already happened.
-describe("when the trial window has closed", () => {
-  it("says the trial is over and that nothing was written", async () => {
-    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(-5) });
-    renderApply();
-    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
-
-    expect(await screen.findByText(/gone back to what it was serving/i)).toBeInTheDocument();
-    expect(screen.getByText(/is exactly as it was/i)).toBeInTheDocument();
-    // AND STOPS ASSERTING A LIVE TRIAL — the three claims that were false at zero.
-    expect(screen.queryByText(/quince is serving it now/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/no time left/i)).not.toBeInTheDocument();
-    // THE DEAD LINK IS GONE TOO. Offering it invites a 409 the user did nothing to deserve.
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-  });
-
-  // A WAY BACK, because the alternative is reloading the page and retyping two paths. Pressing it
-  // returns to the pre-apply card with the same files still in hand.
-  it("offers another attempt, which returns to the trial offer", async () => {
-    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(-5) });
-    renderApply();
-    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
-
-    fireEvent.click(await screen.findByRole("button", { name: /Try again/i }));
-    expect(screen.getByRole("button", { name: /Try it now/i })).toBeInTheDocument();
-    expect(screen.queryByText(/gone back to what it was serving/i)).not.toBeInTheDocument();
-  });
-
-  // AND A LIVE TRIAL IS UNTOUCHED — the countdown still renders while there is time on it.
-  it("still counts down while the window is open", async () => {
-    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(125) });
-    renderApply();
-    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
-
-    expect(await screen.findByText(/quince is serving it now/i)).toBeInTheDocument();
-    expect(screen.queryByText(/gone back to what it was serving/i)).not.toBeInTheDocument();
-  });
-});
-
+// THE BUTTON IS NOT OFFERED WHEN A TRIAL WOULD BE POINTLESS — Operator direction 2026-08-18. The
+// REASON is composed by the page, which is the fix for the first version of this: deriving one cause
+// here meant the other shipped unguarded, and a name the certificate covered but the browser could
+// not reach had a live button under a red box saying so.
 describe("the dead-end guard", () => {
-  it("refuses to offer a trial that would point at an uncovered address", () => {
-    renderApply({ hostname: "", currentHost: "192.0.2.10", currentHostCovered: false });
+  it("refuses to offer a trial the page has ruled out, and says why", () => {
+    renderApply({ blocked: "This certificate does not cover 192.0.2.10. Enter a name it covers above, then check again." });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
-    expect(screen.getByText(/Not from this address/i)).toBeInTheDocument();
-    expect(screen.getByText(/192\.0\.2\.10/)).toBeInTheDocument();
+    expect(screen.getByText(/does not cover 192\.0\.2\.10/i)).toBeInTheDocument();
   });
 
-  // THE JOURNEY THE OPERATOR RULED VALID IS UNAFFECTED — a certificate that DOES cover where you
-  // are, which is what a self-signed pair or an internal CA gives you. The browser warns about the
-  // issuer, trusting it once ends the warnings, and quince must not stand in the way.
-  it("offers the trial when the address you are on is covered, name or no name", () => {
-    renderApply({ hostname: "", currentHost: "quince.lan", currentHostCovered: true });
+  // THE JOURNEY THE OPERATOR RULED VALID IS UNAFFECTED — a certificate that covers a reachable
+  // address, which is what a self-signed pair or an internal CA gives you. The browser warns about
+  // the issuer, trusting it once ends the warnings, and quince must not stand in the way.
+  it("offers the trial when the page has nothing against it", () => {
+    renderApply({ blocked: null });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
-    expect(screen.queryByText(/Not from this address/i)).not.toBeInTheDocument();
-  });
-
-  // AND TYPING A NAME CLEARS IT. The address in play becomes that name, whose coverage `outcome`
-  // has already answered — the trial is not offered at all for anything but `usable`.
-  it("offers the trial once a name is typed, whatever the current address is", () => {
-    renderApply({ hostname: "quince.example", currentHost: "192.0.2.10", currentHostCovered: false });
-
-    expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
+    expect(screen.queryByText(/check again/i)).not.toBeInTheDocument();
   });
 });
 
