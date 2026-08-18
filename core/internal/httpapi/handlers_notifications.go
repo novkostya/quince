@@ -133,6 +133,23 @@ func (d Deps) handleNotificationsTest() http.HandlerFunc {
 				"could not send the test notification")
 			return
 		}
+		// A FAILED TEST REACHES THE LOG, NOT ONLY THE RESPONSE. Until this line, a delivery that
+		// failed was reported to the browser and nowhere else — so the daemon's own log said nothing
+		// about the one operation whose entire purpose is diagnosis, and an operator reading logs to
+		// find out why notifications do not work found no mention that any had been attempted.
+		//
+		// Found on the first real hardware send, 2026-08-18: the push service refused, and the only
+		// copy of the reason was in an HTTP response the screen had already discarded.
+		//
+		// BY LABEL, AS EVERYWHERE ELSE. `Result.Err` is built through `push.RedactEndpoint`, so it
+		// carries an origin at most — but a log line is exactly the artifact D8 has in mind, so the
+		// label is what identifies the device here too.
+		for _, res := range results {
+			if res.State == "error" {
+				d.Log.Warn("notifications: test delivery failed",
+					"device", res.Label, "error", res.Error)
+			}
+		}
 		if results == nil {
 			// A NON-NIL SLICE so the field is `[]` rather than `null` — and `[]` is a real answer
 			// here: it means there is nobody subscribed, which the screen must be able to say.
