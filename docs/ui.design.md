@@ -134,9 +134,35 @@ grey-on-grey that was reported.
 | `--fg-muted` | >= 7:1 | the measured secondary medians, 9.63:1 and 7.58:1 |
 | `--fg-subtle` | >= 5.5:1 | the only role allowed near the floor |
 | state colours (`--ok`, `--warn`, `--danger`, `--accent`) | >= 5.5:1 | all four failed AA on the light theme before this |
+| `--fg-placeholder` | **~4.2:1 — BELOW AA, ruled** | GitLab 4.21:1, Grafana 5.02, npm 5.13, Forgejo 6.48 |
 
 **Under 2% of rendered characters below 4.5:1** is the whole-page target, which is what both measured
 populations achieve. quince was at 20.85%, and 41.9% on the light theme.
+
+**A PLACEHOLDER IS SUB-AA ON PURPOSE, AND THAT IS THE ONE ROLE ALLOWED TO BE** (quince#1200). WCAG
+1.4.3 asks 4.5:1 of text and a placeholder is text — but it is a HINT that must stay distinguishable
+from a value the user typed, and a placeholder reading as content is its own usability failure. The
+two goals pull against each other and only one of them is a ratio.
+
+It rode on `--fg-subtle` until this section's floors raised that role from 2.43:1 to 5.51:1, after
+which an empty field read as a filled one — Operator, on the deployed build: *"placeholders seem too
+loud now, it's hard to differentiate placeholder vs real value."*
+
+**THE MEASUREMENT DID NOT CALL quince AN OUTLIER, and the fix is shaped by that.** At 5.51:1 it was
+THIRD OF FIVE in the comparison set — it had moved from unusually faint to typical, and typical was
+what was objected to. What a placeholder-to-background ratio cannot see is the reported case: an
+EMPTY field has no value to contrast against. So the numbers bound how far to go and the report
+settles whether to go, which is why this sits at GitLab's 4.21 — the floor the set actually uses —
+rather than back at the near-invisible value it came from.
+
+**A SEPARATE TOKEN, NEVER A LOWER `--fg-subtle`.** That role has sixteen call sites of genuine
+secondary text where its own floor is right; lowering it to fix one control would undo this section
+everywhere. If a future surface wants faint text that is NOT a placeholder, it needs its own role for
+the same reason — do not borrow this one.
+
+**WHAT MAKES THE TRADE SURVIVABLE IS THAT NOTHING DEPENDS ON READING IT.** Every field in the product
+carries a `<label>` above it. Put load-bearing information in a placeholder and this exemption stops
+being defensible — that, rather than the ratio, is the line not to cross.
 
 **BORDERS ARE EXEMPT AND THAT IS RULED, NOT OVERLOOKED.** WCAG 1.4.11 asks 3:1 for a control's
 boundary and `--border` meets neither that nor half of it. Raising it was tried twice on quince#1155
