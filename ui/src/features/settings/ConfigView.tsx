@@ -70,7 +70,7 @@ export function ConfigView({ data }: { data: ConfigResponse }) {
 
           The trade this closes, worth stating because it is not obviously the right way round:
           BEFORE file-watch a bad hand-edit was invisible until a restart and then very loud; AFTER,
-          it is caught in two seconds and would have been quiet. */}
+          it is caught within one poll and would have been quiet. */}
       {data.discarded ? <DiscardedBanner data={data} /> : null}
 
       {data.warnings.length > 0 ? (

@@ -11,10 +11,21 @@ import (
 // are re-read is a knob whose own changes are subject to itself, and nobody needs it; D12's "every
 // setting has a sane default" is better served by there being no setting at all.
 //
-// TWO SECONDS IS A CEILING ON A HUMAN'S WAIT, not a tuned number. A hand-edit is somebody at an
-// editor, for whom two seconds is not perceptibly different from instant — and unlike inotify's
-// *usually instant, sometimes never*, it is a GUARANTEE.
-const PollInterval = 2 * time.Second
+// TEN SECONDS IS A CEILING ON A HUMAN'S WAIT, not a tuned number. A hand-edit is somebody at an
+// editor, for whom ten seconds is a pause rather than a wait — and unlike inotify's *usually
+// instant, sometimes never*, it is a GUARANTEE.
+//
+// IT WAS 2s UNTIL 2026-08-18, AND IT MOVED FOR WAKEUPS RATHER THAN CPU TIME (Operator ruling,
+// quince#1094). A tick costs ~12µs, which is nothing — but CPU time is the wrong metric for a box
+// whose job is to sit idle. Each expiry pulls a core out of a deep C-state, and idle residency is
+// what drives temperature and governor behaviour on the low-power hardware this product targets.
+//
+// AND AT IDLE THIS IS THE ONLY PERIODIC WAKEUP IN THE DAEMON, which is what makes that matter. Every
+// other ticker is scoped: `backup/engine.go`'s three run only during a job, `ws/handler.go`'s only
+// while a client is connected. With no backup and no browser open, quince was fully quiescent before
+// this existed — so the marginal cost is not one timer among several, it is the difference between
+// waking and not waking at all. Five times fewer wakeups is the cheap half; the rest is quince#1198.
+const PollInterval = 10 * time.Second
 
 // Watcher re-reads `config.yml` on a fixed interval and applies anything quince did not write
 // itself. It is the second producer feeding the appliers `qn.6g` built.
@@ -23,8 +34,9 @@ const PollInterval = 2 * time.Second
 // version, because the reasoning is what a later reader will want to re-open:
 //
 //   - It costs 12.19µs per tick to read and compare a realistic 218-byte config (measured
-//     2026-08-17), against 2.33µs for a bare `stat`. At one tick per two seconds that is roughly
-//     0.0006% of a core, so the cheap option and the correct option are the same option.
+//     2026-08-17), against 2.33µs for a bare `stat`. At one tick per ten seconds that is roughly
+//     0.0001% of a core, so the cheap option and the correct option are the same option. CPU time
+//     is not the axis that decided the interval, though — see PollInterval.
 //   - The content comparison is required under inotify TOO (see Service.lastBytes), so polling is
 //     the SUBSET rather than the alternative — inotify would add an event source on top of the
 //     mechanism, not instead of it.

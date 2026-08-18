@@ -44,7 +44,7 @@ type Loaded struct {
 	//
 	// Populated on EVERY path that read bytes, including the ones that then discarded them: a
 	// document that failed to parse is still the document on disk, and suppressing the next poll's
-	// re-`Load` of the same broken file is exactly what stops a 2-second re-parse loop forever.
+	// re-`Load` of the same broken file is exactly what stops a re-parse loop at every poll, forever.
 	// nil only when nothing was read — no file, or an unreadable one.
 	Raw []byte
 	// Failure says WHY this load fell back to Default(), TYPED, and nil when it did not

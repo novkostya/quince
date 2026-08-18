@@ -2941,7 +2941,7 @@ secrets ever).
 
 **THE TWO EDITING PATHS NO LONGER DIFFER — `qn.6q` DISCHARGED THIS.** A setting changed through the
 UI applies immediately, and **so does the same setting hand-edited in `config.yml`**: quince re-reads
-the file every **2 seconds** and, when the bytes are not the ones it last read or wrote, loads them
+the file every **10 seconds** and, when the bytes are not the ones it last read or wrote, loads them
 and tells the same subsystems a `PUT` tells. *"Edited by the UI and by hand equally"* above is a
 description now rather than a destination.
 
@@ -2959,7 +2959,7 @@ the app: keep running on last-good, show a UI banner naming the bad key"*, and i
 
 **POLL, NOT `inotify`, AND THE MEASUREMENT IS WHY**, recorded so it is not re-opened on grounds
 already settled. Reading and comparing the whole file costs **12.19 µs** on a realistic 218-byte
-config (`stat` alone is 2.33 µs), so at one tick per two seconds the cheap option and the correct one
+config (`stat` alone is 2.33 µs), so at one tick per ten seconds the cheap option and the correct one
 are the same. And a watch on the file **path** is *dead* after one write — measured: `ATTRIB`,
 `DELETE_SELF`, `IGNORED`, then nothing for any later change including in-place ones — so a correct
 `inotify` implementation is a directory watch plus name filtering plus requeue handling **in front of
