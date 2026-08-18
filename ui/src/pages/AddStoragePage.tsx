@@ -65,7 +65,11 @@ export function AddStoragePage() {
           footer={({ save, canSave, saving, adopting }) => (
             <div className="mt-6">
               <Button onClick={save} disabled={!canSave || saving} data-testid="add-storage-save">
-                {adopting ? "Add this storage" : "Add storage"}
+                {/* `Use`, NOT `Add`, ON AN ADOPT — and the same word `OnboardingStoragePage` uses
+                    for the same action (quince#716). Two screens spelling one action differently is
+                    its own small defect, and `Add` is the one that fights the panel above it: the
+                    storage is not being created, it is being picked back up. */}
+                {adopting ? "Use this storage" : "Add storage"}
               </Button>
             </div>
           )}
