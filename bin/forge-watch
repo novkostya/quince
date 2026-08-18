@@ -3395,8 +3395,29 @@ wake_worthy() {
 		# every red into two interruptions. PRINTED, so a reader sees the recovery in the log.
 		/^event=trunk-recovered/ { next }
 		# A failed trunk fetch does not wake, for the same reason a failed issue read does not: one
-		# is a missed read, a run of them is a watch that is not watching, and `--fail-after` is what
-		# tells those apart. Printed either way.
+		# is a missed read, and a run of them is a watch that is not watching. Printed either way.
+		#
+		# AND NOTHING ESCALATES A RUN OF THEM — this clause used to end "and `--fail-after` is what
+		# tells those apart", which is false here and was measured false (quince#1235). `fetch_trunk`
+		# does `return 1` on both its failure paths, and the CALLER CONSUMES THE STATUS:
+		#
+		#     if fetch_trunk "$_repo" "$_gh" "$_trunk" && [ -s "$_trunk" ]; then
+		#
+		# so the tick falls through and returns 0, `_wfails` is RESET rather than incremented, and a
+		# trunk that has been unreadable for hours is indistinguishable in the wake channel from a
+		# run of clean ticks. Three of the four comments citing that argument are accurate;
+		# this was the one that was not, and it was copied into a fifth event before being caught.
+		#
+		# IT MATTERS MORE HERE THAN THE WORDING SUGGESTS, which is why this is a negative rather than
+		# a deletion. the whole point of quince#202 is that `main` cannot be red without anybody noticing;
+		# a trunk that cannot be READ is that blindness one layer out, and a session reading the old
+		# clause waits for an exit 7 that cannot arrive.
+		#
+		# WHAT WOULD ANSWER IT IS UNRULED AND IS NOT FOR THIS COMMENT TO DECIDE. Letting a failed trunk
+		# read fail the tick is a behaviour change that reopens a question quince#202 settled: the
+		# trunk is a THIRD subject this tool fetches, and ending a watch over it may be punishing the
+		# session for a repo-wide read it never asked for — which is exactly the reasoning
+		# `issue-scan-failed` gives for not counting. quince#1235 carries that ruling.
 		/^event=trunk-fetch-failed/ { next }
 		# `queue-truncated` is a CONDITION, not an edge, and that is the distinction this arm draws
 		# (quince#1189, quince#1190, quince-devlog#276). Every other wake here is something that
