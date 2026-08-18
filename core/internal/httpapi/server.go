@@ -213,6 +213,7 @@ func NewRouter(deps Deps) http.Handler {
 	// confirm cannot accept `X-Forwarded-Proto` as evidence.
 	apiMux.HandleFunc("POST /api/onboarding/certificate/apply", deps.handleCertificateApply())
 	apiMux.HandleFunc("POST /api/onboarding/certificate/confirm", deps.handleCertificateConfirm())
+	apiMux.HandleFunc("POST /api/onboarding/certificate/cancel", deps.handleCertificateCancel())
 	apiMux.HandleFunc("POST /api/auth/setup", deps.handleAuthSetup())
 	apiMux.HandleFunc("POST /api/auth/login", deps.handleAuthLogin())
 	apiMux.HandleFunc("POST /api/auth/logout", deps.handleAuthLogout())

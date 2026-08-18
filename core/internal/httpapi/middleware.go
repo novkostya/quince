@@ -113,6 +113,10 @@ func authExempt(r *http.Request) bool {
 		// BOTH ARE Configured()-GATED IN THE HANDLERS. Being exempt is what makes them reachable;
 		// being one-shot is what makes them safe — an exemption here is only ever half of a decision.
 		"POST /api/onboarding/certificate/apply", "POST /api/onboarding/certificate/confirm",
+		// AND THE DECLINE, which is the confirm's other answer and reachable in the same window
+		// (quince#1158). Refusing it here would leave "yes" pre-auth and "no" impossible, so the only
+		// way out of a trial the user does not want would be to wait ten minutes.
+		"POST /api/onboarding/certificate/cancel",
 		// PASSKEY ASSERTION IS PRE-AUTH BY DEFINITION — it is how a session is obtained (qn.6k).
 		// Registration is deliberately NOT here: it needs a session, which is what makes it the
 		// half that touches none of these lists.
@@ -233,7 +237,11 @@ func csrfExempt(r *http.Request) bool {
 		// double-submit — `ensureCSRF` mints the cookie on every request including exempt ones, which
 		// is why being pre-auth never implied being unable to (handlers_certprobe.go makes the same
 		// argument for the offline check).
-		"/api/onboarding/certificate/confirm":
+		//
+		// THE DECLINE ARRIVES FROM THE SAME PAGE ON THE SAME ORIGIN as the confirm, so the same
+		// reasoning covers it: the CSRF cookie was set on the plain origin the apply happened on and
+		// is not sent with either.
+		"/api/onboarding/certificate/confirm", "/api/onboarding/certificate/cancel":
 		return true
 	}
 	return false
@@ -304,6 +312,9 @@ func setupAllowed(r *http.Request) bool {
 		// and unable to use it. Leaving out the confirm would be worse than leaving out both — the
 		// trial would start and could never be kept.
 		"POST /api/onboarding/certificate/apply", "POST /api/onboarding/certificate/confirm",
+		// The decline belongs beside them: a trial that can start on a zero-storage install must be
+		// escapable on one.
+		"POST /api/onboarding/certificate/cancel",
 		"GET /api/config", "PUT /api/config", "POST /api/config/storage",
 		// The pre-auth transport opt-in (quince#908 slice 6). A zero-storage first run is exactly
 		// the install it exists for — the user has declared nothing yet and cannot even set a

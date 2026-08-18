@@ -241,6 +241,50 @@ func (c *certTrial) confirm(token string) (certFile, keyFile string, ok bool) {
 	return cert, key, true
 }
 
+// abandon ends the trial the token names and puts the previous pair back, returning whether it did.
+//
+// THE SAME TOKEN RULES AS `confirm`, DELIBERATELY: a superseded or expired trial is refused, and the
+// compare is constant-time for the same reason — what is protected is the CORRELATION between an
+// answer and the trial it answers, on a route that is pre-auth by the same argument.
+//
+// IT PUTS THE KEEPER BACK HERE rather than leaving it to the timer, which is the whole point: the
+// user has said no, and waiting out the remaining minutes would keep serving a certificate nobody
+// wants on the address they are trying to leave.
+//
+// WHY A CLIENT MAY DRIVE THIS AT ALL, given that this file refuses a client-driven rollback in as
+// many words. That refusal is about the APPLY page: it sits on plain http, and once a trial is live
+// `plainHalf` redirects it into the handshake that may be exactly what is broken — so its cancel
+// would travel over the channel whose failure it exists to recover from. The CONFIRM page is the
+// opposite case and is the only one this admits: it is reached over the trial certificate itself, so
+// arriving there is proof the channel works. The handler enforces that with `r.TLS != nil`, the same
+// evidence rule the confirmation uses.
+func (c *certTrial) abandon(token string) bool {
+	c.mu.Lock()
+	if c.live == nil || c.live.expired(c.now()) {
+		c.mu.Unlock()
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(c.live.token)) != 1 {
+		c.mu.Unlock()
+		return false
+	}
+	c.live.timer.Stop()
+	prevCert, prevKey := c.live.prevCert, c.live.prevKey
+	c.live = nil
+	c.mu.Unlock()
+
+	c.log.Warn("trial certificate was declined — returning to the pair config.yml names",
+		"cert_file", prevCert, "key_file", prevKey)
+	if err := c.keeper.SetFiles(prevCert, prevKey); err != nil {
+		// NOTHING WAS WRITTEN, SO NOTHING IS LOST — `expire`'s reasoning, and it applies unchanged.
+		// The file is already correct and the Keeper's own self-heal picks the pair up as soon as it
+		// can be read.
+		c.log.Error("could not return to the configured certificate — config.yml is unchanged and correct",
+			"cert_file", prevCert, "key_file", prevKey, "error", err)
+	}
+	return true
+}
+
 // pending reports the live trial's deadline, if there is one. This is the read that keeps the
 // divergence from being hidden state: a surface that wants to say *serving a trial certificate,
 // unconfirmed, until HH:MM* asks here.

@@ -333,3 +333,71 @@ func newConfirmToken() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
+
+// POST /api/onboarding/certificate/cancel {token} → 200 | 400 | 409 | 426 (quince#1158).
+//
+// THE CONFIRMATION'S OTHER ANSWER. The page that asks *keep this certificate?* had one button and a
+// link that merely navigated, so declining meant waiting ten minutes — on a page served by the
+// certificate being declined, which stops existing when the window closes.
+//
+// # Why a client may end a trial here, when cert_trial.go refuses exactly that
+//
+// That refusal is about the APPLY page: it sits on plain http, and the moment a trial is live
+// `plainHalf` redirects it into the handshake that may be the broken thing, so a cancel from there
+// would travel over the channel whose failure it exists to recover from.
+//
+// THIS PAGE IS THE OPPOSITE CASE, AND IT IS THE ONLY ONE ADMITTED. It is reached over the trial
+// certificate itself, so **arriving is the proof the channel works** — the same fact the confirm
+// route accepts as evidence, read the same way: `r.TLS != nil`, never `X-Forwarded-Proto`.
+//
+// IT WRITES NOTHING, WHICH IS WHAT MAKES IT SAFE TO LEAVE PRE-AUTH. The confirm route is the one
+// place in this ceremony that touches `config.yml`; this one puts the Keeper back to the pair the
+// file already names, so the worst a stranger reaching it can do is end a trial somebody else
+// started — the same thing they could do by waiting, or by restarting the daemon they can already
+// reach.
+func (d Deps) handleCertificateCancel() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		configured, err := d.Auth.Configured()
+		if err != nil {
+			d.Log.Error("could not determine whether the install is configured", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not read auth state")
+			return
+		}
+		if configured {
+			writeError(w, d.Log, http.StatusConflict, "already_configured",
+				"quince is already set up — sign in and configure TLS from Settings")
+			return
+		}
+
+		// BEFORE THE BODY, as the confirm does it, and for the same reason: it is a property of the
+		// connection and no body can change it.
+		if r.TLS == nil {
+			writeError(w, d.Log, http.StatusUpgradeRequired, "insecure_transport",
+				"a certificate is declined from the address it is being tried at — open the "+
+					"confirm_origin this apply returned and try again there")
+			return
+		}
+
+		var body wire.CertificateConfirmRequest
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
+			return
+		}
+
+		if !d.CertTrial.abandon(body.Token) {
+			// THE SAME ONE ANSWER FOR THREE CAUSES the confirm gives — nothing running, the window
+			// closed, or a superseded token — because the outcome a caller cares about is identical
+			// and already true: no trial of theirs is running.
+			writeError(w, d.Log, http.StatusConflict, "not_armed",
+				"nothing is waiting to be declined — the window may have closed and the previous "+
+					"certificate come back, or a later apply replaced this one.")
+			return
+		}
+
+		d.Log.Info("certificate trial declined by the user", "route", "POST /api/onboarding/certificate/cancel")
+		writeJSON(w, d.Log, http.StatusOK, struct {
+			Cancelled     bool `json:"cancelled"`
+			ConfigWritten bool `json:"config_written"`
+		}{Cancelled: true, ConfigWritten: false})
+	}
+}

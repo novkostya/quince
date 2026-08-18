@@ -32,6 +32,7 @@ import (
 const (
 	certApplyPath   = "/api/onboarding/certificate/apply"
 	certConfirmPath = "/api/onboarding/certificate/confirm"
+	certCancelPath  = "/api/onboarding/certificate/cancel"
 )
 
 // writeCertPair mints a self-signed pair IN PROCESS, as `tlsx`'s own suite does and for the reason
@@ -140,6 +141,20 @@ func (f *fakeTimers) expire(t *testing.T, n int) {
 	fn := f.fns[n]
 	f.mu.Unlock()
 	fn()
+}
+
+// stopped counts the timers whose Stop was called — the fake already recorded this and nothing read
+// it. Declining a trial must stop its timer, or an expiry fires later against a trial that is over.
+func (f *fakeTimers) stopped() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, s := range f.stop {
+		if s {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *fakeTimers) armed() int {
@@ -598,5 +613,88 @@ func TestTheApplyReportsWhetherTheConfirmOriginIsCovered(t *testing.T) {
 					got.ConfirmHostCovered, tc.wantCovered, tc.wantOrigin)
 			}
 		})
+	}
+}
+
+// DECLINING ENDS THE TRIAL AND WRITES NOTHING (quince#1158). It is the confirm's other answer, and
+// the same evidence rule applies: it is accepted only on quince's own TLS half, because the page that
+// sends it is reached over the trial certificate — which is what makes a client-driven end safe here
+// and nowhere else.
+func TestDecliningATrialPutsTheKeeperBackAndWritesNoConfig(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+	deps, keeper, timers, _ := certApplyDeps(t)
+	router := NewRouter(deps)
+
+	plain := httptest.NewServer(router)
+	defer plain.Close()
+	tlsSrv := httptest.NewTLSServer(router)
+	defer tlsSrv.Close()
+
+	got := decodeApplied(t, postCertJSON(t, router, plain.URL+certApplyPath,
+		applyBody(certFile, keyFile, "quince.example")))
+
+	resp, err := tlsSrv.Client().Post(tlsSrv.URL+certCancelPath, "application/json",
+		strings.NewReader(`{"token":"`+got.ConfirmToken+`"}`))
+	if err != nil {
+		t.Fatalf("decline over TLS: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+
+	// THE PREVIOUS PAIR IS BACK. On this install that is the empty pair, which is the case that
+	// matters: a first run has nothing configured, and `SetFiles` treats empty as an explicit clear.
+	if pair, ok := keeper.last(); !ok || pair[0] != "" || pair[1] != "" {
+		t.Fatalf("the daemon was not put back: %+v", pair)
+	}
+	if deps.Config.Current().TLS.Enabled() {
+		t.Fatalf("config.yml was written by a DECLINE: %+v", deps.Config.Current().TLS)
+	}
+	// AND THE TIMER IS STOPPED, so nothing fires later against a trial that is already over.
+	if timers.stopped() != 1 {
+		t.Errorf("%d timers stopped, want 1", timers.stopped())
+	}
+}
+
+// PLAIN HTTP IS REFUSED WITH 426, exactly as the confirm is. The page that declines is reached over
+// the trial certificate, so a request arriving without TLS did not come from it — and accepting one
+// would admit the client-driven rollback `cert_trial.go` refuses on the apply page.
+func TestDecliningIsRefusedOverPlainHTTP(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeCertPair(t, dir, "quince.example", time.Now().Add(24*time.Hour))
+	deps, keeper, _, _ := certApplyDeps(t)
+	router := NewRouter(deps)
+
+	got := decodeApplied(t, postCertJSON(t, router, "http://quince.example:8968"+certApplyPath,
+		applyBody(certFile, keyFile, "quince.example")))
+
+	rec := postCertJSON(t, router, "http://quince.example:8968"+certCancelPath,
+		`{"token":"`+got.ConfirmToken+`"}`)
+	if rec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("status %d, want 426 — %s", rec.Code, rec.Body.String())
+	}
+	// AND THE TRIAL IS UNTOUCHED: a refused decline must not half-end anything.
+	if pair, ok := keeper.last(); !ok || pair[0] != certFile {
+		t.Fatalf("the trial pair was disturbed by a refused decline: %+v", pair)
+	}
+}
+
+// A TOKEN THAT NAMES NOTHING IS A 409, the same answer the confirm gives for the same three causes:
+// nothing running, the window closed, or a later apply replaced this trial.
+func TestDecliningSomethingElseIsRefused(t *testing.T) {
+	deps, _, _, _ := certApplyDeps(t)
+	tlsSrv := httptest.NewTLSServer(NewRouter(deps))
+	defer tlsSrv.Close()
+
+	resp, err := tlsSrv.Client().Post(tlsSrv.URL+certCancelPath, "application/json",
+		strings.NewReader(`{"token":"not-a-trial"}`))
+	if err != nil {
+		t.Fatalf("decline over TLS: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status %d, want 409", resp.StatusCode)
 	}
 }
