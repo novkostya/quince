@@ -92,27 +92,25 @@ export function OnboardingCertificatePage() {
     }
   }
 
-  // WHY A TRIAL WOULD BE POINTLESS, OR NULL. Two independent facts make it so, and they come from
-  // two different checks — which is exactly how the second one shipped unguarded: a name the
-  // certificate covered, unreachable from this browser, with the button live under a red box saying
-  // so.
-  //
-  //   the certificate cannot cover the address the confirm link would use
-  //   this browser cannot reach that address at all
+  // WHETHER A TRIAL WOULD BE POINTLESS. Two independent facts make it so and they come from two
+  // different checks — which is exactly how the second one shipped unguarded: a name the certificate
+  // covered, unreachable from this browser, with the button live under a red box saying so.
   //
   // NEITHER IS A JUDGEMENT ABOUT THE FILES. The pair is `usable` in both cases; what is wrong is
   // where it would be tried. And neither blocks the journey the Operator ruled valid — a browser
   // warning about the ISSUER, on an address that works — because that address is covered and
-  // reachable, so this returns null for it.
-  const blocked: string | null = (() => {
-    if (offline === null || offline.outcome !== "usable") return null;
-    if (hostname.trim() === "" && offline.current_host !== "" && !offline.current_host_covered) {
-      return `This certificate does not cover ${offline.current_host}. Enter a name it covers above, then check again.`;
-    }
-    if (reach !== null && !reachedThisQuince(reach)) {
-      return `This device cannot reach quince at ${reach.url}. Point that name at this machine, then check again.`;
-    }
-    return null;
+  // reachable.
+  //
+  // THE REASON IS NOT PASSED DOWN, only the verdict: both causes are already stated by the checks
+  // above the card, and repeating one inside it put the same sentence on screen twice.
+  const blocked: boolean = (() => {
+    if (offline === null || offline.outcome !== "usable") return false;
+    // THE CERTIFICATE CANNOT COVER WHERE THE LINK WOULD POINT. Only with the name left empty: with
+    // one typed, the address in play is that name and `outcome` has already answered for it.
+    if (hostname.trim() === "" && offline.current_host !== "" && !offline.current_host_covered) return true;
+    // OR THIS DEVICE CANNOT GET THERE AT ALL, which the confirmation link would need to.
+    if (reach !== null && !reachedThisQuince(reach)) return true;
+    return false;
   })();
 
   return (
