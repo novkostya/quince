@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationsInstallPage } from "./NotificationsInstallPage";
 import { api } from "@/lib/api";
+import { routeGet } from "@/test/config";
 
 // qn.12 — SEND TEST IS WHAT MAKES THE FEATURE INSTALLABLE BY A PERSON.
 //
@@ -41,12 +42,16 @@ function stageInstalledIOS() {
 }
 
 function stageOneLiveSubscription() {
-  mockApi.get.mockResolvedValue({
-    vapid_public_key: "BFakeKey",
-    subscriptions: [
-      { id: "s1", label: "iPhone", state: "live", created_at: "2026-08-18T00:00:00Z", fingerprint: FP },
-    ],
-  });
+  mockApi.get.mockImplementation(
+    routeGet({
+      "/api/notifications": {
+        vapid_public_key: "BFakeKey",
+        subscriptions: [
+          { id: "s1", label: "iPhone", state: "live", created_at: "2026-08-18T00:00:00Z", fingerprint: FP },
+        ],
+      },
+    }) as never,
+  );
 }
 
 beforeEach(() => {
@@ -69,7 +74,9 @@ describe("sending a test notification", () => {
   // NOTHING TO SEND TO IS NOT A CONTROL TO OFFER. A button that can only ever report "nobody is
   // subscribed" is a dead end on the one screen whose job is to get somebody subscribed.
   it("does not offer it when nothing is subscribed", async () => {
-    mockApi.get.mockResolvedValue({ vapid_public_key: "BFakeKey", subscriptions: [] });
+    mockApi.get.mockImplementation(
+      routeGet({ "/api/notifications": { vapid_public_key: "BFakeKey", subscriptions: [] } }) as never,
+    );
     renderPage();
 
     expect(await screen.findByRole("button", { name: /turn on notifications/i })).toBeInTheDocument();
@@ -108,10 +115,14 @@ describe("sending a test notification", () => {
   it("refreshes the device list, because a test can expire a subscription", async () => {
     mockApi.post.mockResolvedValue({ results: [{ label: "iPhone", state: "expired" }] });
     renderPage();
-    await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(1));
+    // COUNTED BY PATH, not by total calls. The page also reads `/api/config` for its settings
+    // (quince#1212), so a bare call count answers "did anything fetch" — which would stay green if
+    // the refetch this test is about were removed.
+    const listCalls = () => mockApi.get.mock.calls.filter((c) => String(c[0]).startsWith("/api/notifications")).length;
+    await waitFor(() => expect(listCalls()).toBe(1));
 
     fireEvent.click(await screen.findByRole("button", { name: /send a test notification/i }));
-    await waitFor(() => expect(mockApi.get.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(1));
   });
 
   it("says so when the send itself fails, rather than staying silent", async () => {

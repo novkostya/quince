@@ -87,10 +87,19 @@ that matters. Concretely —
    iPhone itself is a first-class client.
 8. **Everything configurable in-app; the file stays visible.** Settings pages are an
    editor over `config.yml` (stack D12) — no UI-only state, no setting that can't be
-   found in the file. A read-only "current config" view (PVE-style) in Settings shows the
-   exact file contents, with a banner when a hand-edit was rejected (invalid) or a
-   hand-edit is live. Onboarding is guided checks with plain-language explanations, not
-   a wall of fields.
+   found in the file. A read-only "current config" view (PVE-style) shows the exact file
+   contents, with a banner when a hand-edit was rejected (invalid) or a hand-edit is live.
+   Onboarding is guided checks with plain-language explanations, not a wall of fields.
+
+   **BESIDE EVERY EDITING SURFACE, NOT ONCE "IN SETTINGS"** — this read *"in Settings"* while
+   there was one, and `/settings/notifications` became a second on 2026-08-18 (Operator ruling,
+   quince#1212). A page that edits the document without showing it makes the file invisible from
+   exactly where a change is made, which is the half of this principle that carries the weight.
+   It shows the **whole file** on every such page, not the section that page edits: the view
+   renders `file_text`, the literal bytes on disk, so a per-section view would mean the client
+   parsing YAML and re-emitting it — a second renderer of the config language and a place for the
+   two to disagree. A `PUT` replaces the whole document besides, so the whole document is what a
+   save touches.
 
 ## Type, contrast and rhythm — the numbers, and where they came from
 
