@@ -1,0 +1,200 @@
+#!/bin/sh
+# stale-refs-report — issues whose fix has merged under `Refs` and which nobody has closed.
+#
+# THE DEFECT (quince#1002). `Refs #N` links a PR to an issue and closes nothing, which is CORRECT
+# and is not what this is about. What is missing is that nothing revisits it afterwards: the issue
+# stays open, reads as live work, and gets re-taken.
+#
+# `bin/closing-refs-check` guards the opposite direction — a closing keyword that would auto-close
+# something you did not mean. This is the other half, and it is the half that wastes a session.
+#
+# NEITHER USE OF `Refs` IS AN ERROR, WHICH IS WHY A GATE WOULD BE WRONG. quince#797 wrote `Refs`
+# because the author was not certain the fix was total. quince#963 and quince#964 each wrote it
+# because each was HALF of the issue, and neither could honestly claim to close it alone. That is
+# the correct use, and it is exactly the case that goes stale: THE LAST OF N PRs HAS NO WAY TO KNOW
+# IT WAS THE LAST.
+#
+# THE RATE IS MEASURED AND IT IS NOT SMALL. Six confirmed live instances in 106 open issues
+# (implementer sweep, 2026-08-16), one of which had been fixed for five days and another for eight.
+# Then, from the other end: ONE session, nine merged PRs, SIX issues left open that its own work had
+# closed. So a working session produces these faster than a sweep clears them.
+#
+# A REPORT, NOT A GATE, AND THE EXIT CODES SAY SO. It cannot know intent — quince#644 was
+# deliberately open as a sentinel after its mechanism was fixed, and that is a legitimate state that
+# looks identical from the outside. So finding something is NOT a failure here:
+#
+#   0  looked                       — whether or not it found anything; the count is on stdout
+#   2  DID NOT LOOK                 — bad arguments, no usable `gh`, a query that failed
+#
+# THIS DIVERGES FROM `closing-refs-check` AND `privacy-check`, which use 1 for "found something", and
+# the divergence is the point rather than an oversight. Those two answer questions with a right
+# answer; this one answers a question whose right answer is a judgement. A non-zero exit would put a
+# human decision on the failure path, and the first thing a caller does with a check that fails on a
+# legitimate state is stop running it. `--strict` opts into exit 1 for a caller that wants it.
+#
+# WHAT THE `no comment since the merge` CLAUSE IS FOR, and it is the whole of the noise control. An
+# issue somebody has spoken about since its fix landed is one somebody has already looked at —
+# quince#644 carries an explicit *"this issue stays OPEN deliberately"* posted after the fix. That
+# comment is the difference between a sentinel and an oversight, and it is the only signal available
+# from outside.
+set -eu
+
+ME=$(basename "$0")
+
+usage() {
+	cat >&2 <<EOF
+usage: $ME [--repo <owner/name>] [--gh <path>] [--prs <n>] [--issues <n>] [--strict]
+
+  --repo    which repository (default: novkostya/quince)
+  --gh      the forge wrapper to call (default: bin/gh-coder beside this script)
+  --prs     how many recently-merged PRs to read back (default: 200)
+  --issues  how many open issues to consider (default: 300)
+  --strict  exit 1 when candidates are found, for a caller that wants a failure
+
+Exit: 0 looked · 2 DID NOT LOOK. Finding something is not a failure — see the header.
+EOF
+}
+
+REPO=novkostya/quince
+GH=
+PRS=200
+ISSUES=300
+STRICT=no
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--repo) REPO=${2:?--repo needs a value}; shift 2 ;;
+	--gh) GH=${2:?--gh needs a value}; shift 2 ;;
+	--prs) PRS=${2:?--prs needs a value}; shift 2 ;;
+	--issues) ISSUES=${2:?--issues needs a value}; shift 2 ;;
+	--strict) STRICT=yes; shift ;;
+	-h | --help) usage; exit 2 ;;
+	*) printf '%s: unknown argument %s\n' "$ME" "$1" >&2; usage; exit 2 ;;
+	esac
+done
+
+# The wrapper, not bare `gh` — an allow rule never matches past a leading `VAR=value`, so the
+# credential has to come from the wrapper rather than from an env prefix at the call site.
+[ -n "$GH" ] || GH=$(dirname "$0")/gh-coder
+if [ ! -x "$GH" ]; then
+	printf '%s: no usable forge wrapper at %s — DID NOT LOOK.\n' "$ME" "$GH" >&2
+	exit 2
+fi
+command -v jq >/dev/null 2>&1 || {
+	printf '%s: jq is not installed — DID NOT LOOK.\n' "$ME" >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+# A FAILED QUERY IS `DID NOT LOOK`, NEVER AN EMPTY ANSWER. An empty issue list and an unreachable
+# forge are the same shape on stdout and opposite facts, which is quince#41's equivalence.
+if ! "$GH" issue list --repo "$REPO" --state open --limit "$ISSUES" \
+	--json number,title >"$TMP/issues.json" 2>"$TMP/err"; then
+	printf '%s: could not list open issues on %s — DID NOT LOOK.\n' "$ME" "$REPO" >&2
+	sed 's/^/  /' "$TMP/err" >&2
+	exit 2
+fi
+if ! "$GH" pr list --repo "$REPO" --state merged --limit "$PRS" \
+	--json number,title,body,mergedAt >"$TMP/prs.json" 2>"$TMP/err"; then
+	printf '%s: could not list merged PRs on %s — DID NOT LOOK.\n' "$ME" "$REPO" >&2
+	sed 's/^/  /' "$TMP/err" >&2
+	exit 2
+fi
+for f in issues prs; do
+	jq -e 'type == "array"' "$TMP/$f.json" >/dev/null 2>&1 || {
+		printf '%s: the %s payload is not an array — DID NOT LOOK.\n' "$ME" "$f" >&2
+		exit 2
+	}
+done
+
+SHORT=${REPO##*/}
+
+# THE REFERENCE FORMS, and the closing keywords are stripped FIRST rather than filtered after.
+# A body saying `Closes #12, Refs #13` must yield 13 and not 12, and a keyword binds only to the
+# reference immediately after it — so removing `<keyword> #N` outright is what leaves the rest
+# intact. The list is GitHub's own, all three tenses of each verb.
+#
+# BOTH `#N` AND `<repo>#N` ARE READ, because this project writes both and a cross-repo reference to
+# ANOTHER repo must not be counted. `<repo>#N` is kept only when `<repo>` is this one.
+jq -r --arg short "$SHORT" '
+	.[] | . as $pr
+	| (($pr.title // "") + "\n" + ($pr.body // ""))
+	| gsub("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s+(" + $short + ")?#[0-9]+"; " ")
+	| [scan("(?:(?:^|[^A-Za-z0-9_/-])(?:" + $short + ")?#([0-9]+))")]
+	| flatten | unique | .[]
+	| "\(.)\t\($pr.number)\t\($pr.mergedAt)"
+' "$TMP/prs.json" | sort -u >"$TMP/refs.tsv"
+
+# The newest merge per referenced issue: that is the moment a follow-up comment has to beat, and
+# taking the OLDEST would report an issue whose second PR landed yesterday.
+sort -t"$(printf '\t')" -k1,1n -k3,3r "$TMP/refs.tsv" | awk -F'\t' '!seen[$1]++' >"$TMP/newest.tsv"
+
+jq -r '.[] | "\(.number)\t\(.title)"' "$TMP/issues.json" | sort -t"$(printf '\t')" -k1,1 >"$TMP/open.tsv"
+
+# Candidates: open AND referenced by a merged PR. Anything else needs no forge call, which is what
+# keeps this cheap — the per-issue comment read is the only unbounded cost and it runs over the
+# intersection rather than over the issue list.
+awk -F'\t' 'NR==FNR { open[$1]=$2; next } ($1 in open) { print $1 "\t" $2 "\t" $3 "\t" open[$1] }' \
+	"$TMP/open.tsv" "$TMP/newest.tsv" | sort -k1,1n >"$TMP/candidates.tsv"
+
+CANDIDATES=$(wc -l <"$TMP/candidates.tsv" | tr -d ' ')
+OPEN=$(wc -l <"$TMP/open.tsv" | tr -d ' ')
+
+printf '%s: %s — %s open issue(s), %s referenced by one of the last %s merged PR(s)\n' \
+	"$ME" "$REPO" "$OPEN" "$CANDIDATES" "$PRS"
+
+FOUND=0
+UNREAD=0
+while IFS="$(printf '\t')" read -r n pr merged title; do
+	[ -n "$n" ] || continue
+	# A FAILED READ IS NAMED, NEVER SKIPPED. An issue whose comments could not be fetched is
+	# neither "stale" nor "fine" — reporting it as fine is the silent-subset shape this project
+	# files more than any other, so it gets its own line and its own count.
+	if ! "$GH" issue view "$n" --repo "$REPO" --json comments >"$TMP/c.json" 2>"$TMP/err"; then
+		printf '  ?  #%-6s COULD NOT READ its comments — not classified (%s)\n' \
+			"$n" "$(head -n 1 "$TMP/err" | cut -c1-60)"
+		UNREAD=$((UNREAD + 1))
+		continue
+	fi
+	# `> $merged` is a string comparison over ISO-8601 UTC, which sorts lexically. Every timestamp
+	# GitHub returns here is `Z`-suffixed and fixed-width, so this is exact rather than approximate.
+	after=$(jq -r --arg m "$merged" '[.comments[]? | select(.createdAt > $m)] | length' "$TMP/c.json")
+	[ "$after" = 0 ] || continue
+	printf '  ->  #%-6s no comment since %s merged it at %s\n      %s\n' \
+		"$n" "#$pr" "$merged" "$title"
+	FOUND=$((FOUND + 1))
+done <"$TMP/candidates.tsv"
+
+if [ "$UNREAD" != 0 ]; then
+	printf '%s: %s candidate(s) could not be read and are NOT included in the count below.\n' \
+		"$ME" "$UNREAD"
+fi
+
+if [ "$FOUND" = 0 ]; then
+	# THE ALL-CLEAR IS WITHHELD WHILE ANYTHING IS UNCLASSIFIED, and this is not a nicety — it is the
+	# one lie this tool is capable of. `FOUND=0` with `UNREAD>0` means every candidate failed to
+	# read, and the sentence below would report that as a clean sweep: quince#41's equivalence,
+	# where a check that never looked is indistinguishable from one that looked and found nothing.
+	# Caught by this tool's own suite before it ever ran for real.
+	if [ "$UNREAD" != 0 ]; then
+		printf '%s: NO VERDICT — every candidate failed to read, so nothing was classified.\n' "$ME"
+		exit 2
+	fi
+	printf '%s: nothing to review — every referenced open issue has been spoken about since its merge.\n' "$ME"
+	exit 0
+fi
+
+# THE VERDICT IS THE READER'S AND THE WORDING HAS TO SAY SO. A sentinel and an oversight are
+# indistinguishable from here, so this prints candidates rather than findings, and names the two
+# outcomes so a reader knows both are legitimate.
+cat <<EOF
+$ME: $FOUND candidate(s). Each is an open issue whose referencing PR merged with nothing said since.
+
+  This is NOT a list of mistakes. Read each one and do ONE of:
+    - close it, if the work is done — quoting the commit, as evidence rather than assertion;
+    - comment saying why it stays open, which also removes it from this report for good.
+EOF
+[ "$STRICT" = no ] || exit 1
+exit 0

@@ -1,0 +1,211 @@
+#!/bin/sh
+# stale-refs-report-test — the report's classification, and both ways it must refuse to guess.
+#
+# WHAT IS WORTH TESTING HERE, given the tool is a report and not a gate: the two directions of the
+# `no comment since the merge` clause, the reference EXTRACTION (which is where a false positive
+# would come from), and the DID-NOT-LOOK path — because a report that says "nothing to review"
+# after a failed query is quince#41's equivalence and is the only way this tool can lie.
+#
+# HERMETIC. A stub `gh` answers from files in a temp dir; no network, no credential, no state.
+set -eu
+
+REPORT="${STALE_REFS_BIN:-$PWD/bin/stale-refs-report}"
+[ -x "$REPORT" ] || {
+	printf 'stale-refs-report-test: %s is not executable\n' "$REPORT" >&2
+	exit 2
+}
+command -v jq >/dev/null 2>&1 || {
+	printf 'stale-refs-report-test: jq is not installed\n' >&2
+	exit 2
+}
+
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# The stub reads its answers from $WORK, so a case rewrites those files rather than the stub.
+# `issue view <n>` is per-issue: it looks for comments.<n>.json and fails when there is none, which
+# is how the unreadable-comments case is driven.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+W=$(dirname "$0")
+if [ "$1" = issue ] && [ "$2" = list ]; then cat "$W/issues.json"; exit 0; fi
+if [ "$1" = pr ] && [ "$2" = list ]; then cat "$W/prs.json"; exit 0; fi
+if [ "$1" = issue ] && [ "$2" = view ]; then
+	[ -f "$W/comments.$3.json" ] || { printf 'gh: no such issue\n' >&2; exit 1; }
+	cat "$W/comments.$3.json"; exit 0
+fi
+printf 'stub: unexpected argv: %s\n' "$*" >&2
+exit 1
+STUB
+chmod +x "$WORK/gh"
+
+run() { "$REPORT" --repo novkostya/quince --gh "$WORK/gh" "$@" 2>&1; }
+
+# ---------------------------------------------------------------------------------------------
+# THE TWO DIRECTIONS OF THE `no comment since the merge` CLAUSE.
+#
+# #10 is the defect: fixed under `Refs`, nothing said since, still open.
+# #11 is quince#644's shape and the reason this is a report — a sentinel with an explicit comment
+# posted AFTER its fix landed. Without this case the tool would pass against a build that reported
+# every referenced open issue, which is a list nobody can act on.
+# ---------------------------------------------------------------------------------------------
+cat >"$WORK/issues.json" <<'EOF'
+[{"number":10,"title":"the fixed one"},{"number":11,"title":"the sentinel"}]
+EOF
+cat >"$WORK/prs.json" <<'EOF'
+[{"number":90,"title":"a fix","body":"Refs #10\nRefs #11","mergedAt":"2026-08-10T00:00:00Z"}]
+EOF
+echo '{"comments":[]}' >"$WORK/comments.10.json"
+echo '{"comments":[{"createdAt":"2026-08-11T00:00:00Z"}]}' >"$WORK/comments.11.json"
+
+out=$(run) && rc=0 || rc=$?
+case "$rc" in
+0) ok "finding candidates is exit 0 — a judgement call is not a failure" ;;
+*) bad "expected exit 0, got $rc" ;;
+esac
+case "$out" in
+*"#10"*) ok "an issue referenced by a merged PR with nothing said since is a candidate" ;;
+*) bad "#10 was not reported: $out" ;;
+esac
+case "$out" in
+*"#11"*) bad "#11 was reported, but it carries a comment newer than the merge — that is the sentinel case" ;;
+*) ok "a comment newer than the merge removes it: a sentinel is not an oversight" ;;
+esac
+case "$out" in
+*"1 candidate(s)"*) ok "the count is one, so the sentinel is excluded from the total and not merely unprinted" ;;
+*) bad "expected '1 candidate(s)': $out" ;;
+esac
+
+# --strict is the opt-in for a caller that wants a failure, and it must not change WHAT is found.
+out=$(run --strict) && rc=0 || rc=$?
+case "$rc" in
+1) ok "--strict turns the same finding into exit 1, for a caller that asked for one" ;;
+*) bad "expected --strict to exit 1, got $rc" ;;
+esac
+
+# ---------------------------------------------------------------------------------------------
+# EXTRACTION. This is where a false positive would come from, and a report people do not trust is
+# a report nobody runs.
+# ---------------------------------------------------------------------------------------------
+cat >"$WORK/issues.json" <<'EOF'
+[{"number":12,"title":"closed by keyword, somehow still open"},
+ {"number":13,"title":"plainly referenced"},
+ {"number":14,"title":"another repo's number"}]
+EOF
+cat >"$WORK/prs.json" <<'EOF'
+[{"number":91,"title":"t","body":"Closes #12, and Refs #13. See quince-devlog#14 too.","mergedAt":"2026-08-10T00:00:00Z"}]
+EOF
+for n in 12 13 14; do echo '{"comments":[]}' >"$WORK/comments.$n.json"; done
+
+out=$(run)
+case "$out" in
+*"#12"*) bad "a closing keyword was counted — GitHub closes that one itself, so it is not this tool's case" ;;
+*) ok "a closing keyword is stripped, so #12 is not a candidate" ;;
+esac
+case "$out" in
+*"#13"*) ok "…and the bare Refs in the SAME body still counts, so stripping did not eat its neighbour" ;;
+*) bad "#13 was lost: $out" ;;
+esac
+case "$out" in
+*"#14"*) bad "a cross-repo reference was counted against this repo — the numbers collide across repositories" ;;
+*) ok "quince-devlog#14 is another repository's number and is not counted" ;;
+esac
+
+# ---------------------------------------------------------------------------------------------
+# THE NEWEST MERGE WINS. An issue fixed across two PRs must be judged against the LAST one: taking
+# the oldest reports an issue whose second half landed after the comment, which is backwards.
+# ---------------------------------------------------------------------------------------------
+cat >"$WORK/issues.json" <<'EOF'
+[{"number":15,"title":"fixed in two halves"}]
+EOF
+cat >"$WORK/prs.json" <<'EOF'
+[{"number":92,"title":"t","body":"Refs #15","mergedAt":"2026-08-10T00:00:00Z"},
+ {"number":93,"title":"t","body":"Refs #15","mergedAt":"2026-08-14T00:00:00Z"}]
+EOF
+echo '{"comments":[{"createdAt":"2026-08-12T00:00:00Z"}]}' >"$WORK/comments.15.json"
+out=$(run)
+case "$out" in
+*"#15"*"#93"*) ok "the NEWEST merge is what a comment has to beat, and the report names that PR" ;;
+*"#15"*) bad "reported, but against the wrong PR: $out" ;;
+*) bad "a comment older than the last merge did not make it a candidate: $out" ;;
+esac
+
+# ---------------------------------------------------------------------------------------------
+# DID NOT LOOK. The only way this tool can lie is by saying "nothing to review" about a query that
+# never ran, which is quince#41's equivalence.
+# ---------------------------------------------------------------------------------------------
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+printf 'gh: could not authenticate\n' >&2
+exit 1
+STUB
+chmod +x "$WORK/gh"
+out=$(run) && rc=0 || rc=$?
+case "$rc" in
+2) ok "a failed query is exit 2 DID NOT LOOK, never a clean empty answer" ;;
+*) bad "expected exit 2 on a failed query, got $rc" ;;
+esac
+case "$out" in
+*"DID NOT LOOK"*) ok "…and it says so in words, not only in the exit code" ;;
+*) bad "the refusal did not name itself: $out" ;;
+esac
+
+out=$("$REPORT" --gh "$WORK/definitely-not-here" 2>&1) && rc=0 || rc=$?
+case "$rc" in
+2) ok "no usable wrapper is DID NOT LOOK too, rather than a crash" ;;
+*) bad "expected exit 2 for a missing wrapper, got $rc" ;;
+esac
+
+# An issue whose comments cannot be read is neither stale nor fine, and reporting it as fine is the
+# silent-subset shape. It gets its own line and is kept OUT of the candidate count.
+cat >"$WORK/gh" <<'STUB'
+#!/bin/sh
+W=$(dirname "$0")
+if [ "$1" = issue ] && [ "$2" = list ]; then cat "$W/issues.json"; exit 0; fi
+if [ "$1" = pr ] && [ "$2" = list ]; then cat "$W/prs.json"; exit 0; fi
+if [ "$1" = issue ] && [ "$2" = view ]; then
+	[ -f "$W/comments.$3.json" ] || { printf 'gh: no such issue\n' >&2; exit 1; }
+	cat "$W/comments.$3.json"; exit 0
+fi
+exit 1
+STUB
+chmod +x "$WORK/gh"
+cat >"$WORK/issues.json" <<'EOF'
+[{"number":16,"title":"unreadable"}]
+EOF
+cat >"$WORK/prs.json" <<'EOF'
+[{"number":94,"title":"t","body":"Refs #16","mergedAt":"2026-08-10T00:00:00Z"}]
+EOF
+rm -f "$WORK/comments.16.json"
+out=$(run) && rc=0 || rc=$?
+case "$out" in
+*"COULD NOT READ"*) ok "an unreadable issue is NAMED rather than skipped" ;;
+*) bad "the unreadable issue vanished: $out" ;;
+esac
+case "$out" in
+*"not classified"*"NOT included in the count"*) ok "…and it is excluded from the count, so it cannot read as reviewed" ;;
+*) bad "the unreadable issue was not excluded from the count: $out" ;;
+esac
+case "$out" in
+*"nothing to review"*) bad "an unreadable candidate produced an all-clear, which is the one lie this tool must not tell" ;;
+*) ok "…and it does not print the all-clear line while something is unclassified" ;;
+esac
+
+case "$rc" in
+2) ok "…and an all-unreadable sweep is DID NOT LOOK, not a quiet exit 0" ;;
+*) bad "expected exit 2 when nothing could be classified, got $rc" ;;
+esac
+
+printf '\nstale-refs-report-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" = 0 ]
