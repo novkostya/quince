@@ -38,14 +38,41 @@ type Service struct {
 	newID IDFunc
 	now   func() time.Time
 	// subject is RFC 8292's `sub` claim — a contact a push service may use to reach whoever operates
-	// this quince when its deliveries misbehave. A mailto with no mailbox behind it is the honest
-	// default for a self-hosted install: the claim must be a mailto: or https: URI, and inventing an
-	// address the operator does not own would be worse than a local one.
+	// this quince when its deliveries misbehave.
+	//
+	// IT MUST BE ROUTABLE, AND THIS IS MEASURED RATHER THAN READ. The default was
+	// `mailto:quince@localhost`, on the spec's reasoning that a mailbox nobody owns is more honest
+	// than inventing an address the operator does not have. **Apple rejects it**: the first real
+	// delivery this project ever attempted, on an iPhone on 2026-08-18, came back
+	// `https://web.push.apple.com/<redacted> answered 403`. Apple requires a `mailto:` with a real
+	// domain or an `https:` URI, and `localhost` is neither.
+	//
+	// So the honesty argument was right about the goal and wrong about the fact, and the fix keeps
+	// the goal: **the project's own URL is a real contact that quince genuinely has.** It points at
+	// the software whose deliveries are misbehaving, which is what a push service operator chasing a
+	// misbehaving sender actually wants — and it invents nothing about the person running this
+	// install. An operator with a mailbox they want used should set `notifications.contact`.
 	subject string
 }
 
+// DefaultSubject is the RFC 8292 `sub` claim used when the operator has named no contact.
+//
+// THE PROJECT URL, BECAUSE IT IS THE ONLY REAL CONTACT QUINCE HAS. Apple refuses a `sub` that is not
+// a routable `mailto:` or an `https:` URI — measured, 403, see `Service.subject` — so a placeholder
+// is not an option, and inventing an address for the person running this install would be a worse
+// lie than naming the software.
+const DefaultSubject = "https://github.com/novkostya/quince"
+
+// WithSubject sets the contact a push service may use, overriding DefaultSubject.
+func (s *Service) WithSubject(subject string) *Service {
+	if subject != "" {
+		s.subject = subject
+	}
+	return s
+}
+
 func New(s Store, newID IDFunc, now func() time.Time) *Service {
-	return &Service{store: s, newID: newID, now: now, subject: "mailto:quince@localhost"}
+	return &Service{store: s, newID: newID, now: now, subject: DefaultSubject}
 }
 
 // WithHTTPClient points deliveries at a specific client.

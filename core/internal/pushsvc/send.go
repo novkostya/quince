@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/notify"
@@ -153,7 +155,18 @@ func (s *Service) deliverOne(ctx context.Context, sender Sender, key *push.VAPID
 		// A 4xx that is not 404/410 is quince's own bug — a malformed VAPID token, a payload over the
 		// limit — and a 5xx is the push service's. NEITHER EXPIRES THE SUBSCRIPTION: marking a live
 		// phone dead because a CDN had a bad minute is the failure this branch exists to avoid.
-		res.Err = fmt.Errorf("push: %s answered %d", push.RedactEndpoint(row.Endpoint), resp.StatusCode)
+		//
+		// THE SERVICE'S OWN REASON IS INCLUDED, and its absence cost this project a diagnosis. The
+		// first real delivery ever attempted came back `403` and nothing else, so *why* had to be
+		// worked out from a spec argument and a web search — when Apple had answered
+		// `{"reason":"BadJwtToken"}` in the body and quince threw it away. A status code names the
+		// category; the body names the fault.
+		//
+		// SAFE TO CARRY: this is the push service's error document, not the request, so it holds
+		// nothing of the subscription. Bounded anyway — an error string reaches logs and screens, and
+		// an unbounded read of a remote body is how a diagnostic becomes a denial of service.
+		res.Err = fmt.Errorf("push: %s answered %d%s",
+			push.RedactEndpoint(row.Endpoint), resp.StatusCode, reasonOf(resp.Body))
 	}
 	return res
 }
@@ -178,4 +191,28 @@ func (s *Service) client() *http.Client {
 		return s.http
 	}
 	return http.DefaultClient
+}
+
+// reasonMax bounds how much of a push service's error document reaches an error string.
+//
+// 200 BYTES IS ENOUGH FOR EVERY REAL ONE. Apple answers `{"reason":"BadJwtToken"}`; Mozilla answers
+// a short JSON object with `errno` and `message`. The bound is not about those — it is about the
+// case where a proxy returns an HTML error page, which would otherwise put a whole document into a
+// log line and onto a screen.
+const reasonMax = 200
+
+// reasonOf renders a push service's error body for an error string, or "" when there is nothing
+// useful to say. The leading separator is included so the caller composes without a conditional.
+func reasonOf(body io.Reader) string {
+	raw, err := io.ReadAll(io.LimitReader(body, reasonMax))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	// COLLAPSED TO ONE LINE. A multi-line body inside a structured log value makes the record
+	// unparseable, and this string is built to be read in exactly that position.
+	clean := strings.Join(strings.Fields(string(raw)), " ")
+	if clean == "" {
+		return ""
+	}
+	return ": " + clean
 }
