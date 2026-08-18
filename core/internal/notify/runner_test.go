@@ -224,3 +224,38 @@ func TestRunExitsWhenTheContextIsCancelled(t *testing.T) {
 		t.Fatalf("Run did not return after its context was cancelled")
 	}
 }
+
+// `device.attached` IS THE OPPORTUNITY SIGNAL, AND THE RUNNER LISTENED FOR THE WRONG EVENT (found by
+// wiring the runner into the daemon, quince#1124).
+//
+// The registry publishes `device.attached` when a phone appears on the network, and `device.updated`
+// only when enrichment CHANGED something or a backup was announced. A phone that reconnects to Wi-Fi
+// with the same name, pairing and encryption setting — a phone's daily behaviour — emits the first
+// and never the second, so the whole assisted model silently degraded to the hourly tick.
+//
+// This is the defect's own regression test: it fails against the runner as merged.
+func TestAnAttachedDeviceProducesAReminder(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	r, del, _ := runner(t, []wire.Device{staleDevice("U1", 5, now)}, now)
+
+	r.handle(context.Background(), wire.Envelope{Type: wire.EventDeviceAttached})
+
+	if len(del.sent) != 1 || del.sent[0].Kind != KindBackupAvailable {
+		t.Fatalf("a phone appearing on the network produced no reminder: %+v", del.sent)
+	}
+}
+
+// THE COOLDOWN DOES NOT CARE WHICH DEVICE EVENT WOKE IT. An attach and an update are two names for
+// the same chance to ask, so a phone that emits both — which happens whenever enrichment does change
+// something — must still produce exactly one notification.
+func TestAnAttachFollowedByAnUpdateSendsOnce(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	r, del, _ := runner(t, []wire.Device{staleDevice("U1", 5, now)}, now)
+
+	r.handle(context.Background(), wire.Envelope{Type: wire.EventDeviceAttached})
+	r.handle(context.Background(), wire.Envelope{Type: wire.EventDeviceUpdated})
+
+	if len(del.sent) != 1 {
+		t.Errorf("one phone appearing produced %d notifications: %+v", len(del.sent), del.sent)
+	}
+}

@@ -375,6 +375,23 @@ func (e *Engine) ResetWorking(udid, storageID string) (int, string) {
 	return e.versionQ.RepairWorking(udid, storageID)
 }
 
+// RunningFor reports whether a backup is in flight for this device, satisfying `notify.Jobs` (qn.12).
+//
+// THE NOTIFIER MUST NOT REMIND ABOUT A THING THAT IS ALREADY HAPPENING, and it asks the same map
+// `StartBackup` consults to answer 409 — so "busy" means one thing in this daemon rather than two.
+//
+// A JOB THAT HAS GONE TERMINAL AND IS STILL TEARING DOWN COUNTS AS RUNNING HERE, deliberately
+// differently from `StartBackup`, which takes trouble to word that case apart. The asymmetry is the
+// point: there, the user has just cancelled and is owed an honest sentence; here, the question is
+// whether to interrupt somebody, and a reminder suppressed for the few seconds a teardown takes is
+// invisible where a reminder about the backup they are watching finish is not.
+func (e *Engine) RunningFor(udid string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, busy := e.running[udid]
+	return busy
+}
+
 // --- httpapi.JobReader ---
 
 func (e *Engine) Jobs(udid, cursor string, limit int) ([]wire.Job, string) {
