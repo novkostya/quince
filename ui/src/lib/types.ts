@@ -728,3 +728,19 @@ export interface NotificationsResponse {
   vapid_public_key: string;
   subscriptions: PushSubscriptionSummary[];
 }
+
+/** What happened to one device on a test send (qn.12).
+ *
+ *  BY LABEL, NEVER BY ENDPOINT — this shape reaches a screen and can be read over a shoulder or
+ *  pasted into an issue, and an endpoint plus its keys is a capability against that phone. */
+export interface PushDeliveryResult {
+  label: string;
+  /** `sent` | `expired` | `error` — three states rather than a boolean, because "the push service
+   *  was unreachable" and "the phone is gone" want different things from the user. */
+  state: string;
+  error?: string;
+}
+
+export interface NotificationsTestResponse {
+  results: PushDeliveryResult[];
+}
