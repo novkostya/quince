@@ -1,0 +1,357 @@
+{
+  "kind": "loop",
+  "note": "quince#1189, quince#1190. A FULL WINDOW whose oldest row is still open — twenty rows at the default FETCH_LIMIT of 20, the last of them OPEN — which is the exact shape both boxes hit on 2026-08-18. `queue-truncated` is emitted and PRINTED, and it must not wake: it is a CONDITION rather than an edge, true again on the next arm, so a watch that exits on it exits on tick 1 forever and never observes anything between ticks. The run therefore ends on the idle bound. Without this fixture the filter is one careless line from being removed as redundant, and the failure it restores is silent from the arming side — the watch reports nothing and wakes nobody, which is quince#62 reached from a new direction. TWO ticks, and the truncation line is asserted TWICE on purpose: firing on every tick is the standing-condition property, and a fixture that saw it once could not tell a condition from an edge. The tick count is deterministic rather than timed — with `interval` greater than `max_wait` the loop ticks once at arm and once more when it wakes past the bound, so this does not become a clock-sensitive assertion of the kind the harness normalises `ticks=N` to avoid.",
+  "repo": "novkostya/quince",
+  "interval": 4,
+  "max_wait": 3,
+  "timeout_s": 60,
+  "payloads": [
+    [
+      {
+        "number": 700,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x0",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 701,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x1",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 702,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x2",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 703,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x3",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 704,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x4",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 705,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x5",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 706,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x6",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 707,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x7",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 708,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x8",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 709,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x9",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 710,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x10",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 711,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x11",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 712,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x12",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 713,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x13",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 714,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x14",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 715,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x15",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 716,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x16",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 717,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x17",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 718,
+        "state": "MERGED",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x18",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": "2026-08-18T08:00:00Z",
+        "mergedBy": {
+          "login": "app/quince-review"
+        },
+        "mergeStateStatus": "CLEAN"
+      },
+      {
+        "number": 719,
+        "state": "OPEN",
+        "updatedAt": "2026-08-18T09:00:00Z",
+        "title": "t",
+        "headRefName": "r5/x19",
+        "closingIssuesReferences": [],
+        "statusCheckRollup": [],
+        "reviews": [],
+        "comments": [],
+        "commits": [],
+        "mergedAt": null,
+        "mergedBy": null,
+        "mergeStateStatus": "CLEAN"
+      }
+    ]
+  ],
+  "expect_events": [
+    "event=first-observation count=1",
+    "event=queue-truncated limit=20 repo=novkostya/quince oldest_in_window_still_open=719",
+    "event=queue-truncated limit=20 repo=novkostya/quince oldest_in_window_still_open=719",
+    "event=watch-idle elapsed=Ns ticks=N"
+  ],
+  "expect_exit": 6
+}
