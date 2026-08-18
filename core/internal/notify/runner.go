@@ -27,7 +27,10 @@ import (
 // The tick is FIXED AT ONE HOUR and not configurable: the thresholds are in days, so an hour is
 // already an order of magnitude finer than the finest question it answers, and a knob here would be
 // a setting whose only correct value is the default (D12).
-const tickInterval = time.Hour
+// EXPORTED so the daemon can name it in the line it logs at startup: "the notifier started" is much
+//
+// more useful when it also says how long a quiet period is expected to be.
+const TickInterval = time.Hour
 
 // Devices is the presence and staleness the runner reads. An interface so this package does not
 // depend on the device registry, and so a test can stage a fleet.
@@ -72,7 +75,7 @@ type Runner struct {
 // would both see "cooldown elapsed" and both send — the double notification D5 exists to prevent,
 // arriving by a different road than the one that ruling was about.
 func (r *Runner) Run(ctx context.Context, events <-chan wire.Envelope) {
-	ticker := time.NewTicker(tickInterval)
+	ticker := time.NewTicker(TickInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -91,7 +94,19 @@ func (r *Runner) Run(ctx context.Context, events <-chan wire.Envelope) {
 
 func (r *Runner) handle(ctx context.Context, ev wire.Envelope) {
 	switch ev.Type {
-	case wire.EventDeviceUpdated:
+	// BOTH DEVICE EVENTS, AND THE ATTACH IS THE ONE THAT MATTERS (found by wiring, quince#1124).
+	//
+	// `device.attached` is the opportunity signal this rung is named for — a phone appearing on the
+	// network. `device.updated` is a different fact: the registry publishes it when ENRICHMENT
+	// CHANGED SOMETHING (`changed && listed`) or when a backup is announced. A phone that reconnects
+	// to Wi-Fi with the same name, the same pairing and the same encryption setting — which is what
+	// a phone does every day — emits `device.attached` and NO `device.updated` at all.
+	//
+	// Listening only for `updated` therefore missed the recurring case the assisted model exists for,
+	// and would have degraded to the hourly tick without anything looking broken. Both are handled
+	// because both are genuine chances to ask: the guard clauses and the cooldown make a redundant
+	// evaluation free.
+	case wire.EventDeviceAttached, wire.EventDeviceUpdated:
 		// A DEVICE EVENT RE-EVALUATES EVERY DEVICE, not just the one that moved. It is cheap — the
 		// registry is in memory and the guard clauses reject fast — and scoping it to one device
 		// would mean carrying the udid out of an `any`-typed payload, which is a decode that can

@@ -503,6 +503,7 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **5** | the service worker, the manifest delta, and the install onboarding page (D1, D2, G4, G5) | no |
 | **6** | the notifier — the reminder track and the routing table (D4, D5, G1, G3) | no |
 | **7** | the Settings surface, the five-cause status, and the Devices-page surfaces — the overdue affordance (D7.2) and the no-live-subscription banner (D8) | no |
+| **8** | the daemon wiring — `startNotifier`, the bus forwarder, and the two adapters the runner needs (`Engine.RunningFor`, `Service.DeliverDecision`) | no |
 
 **The ruling has landed (quince#1128), so nothing in this table is gated.** The `yes` rows record what
 slices 3 and 4 were waiting on and are kept as provenance: they touch key material, and design §6's

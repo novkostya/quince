@@ -28,11 +28,13 @@ import (
 	"time"
 
 	"github.com/novkostya/quince/core/internal/auth"
+	"github.com/novkostya/quince/core/internal/backup"
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/config"
 	"github.com/novkostya/quince/core/internal/demo"
 	"github.com/novkostya/quince/core/internal/httpapi"
 	"github.com/novkostya/quince/core/internal/id"
+	"github.com/novkostya/quince/core/internal/notify"
 	"github.com/novkostya/quince/core/internal/pushsvc"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/tlsx"
@@ -190,6 +192,23 @@ func serve(args []string) error {
 	// assigned only from a non-nil runner — assigning a typed nil pointer would make the interface
 	// itself non-nil and the handler would call through it.
 	var reconcileReporter httpapi.ReconcileReporter
+	// The Web Push service (qn.12), nil in demo mode. ONE INSTANCE, feeding two consumers: the
+	// notification routes and the notifier runner started in the live branch below. Two would each
+	// race to mint a VAPID keypair on first use, which the store refuses correctly but which would
+	// still mean two things claiming to own the same key's lifecycle.
+	//
+	// DECLARED AS THE CONCRETE TYPE and converted at the router, because `httpapi.NotificationReader`
+	// holding a nil `*pushsvc.Service` is a non-nil interface — the same trap `reconcileReporter`
+	// names three lines up, and here it would register the routes in demo mode onto a receiver that
+	// has no store.
+	var pushSvc *pushsvc.Service
+	if !demoMode {
+		// THE KEYPAIR IS NOT GENERATED HERE. `pushsvc` mints it on the first read of the public half,
+		// so an install that never opens the notifications page never creates one — and the
+		// generation rules, which are the Operator's (quince#1128), stay in one place rather than
+		// being split between startup and a handler.
+		pushSvc = pushsvc.New(st, func() string { return id.New() }, time.Now)
+	}
 	if demoMode {
 		// configureDemoAuth owns the mode banner too, so this branch has NO `if *publicDemo` in it.
 		// A second divergence point here would erode what the shared branch buys — see its doc.
@@ -323,6 +342,17 @@ func serve(args []string) error {
 		if ls.engine != nil { // the engine holds per-UDID single-flight, so it owns Reset (qn.5b)
 			workingReset = ls.engine
 		}
+		// THE NOTIFIER, and it is the last wire in qn.12 (quince#1124). Everything under it has been
+		// merged and tested for weeks; until this line existed a quince install could subscribe a
+		// phone, send itself a test, and then never hear from the daemon again.
+		//
+		// STARTED HERE RATHER THAN IN buildLiveStack because it is not part of the live stack: it
+		// consumes that stack and the app DB and the config, and `backup` — the other caller of
+		// buildLiveStack — is a one-shot CLI that must not open a push subscription to anybody.
+		//
+		// The engine supplies `RunningFor` and is nil when the muxer is unconfigured, in which case
+		// there are no live devices to remind about and startNotifier does nothing.
+		startNotifier(ctx, log, eventBus, cfgSvc, st, ls.devices, engineJobs(ls.engine), pushDeliverer(pushSvc))
 	}
 
 	// CONSTRUCTED HERE, ABOVE THE ROUTER, BECAUSE THE ROUTER NOW NEEDS IT (quince#908 slice 5). It
@@ -368,7 +398,7 @@ func serve(args []string) error {
 		// so an install that never opens the notifications page never creates one — and the
 		// generation rules, which are the Operator's (quince#1128), stay in one place rather than
 		// being split between startup and a handler.
-		Notifications: notifications(demoMode, st),
+		Notifications: notificationReader(pushSvc),
 	})
 
 	// THE CERTIFICATE CHECK IS ON THE SERVE PATH AND NOT IN Validate — the spec calls this
@@ -1015,17 +1045,39 @@ func passwordAdmin(demoMode bool, authSvc *auth.Service) httpapi.PasswordAdmin {
 	return authSvc
 }
 
-// notifications wires the Web Push surface, or nil in demo mode (qn.12).
+// The three converters below all do one thing: turn a possibly-nil CONCRETE pointer into an
+// interface that is HONESTLY nil.
 //
-// A CONSTRUCTOR RATHER THAN AN INLINE CONDITIONAL, following `passwordAdmin` directly above: the
-// carve-out is the nil, so no handler ever has to ask what mode it is running in.
+// A TYPED NIL IS NOT NIL. `var p *pushsvc.Service = nil` assigned straight to an interface field
+// makes that field non-nil and holding nothing, so every `!= nil` carve-out in this daemon silently
+// inverts: the demo would register the notification routes, and the notifier would start with a
+// deliverer that panics on its first send. `reconcileReporter` carries the same warning at its
+// declaration, and these functions are what make the pattern uniform rather than remembered.
 //
-// THE ID IS A ULID, matching every other id this daemon mints, so a subscription sorts by creation
-// time without a second column. The clock is `time.Now` here and injected in tests, which is what
-// lets the reminder cooldown be asserted at a chosen instant.
-func notifications(demoMode bool, st *store.Store) httpapi.NotificationReader {
-	if demoMode {
+// THEY ARE NOT CEREMONY. The nil IS the carve-out — it is how a mode is expressed here without any
+// handler asking what mode it is running in — so the nil has to be real for the design to hold.
+
+// notificationReader hands the router the push service, or nothing at all in demo mode (qn.12).
+func notificationReader(s *pushsvc.Service) httpapi.NotificationReader {
+	if s == nil {
 		return nil
 	}
-	return pushsvc.New(st, func() string { return id.New() }, time.Now)
+	return s
+}
+
+// pushDeliverer hands the notifier the same service as a `notify.Deliverer` (qn.12).
+func pushDeliverer(s *pushsvc.Service) notify.Deliverer {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// engineJobs hands the notifier the backup engine's per-device busy check (qn.12). The engine is nil
+// when no muxer is configured, and a daemon with no muxer has no live device to remind about.
+func engineJobs(e *backup.Engine) notify.Jobs {
+	if e == nil {
+		return nil
+	}
+	return e
 }
