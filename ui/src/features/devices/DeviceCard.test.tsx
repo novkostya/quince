@@ -109,15 +109,25 @@ describe("DeviceCard", () => {
 
   // qn.6a offline devices: a device with no transports shows an "Offline" badge, a last-seen line,
   // and a DISABLED "Back up now" that still explains why (never a dead button, Operator ruling (ch)).
-  it("an offline device shows a disabled 'Back up now' with a reason and a last-seen line", () => {
+  // THE REASON IS THE BUTTON'S LABEL, and the ruling it serves is unchanged: never a dead button
+  // (quince#1202). What changed is where the reason lives — a caption line above it cost 25px, and
+  // measured, that was the only thing in normal operation raising the device row.
+  //
+  // `aria-disabled` RATHER THAN `disabled` IS THE ASSERTION THAT MATTERS. A truly disabled button
+  // leaves the tab order and screen readers skip it, so putting the reason inside one would delete
+  // it for the users who cannot see the styling. Pinning both halves — the attribute present, the
+  // DOM property false — is what stops a future edit "tidying" this back to `disabled`.
+  it("an offline device carries the reason in the button, focusably", () => {
     renderCard(
       device({ transports: {}, last_seen: "2026-07-19T00:00:00Z", last_backup: { at: "2026-07-19T00:00:00Z", job_id: "J0", status: "succeeded" } }),
     );
     expect(screen.getByText("Offline")).toBeTruthy();
     expect(screen.getByText(/last seen/i)).toBeTruthy();
     const btn = screen.getByTestId("card-backup-now") as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(screen.getByText(/connect it over usb or wi-fi/i)).toBeTruthy();
+    expect(btn.textContent).toMatch(/connect to back it up/i);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    expect(btn.disabled).toBe(false); // focusable, so the reason is reachable
+    expect(screen.queryByText(/connect it over usb or wi-fi/i)).toBeNull();
   });
 
   // qn.6a #6 (CORE): a failed newest attempt must be visible — the card shows a "needs attention"
@@ -263,13 +273,13 @@ describe("DeviceCard action area ends with its button", () => {
   });
 
   // THE REPORTED PAIR. An offline card and an online card side by side was the screenshot.
-  it("offline branch: the reason is above and the button is last", () => {
+  it("offline branch: the button is last and IS the reason", () => {
     const { container } = renderCard(device({ transports: {} }));
     const last = lastControl(container);
     expect(last?.tagName).toBe("BUTTON");
-    expect(last?.textContent).toMatch(/back up now/i);
-    // The reason is still THERE — the ruling is a disabled button WITH a reason, never a dead one.
-    expect(screen.getByText(/Connect it over USB or Wi-Fi/)).toBeTruthy();
+    // The ruling is a button WITH a reason, never a dead one — the reason is now the label itself,
+    // so the alignment invariant (every branch ENDS with its button) holds with nothing above it.
+    expect(last?.textContent).toMatch(/connect to back it up/i);
   });
 
   it("attention branch: the button is last, below its message", () => {
