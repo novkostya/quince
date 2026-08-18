@@ -81,6 +81,31 @@
    * clear AA and still be exactly the grey-on-grey that was reported. */
   --fg-muted: #4f555f; /* 7.06:1 on --bg · 7.87:1 on --bg-card · was #6b7280, 4.51:1 */
   --fg-subtle: #60646b; /* 5.51:1 on --bg · 6.15:1 on --bg-card · was #9aa1ab, 2.43:1 */
+  /* A PLACEHOLDER IS A HINT, NOT CONTENT, AND IT IS THE ONE ROLE THAT MUST STAY FAINT (quince#1200).
+   *
+   * It rode on `--fg-subtle` until quince#1192 raised that role from 2.43:1 to 5.51:1 for the
+   * contrast floors. Operator, on the deployed build: *"placeholders seem too loud now, it's hard to
+   * differentiate placeholder vs real value."*
+   *
+   * THE MEASUREMENT DOES NOT CALL quince AN OUTLIER, AND THAT IS WHY THIS TOKEN EXISTS RATHER THAN A
+   * REVERT. Placeholder contrast across the comparison set: GitLab 4.21:1, Grafana 5.02, npm 5.13,
+   * Forgejo 6.48. quince at 5.51 was third of five — typical, not broken. What the ratio cannot see
+   * is the case being complained about: an EMPTY field has no value to contrast against, so a
+   * placeholder strong enough to read as content makes an unfilled form look filled in.
+   *
+   * SO IT SITS AT THE BOTTOM OF THE MEASURED BAND rather than back at the near-invisible 2.43:1 it
+   * came from. GitLab's 4.21 is the floor the set actually uses.
+   *
+   * IT IS A SEPARATE TOKEN BECAUSE `--fg-subtle` HAS SIXTEEN OTHER CALL SITES, all of them genuine
+   * secondary text where the 5.5:1 floor is right. Lowering the shared role to fix the placeholder
+   * would have undone quince#1192 everywhere to fix one thing.
+   *
+   * BELOW WCAG AA, DELIBERATELY, AND THIS IS THE TRADE. 1.4.3 asks 4.5:1 of text, and a placeholder
+   * is text. It is also a hint that must be distinguishable from a value the user typed — and a
+   * placeholder that reads as content is its own usability failure, which is why every application
+   * measured sits under or near the line too. The durable answer is not to put load-bearing
+   * information in a placeholder; the `<label>` above every field here already carries it. */
+  --fg-placeholder: #72757c; /* 4.29:1 on --bg · 4.60 on --bg-card */
   /* THE STATE COLOURS WERE THE WORST TEXT IN THE PRODUCT AND NOBODY HAD LOOKED (quince#1155).
    *
    * Measured on the light theme before this change, against white: `--ok` 3.49:1, `--warn` 3.64:1,
@@ -141,6 +166,7 @@
    * same hue as before so this is a lightness change and not a repaint. */
   --fg-muted: #b0b7c1; /* 9.63:1 on --bg · 8.89 on --bg-card · 8.37 on --bg-elevated · was #9aa1ab, 6.49 */
   --fg-subtle: #8b93a0; /* 6.28:1 on --bg · 5.80 on --bg-card · 5.46 on --bg-elevated · was #6b7280, 3.50 */
+  --fg-placeholder: #767c87; /* 4.65:1 on --bg · 4.29 on --bg-card */
   /* The counterpart to the light theme's state block. `--ok` and `--warn` already cleared the floor
    * on every dark surface (7.78 and 7.80 at their worst) and are UNCHANGED — a token is moved
    * because it fails, not to make a diff look symmetrical. */

@@ -102,4 +102,33 @@ describe("full-width form controls compute at least 16px, however the scale is t
       }
     }
   });
+
+  // A PLACEHOLDER IS A HINT AND MUST NOT READ AS A VALUE (quince#1200).
+  //
+  // It used to be styled `placeholder:text-subtle`, and quince#1192 raised that shared role from
+  // 2.43:1 to 5.51:1 for the contrast floors — which made an empty field look filled in. The fix is
+  // a token of its OWN, because `--fg-subtle` has sixteen other call sites where the higher floor is
+  // right.
+  //
+  // BOTH HALVES ARE THE TEST. Asserting only the new class would pass if `--fg-placeholder` were
+  // later aliased straight back to `--fg-subtle`; asserting the absence of the old one is what pins
+  // the SEPARATION rather than the rename.
+  it("styles the placeholder with its own role, not the shared subtle one", () => {
+    const { container } = render(<Input placeholder="nas.local" />);
+    const cls = container.querySelector("input")?.className.split(/\s+/) ?? [];
+    expect(cls).toContain("placeholder:text-placeholder");
+    expect(cls).not.toContain("placeholder:text-subtle");
+  });
+
+  // The two roles must resolve to DIFFERENT values, or the token above is decoration. Read from the
+  // stylesheet, because jsdom computes no cascade.
+  it("keeps the placeholder role distinct from the subtle role in both themes", () => {
+    const css = readFileSync("src/styles/tokens.css", "utf8");
+    const subtle = [...css.matchAll(/--fg-subtle:\s*(#[0-9a-f]{6})/gi)].map((m) => m[1].toLowerCase());
+    const ph = [...css.matchAll(/--fg-placeholder:\s*(#[0-9a-f]{6})/gi)].map((m) => m[1].toLowerCase());
+    expect(subtle).toHaveLength(2); // light and dark
+    expect(ph).toHaveLength(2);
+    expect(ph[0]).not.toBe(subtle[0]);
+    expect(ph[1]).not.toBe(subtle[1]);
+  });
 });
