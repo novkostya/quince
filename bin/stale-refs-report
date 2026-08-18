@@ -24,7 +24,15 @@
 # looks identical from the outside. So finding something is NOT a failure here:
 #
 #   0  looked                       — whether or not it found anything; the count is on stdout
-#   2  DID NOT LOOK                 — bad arguments, no usable `gh`, a query that failed
+#   2  NO VERDICT                   — bad arguments, no usable `gh`, a query that failed, or a sweep
+#                                     that could not classify every candidate it found
+#
+# `2` THEREFORE COVERS TWO THINGS AND THE OUTPUT SAYS WHICH, which is a deliberate widening of the
+# usual `DID NOT LOOK` (quince#1234 review). A sweep that classified 9 of 10 DID look, so calling it
+# "did not look" would be false — but reporting it as clean would be worse, so the verdict is
+# withheld and the line names the partial: `PARTIAL SWEEP, no verdict — nothing to review among the
+# N classified, and M could not be read`. Conservative in the direction this project prefers, and
+# never at the cost of a sentence that is not true.
 #
 # THIS DIVERGES FROM `closing-refs-check` AND `privacy-check`, which use 1 for "found something", and
 # the divergence is the point rather than an oversight. Those two answer questions with a right
@@ -51,7 +59,8 @@ usage: $ME [--repo <owner/name>] [--gh <path>] [--prs <n>] [--issues <n>] [--str
   --issues  how many open issues to consider (default: 300)
   --strict  exit 1 when candidates are found, for a caller that wants a failure
 
-Exit: 0 looked · 2 DID NOT LOOK. Finding something is not a failure — see the header.
+Exit: 0 looked · 2 NO VERDICT (could not look, or could not classify every candidate).
+      Finding something is not a failure — see the header.
 EOF
 }
 
@@ -174,12 +183,29 @@ fi
 
 if [ "$FOUND" = 0 ]; then
 	# THE ALL-CLEAR IS WITHHELD WHILE ANYTHING IS UNCLASSIFIED, and this is not a nicety — it is the
-	# one lie this tool is capable of. `FOUND=0` with `UNREAD>0` means every candidate failed to
-	# read, and the sentence below would report that as a clean sweep: quince#41's equivalence,
-	# where a check that never looked is indistinguishable from one that looked and found nothing.
-	# Caught by this tool's own suite before it ever ran for real.
-	if [ "$UNREAD" != 0 ]; then
+	# one lie this tool is capable of: quince#41's equivalence, where a check that never looked is
+	# indistinguishable from one that looked and found nothing.
+	#
+	# THE TWO UNCLASSIFIED CASES ARE DIFFERENT FACTS AND MUST NOT SHARE A SENTENCE (quince#1234
+	# review). This branch used to say `every candidate failed to read, so nothing was classified`
+	# whenever `UNREAD` was non-zero — true only when EVERY candidate failed, and false in the far
+	# commoner case where most read fine, were correctly classified as not-stale, and left `FOUND`
+	# at zero. A session reading that concludes the forge is unreachable and re-runs, when the truth
+	# is one unreadable issue and an otherwise clean sweep: quince#940's defect, distinguishable
+	# causes collapsed into one useless sentence, with both numbers already in hand.
+	#
+	# EXIT 2 FOR BOTH, AND THE REASON HAS TO BE THE REAL ONE. A partial sweep DID look, so `2` is
+	# being used here for "no verdict available" rather than for its documented "did not look" —
+	# conservative in the direction this project prefers, since withholding a clean verdict while
+	# anything is unknown is the safe error. That is a choice, so the wording names what actually
+	# happened instead of borrowing the all-failed sentence to justify the code path.
+	if [ "$UNREAD" != 0 ] && [ "$UNREAD" = "$CANDIDATES" ]; then
 		printf '%s: NO VERDICT — every candidate failed to read, so nothing was classified.\n' "$ME"
+		exit 2
+	fi
+	if [ "$UNREAD" != 0 ]; then
+		printf '%s: PARTIAL SWEEP, no verdict — nothing to review among the %s candidate(s) classified, and %s could not be read.\n' \
+			"$ME" "$((CANDIDATES - UNREAD))" "$UNREAD"
 		exit 2
 	fi
 	printf '%s: nothing to review — every referenced open issue has been spoken about since its merge.\n' "$ME"

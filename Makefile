@@ -216,7 +216,7 @@ closing-refs-check: ## Find bare closing keywords that auto-close an issue (REF=
 	@bin/closing-refs-check $(if $(REF),--ref $(REF)) $(if $(TEXT),--text $(TEXT))
 
 .PHONY: stale-refs-report
-stale-refs-report: ## Open issues whose fix merged under Refs and which nobody closed (REPO=, PRS=, ISSUES=); 0 looked · 2 DID NOT LOOK
+stale-refs-report: ## Open issues whose fix merged under Refs and which nobody closed (REPO=, PRS=, ISSUES=); 0 looked · 2 NO VERDICT
 	@bin/stale-refs-report $(if $(REPO),--repo $(REPO)) $(if $(PRS),--prs $(PRS)) $(if $(ISSUES),--issues $(ISSUES))
 
 .PHONY: gap-heading-check

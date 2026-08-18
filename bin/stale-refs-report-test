@@ -207,5 +207,37 @@ case "$rc" in
 *) bad "expected exit 2 when nothing could be classified, got $rc" ;;
 esac
 
+
+# THE MIXED CASE, which is the commoner one and had no test until quince#1234's review found the
+# message false in it. Most candidates read fine and are correctly not-stale; one cannot be read.
+# `FOUND` is 0 for an honest reason, so the all-clear is still withheld — but "every candidate
+# failed to read" is a claim about a sweep that plainly classified something, and a session reading
+# it concludes the forge is unreachable and re-runs.
+cat >"$WORK/issues.json" <<'EOF2'
+[{"number":16,"title":"unreadable"},{"number":17,"title":"readable and not stale"}]
+EOF2
+cat >"$WORK/prs.json" <<'EOF2'
+[{"number":94,"title":"t","body":"Refs #16\nRefs #17","mergedAt":"2026-08-10T00:00:00Z"}]
+EOF2
+rm -f "$WORK/comments.16.json"
+echo '{"comments":[{"createdAt":"2026-08-11T00:00:00Z"}]}' >"$WORK/comments.17.json"
+out=$(run) && rc=0 || rc=$?
+case "$out" in
+*"every candidate failed to read"*) bad "a PARTIAL sweep claimed every candidate failed — #17 was read and classified" ;;
+*) ok "a partial sweep does not borrow the all-failed sentence" ;;
+esac
+case "$out" in
+*"PARTIAL SWEEP"*"1 candidate(s) classified"*) ok "…it names both numbers, and they agree with the line above it" ;;
+*) bad "the partial sweep did not name what it classified: $out" ;;
+esac
+case "$out" in
+*"nothing to review — every referenced"*) bad "a partial sweep printed the all-clear, which is the lie the guard exists to stop" ;;
+*) ok "…and the all-clear is still withheld, which is what the guard is for" ;;
+esac
+case "$rc" in
+2) ok "…and a partial sweep is exit 2, no verdict, rather than a quiet 0" ;;
+*) bad "expected exit 2 on a partial sweep, got $rc" ;;
+esac
+
 printf '\nstale-refs-report-test: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
