@@ -12,7 +12,7 @@ import type { CertificateProbe } from "@/lib/types";
 // trial, which lives in `CertificateApply` rather than here. Keeping them apart is what let the
 // check be reviewed on whether it tells the truth rather than on whether it is safe to turn on —
 // and it is worth keeping, because this file is about describing two files and that one is about
-// the ten-minute window in which a certificate can lock somebody out.
+// the window in which a certificate can lock somebody out.
 //
 // A ROUTE RATHER THAN AN ACCORDION, and the reason is not taste (§4). This flow is multi-step and
 // stateful — paths, a name, two verdicts — and **an accordion is application state with no URL**: a

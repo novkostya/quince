@@ -1155,7 +1155,7 @@ func tlsWarning(t *testing.T, warns []config.Warning) string {
 // ruling that chose an unconditional permanent redirect.
 //
 // WHY IT NEEDS A GATE RATHER THAN A WALK, in the ruling's own words: the regression is invisible in
-// a browser until ten minutes later. A trial serves a certificate and rolls it back BY ITSELF, and
+// a browser until the window closes. A trial serves a certificate and rolls it back BY ITSELF, and
 // a browser that cached a permanent upgrade in between keeps upgrading to an origin that has
 // stopped existing — with no error naming a cause, because from the browser's side the connection
 // simply fails.
@@ -1203,7 +1203,7 @@ func TestATrialRedirectsTemporarilyAndAConfirmedPairPermanently(t *testing.T) {
 	}
 	if got := code(); got != http.StatusTemporaryRedirect {
 		t.Errorf("a live trial redirected with %d, want 307. A 301 here is cached permanently, and "+
-			"the trial rolls back by itself ten minutes later — leaving the browser upgrading to an "+
+			"the trial rolls back by itself when the window closes — leaving the browser upgrading to an "+
 			"origin that no longer answers (quince#1157)", got)
 	}
 

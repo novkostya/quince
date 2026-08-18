@@ -77,7 +77,7 @@ type certKeeper interface {
 // Operator, 2026-08-14: *"we're not going to actually write tls setting entry to config.yml for that
 // 30 seconds and only write config once probe has succeeded?"* The first version of this did write
 // first and wrote a second time to undo, which left a certificate that never worked visible in a
-// hand-edited file for ten minutes. **D12 says that file contains only what the user set, and a
+// hand-edited file for the whole window. **D12 says that file contains only what the user set, and a
 // certificate somebody tried and abandoned was never something they set.**
 //
 // So the trial lives HERE and in the Keeper, which is what actually serves TLS and needs no file to
@@ -92,7 +92,7 @@ type certKeeper interface {
 //     miss it and the user has a broken certificate AND no plain-http fallback"* has nothing to
 //     restore.
 //
-// WHAT IT COSTS, STATED RATHER THAN DISCOVERED LATER: for up to ten minutes the daemon serves a
+// WHAT IT COSTS, STATED RATHER THAN DISCOVERED LATER: for the length of a trial the daemon serves a
 // certificate `config.yml` does not name. That is hidden state, which this project forbids
 // elsewhere, so it is surfaced — see `pending`, the apply response, and the WARN at trial start.
 //
@@ -105,7 +105,7 @@ type certKeeper interface {
 type certTrial struct {
 	log    *slog.Logger
 	keeper certKeeper
-	// afterFunc is time.AfterFunc in production and a fake in tests, so the ten-minute window is
+	// afterFunc is time.AfterFunc in production and a fake in tests, so the trial window is
 	// reached without waiting for it. It returns an interface rather than a *time.Timer for that
 	// reason alone — a fake cannot build one whose Stop means anything.
 	afterFunc func(time.Duration, func()) trialTimer
@@ -151,7 +151,7 @@ type certTrialPending struct {
 	// reading is `CLOCK_MONOTONIC`, which stops while the machine sleeps, and reaching BOOTTIME
 	// means `golang.org/x/sys/unix.ClockGettime` plus a per-OS fallback. The OR of these two fields
 	// is the same guarantee assembled from clocks the standard library already has, which is worth
-	// more than a syscall and a build tag for a ten-minute window.
+	// more than a syscall and a build tag for a window this short.
 	deadlineWall time.Time
 	timer        trialTimer
 }

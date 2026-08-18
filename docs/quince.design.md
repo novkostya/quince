@@ -830,7 +830,7 @@ the moment anything else can withdraw TLS. *Permanent only when the state is per
 
 **Who it strands is why this is not cosmetic.** A user whose certificate works never sees it. It
 lands on the one whose certificate did **not** work — already the user being asked to trust the
-ten-minute rollback as a safety net — and **the failure names no cause**, because from the browser's
+timed rollback as a safety net — and **the failure names no cause**, because from the browser's
 side the connection simply fails. Already-cached `301`s are out of reach of any server-side change,
 which the ruling states rather than tries to fix.
 

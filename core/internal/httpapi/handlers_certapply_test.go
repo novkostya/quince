@@ -109,7 +109,7 @@ func (k *fakeKeeper) last() ([2]string, bool) {
 	return k.calls[len(k.calls)-1], true
 }
 
-// fakeTimers stands in for time.AfterFunc so the ten-minute window can be reached without waiting.
+// fakeTimers stands in for time.AfterFunc so the trial window can be reached without waiting.
 //
 // IT IS NO LONGER THE AUTHORITY, and the tests say so: since the deadline decides, a test can move
 // the CLOCK without firing a timer and vice versa. Both are exercised, because the two failure modes
@@ -431,7 +431,7 @@ func TestAConfirmOverTheTLSHalfWritesTheConfig(t *testing.T) {
 	// THE MEASUREMENT THE RULING ASKED FOR — `certTrialWindow` is human time and the number had to
 	// be brought back rather than inherited. REPORTED, not asserted against a threshold: a timing
 	// assertion on a shared box is a flake, and the claim is "negligible", not "under N ms".
-	t.Logf("apply → https confirm round trip: %v (handshake included) — the ten-minute window is human time, not this",
+	t.Logf("apply → https confirm round trip: %v (handshake included) — the window is human time, not this",
 		elapsed.Round(time.Microsecond))
 }
 
@@ -583,7 +583,7 @@ func TestHealthReportsALiveTrial(t *testing.T) {
 // address from the same two inputs — so it always could, and never did.
 //
 // FALSE IS NOT A REFUSAL. The trial still starts: a browser interstitial the user accepts is a
-// legitimate install (a self-signed pair, an IP-only LAN), and the ten-minute rollback is what makes
+// legitimate install (a self-signed pair, an IP-only LAN), and the timed rollback is what makes
 // trying one safe. The field exists so the trial screen can stop asserting coverage it never checked.
 func TestTheApplyReportsWhetherTheConfirmOriginIsCovered(t *testing.T) {
 	dir := t.TempDir()
