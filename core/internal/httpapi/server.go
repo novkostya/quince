@@ -112,7 +112,7 @@ type HealthResponse struct {
 	//
 	// IT IS HOW THE ONE DIVERGENCE IN THIS DESIGN STAYS VISIBLE. Not writing the file until the
 	// certificate has proved itself is what keeps an abandoned attempt out of a hand-edited config
-	// (D12), and the price is that for up to ten minutes what is configured and what is running
+	// (D12), and the price is that for the length of a trial what is configured and what is running
 	// disagree. `no silent caps or fallbacks` is what makes stating it mandatory rather than tidy,
 	// and `GET /api/config` cannot state it, because the config is not what changed.
 	//

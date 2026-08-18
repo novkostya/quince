@@ -10,13 +10,10 @@ import (
 
 // certTrialWindow is how long a trial certificate serves before quince puts the previous one back.
 //
-// # TEN MINUTES, AND THE NUMBER IS TAKEN FROM THE PRIOR ART RATHER THAN FROM A PARENTHESIS
+// # THREE MINUTES — Operator ruling 2026-08-18, amending the ten ruled on 2026-08-14
 //
-// quince#908 §5 wrote *"thirty seconds of silence is a failure, three is someone reading"*, which
-// reads as ~30s. That was an illustration inside a sentence about something else, and the Operator's
-// ruling of 2026-08-14 required the number to be brought back with the PR rather than inherited.
-//
-// THE SAME PROBLEM HAS A FORTY-YEAR-OLD ANSWER, and the two ends of it disagree by a factor of forty:
+// The earlier number was taken from prior art rather than a parenthesis, and that reasoning still
+// holds where it applies:
 //
 //   - **Junos `commit confirmed`: 10 minutes.** *"If the commit is not confirmed within a certain
 //     time (10 minutes by default), the operating system automatically rolls back to the previous
@@ -25,25 +22,38 @@ import (
 //   - **NetworkManager `nmcli … checkpoint`: 15 seconds.** Same mechanism, same fear — an operator
 //     cutting off the ssh session they are typing into.
 //
-// THE DEFAULT TRACKS WHO CONFIRMS. `nmcli`'s confirmation is the next line of a script, so 15
-// seconds is generous. Junos expects a human to re-establish a session and look around, so it is
-// 600. Ours is a human who must read an instruction, open the https address in a browser, almost
-// certainly click through a certificate interstitial, and press a button. That is the Junos case.
-//
-// THE MECHANISM ITSELF CONTRIBUTES NOTHING TO THE BUDGET — measured, in
+// THE MECHANISM CONTRIBUTES NOTHING TO THE BUDGET, measured in
 // TestConfirmOverTheTLSHalfCostsNothingMeasurable: the apply → https-confirm round trip against a
-// real router over a real handshake ran in **11.5–19.8 ms across five runs** (under `-race`, which
-// inflates it). That is 0.003% of this window. So the whole of this number is human time, and there
-// is no engineering term in it to trade against.
+// real router over a real handshake ran in 11.5–19.8 ms across five runs. The whole of this number
+// is human time.
 //
-// AND THE COST IS ASYMMETRIC. Too short abandons a certificate that was working, from a user who did
-// everything right, and fails the same way on every retry. Too long leaves somebody looking at a
-// certificate their browser rejects — which is BOUNDED, ends by itself, and is visible to them.
+// # WHAT CHANGED IS A PREMISE, NOT A PREFERENCE
 //
-// NOT A CONFIG KEY. D12 says every SETTING has a sane default and is editable; this is an internal
-// timeout with no operator decision behind it, and a key nobody would ever set is the noise that
-// ruling exists to keep out of `config.yml`.
-const certTrialWindow = 10 * time.Minute
+// The ten was chosen on this asymmetry: *"too short abandons a certificate that was working … too
+// long leaves somebody looking at a certificate their browser rejects — which is BOUNDED, ends by
+// itself, and is VISIBLE to them."*
+//
+// **The last word was wrong, and walking it on hardware is what showed it.** While a trial is live
+// `plainHalf` redirects http to https, so the page the user applied from is dead and the https one
+// will not load. They are not looking at a warning; they are looking at NOTHING, with no UI at all,
+// until the window closes. The cost of "too long" is a blind lockout rather than a visible refusal,
+// and it falls entirely on the user whose certificate did not work.
+//
+// AND THE LENGTH BUYS LESS THAN IT DID. quince#1197's reach probe now catches a name this browser
+// cannot reach BEFORE a trial starts, so the slow failure it was padding for — a name that needs DNS
+// fixing — is pre-empted. What is left is issuer trust, which the browser answers the moment the link
+// opens. The decline button of quince#1158 helps only when the certificate works, which is not this
+// case; the other escape is restarting the daemon, which a phone-first user standing in front of a
+// NAS may not have to hand.
+//
+// SO THE JUNOS CASE IS STILL THE RIGHT SHAPE AND THE WRONG SIZE: its ten minutes buys a network
+// engineer time to re-establish a session and reason about a router. Ours buys a person time to open
+// a link, click through an interstitial and press a button — with slack for switching to another
+// device, which is the one path that needs more than seconds.
+//
+// NOT A CONFIG KEY, unchanged from the earlier ruling. D12 says every SETTING has a sane default and
+// is editable; this is an internal timeout with no operator decision behind it.
+const certTrialWindow = 3 * time.Minute
 
 // certKeeper is the part of `*tlsx.Keeper` this package uses: point the running daemon at a pair,
 // with no file anywhere in it.

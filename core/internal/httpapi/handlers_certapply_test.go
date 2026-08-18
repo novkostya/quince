@@ -428,7 +428,7 @@ func TestAConfirmOverTheTLSHalfWritesTheConfig(t *testing.T) {
 		t.Fatalf("a confirmed certificate was undone by its own late timer: %+v", live)
 	}
 
-	// THE MEASUREMENT THE RULING ASKED FOR — `certTrialWindow` is ten minutes and the number had to
+	// THE MEASUREMENT THE RULING ASKED FOR — `certTrialWindow` is human time and the number had to
 	// be brought back rather than inherited. REPORTED, not asserted against a threshold: a timing
 	// assertion on a shared box is a flake, and the claim is "negligible", not "under N ms".
 	t.Logf("apply → https confirm round trip: %v (handshake included) — the ten-minute window is human time, not this",
@@ -533,7 +533,7 @@ func TestAnApplyWithNoTLSListenerAnswers503(t *testing.T) {
 	}
 }
 
-// THE TRIAL IS VISIBLE, which is what keeps it from being hidden state: for up to ten minutes the
+// THE TRIAL IS VISIBLE, which is what keeps it from being hidden state: for the length of a trial the
 // daemon serves a certificate `config.yml` does not name, and something has to say so.
 func TestHealthReportsALiveTrial(t *testing.T) {
 	dir := t.TempDir()

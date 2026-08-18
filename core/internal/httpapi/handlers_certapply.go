@@ -36,7 +36,7 @@ type certificateApplied struct {
 	// ABSOLUTE rather than a countdown, so a client that was backgrounded does not resume from a
 	// stale remainder.
 	ExpiresAt string `json:"expires_at"`
-	// ExpiresSeconds is the same window as a length, for prose ("you have ten minutes"). A client
+	// ExpiresSeconds is the same window as a length, for prose ("you have three minutes"). A client
 	// needs one of these to render a clock and the other to write a sentence.
 	ExpiresSeconds int `json:"expires_seconds"`
 	// ConfigWritten is FALSE here, always, and it is sent rather than implied. This is the whole
@@ -57,7 +57,7 @@ type certificateApplied struct {
 // Operator, 2026-08-14: *"we're not going to actually write tls setting entry to config.yml for that
 // 30 seconds and only write config once probe has succeeded?"* An earlier shape wrote the pair here
 // and wrote the file a second time to undo it, leaving a certificate that never worked visible in a
-// hand-edited file for ten minutes. D12 says `config.yml` holds only what the user set, and a
+// hand-edited file for the length of a trial. D12 says `config.yml` holds only what the user set, and a
 // certificate somebody tried and abandoned was never something they set.
 //
 // SO THE RULED PRE-AUTH WRITE IS SPENT ON THE CONFIRM ROUTE, NOT THIS ONE. The ruling of 2026-08-14
@@ -337,7 +337,7 @@ func newConfirmToken() (string, error) {
 // POST /api/onboarding/certificate/cancel {token} → 200 | 400 | 409 | 426 (quince#1158).
 //
 // THE CONFIRMATION'S OTHER ANSWER. The page that asks *keep this certificate?* had one button and a
-// link that merely navigated, so declining meant waiting ten minutes — on a page served by the
+// link that merely navigated, so declining meant waiting the window out — on a page served by the
 // certificate being declined, which stops existing when the window closes.
 //
 // # Why a client may end a trial here, when cert_trial.go refuses exactly that

@@ -56,7 +56,7 @@ export function probeTargetURL(input: string): URL | null {
 //
 // quince IS SERVING http AT THAT NAME RIGHT NOW, IF THE NAME REACHES IT. So this asks the question the
 // trial actually depends on — *does this name reach THIS quince from THIS browser* — and answers it
-// before ten minutes are spent finding out. What it cannot answer is whether the browser will trust
+// before a trial is spent finding out. What it cannot answer is whether the browser will trust
 // the issuer, and no probe can.
 //
 // THE PORT COMES FROM THE PAGE unless the user typed one. quince serves both protocols on ONE

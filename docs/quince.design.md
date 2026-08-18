@@ -819,7 +819,7 @@ arrived that its premise excluded.
 The `301` was chosen because it is cacheable, so a bookmark upgrades itself once and stays upgraded.
 Its recorded cost was that it stays cached if the certificate later goes away, and that was accepted
 on one clause: *"turning TLS off is a config edit rather than something quince ever decides on its
-own."* **`certTrial` falsified it.** A trial serves a certificate for ten minutes and then puts the
+own."* **`certTrial` falsified it.** A trial serves a certificate for a few minutes and then puts the
 previous one back **by itself** — quince deciding, on a timer, to stop serving TLS. The trial landed
 after the ruling and nothing pointed back at it.
 
