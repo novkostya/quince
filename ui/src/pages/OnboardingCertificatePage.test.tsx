@@ -312,7 +312,10 @@ describe("the certificate step", () => {
     fill();
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    expect(await screen.findByText(/does not cover/i)).toBeInTheDocument();
+    // ASSERTED ON AN UNBROKEN PHRASE: the sentence above puts <strong>not</strong> and a <code> host
+    // inside itself, and the default matcher does not read across elements.
+    expect(await screen.findByText(/the address you are on/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fix the problem above/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
   });
 
@@ -328,9 +331,9 @@ describe("the certificate step", () => {
     fill("/certs/quince.pem", "/certs/quince.key", "quince.example");
     fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
 
-    // TWICE, DELIBERATELY: the result box reports it, and the trial card repeats it as the reason its
-    // button is dead. Both are the same finding and the second is what stops a pointless ten minutes.
-    expect((await screen.findAllByText(/cannot reach quince at/i)).length).toBeGreaterThan(1);
+    // ONCE. The card that would have repeated it points at it instead — the same sentence twice,
+    // two boxes apart, reads as a rendering fault.
+    expect((await screen.findAllByText(/cannot reach quince at/i)).length).toBe(1);
     expect(screen.getByText(/Check that the name points/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
   });

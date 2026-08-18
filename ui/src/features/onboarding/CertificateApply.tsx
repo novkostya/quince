@@ -98,10 +98,12 @@ export function CertificateApply({
         This page will stop working while you do — use the link quince gives you. Restarting quince
         cancels the whole thing at once.
       </p>
+      {/* A POINTER, NOT THE REASON AGAIN. Every reason this button is dead has already been stated
+          above, in the check results — printing it a second time inside the card put the same
+          sentence on screen twice, two boxes apart, which reads as a rendering fault rather than as
+          emphasis. This says only why the button will not respond. */}
       {blocked !== null ? (
-        <p role="status" className="mt-3 rounded-card border border-warn bg-bg px-3 py-2">
-          {blocked}
-        </p>
+        <p className="mt-3 text-muted">Fix the problem above to try this certificate.</p>
       ) : null}
       <div className="mt-3">
         <Button onClick={() => void apply()} disabled={busy || blocked !== null}>
