@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { InsecureTransportBanner } from "@/components/InsecureTransportBanner";
 import { CertificateApply } from "@/features/onboarding/CertificateApply";
 import { api } from "@/lib/api";
-import { probeTargetURL, runProbe, type ProbeOutcome } from "@/lib/probe";
+import { reachTargetURL, reachedThisQuince, runProbe, type ProbeOutcome } from "@/lib/probe";
 import type { CertificateProbe } from "@/lib/types";
 
 // THE CERTIFICATE STEP — quince#908 §5. Slice 4 built both halves of the CHECK; slice 5 added the
@@ -58,7 +58,11 @@ export function OnboardingCertificatePage() {
       // THE REACHABILITY HALF RUNS ONLY IF THE PAIR IS USABLE AND A NAME WAS GIVEN. Probing a name
       // whose certificate is already known to be expired would ask the user to debug DNS for a
       // certificate that was never going to work.
-      const target = probeTargetURL(hostname);
+      //
+      // OVER http, AT THIS PAGE'S PORT — see `reachTargetURL`. quince cannot be serving TLS at that
+      // name yet, so probing https would fail by construction and say nothing; it IS serving http
+      // there if the name reaches it at all, which is exactly the precondition the trial needs.
+      const target = reachTargetURL(hostname, window.location.port);
       if (got.outcome === "usable" && target) {
         setReach(await runProbe(target));
       }
@@ -291,41 +295,45 @@ function OfflineResult({ probe }: { probe: CertificateProbe }) {
   );
 }
 
-// THE SECOND HALF, AND ITS WORDING RULE IS §6's: say what THIS client could not do, never "DNS is
-// wrong". A browser cannot distinguish a name that does not resolve, a refused connection, an
-// untrusted certificate and a CORS refusal, so naming one would invent a cause.
+// THE SECOND HALF, AND IT NOW ASKS A QUESTION WITH AN UNKNOWN ANSWER.
+//
+// It probes **http** at that name (see `reachTargetURL`), which is what quince is serving while this
+// page is open. So a failure here is a real finding rather than the foregone one: probing https
+// before a certificate exists fails by construction, and the old copy had to hedge — *"that is
+// expected … it also covers a name that does not resolve here"* — one sentence for the harmless case
+// and the fatal one.
+//
+// THE WORDING RULE IS UNCHANGED (§6): say what THIS client could not do, never "DNS is wrong". A
+// browser cannot tell a name that does not resolve from a refused connection from a CORS refusal, so
+// naming a cause would be inventing one.
+//
+// WHAT IT STILL CANNOT SAY is whether the browser will trust the ISSUER once TLS is up. No probe can
+// — that is what the trial is for, and why a good answer here is a precondition rather than a
+// promise.
 function ReachResult({ outcome }: { outcome: ProbeOutcome }) {
-  switch (outcome.kind) {
-    case "ready":
-    case "quince-tls":
-      return (
-        <div role="status" className="mt-3 rounded-card border border-ok bg-card px-3 py-2 text-sm">
-          <strong>quince reached itself at {outcome.url}.</strong> This browser can get there, and it
-          was this quince answering.
-        </div>
-      );
-    case "no-forwarded-proto":
-      return (
-        <div role="status" className="mt-3 rounded-card border border-warn bg-card px-3 py-2 text-sm">
-          <strong>Something reached quince at {outcome.url} over plain HTTP.</strong> That name is
-          already served by a proxy which is not forwarding the scheme — worth settling before
-          quince starts serving TLS at it too.
-        </div>
-      );
-    case "other-quince":
-      return (
-        <div role="alert" className="mt-3 rounded-card border border-danger bg-card px-3 py-2 text-sm">
-          <strong>A different quince answered at {outcome.url}.</strong> The certificate is fine; the
-          name points somewhere else.
-        </div>
-      );
-    case "unreachable":
-      return (
-        <div role="status" className="mt-3 rounded-card border border-warn bg-card px-3 py-2 text-sm">
-          <strong>This browser could not reach quince at {outcome.url} yet.</strong> That is expected
-          if quince is not serving TLS there — it will be once this is applied. It also covers a name
-          that does not resolve here, so open it in a tab if you want the specific answer.
-        </div>
-      );
+  if (reachedThisQuince(outcome)) {
+    return (
+      <div role="status" className="mt-3 rounded-card border border-ok bg-card px-3 py-2 text-sm">
+        <strong>This browser reached quince at {outcome.url}.</strong> The name gets here, so applying
+        moves that address to https. Whether your browser trusts the certificate itself is what the
+        trial will show.
+      </div>
+    );
   }
+  if (outcome.kind === "other-quince") {
+    return (
+      <div role="alert" className="mt-3 rounded-card border border-danger bg-card px-3 py-2 text-sm">
+        <strong>Something else answered at {outcome.url}.</strong> That name does not reach this
+        quince, so applying would send you somewhere else.
+      </div>
+    );
+  }
+  return (
+    <div role="alert" className="mt-3 rounded-card border border-danger bg-card px-3 py-2 text-sm">
+      <strong>This browser could not reach quince at {outcome.url}.</strong> quince is serving that
+      address right now, so a name that worked would answer — applying would send you somewhere you
+      cannot get to, and you would wait ten minutes to find out. Check the name points here before
+      trying it.
+    </div>
+  );
 }

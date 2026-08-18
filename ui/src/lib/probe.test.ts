@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { probeTargetURL, runProbe } from "./probe";
+import { probeTargetURL, reachTargetURL, reachedThisQuince, runProbe } from "./probe";
 import { api } from "./api";
 
 // THE FIVE OUTCOMES (quince#939 §4). They are asserted as a table because the copy for each is
@@ -42,6 +42,54 @@ describe("probeTargetURL", () => {
 
   it.each([["", "  ", "https://", "::::"]].flat())("refuses %o", (input) => {
     expect(probeTargetURL(input)).toBeNull();
+  });
+});
+
+// THE CERTIFICATE STEP PROBES http, NOT https, AND THAT IS THE POINT OF IT EXISTING.
+//
+// Before a certificate is applied quince cannot be serving TLS at the typed name, so an https probe
+// fails by construction and the result carries no information — the copy it fed had to cover the
+// harmless case and the fatal one in one sentence. quince IS serving http there, if the name reaches
+// it at all, which is precisely the precondition the trial depends on.
+describe("reachTargetURL", () => {
+  it.each([
+    // THE PAGE'S PORT IS USED when none was typed: quince serves both protocols on ONE listener, so
+    // the name will be reached on the port the user is on. Defaulting to 80 would report
+    // "unreachable" about a working deployment.
+    ["quince.example.com", "8969", "http://quince.example.com:8969/api/onboarding/probe"],
+    // A TYPED PORT WINS over the page's.
+    ["quince.example.com:9443", "8969", "http://quince.example.com:9443/api/onboarding/probe"],
+    // AND A TYPED SCHEME IS OVERRIDDEN — https is the destination, not the thing being probed.
+    ["https://quince.example.com", "8969", "http://quince.example.com:8969/api/onboarding/probe"],
+  ])("turns %o on port %o into %o", (input, port, want) => {
+    expect(reachTargetURL(input, port)?.toString()).toBe(want);
+  });
+
+  // A DEFAULT-PORT INSTALL KEEPS THE DEFAULT. `window.location.port` is "" on :80, and forcing a port
+  // that was never in the address would probe somewhere the user is not.
+  it("leaves the port off when the page has none", () => {
+    expect(reachTargetURL("quince.example.com", "")?.toString()).toBe(
+      "http://quince.example.com/api/onboarding/probe",
+    );
+  });
+
+  it.each([["", "  ", "::::"]].flat())("refuses %o", (input) => {
+    expect(reachTargetURL(input, "8969")).toBeNull();
+  });
+});
+
+// THE THREE KINDS THAT MEAN "THE NONCE CAME BACK" ARE ONE ANSWER HERE. They differ only in what
+// `detected` said about the answering connection, which is tier 1's question and not this one's: on
+// the certificate step the whole question is *did I reach myself*.
+describe("reachedThisQuince", () => {
+  it.each([
+    [{ kind: "ready", url: "u" }, true],
+    [{ kind: "quince-tls", url: "u" }, true],
+    [{ kind: "no-forwarded-proto", url: "u" }, true],
+    [{ kind: "other-quince", url: "u" }, false],
+    [{ kind: "unreachable", url: "u" }, false],
+  ] as const)("%o → %o", (outcome, want) => {
+    expect(reachedThisQuince(outcome)).toBe(want);
   });
 });
 

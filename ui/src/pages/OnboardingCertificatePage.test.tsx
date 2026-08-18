@@ -292,6 +292,45 @@ describe("the certificate step", () => {
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
   });
 
+  // THE REACH HALF IS A REAL FINDING NOW. It probes http at the typed name — which quince is serving
+  // while this page is open — so a failure means the name does not get here, rather than the
+  // foregone "no TLS there yet" an https probe would always have returned.
+  it("refuses the name when this browser cannot reach quince at it over http", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...USABLE, hostname: "quince.example" });
+    vi.spyOn(api, "get").mockResolvedValue({ nonce: "n-1" });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("nope")));
+
+    renderPage();
+    fill("/certs/quince.pem", "/certs/quince.key", "quince.example");
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/could not reach quince at/i)).toBeInTheDocument();
+    // AND IT SAYS WHY THAT MATTERS RATHER THAN CALLING IT EXPECTED: the address is live right now, so
+    // a name that worked would have answered.
+    expect(screen.getByText(/serving that\s+address right now/i)).toBeInTheDocument();
+  });
+
+  // AND A NAME THAT DOES REACH THIS QUINCE IS REPORTED AS THE PRECONDITION IT IS — not as a promise
+  // that the browser will trust the certificate, which no probe can answer.
+  it("confirms a name that reaches this quince, without promising the trial will pass", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...USABLE, hostname: "quince.example" });
+    vi.spyOn(api, "get").mockResolvedValue({ nonce: "n-2" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ nonce: "n-2", detected: "plain" }),
+      } as unknown as Response),
+    );
+
+    renderPage();
+    fill("/certs/quince.pem", "/certs/quince.key", "quince.example");
+    fireEvent.click(screen.getByRole("button", { name: /Check these files/i }));
+
+    expect(await screen.findByText(/This browser reached quince at/i)).toBeInTheDocument();
+    expect(screen.getByText(/trusts the certificate itself is what the\s+trial will show/i)).toBeInTheDocument();
+  });
+
   // THE VERDICT RENDERS EVEN IF `names` ARRIVES AS `null`. The server now sends `[]` on every
   // outcome, so this asserts the page does not depend on that being true — it reads the field
   // structurally, and this page sits under no error boundary, so one unexpected null replaces the

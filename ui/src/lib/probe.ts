@@ -45,6 +45,45 @@ export function probeTargetURL(input: string): URL | null {
   return parsed;
 }
 
+// reachTargetURL builds the probe URL for the CERTIFICATE step, and it differs from
+// `probeTargetURL` in the one way that matters: it asks over **http**, on the port this page is
+// already served from.
+//
+// PROBING https BEFORE A CERTIFICATE EXISTS ASKS A QUESTION WITH A KNOWN ANSWER. quince is not
+// serving TLS at that name yet — that is the entire reason the user is on this screen — so the probe
+// fails, and the failure is indistinguishable from the one that matters: a name that does not resolve
+// here, or resolves somewhere else. One result, two opposite meanings, and the copy had to hedge.
+//
+// quince IS SERVING http AT THAT NAME RIGHT NOW, IF THE NAME REACHES IT. So this asks the question the
+// trial actually depends on — *does this name reach THIS quince from THIS browser* — and answers it
+// before ten minutes are spent finding out. What it cannot answer is whether the browser will trust
+// the issuer, and no probe can.
+//
+// THE PORT COMES FROM THE PAGE unless the user typed one. quince serves both protocols on ONE
+// listener, so the name will be reached on the port they are on now; defaulting to 80 would report
+// "unreachable" about a working deployment on :8969.
+//
+// SAME-SCHEME, WHICH IS WHY THIS IS ALLOWED AT ALL. The page is on http, so fetching http is not
+// mixed content. From an https page a browser would block it — and from there this whole tier is
+// unnecessary.
+export function reachTargetURL(input: string, currentPort: string): URL | null {
+  const target = probeTargetURL(input);
+  if (target === null) return null;
+  target.protocol = "http:";
+  if (!/:\d+\s*$/.test(input.trim())) target.port = currentPort;
+  return target;
+}
+
+// reachedThisQuince reports whether the probe got its own nonce back, whatever the connection it
+// found there looked like.
+//
+// THE THREE "SUCCESS" KINDS ALL MEAN THE NONCE MATCHED — they differ only in what `detected` said
+// about the answering connection, which is tier 1's question (is a proxy forwarding the scheme) and
+// not this one's. Here the whole question is *did I reach myself*.
+export function reachedThisQuince(outcome: ProbeOutcome): boolean {
+  return outcome.kind === "ready" || outcome.kind === "quince-tls" || outcome.kind === "no-forwarded-proto";
+}
+
 // runProbe mints a nonce SAME-ORIGIN, then asks the typed name for it back.
 //
 // THE NONCE IS WHAT MAKES A SUCCESS MEAN ANYTHING. Without it, an answer proves "a quince responded",
