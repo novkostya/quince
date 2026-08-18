@@ -3412,9 +3412,20 @@ wake_worthy() {
 		#
 		# PRINTED EITHER WAY, which is the whole point — the report is correct and must not be
 		# dropped. A query that silently covers a subset is the quince-devlog#3 shape, and this line is
-		# that rule applied to the window this tool itself reads. Same treatment, and same argument, as
-		# `fetch-failed` and the three failed-read events above: one is a caveat on the report, a run
-		# of them is a watch that is not watching, and `--fail-after` is what tells those apart.
+		# that rule applied to the window this tool itself reads.
+		#
+		# AND NOTHING ESCALATES A PERSISTENT TRUNCATION, BY DESIGN. Do not reach for `--fail-after`
+		# here: it counts ticks whose rc is NON-ZERO, and this line is printed on the SUCCESS path —
+		# the emission falls through into building the observation and the tick returns 0, so the
+		# streak never increments. Measured, not reasoned: the fixture re-run with `fail_after` forced
+		# to 1, the strictest setting there is, still exits 6 (idle) across two consecutive truncation
+		# ticks. That is the argument `fetch-failed` makes and it does NOT transfer here.
+		#
+		# Stated as a negative because the parity is what a reader assumes. A session debugging a
+		# permanently-truncated window would otherwise wait for an exit 7 that cannot arrive, and a
+		# session "restoring parity" would add an exit on a standing condition after N ticks — this
+		# defect again, wearing a threshold. What answers a truncation that never clears is a
+		# predicate that knows whether anything is actually hidden, below.
 		#
 		# IT DOES NOT MAKE THE TRUNCATION HARMLESS. The predicate above still cannot distinguish "the
 		# oldest row is open AND more open ones are behind it" from "the oldest row is open and there
