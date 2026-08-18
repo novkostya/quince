@@ -20,11 +20,9 @@ import { describe, expect, it } from "vitest";
 // the allowlist below. Every allowlist entry is a place where Return does nothing, and each one
 // needs a reason that is about the CONTENT rather than about the effort.
 const ALLOWED = new Map<string, string>([
-  // The primitive itself: it renders an input and belongs to whatever form its caller provides.
+  // The primitives themselves: each renders an input and belongs to whatever form its caller
+  // provides.
   ["components/ui/input.tsx", "the shared <Input>, which has no page of its own"],
-  // Its only input is a CHECKBOX inside AuthPage's form, and the password field it sits beside is
-  // submitted by that form. A checkbox has no Return semantics to lose.
-  ["pages/SetupPasswordPage.tsx", "a checkbox inside AuthPage's own form"],
   // Its fields sit inside the <form> AuthPage renders when handed an onSubmit, and its action is a
   // <Button type="submit"> — so Return works here; the form simply lives one component up.
   ["features/auth/PasswordForm.tsx", "submitted by AuthPage's form, via type=\"submit\""],

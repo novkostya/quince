@@ -4,6 +4,7 @@ import type { Config, ConfigFieldError } from "@/lib/types";
 import { configKey, updateConfig, useConfigDraft } from "@/lib/config";
 import { APIError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { CheckboxRow } from "@/components/ui/checkbox-row";
 import { Input } from "@/components/ui/input";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Field } from "@/features/settings/ConfigEditor";
@@ -142,39 +143,24 @@ export function NotificationSettings({ config }: { config: Config }) {
         <ul className="mt-3 flex flex-col gap-3">
           {CATEGORIES.map((c) => (
             <li key={c.key}>
-              {/* A NESTED <label>, not a `Field` with an `htmlFor`. Radix associates implicitly this
-                  way and a checkbox's label belongs beside it rather than above it — the association
-                  reason `ConfigEditor`'s `Field` exists for is satisfied by nesting, which is what
-                  that comment says to do when the control is inside the label. */}
-              <label className="flex items-start gap-2.5 text-sm">
-                {/* THE LINE BOX IS DERIVED FROM THE TOKENS, NOT NUDGED TOWARDS IT AND NOT PINNED TO
-                    A LITERAL. This is quince#1192's pattern verbatim, and it already sat in
-                    `SetupPasswordPage` before this screen existed — quince#1227 is the issue for the
-                    fact that nothing made it findable.
+              {/* A NESTED <label>, not a `Field` with an `htmlFor` — `CheckboxRow` is that label.
+                  Radix associates implicitly this way and a checkbox's label belongs beside it
+                  rather than above it, which is what `ConfigEditor`'s `Field` comment says to do
+                  when the control is inside the label.
 
-                    It was `mt-0.5`, a fixed 2px nudge tuned against the OLD `text-sm` (14px/20px),
-                    where top-align plus 2px landed a ~13px native checkbox within a pixel of the
-                    line's optical centre — correct by luck. quince#1192 moved `text-sm` to 16px/24px
-                    and the same nudge leaves the box 3–4px high, floating above its own label. That
-                    is the defect the Operator reported here, and it is character for character the
-                    one already fixed on the setup screen.
-
-                    `calc()` OVER A TAILWIND STEP, deliberately. `h-6` is the same 1.5rem today and
-                    would need a test pinning both tokens to stay true — a second place to keep in
-                    step, whose failure mode is a red test rather than a correct screen. This form
-                    has no second place: move the scale and the box follows. */}
-                <span className="flex h-[calc(var(--type-sm)*var(--type-sm-line))] shrink-0 items-center">
-                  <input
-                    type="checkbox"
-                    checked={draft.notifications[c.key]}
-                    onChange={(e) => setNotifications({ [c.key]: e.target.checked })}
-                  />
-                </span>
+                  THE LINE-BOX ALIGNMENT MOVED INTO THE PRIMITIVE (quince#1227). It was written out
+                  here, and before that as a `mt-0.5` nudge; both were page-local, which is why this
+                  screen could ship the broken form after the fix already existed one directory
+                  away. The reasoning now lives in `components/ui/checkbox-row.tsx`. */}
+              <CheckboxRow
+                checked={draft.notifications[c.key]}
+                onChange={(e) => setNotifications({ [c.key]: e.target.checked })}
+              >
                 <span className="min-w-0">
                   <span className="font-medium">{c.label}</span>
                   <span className="mt-0.5 block text-xs text-muted">{c.hint}</span>
                 </span>
-              </label>
+              </CheckboxRow>
               {errFor(`notifications.${c.key}`) ? (
                 <span className="mt-1 block text-xs text-danger">{errFor(`notifications.${c.key}`)}</span>
               ) : null}

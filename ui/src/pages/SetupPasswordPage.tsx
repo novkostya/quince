@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { CheckboxRow } from "@/components/ui/checkbox-row";
 import { AuthPage } from "@/features/auth/AuthPage";
 import { PasswordForm } from "@/features/auth/PasswordForm";
 import { APIError } from "@/lib/api";
@@ -185,24 +186,11 @@ export function SetupPasswordPage() {
       variant="page"
       extra={
         offer ? (
-          <label className="mt-4 flex items-start gap-2.5 text-sm">
-            {/* THE BOX IS CENTRED IN THE LABEL'S FIRST LINE BOX, NOT NUDGED BY A FIXED MARGIN.
-                It was `mt-0.5` — 2px, correct against a 14px/20px label and wrong the moment the
-                type scale moved to 16px/24px (quince#1155). Half of a 4px line-height change is
-                2px, and 2px was the entire nudge, so the control ended up sitting above its own
-                text. Caught on the lab rather than by the survey, because the survey measures TEXT
-                and this is geometry.
-
-                A magic number tuned against one scale is a defect waiting for the next scale
-                change, so the line box is derived from the SAME tokens this label's `text-sm`
-                resolves to. Move the scale and this follows; there is nothing left to re-tune. */}
-            <span className="flex h-[calc(var(--type-sm)*var(--type-sm-line))] shrink-0 items-center">
-              <input
-                type="checkbox"
-                checked={wantPasskey}
-                onChange={(e) => setWantPasskey(e.target.checked)}
-              />
-            </span>
+          <CheckboxRow
+            className="mt-4"
+            checked={wantPasskey}
+            onChange={(e) => setWantPasskey(e.target.checked)}
+          >
             <span>
               <span className="font-medium">Also set up a passkey on this device</span>
               {/* UNTICKED, and the paragraph that used to sit here argued the opposite in capitals
@@ -216,7 +204,7 @@ export function SetupPasswordPage() {
                 right after the password is set.
               </span>
             </span>
-          </label>
+          </CheckboxRow>
         ) : null
       }
       footer={
