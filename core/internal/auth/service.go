@@ -151,9 +151,11 @@ func (s *Service) Secure(r *http.Request) bool {
 // already guards quince#497's login loop and already shapes `csrfRefusal`'s wording, and a second
 // copy of a security predicate drifts from the first.
 //
-// SO THE FLAG SURVIVES ON LOOPBACK. `http://127.0.0.1` is a trustworthy origin, the browser keeps
-// the cookie, nothing is broken there — and dropping it there would be a widening this deadlock does
-// not require.
+// SO IT NARROWS EXACTLY ONE CASE: plain http to a NON-loopback host. Everywhere else it is identical
+// to `Secure`, because `CookieWillBeDiscarded` is false there — including plain-http loopback, which
+// has never carried the flag on either cookie (`secureCookie` ends in `!isLoopbackHost`). That is
+// what lets `--demo` and the e2e suite run over http at all, and it means there is no loopback
+// carve-out here to find or to restore.
 func (s *Service) CSRFSecure(r *http.Request) bool {
 	return s.Secure(r) && !s.CookieWillBeDiscarded(r)
 }
