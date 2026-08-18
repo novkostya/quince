@@ -37,10 +37,25 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:8968",
     // `on-first-retry` cannot fire when there is no retry, so it would be config that is
-    // structurally dead rather than merely rarely reached. NOTE, because this is not the
-    // improvement it looks like: `gates-ui-e2e` mounts only node_modules and the pnpm store, and
-    // removes both containers when the run ends, so a trace written here goes with them. This makes
-    // the setting honest, not the artifact reachable — retrieving one is separate work.
+    // structurally dead rather than merely rarely reached.
+    //
+    // THE TRACE REACHES THE HOST, and this comment said the opposite until quince#969 was measured.
+    // It read: *"`gates-ui-e2e` mounts only node_modules and the pnpm store, and removes both
+    // containers when the run ends, so a trace written here goes with them. This makes the setting
+    // honest, not the artifact reachable — retrieving one is separate work."*
+    //
+    // Both halves of that are false. `RUN := $(RUNTIME) run --rm -v $(ROOT):/src` bind-mounts the
+    // WHOLE REPOSITORY at `/src` — which is how the container reaches `deploy/e2e-run.sh` in the
+    // first place — so `/src/ui/test-results` IS `ui/test-results` on the host, and the container
+    // being removed takes nothing with it.
+    //
+    // MEASURED BY FORCING A RED rather than by reading the mount list, because that is the check
+    // quince#969 named as step one and nobody had run: a deliberate failing assertion produced
+    // `ui/test-results/<test>-chromium/trace.zip`, 33 KB, present on the host after the run, and
+    // `gates-ui-e2e` printed its path and the command to open it.
+    //
+    // So the setting is honest AND the artifact is reachable. What is still separate work is
+    // getting one out of CI, which needs a `.github/workflows/**` write (quince#113).
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
