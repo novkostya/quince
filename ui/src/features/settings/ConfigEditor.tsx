@@ -6,6 +6,7 @@ import { configKey, updateConfig, useConfigDraft } from "@/lib/config";
 import { APIError } from "@/lib/api";
 import { setTheme, type Theme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
+import { CheckboxRow } from "@/components/ui/checkbox-row";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -151,16 +152,18 @@ export function ConfigEditor({ config }: { config: Config }) {
         )}
       </Field>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.backup.require_encryption}
-          onChange={(e) =>
-            setDraft({ ...draft, backup: { ...draft.backup, require_encryption: e.target.checked } })
-          }
-        />
+      {/* A ONE-LINE LABEL IS A HINT-LESS ROW, which is why this uses the same primitive as the
+          two-line rows rather than its own `items-center` string: the line box is exactly one line
+          tall, so centring the box inside it and centring it against a one-line label are the same
+          position (quince#1227). */}
+      <CheckboxRow
+        checked={draft.backup.require_encryption}
+        onChange={(e) =>
+          setDraft({ ...draft, backup: { ...draft.backup, require_encryption: e.target.checked } })
+        }
+      >
         Require encryption
-      </label>
+      </CheckboxRow>
 
       {/* THE GLOBAL "Storage backend" SELECT IS GONE, and it is not moved — it no longer exists.
           quince#473 flattened `storage:` to a list of fully-specified entries, so `backend` is a
