@@ -3,6 +3,7 @@ package pushsvc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -74,12 +75,6 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 	if err != nil {
 		return nil, err
 	}
-	payload, err := push.MarshalPayload(push.Notification{
-		Title: d.Title, Body: d.Body, Navigate: d.Navigate, Kind: string(d.Kind),
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	rows, err := sender.PushSubscriptions()
 	if err != nil {
@@ -90,9 +85,59 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		if !row.Live() {
 			continue
 		}
+		// THE PAYLOAD IS BUILT PER SUBSCRIPTION, because `navigate` must be ABSOLUTE and each device
+		// knows this quince by its own address. It used to be built once, above the loop, with the
+		// relative path the Decision carries — and Declarative Web Push DROPS a payload that fails
+		// validation without displaying anything and without telling the sender, who has already had
+		// a 201 from the push service. Measured on an iPhone, 2026-08-18: Apple accepted every
+		// delivery and Safari showed none of them.
+		payload, err := payloadFor(d, row.Origin)
+		if err != nil {
+			// NOT AN EXPIRY AND NOT A GUESS. A row with no origin predates migration 0012, and
+			// nothing can invent one: a wrong address makes the notification's tap land somewhere
+			// the phone cannot open. The remedy is to re-subscribe on that device, so the error says
+			// so and the row stays live for when they do.
+			out = append(out, Result{Label: row.Label, Err: err})
+			continue
+		}
 		out = append(out, s.deliverOne(ctx, sender, key, row, payload, subject))
 	}
 	return out, nil
+}
+
+// payloadFor renders the declarative envelope for one subscription, with `navigate` made absolute
+// against the origin that subscription was created from.
+//
+// A DECISION CARRIES A PATH, NOT A URL, and that is right: the notifier decides *which screen*, and
+// it has no business knowing what address any particular phone reaches quince by. Resolving the two
+// is this function's whole job.
+func payloadFor(d notify.Decision, origin string) ([]byte, error) {
+	navigate, err := absoluteNavigate(d.Navigate, origin)
+	if err != nil {
+		return nil, err
+	}
+	return push.MarshalPayload(push.Notification{
+		Title: d.Title, Body: d.Body, Navigate: navigate, Kind: string(d.Kind),
+	})
+}
+
+// absoluteNavigate resolves a Decision's path against a subscription's origin.
+//
+// AN ALREADY-ABSOLUTE PATH IS PASSED THROUGH, so a future caller that has a full URL is not mangled.
+func absoluteNavigate(path, origin string) (string, error) {
+	if strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "http://") {
+		return path, nil
+	}
+	if origin == "" {
+		return "", errors.New(
+			"this device subscribed before quince recorded which address it uses, " +
+				"so a notification could not be addressed to it — turn notifications off and on " +
+				"again on that device")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return strings.TrimSuffix(origin, "/") + path, nil
 }
 
 func (s *Service) deliverOne(ctx context.Context, sender Sender, key *push.VAPIDKey,

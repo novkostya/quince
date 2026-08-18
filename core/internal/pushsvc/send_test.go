@@ -57,7 +57,7 @@ func senderWith(t *testing.T, endpoint string) (*Service, *store.Store) {
 	if _, err := s.VAPIDPublicKey(); err != nil { // generate the key
 		t.Fatalf("key: %v", err)
 	}
-	if _, err := s.Subscribe(endpoint, rfcP256DH, rfcAuth, "iPhone"); err != nil {
+	if _, err := s.Subscribe(endpoint, rfcP256DH, rfcAuth, "iPhone", testOrigin); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	return s, raw

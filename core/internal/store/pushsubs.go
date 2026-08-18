@@ -23,11 +23,15 @@ const VAPIDKeySetting = "push.vapid_private_key"
 
 // PushSubscription is one device's Web Push registration.
 type PushSubscription struct {
-	ID         string
-	Endpoint   string
-	P256DH     string
-	Auth       string
-	Label      string
+	ID       string
+	Endpoint string
+	P256DH   string
+	Auth     string
+	Label    string
+	// Origin is the address the subscribing browser reached quince by — the scheme and authority a
+	// notification's `navigate` URL must be absolute against. Empty for rows created before
+	// migration 0012, which is a refusal at send time and never a guess.
+	Origin     string
 	CreatedAt  time.Time
 	ExpiredAt  *time.Time // non-nil once the push service answered 410/404
 	LastSentAt *time.Time
@@ -51,9 +55,9 @@ var ErrSubscriptionExists = errors.New("store: subscription already exists")
 func (s *Store) AddPushSubscription(p PushSubscription) error {
 	res, err := s.db.Exec(
 		`UPDATE push_subscriptions
-		    SET p256dh = ?, auth = ?, label = ?, expired_at = NULL
+		    SET p256dh = ?, auth = ?, label = ?, origin = ?, expired_at = NULL
 		  WHERE endpoint = ?`,
-		p.P256DH, p.Auth, p.Label, p.Endpoint)
+		p.P256DH, p.Auth, p.Label, p.Origin, p.Endpoint)
 	if err != nil {
 		return fmt.Errorf("store: revive subscription: %w", err)
 	}
@@ -61,9 +65,9 @@ func (s *Store) AddPushSubscription(p PushSubscription) error {
 		return nil
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, label, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Endpoint, p.P256DH, p.Auth, p.Label, p.CreatedAt.UTC().Format(time.RFC3339))
+		`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, label, origin, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Endpoint, p.P256DH, p.Auth, p.Label, p.Origin, p.CreatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("store: add subscription: %w", err)
 	}
@@ -77,7 +81,7 @@ func (s *Store) AddPushSubscription(p PushSubscription) error {
 // silent-fallback this rung is written against.
 func (s *Store) PushSubscriptions() ([]PushSubscription, error) {
 	rows, err := s.db.Query(
-		`SELECT id, endpoint, p256dh, auth, label, created_at, expired_at, last_sent_at
+		`SELECT id, endpoint, p256dh, auth, label, origin, created_at, expired_at, last_sent_at
 		   FROM push_subscriptions ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list subscriptions: %w", err)
@@ -88,11 +92,12 @@ func (s *Store) PushSubscriptions() ([]PushSubscription, error) {
 	for rows.Next() {
 		var p PushSubscription
 		var created string
-		var expired, lastSent sql.NullString
-		if err := rows.Scan(&p.ID, &p.Endpoint, &p.P256DH, &p.Auth, &p.Label, &created, &expired, &lastSent); err != nil {
+		var origin, expired, lastSent sql.NullString
+		if err := rows.Scan(&p.ID, &p.Endpoint, &p.P256DH, &p.Auth, &p.Label, &origin, &created, &expired, &lastSent); err != nil {
 			return nil, fmt.Errorf("store: scan subscription: %w", err)
 		}
 		p.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		p.Origin = origin.String
 		if expired.Valid {
 			if t, err := time.Parse(time.RFC3339, expired.String); err == nil {
 				p.ExpiredAt = &t

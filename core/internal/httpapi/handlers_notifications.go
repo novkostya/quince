@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/wire"
@@ -77,7 +78,8 @@ func (d Deps) handleNotificationsSubscribe() http.HandlerFunc {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "invalid request body: "+err.Error())
 			return
 		}
-		id, err := d.Notifications.Subscribe(body.Endpoint, body.Keys.P256DH, body.Keys.Auth, body.Label)
+		id, err := d.Notifications.Subscribe(body.Endpoint, body.Keys.P256DH, body.Keys.Auth, body.Label,
+			originOf(r))
 		if err != nil {
 			// A 422, NOT A 500, AND THE ERROR TEXT IS SAFE TO RETURN. `pushsvc` refuses a malformed
 			// endpoint or key, which is the caller's input being wrong — and its messages name the
@@ -140,4 +142,32 @@ func (d Deps) handleNotificationsTest() http.HandlerFunc {
 			Results []wire.PushDeliveryResult `json:"results"`
 		}{Results: results})
 	}
+}
+
+// originOf is the address this request reached quince by — scheme and authority, no path.
+//
+// IT IS WHAT MAKES A NOTIFICATION'S `navigate` ABSOLUTE, which Declarative Web Push requires and
+// silently enforces: a payload failing validation is dropped by the user agent with nothing
+// displayed and nothing reported, after the push service has already answered 201.
+//
+// THE `Origin` HEADER FIRST, because it is exactly this value and the browser sends it on this POST.
+// Falling back to Host is not a guess — it is the same authority, reconstructed — but the scheme has
+// to be inferred, and `X-Forwarded-Proto` is consulted for the reverse-proxy deployment this project
+// documents. `r.TLS` alone would report http for every install behind a proxy, and an http origin on
+// a device that reached quince over https makes the tap land on a URL the browser will refuse.
+func originOf(r *http.Request) string {
+	if o := r.Header.Get("Origin"); o != "" {
+		return o
+	}
+	if r.Host == "" {
+		// No Origin and no Host is not a browser. Empty rather than invented: the send path refuses
+		// a subscription with no origin and names the remedy, which beats addressing a notification
+		// at a hostname nobody asked for.
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
