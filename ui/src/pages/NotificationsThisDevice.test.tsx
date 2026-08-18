@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationsInstallPage } from "./NotificationsInstallPage";
 import { api } from "@/lib/api";
+import { routeGet } from "@/test/config";
 
 // "THIS DEVICE" MUST MEAN THIS DEVICE. Operator-reported 2026-08-18, with an iPhone and a Mac.
 //
@@ -44,15 +45,19 @@ function stageBrowser(hasOwnSubscription: boolean) {
 }
 
 function stageServerHas(subs: Array<{ id: string; label: string; fingerprint?: string }>) {
-  mockApi.get.mockResolvedValue({
-    vapid_public_key: "BFakeKey",
-    subscriptions: subs.map((s) => ({
-      fingerprint: "other-device",
-      ...s,
-      state: "live",
-      created_at: "2026-08-18T00:00:00Z",
-    })),
-  });
+  mockApi.get.mockImplementation(
+    routeGet({
+      "/api/notifications": {
+        vapid_public_key: "BFakeKey",
+        subscriptions: subs.map((s) => ({
+          fingerprint: "other-device",
+          ...s,
+          state: "live",
+          created_at: "2026-08-18T00:00:00Z",
+        })),
+      },
+    }) as never,
+  );
 }
 
 beforeEach(() => {

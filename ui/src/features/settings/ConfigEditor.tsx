@@ -29,7 +29,7 @@ import { ConfigStaleNotice } from "./ConfigStaleNotice";
 // THE INLINE SELECTS ELSEWHERE KEEP THEIR `aria-label`, AND THAT IS NOT AN INCONSISTENCY.
 // `StorageSelect` and `BackupControls` have no visible <Label> to associate with, so `aria-label` is
 // the right mechanism THERE. Each control uses the one that fits it; do not "unify" them.
-function Field({
+export function Field({
   label,
   error,
   children,

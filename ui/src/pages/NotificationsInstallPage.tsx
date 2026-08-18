@@ -3,6 +3,9 @@ import { BackLink } from "@/components/BackLink";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeading } from "@/components/ui/section-heading";
+import { useConfig } from "@/lib/config";
+import { ConfigView } from "@/features/settings/ConfigView";
+import { NotificationSettings } from "@/features/notifications/NotificationSettings";
 import { Button } from "@/components/ui/button";
 import { isIOS, pushSupport } from "@/lib/pwa";
 import {
@@ -27,6 +30,12 @@ import {
 export function NotificationsInstallPage() {
   const support = pushSupport();
   const ios = isIOS();
+  // THE CONFIG IS FETCHED HERE, not inside the settings form, because BOTH the form and the
+  // `Current configuration` block below read one document — and one query key means one fetch and
+  // one source of truth for the two halves of the page. Splitting it would let the editor and the
+  // rendered file disagree about which document is current, which is the defect the block exists to
+  // rule out.
+  const { data, isLoading, isError } = useConfig();
 
   return (
     // A CHILD OF THE AUTHED SHELL, LAID OUT LIKE ONE. This page was built with the pre-shell
@@ -58,7 +67,17 @@ export function NotificationsInstallPage() {
         needs you.
       </p>
 
-      <div className="mt-6 max-w-xl space-y-8">
+      {/* THE SAME TWO-COLUMN GRID AS `/settings`, because this page is now the same kind of thing: a
+          configuration surface with the rendered `config.yml` beside it (Operator ruling 2026-08-18,
+          quince#1212). `min-w-0` on BOTH columns is structural, not decoration — a grid item defaults
+          to `min-width: auto`, so one long line in the config dump would widen this column, the grid,
+          and the content area with it, sliding the controls off the left edge on a phone (quince#631).
+
+          `max-w-xl` IS GONE FROM THE COLUMN and that is deliberate: the column is now the constraint,
+          and a second width limit inside it made the left column narrower than the right for no
+          reason a reader could see. */}
+      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+        <div className="min-w-0 space-y-8">
         {support === "unsupported_platform" && (
           <section>
             <SectionHeading className="flex items-center gap-2">
@@ -152,6 +171,41 @@ export function NotificationsInstallPage() {
         )}
 
         {support === "supported" && <NotificationsControls />}
+
+        {/* THE SETTINGS RENDER WHATEVER THIS BROWSER CAN DO — see `NotificationSettings` for why.
+            They are also the LAST thing in this column on purpose: the first question on this page
+            is "is this device receiving anything", and tuning comes after that is answered. */}
+        {isLoading ? <div className="text-sm text-muted">Loading settings…</div> : null}
+        {isError ? (
+          <div className="text-sm text-danger">Could not load configuration.</div>
+        ) : null}
+        {data ? <NotificationSettings config={data.config} /> : null}
+      </div>
+
+        {/* LAST ON A PHONE, BY DOM ORDER RATHER THAN BY A CLASS, exactly as on `/settings` — the
+            columns stack below `lg`, so second-in-source is last-on-screen, and this block is long,
+            read-only, and buries whatever follows it.
+
+            THE WHOLE FILE, NOT THE `notifications:` SECTION, and that is quince#1212's first open
+            question answered. Three reasons, in order of weight: `ConfigView` renders `file_text` —
+            the literal bytes on disk — so showing one section would mean this client parsing YAML
+            and re-emitting it, a second renderer of the config language and a place for the two to
+            disagree. A PUT replaces the WHOLE document, so the whole document is what a save here
+            touches, and showing less would understate that. And the block carries the discarded
+            banner and the warnings list, which are facts about the file rather than about a section.
+
+            The cost is real and is accepted: on a phone this is a long read-only block below the
+            controls. It is the same cost `/settings` already pays, in the same place. */}
+        <div className="min-w-0">
+          {data ? (
+            <>
+              <SectionHeading>Current configuration</SectionHeading>
+              <div className="mt-3">
+                <ConfigView data={data} />
+              </div>
+            </>
+          ) : null}
+        </div>
       </div>
     </section>
   );
