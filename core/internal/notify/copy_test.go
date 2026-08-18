@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/novkostya/quince/core/internal/backup"
 	"github.com/novkostya/quince/core/internal/config"
@@ -15,19 +16,69 @@ import (
 // real lock screen.
 const longDeviceName = "someones-iphone-15-pro"
 
-// EVERY TITLE MUST LEAD WITH THE STATE, NOT THE DEVICE NAME (Operator-reported 2026-08-18).
+// THE TITLE IS THE STATE AND CARRIES NO DEVICE NAME (Operator-reported 2026-08-18, twice).
 //
-// The lock screen showed *"<device-name> could not be ba…"*: the name survived and the news was
-// cut off. The name is what the reader already knows; the state is why the notification exists.
+// First the titles read `<device> could not be backed up`, which truncated to
+// *"<device-name> could not be ba…"* — the news cut, the known part kept. Then `Backup failed —
+// <device>`, which fixed the order and kept an UNBOUNDED tail: iOS names a phone after its owner, so
+// the title's length was still set by a string quince does not choose.
 //
-// ASSERTED OVER EVERY DECISION THIS PACKAGE CAN PRODUCE, not over a list of strings. The bug was in
-// all six titles at once — it was a habit, not a typo — so the test has to be the shape that catches
-// the seventh.
-func TestNoTitleLeadsWithTheDeviceName(t *testing.T) {
+// A fixed title cannot truncate at all. Apple asks for *"brief titles that people can read at a
+// glance, especially on Apple Watch"*, and this is what satisfies it.
+func TestNoTitleCarriesTheDeviceName(t *testing.T) {
 	for _, d := range everyDecision(t) {
-		if strings.HasPrefix(d.Title, longDeviceName) {
-			t.Errorf("kind %q leads with the device name: %q — truncation would cut the state",
-				d.Kind, d.Title)
+		if strings.Contains(d.Title, longDeviceName) {
+			t.Errorf("kind %q puts the device name in the title: %q — put it in the body", d.Kind, d.Title)
+		}
+	}
+}
+
+// AND THE BODY LEADS WITH IT, so the device is still the first thing read — in the field where
+// Apple's budget is 150 characters and the first ~40 are the most consistently visible.
+func TestEveryBodyLeadsWithTheDeviceName(t *testing.T) {
+	for _, d := range everyDecision(t) {
+		if !strings.HasPrefix(d.Body, longDeviceName) {
+			t.Errorf("kind %q body does not name the device first: %q", d.Kind, d.Body)
+		}
+	}
+}
+
+// A TITLE IS SHORT ENOUGH TO READ AT A GLANCE. Apple's ceiling is 50 characters; these are states,
+// not sentences, and iOS spends part of the line on `from <app name>` besides. 24 is what the
+// longest of them needs, and a title that grows past it is a title that has started carrying data.
+func TestTitlesAreShortEnoughForAWatch(t *testing.T) {
+	for _, d := range everyDecision(t) {
+		if n := len([]rune(d.Title)); n > 24 {
+			t.Errorf("kind %q title is %d characters: %q — Apple asks for brief titles", d.Kind, n, d.Title)
+		}
+	}
+}
+
+// TITLE-STYLE CAPITALIZATION AND NO ENDING PUNCTUATION, in the HIG's words.
+//
+// Checked as "every word starts capitalized", which is what title style means for strings this
+// short — none of them contain an article or preposition that title style would leave lowercase.
+func TestTitlesUseTitleStyleCapitalization(t *testing.T) {
+	for _, d := range everyDecision(t) {
+		for _, word := range strings.Fields(d.Title) {
+			r := []rune(word)[0]
+			if unicode.IsLetter(r) && !unicode.IsUpper(r) {
+				t.Errorf("kind %q title is not title-style: %q", d.Kind, d.Title)
+				break
+			}
+		}
+		if strings.HasSuffix(d.Title, ".") || strings.HasSuffix(d.Title, "!") {
+			t.Errorf("kind %q title ends with punctuation: %q", d.Kind, d.Title)
+		}
+	}
+}
+
+// THE BODY STAYS SENTENCE CASE WITH A FULL STOP, which is the same guidance's other half —
+// *"complete sentences, sentence case, and proper punctuation"*. The product's voice lives here.
+func TestBodiesAreCompleteSentences(t *testing.T) {
+	for _, d := range everyDecision(t) {
+		if !strings.HasSuffix(d.Body, ".") {
+			t.Errorf("kind %q body is not a complete sentence: %q", d.Kind, d.Body)
 		}
 	}
 }

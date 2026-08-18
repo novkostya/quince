@@ -99,53 +99,58 @@ func ForTerminal(dev wire.Device, state, errorCode string, cfg config.Notificati
 	d := Decision{Kind: kind, UDID: dev.UDID, Navigate: "/devices/" + dev.UDID}
 	switch kind {
 	case KindBackupCompleted:
-		d.Title = "Backed up — " + name
-		d.Body = "The backup finished and was verified."
+		d.Title = "Backup Complete"
+		d.Body = name + " is backed up and verified."
 	case KindActionRequired:
-		d.Title = "Needs you — " + name
-		d.Body = actionRequiredBody(errorCode)
+		d.Title = "Action Needed"
+		d.Body = name + " — " + actionRequiredBody(errorCode)
 	case KindBackupFailed:
-		d.Title = "Backup failed — " + name
-		d.Body = backupFailedBody(errorCode)
+		d.Title = "Backup Failed"
+		d.Body = name + " — " + backupFailedBody(errorCode)
 	}
 	return d, true
 }
 
 // NOTIFICATION COPY RULES, from Apple's HIG and from a lock screen (Operator-reported 2026-08-18).
 //
-// THE STATE COMES FIRST, THE DEVICE NAME SECOND. Every title in this file used to read
-// `<device> <what happened>`, and on a real lock screen that renders as
-// *"<device-name> could not be ba…"* — the device name survives and the news is cut off. The name
-// is the part the reader already knows; the state is why the notification exists. Front-loading it
-// means truncation costs the least important half.
+// THE TITLE IS THE STATE. THE DEVICE NAME IS THE BODY'S FIRST WORDS. Apple asks for *"brief titles
+// that people can read at a glance, especially on Apple Watch, where space is limited"* — and a
+// device name is neither brief nor bounded: iOS names a phone after its owner by default, so the
+// title's length is set by a string quince does not choose.
 //
-// The space is smaller than it looks: iOS renders a Home Screen web app's notification as
-// `<title> from <app name>`, so the app name eats the line too. Apple's guidance is under 50
-// characters for a title and under 150 for a body, with the first ~40 characters of the body the
-// most consistently visible across lock screen and banner.
+// Two earlier shapes were both wrong. `<device> could not be backed up` truncated to
+// *"<device-name> could not be ba…"*, keeping the part the reader already knows and cutting the news.
+// `Backup failed — <device>` fixed the ORDER and kept the unbounded tail, so a long name still
+// pushed the title past the line. **A fixed title cannot truncate at all**, and the name is then in
+// the body, where Apple's budget is 150 characters rather than 50.
+//
+// It also costs less to the suffix iOS adds: a Home Screen web app renders as `<title> from <app
+// name>`, which is redundant and not removable — Declarative Web Push requires a title, so there is
+// no "let the system show the app name" option here. A short title is what makes it cheap.
+//
+// TITLE-STYLE CAPITALIZATION AND NO ENDING PUNCTUATION, which is the HIG's wording and is followed
+// here. Bodies stay sentence case with full stops, which is the same guidance's other half —
+// *"complete sentences, sentence case, and proper punctuation"* — so the product's voice lives in
+// the body where the sentences are.
 //
 // THE BODY NEVER OPENS WITH "quince". Apple: *"avoid including your app name … the system displays
-// your app icon automatically"* — and it is worse than redundant here, because the first words are
-// the ones that survive. Naming quince mid-sentence as a place to go is fine and stays.
+// your app icon automatically"* — and it is worse than redundant, because the first ~40 characters
+// are the ones most consistently visible. Naming quince mid-sentence as a place to go is fine.
 //
 // "OPEN QUINCE", NOT "TAP". These go to every subscribed device, and a Mac does not tap.
-//
-// SENTENCE CASE, NOT APPLE'S TITLE CASE. The HIG asks for title-style capitalization; every other
-// string in this product is sentence case, and matching the product a reader is about to open beats
-// matching a platform convention they will not notice. Deliberate, not an oversight.
 
 // actionRequiredBody says what to do on the PHONE, because that is what this kind means.
 func actionRequiredBody(errorCode string) string {
 	switch errorCode {
 	case backup.ErrNotPaired:
-		return "This device is no longer paired. Connect it, and trust this computer again."
+		return "it is no longer paired. Connect it, and trust this computer again."
 	case backup.ErrEncryptionRequired:
-		return "Backup encryption is off. Turn it on, then start the backup again."
+		return "backup encryption is off. Turn it on, then start the backup again."
 	default:
 		// `device_disconnected` and `device_not_visible`. Deliberately one sentence for both: from
 		// the user's side they are the same act — the phone left the network — and quince cannot
 		// tell them which without saying something it does not know.
-		return "The device went off the network. Unlock it and keep it nearby, then try again."
+		return "it went off the network. Unlock it and keep it nearby, then try again."
 	}
 }
 
@@ -153,15 +158,15 @@ func actionRequiredBody(errorCode string) string {
 func backupFailedBody(errorCode string) string {
 	switch errorCode {
 	case backup.ErrDiskLow:
-		return "The backup storage is nearly full. Free some space, then try again."
+		return "the backup storage is nearly full. Free some space, then try again."
 	case backup.ErrVerifyFailed:
-		return "The backup did not verify, so it was not kept. Open quince for the details."
+		return "the backup did not verify, so it was not kept. Open quince for the details."
 	case backup.ErrCommitFailed:
-		return "The backup could not be saved. The transferred data was kept — open quince for the details."
+		return "the backup could not be saved. The transferred data was kept — open quince for the details."
 	case backup.ErrInterrupted:
-		return "A restart interrupted the backup. Open quince to start it again."
+		return "a restart interrupted the backup. Open quince to start it again."
 	default:
-		return "The backup did not finish. Open quince for the details."
+		return "the backup did not finish. Open quince for the details."
 	}
 }
 
@@ -224,8 +229,8 @@ func Evaluate(dev wire.Device, r Reminder, cfg config.NotificationsConfig, jobRu
 		}
 		return Decision{
 			Kind: KindBackupAvailable, UDID: dev.UDID, Navigate: nav,
-			Title: "Never backed up — " + name,
-			Body:  "It is on the network now — open quince to start the first backup.",
+			Title: "Never Backed Up",
+			Body:  name + " has never been backed up. It is on the network now — open quince to start.",
 		}, true
 	}
 
@@ -247,8 +252,8 @@ func Evaluate(dev wire.Device, r Reminder, cfg config.NotificationsConfig, jobRu
 		}
 		return Decision{
 			Kind: KindBackupOverdue, UDID: dev.UDID, Navigate: nav,
-			Title: "Backup overdue — " + name,
-			Body:  "It has not been backed up in " + plural(days, "day") + ". It is on the network now — open quince to start.",
+			Title: "Backup Overdue",
+			Body:  name + " has not been backed up in " + plural(days, "day") + ". It is on the network now — open quince to start.",
 		}, true
 	}
 	if !Enabled(KindBackupAvailable, cfg) {
@@ -256,8 +261,8 @@ func Evaluate(dev wire.Device, r Reminder, cfg config.NotificationsConfig, jobRu
 	}
 	return Decision{
 		Kind: KindBackupAvailable, UDID: dev.UDID, Navigate: nav,
-		Title: "Ready to back up — " + name,
-		Body:  "Its last backup was " + plural(days, "day") + " ago. It is on the network now — open quince to start.",
+		Title: "Backup Due",
+		Body:  name + " was last backed up " + plural(days, "day") + " ago. It is on the network now — open quince to start.",
 	}, true
 }
 
