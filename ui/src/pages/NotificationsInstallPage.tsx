@@ -348,7 +348,7 @@ function NotificationsControls() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => unsubscribe.mutate(s.id)}
+                    onClick={() => unsubscribe.mutate({ id: s.id, mine: s.id === thisDevice.id })}
                     disabled={unsubscribe.isPending}
                   >
                     Remove
@@ -409,7 +409,7 @@ function NotificationsControls() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => unsubscribe.mutate(s.id)}
+                  onClick={() => unsubscribe.mutate({ id: s.id, mine: s.id === thisDevice.id })}
                   disabled={unsubscribe.isPending}
                 >
                   Turn off

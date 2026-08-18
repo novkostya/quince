@@ -18,6 +18,9 @@ vi.mock("@/lib/api", () => ({
 
 const mockApi = vi.mocked(api);
 
+// The base64url of 32 zero bytes — what the stubbed digest above produces.
+const FP = "A".repeat(43);
+
 function stageInstalledIOS() {
   // THE BROWSER'S OWN SUBSCRIPTION IS HALF THE ANSWER to "is this device on" — the server list is
   // the other half. Staging only the server list is what the page used to believe, and it is exactly
@@ -31,15 +34,18 @@ function stageInstalledIOS() {
     serviceWorker: { register: vi.fn(), ready: Promise.resolve({ pushManager }) },
   });
   vi.stubGlobal("PushManager", function PushManager() {});
+  // `crypto.subtle.digest` stubbed to 32 zero bytes, so `fingerprintOf` always yields FP below.
+  // Deterministic rather than real hashing: what is under test is the MATCH, not SHA-256.
+  vi.stubGlobal("crypto", { subtle: { digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)) } });
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
 }
 
 function stageOneLiveSubscription() {
-  // The id the page will look for in localStorage, matching the row below.
-  localStorage.setItem("quince.push.subscription-id", "s1");
   mockApi.get.mockResolvedValue({
     vapid_public_key: "BFakeKey",
-    subscriptions: [{ id: "s1", label: "iPhone", state: "live", created_at: "2026-08-18T00:00:00Z" }],
+    subscriptions: [
+      { id: "s1", label: "iPhone", state: "live", created_at: "2026-08-18T00:00:00Z", fingerprint: FP },
+    ],
   });
 }
 
@@ -52,7 +58,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   // The remembered id is per-browser state, so it outlives a test unless cleared.
-  localStorage.clear();
 });
 
 describe("sending a test notification", () => {

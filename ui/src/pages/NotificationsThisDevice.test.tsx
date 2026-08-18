@@ -19,6 +19,9 @@ vi.mock("@/lib/api", () => ({
 
 const mockApi = vi.mocked(api);
 
+// The base64url of 32 zero bytes — what the stubbed digest above produces.
+const FP = "A".repeat(43);
+
 // stageBrowser stages a push-capable browser that either HAS its own subscription or does not. That
 // distinction is the whole subject of this file.
 function stageBrowser(hasOwnSubscription: boolean) {
@@ -34,24 +37,30 @@ function stageBrowser(hasOwnSubscription: boolean) {
     serviceWorker: { register: vi.fn(), ready: Promise.resolve({ pushManager }) },
   });
   vi.stubGlobal("PushManager", function PushManager() {});
+  // `crypto.subtle.digest` stubbed to 32 zero bytes, so `fingerprintOf` always yields FP below.
+  // Deterministic rather than real hashing: what is under test is the MATCH, not SHA-256.
+  vi.stubGlobal("crypto", { subtle: { digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)) } });
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
 }
 
-function stageServerHas(subs: Array<{ id: string; label: string }>) {
+function stageServerHas(subs: Array<{ id: string; label: string; fingerprint?: string }>) {
   mockApi.get.mockResolvedValue({
     vapid_public_key: "BFakeKey",
-    subscriptions: subs.map((s) => ({ ...s, state: "live", created_at: "2026-08-18T00:00:00Z" })),
+    subscriptions: subs.map((s) => ({
+      fingerprint: "other-device",
+      ...s,
+      state: "live",
+      created_at: "2026-08-18T00:00:00Z",
+    })),
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.clear();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  localStorage.clear();
 });
 
 describe("what This device reports", () => {
@@ -77,8 +86,8 @@ describe("what This device reports", () => {
 
   it("says On when this browser holds the subscription quince knows about", async () => {
     stageBrowser(true);
-    localStorage.setItem("quince.push.subscription-id", "mac-row");
-    stageServerHas([{ id: "mac-row", label: "Mac · Safari" }]);
+    // This browser's own row, matched by fingerprint rather than by anything stored locally.
+    stageServerHas([{ id: "mac-row", label: "Mac · Safari", fingerprint: FP }]);
     renderPage();
 
     expect(await screen.findByText("On")).toBeInTheDocument();
@@ -90,7 +99,7 @@ describe("what This device reports", () => {
   // pointing the other way, so BOTH halves are required.
   it("says Off when the browser is subscribed but quince has forgotten the row", async () => {
     stageBrowser(true);
-    localStorage.setItem("quince.push.subscription-id", "deleted-row");
+    
     stageServerHas([{ id: "some-other-device", label: "iPhone · Safari" }]);
     renderPage();
 
@@ -101,10 +110,10 @@ describe("what This device reports", () => {
   // destructive misclick. The current one is marked.
   it("marks which row in the list is the current device", async () => {
     stageBrowser(true);
-    localStorage.setItem("quince.push.subscription-id", "mac-b");
+    
     stageServerHas([
       { id: "mac-a", label: "Mac · Safari" },
-      { id: "mac-b", label: "Mac · Safari" },
+      { id: "mac-b", label: "Mac · Safari", fingerprint: FP },
     ]);
     renderPage();
 
@@ -124,3 +133,34 @@ function renderPage() {
     </QueryClientProvider>,
   );
 }
+
+// THE BUG A LOCALLY-STORED ID PRODUCED, AND THE REASON THE ANSWER IS STATELESS.
+//
+// The first fix matched "this device" against a subscription id written to `localStorage` at
+// subscribe time. Every subscription created BEFORE that code existed had none — so the device that
+// owned it reported **Off while subscribed and receiving**, which is the worst direction for this
+// page to be wrong in: it offers to turn on something that is already on. Operator-reported
+// 2026-08-18, from an iPhone looking at its own row.
+//
+// A cleared profile and a private window fail identically. Nothing is stored now: both sides hash
+// the endpoint, so recognition survives anything that clears the browser.
+describe("recognising a subscription this browser did not just create", () => {
+  it("says On for a subscription with nothing remembered locally", async () => {
+    stageBrowser(true);
+    localStorage.clear(); // whatever an older build may have written is irrelevant now
+    stageServerHas([{ id: "pre-existing", label: "iPhone · Safari", fingerprint: FP }]);
+    renderPage();
+
+    expect(await screen.findByText("On")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /turn on notifications/i })).not.toBeInTheDocument();
+  });
+
+  it("marks that row as this device, so the list agrees with the badge", async () => {
+    stageBrowser(true);
+    localStorage.clear();
+    stageServerHas([{ id: "pre-existing", label: "iPhone · Safari", fingerprint: FP }]);
+    renderPage();
+
+    expect(await screen.findByText(/this device/i)).toBeInTheDocument();
+  });
+});

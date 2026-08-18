@@ -35,9 +35,12 @@ func (s *Service) SendTest(ctx context.Context) ([]wire.PushDeliveryResult, erro
 		Kind:  KindTest,
 		Title: testTitle,
 		Body:  "This is a test. Nothing needs backing up because of it.",
-		// THE HOME SCREEN, NOT A DEVICE PAGE. A test belongs to no device, and deep-linking to one
-		// would be a lie about why the notification arrived.
-		Navigate: "/",
+		// BACK TO THE PAGE THE BUTTON IS ON, which is where the person who pressed it is. It used to
+		// be "/" on the reasoning that a test belongs to no device and deep-linking to one would lie
+		// about why it arrived — the first half of that is right and the conclusion was wrong. The
+		// notifications page is not a device page: it is the surface the test was requested from, so
+		// a tap returns you to your own result. Operator-reported 2026-08-18.
+		Navigate: "/settings/notifications",
 	}, s.subject)
 	if err != nil {
 		return nil, err

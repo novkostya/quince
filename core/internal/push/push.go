@@ -400,3 +400,17 @@ func ParseSubscriptionKeys(p256dh, auth string) (uaPublic []byte, authSecret []b
 	}
 	return uaPublic, authSecret, nil
 }
+
+// EndpointFingerprint identifies a subscription to the browser that owns it, without anyone sending
+// an endpoint.
+//
+// THE ENDPOINT IS A CAPABILITY AND ITS DIGEST IS NOT. Anyone holding endpoint + keys can push to that
+// phone, which is why `GET /api/notifications` returns labels and states and never an endpoint (spec
+// D8). A SHA-256 is one-way, and a push endpoint carries a long random token, so there is nothing to
+// brute-force back. The browser hashes the endpoint it already holds and compares.
+//
+// base64url WITHOUT PADDING, matching every other encoded field in this package.
+func EndpointFingerprint(endpoint string) string {
+	sum := sha256.Sum256([]byte(endpoint))
+	return b64.EncodeToString(sum[:])
+}
