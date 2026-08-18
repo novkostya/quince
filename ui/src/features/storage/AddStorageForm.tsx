@@ -178,12 +178,33 @@ function bytes(n: number): string {
 
 // ProbeResult renders the daemon's answer. THREE BRANCHES, and which one you are in is `outcome`
 // — never the HTTP status, which is 200 for all of them (contracts §1).
-function ProbeResult({ probe }: { probe: StorageProbe }) {
+// EXPORTED FOR ITS TEST, which is the same reason `needsZFSConfig` and `helperFetchCommand` are —
+// this file's established shape rather than a new one. It takes the probe as a prop and holds no
+// state, so a test drives all three branches without the form's fetch, its path field or its
+// backend selector standing in the way (quince#716).
+export function ProbeResult({ probe }: { probe: StorageProbe }) {
   if (probe.outcome === "adopt") {
     return (
       <div className="mt-3 rounded-card border border-line bg-elevated p-3 text-sm">
-        <div className="font-medium">This is already a quince storage</div>
+        {/* PAST TENSE, BECAUSE THE PRESENT TENSE WAS THE DEFECT (quince#716). This read *"This is
+            already a quince storage"* — true of the DISK, and read as a refusal by a user thinking
+            about the LIST. *"Already"* claims a current declaration, which is exactly what somebody
+            who just pressed Forget knows to be false; the screen then offered to add the thing it
+            had just told them they had.
+
+            IT MUST BE TRUE FOR BOTH READERS, and that is the whole constraint. The person adopting a
+            replugged disk never forgot anything; the person re-adding what they forgot five minutes
+            ago did. quince cannot tell them apart — forget deliberately keeps no state that would —
+            so the copy must not imply either story. */}
+        <div className="font-medium">quince has used this folder before</div>
         <div className="mt-1 text-muted">{probe.reason}</div>
+        {/* WHAT WILL HAPPEN, which is what the old copy left the reader to guess and why it read as
+            a wall rather than as a step. The marker stays on the disk through a forget by ruling
+            (contracts §1, qn.6d gap B) — so this is the replug story working, not a warning. */}
+        <div className="mt-1 text-muted">
+          Its backups and its identity are still here. Adding it picks up where it left off — nothing
+          is created or overwritten.
+        </div>
         {/* NO BACKEND SELECTOR ON AN ADOPT. A storage's backend is written at its creation moment
             and is immutable; a later probe that disagrees is a remount, not a re-selection. Showing
             a dropdown here would offer a choice quince would then refuse to honour. */}
