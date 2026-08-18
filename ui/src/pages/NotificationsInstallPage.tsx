@@ -1,5 +1,6 @@
 import { ChevronLeft } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
+import { RelativeTime } from "@/components/RelativeTime";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
@@ -322,16 +323,33 @@ function NotificationsControls() {
               These devices are no longer reachable. Open quince on each one and
               turn notifications on again.
             </p>
-            <ul className="space-y-1">
+            <ul className="mt-3 flex flex-col gap-2">
               {expired.map((s) => (
                 <li
                   key={s.id}
-                  className="flex items-center justify-between gap-3"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-bg px-3 py-2"
                 >
-                  <span>{s.label}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {s.label}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {s.expired_at ? (
+                        <>
+                          {"stopped receiving "}
+                          <RelativeTime iso={s.expired_at} />
+                        </>
+                      ) : (
+                        "no longer reachable"
+                      )}
+                    </div>
+                  </div>
                   <Button
-                    variant="ghost"
+                    type="button"
+                    size="sm"
+                    variant="outline"
                     onClick={() => unsubscribe.mutate(s.id)}
+                    disabled={unsubscribe.isPending}
                   >
                     Remove
                   </Button>
@@ -345,31 +363,51 @@ function NotificationsControls() {
       {live.length > 0 && (
         <section>
           <SectionHeading>Devices receiving notifications</SectionHeading>
-          <div className="mt-3 space-y-3 text-sm text-muted">
-            <ul className="space-y-1">
-              {live.map((s) => (
-                <li
-                  key={s.id}
-                  className="flex items-center justify-between gap-3"
+          {/* THE SAME ROW AS A PASSKEY, because it is the same kind of thing: a credential-backed
+              registration the user can revoke, one per line, with the name at full contrast and the
+              detail beneath it. Operator-reported 2026-08-18 — this list was plain muted text with a
+              ghost button, so the device name read fainter than the sentence above it and the
+              control barely looked like one. */}
+          <ul className="mt-3 flex flex-col gap-2">
+            {live.map((s) => (
+              <li
+                key={s.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-bg px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{s.label}</div>
+                  {/* THE CURRENT DEVICE IS MARKED, and it sits in the metadata line rather than
+                      beside the name — two Macs produce one identical label, and "Turn off" against
+                      the wrong row is a destructive misclick. */}
+                  <div className="text-xs text-muted">
+                    {s.id === thisDevice.id ? "this device" : "added "}
+                    {s.id === thisDevice.id ? null : (
+                      <RelativeTime iso={s.created_at} />
+                    )}
+                    {s.last_sent_at ? (
+                      <>
+                        {" · last notified "}
+                        <RelativeTime iso={s.last_sent_at} />
+                      </>
+                    ) : (
+                      // NOTHING SENT YET IS A FACT WORTH SHOWING, exactly as "never used" is for a
+                      // passkey: a device quince has never reached is the one to be suspicious of.
+                      " · nothing sent yet"
+                    )}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => unsubscribe.mutate(s.id)}
+                  disabled={unsubscribe.isPending}
                 >
-                  {/* THE CURRENT DEVICE IS MARKED. Two Macs, or two iPhones, produce the same
-                      label, and "Turn off" beside the wrong one is a destructive misclick. */}
-                  <span>
-                    {s.label}
-                    {s.id === thisDevice.id ? (
-                      <span className="text-muted"> · this device</span>
-                    ) : null}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    onClick={() => unsubscribe.mutate(s.id)}
-                  >
-                    Turn off
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
+                  Turn off
+                </Button>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </div>
