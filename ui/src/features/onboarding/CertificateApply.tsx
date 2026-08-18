@@ -28,14 +28,17 @@ export function CertificateApply({
   certFile: string;
   keyFile: string;
   hostname: string;
-  // WHY A TRIAL WOULD BE POINTLESS, COMPOSED BY THE PAGE, or null when it would not be.
+  // WHETHER A TRIAL WOULD BE POINTLESS, DECIDED BY THE PAGE.
   //
-  // THE PAGE OWNS THIS BECAUSE IT HOLDS BOTH FACTS. A trial is a dead end for two independent
-  // reasons — the certificate cannot cover the address the link would use, or this browser cannot
-  // reach that address at all — and they arrive from two different checks. Deriving one of them
-  // here is what let the other ship unguarded: a name the certificate covered, unreachable from
-  // this browser, with the button live under a red box saying so.
-  blocked: string | null;
+  // A BOOLEAN, BECAUSE THE REASON IS ALREADY ON SCREEN. Both causes — the certificate cannot cover
+  // the address the link would use, or this browser cannot reach that address at all — are reported
+  // by the checks above this card, so carrying the sentence down here as well would ship a string
+  // nothing renders.
+  //
+  // THE PAGE OWNS THE DECISION BECAUSE IT HOLDS BOTH FACTS, which arrive from two different checks.
+  // Deriving one of them here is what let the other ship unguarded: a name the certificate covered,
+  // unreachable from this browser, with the button live under a red box saying so.
+  blocked: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState<CertificateApplied | null>(null);
@@ -102,11 +105,11 @@ export function CertificateApply({
           above, in the check results — printing it a second time inside the card put the same
           sentence on screen twice, two boxes apart, which reads as a rendering fault rather than as
           emphasis. This says only why the button will not respond. */}
-      {blocked !== null ? (
+      {blocked ? (
         <p className="mt-3 text-muted">Fix the problem above to try this certificate.</p>
       ) : null}
       <div className="mt-3">
-        <Button onClick={() => void apply()} disabled={busy || blocked !== null}>
+        <Button onClick={() => void apply()} disabled={busy || blocked}>
           {busy ? "Starting…" : "Try it now"}
         </Button>
       </div>

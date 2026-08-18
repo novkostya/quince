@@ -36,7 +36,7 @@ function renderApply(props: Partial<ComponentProps<typeof CertificateApply>> = {
       certFile="/tls/fullchain.pem"
       keyFile="/tls/privkey.pem"
       hostname="quince.example"
-      blocked={null}
+      blocked={false}
       {...props}
     />,
   );
@@ -145,7 +145,7 @@ describe("the certificate trial", () => {
 // not reach had a live button under a red box saying so.
 describe("the dead-end guard", () => {
   it("refuses to offer a trial the page has ruled out, and says why", () => {
-    renderApply({ blocked: "This certificate does not cover 192.0.2.10. Enter a name it covers above, then check again." });
+    renderApply({ blocked: true });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeDisabled();
     // THE POINTER, NOT THE REASON — that sentence is already on screen above this card.
@@ -157,7 +157,7 @@ describe("the dead-end guard", () => {
   // address, which is what a self-signed pair or an internal CA gives you. The browser warns about
   // the issuer, trusting it once ends the warnings, and quince must not stand in the way.
   it("offers the trial when the page has nothing against it", () => {
-    renderApply({ blocked: null });
+    renderApply({ blocked: false });
 
     expect(screen.getByRole("button", { name: /Try it now/i })).toBeEnabled();
     expect(screen.queryByText(/Fix the problem above/i)).not.toBeInTheDocument();
