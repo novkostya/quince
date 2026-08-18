@@ -566,13 +566,14 @@ func plainHalf(app http.Handler, keeper *tlsx.Keeper, allowInsecure, tlsDeclared
 // on its own."*
 //
 // `certTrial` FALSIFIED THAT CLAUSE, WHICH IS WHY THIS IS AN AMENDMENT RATHER THAN A FIX. A
-// trial serves a certificate for ten minutes and then puts the previous one back BY ITSELF —
-// quince deciding, on a timer, to stop serving TLS, the one event the ruling assumed could not
-// happen. The trial landed after the ruling and nothing pointed back at it.
+// trial serves a certificate for the length of its window and then puts the previous one
+// back BY ITSELF — quince deciding, on a timer, to stop serving TLS, the one event the
+// ruling assumed could not happen. The trial landed after the ruling and nothing pointed
+// back at it.
 //
 // WHAT IT COSTS THE USER IT STRANDS, since that is what decides it. Someone whose certificate
 // works never sees this. It lands on the one whose certificate did NOT work — already the user
-// being asked to trust the ten-minute rollback as a safety net. The browser holds a permanent
+// being asked to trust the timed rollback as a safety net. The browser holds a permanent
 // upgrade to an origin that stopped existing, quince answers plain http, and the failure NAMES
 // NO CAUSE: from the browser's side the connection simply fails. Recovery is clearing the
 // cached redirect for that host, which the product does not mention and a first-run user will
