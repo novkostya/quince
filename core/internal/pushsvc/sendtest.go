@@ -17,6 +17,12 @@ import (
 // THE COPY IS DELIBERATELY BORING. It has to read as a test on a lock screen three seconds after
 // somebody tapped a button they are still looking at, and it must not be mistakable for a real
 // reminder about a device.
+//
+// AND IT DOES NOT SAY "quince", BECAUSE iOS ALREADY DOES. A Home Screen web app's notification is
+// rendered as `<title> from <app name>`, so a title beginning with the app's own name produced
+// *"quince notifications are working from quince"* on a real lock screen — measured 2026-08-18, on
+// the first notification quince ever delivered. Nothing in a test could have caught it: the
+// attribution is the platform's, not quince's, and it exists only on the device.
 func (s *Service) SendTest(ctx context.Context) ([]wire.PushDeliveryResult, error) {
 	sender, ok := s.store.(Sender)
 	if !ok {
@@ -27,7 +33,7 @@ func (s *Service) SendTest(ctx context.Context) ([]wire.PushDeliveryResult, erro
 	}
 	results, err := s.Deliver(ctx, sender, notify.Decision{
 		Kind:  KindTest,
-		Title: "quince notifications are working",
+		Title: testTitle,
 		Body:  "This is a test. Nothing needs backing up because of it.",
 		// THE HOME SCREEN, NOT A DEVICE PAGE. A test belongs to no device, and deep-linking to one
 		// would be a lie about why the notification arrived.
@@ -77,3 +83,7 @@ func toWire(results []Result) []wire.PushDeliveryResult {
 // because a 410 would go unrecorded and the dead device would stay listed as live.
 var ErrStoreCannotSend = errors.New(
 	"pushsvc: this service's store cannot record delivery outcomes, so it must not send")
+
+// testTitle is the lock-screen title of a test notification. A constant so its own test can read it
+// without a delivery round trip, which would prove the transport rather than the copy.
+const testTitle = "Notifications are working"

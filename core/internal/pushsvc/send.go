@@ -218,12 +218,19 @@ func (s *Service) deliverOne(ctx context.Context, sender Sender, key *push.VAPID
 
 // urgencyFor picks RFC 8030 §5.3's urgency from the payload's kind.
 //
-// A REMINDER MAY WAIT; A FAILURE MAY NOT. `low` lets a push service batch delivery to save battery,
-// which is right for "your phone is due for a backup" and wrong for "the backup did not finish" —
-// the second is the one somebody is waiting on.
+// A REMINDER MAY WAIT; SOMETHING SOMEBODY IS WATCHING FOR MAY NOT. `low` is not a hint — §5.3 defines
+// it as explicit permission for the push service to DELAY delivery to conserve battery, which is
+// right for "your phone is due for a backup" and wrong for anything a person is currently waiting on.
+//
+// `test` IS THE SHARPEST CASE AND IT USED TO FALL THROUGH TO `low`. A test notification is sent
+// because somebody just tapped a button and is staring at the screen; it is the only message in this
+// rung whose entire value is arriving NOW, and quince was telling Apple it could batch it. Measured
+// on an iPhone, 2026-08-18 — the first notification quince ever delivered took long enough that the
+// Operator assumed the network was at fault.
 func urgencyFor(payload []byte) string {
 	if bytes.Contains(payload, []byte(`"kind":"action_required"`)) ||
-		bytes.Contains(payload, []byte(`"kind":"backup_failed"`)) {
+		bytes.Contains(payload, []byte(`"kind":"backup_failed"`)) ||
+		bytes.Contains(payload, []byte(`"kind":"test"`)) {
 		return "high"
 	}
 	return "low"
