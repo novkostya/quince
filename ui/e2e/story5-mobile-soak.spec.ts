@@ -22,7 +22,7 @@ async function authenticate(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 }
 
-test("the dashboard fits a phone and lists an offline device with a disabled, explained action", async ({ page }) => {
+test("the dashboard fits a phone and lists an offline device whose action states its own condition", async ({ page }) => {
   await authenticate(page);
 
   // No horizontal overflow — the page must never require sideways scrolling on a phone.
@@ -71,10 +71,23 @@ test("the dashboard fits a phone and lists an offline device with a disabled, ex
   const offline = page.getByTestId("device-card").filter({ hasText: "attic-ipad" });
   await expect(offline.getByText("Offline")).toBeVisible();
   await expect(offline.getByText(/last seen/i)).toBeVisible();
-  // Its "Back up now" is present (layout stays aligned) but DISABLED with a visible reason.
+  // Its action is present (layout stays aligned) and IS the reason — quince#1202. The caption line
+  // above it is gone; the button states its own condition instead, which is what reclaimed the 25px
+  // that made this card the tallest in the row.
+  //
+  // `toBeDisabled()` PASSES ON `aria-disabled`, MEASURED — an earlier version of this comment said
+  // Playwright honours it "only on some roles" and asserted `toBeEnabled()`, which failed. It
+  // resolves disabled through the accessibility tree, so the a11y-facing state is what it reports.
+  //
+  // WHICH IS WHY THE DOM PROPERTY IS ASSERTED SEPARATELY. The whole point of `aria-disabled` here is
+  // that the control stays in the tab order — a truly `disabled` button is skipped by screen
+  // readers, so putting the reason inside one would delete it for the users who cannot see the
+  // styling. `toBeDisabled()` cannot tell those two apart; this can.
   const offlineBtn = offline.getByTestId("card-backup-now");
-  await expect(offlineBtn).toBeDisabled();
-  await expect(offline.getByText(/connect it over usb or wi-fi/i)).toBeVisible();
+  await expect(offlineBtn).toBeDisabled(); // a11y-facing: announced as unavailable
+  expect(await offlineBtn.evaluate((el: HTMLButtonElement) => el.disabled)).toBe(false); // still focusable
+  await expect(offlineBtn).toHaveText(/connect to back it up/i);
+  await expect(offline.getByText(/connect it over usb or wi-fi/i)).toHaveCount(0);
 
   // A backup row names its device (qn.6a #3) — the recent-backups list mixes devices.
   await expect(page.getByRole("heading", { name: /recent backups/i })).toBeVisible();

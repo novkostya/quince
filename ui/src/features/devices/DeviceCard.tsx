@@ -65,7 +65,18 @@ function BackupStatus({ device, attention }: { device: Device; attention?: boole
   if (device.last_backup) {
     return (
       <>
-        Last backup <RelativeTime iso={device.last_backup.at} /> · {device.last_backup.status}
+        {/* NO `· {status}` SUFFIX. It was a TAUTOLOGY, not a fact (quince#1202): `LastBackup` is
+            derived from the newest committed VERSION, and `storage.Manager.LastBackup` fills it with
+            the literal `"succeeded"` — versions only exist for backups that committed, so the word
+            could never be anything else in production.
+
+            OPERATOR-FOUND, from reading `succeeded · last attempt needs attention` on a card and
+            calling it weird. It is weirder than it looks: one half of that line varies and the other
+            half is a constant.
+
+            THE FIELD STAYS ON THE WIRE. `contracts.md` is frozen and `wire.LastBackup.Status` has
+            other readers; this is a decision about what the CARD says, not about the envelope. */}
+        Last backup <RelativeTime iso={device.last_backup.at} />
         {marker}
       </>
     );
@@ -263,26 +274,35 @@ export function DeviceCard({ device, due }: { device: Device; due?: DueState }) 
             // all and is in a different state. It must not acquire one to satisfy an alignment rule.
             <JobProgressInline job={activeJob} />
           ) : !present ? (
-            // Offline: a disabled "Back up now" WITH a reason (never a dead button), so the card
-            // keeps its shape (Operator ruling, (ch)/(bq)). The reason is shown inline as well as in
-            // the title — a hover title alone is invisible on a phone.
+            // Offline: THE BUTTON CARRIES THE REASON, so there is no caption line above it
+            // (quince#1202, Operator: *"maybe display something on the button itself"*).
             //
-            // THE REASON SITS ABOVE THE BUTTON NOW, and that RESTORES the ruling rather than
-            // altering it. The comment here used to say "same shape as an online card so the layout
-            // stays aligned" — right about the ruling and wrong about the code, which is the more
-            // dangerous way to be wrong, because it reads as authority. The caption underneath was
-            // precisely what pushed this branch's button a line higher than every other card's.
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Connect it over USB or Wi-Fi to back it up.</span>
-              <Button
-                size="sm"
-                disabled
-                title="Connect the device to back it up"
-                data-testid="card-backup-now"
-              >
-                Back up now
-              </Button>
-            </div>
+            // IT KEEPS THE (ch)/(bq) RULING AND DROPS ITS COST. That ruling is "a disabled Back up
+            // now WITH a reason, never a dead button" — the reason had to be on screen because a
+            // hover `title` is invisible on a phone. Putting it in the LABEL satisfies that on every
+            // surface, and reclaims the 25px the caption spent: measured, that caption was the only
+            // thing in normal operation that raised the device row, since a grid row takes its
+            // height from its tallest card.
+            //
+            // `aria-disabled`, NOT `disabled`, AND THAT IS THE ACCESSIBILITY HALF. A `disabled`
+            // button leaves the tab order and screen readers routinely skip it — so moving the
+            // reason into a truly disabled control would have DELETED it for exactly the users who
+            // cannot see the greyed-out styling. Same reasoning as `OnboardingHTTPSPage`. The button
+            // stays focusable and announced, and carries no handler, so there is nothing to suppress.
+            //
+            // `outline` RATHER THAN THE ACCENT FILL, because this is not an available action and a
+            // primary-looking button that does nothing is the "dead button" the ruling forbids in
+            // its other form. No `title`: the label says it, and a tooltip repeating the label is
+            // the same duplication quince#1195 removed one line up.
+            <Button
+              size="sm"
+              variant="outline"
+              aria-disabled="true"
+              className="cursor-default opacity-70"
+              data-testid="card-backup-now"
+            >
+              Connect to back it up
+            </Button>
           ) : device.paired !== "yes" ? (
             // Pairing is USB-only and narrated (Trust + passcode), so it lives on the device's
             // details page (qn.3); the card routes there carrying a pair INTENT (router state) so the
