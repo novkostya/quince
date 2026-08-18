@@ -211,8 +211,17 @@ func (s sourceSink) Apply(ev muxd.Event) { s.reg.apply(s.source, ev) }
 // serving USB is legitimate and was misrouted outright.
 //
 // Newest last_seen wins, which is mergedLocked's rule for which edge the merged table shows —
-// stated once here so routing cannot disagree with what the UI displays. Ties break on the
-// lexicographically smaller sourceID, because Go randomises map order and routing must not.
+// stated once here so routing cannot disagree with what the UI displays.
+//
+// THE TIE-BREAK IS THE COMMON PATH, NOT THE RARE ONE, and reading it as a parenthetical sends you
+// to the wrong branch first (quince#1232 review). `wire.Now()` formats `time.RFC3339`, which has
+// SECOND resolution and no fractional part — so two muxers replaying their attached sets at
+// startup, which is the topology this routing exists for, produce byte-identical timestamps
+// essentially always. When they do, `source < best` is what decides where the op goes.
+//
+// It breaks on the lexicographically smaller sourceID because Go randomises map iteration order
+// deliberately, and routing must not: without it one device's ops go to a different daemon per
+// call, which is a bug that reproduces one run in N.
 //
 // FALSE MEANS NO SOURCE HOLDS THAT EDGE, and the caller must refuse rather than substitute a
 // default: an op sent to a muxer that cannot see the device fails with a message about the
