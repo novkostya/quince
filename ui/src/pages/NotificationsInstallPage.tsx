@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { isIOS, pushSupport } from "@/lib/pwa";
+import { useNotifications, useSubscribe, useUnsubscribe } from "@/lib/notifications";
 
 // The install step for notifications (qn.12, spec D1).
 //
@@ -121,23 +123,133 @@ export function NotificationsInstallPage() {
           </Card>
         )}
 
-        {support === "supported" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                This device can receive notifications
-                <Badge tone="ok">Ready</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-fg-muted">
-              <p>
-                quince is installed on this device and its browser supports notifications. Nothing
-                else is needed here.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        {support === "supported" && <NotificationsControls />}
       </div>
+    </div>
+  );
+}
+
+// The five-cause status surface (qn.12, spec D6).
+//
+// quince#1124 item 4 names this as quince#940's defect in waiting: *"notifications are off" has at
+// least five causes and quince can tell them apart.* Collapsing them into one true, useless sentence
+// is what leaves somebody toggling a setting that was never the problem. Each state below renders its
+// OWN remedy, and the remedies are genuinely different — tap a button, open iOS Settings, edit a
+// config key, re-subscribe on this device.
+function NotificationsControls() {
+  const q = useNotifications();
+  const subscribe = useSubscribe();
+  const unsubscribe = useUnsubscribe();
+  const permission = typeof Notification === "undefined" ? "default" : Notification.permission;
+
+  // PERMISSION DENIED IS TERMINAL FROM HERE, and saying so is the honest thing. The platform will
+  // not re-prompt after a denial, so a button would do nothing — the remedy is outside quince.
+  if (permission === "denied") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Notifications are blocked for quince
+            <Badge tone="warn">Blocked</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-fg-muted">
+          <p>
+            You turned notifications off for quince. quince cannot ask again — turn them back on in
+            iOS Settings → Notifications → quince, then come back to this page.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const live = (q.data?.subscriptions ?? []).filter((s) => s.state === "live");
+  const expired = (q.data?.subscriptions ?? []).filter((s) => s.state !== "live");
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            This device
+            {live.length > 0 ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-fg-muted">
+          {live.length > 0 ? (
+            <p>quince will notify this device when a backup is due or needs you.</p>
+          ) : (
+            <p>Turn on notifications to hear when a device is due for a backup, or needs you.</p>
+          )}
+          {/* THE PROMPT MUST HANG OFF A REAL TAP — a platform requirement, not a preference, which
+              is why this is a button and not something the page does on mount. */}
+          {live.length === 0 && (
+            <Button
+              onClick={() => q.data && subscribe.mutate(q.data.vapid_public_key)}
+              disabled={!q.data || subscribe.isPending}
+            >
+              {subscribe.isPending ? "Turning on…" : "Turn on notifications"}
+            </Button>
+          )}
+          {subscribe.isError && (
+            <p className="text-danger">
+              {String(subscribe.error).includes("permission_denied")
+                ? "You declined. Turn notifications on in iOS Settings → Notifications → quince."
+                : "That did not work. Try again, and if it keeps failing check that quince was opened from your Home Screen."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* AN EXPIRED SUBSCRIPTION IS SHOWN, NOT HIDDEN (spec D8). A device that quietly stopped
+          receiving is the failure whose first symptom would otherwise be a missed backup, and the
+          remedy — re-enable on THAT device — needs the device named. */}
+      {expired.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              A device stopped receiving
+              <Badge tone="warn">Needs attention</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-fg-muted">
+            <p>
+              These devices are no longer reachable. Open quince on each one and turn notifications
+              on again.
+            </p>
+            <ul className="space-y-1">
+              {expired.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-3">
+                  <span>{s.label}</span>
+                  <Button variant="ghost" onClick={() => unsubscribe.mutate(s.id)}>
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {live.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Devices receiving notifications</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-1 text-fg-muted">
+              {live.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-3">
+                  <span>{s.label}</span>
+                  <Button variant="ghost" onClick={() => unsubscribe.mutate(s.id)}>
+                    Turn off
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

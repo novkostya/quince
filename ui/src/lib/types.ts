@@ -707,3 +707,24 @@ export interface StorageZFSHostKeyTrustResponse {
   trusted: boolean;
   path: string;
 }
+
+// GET /api/notifications (qn.12, contracts §1).
+//
+// THE ENDPOINT AND KEYS ARE ABSENT AND THAT IS THE POINT: they are what a sender needs, so anyone
+// holding them can push to that device. A subscription is identified here by a label and an id.
+export interface PushSubscriptionSummary {
+  id: string;
+  label: string;
+  /** `live` | `expired` — an expired row is LISTED rather than hidden, so a device that stopped
+   *  receiving can be named. Hiding it is what makes the failure invisible until a backup is missed. */
+  state: string;
+  created_at: string;
+  expired_at?: string;
+  last_sent_at?: string;
+}
+
+export interface NotificationsResponse {
+  /** The `applicationServerKey` every subscription is created against. Public by construction. */
+  vapid_public_key: string;
+  subscriptions: PushSubscriptionSummary[];
+}

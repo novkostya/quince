@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationsInstallPage } from "./NotificationsInstallPage";
 
@@ -44,7 +45,7 @@ afterEach(() => {
 describe("the notifications install page", () => {
   it("shows the literal iOS gesture to a Safari tab, and no control", () => {
     stageBrowser({ ios: true, standalone: false, serviceWorker: true, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     // THE GESTURE, NAMED. "Install" is not a word that appears anywhere in iOS.
     expect(screen.getByText(/Add to Home Screen/i)).toBeInTheDocument();
@@ -54,11 +55,14 @@ describe("the notifications install page", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("confirms readiness once installed, and stops instructing", () => {
+  it("offers the control once installed, and stops instructing", () => {
     stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: true });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
-    expect(screen.getByText(/can receive notifications/i)).toBeInTheDocument();
+    // THE READINESS CARD IS GONE AND THE CONTROL REPLACES IT. "You can receive notifications,
+    // nothing else is needed here" was true and useless; the honest end state of this page is a
+    // switch the person came to throw.
+    expect(screen.getByRole("button", { name: /turn on notifications/i })).toBeInTheDocument();
     // The instruction must be GONE, not merely deprioritised — somebody who has already followed it
     // reads a repeat as "it did not work".
     expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
@@ -69,7 +73,7 @@ describe("the notifications install page", () => {
   // nothing, where "not installed" is one gesture away from working.
   it("does not tell a Lockdown Mode user to add quince to their Home Screen", () => {
     stageBrowser({ ios: true, standalone: false, serviceWorker: false, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     expect(screen.getByText(/Lockdown Mode/i)).toBeInTheDocument();
     expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
@@ -84,7 +88,7 @@ describe("the notifications install page", () => {
 
   it("does not blame Lockdown Mode on a browser that is not iOS", () => {
     stageBrowser({ ios: false, standalone: false, serviceWorker: false, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     expect(screen.queryByText(/Lockdown Mode/i)).not.toBeInTheDocument();
     expect(screen.getByText(/does not support web notifications/i)).toBeInTheDocument();
@@ -101,7 +105,7 @@ describe("the notifications install page", () => {
   // exists separately rather than being folded into it.
   it("never tells a non-iOS browser to install when installing cannot help", () => {
     stageBrowser({ ios: false, standalone: false, serviceWorker: true, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/address bar/i)).not.toBeInTheDocument();
@@ -113,7 +117,7 @@ describe("the notifications install page", () => {
   // because Lockdown Mode removes the service worker too. quince can tell these apart, so it must.
   it("does not blame Lockdown Mode when the service worker rules it out", () => {
     stageBrowser({ ios: true, standalone: true, serviceWorker: true, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     expect(screen.queryByText(/Lockdown Mode/i)).not.toBeInTheDocument();
     expect(screen.getByText(/iOS 16\.4 or later/i)).toBeInTheDocument();
@@ -126,9 +130,24 @@ describe("the notifications install page", () => {
   // between two different explanations of one unchanged fact.
   it("gives an installed non-iOS browser the same answer as a tab", () => {
     stageBrowser({ ios: false, standalone: true, serviceWorker: true, pushManager: false });
-    render(<NotificationsInstallPage />);
+    renderPage();
 
     expect(screen.getByText(/does not support web notifications/i)).toBeInTheDocument();
     expect(screen.queryByText(/Add to Home Screen/i)).not.toBeInTheDocument();
   });
 });
+
+// renderPage supplies the QueryClient the controls need.
+//
+// THE PAGE FETCHES NOW, AND ITS TEST HARNESS HAD TO LEARN THAT. The `supported` branch used to be a
+// static card; it is a control backed by `GET /api/notifications`, so a bare `render` fails with
+// `No QueryClient set` — the same breakage `DeviceCard` produced when a query moved into it, and the
+// same honest signal that the component's dependencies changed.
+function renderPage() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <NotificationsInstallPage />
+    </QueryClientProvider>,
+  );
+}
