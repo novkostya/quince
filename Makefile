@@ -215,6 +215,10 @@ privacy-check: ## Sweep for Operator-private strings (REF=<range> whole-branch, 
 closing-refs-check: ## Find bare closing keywords that auto-close an issue (REF=<range>, TEXT=<file>); 0 none · 1 found · 2 DID NOT LOOK
 	@bin/closing-refs-check $(if $(REF),--ref $(REF)) $(if $(TEXT),--text $(TEXT))
 
+.PHONY: stale-refs-report
+stale-refs-report: ## Open issues whose fix merged under Refs and which nobody closed (REPO=, PRS=, ISSUES=); 0 looked · 2 DID NOT LOOK
+	@bin/stale-refs-report $(if $(REPO),--repo $(REPO)) $(if $(PRS),--prs $(PRS)) $(if $(ISSUES),--issues $(ISSUES))
+
 .PHONY: gap-heading-check
 gap-heading-check: ## Find a `PROPOSED (gap)` block whose own body says RULED; 0 none · 1 found · 2 DID NOT RUN
 	@bin/gap-heading-check
@@ -349,7 +353,8 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
-                   demo-block-check-test build-args-test release-image-test go-test-args-test
+                   demo-block-check-test build-args-test release-image-test go-test-args-test \
+                   stale-refs-report-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -418,6 +423,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \
+                   bin/stale-refs-report bin/stale-refs-report-test \
                    bin/forge-watch-role-test bin/forge-ledger bin/forge-watch-selfcaused-test \
                    bin/forge-watch-actor-test bin/forge-watch-postmerge-test \
                    bin/loop-drift bin/loop-drift-test \
@@ -584,6 +590,10 @@ forge-watch-role-test: ## Branch-ownership suppression is role-dependent (quince
 .PHONY: closing-refs-check-test
 closing-refs-check-test: ## The closing-keyword gate's own refusals, all three exit codes (quince#293)
 	@bin/closing-refs-check-test
+
+.PHONY: stale-refs-report-test
+stale-refs-report-test: ## The stale-refs report's classification and its DID-NOT-LOOK paths (quince#1002)
+	@bin/stale-refs-report-test
 
 .PHONY: gap-heading-check-test
 gap-heading-check-test: ## The gap-marker gate's refusals + quince#408's three instances as fixtures
