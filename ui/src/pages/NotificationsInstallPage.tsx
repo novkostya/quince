@@ -363,6 +363,15 @@ function NotificationsControls() {
       {live.length > 0 && (
         <section>
           <SectionHeading>Devices receiving notifications</SectionHeading>
+          {/* A FAILED "Turn off" USED TO SAY NOTHING AT ALL. `subscribe` and `sendTest` both render
+              their errors and this one did not, so a refused removal was indistinguishable from a
+              button that does not work — which is how the Operator reported it. */}
+          {unsubscribe.isError && (
+            <p className="mt-3 text-sm text-danger">
+              That device could not be turned off. The list has been refreshed —
+              if it is gone, it was already removed somewhere else.
+            </p>
+          )}
           {/* THE SAME ROW AS A PASSKEY, because it is the same kind of thing: a credential-backed
               registration the user can revoke, one per line, with the name at full contrast and the
               detail beneath it. Operator-reported 2026-08-18 — this list was plain muted text with a
