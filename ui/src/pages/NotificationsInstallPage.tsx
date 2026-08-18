@@ -71,13 +71,22 @@ export function NotificationsInstallPage() {
           configuration surface with the rendered `config.yml` beside it (Operator ruling 2026-08-18,
           quince#1212). `min-w-0` on BOTH columns is structural, not decoration — a grid item defaults
           to `min-width: auto`, so one long line in the config dump would widen this column, the grid,
-          and the content area with it, sliding the controls off the left edge on a phone (quince#631).
-
-          `max-w-xl` IS GONE FROM THE COLUMN and that is deliberate: the column is now the constraint,
-          and a second width limit inside it made the left column narrower than the right for no
-          reason a reader could see. */}
+          and the content area with it, sliding the controls off the left edge on a phone (quince#631). */}
       <div className="mt-6 grid gap-8 lg:grid-cols-2">
-        <div className="min-w-0 space-y-8">
+        {/* `max-w-xl` IS BACK, AND REMOVING IT WAS A REGRESSION (quince#1218, Operator-reported
+            from a Mac the same day). The column was `mt-6 max-w-xl space-y-8` before that PR turned
+            it into a grid, and the reasoning for dropping it — *"the column is now the constraint"*
+            — held only for a narrow window. On a wide one the column is ~1130px, and two things
+            break at once: a device row puts its name at the far left and its `Turn off` button
+            seven hundred pixels away, and every hint under a category switch runs to roughly ninety
+            characters, well past the 45–75 a line should carry.
+
+            THE CONSTRAINT BELONGS ON THE CONTENT, NOT ON THE COLUMN, which is why this is not
+            simply a revert. The grid column must stay full width so `min-w-0` still governs
+            overflow (quince#631); it is the prose and the rows inside it that want a measure. The
+            right column is deliberately unconstrained — a config dump is not prose and wants every
+            pixel it can have. */}
+        <div className="min-w-0 max-w-xl space-y-8">
         {support === "unsupported_platform" && (
           <section>
             <SectionHeading className="flex items-center gap-2">
