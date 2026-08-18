@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
-import type { NotificationsResponse } from "./types";
+import type { NotificationsResponse, NotificationsTestResponse } from "./types";
 import { pushSupport } from "./pwa";
 
 // The Web Push subscription client (qn.12, contracts §1).
@@ -103,6 +103,24 @@ export function useUnsubscribe() {
         /* The platform's own bookkeeping; nothing quince can do about it and nothing it breaks. */
       }
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
+  });
+}
+
+// useSendTest asks quince to push one notification to every live subscription, right now.
+//
+// IT IS WHAT MAKES THE FEATURE INSTALLABLE BY A PERSON. Without it the only proof that
+// notifications work is to wait for a device to go stale — three days by default — and the only
+// diagnosis available on failure is "nothing arrived", which does not distinguish a declined
+// permission from a dead subscription from a push service that is down.
+//
+// IT INVALIDATES THE LIST, because a test is also a probe: a 410 marks that subscription expired
+// server-side, so the device list is stale the moment this returns. That is the whole reason the
+// endpoint reports per-device state rather than a boolean.
+export function useSendTest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<NotificationsTestResponse>("/api/notifications/test", {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
 }

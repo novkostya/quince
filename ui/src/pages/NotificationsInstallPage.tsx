@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { isIOS, pushSupport } from "@/lib/pwa";
-import { useNotifications, useSubscribe, useUnsubscribe } from "@/lib/notifications";
+import { useNotifications, useSendTest, useSubscribe, useUnsubscribe } from "@/lib/notifications";
 
 // The install step for notifications (qn.12, spec D1).
 //
@@ -140,6 +140,7 @@ function NotificationsControls() {
   const q = useNotifications();
   const subscribe = useSubscribe();
   const unsubscribe = useUnsubscribe();
+  const sendTest = useSendTest();
   const permission = typeof Notification === "undefined" ? "default" : Notification.permission;
 
   // PERMISSION DENIED IS TERMINAL FROM HERE, and saying so is the honest thing. The platform will
@@ -197,6 +198,49 @@ function NotificationsControls() {
                 ? "You declined. Turn notifications on in iOS Settings → Notifications → quince."
                 : "That did not work. Try again, and if it keeps failing check that quince was opened from your Home Screen."}
             </p>
+          )}
+          {/* SEND TEST IS THE ONLY WAY TO PROVE THIS WORKS WITHOUT WAITING DAYS. The next real
+              notification is whenever a device next goes stale — three days by default — so without
+              this the setup flow ends on "we think that worked". It is placed on the same card as
+              the switch, because "turn it on" and "check it arrived" are one task. */}
+          {live.length > 0 && (
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                onClick={() => sendTest.mutate()}
+                disabled={sendTest.isPending}
+              >
+                {sendTest.isPending ? "Sending…" : "Send a test notification"}
+              </Button>
+              {/* PER DEVICE, NEVER A SINGLE VERDICT. With two phones subscribed, "sent" would be a
+                  lie about the one that failed, and the remedy differs per state. */}
+              {sendTest.isSuccess && (
+                <ul className="space-y-1 text-sm">
+                  {sendTest.data.results.length === 0 && (
+                    <li>No devices are subscribed, so nothing was sent.</li>
+                  )}
+                  {sendTest.data.results.map((r) => (
+                    <li key={r.label + r.state}>
+                      {r.state === "sent" && <span>Sent to {r.label}. Check its lock screen.</span>}
+                      {r.state === "expired" && (
+                        <span className="text-warn">
+                          {r.label} is no longer reachable — turn notifications on again on that
+                          device.
+                        </span>
+                      )}
+                      {r.state === "error" && (
+                        <span className="text-danger">
+                          {r.label} did not receive it. Try again in a moment.
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {sendTest.isError && (
+                <p className="text-danger">quince could not send the test. Try again in a moment.</p>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
