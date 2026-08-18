@@ -35,9 +35,13 @@ func isDeviceConfirm(s string) bool {
 // prompts from answers (in order) and firing onDeviceConfirm once the device-side passcode
 // step begins. It returns the full captured output and the child's exit error. args must NOT
 // contain any password (interface fact 1 — argv is forbidden).
-func (t *Tools) runInteractiveBackup2(ctx context.Context, transport string, args []string, answers []ptyAnswer, onDeviceConfirm func()) (string, error) {
+func (t *Tools) runInteractiveBackup2(ctx context.Context, udid, transport string, args []string, answers []ptyAnswer, onDeviceConfirm func()) (string, error) {
+	env, err := t.childEnv(udid, transport)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, t.Idevicebackup2, t.args(args...)...)
-	cmd.Env = t.childEnv(transport)
+	cmd.Env = env
 	cancelKillGroup(cmd) // pty.Start sets Setsid (own session/group); ctx-cancel kills the group
 
 	f, err := pty.Start(cmd)
@@ -125,7 +129,7 @@ func (t *Tools) Encryption(ctx context.Context, udid, transport string, enable b
 		answers = []ptyAnswer{{"backup password", password}, {"backup password", password}} // set + confirm
 	}
 	args := append(backup2Opts(udid, transport), "encryption", state)
-	_, err := t.runInteractiveBackup2(ctx, transport, args, answers, onDeviceConfirm)
+	_, err := t.runInteractiveBackup2(ctx, udid, transport, args, answers, onDeviceConfirm)
 	return err
 }
 
@@ -142,6 +146,6 @@ func (t *Tools) ChangePassword(ctx context.Context, udid, transport, oldPassword
 		{"new backup password", newPassword}, // confirm entry, if the CLI asks twice
 	}
 	args := append(backup2Opts(udid, transport), "changepw")
-	_, err := t.runInteractiveBackup2(ctx, transport, args, answers, onDeviceConfirm)
+	_, err := t.runInteractiveBackup2(ctx, udid, transport, args, answers, onDeviceConfirm)
 	return err
 }

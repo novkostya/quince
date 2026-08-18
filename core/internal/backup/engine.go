@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/novkostya/quince/core/internal/bus"
-	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -82,11 +81,11 @@ type ToolConfig struct {
 	Bin       string   // "" → "idevicebackup2"
 	ArgPrefix []string // test-only leading args (-test.run=… "--")
 	Env       []string // test-only extra child env (the fake harness knobs)
-	// PARSED endpoints, not config strings (qn.6p D3): the grammar is decided once at startup,
-	// so a backup child cannot be handed a spelling libusbmuxd reads differently from the
-	// presence client that is talking to the same daemon.
-	Usbmuxd muxaddr.Endpoint
-	Netmuxd muxaddr.Endpoint
+	// THE MUXER IS RESOLVED PER DEVICE, not per transport (quince#1219 item D): the registry knows
+	// which muxer reported a device and the child is pointed at that one. The grammar is still
+	// decided once at startup (qn.6p D3), so a backup child cannot be handed a spelling libusbmuxd
+	// reads differently from the presence client talking to the same daemon.
+	MuxerFor MuxerFor
 }
 
 // Engine runs backups. One goroutine per job; a global per-UDID single-flight (never two jobs for
@@ -197,7 +196,7 @@ func New(o Options) *Engine {
 			preferredTransport: o.Config.PreferredTransport,
 		},
 		tool: &tool{bin: o.Tool.Bin, argPrefix: o.Tool.ArgPrefix, env: o.Tool.Env,
-			usbmuxd: o.Tool.Usbmuxd, netmuxd: o.Tool.Netmuxd},
+			muxerFor: o.Tool.MuxerFor},
 		running: map[string]*liveJob{}, logs: newLogStore(),
 	}
 }
@@ -718,7 +717,11 @@ type runningTool struct {
 func (e *Engine) startTool(parent context.Context, lj *liveJob, target, gatePath string) (*runningTool, error) {
 	udid := lj.row.UDID
 	runCtx, cancel := context.WithCancel(parent)
-	cmd := e.tool.command(runCtx, lj.row.Transport, udid, target, gatePath)
+	cmd, err := e.tool.command(runCtx, lj.row.Transport, udid, target, gatePath)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("idevicebackup2: %w", err)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()

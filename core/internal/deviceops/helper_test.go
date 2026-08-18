@@ -39,7 +39,7 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 // fakeTools returns a Tools whose three CLIs are the test binary, with the given extra child
 // env selecting fake behaviour (DEVICEOPS_FAKE=…, DEVICEOPS_* knobs).
 func fakeTools(env ...string) *Tools {
-	tl := NewTools(mustEP("/var/run/usbmuxd"), mustEP("127.0.0.1:27015"), discard())
+	tl := NewTools(StaticMuxer(mustEP("/var/run/usbmuxd")), discard())
 	tl.Idevicepair = os.Args[0]
 	tl.Ideviceinfo = os.Args[0]
 	tl.Idevicebackup2 = os.Args[0]
