@@ -225,4 +225,29 @@ describe("a refusal with no accepts", () => {
     expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use a passkey" })).not.toBeInTheDocument();
   });
+
+  // RETURN SUBMITS THE ROW. A named field beside one button is a form, and typing a name then
+  // pressing Return did nothing at all — the same defect reported three times on the onboarding
+  // flow, living here too.
+  it("creates the passkey when Return is pressed in the name field", async () => {
+    const register = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
+    renderRow();
+    const field = screen.getByLabelText("Passkey name");
+    fireEvent.change(field, { target: { value: "my iPhone" } });
+
+    fireEvent.submit(field.closest("form")!);
+
+    await waitFor(() => expect(register).toHaveBeenCalled());
+  });
+
+  // AND NOT WITH AN EMPTY NAME, matching the button's own disabled rule rather than inventing a
+  // second one.
+  it("does nothing on Return while the name is empty", () => {
+    const register = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
+    renderRow();
+
+    fireEvent.submit(screen.getByLabelText("Passkey name").closest("form")!);
+
+    expect(register).not.toHaveBeenCalled();
+  });
 });

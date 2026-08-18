@@ -75,6 +75,29 @@ export function OnboardingCertificatePage() {
     }
   }
 
+  // WHY A TRIAL WOULD BE POINTLESS, OR NULL. Two independent facts make it so, and they come from
+  // two different checks — which is exactly how the second one shipped unguarded: a name the
+  // certificate covered, unreachable from this browser, with the button live under a red box saying
+  // so.
+  //
+  //   the certificate cannot cover the address the confirm link would use
+  //   this browser cannot reach that address at all
+  //
+  // NEITHER IS A JUDGEMENT ABOUT THE FILES. The pair is `usable` in both cases; what is wrong is
+  // where it would be tried. And neither blocks the journey the Operator ruled valid — a browser
+  // warning about the ISSUER, on an address that works — because that address is covered and
+  // reachable, so this returns null for it.
+  const blocked: string | null = (() => {
+    if (offline === null || offline.outcome !== "usable") return null;
+    if (hostname.trim() === "" && offline.current_host !== "" && !offline.current_host_covered) {
+      return `This certificate does not cover ${offline.current_host}. Enter a name it covers above, then check again.`;
+    }
+    if (reach !== null && !reachedThisQuince(reach)) {
+      return `This device cannot reach quince at ${reach.url}. Point that name at this machine, then check again.`;
+    }
+    return null;
+  })();
+
   return (
     <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
       <div className="mx-auto w-full max-w-2xl">
@@ -82,8 +105,8 @@ export function OnboardingCertificatePage() {
         <div className="text-lg font-semibold tracking-tight">quince</div>
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Give quince your own certificate</h1>
         <p className="mt-1 text-sm text-muted">
-          quince checks the files before anything changes, and nothing is written to configuration
-          until a certificate has proved itself over https.
+          quince checks the files first. Nothing is saved until the certificate has worked over
+          https.
         </p>
 
         {/* THE PLACEHOLDERS ARE THE PATHS THE SHIPPED EXAMPLES PRODUCE, and that is the whole
@@ -92,7 +115,17 @@ export function OnboardingCertificatePage() {
             `/certs/quince.key` in the `tls:` block a user copies. A placeholder from a different
             convention teaches a path that does not exist on any install this project describes —
             worse than an empty box, because it reads as instruction. */}
-        <div className="mt-6 space-y-4">
+        {/* A FORM, SO RETURN SUBMITS IT. Three text fields and one action is a form whatever the
+            markup says, and a keyboard user pressing Return on the last field expects the button —
+            on a phone the key is literally labelled "go". Without this the page silently does
+            nothing, which is the third time this defect has been reported on this flow. */}
+        <form
+          className="mt-6 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canCheck) void check();
+          }}
+        >
           <Field
             id="cert-file"
             label="Certificate file"
@@ -132,13 +165,16 @@ export function OnboardingCertificatePage() {
               clearResults();
             }}
           />
-        </div>
 
-        <div className="mt-4">
-          <Button onClick={() => void check()} disabled={!canCheck}>
-            {busy ? "Checking…" : "Check these files"}
-          </Button>
-        </div>
+          <div className="mt-4">
+            {/* THE DEFAULT BUTTON, which is what makes Return work — and being disabled is what makes
+                Return correctly do nothing while a field is empty, with no second rule to keep in
+                step. */}
+            <Button type="submit" disabled={!canCheck}>
+              {busy ? "Checking…" : "Check these files"}
+            </Button>
+          </div>
+        </form>
 
         {errors ? (
           <div role="alert" className="mt-4 rounded-card border border-danger bg-card px-3 py-2 text-sm">
@@ -158,18 +194,13 @@ export function OnboardingCertificatePage() {
             certFile={certFile.trim()}
             keyFile={keyFile.trim()}
             hostname={hostname.trim()}
-            // FROM THE PROBE, NOT FROM THE BROWSER. `window.location.hostname` is the same string
-            // most of the time and is the wrong source: the coverage answer beside it came from the
-            // daemon comparing the leaf to the host IT saw, and a page deciding on its own would be a
-            // second implementation of one question — able to disagree with the sentence directly
-            // above the button.
-            currentHost={offline.current_host}
-            currentHostCovered={offline.current_host_covered}
+            // THE REASON IS COMPOSED HERE, from the daemon's own coverage answer and this
+            // browser's own reach result — see `blocked` above.
+            blocked={blocked}
           />
         ) : offline ? (
           <p className="mt-6 text-sm text-muted">
-            Nothing has been saved. Fix what the check reported and run it again — quince serves a
-            certificate only once these files pass.
+            Nothing was saved. Fix what the check reported and try again.
           </p>
         ) : null}
 
@@ -275,15 +306,13 @@ function OfflineResult({ probe }: { probe: CertificateProbe }) {
       {ok && probe.hostname === "" && probe.current_host !== "" ? (
         probe.current_host_covered ? (
           <p className="mt-2 text-xs text-muted">
-            You are on <code className="font-mono">{probe.current_host}</code>, which this
-            certificate covers — leaving the name empty keeps you there.
+            It covers <code className="font-mono">{probe.current_host}</code>, the address you are
+            on, so you can leave the name empty.
           </p>
         ) : (
           <p className="mt-2 text-xs">
-            You are on <code className="font-mono">{probe.current_host}</code>, which this
-            certificate does <strong>not</strong> cover. Leaving the name empty keeps you there, and
-            your browser will warn you about the certificate every time. Type a name it covers to
-            move to one instead.
+            It does <strong>not</strong> cover <code className="font-mono">{probe.current_host}</code>,
+            the address you are on. Leave the name empty and your browser will warn you every visit.
           </p>
         )
       ) : null}
@@ -314,26 +343,22 @@ function ReachResult({ outcome }: { outcome: ProbeOutcome }) {
   if (reachedThisQuince(outcome)) {
     return (
       <div role="status" className="mt-3 rounded-card border border-ok bg-card px-3 py-2 text-sm">
-        <strong>This browser reached quince at {outcome.url}.</strong> The name gets here, so applying
-        moves that address to https. Whether your browser trusts the certificate itself is what the
-        trial will show.
+        <strong>That name reaches quince.</strong> Trying the certificate will move it to https.
       </div>
     );
   }
   if (outcome.kind === "other-quince") {
     return (
       <div role="alert" className="mt-3 rounded-card border border-danger bg-card px-3 py-2 text-sm">
-        <strong>Something else answered at {outcome.url}.</strong> That name does not reach this
-        quince, so applying would send you somewhere else.
+        <strong>Something else answers at {outcome.url}.</strong> That name does not point at this
+        quince.
       </div>
     );
   }
   return (
     <div role="alert" className="mt-3 rounded-card border border-danger bg-card px-3 py-2 text-sm">
-      <strong>This browser could not reach quince at {outcome.url}.</strong> quince is serving that
-      address right now, so a name that worked would answer — applying would send you somewhere you
-      cannot get to, and you would wait ten minutes to find out. Check the name points here before
-      trying it.
+      <strong>This device cannot reach quince at {outcome.url}.</strong> Check that the name points
+      at this machine.
     </div>
   );
 }

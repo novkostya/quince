@@ -23,17 +23,19 @@ export function CertificateApply({
   certFile,
   keyFile,
   hostname,
-  currentHost,
-  currentHostCovered,
+  blocked,
 }: {
   certFile: string;
   keyFile: string;
   hostname: string;
-  // WHERE THE CONFIRM LINK WOULD POINT IF THE NAME IS LEFT EMPTY, and whether this pair covers it.
-  // The apply answers the same question in `confirm_host_covered` — one press too late to stop
-  // anybody. This is the CHECK's answer, already on screen before the button is reachable.
-  currentHost: string;
-  currentHostCovered: boolean;
+  // WHY A TRIAL WOULD BE POINTLESS, COMPOSED BY THE PAGE, or null when it would not be.
+  //
+  // THE PAGE OWNS THIS BECAUSE IT HOLDS BOTH FACTS. A trial is a dead end for two independent
+  // reasons — the certificate cannot cover the address the link would use, or this browser cannot
+  // reach that address at all — and they arrive from two different checks. Deriving one of them
+  // here is what let the other ship unguarded: a name the certificate covered, unreachable from
+  // this browser, with the button live under a red box saying so.
+  blocked: string | null;
 }) {
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState<CertificateApplied | null>(null);
@@ -57,38 +59,31 @@ export function CertificateApply({
     }
   }
 
-  // THE TRIAL IS NOT OFFERED WHEN THE ADDRESS IT WOULD USE CANNOT MATCH — Operator direction,
-  // 2026-08-18: *"there should be no way to tap Try it now — this is guaranteed dead end."*
+  // THE TRIAL IS NOT OFFERED WHEN IT CANNOT SUCCEED — Operator direction, 2026-08-18: *"there should
+  // be no way to tap Try it now — this is guaranteed dead end."* The reason arrives already worded,
+  // because the page is where both halves of "pointless" are known.
   //
-  // WITH THE NAME LEFT EMPTY the confirm link is built from the address this request arrived on. A
-  // pair that does not cover that address produces a name mismatch there — not once, but on every
-  // visit for as long as the install stands, because confirming writes exactly this pair for exactly
-  // this address. A user CAN click through it; what they get is an install that warns every time.
-  //
-  // IT DOES NOT TOUCH THE JOURNEY THE OPERATOR RULED VALID — *"this is also a valid test case"* —
-  // because that one is a certificate that DOES cover where you are: self-signed for this host, or
-  // an internal CA. There `currentHostCovered` is true, the button stays live, the browser warns
-  // about the ISSUER rather than the name, and trusting it once ends the warnings.
+  // IT DOES NOT TOUCH THE JOURNEY THE OPERATOR RULED VALID — *"this is also a valid test case"* — a
+  // certificate that DOES cover a reachable address, self-signed or from an internal CA. There the
+  // browser warns about the ISSUER, trusting it once ends the warnings, and quince must not stand in
+  // the way. Nothing here blocks a warning; it blocks an address that cannot work.
   //
   // A DISABLED BUTTON WITH A REASON, not a hidden one: the remedy is one field away, and a control
   // that vanishes teaches nothing.
-  const deadEnd = currentHost !== "" && hostname === "" && !currentHostCovered;
-
   if (applied) return <ConfirmInstructions applied={applied} onRestart={() => setApplied(null)} />;
 
   return (
     <div className="mt-6 rounded-card border border-line bg-card px-3 py-3 text-sm">
       <p>
-        <strong>Try this certificate.</strong> quince starts serving TLS with it immediately — no
-        restart — and <strong>writes nothing to configuration yet</strong>.
+        <strong>Try this certificate.</strong> quince starts using it now and{" "}
+        <strong>saves nothing yet</strong>.
       </p>
       {/* SAID BEFORE THE BUTTON, NOT AFTER. This is the reassurance that makes it safe to press, and
           a user who only learns it once the page has changed has already taken the risk they were
           being reassured about. */}
       <p className="mt-2 text-muted">
-        You then have ten minutes to confirm it over https. If you do not — because it turns out to
-        be a certificate your browser will not accept — quince goes back to what it was serving, and{" "}
-        <code className="font-mono">config.yml</code> was never touched.
+        You have ten minutes to open it over https and confirm. If you do not, quince goes back to
+        what it had and nothing is saved.
       </p>
       {/* THE COST TO **THIS** PAGE, WHICH NOTHING SAID. The moment a certificate is serving,
           `plainHalf` starts redirecting http to https, so every request from this page is sent to an
@@ -100,20 +95,16 @@ export function CertificateApply({
           trial evaporates and the daemon comes back on what `config.yml` names. Offering only "wait
           ten minutes" under-sells a guarantee the daemon already makes. */}
       <p className="mt-2 text-muted">
-        This page stops working while the trial runs — quince starts sending http to https at once,
-        so use the link it gives you. If you want out sooner than ten minutes, restart quince: that
-        cancels the trial immediately and nothing was written.
+        This page will stop working while you do — use the link quince gives you. Restarting quince
+        cancels the whole thing at once.
       </p>
-      {deadEnd ? (
+      {blocked !== null ? (
         <p role="status" className="mt-3 rounded-card border border-warn bg-bg px-3 py-2">
-          <strong>Not from this address.</strong> The link would point at{" "}
-          <code className="font-mono">{currentHost}</code>, which this certificate does not cover, so
-          your browser would warn you there every time. Put a name it covers in the field above and
-          check again.
+          {blocked}
         </p>
       ) : null}
       <div className="mt-3">
-        <Button onClick={() => void apply()} disabled={busy || deadEnd}>
+        <Button onClick={() => void apply()} disabled={busy || blocked !== null}>
           {busy ? "Starting…" : "Try it now"}
         </Button>
       </div>
@@ -159,12 +150,10 @@ function ConfirmInstructions({
     return (
       <div role="status" className="mt-6 rounded-card border border-line bg-card px-3 py-3 text-sm">
         <p>
-          <strong>The ten minutes are up, so quince has gone back to what it was serving.</strong>
+          <strong>Time is up, so quince has gone back to the certificate it had.</strong>
         </p>
         <p className="mt-2 text-muted">
-          Nothing was written — <code className="font-mono">config.yml</code> is exactly as it was.
-          The link from this trial no longer works; start another when you are ready, with the same
-          files or different ones.
+          Nothing was saved. Start again whenever you are ready.
         </p>
         <div className="mt-3">
           <Button onClick={onRestart}>Try again</Button>
@@ -186,8 +175,8 @@ function ConfirmInstructions({
           URL from. */}
       <p className="mt-2">
         {applied.confirm_host_covered
-          ? "Open this link. It is the same quince, at a name this certificate covers, over https:"
-          : "Open this link. It is the same quince over https — but at an address this certificate does not cover, so your browser will warn you first:"}
+          ? "Open this link to confirm. It is this quince, over https:"
+          : "Open this link to confirm. Your browser will warn you first — this certificate does not cover that address:"}
       </p>
       {/* A NEW TAB, DELIBERATELY. This page is the instructions; a user whose https link fails needs
           to still be looking at them, and on a name that does not resolve a same-tab navigation
@@ -201,9 +190,8 @@ function ConfirmInstructions({
           a restart does the same thing in seconds, because a trial is held in memory and evaporates
           with the process — fail-safe by construction rather than by a handler running. */}
       <p className="mt-3 text-muted">
-        If the page will not load at all, do nothing: quince goes back by itself in a few minutes,
-        nothing was saved, and you can try a different name or a different file. Restarting quince
-        does the same thing straight away.
+        If it will not load, do nothing — quince goes back on its own in a few minutes and nothing
+        is saved. Restarting quince does it at once.
       </p>
     </div>
   );

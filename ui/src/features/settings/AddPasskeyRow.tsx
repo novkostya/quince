@@ -208,7 +208,22 @@ export function AddPasskeyRow({
           would read as *a passkey that is broken*, on the one screen that warns when a credential
           has stopped working at this address. The content carries the difference instead: a text
           input and a button do not look like a row of text. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-bg px-3 py-2">
+      {/* A FORM, SO RETURN SUBMITS IT. A named field beside one action is a form whatever the markup
+          says; without this, typing a name and pressing Return did nothing at all. Which action it
+          submits follows the stage, exactly as the visible button does. */}
+      <form
+        className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-bg px-3 py-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!supported || busy) return;
+          if (stage.at === "proved") {
+            // At this stage the ceremony wants a fresh user gesture, and a submit is one.
+            create(stage.present);
+            return;
+          }
+          if (name.trim() !== "") create(undefined);
+        }}
+      >
         <div className="min-w-0 flex-1">
           {/* D8: THE LABEL IS VISUALLY HIDDEN, NOT ABSENT. The placeholder is a HINT — it
               disappears the moment the user types, and a screen reader announces an unnamed field.
@@ -242,7 +257,7 @@ export function AddPasskeyRow({
             {busy ? "…" : "Add"}
           </Button>
         )}
-      </div>
+      </form>
       {stage.at === "proved" ? (
         <p className="mt-2 text-sm text-muted">
           Confirmed. Press <span className="font-medium">Create the passkey</span> to make it — your
