@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -50,6 +53,28 @@ beforeEach(() => {
 });
 
 describe("the certificate step", () => {
+  // THE PLACEHOLDERS ARE THE PATHS THE SHIPPED EXAMPLES PRODUCE, read out of the doc rather than
+  // copied into this test. A placeholder is instruction: it is what a user types when they have no
+  // idea what to type, and one from a convention this project does not ship teaches a path that
+  // exists nowhere. Found on the rig, 2026-08-18 — the field suggested `/etc/quince/tls/…` while
+  // both compose examples mount `/certs` and `deploy/tls.md` names `/certs/quince.pem`.
+  //
+  // IT READS `deploy/tls.md` BECAUSE THAT IS THE ARTIFACT A USER COPIES FROM. A constant compared to
+  // a constant would pass while the doc moved underneath it.
+  it("suggests the same paths deploy/tls.md tells a user to configure", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const doc = readFileSync(resolve(here, "../../../deploy/tls.md"), "utf8");
+
+    const cert = /cert_file:\s*(\S+)/.exec(doc);
+    const key = /key_file:\s*(\S+)/.exec(doc);
+    expect(cert, "deploy/tls.md no longer names a cert_file").not.toBeNull();
+    expect(key, "deploy/tls.md no longer names a key_file").not.toBeNull();
+
+    renderPage();
+    expect(screen.getByLabelText(/Certificate file/i)).toHaveAttribute("placeholder", cert![1]);
+    expect(screen.getByLabelText(/^Key file/i)).toHaveAttribute("placeholder", key![1]);
+  });
+
   // THE HOSTNAME FIELD STARTS EMPTY AND IS NEVER PRE-FILLED (quince#908 §5). That is the name they
   // are LEAVING — an IP or a `.local` — and no CA issues for either. Pre-filling it would quietly
   // aim the whole step at the address the user came here to stop using.
