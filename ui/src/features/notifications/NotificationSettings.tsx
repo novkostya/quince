@@ -147,12 +147,29 @@ export function NotificationSettings({ config }: { config: Config }) {
                   reason `ConfigEditor`'s `Field` exists for is satisfied by nesting, which is what
                   that comment says to do when the control is inside the label. */}
               <label className="flex items-start gap-2.5 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 shrink-0"
-                  checked={draft.notifications[c.key]}
-                  onChange={(e) => setNotifications({ [c.key]: e.target.checked })}
-                />
+                {/* THE LINE BOX IS DERIVED FROM THE TOKENS, NOT NUDGED TOWARDS IT AND NOT PINNED TO
+                    A LITERAL. This is quince#1192's pattern verbatim, and it already sat in
+                    `SetupPasswordPage` before this screen existed — quince#1227 is the issue for the
+                    fact that nothing made it findable.
+
+                    It was `mt-0.5`, a fixed 2px nudge tuned against the OLD `text-sm` (14px/20px),
+                    where top-align plus 2px landed a ~13px native checkbox within a pixel of the
+                    line's optical centre — correct by luck. quince#1192 moved `text-sm` to 16px/24px
+                    and the same nudge leaves the box 3–4px high, floating above its own label. That
+                    is the defect the Operator reported here, and it is character for character the
+                    one already fixed on the setup screen.
+
+                    `calc()` OVER A TAILWIND STEP, deliberately. `h-6` is the same 1.5rem today and
+                    would need a test pinning both tokens to stay true — a second place to keep in
+                    step, whose failure mode is a red test rather than a correct screen. This form
+                    has no second place: move the scale and the box follows. */}
+                <span className="flex h-[calc(var(--type-sm)*var(--type-sm-line))] shrink-0 items-center">
+                  <input
+                    type="checkbox"
+                    checked={draft.notifications[c.key]}
+                    onChange={(e) => setNotifications({ [c.key]: e.target.checked })}
+                  />
+                </span>
                 <span className="min-w-0">
                   <span className="font-medium">{c.label}</span>
                   <span className="mt-0.5 block text-xs text-muted">{c.hint}</span>
