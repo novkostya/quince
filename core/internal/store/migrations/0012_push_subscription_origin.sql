@@ -1,0 +1,21 @@
+-- qn.12 — the origin each subscription was created from, so a notification can carry an ABSOLUTE
+-- `navigate` URL.
+--
+-- MEASURED, NOT ANTICIPATED. Declarative Web Push requires `navigate` to be an absolute URL, and a
+-- payload failing validation is dropped by the user agent WITHOUT displaying anything and WITHOUT
+-- telling the sender — the push service has already answered 201 by then. quince sent `/devices/…`,
+-- so on Safari 18.4+ every notification it has ever sent was silently discarded. Found on an iPhone,
+-- 2026-08-18, on the first delivery Apple accepted.
+--
+-- PER SUBSCRIPTION RATHER THAN A CONFIG KEY, and that is the load-bearing choice. One quince is
+-- commonly reached by more than one address — a LAN IP, a Tailscale name, a domain through a proxy —
+-- and a notification must open the app at the address THAT phone knows, or the tap lands on a URL
+-- its browser cannot resolve. It also needs no setup: the subscribing browser states its own origin,
+-- which is the same reasoning `Passkeys` already carries for being tied to the address it was
+-- created on.
+--
+-- NULLABLE, AND A NULL IS NOT A DEFAULT. Rows created before this migration have no origin and
+-- nothing can invent one for them: a guess that is wrong produces a notification whose tap goes
+-- nowhere. They are refused at send time with a reason naming the remedy — re-subscribe on that
+-- device — rather than being quietly given somebody else's address.
+ALTER TABLE push_subscriptions ADD COLUMN origin TEXT;

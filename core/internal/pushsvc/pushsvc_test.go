@@ -75,7 +75,7 @@ func TestTheVAPIDKeyIsGeneratedOnceAndIsStable(t *testing.T) {
 // healthy.
 func TestAMissingKeyWithSubscriptionsIsRefusedRatherThanRegenerated(t *testing.T) {
 	s, raw := svc(t)
-	if _, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone"); err != nil {
+	if _, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone", testOrigin); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	// Subscribing did not need the key, so none exists — exactly the divergent state.
@@ -102,12 +102,12 @@ func TestABadSubscriptionIsRefusedWhenItIsCreated(t *testing.T) {
 		"p256dh not a point": {"https://p.example/a", "AAAA", rfcAuth},
 		"auth wrong length":  {"https://p.example/a", rfcP256DH, "AAAA"},
 	} {
-		if _, err := s.Subscribe(sub[0], sub[1], sub[2], "x"); err == nil {
+		if _, err := s.Subscribe(sub[0], sub[1], sub[2], "x", testOrigin); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
 	// The good one still goes through, so the guard is not simply refusing everything.
-	if _, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone"); err != nil {
+	if _, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone", testOrigin); err != nil {
 		t.Errorf("a valid subscription was refused: %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestABadSubscriptionIsRefusedWhenItIsCreated(t *testing.T) {
 func TestTheSubscriptionListNeverCarriesTheEndpointOrKeys(t *testing.T) {
 	s, raw := svc(t)
 	const ep = "https://push.example.net/very-secret-token"
-	if _, err := s.Subscribe(ep, rfcP256DH, rfcAuth, "iPhone"); err != nil {
+	if _, err := s.Subscribe(ep, rfcP256DH, rfcAuth, "iPhone", testOrigin); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	got, err := s.Subscriptions()
@@ -153,7 +153,7 @@ func TestTheSubscriptionListNeverCarriesTheEndpointOrKeys(t *testing.T) {
 
 func TestUnsubscribeRemovesOneAndReportsWhether(t *testing.T) {
 	s, _ := svc(t)
-	id, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone")
+	id, err := s.Subscribe("https://push.example.net/a", rfcP256DH, rfcAuth, "iPhone", testOrigin)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -164,3 +164,8 @@ func TestUnsubscribeRemovesOneAndReportsWhether(t *testing.T) {
 		t.Errorf("a second unsubscribe reported gone=%v err=%v", gone, err)
 	}
 }
+
+// testOrigin is the address a subscribing browser reached quince by. Every test subscribes with one
+// because a subscription without one cannot be delivered to — which is itself asserted, in
+// TestASubscriptionWithNoOriginIsRefusedRatherThanGuessedAt.
+const testOrigin = "https://quince.example.net"

@@ -162,7 +162,10 @@ func (s *Service) Subscriptions() ([]wire.PushSubscription, error) {
 // THE FIELDS ARE VALIDATED BY DECODING THEM, not by inspection: `push.Encrypt` would refuse a
 // malformed key later, at send time, where the failure is invisible from here. Refusing at the door
 // turns "notifications silently never arrive" into a 422 on the request that caused it.
-func (s *Service) Subscribe(endpoint, p256dh, auth, label string) (string, error) {
+// `origin` is the address the subscribing browser reached quince by, which is what makes a
+// notification's `navigate` URL absolute. Taken from the request rather than from the client's own
+// claim: the browser sends `Origin` on this POST, the same header the session layer already trusts.
+func (s *Service) Subscribe(endpoint, p256dh, auth, label, origin string) (string, error) {
 	if endpoint == "" || p256dh == "" || auth == "" {
 		return "", fmt.Errorf("pushsvc: subscription is missing endpoint or keys")
 	}
@@ -172,7 +175,7 @@ func (s *Service) Subscribe(endpoint, p256dh, auth, label string) (string, error
 	id := s.newID()
 	err := s.store.AddPushSubscription(store.PushSubscription{
 		ID: id, Endpoint: endpoint, P256DH: p256dh, Auth: auth,
-		Label: label, CreatedAt: s.now(),
+		Label: label, Origin: origin, CreatedAt: s.now(),
 	})
 	if err != nil {
 		return "", err

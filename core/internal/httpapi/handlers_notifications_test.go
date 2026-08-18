@@ -27,14 +27,21 @@ type fakeNotifications struct {
 	delErr      error
 	testResults []wire.PushDeliveryResult
 	testErr     error
+	gotOrigin   string
 }
 
 func (f *fakeNotifications) VAPIDPublicKey() (string, error) { return f.key, f.keyErr }
 func (f *fakeNotifications) Subscriptions() ([]wire.PushSubscription, error) {
 	return f.subs, f.subsErr
 }
-func (f *fakeNotifications) Subscribe(_, _, _, _ string) (string, error) { return f.newID, f.subErr }
-func (f *fakeNotifications) Unsubscribe(string) (bool, error)            { return f.gone, f.delErr }
+
+// gotOrigin records what the handler derived, so the test can assert the address a notification
+// would be addressed to rather than only that a call happened.
+func (f *fakeNotifications) Subscribe(_, _, _, _, origin string) (string, error) {
+	f.gotOrigin = origin
+	return f.newID, f.subErr
+}
+func (f *fakeNotifications) Unsubscribe(string) (bool, error) { return f.gone, f.delErr }
 func (f *fakeNotifications) SendTest(context.Context) ([]wire.PushDeliveryResult, error) {
 	return f.testResults, f.testErr
 }
