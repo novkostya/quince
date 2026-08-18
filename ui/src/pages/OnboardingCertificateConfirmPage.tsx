@@ -132,7 +132,11 @@ export function OnboardingCertificateConfirmPage() {
                 gave you — it begins <code className="font-mono">https://</code>.
               </div>
             ) : null}
-            <div className="mt-4">
+            {/* THE PROJECT'S BUTTON ROW: `flex flex-wrap items-center gap-2`, which is what
+                `BackupControls`, `PasswordControls`, `PlainHTTPSetting` and eight others use. A bare
+                block put the two answers flush against each other. `flex-wrap` is not decoration —
+                these labels are long enough to need a second line on a phone. */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button onClick={() => void confirm()} disabled={state === "busy" || secure === false}>
                 {state === "busy" ? "Working…" : "Yes, keep it"}
               </Button>
