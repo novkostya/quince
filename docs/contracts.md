@@ -2012,7 +2012,7 @@ floated and explicitly deferred with it.
 
 ```
 GET    /api/notifications
-       → {vapid_public_key, subscriptions: [{id, label, state, created_at, expired_at?, last_sent_at?}]}
+       → {vapid_public_key, subscriptions: [{id, label, state, fingerprint, created_at, expired_at?, last_sent_at?}]}
 POST   /api/notifications/subscriptions {endpoint, keys: {p256dh, auth}, label}
        → 201 {id} | 400 bad body | 422 invalid_subscription
 DELETE /api/notifications/subscriptions/{id}
@@ -2020,6 +2020,27 @@ DELETE /api/notifications/subscriptions/{id}
 POST   /api/notifications/test
        → 202 {results: [{label, state: "sent"|"expired"|"error", error?}]}
 ```
+
+**`fingerprint` IS HOW A BROWSER RECOGNISES ITS OWN ROW, AND IT IS NOT AN ENDPOINT.** It is
+`base64url(sha256(endpoint))`, present on every subscription object — not optional, and not
+`omitempty`.
+
+The page has to answer *"is THIS device subscribed"*, and it cannot ask the server: an endpoint is
+capability-grade and never leaves the daemon (design §6, qn.12 D8), so there is nothing in the list to
+compare against. **Both sides hash what they already hold** — the browser its own endpoint from
+`pushManager.getSubscription()`, the server each stored one — **and neither transmits one.**
+
+**This does not weaken D8, and the reason is that a digest is not a capability.** An endpoint is one
+because holding it plus the subscription keys lets anyone push to that phone. SHA-256 is one-way, and
+a push endpoint carries a long random token, so the digest is neither reversible nor pushable. It can
+therefore appear in a response that an endpoint must not.
+
+**What it replaced, because the alternative looks simpler and is wrong.** The first implementation
+kept the subscription id in the browser's `localStorage` at subscribe time. That is *state*, and state
+that exists only if this browser created the subscription — so every subscription predating the code,
+every cleared profile and every private window reported its own device as **Off while subscribed and
+receiving**. Found on hardware, 2026-08-18, on an iPhone looking at its own row. A fingerprint is
+stateless and survives all three.
 
 **`POST /test` answers 202 with per-device outcomes rather than a single status**, because delivery is
 per-device and **partial success is the normal case** — one phone live, one gone — so one status could
